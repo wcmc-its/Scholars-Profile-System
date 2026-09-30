@@ -272,6 +272,18 @@ export class SecretsStack extends Stack {
         description:
           "SPS ETL credentials — ReciterDB MySQL connection (SCHOLARS_RECITERDB_* host/port/database/username/password).",
       },
+      // Containerization design (2026-08-14) -- scripts/bulk-data-rule/ gets
+      // its own reciterdb credential rather than a share of EtlReciter above.
+      // Deliberately plain key names, not SCHOLARS_RECITERDB_*: the Python
+      // scripts read os.environ['DB_HOST']/['DB_USERNAME']/['DB_PASSWORD']/
+      // ['DB_NAME'] directly (attribute.py and friends), so seeding this
+      // secret with those exact keys means zero script changes.
+      {
+        constructId: "EtlBulkDataRule",
+        name: `scholars/${env}/etl/bulk-data-rule`,
+        description:
+          "SPS bulk-data-rule pipeline (scripts/bulk-data-rule/) — dedicated reciterdb credential, plain DB_HOST/DB_USERNAME/DB_PASSWORD/DB_NAME keys (the Python scripts' own env var names). Narrow-scoped: this task's role/secret reads nothing else.",
+      },
       {
         constructId: "EtlJenzabar",
         name: `scholars/${env}/etl/jenzabar`,
@@ -295,6 +307,15 @@ export class SecretsStack extends Stack {
         name: `scholars/${env}/etl/hierarchy`,
         description:
           "SPS ETL credentials — annual hierarchy import (Jenzabar / org chart source).",
+      },
+      // CTSC roster (etl:ctsc-roster) — JSON keys CTSC_FEED_URL + CTSC_FEED_TOKEN
+      // for the CTSC investigators-and-trainees feed (the one the ReCiter
+      // Institutional Client reads). Seed out-of-band before EtlStack deploys.
+      {
+        constructId: "EtlCtsc",
+        name: `scholars/${env}/etl/ctsc`,
+        description:
+          "SPS ETL credentials — CTSC investigators-and-trainees feed (CTSC_FEED_URL + CTSC_FEED_TOKEN) for the nightly CTSC roster.",
       },
       // #746 — ReCiter engine REST API for the self-edit "Not mine" reject.
       // JSON keys RECITER_API_BASE_URL + RECITER_API_KEY (the ADMIN api-key) for

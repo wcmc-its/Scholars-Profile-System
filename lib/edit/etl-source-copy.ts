@@ -18,165 +18,323 @@
  * raw key, so a newly tracked import renders as itself rather than as a blank
  * line on a status board. Adding the copy is a follow-up, not a prerequisite.
  */
+export type EtlSourceOrigin = "external" | "internal";
+
 export type EtlSourceCopy = {
   /** What this import gives a reader, in their words. */
   readonly label: string;
   /** One sentence on what breaks on a profile when it stops. */
   readonly description: string;
+  /**
+   * `"external"` — this import's DATA comes from a system nobody on this repo
+   * operates (NIH, NSF, Gates, PubMed, the WCM Enterprise Directory, ASMS,
+   * Jenzabar, POPS, ReCiterDB, ReCiterAI's S3/DynamoDB artifacts, ...). A
+   * failure here is frequently "wait for them" or "tell that team," not
+   * "restart our container."
+   * `"internal"` — this import only reads and recomputes data already sitting
+   * in this app's own Aurora tables (a health check, a stats rollup, an
+   * index/cache rebuild, a cross-reference between two tables we already
+   * populated). A failure here is ours to fix.
+   *
+   * Deliberately NOT the `external` flag in `cdk/lib/etl-stack.ts` — that one
+   * means "needs a Secrets Manager credential wired," a build/deploy concern
+   * that disagrees with this in both directions: NSF/NIH RePORTER are public,
+   * no-credential APIs (cdk marks some `external:false`) despite plainly being
+   * outside data sources, and Headshot hits directory.weill.cornell.edu the
+   * same way. This field is graded from what each entrypoint actually reads
+   * at runtime (etl/<name>/index.ts and its one-hop imports), not from how
+   * its ECS task is wired.
+   */
+  readonly origin: EtlSourceOrigin;
 };
 
 export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   ED: {
     label: "People & Appointments",
     description: "Who has a profile, plus name, title, rank, department and division.",
+    origin: "external", // WCM Enterprise Directory (LDAP)
   },
   "ED-Admins": {
     label: "Department Editor Access",
     description: "Sets which staff may edit the profiles in their department, division or center.",
+    origin: "external", // WCM Enterprise Directory (LDAP)
+  },
+  "CTSC-Roster": {
+    label: "CTSC Roster",
+    description:
+      "Clinical & Translational Science Center investigators and trainees; not used for publications.",
+    origin: "external", // CTSC investigators-and-trainees feed
   },
   ReCiter: {
     label: "Publications",
     description: "Journal articles on each profile, with authors, journal, year and DOI.",
+    origin: "external", // sibling ReCiterDB
   },
   "ReCiter-COI-Statements": {
     label: "Competing Interest Statements",
     description: "The competing-interests note on each paper; feeds Conflict-of-Interest Gaps.",
+    origin: "external", // sibling ReCiterDB
   },
   ASMS: {
     label: "Education & Training",
     description: "Degrees, schools and training years in the Education panel.",
+    origin: "external", // ASMS (MSSQL)
   },
   InfoEd: {
     label: "Grants & Funding",
     description: "Grant awards and funding history: sponsor, title, role and dates.",
+    origin: "external", // InfoEd (MSSQL)
   },
   COI: {
     label: "Conflict-of-Interest Disclosures",
     description: "Outside organization ties in the profile's External relationships section.",
+    origin: "external", // WCM COI system (MySQL)
   },
   "COI-Gap": {
     label: "Conflict-of-Interest Gaps",
     description: "Companies named in a scholar's papers that their disclosures don't list.",
+    origin: "internal", // cross-references two tables this app already populated
   },
   Jenzabar: {
     label: "PhD Thesis Advisors",
     description: "PhD and MD-PhD thesis advisor and student pairs in the Mentoring list.",
+    origin: "external", // Jenzabar (MSSQL)
   },
   "ReCiterAI-projection": {
     label: "Research Topics & Scores",
     description: "Research topic pages, their ranked scholars, and per-paper impact scores.",
+    origin: "external", // ReCiterAI-published DynamoDB records
   },
   "Identity-orcid": {
     label: "ORCID Researcher IDs",
     description: "Each scholar's ORCID iD, used by search engines and shown in the editor.",
+    origin: "external", // WCM Identity DynamoDB table
+  },
+  "RPM-orcid-candidates": {
+    label: "ORCID candidates from Publication Manager",
+    description:
+      "ORCID iDs the ReCiter Publication Manager has inferred from a scholar's accepted publications, or an administrator entered there. Feeds the ORCID coverage dashboard only.",
+    origin: "external", // WCM ReciterDB
+  },
+  "ORCID-registry": {
+    label: "ORCID registry sweep",
+    description:
+      "ORCID iDs from the public ORCID registry matched to scholars by WCM email or by name plus shared publications. Feeds the ORCID coverage dashboard only.",
+    origin: "external", // pub.orcid.org public API
+  },
+  "ORCID-push": {
+    label: "ORCID iDs pushed to Identity",
+    description:
+      "Copies each scholar's ORCID iD on file in SPS into the WCM Identity record so ReCiter and Publication Manager see it; nightly, compare-then-write.",
+    origin: "external", // ReCiter engine API → WCM Identity (DynamoDB)
   },
   Tools: {
     label: "Methods & Tools",
     description: "Fills the Methods & tools list of techniques and models on profiles.",
+    origin: "external", // ReCiterAI-published S3 artifacts
   },
   FamilySensitivity: {
     label: "Sensitive Method Gating",
     description: "Hides animal-model methods from public profiles; owners and admins see them.",
+    origin: "internal", // curated CSV checked into this repo, no live outside read
   },
   FamilySuppression: {
     label: "Hidden Generic Methods",
     description: "Hides generic methods, like common statistical tests, from all profiles.",
+    origin: "internal", // curated CSV checked into this repo, no live outside read
   },
   MeshCoverage: {
     label: "Search Topic Weighting",
     description: "Measures how common each subject heading is in WCM papers, to rank search.",
+    origin: "internal", // recomputed from this app's own publication/mesh tables
   },
   MeshAnchor: {
     label: "Research Area Links",
     description: "Links paper subject headings to the research areas people browse by.",
+    origin: "internal", // curated CSV + this app's own tables
   },
   MeshAlias: {
     label: "Search Term Synonyms",
     description: "Maps WCM specialty names, like Cardiothoracic Surgery, to subject headings.",
+    origin: "internal", // curated CSV checked into this repo, no live outside read
   },
   PubMedRetractions: {
     label: "Retracted Paper Removal",
     description: "Removes papers PubMed has retracted from profiles and search results.",
+    origin: "external", // PubMed E-utilities
   },
   SearchIndex: {
     label: "Site Search Refresh",
     description: "Refreshes search for people, publications, grants and funding opportunities.",
+    origin: "internal", // rebuilds this app's own OpenSearch index from Aurora
   },
   Revalidate: {
     label: "Public Page Refresh",
     description: "Refreshes the home, topic, department and browse pages with new data.",
+    origin: "internal", // this app's own /api/revalidate
   },
   Integrity: {
     label: "Nightly Data Health Check",
     description: "Checks each night's updates produced sensible data, and alerts if not.",
+    origin: "internal", // checks this app's own OpenSearch count against its own Aurora rows
   },
   Completeness: {
     label: "Profile Completeness Stats",
     description: "Weekly tally of profiles that have an overview and a confirmed publication.",
+    origin: "internal", // stats rollup over this app's own Aurora tables
   },
   Headshot: {
     label: "Profile Photo Check",
     description: "Checks which scholars are missing a photo in the campus directory.",
+    origin: "external", // directory.weill.cornell.edu
   },
   CancerCenterCollabReport: {
     label: "Cancer Center Collaboration Report",
     description: "Weekly collaboration and cancer-relevance numbers behind a Cancer Center's Reports tab.",
+    origin: "internal", // Aurora-only rollup
   },
   Reporter: {
     label: "NIH Award Details",
     description: "Adds NIH award summaries and the papers each award funded.",
+    origin: "external", // NIH RePORTER + sibling ReCiterDB
   },
   NSF: {
     label: "NSF Award Summaries",
     description: "Adds project summaries to National Science Foundation awards.",
+    origin: "external", // NSF Awards API
   },
   Gates: {
     label: "Gates Foundation Summaries",
     description: "Adds project summaries to Gates Foundation awards.",
+    origin: "external", // Gates Foundation public CSV
   },
   NihProfile: {
     label: "NIH Researcher Match",
     description: "Matches scholars to their NIH researcher ID for the NIH portfolio link.",
+    origin: "external", // NIH RePORTER
   },
   POPS: {
     label: "Clinical Specialties",
     description: "Adds board certifications and specialties so clinicians turn up in search.",
+    origin: "external", // WCM POPS physician directory
   },
   ReporterGrants: {
     label: "NIH Awards From Elsewhere",
     description: "Adds NIH awards from prior institutions to a scholar's funding list.",
+    origin: "external", // NIH RePORTER
   },
   ClinicalTrials: {
     label: "Clinical Trials",
-    description: "Adds the clinical trials each scholar leads or takes part in.",
+    description: "Adds the clinical trials each scholar leads as principal investigator.",
+    origin: "external", // sibling ReCiterDB
   },
   DataSharing: {
     label: "Dataset Deposits",
     description: "Adds a scholar's shared research datasets to their profile's Datasets section.",
+    origin: "external", // sibling ReCiterDB
   },
   Technology: {
     label: "Available Technologies",
     description: "Adds a scholar's licensable inventions from the WCM technology portfolio.",
+    origin: "external", // innovation.weill.cornell.edu
   },
   News: {
     label: "News Mentions",
     description: "Adds WCM Newsroom stories that mention a scholar to their profile.",
+    origin: "external", // news.weill.cornell.edu
+  },
+  FundingDigest: {
+    label: "Funding Digest",
+    description: "Submits new opportunities from the Research Dean's weekly funding email to Grant Matcha.",
+    origin: "external", // Research Dean digest, via SES to S3, then ReciterAI
+  },
+  HonorsLists: {
+    label: "Honor Lists",
+    description:
+      "Checks public honor lists (academies, fellowships) for Weill Cornell scholars and queues each new match for curator approval.",
+    origin: "external", // public roster pages of the conferring bodies
+  },
+  NewsClips: {
+    label: "Media highlights",
+    description: "Queues press clips from the daily \"WCM in the News\" email for comms review.",
+    origin: "external", // External Affairs digest, via SES to S3
   },
   Spotlight: {
     label: "Homepage Spotlight",
     description: "Refreshes the Spotlight research cards on the home page.",
+    origin: "external", // ReCiterAI-published S3 artifacts
   },
   Hierarchy: {
     label: "Research Subareas",
     description: "Refreshes the subarea names listed under each research area.",
+    origin: "external", // ReCiterAI-published S3 artifacts
   },
   SearchReconcile: {
     label: "Search Update Safety Net",
     description: "Retries a hide or suppression that didn't reach search results the first time.",
+    origin: "internal", // reconciles this app's own OpenSearch state against Aurora
   },
   CdnReconcile: {
     label: "Cached Page Refresh Retries",
     description: "Retries clearing a page's cached copy after an edit, so visitors stop seeing the old version.",
+    origin: "internal", // this app's own CloudFront invalidation
+  },
+  // The four below are NOT imports into this site. They are the scheduled jobs
+  // in the research-AI system that PRODUCE the data several rows above depend
+  // on. They are listed here because those rows can only report whether this
+  // site's import ran -- if the research-AI job behind one stops, the import
+  // keeps succeeding on the last data it published and stays green. Each
+  // description says which of the rows above it stands behind, because that is
+  // the question somebody has when one of these turns red.
+  "ReciterAI-enrichment": {
+    label: "Research AI: Daily Summaries",
+    description:
+      "The nightly research-AI job that writes each new publication's plain-language summary and impact score.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
+  "ReciterAI-hot-path": {
+    label: "Research AI: Weekly Scoring",
+    description:
+      "The weekly research-AI job that scores new publications and files them under research areas. Stands behind Research Topics & Scores.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
+  "ReciterAI-spotlight-gate": {
+    label: "Research AI: Spotlight Check",
+    description:
+      "The monthly research-AI check that decides whether the Homepage Spotlight cards need rebuilding. Skipping is normal; not running at all is not.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
+  // These two say "data arrived", not "the job ran" -- the descriptions have to
+  // carry that, because it is the difference between the two kinds of row on
+  // this page and nothing else on screen shows it.
+  "ReciterAI-grants": {
+    label: "Research AI: Funding Opportunities",
+    description:
+      "When the research-AI system last published a fresh set of funding opportunities. Measures the data, not the job.",
+    origin: "external", // ReCiterAI-published S3 artifacts (manifest generated_at)
+  },
+  "ReciterAI-cores": {
+    label: "Research AI: Core Facility Usage",
+    description:
+      "When core facility usage was last scored. Measures the data, not the job, so a quiet stretch with no new publications can look like a pause.",
+    origin: "external", // derived from the ReCiterAI-published core rows
+  },
+  "ReciterAI-drift": {
+    label: "Research AI: Quality Drift Check",
+    description:
+      "The daily research-AI check for publications its scoring is losing confidence on. A red row means the check stopped running, not that quality slipped.",
+    origin: "external", // ReCiterAI-run job, read from its daily findings row
+  },
+  "ReciterAI-taxonomy-drift": {
+    label: "Research AI: Research Area Drift Check",
+    description:
+      "The daily research-AI check that research areas still match the publications filed under them.",
+    origin: "external", // ReCiterAI-run job, read from its daily findings row
+  },
+  "ReciterAI-onboarding-detector": {
+    label: "Research AI: New Faculty Scan",
+    description: "The daily research-AI scan for faculty who have no research profile data yet.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
   },
 };
 
@@ -192,4 +350,9 @@ export function sourceLabel(source: string): string {
 /** The one-line description, or null when there is none to show yet. */
 export function sourceDescription(source: string): string | null {
   return SOURCE_COPY[source]?.description ?? null;
+}
+
+/** @see EtlSourceCopy.origin. Null for a source this map hasn't caught up with. */
+export function sourceOrigin(source: string): EtlSourceOrigin | null {
+  return SOURCE_COPY[source]?.origin ?? null;
 }

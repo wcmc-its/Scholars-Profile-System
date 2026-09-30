@@ -20,16 +20,17 @@
  * loads under vitest with a fake client, matching `edit-roster.ts`.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { institutionName } from "@/lib/institutions";
 
 /** The Prisma surface this loader reads — a client or `db.read` satisfies it. */
 export type AdminRosterClient = Pick<
   PrismaClient,
-  "unitAdmin" | "department" | "division" | "center" | "scholar"
+  "unitAdmin" | "department" | "division" | "center" | "core" | "scholar"
 >;
 
 /** One unit-scope grant a person holds. */
 export type AdminRosterGrant = {
-  entityType: "department" | "division" | "center";
+  entityType: "department" | "division" | "center" | "core" | "institution";
   /** The unit code (`UnitAdmin.entityId`). */
   entityId: string;
   /** The unit display name, falling back to the bare code if the unit row is gone. */
@@ -37,6 +38,13 @@ export type AdminRosterGrant = {
   role: "owner" | "curator";
   /** `UnitAdmin.source` — "manual" | "ED:DA" | "ED:DivA" | "ED:IAMDELA" | "ED:DivA-IAMDELA". */
   source: string;
+  /** `UnitAdmin.grantedBy` — the actor CWID for a manual grant ("ED-ETL" for an
+   *  import). Optional: absent on rows the caller synthesized. */
+  grantedBy?: string | null;
+  /** The granter's display name (Scholar `preferredName`) when one resolves. */
+  grantedByName?: string | null;
+  /** `UnitAdmin.createdAt` as an ISO string. */
+  grantedAt?: string | null;
 };
 
 /** One person on the roster, with the set of unit grants they hold. */
@@ -85,6 +93,8 @@ export async function loadUnitAdministratorRoster(
       role: true,
       source: true,
       granteeName: true,
+      grantedBy: true,
+      createdAt: true,
     },
   });
 
@@ -93,16 +103,22 @@ export async function loadUnitAdministratorRoster(
   }
 
   // Batch-resolve unit names per kind (only the codes we actually saw).
+  // Institutions have no table — lib/institutions.ts names them inline.
+  const unitName = new Map<string, string>();
   const deptCodes = new Set<string>();
   const divCodes = new Set<string>();
   const centerCodes = new Set<string>();
+  const coreCodes = new Set<string>();
   for (const r of rows) {
     if (r.entityType === "department") deptCodes.add(r.entityId);
     else if (r.entityType === "division") divCodes.add(r.entityId);
+    else if (r.entityType === "core") coreCodes.add(r.entityId);
+    else if (r.entityType === "institution")
+      unitName.set(`institution:${r.entityId}`, institutionName(r.entityId));
     else centerCodes.add(r.entityId);
   }
 
-  const [departments, divisions, centers] = await Promise.all([
+  const [departments, divisions, centers, cores] = await Promise.all([
     deptCodes.size
       ? client.department.findMany({
           where: { code: { in: [...deptCodes] } },
@@ -121,15 +137,25 @@ export async function loadUnitAdministratorRoster(
           select: { code: true, name: true },
         })
       : Promise.resolve([]),
+    coreCodes.size
+      ? client.core.findMany({
+          where: { id: { in: [...coreCodes] } },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
   ]);
 
-  const unitName = new Map<string, string>();
   for (const d of departments) unitName.set(`department:${d.code}`, d.name);
   for (const d of divisions) unitName.set(`division:${d.code}`, d.name);
   for (const c of centers) unitName.set(`center:${c.code}`, c.name);
+  for (const c of cores) unitName.set(`core:${c.id}`, c.name);
 
-  // Batch-resolve grantee display names from the local Scholar table.
-  const cwids = [...new Set(rows.map((r) => r.cwid))];
+  // Batch-resolve grantee display names from the local Scholar table — plus
+  // the granters of manual grants, so "Added by …" can show a name.
+  const granters = rows
+    .filter((r) => r.source === "manual" && r.grantedBy)
+    .map((r) => r.grantedBy as string);
+  const cwids = [...new Set([...rows.map((r) => r.cwid), ...granters])];
   const scholars = await client.scholar.findMany({
     where: { cwid: { in: cwids } },
     select: { cwid: true, preferredName: true, primaryTitle: true },
@@ -157,8 +183,8 @@ export async function loadUnitAdministratorRoster(
       };
       byCwid.set(r.cwid, entry);
     }
-    // A `UnitAdmin` row is always unit-typed (department/division/center); the
-    // generated `EntityType` enum is wider, so narrow here for the grant shape.
+    // A `UnitAdmin` row is always unit-typed (department/division/center/core/institution);
+    // the generated `EntityType` enum is wider, so narrow here for the grant shape.
     const entityType = r.entityType as AdminRosterGrant["entityType"];
     entry.grants.push({
       entityType,
@@ -166,6 +192,9 @@ export async function loadUnitAdministratorRoster(
       unitName: unitName.get(`${entityType}:${r.entityId}`) ?? r.entityId,
       role: r.role,
       source: r.source,
+      grantedBy: r.grantedBy ?? null,
+      grantedByName: r.grantedBy ? (scholarName.get(r.grantedBy)?.name ?? null) : null,
+      grantedAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : null,
     });
   }
 

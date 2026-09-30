@@ -27,6 +27,7 @@
  */
 import { sanitizeOverviewHtml, validateSelectedHighlightPmids } from "@/lib/edit/validators";
 import { type ManualMentee, validateManualMentees } from "@/lib/edit/manual-mentee";
+import { type ProfileLinks, validateProfileLinks } from "@/lib/edit/profile-links";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 
@@ -161,6 +162,35 @@ export async function getManualMentees(
   if (!override) return [];
   const parsed = validateManualMentees(override.value);
   return parsed.ok ? parsed.value : [];
+}
+
+// ---------------------------------------------------------------------------
+// profileLinks — #2699 faculty-entered external profile links
+// ---------------------------------------------------------------------------
+
+/**
+ * The scholar's external profile links (`{ platform: canonical URL }`), or `{}`
+ * when none are on file. Reads `field_override(scholar, cwid, 'profileLinks')`
+ * and re-validates the stored JSON; a malformed row reads as `{}` rather than
+ * throwing, matching the two helpers above.
+ */
+export async function getProfileLinks(
+  cwid: string,
+  client: OverrideReadClient,
+): Promise<ProfileLinks> {
+  const override = await client.fieldOverride.findUnique({
+    where: {
+      entityType_entityId_fieldName: {
+        entityType: "scholar",
+        entityId: cwid,
+        fieldName: "profileLinks",
+      },
+    },
+    select: { value: true },
+  });
+  if (!override) return {};
+  const parsed = validateProfileLinks(override.value);
+  return parsed.ok ? parsed.value : {};
 }
 
 /**
@@ -575,8 +605,11 @@ export async function resolveUnitDarkPmids(
 //  1. `field_override` rows on Department / Division — `description`, `url`,
 //     `slug`, `leaderCwid`, `leaderInterim`. Merged at read time by the unit page.
 //     **Centers do not use `field_override`** — a center row is manually-owned
-//     (no ETL writes the `center` table), so its fields are edited in-row
-//     and the in-row values are authoritative.
+//     (no ETL writes the `center` table), so `description`/`url`/`slug` are
+//     edited in-row and those in-row values are authoritative. Leadership is
+//     the one exception: for a center too, `leaderCwid`/`leaderInterim` come
+//     from an `OrgUnitRoleAssignment` row (#2542 contract A), fed into this
+//     merge by `lib/api/unit-edit-context.ts` — not an in-row column.
 //
 //  2. Whole-unit suppression — a `suppression` row keyed on the unit `code`,
 //     with `contributorCwid` always NULL. A suppressed unit's public page
@@ -696,7 +729,9 @@ export type UnitRowFieldsForMerge = {
   /** #1021 — outbound website URL; same override-or-column precedence as description. */
   url?: string | null;
   leaderCwid: string | null;
-  /** For Center this is the in-row `leader_interim`; for dept/div there is no column. */
+  /** For Center this comes from its `OrgUnitRoleAssignment.interim` row (#2542
+   *  contract A, fed in by `lib/api/unit-edit-context.ts`), not an in-row
+   *  column; for dept/div there is no column either. */
   leaderInterim?: boolean;
 };
 

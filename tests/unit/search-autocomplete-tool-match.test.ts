@@ -23,7 +23,11 @@ const {
   mockMethodPagesEnabled,
   mockLoadFamilyOverlayGate,
   mockIsFamilyPubliclyVisible,
+  mockSubtopicFindMany,
+  mockQueryRaw,
 } = vi.hoisted(() => ({
+  mockSubtopicFindMany: vi.fn(),
+  mockQueryRaw: vi.fn(),
   mockScholarToolFindMany: vi.fn(),
   mockScholarFamilyGroupBy: vi.fn(),
   mockMethodPagesEnabled: vi.fn(),
@@ -35,6 +39,8 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     scholarTool: { findMany: mockScholarToolFindMany },
     scholarFamily: { groupBy: mockScholarFamilyGroupBy },
+    subtopic: { findMany: mockSubtopicFindMany },
+    $queryRawUnsafe: mockQueryRaw,
   },
 }));
 
@@ -78,7 +84,7 @@ vi.mock("@/lib/search", () => ({
   searchClient: () => ({}),
 }));
 
-import { loadMethodFamilyCandidates } from "@/lib/api/search";
+import { loadMethodFamilyCandidates, suggestMethodFinder } from "@/lib/api/search";
 
 const SC = "genome_editing";
 
@@ -107,6 +113,8 @@ beforeEach(() => {
     sensitive: new Set<string>(),
   });
   mockIsFamilyPubliclyVisible.mockReturnValue(true);
+  mockSubtopicFindMany.mockResolvedValue([]);
+  mockQueryRaw.mockResolvedValue([]);
 });
 
 describe("#863 loadMethodFamilyCandidates — member-tool-name match", () => {
@@ -192,3 +200,40 @@ describe("#863 loadMethodFamilyCandidates — member-tool-name match", () => {
     expect(out.map((c) => c.familyLabel)).not.toContain("Suppressed Family");
   });
 });
+
+describe("suggestMethodFinder — home 'Find a method' typeahead", () => {
+  const sub = (id: string, label: string, parent: string) => ({
+    id, label, displayName: label, parentTopicId: parent, parentTopic: { label: `Area ${parent}` },
+  });
+
+  it("puts subareas first, prefix matches before infix, and reads 'Area · N scholars'", async () => {
+    mockSubtopicFindMany.mockResolvedValue([
+      sub("s2", "Functional Genomics via CRISPR", "p2"),
+      sub("s1", "CRISPR Genome Editing", "p1"),
+    ]);
+    mockQueryRaw.mockResolvedValue([{ p: "p1", s: "s1", n: BigInt(12) }]); // s2 has no row
+    mockScholarFamilyGroupBy.mockResolvedValue([
+      group("Functional genomic screening", "fam_2", 31), // matched via tool name only
+      group("CRISPR genome editing", "fam_1", 7),
+    ]);
+
+    const out = await suggestMethodFinder("crispr");
+
+    expect(out.map((s) => [s.kind, s.title])).toEqual([
+      ["subtopic", "CRISPR Genome Editing"],
+      ["subtopic", "Functional Genomics via CRISPR"],
+      ["method", "CRISPR genome editing"],
+      ["method", "Functional genomic screening"],
+    ]);
+    expect(out[0].subtitle).toBe("Area p1 · 12 scholars");
+    // #2218 — a missing count row is not zero: area only.
+    expect(out[1].subtitle).toBe("Area p2");
+    expect(out[2].subtitle).toMatch(/· 7 scholars$/);
+  });
+
+  it("asks for nothing under 2 characters", async () => {
+    expect(await suggestMethodFinder(" c ")).toEqual([]);
+    expect(mockSubtopicFindMany).not.toHaveBeenCalled();
+  });
+});
+

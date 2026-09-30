@@ -5,7 +5,8 @@
  * cookies, so the personalization works regardless of the edge cache. The
  * CloudFront behavior is CachingDisabled + AllViewer (so `sort`/`weights`/`limit`
  * are forwarded, matching the other query-reading API routes); the edge does not
- * cache, and we set a short browser `max-age`. Phase 3 renders it as "Grants for
+ * cache, and we set a short `private` browser `max-age`. Hidden (#536) roles get
+ * the nonexistent-CWID empty payload (#2263). Phase 3 renders it as "Grants for
  * me" by probing /api/auth/session then calling this for the logged-in cwid.
  *
  * Response carries the DISTINCT axis vector per opportunity; `sort` + `weights`
@@ -22,6 +23,10 @@ import {
   type RankSort,
 } from "@/lib/api/match-opportunities";
 import { db } from "@/lib/db";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+
+// Per-CWID body: `private` so no shared intermediary stores it (#2263).
+const CACHE_HEADERS = { "Cache-Control": "private, max-age=300" };
 
 const CWID_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 const SORT_ALLOWLIST: ReadonlySet<RankSort> = new Set(["fit", "deadline", "stage", "prestige"]);
@@ -70,6 +75,18 @@ export async function GET(
     limit = Math.min(n, MAX_LIMIT);
   }
 
+  // #2263 — #536 role carve, fail-closed (same shape as #2257). A hidden or
+  // out-of-band role gets the byte-identical payload a nonexistent CWID gets, so
+  // the body is not an oracle for the hidden-role bit, the topic profile, or the
+  // career-stage bucket. The matcher never runs for them.
+  const visible = await db.read.scholar.findFirst({
+    where: { cwid, deletedAt: null, status: "active", ...publicRoleWhere() },
+    select: { roleCategory: true },
+  });
+  if (!visible || !isPubliclyDisplayed(visible.roleCategory)) {
+    return NextResponse.json({ cwid, count: 0, results: [] }, { headers: CACHE_HEADERS });
+  }
+
   const results = await matchOpportunitiesForScholar(cwid, {
     sort: sortRaw as RankSort,
     weights,
@@ -99,6 +116,6 @@ export async function GET(
 
   return NextResponse.json(
     { cwid, count: results.length, results: payload },
-    { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=3600" } },
+    { headers: CACHE_HEADERS },
   );
 }

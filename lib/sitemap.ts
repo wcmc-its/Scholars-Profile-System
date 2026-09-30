@@ -57,7 +57,7 @@ export { siteBaseUrl };
 
 /**
  * Build the full, ordered list of sitemap entries (static + scholars + topics +
- * departments + centers). Order is stable — each query carries an explicit
+ * departments + divisions + centers). Order is stable — each query carries an explicit
  * `orderBy` and the sections concatenate in a fixed sequence — so a given URL
  * always lands in the same child shard when sliced by `URLS_PER_SITEMAP`.
  *
@@ -78,10 +78,13 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
     roleCategory: string | null;
   }> = [];
   let topics: Array<{ id: string; refreshedAt: Date | null }> = [];
-  let departments: Array<{ slug: string; updatedAt: Date | null }> = [];
+  let departments: Array<{ code: string; slug: string; updatedAt: Date | null }> = [];
   let centers: Array<{ slug: string; updatedAt: Date | null }> = [];
+  let divisions: Array<{ code: string; deptCode: string; slug: string; updatedAt: Date | null }> =
+    [];
+  let suppressedDivisions: Array<{ entityId: string }> = [];
   try {
-    [scholars, topics, departments, centers] = await Promise.all([
+    [scholars, topics, departments, centers, divisions, suppressedDivisions] = await Promise.all([
       prisma.scholar.findMany({
         // #2205 — the #536 role carve, which this query used to omit entirely.
         // `deletedAt: null, status: "active"` alone matched 9,412 prod rows, ~690
@@ -111,12 +114,23 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
         orderBy: { id: "asc" },
       }),
       prisma.department.findMany({
-        select: { slug: true, updatedAt: true },
+        select: { code: true, slug: true, updatedAt: true },
         orderBy: { slug: "asc" },
       }),
       prisma.center.findMany({
         select: { slug: true, updatedAt: true },
         orderBy: { slug: "asc" },
+      }),
+      // #2245 — division pages were never advertised.
+      prisma.division.findMany({
+        select: { code: true, deptCode: true, slug: true, updatedAt: true },
+        orderBy: [{ deptCode: "asc" }, { slug: "asc" }],
+      }),
+      // Retired (whole-unit-suppressed) divisions 404 at getDivision (#540);
+      // same predicate as `isUnitSuppressed`, batched.
+      prisma.suppression.findMany({
+        where: { entityType: "division", revokedAt: null },
+        select: { entityId: true },
       }),
     ]);
   } catch (err) {
@@ -164,6 +178,23 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
     priority: 0.6,
   }));
 
+  // Division route is /departments/<deptSlug>/divisions/<divSlug>; a division
+  // whose department is not listed, or that is suppressed, would 404.
+  const deptSlugByCode = new Map(departments.map((d) => [d.code, d.slug]));
+  const suppressedDivisionCodes = new Set(suppressedDivisions.map((s) => s.entityId));
+  const divisionEntries: SitemapEntry[] = divisions.flatMap((v) => {
+    const deptSlug = deptSlugByCode.get(v.deptCode);
+    if (!deptSlug || suppressedDivisionCodes.has(v.code)) return [];
+    return [
+      {
+        url: `${base}/departments/${deptSlug}/divisions/${v.slug}`,
+        lastModified: v.updatedAt ?? now,
+        changeFrequency: "monthly",
+        priority: 0.6,
+      },
+    ];
+  });
+
   const centerEntries: SitemapEntry[] = centers.map((c) => ({
     url: `${base}/centers/${c.slug}`,
     lastModified: c.updatedAt ?? now,
@@ -208,6 +239,7 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
     ...scholarEntries,
     ...topicEntries,
     ...deptEntries,
+    ...divisionEntries,
     ...centerEntries,
     ...methodEntries,
   ];

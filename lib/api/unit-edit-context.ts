@@ -4,7 +4,7 @@
  *
  * One server call loads everything a `/edit/{department,division,center}/[code]`
  * page renders: the override-merged unit fields, the leader chip, the access
- * list (Owner/Superuser only), the roster (centers + manual divisions only),
+ * list (Owner, Superuser, or comms_steward), the roster (centers + manual divisions only),
  * and — on a department — its child divisions for the sub-rail. The actor's
  * effective role rides along so the client can filter the attribute rail
  * without a second round-trip.
@@ -31,20 +31,66 @@
  * membershipType / programCode / startDate / endDate and added a per-center
  * `programs` taxonomy map (both null/empty for non-center units), consumed by
  * the center roster table (`center-roster-card.tsx`).
+ *
+ * The disease-assignment plan (`2026-08-12-cancer-center-disease-assignment-
+ * edit-ui-plan.md` §5/§6) widens each center roster row further with a
+ * `diseases` list — `CancerCenterDiseaseAssignment` merged with any curator
+ * `CancerCenterDiseaseDecision` for the same (cwid, diseaseCode) pair, plus a
+ * v1 drift flag comparing the decision's snapshot against the CURRENT
+ * assignment row. Always `[]` for a department/division, for a center with
+ * no assignment/decision rows, AND (bug fix, staging report 2026-08-26) for a
+ * center with no `CenterProgram` taxonomy at all — `CancerCenterDiseaseAssignment`
+ * is keyed (cwid, diseaseCode) with no center column, so a program-less center
+ * that happens to SHARE roster members with the Cancer Center (e.g. Health
+ * Equity) would otherwise inherit their disease rows. Gated the same
+ * data-driven way `resolveReportsCenterCode` (`lib/edit/cancer-center-
+ * reports.ts`) picks the Cancer Center: "a center with a `CenterProgram`
+ * taxonomy," not a hardcoded center code. A decision with NO matching assignment row
+ * (the manual-add case — a curator attaching a disease code the generator
+ * never suggested for this member) still produces a `diseases` entry:
+ * `assignment: null`, `decision` populated. The merge below keys off BOTH
+ * tables independently rather than iterating assignments and attaching
+ * decisions, precisely so a decision-only pair is never dropped.
+ *
+ * The manual-add extension also widens the context with `diseaseOptions` — the
+ * canonical disease-code → label list (`docs/cancer-center-person-rollup.csv`,
+ * the same rollup `labelsOf()` in `scripts/cancer-center-disease-assignments.ts`
+ * reads) — so the roster card's "Add a disease" picker has something to list
+ * without a second round-trip. One shared list for the whole center, computed
+ * once per load — NOT per member. `null` outside a center, same convention as
+ * `programs`.
  */
+import { readFileSync } from "node:fs";
+import {
+  CENTER_ENTITY_TYPE,
+  CENTER_PROGRAM_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
+import path from "node:path";
+
+import { isRoleAllowedAtUnit } from "@/lib/api/org-unit-role-scope";
 import {
   loadUnitFieldOverrides,
   mergeUnitFields,
   type UnitEntityType,
   type UnitFieldOverrideName,
 } from "@/lib/api/manual-layer";
+import { parseCsv } from "@/lib/csv";
+import { isPublicRosterMember } from "@/lib/eligibility";
 import {
+  canManageAccess as canManageAccessPredicate,
   getEffectiveUnitRole,
   type UnitAdminLookup,
   type UnitRef,
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { enabledExternalMemberSources } from "@/lib/edit/external-member-sources";
+import { loadExternalMembersByCuid } from "@/lib/api/external-members";
+import type { ExternalMember, PrismaClient } from "@/lib/generated/prisma/client";
+import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
 
 export type UnitActorRole = "superuser" | "owner" | "curator";
 
@@ -92,7 +138,8 @@ export type UnitEditContext = {
     };
     suppression: { id: string; suppressedAt: Date; actorCwid: string } | null;
   };
-  /** Present iff the actor can manage access (Owner or Superuser); else null. */
+  /** Present iff the actor can manage access (Owner, Superuser, or
+   *  comms_steward — 2026-08-26 policy widening, decision #3); else null. */
   access: ReadonlyArray<{
     cwid: string;
     name: string;
@@ -115,14 +162,39 @@ export type UnitEditContext = {
     title: string | null;
     source: string;
     membershipType: "research" | "clinical" | null;
+    /** #2542 vocabulary key backing `membershipType` — `null` for a division
+     *  row. Optional so existing fixtures/callers that predate this field
+     *  still type-check (same convention as `diseases` below). */
+    membershipRoleKey?: string | null;
     programCode: string | null;
     startDate: string | null;
     endDate: string | null;
     /** Whether the PERSON is still at WCM — orthogonal to the membership dates.
      *  `departed` = soft-deleted by the ED ETL (left WCM, or `affiliate_alumni`);
      *  `unknown` = no Scholar row ever matched this cwid, which is why the `name`
-     *  above falls back to the raw cwid. */
+     *  above falls back to the raw cwid; `external` = a Cornell (Ithaca)
+     *  `source: "cornell-ithaca"` row hydrated from `ExternalMember` instead of
+     *  `Scholar` (#2519) — `name`/`title` above come from that row, not the
+     *  nameMap. */
     scholarState: RosterScholarState;
+    /** #1827 — whether the public center page renders this member
+     *  (`isPublicRosterMember`). Optional so fixtures that predate it still
+     *  type-check; absent → treated as listed. */
+    publiclyListed?: boolean;
+    /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
+     *  picture. `[]` outside a center (dept/division) and for a center member
+     *  with no `CancerCenterDiseaseAssignment`/`CancerCenterDiseaseDecision`
+     *  rows. Optional so existing fixtures/callers that predate this feature
+     *  still type-check; absent → `[]` (same convention as `RosterMember.
+     *  scholarState` in `center-roster-card.tsx`). */
+    diseases?: ReadonlyArray<RosterDiseaseRow>;
+    /** Roster upkeep "Fill dates": the person's earliest WCM appointment start
+     *  (YYYY-MM-DD), sent only for a center membership with no start date;
+     *  absent/null otherwise or when no appointment has one. */
+    wcmStartDate?: string | null;
+    /** Roster upkeep "End at departure dates": the day the ED sync marked this
+     *  person gone (`Scholar.deletedAt`), for a departed member only. */
+    departedOn?: string | null;
   }> | null;
   /** The center's program taxonomy (#552), present for a center (empty when the
    *  center has none — the roster editor hides Type + Program then). null for a
@@ -144,12 +216,53 @@ export type UnitEditContext = {
       sortOrder: number;
     }>;
   }> | null;
+  /** #2542 Phase C — the center's LEADERSHIP-group `OrgUnitRole` vocabulary,
+   *  ordered by `sortOrder`, each with its current holders. Present (possibly
+   *  `[]`) for a center; `null` for a department/division (they keep the
+   *  single-role `unit.leader` override instead — see that field). Already
+   *  filtered to roles this center may assign (`isRoleAllowedAtUnit`, #2557
+   *  Phase E) — a role with an explicit allowlist that excludes this center
+   *  is not offered at all, the same server-side gate the roster editor
+   *  already enforces for membership roles. `OrgUnitRole` is one vocabulary
+   *  per KIND for the whole institution (its own docblock), not per-unit —
+   *  only the holders and the allowlist outcome vary per center. */
+  centerLeadership: ReadonlyArray<{
+    key: string;
+    label: string;
+    singleHolder: boolean;
+    sortOrder: number;
+    holders: ReadonlyArray<{
+      cwid: string;
+      name: string | null;
+      title: string | null;
+      interim: boolean;
+    }>;
+  }> | null;
+  /** The center's MEMBERSHIP-group `OrgUnitRole` vocabulary (CHPC fellow
+   *  roles etc.), same shape/filtering as `centerLeadership` above minus
+   *  holders — the roster card renders holders itself, per-row. `null` for a
+   *  department/division. */
+  centerMembershipRoles: ReadonlyArray<{
+    key: string;
+    label: string;
+    sortOrder: number;
+  }> | null;
   /** Present on a department only — its child divisions for the sub-rail. */
   siblingDivisions: ReadonlyArray<{
     code: string;
     name: string;
     slug: string;
   }> | null;
+  /** Disease-assignment plan §5/§6 manual-add extension — the canonical
+   *  disease-code → label list, for the roster card's "Add a disease" picker.
+   *  One shared list for the whole center (not per member); `null` for a
+   *  department or division, same convention as {@link programs}. */
+  diseaseOptions: ReadonlyArray<DiseaseCodeOption> | null;
+  /** The center's "Auto-publish high-confidence inferences" switch
+   *  (`Center.diseaseAutoPublish`, `lib/cancer-center-disease-publish.ts`).
+   *  Present for a center with a `CenterProgram` taxonomy (the same gate as
+   *  `diseaseOptions`); `null` otherwise. */
+  diseaseAutoPublish: boolean | null;
   /** The actor's effective role on THIS unit (drives client-side rail filtering). */
   actorRole: UnitActorRole;
   /** The acting session's CWID — the access card disables Remove on this row
@@ -174,6 +287,12 @@ export type UnitEditContextClient = Pick<
   | "centerMembership"
   | "divisionMembership"
   | "centerProgram"
+  | "cancerCenterDiseaseAssignment"
+  | "cancerCenterDiseaseDecision"
+  | "appointment"
+  | "orgUnitRoleAssignment"
+  | "orgUnitRole"
+  | "orgUnitRoleScope"
 >;
 
 /**
@@ -193,41 +312,185 @@ export type UnitEditContextClient = Pick<
  *   - NOT in the map at all     → no Scholar row has ever existed for this cwid
  *     (a manually-added membership that never matched anyone)
  */
-async function resolveScholarNames(
+export async function resolveScholarNames(
   cwids: ReadonlyArray<string>,
   client: UnitEditContextClient,
-): Promise<Map<string, { name: string; title: string | null; departed: boolean }>> {
-  const out = new Map<string, { name: string; title: string | null; departed: boolean }>();
+): Promise<
+  Map<
+    string,
+    { name: string; title: string | null; departed: boolean; departedOn: string | null; publiclyListed: boolean }
+  >
+> {
+  const out = new Map<
+    string,
+    { name: string; title: string | null; departed: boolean; departedOn: string | null; publiclyListed: boolean }
+  >();
   const unique = [...new Set(cwids.filter((c) => c.length > 0))];
   if (unique.length === 0) return out;
   const rows = await client.scholar.findMany({
     where: { cwid: { in: unique } },
-    select: { cwid: true, preferredName: true, primaryTitle: true, deletedAt: true },
+    select: {
+      cwid: true,
+      preferredName: true,
+      primaryTitle: true,
+      deletedAt: true,
+      status: true,
+      roleCategory: true,
+    },
   });
   for (const row of rows) {
     out.set(row.cwid, {
       name: row.preferredName,
       title: row.primaryTitle,
       departed: row.deletedAt !== null,
+      // The day the ED sync saw them go — our only departure date (no HR
+      // last-day feed); "End at departure dates" uses it.
+      departedOn: row.deletedAt ? row.deletedAt.toISOString().slice(0, 10) : null,
+      // #1827 — the public center-roster gate, so /edit can flag members the
+      // public page silently drops (suppressed profile, hidden role class).
+      publiclyListed: isPublicRosterMember(row),
     });
   }
   return out;
 }
 
 /**
- * Whether a roster member is still at WCM, has left, or was never resolvable.
- * Derived from the `resolveScholarNames` lookup — NOT from membership dates,
- * which are a separate axis (`rosterStatusOf`: a member can have a current
- * membership AND have left the institution, which is exactly the state a center
- * needs to notice).
+ * Whether a roster member is still at WCM, has left, was never resolvable, or
+ * is a Cornell (Ithaca) external member with no WCM identity at all (#2519).
+ * `active`/`departed`/`unknown` are derived from the `resolveScholarNames`
+ * lookup — NOT from membership dates, which are a separate axis
+ * (`rosterStatusOf`: a member can have a current membership AND have left the
+ * institution, which is exactly the state a center needs to notice).
+ * `external` is orthogonal to that lookup entirely — it comes from the
+ * roster row's membership `source`, not from `Scholar`.
  */
-export type RosterScholarState = "active" | "departed" | "unknown";
+export type RosterScholarState = "active" | "departed" | "unknown" | "external";
 
 export function scholarStateOf(
   resolved: { departed: boolean } | undefined,
+  external = false,
 ): RosterScholarState {
+  if (external) return "external";
   if (resolved === undefined) return "unknown";
   return resolved.departed ? "departed" : "active";
+}
+
+/**
+ * One (cwid, diseaseCode) pair — the CURRENT `CancerCenterDiseaseAssignment`
+ * row for it, if the assignment ETL's most recent full-replace still carries
+ * one, UNION'd with the curator's `CancerCenterDiseaseDecision`, if any exists.
+ * Either can be present alone: an assignment with no decision is simply
+ * unreviewed; a decision with no current assignment is the "evidence
+ * disappeared" drift case below (plan §6).
+ */
+export type RosterDiseaseRow = {
+  diseaseCode: string;
+  assignment: {
+    rank: number;
+    focus: string;
+    confidence: string;
+    leadPubs: number;
+    secondPubs: number;
+    middlePubs: number;
+    grantsLed: number;
+    grantsSupport: number;
+    trialsLed: number;
+    trialsSupport: number;
+    pubScore: number;
+    score: number;
+    firstYear: number | null;
+    lastYear: number | null;
+    recentPubs: number;
+    specialtyStatus: string;
+  } | null;
+  decision: {
+    decision: string; // "confirmed" | "rejected"
+    decidedBy: string;
+    decidedAt: Date;
+    /** null for a manual add (plan's manual-add extension) — a curator-attached
+     *  disease with no `CancerCenterDiseaseAssignment` row to snapshot. Always
+     *  populated for a decision made against a live assignment (the ordinary
+     *  confirm/reject flow). */
+    scoreAtDecision: number | null;
+    confidenceAtDecision: string | null;
+  } | null;
+  /** Plan §6 v1 drift flag — see `isDiseaseDecisionDrifted`. */
+  drifted: boolean;
+};
+
+/** One canonical disease code — for the "Add a disease" picker (manual-add
+ *  extension) and for validating a curator-supplied code server-side. */
+export type DiseaseCodeOption = { code: string; label: string };
+
+/** `docs/cancer-center-person-rollup.csv`, read via a cwd-relative path — the
+ *  same file `scripts/cancer-center-disease-assignments.ts`'s CLI entrypoint
+ *  reads. Traced into the app runtime image via `next.config.ts`'s
+ *  `outputFileTracingIncludes` for the routes that call
+ *  {@link loadDiseaseCodeOptions}; any NEW app-runtime caller must be added
+ *  there too (mirrors `loadMeshAncestorContext`'s own CSV-tracing guardrail,
+ *  `lib/clinical-mesh-anchors.ts`). */
+const DISEASE_ROLLUP_CSV_PATH = path.join(process.cwd(), "docs/cancer-center-person-rollup.csv");
+
+/**
+ * The canonical disease-code → label list, deduped by code (a code can repeat
+ * across several `article_bucket` rows in the rollup — first label wins, same
+ * as `labelsOf()` in `scripts/cancer-center-disease-assignments.ts`), sorted
+ * by label for the picker. Deliberately NOT an import of `labelsOf()` itself:
+ * that file's `runAssignments` pulls in the raw `mariadb` driver + `lib/
+ * cancer-taxonomy.ts` at module scope (behind an `import.meta.url` CLI guard,
+ * not a lazy import), which this context loader — reached by every unit-editor
+ * route, not only centers — has no reason to carry. `parseCsv` (the one CSV
+ * dialect this repo has) IS reused; only the ~3-line code→label dedup is
+ * re-derived locally.
+ *
+ * Throws (fail-loud) if the CSV is absent — same stance
+ * `loadSpecialtyAnchorMap` documents for its own CSV: the file is committed,
+ * so absence is a packaging bug, not a runtime-degrade case. The one caller in
+ * this module ({@link loadUnitEditContext}) catches around its call site and
+ * degrades `diseaseOptions` to `[]` rather than failing the whole unit page.
+ */
+export function loadDiseaseCodeOptions(
+  csvPath: string = DISEASE_ROLLUP_CSV_PATH,
+): ReadonlyArray<DiseaseCodeOption> {
+  const rows = parseCsv(readFileSync(csvPath, "utf8"));
+  const seen = new Set<string>();
+  const options: DiseaseCodeOption[] = [];
+  for (const r of rows) {
+    const code = r.person_code;
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    options.push({ code, label: r.display_label });
+  }
+  return options.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Plan §6 — deliberately simple v1 drift flag, recomputed on every load by
+ * comparing a decision's AT-DECISION-TIME snapshot against the CURRENT
+ * assignment row for the same pair. A visible badge only; no auto-revert, no
+ * notification.
+ *
+ * ponytail: v2 could add thresholds / a staleness window / a digest instead
+ * of a per-row badge the curator happens to notice next time they're on the
+ * row — flagged here so this doesn't quietly become the permanent ceiling.
+ */
+export function isDiseaseDecisionDrifted(
+  decision: { decision: string; confidenceAtDecision: string | null },
+  current: { confidence: string } | undefined,
+): boolean {
+  if (decision.decision === "rejected") {
+    // Evidence "tripled" — now high confidence, and wasn't at decision time.
+    return current !== undefined && current.confidence === "high" && decision.confidenceAtDecision !== "high";
+  }
+  if (decision.decision === "confirmed") {
+    // A manual add (`confidenceAtDecision === null` — no assignment row to
+    // snapshot at decision time, the route's manual-add branch) never had
+    // evidence to begin with, so "the row disappeared" doesn't apply to it.
+    // Only flag drift when a decision that WAS backed by evidence loses its
+    // assignment row.
+    return decision.confidenceAtDecision !== null && current === undefined;
+  }
+  return false;
 }
 
 export async function loadUnitEditContext(
@@ -246,13 +509,14 @@ export async function loadUnitEditContext(
   let deptSlug: string | null = null;
   let source: "ED" | "manual";
   let centerType: "center" | "institute" | null = null;
+  let centerDiseaseAutoPublish = true;
   let rowLeaderCwid: string | null;
   let rowLeaderInterim: boolean | undefined;
 
   if (unitType === "department") {
     const row = await client.department.findUnique({
       where: { code },
-      select: { code: true, name: true, description: true, url: true, slug: true, chairCwid: true, source: true },
+      select: { code: true, name: true, description: true, url: true, slug: true, source: true },
     });
     if (!row) return null;
     name = row.name;
@@ -260,7 +524,21 @@ export async function loadUnitEditContext(
     url = row.url;
     slug = row.slug;
     source = row.source === "manual" ? "manual" : "ED";
-    rowLeaderCwid = row.chairCwid;
+    // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row only;
+    // `Department.chairCwid` no longer exists as a read source. `roleKey`
+    // (chair vs. director) is naturally exclusive per department — seeded by
+    // category — so an IN-list `findFirst` needs no separate category read.
+    const assignment = await client.orgUnitRoleAssignment.findFirst({
+      where: {
+        entityType: "department",
+        entityId: row.code,
+        roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+      },
+      select: { cwid: true, interim: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    rowLeaderCwid = assignment?.cwid ?? null;
+    rowLeaderInterim = assignment?.interim;
   } else if (unitType === "division") {
     const row = await client.division.findUnique({
       where: { code },
@@ -270,7 +548,6 @@ export async function loadUnitEditContext(
         description: true,
         url: true,
         slug: true,
-        chiefCwid: true,
         source: true,
         deptCode: true,
         department: { select: { name: true, slug: true } },
@@ -285,7 +562,15 @@ export async function loadUnitEditContext(
     deptCode = row.deptCode;
     deptName = row.department?.name ?? null;
     deptSlug = row.department?.slug ?? null;
-    rowLeaderCwid = row.chiefCwid;
+    // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row only;
+    // `Division.chiefCwid` no longer exists as a read source.
+    const assignment = await client.orgUnitRoleAssignment.findFirst({
+      where: { entityType: "division", entityId: row.code, roleKey: DIVISION_CHIEF_ROLE_KEY },
+      select: { cwid: true, interim: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    rowLeaderCwid = assignment?.cwid ?? null;
+    rowLeaderInterim = assignment?.interim;
   } else {
     const row = await client.center.findUnique({
       where: { code },
@@ -295,9 +580,8 @@ export async function loadUnitEditContext(
         description: true,
         url: true,
         slug: true,
-        directorCwid: true,
         centerType: true,
-        leaderInterim: true,
+        diseaseAutoPublish: true,
       },
     });
     if (!row) return null;
@@ -309,8 +593,20 @@ export async function loadUnitEditContext(
     // "manual" regardless of the seed/import provenance on the row.
     source = "manual";
     centerType = row.centerType === "institute" ? "institute" : "center";
-    rowLeaderCwid = row.directorCwid;
-    rowLeaderInterim = row.leaderInterim;
+    // Column default is ON; a missing value (older fixture) reads as the default.
+    centerDiseaseAutoPublish = row.diseaseAutoPublish ?? true;
+    // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row only;
+    // `Center.directorCwid` / `Center.leaderInterim` no longer exist as read
+    // sources. Separate query: the assignment is polymorphic on (entityType,
+    // entityId) with no FK to `center`, so it cannot be nested on the select
+    // above.
+    const assignment = await client.orgUnitRoleAssignment.findFirst({
+      where: { entityType: CENTER_ENTITY_TYPE, entityId: row.code, roleKey: DIRECTOR_ROLE_KEY },
+      select: { cwid: true, interim: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    rowLeaderCwid = assignment?.cwid ?? null;
+    rowLeaderInterim = assignment?.interim;
   }
 
   // 2. Effective role + the superuser/retired gates.
@@ -341,9 +637,16 @@ export async function loadUnitEditContext(
   if (suppressionRow !== null && !session.isSuperuser) return null;
 
   // A steward without a real grant (`effective === "none"`, having passed the
-  // gate above) acts as a CURATOR: edits content but never manages access
-  // (`canManageAccess` below stays Superuser/Owner-only, so a steward gets no
-  // grant UI). A steward who ALSO holds a real owner/curator grant keeps it.
+  // gate above) acts as a CURATOR for content-editing purposes — `actorRole`
+  // (client-side rail filtering) stays whatever the actor's real grant says,
+  // "curator" as the floor. Access-management no longer rides on `actorRole`
+  // at all: per the 2026-08-26 policy widening (decision #3,
+  // `comms-steward-profile-editing-spec.md` §11) a comms_steward gets FULL
+  // access-management parity on every unit — grant/revoke owner AND curator
+  // rows — regardless of any grant they personally hold, so `canManageAccess`
+  // below ORs in `session.isCommsSteward` directly rather than deriving it
+  // from `actorRole`. A steward who ALSO holds a real owner/curator grant
+  // keeps that `actorRole`.
   const actorRole: UnitActorRole = session.isSuperuser
     ? "superuser"
     : effective === "none"
@@ -361,8 +664,15 @@ export async function loadUnitEditContext(
   const leaderCwid =
     merged.leaderCwid === null || merged.leaderCwid === "" ? null : merged.leaderCwid;
 
-  // 4. Access list (Owner/Superuser only) and roster (center/manual-division).
-  const canManageAccess = session.isSuperuser || actorRole === "owner";
+  // 4. Access list (Owner/Superuser/comms_steward, delegated to `lib/edit/
+  // authz.ts`'s own `canManageAccess` predicate — same inputs already in
+  // scope: `session` and `effective`, the `EffectiveUnitRole`. Passing
+  // `effective` rather than `actorRole` is deliberate: `actorRole` collapses
+  // to `"superuser"` for a superuser, which would never equal `"owner"`, but
+  // the predicate's `session.isSuperuser` branch already ALLOWs first, so the
+  // `effectiveRole === "owner"` arm is only ever reached for a non-superuser
+  // actor anyway) and roster (center/manual-division).
+  const canManageAccess = canManageAccessPredicate(session, effective).ok;
   const hasRoster = unitType === "center" || (unitType === "division" && source === "manual");
 
   const accessRows = canManageAccess
@@ -377,6 +687,8 @@ export async function loadUnitEditContext(
     cwid: string;
     source: string;
     membershipType: "research" | "clinical" | null;
+    /** #2542 vocabulary key backing `membershipType` — `null` for a division row. */
+    membershipRoleKey: string | null;
     programCode: string | null;
     startDate: Date | null;
     endDate: Date | null;
@@ -389,9 +701,20 @@ export async function loadUnitEditContext(
     label: string;
     sortOrder: number;
     description: string | null;
-    leaders: Array<{ cwid: string; interim: boolean; role: string; sortOrder: number }>;
   };
   let programRowsRaw: ProgramRowRaw[] | null = null;
+  // #2558 — program leadership is an `OrgUnitRoleAssignment` row
+  // (`entityType: "center_program"`, `entityId: "{centerCode}:{programCode}"`),
+  // not a nested `CenterProgram.leaders` relation (the retired per-program
+  // leader table this migrates off of). Grouped by `entityId` below, after
+  // `programRowsRaw` is known.
+  let programAssignments: Array<{
+    entityId: string;
+    cwid: string;
+    interim: boolean;
+    roleKey: string;
+    sortOrder: number;
+  }> = [];
   if (hasRoster) {
     if (unitType === "center") {
       rosterRows = await client.centerMembership.findMany({
@@ -400,6 +723,7 @@ export async function loadUnitEditContext(
           cwid: true,
           source: true,
           membershipType: true,
+          membershipRoleKey: true,
           programCode: true,
           startDate: true,
           endDate: true,
@@ -408,18 +732,19 @@ export async function loadUnitEditContext(
       });
       programRowsRaw = await client.centerProgram.findMany({
         where: { centerCode: code },
-        select: {
-          code: true,
-          label: true,
-          sortOrder: true,
-          description: true,
-          leaders: {
-            select: { cwid: true, interim: true, role: true, sortOrder: true },
-            orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
-          },
-        },
+        select: { code: true, label: true, sortOrder: true, description: true },
         orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
       });
+      if (programRowsRaw.length > 0) {
+        programAssignments = await client.orgUnitRoleAssignment.findMany({
+          where: {
+            entityType: CENTER_PROGRAM_ENTITY_TYPE,
+            entityId: { in: programRowsRaw.map((p) => `${code}:${p.code}`) },
+          },
+          select: { entityId: true, cwid: true, interim: true, roleKey: true, sortOrder: true },
+          orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
+        });
+      }
     } else {
       const rows = await client.divisionMembership.findMany({
         where: { divisionCode: code },
@@ -431,10 +756,223 @@ export async function loadUnitEditContext(
         cwid: r.cwid,
         source: r.source,
         membershipType: null,
+        membershipRoleKey: null,
         programCode: null,
         startDate: null,
         endDate: null,
       }));
+    }
+  }
+
+  // 4c. Center leadership vocabulary + holders (#2542 Phase C). `OrgUnitRole`
+  // is ONE vocabulary per KIND for the whole institution (its own
+  // docblock), not per-unit, so this reads the same LEADERSHIP-group `center`
+  // rows every center reads — only the holders and the `isRoleAllowedAtUnit`
+  // outcome vary per center. A role with an explicit `OrgUnitRoleScope`
+  // allowlist that excludes THIS center is dropped entirely (#2557 Phase E),
+  // matching the roster editor's server-side gate for membership roles.
+  type CenterLeadershipRoleRaw = {
+    key: string;
+    label: string;
+    singleHolder: boolean;
+    sortOrder: number;
+  };
+  let centerLeadershipRolesRaw: CenterLeadershipRoleRaw[] | null = null;
+  let centerLeadershipAssignments: Array<{ cwid: string; interim: boolean; roleKey: string }> = [];
+  if (unitType === "center") {
+    const roleRows = await client.orgUnitRole.findMany({
+      where: { entityType: CENTER_ENTITY_TYPE, roleGroup: "leadership" },
+      select: { key: true, label: true, singleHolder: true, sortOrder: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    const allowedFlags = await Promise.all(
+      roleRows.map((r) =>
+        isRoleAllowedAtUnit({
+          entityType: CENTER_ENTITY_TYPE,
+          roleKey: r.key,
+          entityId: code,
+          client,
+        }),
+      ),
+    );
+    centerLeadershipRolesRaw = roleRows.filter((_, i) => allowedFlags[i]);
+    if (centerLeadershipRolesRaw.length > 0) {
+      centerLeadershipAssignments = await client.orgUnitRoleAssignment.findMany({
+        where: {
+          entityType: CENTER_ENTITY_TYPE,
+          entityId: code,
+          roleKey: { in: centerLeadershipRolesRaw.map((r) => r.key) },
+        },
+        select: { cwid: true, interim: true, roleKey: true },
+        orderBy: [{ roleKey: "asc" }, { cwid: "asc" }],
+      });
+    }
+  }
+
+  // 4c-2. Center membership vocabulary (CHPC fellow roles) — same shape/
+  // filtering as the leadership block above; holders ride the roster rows
+  // already loaded, so no assignment query is needed here.
+  type CenterMembershipRoleRaw = { key: string; label: string; sortOrder: number };
+  let centerMembershipRoles: CenterMembershipRoleRaw[] | null = null;
+  if (unitType === "center") {
+    const membershipRoleRows = await client.orgUnitRole.findMany({
+      where: { entityType: CENTER_ENTITY_TYPE, roleGroup: "membership" },
+      select: { key: true, label: true, sortOrder: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    const membershipAllowedFlags = await Promise.all(
+      membershipRoleRows.map((r) =>
+        isRoleAllowedAtUnit({
+          entityType: CENTER_ENTITY_TYPE,
+          roleKey: r.key,
+          entityId: code,
+          client,
+        }),
+      ),
+    );
+    centerMembershipRoles = membershipRoleRows.filter((_, i) => membershipAllowedFlags[i]);
+  }
+
+  // 4b. Disease-expertise rows (plan §5/§6) — center only, keyed off the
+  // roster cwids just loaded above. `CancerCenterDiseaseAssignment` /
+  // `CancerCenterDiseaseDecision` carry no center column of their own (a
+  // scholar's disease profile isn't center-scoped data — same posture as the
+  // `/disease-assignments` route's own docblock), so this is "assignments +
+  // decisions for THIS center's current roster members," not a query scoped
+  // by a center FK.
+  //
+  // Gated on `hasProgramTaxonomy` (bug fix, staging report 2026-08-26): a
+  // center with NO `CenterProgram` rows is not the Cancer Center, but this
+  // person-scoped query would otherwise still surface its roster members'
+  // disease rows whenever they overlap with the Cancer Center's own roster
+  // (e.g. Health Equity shares members with Meyer). This is the same
+  // data-driven "has a program taxonomy" gate `resolveReportsCenterCode`
+  // (`lib/edit/cancer-center-reports.ts`) uses to resolve the Cancer Center —
+  // not a hardcoded center code.
+  const hasProgramTaxonomy = unitType === "center" && (programRowsRaw?.length ?? 0) > 0;
+  const diseasesByCwid = new Map<string, RosterDiseaseRow[]>();
+  if (hasProgramTaxonomy && rosterRows.length > 0) {
+    const rosterCwids = rosterRows.map((r) => r.cwid);
+    const [assignmentRows, decisionRows] = await Promise.all([
+      client.cancerCenterDiseaseAssignment.findMany({
+        where: { cwid: { in: rosterCwids } },
+        select: {
+          cwid: true,
+          diseaseCode: true,
+          rank: true,
+          focus: true,
+          confidence: true,
+          leadPubs: true,
+          secondPubs: true,
+          middlePubs: true,
+          grantsLed: true,
+          grantsSupport: true,
+          trialsLed: true,
+          trialsSupport: true,
+          pubScore: true,
+          score: true,
+          firstYear: true,
+          lastYear: true,
+          recentPubs: true,
+          specialtyStatus: true,
+        },
+      }),
+      client.cancerCenterDiseaseDecision.findMany({
+        where: { cwid: { in: rosterCwids } },
+        select: {
+          cwid: true,
+          diseaseCode: true,
+          decision: true,
+          decidedBy: true,
+          decidedAt: true,
+          scoreAtDecision: true,
+          confidenceAtDecision: true,
+        },
+      }),
+    ]);
+
+    // Both tables share the same (cwid, diseaseCode) composite id — key on it
+    // to look up "does this decision's pair still have a live assignment row"
+    // for the drift check below.
+    const assignmentByKey = new Map<string, (typeof assignmentRows)[number]>();
+    for (const a of assignmentRows) assignmentByKey.set(`${a.cwid}::${a.diseaseCode}`, a);
+
+    const rowsByCwid = new Map<string, Map<string, RosterDiseaseRow>>();
+    const rowFor = (cwid: string, diseaseCode: string): RosterDiseaseRow => {
+      let byCode = rowsByCwid.get(cwid);
+      if (!byCode) rowsByCwid.set(cwid, (byCode = new Map()));
+      let row = byCode.get(diseaseCode);
+      if (!row) {
+        row = { diseaseCode, assignment: null, decision: null, drifted: false };
+        byCode.set(diseaseCode, row);
+      }
+      return row;
+    };
+
+    for (const a of assignmentRows) {
+      rowFor(a.cwid, a.diseaseCode).assignment = {
+        rank: a.rank,
+        focus: a.focus,
+        confidence: a.confidence,
+        leadPubs: a.leadPubs,
+        secondPubs: a.secondPubs,
+        middlePubs: a.middlePubs,
+        grantsLed: a.grantsLed,
+        grantsSupport: a.grantsSupport,
+        trialsLed: a.trialsLed,
+        trialsSupport: a.trialsSupport,
+        pubScore: a.pubScore,
+        score: a.score,
+        firstYear: a.firstYear,
+        lastYear: a.lastYear,
+        recentPubs: a.recentPubs,
+        specialtyStatus: a.specialtyStatus,
+      };
+    }
+    for (const d of decisionRows) {
+      const row = rowFor(d.cwid, d.diseaseCode);
+      row.decision = {
+        decision: d.decision,
+        decidedBy: d.decidedBy,
+        decidedAt: d.decidedAt,
+        scoreAtDecision: d.scoreAtDecision,
+        confidenceAtDecision: d.confidenceAtDecision,
+      };
+      const current = assignmentByKey.get(`${d.cwid}::${d.diseaseCode}`);
+      row.drifted = isDiseaseDecisionDrifted(
+        row.decision,
+        current ? { confidence: current.confidence } : undefined,
+      );
+    }
+
+    // Ranked — live assignments by their rank, any decision-only ("evidence
+    // disappeared") rows trail at the end ordered by code.
+    for (const [cwid, byCode] of rowsByCwid) {
+      const rows = [...byCode.values()].sort((a, b) => {
+        const rankA = a.assignment?.rank ?? Number.MAX_SAFE_INTEGER;
+        const rankB = b.assignment?.rank ?? Number.MAX_SAFE_INTEGER;
+        return rankA - rankB || a.diseaseCode.localeCompare(b.diseaseCode);
+      });
+      diseasesByCwid.set(cwid, rows);
+    }
+  }
+
+  // 4d. Cornell (Ithaca) external-member hydration (#2519 continuation) — a
+  // roster row whose membership `source` is `"cornell-ithaca"` has no
+  // `Scholar` row at all (see `lib/api/external-members.ts`'s header), so its
+  // name/title come from `ExternalMember` instead of the `nameMap` built in
+  // step 5. One batched query for every such cwid across the whole roster —
+  // gated on `enabledExternalMemberSources()`, mirroring the public
+  // roster union (`lib/api/centers.ts`), so the flag-off path never queries
+  // `ExternalMember` and stays byte-identical to today.
+  let externalByCuid = new Map<string, ExternalMember>();
+  if (hasRoster) {
+    const externalSources = enabledExternalMemberSources();
+    const cornellCwids = rosterRows
+      .filter((r) => externalSources.includes(r.source))
+      .map((r) => r.cwid);
+    if (cornellCwids.length > 0) {
+      externalByCuid = await loadExternalMembersByCuid(cornellCwids);
     }
   }
 
@@ -447,7 +985,10 @@ export async function loadUnitEditContext(
       ...accessRows.map((r) => r.cwid),
       ...rosterRows.map((r) => r.cwid),
       // #1117 — program-leader cwids, so the program editor shows names.
-      ...(programRowsRaw ?? []).flatMap((p) => p.leaders.map((l) => l.cwid)),
+      ...programAssignments.map((a) => a.cwid),
+      // #2542 Phase C — center leadership holder cwids, so the leadership
+      // editor shows names.
+      ...centerLeadershipAssignments.map((a) => a.cwid),
     ],
     client,
   );
@@ -466,19 +1007,44 @@ export async function loadUnitEditContext(
       }))
     : null;
 
+  // Roster upkeep "Fill dates": each undated center member's earliest WCM
+  // appointment start. Only queried for the rows that need it.
+  const wcmStartByCwid = new Map<string, string>();
+  const undatedCwids = unitType === "center" ? rosterRows.filter((r) => !r.startDate).map((r) => r.cwid) : [];
+  if (undatedCwids.length > 0) {
+    const appts = await client.appointment.findMany({
+      where: { cwid: { in: undatedCwids }, startDate: { not: null } },
+      select: { cwid: true, startDate: true },
+    });
+    for (const a of appts) {
+      if (!a.startDate) continue;
+      const iso = a.startDate.toISOString().slice(0, 10);
+      const cur = wcmStartByCwid.get(a.cwid);
+      if (!cur || iso < cur) wcmStartByCwid.set(a.cwid, iso);
+    }
+  }
+
   const roster = hasRoster
     ? rosterRows.map((r) => {
         const resolved = nameMap.get(r.cwid);
+        const external = externalByCuid.get(r.cwid);
         return {
           cwid: r.cwid,
-          name: resolved?.name ?? r.cwid,
-          title: resolved?.title ?? null,
+          name: external ? external.displayName : (resolved?.name ?? r.cwid),
+          title: external ? external.title : (resolved?.title ?? null),
           source: r.source,
           membershipType: r.membershipType,
+          membershipRoleKey: r.membershipRoleKey,
           programCode: r.programCode,
           startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
           endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
-          scholarState: scholarStateOf(resolved),
+          scholarState: scholarStateOf(resolved, external !== undefined),
+          // #1827 — false ⇒ the public center page will not render this WCM
+          // member. External rows render through their own source path.
+          publiclyListed: external !== undefined || (resolved?.publiclyListed ?? false),
+          diseases: diseasesByCwid.get(r.cwid) ?? [],
+          wcmStartDate: wcmStartByCwid.get(r.cwid) ?? null,
+          departedOn: external ? null : (resolved?.departedOn ?? null),
         };
       })
     : null;
@@ -486,21 +1052,68 @@ export async function loadUnitEditContext(
   // #1117 — resolve each program's leader cwids to display names for the editor.
   // A leader cwid that isn't a WCM scholar (external leader) stays name/title
   // null; the card re-resolves it client-side like the access/roster cards do.
+  // #2558 — leaders come from `programAssignments` (an `OrgUnitRoleAssignment`
+  // row per leader), grouped here by the program's `entityId`
+  // (`"{centerCode}:{programCode}"`).
+  const assignmentsByProgram = new Map<string, typeof programAssignments>();
+  for (const a of programAssignments) {
+    const list = assignmentsByProgram.get(a.entityId);
+    if (list) list.push(a);
+    else assignmentsByProgram.set(a.entityId, [a]);
+  }
   const programs = programRowsRaw
     ? programRowsRaw.map((p) => ({
         code: p.code,
         label: p.label,
         sortOrder: p.sortOrder,
         description: p.description,
-        leaders: p.leaders.map((l) => ({
-          cwid: l.cwid,
-          name: nameMap.get(l.cwid)?.name ?? null,
-          title: nameMap.get(l.cwid)?.title ?? null,
-          interim: l.interim,
-          // `role` is a VarChar, not an enum — narrow it the same way the public
-          // program page does (`lib/api/centers.ts`): anything unrecognized is a leader.
-          role: l.role === "coe_liaison" ? ("coe_liaison" as const) : ("leader" as const),
-          sortOrder: l.sortOrder,
+        leaders: (assignmentsByProgram.get(`${code}:${p.code}`) ?? []).map((a) => ({
+          cwid: a.cwid,
+          name: nameMap.get(a.cwid)?.name ?? null,
+          title: nameMap.get(a.cwid)?.title ?? null,
+          interim: a.interim,
+          // `roleKey` is a VarChar, not an enum — narrow it the same way the
+          // public program page does (`lib/api/centers.ts`): anything
+          // unrecognized is a leader.
+          role: a.roleKey === "coe_liaison" ? ("coe_liaison" as const) : ("leader" as const),
+          sortOrder: a.sortOrder,
+        })),
+      }))
+    : null;
+
+  // #2542 Phase C — group the center leadership holders by role, then
+  // resolve names, matching the program-leadership shape just above.
+  const centerLeadershipByRole = new Map<string, typeof centerLeadershipAssignments>();
+  for (const a of centerLeadershipAssignments) {
+    const list = centerLeadershipByRole.get(a.roleKey);
+    if (list) list.push(a);
+    else centerLeadershipByRole.set(a.roleKey, [a]);
+  }
+  // A center leader with no Scholar row (staff) would otherwise show as a bare
+  // CWID in the editor; name them from ED. Fail-soft: any ED error leaves them
+  // unnamed, as before.
+  const unnamedLeaders = centerLeadershipAssignments.map((a) => a.cwid).filter((c) => !nameMap.get(c));
+  const leaderDirectory = new Map<string, { name: string; title: string | null }>();
+  if (unnamedLeaders.length > 0) {
+    try {
+      for (const p of await fetchDirectoryPeopleByCwid(unnamedLeaders)) {
+        leaderDirectory.set(p.cwid.toLowerCase(), { name: p.name, title: p.title });
+      }
+    } catch (err) {
+      console.warn("unit edit context: ED lookup for center leaders failed", err);
+    }
+  }
+  const centerLeadership = centerLeadershipRolesRaw
+    ? centerLeadershipRolesRaw.map((r) => ({
+        key: r.key,
+        label: r.label,
+        singleHolder: r.singleHolder,
+        sortOrder: r.sortOrder,
+        holders: (centerLeadershipByRole.get(r.key) ?? []).map((a) => ({
+          cwid: a.cwid,
+          name: nameMap.get(a.cwid)?.name ?? leaderDirectory.get(a.cwid.toLowerCase())?.name ?? null,
+          title: nameMap.get(a.cwid)?.title ?? leaderDirectory.get(a.cwid.toLowerCase())?.title ?? null,
+          interim: a.interim,
         })),
       }))
     : null;
@@ -516,6 +1129,26 @@ export async function loadUnitEditContext(
           })
         ).map((d) => ({ code: d.code, name: d.name, slug: d.slug }))
       : null;
+
+  // 7. Disease-code options (manual-add extension) — center only, one shared
+  // list for the whole roster (not per member). A read failure (the CSV
+  // missing from this route's `outputFileTracingIncludes` trace, or absent
+  // entirely) degrades the picker to empty rather than failing the whole unit
+  // page — `loadDiseaseCodeOptions` itself stays fail-loud so a genuinely
+  // missing/malformed CSV is easy to spot from this one call site.
+  //
+  // Gated on the same `hasProgramTaxonomy` check as §4b (bug fix, staging
+  // report 2026-08-26): a program-less center gets no manual-add picker
+  // payload either — there's no disease surface for it to attach to.
+  let diseaseOptions: ReadonlyArray<DiseaseCodeOption> | null = null;
+  if (hasProgramTaxonomy) {
+    try {
+      diseaseOptions = loadDiseaseCodeOptions();
+    } catch (err) {
+      console.error("[unit-edit-context] loadDiseaseCodeOptions failed", err);
+      diseaseOptions = [];
+    }
+  }
 
   return {
     unit: {
@@ -552,7 +1185,11 @@ export async function loadUnitEditContext(
     access,
     roster,
     programs,
+    centerLeadership,
+    centerMembershipRoles,
     siblingDivisions,
+    diseaseOptions,
+    diseaseAutoPublish: hasProgramTaxonomy ? centerDiseaseAutoPublish : null,
     actorRole,
     actorCwid: session.cwid,
   };

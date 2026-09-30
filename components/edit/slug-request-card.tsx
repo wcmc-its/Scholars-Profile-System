@@ -211,7 +211,7 @@ export function SlugRequestCard({
       <div className="flex flex-col gap-3">
         <p className="flex flex-wrap items-center gap-2.5 text-sm">
           <span className="text-muted-foreground">Your current URL: </span>
-          <code className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs">
+          <code className="bg-apollo-surface-2 border-apollo-border-strong rounded border px-2.5 py-1 font-mono text-xs">
             {SITE_HOST}/{currentSlug}
           </code>
         </p>
@@ -287,7 +287,7 @@ export function SlugRequestCard({
               </label>
               <div className="border-apollo-border-strong focus-within:ring-ring flex max-w-[640px] items-stretch overflow-hidden rounded-md border focus-within:ring-2">
                 <span
-                  className="bg-apollo-surface-2 border-apollo-border text-muted-foreground flex select-none items-center whitespace-nowrap border-r px-3 font-mono text-sm"
+                  className="bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground flex select-none items-center whitespace-nowrap border-r px-3 font-mono text-sm"
                   data-slot="slug-request-prefix"
                 >
                   {SITE_HOST}/

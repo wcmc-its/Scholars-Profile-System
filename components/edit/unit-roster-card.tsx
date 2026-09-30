@@ -32,24 +32,35 @@ export type UnitRosterCardProps = {
   /** The API request's `unitCode`. */
   unitCode: string;
   members: ReadonlyArray<Member>;
+  /** #2519 — when true, render the WCM/Cornell source toggle above the add
+   *  typeahead (the `CORNELL_DIRECTORY_MEMBERS` flag, resolved server-side —
+   *  same pattern as `center-roster-card.tsx`). Defaults to false, so a
+   *  caller that doesn't pass it gets today's WCM-only add form. */
+  cornellDirectoryEnabled?: boolean;
 };
 
-export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitRosterCardProps) {
+export function UnitRosterCard({
+  entityType,
+  unitCode,
+  members: initial,
+  cornellDirectoryEnabled = false,
+}: UnitRosterCardProps) {
   const [members, setMembers] = React.useState<Member[]>(() => [...initial]);
   const [addValue, setAddValue] = React.useState<DirectoryValue | null>(null);
+  const [addSource, setAddSource] = React.useState<"wcm" | "cornell">("wcm");
   const [adding, setAdding] = React.useState(false);
   const [removeTarget, setRemoveTarget] = React.useState<Member | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  async function postRoster(cwid: string, action: "add" | "remove"): Promise<boolean> {
+  async function postRoster(body: Record<string, unknown>): Promise<boolean> {
     const res = await fetch("/api/edit/roster", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ unitType: entityType, unitCode, cwid, action }),
+      body: JSON.stringify({ unitType: entityType, unitCode, ...body }),
     });
-    const data = (await res.json()) as { ok: boolean; error?: string };
-    if (!res.ok || data.ok !== true) {
-      setError(mapErrorToMessage(data.error ?? ""));
+    const data = (await res.json().catch(() => null)) as { ok: boolean; error?: string } | null;
+    if (!res.ok || data?.ok !== true) {
+      setError(mapErrorToMessage(data?.error ?? ""));
       return false;
     }
     return true;
@@ -58,20 +69,27 @@ export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitR
   async function add() {
     if (!addValue || adding) return;
     const picked = addValue;
-    if (members.some((m) => m.cwid === picked.cwid)) {
+    // #2519 — a Cornell pick with no WCM bridge (`wcmMatch`) adds as an
+    // external member; a bridged Cornell pick steers to the ordinary WCM add
+    // below (same as `addSource === "wcm"`, which never sets `wcmMatch`).
+    const isCornellAdd = addSource === "cornell" && !picked.wcmMatch;
+    const effectiveCwid = picked.wcmMatch ?? picked.netid ?? picked.cwid;
+    if (members.some((m) => m.cwid === effectiveCwid)) {
       // Already listed — clear the picker, nothing to do.
       setAddValue(null);
       return;
     }
     setError(null);
     setAdding(true);
-    const member: Member = { cwid: picked.cwid, name: picked.name, title: picked.title };
+    const member: Member = { cwid: effectiveCwid, name: picked.name, title: picked.title };
     // Optimistic insert; revert on failure.
     setMembers((prev) => [...prev, member]);
     setAddValue(null);
-    const ok = await postRoster(picked.cwid, "add");
+    const ok = isCornellAdd
+      ? await postRoster({ source: "cornell", netid: picked.netid, action: "add" })
+      : await postRoster({ cwid: effectiveCwid, action: "add" });
     if (!ok) {
-      setMembers((prev) => prev.filter((m) => m.cwid !== picked.cwid));
+      setMembers((prev) => prev.filter((m) => m.cwid !== effectiveCwid));
     }
     setAdding(false);
   }
@@ -79,7 +97,7 @@ export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitR
   async function confirmRemove() {
     if (!removeTarget) return;
     setError(null);
-    const ok = await postRoster(removeTarget.cwid, "remove");
+    const ok = await postRoster({ cwid: removeTarget.cwid, action: "remove" });
     if (!ok) throw new Error("remove_failed"); // keeps the dialog open
     setMembers((prev) => prev.filter((m) => m.cwid !== removeTarget.cwid));
     setRemoveTarget(null);
@@ -126,7 +144,44 @@ export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitR
 
         <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="unit-roster-add">
           <p className="text-sm font-medium">Add member</p>
-          <DirectoryPeopleTypeahead idPrefix="roster" value={addValue} onChange={setAddValue} />
+          {cornellDirectoryEnabled && (
+            <div
+              className="border-apollo-border flex w-fit overflow-hidden rounded-md border"
+              role="group"
+              aria-label="Directory source"
+            >
+              {(
+                [
+                  ["wcm", "WCM"],
+                  ["cornell", "Cornell"],
+                ] as ReadonlyArray<readonly ["wcm" | "cornell", string]>
+              ).map(([value, label], i) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setAddSource(value);
+                    setAddValue(null);
+                  }}
+                  aria-pressed={addSource === value}
+                  className={`px-3 py-1 text-sm font-medium transition-colors ${i > 0 ? "border-apollo-border border-l" : ""} ${
+                    addSource === value
+                      ? "bg-apollo-maroon text-white"
+                      : "text-muted-foreground hover:bg-accent"
+                  }`}
+                  data-testid={`unit-roster-add-source-${value}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <DirectoryPeopleTypeahead
+            idPrefix="roster"
+            value={addValue}
+            onChange={setAddValue}
+            source={cornellDirectoryEnabled ? addSource : "wcm"}
+          />
           <div className="flex justify-end">
             <Button
               type="button"

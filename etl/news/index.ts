@@ -23,6 +23,7 @@
  * Env:
  *   NEWS_SEED_PATH   read this JSON (ScrapedArticle[]) instead of scraping.
  *   NEWS_BACKFILL=1  ignore the already-ingested set; walk the full feed.
+ *                    Operator run: `scripts/run-etl-step.sh etl:news <env> NEWS_BACKFILL=1`.
  *   NEWS_MAX_PAGES   feed-page ceiling for a backfill (default 60; 100 stories/page).
  */
 import { readFileSync } from "node:fs";
@@ -53,7 +54,17 @@ type MentionUpsert = {
   source: "VIVO" | "NAME";
   detectedName: string | null;
   likelihood: string | null;
+  /** How the NAME match was made — TAG|BODY|TITLE|CAPTION (#2578). Null for VIVO. */
+  matchBasis: string | null;
   sourceRef: string | null;
+  /** ~200-300 chars of raw article text around the matched name, for the queue
+   *  UI (#2578 follow-up). Null for VIVO and for a NAME match with no prose
+   *  position (TAG/CAPTION) — see DetectedMention.contextSnippet. */
+  contextSnippet: string | null;
+  /** Press outlet for a Media highlights clip (etl/news/clips.ts); null for a newsroom story. */
+  outlet: string | null;
+  /** Clips only: the digest's "originally appeared in X" credit. */
+  creditedOutlet: string | null;
 };
 
 async function recordRun(args: {
@@ -108,6 +119,8 @@ export function articlesToMentions(
       publishedAt,
       excerpt: a.excerpt,
       thumbnailUrl: a.thumbnailUrl,
+      outlet: a.outlet ?? null,
+      creditedOutlet: a.creditedOutlet ?? null,
     };
     const put = (row: MentionUpsert) => {
       // #2241 — key on the STORY, not the url: the feed publishes some articles
@@ -126,11 +139,23 @@ export function articlesToMentions(
         source: "VIVO",
         detectedName: null,
         likelihood: null,
+        matchBasis: null,
         sourceRef: null,
+        contextSnippet: null,
       });
     }
     // detectMentions already excludes the VIVO cwids, so no scholar is both.
-    for (const d of detectMentions(`${a.title} ${a.bodyText}`, nameIndex, new Set(a.cwids))) {
+    for (const d of detectMentions(
+      // #2578 — the feed's own tags are the strongest signal and the photo alt
+      // text the weakest, so all three streams are kept SEPARATE here; merging
+      // them into one blob would erase the basis the tiering is built on.
+      // `title` rides ALONGSIDE `text` (not instead of it) — #2578 follow-up's
+      // BODY score needs to know where the headline ends in the combined
+      // stream; see MentionSources.title.
+      { title: a.title, text: `${a.title} ${a.bodyText}`, tags: a.tags, captionText: a.captionText },
+      nameIndex,
+      new Set(a.cwids),
+    )) {
       put({
         ...meta,
         cwid: d.cwid,
@@ -138,7 +163,9 @@ export function articlesToMentions(
         source: "NAME",
         detectedName: d.detectedName,
         likelihood: d.likelihood,
+        matchBasis: d.basis,
         sourceRef: `${a.url}|${d.groupKey}`,
+        contextSnippet: d.contextSnippet,
       });
     }
   }
@@ -161,8 +188,37 @@ export type ExistingMention = {
   thumbnailUrl: string | null;
   detectedName: string | null;
   likelihood: string | null;
+  matchBasis: string | null;
   sourceRef: string | null;
+  /** #2578 follow-up — same review-state discipline as detectedName/likelihood/
+   *  matchBasis: refreshed on a NAME->NAME re-scrape, cleared on a VIVO upgrade,
+   *  never touched on a human-touched row. */
+  contextSnippet: string | null;
+  outlet: string | null;
+  creditedOutlet: string | null;
 };
+
+type ArticleMetadata = Pick<
+  ExistingMention,
+  "title" | "publishedAt" | "excerpt" | "thumbnailUrl" | "outlet" | "creditedOutlet"
+>;
+
+/**
+ * The article-metadata half of `reconcile`: title/date/excerpt/thumbnail/outlet
+ * only, never review state (status/source/enteredByCwid/showOnProfile) or
+ * provenance. Also applied to a row that stores the same story under another
+ * slug (#2240), so a human hide or reject on it survives the refresh.
+ */
+export function metadataPatch(cur: ArticleMetadata, r: MentionUpsert): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  if (cur.title !== r.title) data.title = r.title;
+  if (!sameDate(cur.publishedAt, r.publishedAt)) data.publishedAt = r.publishedAt;
+  if (cur.excerpt !== r.excerpt) data.excerpt = r.excerpt;
+  if (cur.thumbnailUrl !== r.thumbnailUrl) data.thumbnailUrl = r.thumbnailUrl;
+  if (cur.outlet !== r.outlet) data.outlet = r.outlet;
+  if (cur.creditedOutlet !== r.creditedOutlet) data.creditedOutlet = r.creditedOutlet;
+  return data;
+}
 
 /**
  * Compute the update patch for an existing (cwid, url) row given a freshly
@@ -174,11 +230,7 @@ export type ExistingMention = {
  *     never downgraded and never resurrected.
  */
 export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string, unknown> {
-  const data: Record<string, unknown> = {};
-  if (cur.title !== r.title) data.title = r.title;
-  if (!sameDate(cur.publishedAt, r.publishedAt)) data.publishedAt = r.publishedAt;
-  if (cur.excerpt !== r.excerpt) data.excerpt = r.excerpt;
-  if (cur.thumbnailUrl !== r.thumbnailUrl) data.thumbnailUrl = r.thumbnailUrl;
+  const data = metadataPatch(cur, r);
 
   const humanTouched = cur.enteredByCwid !== null;
   if (!humanTouched) {
@@ -187,18 +239,24 @@ export function reconcile(cur: ExistingMention, r: MentionUpsert): Record<string
       data.status = "published";
       data.detectedName = null;
       data.likelihood = null;
+      // The whole NAME provenance set clears together — a stale basis on a row
+      // now joined by identifier would tell the queue a story that isn't true.
+      data.matchBasis = null;
       data.sourceRef = null;
+      data.contextSnippet = null;
     } else if (r.source === "NAME" && cur.source === "NAME") {
       if (cur.detectedName !== r.detectedName) data.detectedName = r.detectedName;
       if (cur.likelihood !== r.likelihood) data.likelihood = r.likelihood;
+      if (cur.matchBasis !== r.matchBasis) data.matchBasis = r.matchBasis;
       if (cur.sourceRef !== r.sourceRef) data.sourceRef = r.sourceRef;
+      if (cur.contextSnippet !== r.contextSnippet) data.contextSnippet = r.contextSnippet;
     }
     // NAME arriving for an existing VIVO row: keep VIVO, change nothing.
   }
   return data;
 }
 
-async function upsertMentions(rows: MentionUpsert[]): Promise<{
+export async function upsertMentions(rows: MentionUpsert[]): Promise<{
   inserted: number;
   updated: number;
   preserved: number;
@@ -221,7 +279,11 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
           thumbnailUrl: true,
           detectedName: true,
           likelihood: true,
+          matchBasis: true,
           sourceRef: true,
+          contextSnippet: true,
+          outlet: true,
+          creditedOutlet: true,
         },
       })
     : [];
@@ -232,25 +294,37 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
   // here and would be created a second time. Look the affected scholars up by
   // story key as well, and skip a create that would duplicate one.
   const cwids = [...new Set(rows.map((r) => r.cwid))];
-  /** `"<cwid> <storyKey>"` -> the urls this scholar already has it stored under. */
-  const storedStories = new Map<string, Set<string>>();
+  type StoredSibling = ArticleMetadata & { id: string; url: string };
+  /** `"<cwid> <storyKey>"` -> the rows this scholar already has it stored under. */
+  const storedStories = new Map<string, StoredSibling[]>();
   if (cwids.length) {
     for (const e of await db.write.newsMention.findMany({
       where: { cwid: { in: cwids } },
-      select: { cwid: true, url: true, title: true, publishedAt: true },
+      select: {
+        id: true,
+        cwid: true,
+        url: true,
+        title: true,
+        publishedAt: true,
+        excerpt: true,
+        thumbnailUrl: true,
+        outlet: true,
+        creditedOutlet: true,
+      },
     })) {
       const k = storyKey(e.title, e.publishedAt);
       if (!k) continue;
       const key = `${e.cwid} ${k}`;
-      storedStories.set(key, (storedStories.get(key) ?? new Set()).add(e.url));
+      storedStories.set(key, [...(storedStories.get(key) ?? []), e]);
     }
   }
-  /** True when this scholar already has the same story under a DIFFERENT url. */
-  const storedElsewhere = (r: MentionUpsert): boolean => {
+  /** The rows holding this story under a DIFFERENT url, or null when none. */
+  const storedElsewhere = (r: MentionUpsert): StoredSibling[] | null => {
     const k = storyKey(r.title, r.publishedAt);
-    if (!k) return false;
-    const urlsForStory = storedStories.get(`${r.cwid} ${k}`);
-    return urlsForStory !== undefined && !urlsForStory.has(r.url);
+    if (!k) return null;
+    const rowsForStory = storedStories.get(`${r.cwid} ${k}`);
+    if (!rowsForStory || rowsForStory.some((s) => s.url === r.url)) return null;
+    return rowsForStory;
   };
 
   let inserted = 0;
@@ -265,8 +339,19 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
         if (!cur) {
           // #2241 — same story, other slug, already stored. Creating it would
           // render the article twice on the profile.
-          if (storedElsewhere(r)) {
+          const siblings = storedElsewhere(r);
+          if (siblings) {
             deduped++;
+            // #2240 — the stored row may sit on a slug the feed never emits
+            // again (a 301 alias), so it would never be matched by url and its
+            // metadata would stay stale forever. Refresh it from this story.
+            for (const s of siblings) {
+              const data = metadataPatch(s, r);
+              if (Object.keys(data).length > 0) {
+                await tx.newsMention.update({ where: { id: s.id }, data });
+                updated++;
+              }
+            }
             continue;
           }
           await tx.newsMention.create({
@@ -281,7 +366,11 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
               source: r.source,
               detectedName: r.detectedName,
               likelihood: r.likelihood,
+              matchBasis: r.matchBasis,
               sourceRef: r.sourceRef,
+              contextSnippet: r.contextSnippet,
+              outlet: r.outlet,
+              creditedOutlet: r.creditedOutlet,
               // enteredByCwid stays null: the ETL is not a manual edit.
             },
           });
@@ -332,7 +421,8 @@ export async function assertNoLegacyOriginRows(
   // false all-clear and let the run proceed against un-migrated rows.
   countLegacy: () => Promise<number> = () =>
     db.write.newsMention.count({
-      where: { NOT: { url: { startsWith: NEWS_ORIGIN + NEWS_PATH_PREFIX } } },
+      // Media highlights clips (outlet set) link off-site by design — not legacy.
+      where: { outlet: null, NOT: { url: { startsWith: NEWS_ORIGIN + NEWS_PATH_PREFIX } } },
     }),
 ): Promise<void> {
   const legacy = await countLegacy();

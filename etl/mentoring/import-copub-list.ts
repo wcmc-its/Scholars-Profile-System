@@ -19,9 +19,12 @@
  * NDJSON contract: one object per (mentor, mentee) pair with >=1 co-pub —
  *   { mentorCwid, menteeCwid, pubs: CoPublicationFull[] }
  * Blank lines are skipped; a line missing mentorCwid/menteeCwid or whose `pubs`
- * is not an array is skipped + counted. A pub without a valid positive-integer
- * pmid is dropped and counted separately (`droppedPubs`) so a malformed artifact
- * is visible in the log rather than silently lossy.
+ * is not an array is skipped + counted. The row key (`pmid`, a string since
+ * round 5) is the pub's `id` — the SPS `Publication.pmid` key, `SCOPUS:…` for
+ * a Scopus-only article — else `String(pmid)` for a positive-integer pmid (a
+ * product written before round 5); a pub with neither is dropped and counted
+ * separately (`droppedPubs`) so a malformed artifact is visible in the log
+ * rather than silently lossy.
  *
  * Empty-export floor guard: a 0-row parse ABORTS before the delete-stale step
  * (which, with nothing upserted, would remove every row), so a corrupt/partial/
@@ -64,7 +67,7 @@ function resolveKey(): string {
 type DbRow = {
   mentorCwid: string;
   menteeCwid: string;
-  pmid: number;
+  pmid: string;
   pubYear: number | null;
   pub: Prisma.InputJsonValue;
 };
@@ -79,11 +82,19 @@ function isPositiveInt(n: unknown): n is number {
   return typeof n === "number" && Number.isInteger(n) && n > 0;
 }
 
+/** The row key: `id` when present, else a positive-integer `pmid` (an old
+ *  product), else null (dropped). */
+function rowKey(pub: { id?: unknown; pmid?: unknown }): string | null {
+  if (typeof pub.id === "string" && pub.id.length > 0 && pub.id.length <= 32) return pub.id;
+  return isPositiveInt(pub.pmid) ? String(pub.pmid) : null;
+}
+
 /** Parse NDJSON → flattened (mentor, mentee, pmid) rows. `skipped` counts whole
  *  lines dropped (bad JSON / missing cwid / non-array pubs); `droppedPubs` counts
- *  individual pubs dropped for a missing/invalid pmid, so per-pub data loss in a
- *  malformed artifact is visible rather than silent. */
-function parseNdjson(text: string): { rows: DbRow[]; skipped: number; droppedPubs: number } {
+ *  individual pubs dropped for a missing/invalid key, so per-pub data loss in a
+ *  malformed artifact is visible rather than silent. Exported for its unit
+ *  test; the S3 read and the writes stay in `main`. */
+export function parseNdjson(text: string): { rows: DbRow[]; skipped: number; droppedPubs: number } {
   const rows: DbRow[] = [];
   let skipped = 0;
   let droppedPubs = 0;
@@ -102,15 +113,16 @@ function parseNdjson(text: string): { rows: DbRow[]; skipped: number; droppedPub
         skipped++;
         continue;
       }
-      for (const pub of o.pubs as Array<{ pmid?: unknown; year?: unknown }>) {
-        if (!pub || !isPositiveInt(pub.pmid)) {
-          droppedPubs++; // a pub with no valid pmid — counted, not silently lost
+      for (const pub of o.pubs as Array<{ id?: unknown; pmid?: unknown; year?: unknown }>) {
+        const pmid = pub ? rowKey(pub) : null;
+        if (pmid === null) {
+          droppedPubs++; // a pub with no valid key — counted, not silently lost
           continue;
         }
         rows.push({
           mentorCwid,
           menteeCwid,
-          pmid: Number(pub.pmid),
+          pmid,
           pubYear: typeof pub.year === "number" ? pub.year : null,
           pub: pub as unknown as Prisma.InputJsonValue,
         });
@@ -137,7 +149,7 @@ async function main() {
 
     const { rows, skipped, droppedPubs } = parseNdjson(text);
     console.log(
-      `Parsed ${rows.length} co-pub rows (${skipped} lines skipped, ${droppedPubs} pubs dropped for invalid pmid).`,
+      `Parsed ${rows.length} co-pub rows (${skipped} lines skipped, ${droppedPubs} pubs dropped for invalid key).`,
     );
 
     // Empty-export floor guard: with nothing upserted, the delete-stale step
@@ -219,11 +231,14 @@ async function main() {
   }
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+// Import-safe: only run when invoked as a script, never when imported by vitest.
+if (!process.env.VITEST) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await db.write.$disconnect();
+    });
+}

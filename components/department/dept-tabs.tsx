@@ -9,16 +9,20 @@
  * §16: the Grants tab is removed from dept pages. Callers omit
  * `grantsCount` to suppress the tab entirely. Division pages still pass
  * it (until slice 3 of issue #52).
+ *
+ * Department pages may append a countless "Collaboration" tab (Unit Page v2 —
+ * last, after Grants) via `showCollaboration`; division pages leave it unset.
  */
 import Link from "next/link";
 import type { Route } from "next";
 
-type TabKey = "scholars" | "publications" | "grants";
+type TabKey = "scholars" | "publications" | "grants" | "collaboration";
 
 type Tab = {
   key: TabKey;
   label: string;
-  count: number;
+  /** `undefined` ⇒ a countless tab (never disabled, no count badge). */
+  count?: number;
 };
 
 export function DeptTabs({
@@ -27,6 +31,7 @@ export function DeptTabs({
   scholarsCount,
   publicationsCount,
   grantsCount,
+  showCollaboration = false,
 }: {
   active: TabKey;
   basePath: string;
@@ -34,6 +39,8 @@ export function DeptTabs({
   publicationsCount: number;
   /** Omit to suppress the Grants tab entirely (§16, dept pages). */
   grantsCount?: number;
+  /** Append the countless Collaboration tab (department pages only). */
+  showCollaboration?: boolean;
 }) {
   const tabs: Tab[] = [
     { key: "scholars", label: "Scholars", count: scholarsCount },
@@ -41,24 +48,32 @@ export function DeptTabs({
     ...(grantsCount !== undefined
       ? [{ key: "grants" as const, label: "Grants", count: grantsCount }]
       : []),
+    ...(showCollaboration
+      ? [{ key: "collaboration" as const, label: "Collaboration" }]
+      : []),
   ];
 
   return (
+    // With Grants + Collaboration the row runs past a 390px phone's column: it
+    // scrolls sideways INSIDE itself (scrollbar hidden) rather than the page.
+    // `overflow-x-auto` clips y too, so the hairline is an inset shadow the tabs'
+    // 2px underline paints over, not a border they overlap with `-mb-px` (same
+    // fix as `CenterTabs`).
     <div
       role="tablist"
-      className="mb-5 flex gap-7 border-b border-[var(--color-border)]"
+      className="mb-5 flex gap-5 overflow-x-auto shadow-[inset_0_-1px_0_var(--color-apollo-border)] [scrollbar-width:none] sm:gap-7 [&::-webkit-scrollbar]:hidden"
     >
       {tabs.map((t) => {
         const isActive = t.key === active;
         const isDisabled = t.count === 0;
         const className = [
-          "-mb-px py-2.5 text-sm transition-colors",
+          // Unit Page v2: 14px normal weight; the count inherits the label
+          // colour (slate when active, foreground otherwise).
+          "inline-flex shrink-0 items-baseline gap-[7px] whitespace-nowrap py-3 text-[14px] transition-colors duration-[120ms] ease-out",
           isActive
-            ? "border-b-2 border-[var(--color-accent-slate)] font-medium text-[var(--color-accent-slate)]"
+            ? "border-b-2 border-apollo-slate text-apollo-slate"
             : "border-b-2 border-transparent",
-          !isActive && !isDisabled
-            ? "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-            : "",
+          !isActive && !isDisabled ? "text-foreground hover:text-apollo-slate" : "",
           isDisabled
             ? "cursor-not-allowed text-[var(--color-text-tertiary)]"
             : "",
@@ -69,9 +84,11 @@ export function DeptTabs({
         const content = (
           <>
             {t.label}
-            <span className="ml-1.5 text-[12px] text-[var(--color-text-tertiary)]">
-              {t.count.toLocaleString()}
-            </span>
+            {t.count !== undefined && (
+              <span className="text-[13px]">
+                {t.count.toLocaleString()}
+              </span>
+            )}
           </>
         );
 

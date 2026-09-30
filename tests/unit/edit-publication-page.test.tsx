@@ -88,7 +88,12 @@ describe("/edit/publication/[pmid] — authorization matrix", () => {
   it("signed-in non-superuser → ForbiddenEditPage + edit_authz_denied log line", async () => {
     mockGetEditSession.mockResolvedValue(SELF);
     const result = asElement(await EditPublicationPage({ params: params("12345") }));
-    expect(result.type).toBe(mockForbiddenEditPage);
+    // The denial branch is wrapped in the reduced-chrome shell (a bare div +
+    // ConsoleTopBar), so the top-level element is the div and ForbiddenEditPage
+    // is its second child, not the return value itself.
+    expect(result.type).toBe("div");
+    const forbidden = asElement((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbiddenEditPage);
     expect(mockLoadCtx).not.toHaveBeenCalled();
     const line = (console.warn as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     const parsed = JSON.parse(line) as Record<string, unknown>;

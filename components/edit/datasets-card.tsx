@@ -19,7 +19,8 @@
  * controls.
  *
  * Rendered only when the loader populated `ctx.datasets` (DATA_SHARING_SECTION
- * on AND the scholar has ≥1 deposit), so an empty panel is never reached.
+ * on, or the scholar's own `showDatasets` opt-in, AND the scholar has ≥1
+ * deposit), so an empty panel is never reached.
  *
  * Optimistic mechanism: `useOptimistic` over a local-state list that commits
  * on a successful POST. On a network/server failure the optimistic state

@@ -38,7 +38,9 @@ export default async function DepartmentRoute({
       ? "publications"
       : tabRaw === "grants"
         ? "grants"
-        : "scholars";
+        : tabRaw === "collaboration"
+          ? "collaboration"
+          : "scholars";
   const sortRaw = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
   return (
     <DepartmentPage

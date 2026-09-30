@@ -35,15 +35,17 @@ export type ViewAsButtonProps = {
   variant?: React.ComponentProps<typeof Button>["variant"];
 };
 
-/** Map an `/api/impersonation` error reason to a human message. */
-function mapStartError(code: string): string {
+/** Map an `/api/impersonation` error reason to a human message. Shared with the
+ *  account-menu switcher (`impersonation-switcher.tsx`) so both launchers read
+ *  a POST failure the same way. */
+export function mapStartError(code: string): string {
   switch (code) {
     case "target_is_superuser":
       return "You can’t view as another superuser.";
     case "not_superuser":
       return "Only superusers can use “View as”.";
     case "target_not_found":
-      return "That person isn’t an active scholar.";
+      return "That person isn’t an active scholar, unit admin, or role holder — nothing to view as.";
     default:
       return "Couldn’t start “View as” — please try again.";
   }

@@ -39,14 +39,18 @@ export interface UsageQueries {
 }
 
 /**
- * Build the six usage queries for the window `[sinceDt, today]`. `dt` in
- * daily_usage is a 'YYYY-MM-DD' partition string, so a lexicographic
- * `dt >= '<sinceDt>'` is a correct date-range filter (ISO dates sort
- * chronologically). Column aliases match what {@link shapeUsageRows} reads.
+ * Build the six usage queries for the window `[sinceDt, untilDt]` (both
+ * inclusive; no upper bound when `untilDt` is omitted). `dt` in daily_usage is a
+ * 'YYYY-MM-DD' partition string, so lexicographic `dt >= / <=` comparisons are a
+ * correct date-range filter (ISO dates sort chronologically), and partition
+ * projection prunes to just those days. Column aliases match what
+ * {@link shapeUsageRows} reads.
  */
-export function buildUsageQueries(sinceDt: string): UsageQueries {
+export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueries {
   assertIsoDate(sinceDt);
-  const since = `dt >= '${sinceDt}'`;
+  if (untilDt !== undefined) assertIsoDate(untilDt);
+  const since =
+    untilDt === undefined ? `dt >= '${sinceDt}'` : `dt >= '${sinceDt}' AND dt <= '${untilDt}'`;
   const ranked = (metric: string, dimAlias: string, cntAlias: string): string =>
     [
       `SELECT dimension AS ${dimAlias}, SUM(cnt) AS ${cntAlias}`,

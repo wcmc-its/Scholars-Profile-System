@@ -76,6 +76,51 @@ describe("#2018 concentration-boost arm precedence", () => {
     expect(getAreaScholarConcentration).not.toHaveBeenCalled();
   });
 
+  it("two-concept query: the co-occurrence arm runs FIRST, keyed on both subtrees", async () => {
+    process.env.SEARCH_PEOPLE_CONCEPT_ARM_FIRST = "on";
+    const PAIR = [{ cwid: "pairarm", total: 9 }];
+    getConceptScholarConcentration.mockResolvedValue(PAIR);
+    const out = await resolveAreaConcentration({
+      taxonomyMatch: {
+        state: "none",
+        areas: [],
+        meshResolution: {
+          descendantUis: ["D010190"],
+          secondaryConcept: { descriptorUi: "D007167", descendantUis: ["D007167", "D007168"] },
+        },
+      } as never,
+      meshOff: false,
+    });
+    expect(out).toEqual(PAIR);
+    expect(getConceptScholarConcentration).toHaveBeenCalledTimes(1);
+    expect(getConceptScholarConcentration).toHaveBeenCalledWith(
+      ["D010190"],
+      expect.any(Number),
+      ["D007167", "D007168"],
+    );
+  });
+
+  it("two-concept query with no co-occurring scholars: falls through to the primary-only arm", async () => {
+    process.env.SEARCH_PEOPLE_CONCEPT_ARM_FIRST = "on";
+    getConceptScholarConcentration.mockResolvedValueOnce([]).mockResolvedValueOnce(CONCEPT);
+    const out = await resolveAreaConcentration({
+      taxonomyMatch: {
+        state: "none",
+        areas: [],
+        meshResolution: {
+          descendantUis: ["D010190"],
+          secondaryConcept: { descriptorUi: "D007167", descendantUis: ["D007167"] },
+        },
+      } as never,
+      meshOff: false,
+    });
+    // Never worse than the single-concept ranking: the pair came back empty, so the
+    // primary alone decides, exactly as if there were no secondary.
+    expect(out).toEqual(CONCEPT);
+    expect(getConceptScholarConcentration).toHaveBeenNthCalledWith(1, ["D010190"], expect.any(Number), ["D007167"]);
+    expect(getConceptScholarConcentration).toHaveBeenNthCalledWith(2, ["D010190"], expect.any(Number));
+  });
+
   it("flag ON but the concept arm is empty: falls back to curated, no third call", async () => {
     process.env.SEARCH_PEOPLE_CONCEPT_ARM_FIRST = "on";
     getConceptScholarConcentration.mockResolvedValue([]);

@@ -20,6 +20,8 @@ VITEST                                 # test-runner guard
 AI_GATEWAY_API_KEY
 NCBI_API_KEY
 OPENALEX_MAILTO
+ORCID_CLIENT_ID                     # etl/orcid-registry: optional /read-public token; unset = anonymous pub.orcid.org pool. The deployed weekly run is anonymous BY DESIGN until scholars/<env>/orcid-api is wired to the ETL base family (and the app task, for the Connect-your-iD OAuth) — a new secret is a cdk deploy, not a merge
+ORCID_CLIENT_SECRET                 # with ORCID_CLIENT_ID
 SERPAPI_KEY
 
 # --- SAML/session optional overrides (lib/auth/config.ts optionalEnv(), safe code default) ---
@@ -31,6 +33,7 @@ SESSION_COOKIE_NAME       # falls back to "__Secure-sps_session"
 
 # --- code-default tunables: numeric/mode levers with baked-in defaults ---
 BIOSKETCH_GENERATE_MODEL
+CLIPS_LOOKBACK_DAYS                 # etl:news-clips S3 re-read window (code default 30 days)
 CANCER_FUNDING_MODEL                # NCI Table 2A inference model rollback lever (code default Sonnet 4.5)
 EDIT_BIOSKETCH_GENERATE_RATE_LIMIT
 EDIT_CV_EXPORT_RATE_LIMIT           # CV-export Bedrock cap (code default 10/hr)
@@ -73,13 +76,17 @@ SPS_TRACE_REDACT
 TELEMETRY_SALT
 
 # --- manual ETL knobs: overrides supplied per one-off task run, never baked ---
+ASSIGNMENTS_AS_OF                   # cancer-center-disease-assignments: override the "as of" date (YYYY-MM-DD)
 CANCER_TAXONOMY_FORCE_REPLACE       # bypass the ruleset+MeSH paired-hash short-circuit
 ETL_GUARD_BYPASS
 FAMILY_REVIEW_TERMS_PATH
 FAMILY_SENSITIVITY_CURATED_PATH
 FAMILY_SUPPRESSION_CURATED_PATH
 HIERARCHY_FORCE_REPLACE             # §4.3 escape hatch: force a hierarchy full-replace past the sha256 short-circuit
-HONORS_SEED_PATH                    # #1761 seed import: non-repo data path, operator run-task only
+HONORS_LISTS                        # etl:honors: which lists to scrape; set per EXECUTION by scholars-honors-<env> from its input ($.lists), never baked
+HONORS_RUN_ID                       # etl:honors: the queued honor_list_run row a Run now execution claims; set per EXECUTION from the input ($.runId), never baked
+HONORS_SEED_PATH                   # #1761 seed import: non-repo data path, operator run-task only
+HONORS_TRIGGER                      # etl:honors: "schedule" or "manual", set per EXECUTION from the input ($.trigger), never baked
 MESH_ALIAS_CURATED_PATH
 MESH_ANCHOR_CURATED_PATH
 MESH_ANCHOR_MIN_SUPPORT
@@ -98,6 +105,8 @@ NEWS_SEED_PATH                      # news: read the committed seed instead of s
 NEWS_BACKFILL                       # news: walk the full feed + re-reconcile every article (default incremental)
 NEWS_MAX_PAGES                      # news: feed-page ceiling for a backfill (code default 60; 100 stories/page)
 NEWS_MIN_PUBLISHED                  # news: ignore articles published before this date (code default 2019-01-01; "" walks the 1997 archive)
+ORCID_REGISTRY_DRY_RUN              # orcid-registry: env twin of --dry-run (nothing written, no EtlRun row); local/operator only
+ORCID_REGISTRY_MAX_RECORDS          # orcid-registry: local smoke — truncates the registry union and FORCES a dry run (a partial mirror would let the delete pass wipe the rest)
 SCHOLARS_VIVO_ORG_CROSSWALK
 SCHOLARS_VIVO_ORG_REDIRECT_OUTPUT
 SCHOLARS_VIVO_PUB_REDIRECT_OUTPUT
@@ -116,6 +125,7 @@ MENTORING_AOC_KEY
 MENTORING_COPUBS_BUCKET
 MENTORING_COPUBS_KEY
 MENTORING_COPUB_LIST_KEY
+MENTORING_LEARNER_PUBS_KEY
 PUBLICATION_CITING_KEY
 RCR_BUCKET
 RCR_KEY

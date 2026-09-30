@@ -18,7 +18,7 @@
  * active item, a maroon (`--apollo-ring`) ring on the pale rail.
  */
 import Link from "next/link";
-import { ChevronRight, CornerDownRight, HomeIcon, type LucideIcon } from "lucide-react";
+import { ChevronRight, CornerDownRight, HomeIcon, Lock, type LucideIcon } from "lucide-react";
 
 import { GroupInfoButton } from "@/components/edit/group-info-button";
 import { cn } from "@/lib/utils";
@@ -28,7 +28,7 @@ export type RailKind = "owned" | "service" | "sourced" | "readonly";
 /**
  * Leading-icon keys a rail item may carry. A STRING (not the component) so the
  * item stays serializable across the server→client boundary — `railItems` is
- * passed to the mobile `RailSelect`, a client component, and React Server
+ * passed to the mobile `RailSheet`, a client component, and React Server
  * Components cannot serialize a function/component prop. `RailLink` maps the key
  * to the glyph.
  */
@@ -95,7 +95,7 @@ export type AttributeRailProps = {
    * without an entry render header-only (back-compat for the unit /
    * sibling-division rails, which pass nothing).
    */
-  groupMeta?: Record<string, { description?: string }>;
+  groupMeta?: Record<string, { description?: string; locked?: boolean }>;
 };
 
 export function AttributeRail({ items, active, basePath, groupMeta }: AttributeRailProps) {
@@ -114,6 +114,13 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
           // header, just the item(s) at the top of the rail.
           const isFloating = g.label === "";
           const description = groupMeta?.[g.label]?.description;
+          // A group whose items are all managed at their source gets a lock beside its
+          // header. The items themselves still carry only the sr-only note (the lock cue
+          // on a panel is LockedBadge's job) — but "sourced" was previously signalled by
+          // the group HEADING ALONE, i.e. by the absence of the green "Yours to edit"
+          // badge one panel deeper, which is provenance by noticed absence. Icon + the
+          // existing text label is the house rule for a locked signal.
+          const locked = groupMeta?.[g.label]?.locked === true;
           // Hairline rule between sections — restructured rail only (groupMeta is
           // present only there); skipped before the first (floating Home) group.
           const showDivider = groupMeta != null && groupIndex > 0;
@@ -136,12 +143,8 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
                       aria-hidden
                     />
                   )}
-                  <p
-                    className={cn(
-                      "text-xs font-semibold tracking-wide uppercase",
-                      accent.text,
-                    )}
-                  >
+                  {locked && <Lock className="text-muted-foreground size-3 shrink-0" aria-hidden />}
+                  <p className={cn("text-xs font-semibold tracking-wide uppercase", accent.text)}>
                     {g.label}
                   </p>
                   {description && <GroupInfoButton label={g.label} description={description} />}
@@ -291,13 +294,13 @@ function RailLink({
         aria-current={isActive ? "page" : undefined}
         data-testid={`rail-${item.key}`}
         className={cn(
-          "flex min-h-11 items-center justify-between gap-2 rounded-md border-l-2 border-transparent px-3 py-2 text-sm transition-colors md:min-h-9",
+          "flex min-h-11 items-center justify-between gap-2 rounded-md border-l-2 border-transparent py-2 pr-3 pl-4 text-sm transition-colors md:min-h-9",
           "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
           // Nested child ("From your publications"): indented and quieter, with a
           // down-right arrow (below) standing in for the connector to its parent.
           item.child && "pl-7 text-xs",
           isActive
-            ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white"
+            ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-[600] focus-visible:ring-white"
             : cn(
                 "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
                 // Parent of the active child: subtle persistent highlight.
@@ -306,9 +309,7 @@ function RailLink({
         )}
       >
         <span className="flex items-center gap-2">
-          {item.child && (
-            <CornerDownRight className="size-3.5 shrink-0 opacity-60" aria-hidden />
-          )}
+          {item.child && <CornerDownRight className="size-3.5 shrink-0 opacity-60" aria-hidden />}
           {Icon && (
             <Icon data-testid={`rail-${item.key}-icon`} className="size-4 shrink-0" aria-hidden />
           )}

@@ -26,9 +26,9 @@ import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import {
   getCoPublications,
   getMentorMenteePair,
-  type CoPublicationAuthor,
   type CoPublicationFull,
 } from "@/lib/api/mentoring";
+import { citationIdentifier, formatVolIssuePages, vancouverAuthorToken } from "@/lib/citation";
 import { toCsv } from "@/lib/csv";
 import { htmlToPlainText } from "@/lib/utils";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
@@ -108,27 +108,15 @@ const CSV_HEADERS = ["pmid", "year", "journal", "title", "authors"] as const;
 
 function renderCsv(pubs: CoPublicationFull[]): string {
   const rows = pubs.map((p) => [
-    String(p.pmid),
+    p.id ?? String(p.pmid),
     p.year,
     p.journal ?? "",
     // PubMed titles carry inline HTML (`<i>`, `<sup>`); strip for CSV so
     // spreadsheets don't show literal `<sup>+</sup>` (#331).
     htmlToPlainText(p.title, Number.POSITIVE_INFINITY),
-    p.authors.map(authorToVancouverToken).join("; "),
+    p.authors.map(vancouverAuthorToken).join("; "),
   ]);
   return toCsv([...CSV_HEADERS], rows);
-}
-
-/** Vancouver token: "Lastname Initials" (e.g. "Smith JA"). Initials are
- *  the first letter of each whitespace-separated first/middle name with
- *  no periods. Empty firstName → just the lastname. */
-function authorToVancouverToken(a: CoPublicationAuthor): string {
-  const initials = (a.firstName ?? "")
-    .split(/\s+/)
-    .map((p) => p.charAt(0).toUpperCase())
-    .filter(Boolean)
-    .join("");
-  return initials ? `${a.lastName} ${initials}` : a.lastName;
 }
 
 const HANGING_INDENT_TWIPS = 360;
@@ -210,7 +198,7 @@ function buildCitationParagraph(
   const authorRuns: TextRun[] = [];
   pub.authors.forEach((a, i) => {
     if (i > 0) authorRuns.push(new TextRun({ text: ", " }));
-    const token = authorToVancouverToken(a);
+    const token = vancouverAuthorToken(a);
     const bold = a.personIdentifier !== null && boldCwids.has(a.personIdentifier);
     authorRuns.push(new TextRun({ text: token, bold }));
   });
@@ -220,14 +208,24 @@ function buildCitationParagraph(
   // `H<sub>2</sub>O` render with real subscript runs (#331).
   const titleRuns = buildPubmedRuns(titleClean);
   const journal = pub.journal ?? "";
+  // #2580 — the shared formatter treats a literal "NULL" volume/issue/pages as
+  // absent; the local copy printed `2024;NULL(NULL):NULL.` into the .docx.
   const volIssuePages = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
 
+  // #2580 — `CoPublicationFull.pmid` is a number, but ReciterDB assigns external
+  // (non-PubMed) records a synthetic NEGATIVE pmid, which this used to label
+  // `PMID:` and link as `pubmed.ncbi.nlm.nih.gov/-3/` — dead in the reader's
+  // Word document. The shared helper labels such a row "Source: External" and
+  // returns no href.
+  const id = citationIdentifier(pub.id ?? pub.pmid);
   const idRuns: (TextRun | ExternalHyperlink)[] = [
-    new TextRun({ text: "PMID: " }),
-    new ExternalHyperlink({
-      link: `https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`,
-      children: [new TextRun({ text: String(pub.pmid), style: "Hyperlink" })],
-    }),
+    new TextRun({ text: `${id.label}: ` }),
+    id.href
+      ? new ExternalHyperlink({
+          link: id.href,
+          children: [new TextRun({ text: id.value, style: "Hyperlink" })],
+        })
+      : new TextRun({ text: id.value }),
   ];
   if (pub.pmcid) {
     idRuns.push(new TextRun({ text: "; PMCID: " }));
@@ -268,19 +266,6 @@ function buildCitationParagraph(
     indent: { left: HANGING_INDENT_TWIPS, hanging: HANGING_INDENT_TWIPS },
     spacing: { after: 120 },
   });
-}
-
-function formatVolIssuePages(
-  volume: string | null,
-  issue: string | null,
-  pages: string | null,
-): string {
-  if (!volume && !issue && !pages) return "";
-  let s = "";
-  if (volume) s += volume;
-  if (issue) s += `(${issue})`;
-  if (pages) s += `:${pages}`;
-  return s;
 }
 
 function pageNumberFooter(): Footer {

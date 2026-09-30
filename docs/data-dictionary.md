@@ -29,6 +29,7 @@ system that owns the data — because that's what determines who to ask when a v
 | **ReciterAI** | DynamoDB + S3 — topics/scores/spotlight | `etl/dynamodb`, `etl/spotlight`, `etl/hierarchy` | weekly / annual |
 | **RePORTER/NSF** | NIH RePORTER + NSF APIs | `etl/reporter`, `etl/nsf`, `etl/nih-profile` | nightly/weekly |
 | **NLM** | NLM MeSH XML release | `etl/mesh-descriptors` | annual |
+| **CTSC** | Clinical & Translational Science Center investigators-and-trainees feed (HTTPS JSON; roster only, not publications) | `etl/ctsc-roster` | nightly |
 | **Manual** | Human-entered (manual-override layer / curation) | `/api/edit/*`, seeds | on edit |
 | **Internal** | Computed/coordination by SPS itself | various ETL | per job |
 
@@ -43,7 +44,7 @@ DB column name. FKs reference `scholar.cwid` (CWID-canonical). Soft delete is
 
 | Table | SOR | Purpose & key fields |
 |---|---|---|
-| **`scholar`** (`Scholar`) | ED (+ Manual for `overview`/`slug`) | One row per actively-affiliated WCM scholar; **PK = `cwid`**. `preferredName`, `fullName`, `postnominal` (degree string), `primaryTitle`, `primaryDepartment`, `email`, `headshotUrl`, `overview` (manual-editable bio), `slug` (unique URL key), `status` (`active`/`suppressed`), `roleCategory` (eligibility carve), `deptCode`/`divCode` (org-unit FKs), `hasClinicalProfile`/`clinicalProfileUrl` (weillcornell.org link), `professorialRank` (`Assistant Professor`/`Associate Professor`/`Professor`; ASMS-authoritative, derived by `lib/faculty-rank.ts`'s `deriveProfessorialRank`; drives the People-search "Professorial rank" facet), `postdoctoralMentorCwid`, `orcid`, `deletedAt` (soft delete). |
+| **`scholar`** (`Scholar`) | ED (+ Manual for `overview`/`slug`) | One row per actively-affiliated WCM scholar; **PK = `cwid`**. `preferredName`, `fullName`, `postnominal` (degree string), `primaryTitle`, `primaryDepartment`, `email`, `headshotUrl`, `overview` (manual-editable bio), `slug` (unique URL key), `status` (`active`/`suppressed`), `roleCategory` (eligibility carve), `deptCode`/`divCode` (org-unit FKs), `hasClinicalProfile`/`clinicalProfileUrl` (weillcornell.org link), `professorialRank` (`Assistant Professor`/`Associate Professor`/`Professor`; ASMS-authoritative, derived by `lib/faculty-rank.ts`'s `deriveProfessorialRank`; drives the People-search "Professorial rank" facet), `primaryOrgCode` (ED `weillCornellEduPrimaryOrganization` code: `WCMC`, `HSS`, `MSKCC`, `NYP`, ...; NULL where ED carries no faculty-tagged value; drives the `institution` unit-admin axis and the People-search "Institution" facet, labelled via `lib/institutions.ts`'s `institutionDisplayName`), `postdoctoralMentorCwid`, `orcid`, `deletedAt` (soft delete). |
 | **`appointment`** (`Appointment`) | ED | Titles/affiliations; `isPrimary`, `isInterim`, `startDate`/`endDate` (NULL end = current). `externalId` = ED appointment ID (#352 reconcile key). |
 | **`education`** (`Education`) | ASMS | Degrees/training: `degree`, `institution`, `year`, `field`. |
 | **`person_nih_profile`** (`PersonNihProfile`) | RePORTER | Maps a scholar to NIH RePORTER PI `nihProfileId` for the "View NIH portfolio" link. Composite PK `(cwid, nihProfileId)`; one `isPreferred` row per scholar; `resolutionSource` ∈ `grant_join_contact` / `grant_join_pi` / `name_match` / `name_query` (the `pi_names` subaward probe). A row exists **only when a RePORTER PI profile resolves** — scholars who appear on NIH grants solely as Co-I / Key Personnel / subaward have no RePORTER PI profile and correctly get no row (no link). |
@@ -89,11 +90,15 @@ DB column name. FKs reference `scholar.cwid` (CWID-canonical). Soft delete is
 
 | Table | SOR | Purpose |
 |---|---|---|
-| **`department`** (`Department`) | ED (+ Manual `category`/leadership) | PK = `code` (stable LDAP org-unit code). `name`, `slug`, `category` (browse bucket, hand-curated, ETL-preserved), `chairCwid`, `scholarCount`. |
-| **`division`** (`Division`) | ED (+ Manual) | PK = `code`; `deptCode` FK. `chiefCwid`, `slug` (disambiguated by deptCode). |
-| **`center`** (`Center`) | Manual / seed | Cross-disciplinary centers & institutes. PK = `code`. `centerType` (center/institute badge), `directorCwid`, `leaderInterim`, `sortOrder`. Manually owned — no ETL writes it. |
-| **`center_membership`** (`CenterMembership`) | Manual | Per-scholar center membership; composite PK `(centerCode, cwid)`. |
+| **`department`** (`Department`) | ED (+ Manual `category`) | PK = `code` (stable LDAP org-unit code). `name`, `slug`, `category` (browse bucket, hand-curated, ETL-preserved), `scholarCount`. Leadership (chair) is `org_unit_role_assignment`, not a column — #2542 contract A retired `chairCwid`. |
+| **`division`** (`Division`) | ED (+ Manual) | PK = `code`; `deptCode` FK. `slug` (disambiguated by deptCode). Leadership (chief) is `org_unit_role_assignment` — #2542 contract A retired `chiefCwid`. |
+| **`center`** (`Center`) | Manual / seed | Cross-disciplinary centers & institutes. PK = `code`. `centerType` (center/institute badge), `sortOrder`. Manually owned — no ETL writes it. Leadership (director) + the `interim` qualifier are `org_unit_role_assignment` — #2542 contract A retired `directorCwid`/`leaderInterim`. |
+| **`center_membership`** (`CenterMembership`) | Manual (+ CTSC feed for the `ctsc` center) | Per-scholar center membership; composite PK `(centerCode, cwid)`. `source`: `manual` / `manual-ui` (curated), `cornell-ithaca` (a Cornell Ithaca member; `cwid` holds an `external_member.cuid`), `ctsc-feed` (a profiled scholar mirrored nightly from the CTSC feed by `etl/ctsc-roster`), `ctsc-feed-external` (a CTSC feed person with no SPS profile; `cwid` holds an `external_member.cuid`). The CTSC sync deletes only its own two sources and never overwrites a manual row; /edit Remove on a feed-owned row returns `409`. |
+| **`external_member`** (`ExternalMember`) | Cornell directory / CTSC feed | A center member with no `Scholar` row, rendered as a plain (or externally linked) name. PK `cuid`: a Cornell NetID (`source='cornell-ithaca'`) or `ctsc:<feed PrimaryKey>` (`source='ctsc-feed'`, written by `etl/ctsc-roster`; `affiliation` carries the feed's institution for the roster badge). |
+| **`ctsc_feed_issue`** (`CtscFeedIssue`) | Internal (CTSC feed vs ED) | One CTSC feed record whose CWID CTSC should fix at the source. PK `primaryKey` (feed PrimaryKey); `name`, `institution`, `feedCwid`, `reason` (`blank-resolved`, `not-in-ed`, `retired-cwid`, `cwid-email-conflict`, `email-match-name-differs`, `email-ambiguous`, `duplicate-record`, `wcm-email-unknown`), `suggestedCwid` / `suggestedName` / `matchedEmail` (what ED resolved from the record's emails, null when nothing resolved unambiguously), `syncedAt`. Full-replaced nightly by `etl/ctsc-roster`; shown as "Feed CWID issues" on the CTSC center's /edit page. |
 | **`division_membership`** (`DivisionMembership`) | Manual | Roster for *manually-created* divisions (`Division.source='manual'`); LDAP division membership stays on `Scholar.divCode`. |
+| **`org_unit_role`** (`OrgUnitRole`) | Manual (superuser/comms_steward) | The org-unit role vocabulary, one list per unit kind (`entityType`). PK `(entityType, key)`. `label` (editable), `roleGroup` (`leadership`/`membership`), `singleHolder`, `profileTitle`. |
+| **`org_unit_role_assignment`** (`OrgUnitRoleAssignment`) | ED (dept/div leadership) + Manual (center leadership, program leadership) | The sole leadership store for department/division/center (#2542). Composite key `(entityType, entityId, cwid, roleKey)`; `interim` qualifier rides with the row. No FK on `entityId` — polymorphic, like `UnitAdmin`. |
 
 ## 7. Manual-override layer (ADR-005) — ETL-immune
 
@@ -171,6 +176,13 @@ not in these tables. See [`ADR-005`](./ADR-005-manual-override-layer.md) and
   (`SEARCH_PEOPLE_ESI_FACET`). Derivation logic lives entirely in
   [`deriveGrantSignals`](../lib/api/match-researchers.ts) (~line 180) — see that function for
   the exact rule, not restated here.
+- **`wcmAuthorInstitutions` (publications index) and `institution` (funding index) are
+  index-only** — derived from `Scholar.primaryOrgCode` at OpenSearch build time. The pub field is
+  the union across the displayable WCM authors (same author set as `wcmAuthorDepartments`,
+  `buildPublicationDoc`); the funding field is the lead PI's code (same lead-PI rule as
+  `department`, `lib/funding-projection.ts`). Both back the "Institution" facet on their tab
+  (`SEARCH_PUB_INSTITUTION_FACET` / `SEARCH_FUNDING_INSTITUTION_FACET`), labelled via
+  `institutionDisplayName`.
 - This dictionary covers the **public/runtime model** (Aurora). The B03 audit schema is
   documented separately; upstream source schemas (ReciterDB, InfoEd, etc.) are owned by
   those systems.

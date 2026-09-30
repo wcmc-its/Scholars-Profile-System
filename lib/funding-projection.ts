@@ -41,6 +41,10 @@ export type GrantRowForIndex = {
     slug: string;
     preferredName: string;
     primaryDepartment: string | null;
+    /** `Scholar.primaryOrgCode` (WCMC, HSS, MSKCC, ...) — the lead PI's value
+     *  becomes `FundingDoc.institution`. Optional so fixtures that predate the
+     *  Institution facet need not supply it. */
+    primaryOrgCode?: string | null;
   };
   /** Pub-grant linkages from grant_publication. Optional so test fixtures
    *  and any caller that doesn't need pub counts can omit it. The
@@ -98,6 +102,9 @@ export type FundingDoc = {
   mechanism: string | null;
   nihIc: string | null;
   department: string | null;
+  /** Lead PI's `Scholar.primaryOrgCode` (same lead-PI rule as `department`);
+   *  the Funding-tab Institution facet (`SEARCH_FUNDING_INSTITUTION_FACET`). */
+  institution: string | null;
   roles: string[];
   startDate: string;
   endDate: string;
@@ -175,7 +182,9 @@ export type FundingDoc = {
  *  the scholar's profile. */
 export const PUB_LIST_CAP = 250;
 
-/** Parse `INFOED-{accountNumber}-{cwid}` external ID. */
+/** Parse `INFOED-{accountNumber}-{cwid}` external ID. InfoEd ONLY — the
+ *  funding-project key goes through {@link fundingProjectBaseKey}, which also
+ *  accepts RePORTER ids (#2285). */
 export function parseExternalId(
   externalId: string | null,
 ): { accountNumber: string; cwid: string } | null {
@@ -183,6 +192,34 @@ export function parseExternalId(
   const m = externalId.match(/^INFOED-(.+)-([^-]+)$/);
   if (!m) return null;
   return { accountNumber: m[1], cwid: m[2] };
+}
+
+/** `reporter:{cwid}:{coreProjectNum}` — the id `etl/reporter-grants/transform.ts`
+ *  writes for a RePORTER-sourced grant row. */
+const REPORTER_EXTERNAL_ID = /^reporter:([^:]+):(.+)$/;
+
+/** True for a RePORTER-sourced grant row's externalId. */
+export function isReporterExternalId(externalId: string | null): boolean {
+  return !!externalId && REPORTER_EXTERNAL_ID.test(externalId);
+}
+
+/**
+ * The per-row fallback half of the funding-project key: the InfoEd
+ * Account_Number for `INFOED-{account}-{cwid}`, or the core project number for
+ * `reporter:{cwid}:{core}`. Null for any other id (never indexed).
+ *
+ * #2285 — the funding index used to key on `parseExternalId` alone, which
+ * accepts only the InfoEd form, so every RePORTER row was loaded and then
+ * silently dropped. Deliberately a separate function rather than a widened
+ * `parseExternalId`: that one's other callers (`lib/api/project-siblings.ts`
+ * builds an `INFOED-{account}-` prefix from it) genuinely need an InfoEd
+ * Account_Number, which a RePORTER row does not have.
+ */
+export function fundingProjectBaseKey(externalId: string | null): string | null {
+  const infoed = parseExternalId(externalId);
+  if (infoed) return infoed.accountNumber;
+  const m = externalId?.match(REPORTER_EXTERNAL_ID);
+  return m ? m[2] : null;
 }
 
 /**
@@ -240,7 +277,7 @@ export const GRANT_INDEX_SELECT = {
     },
   },
   scholar: {
-    select: { slug: true, preferredName: true, primaryDepartment: true },
+    select: { slug: true, preferredName: true, primaryDepartment: true, primaryOrgCode: true },
   },
 } satisfies Prisma.GrantSelect;
 
@@ -267,15 +304,43 @@ export function groupGrantsByProject<
   for (const r of rows) {
     // #160 — drop a suppressed grant role before grouping/projection. A project
     // with no surviving rows never forms a group (-> dark, never indexed).
-    if (r.externalId && suppressedExternalIds.has(r.externalId)) continue;
-    const ext = parseExternalId(r.externalId);
-    if (!ext) continue;
-    const key = coreProjectNum(r.awardNumber) ?? ext.accountNumber;
+    if (!isFundingIndexedRow(r, suppressedExternalIds)) continue;
+    const key =
+      coreProjectNum(r.awardNumber) ?? (fundingProjectBaseKey(r.externalId) as string);
     const arr = byProject.get(key) ?? [];
     arr.push(r);
     byProject.set(key, arr);
   }
   return byProject;
+}
+
+/**
+ * True when a grant row survives into the funding index: not suppressed (#160)
+ * and keyed by a recognised externalId form (InfoEd or RePORTER, #2285). The
+ * row filter {@link groupGrantsByProject} applies before grouping.
+ */
+export function isFundingIndexedRow(
+  r: { externalId: string | null },
+  suppressedExternalIds: ReadonlySet<string>,
+): boolean {
+  if (r.externalId && suppressedExternalIds.has(r.externalId)) return false;
+  return fundingProjectBaseKey(r.externalId) !== null;
+}
+
+/**
+ * #2081 — THE definition of "this scholar renders as a PI chip on a Funding
+ * row": at least one of their grant rows reaches the funding index AND carries
+ * a {@link isPiRole} role. The People index's `piRoleEver` (the "PI (ever)"
+ * facet) is computed with this exact function so the facet and the chips cannot
+ * drift. They previously did: the people doc filtered `source != 'RePORTER'`
+ * and ignored suppression, while the funding index keeps RePORTER rows (#2285)
+ * and drops suppressed ones.
+ */
+export function hasFundingPiChip(
+  rows: readonly { role: string; externalId: string | null }[],
+  suppressedExternalIds: ReadonlySet<string>,
+): boolean {
+  return rows.some((r) => isPiRole(r.role) && isFundingIndexedRow(r, suppressedExternalIds));
 }
 
 /**
@@ -316,7 +381,7 @@ export function multiPiExternalIds(
 /** Per-row role bucket — Multi-PI is a project-level fact (≥2 PI rows on
  *  the same account number) and gets layered in by the caller. */
 export function rowRoleBucket(role: string): "PI" | "Co-I" | null {
-  if (role === "PI" || role === "PI-Subaward" || role === "Co-PI") return "PI";
+  if (isPiRole(role)) return "PI";
   if (role === "Co-I") return "Co-I";
   return null;
 }
@@ -427,12 +492,15 @@ export function projectFromRows(
   now: Date = new Date(),
 ): FundingDoc | null {
   if (rows.length === 0) return null;
-  const ext = parseExternalId(rows[0].externalId);
-  if (!ext) return null;
+  const baseKey = fundingProjectBaseKey(rows[0].externalId);
+  if (!baseKey) return null;
 
   // Per-project canonical fields are taken from any row — all rows for a
-  // single account number share these by construction.
-  const head = rows[0];
+  // single account number share these by construction. An InfoEd row is
+  // preferred when the project mixes sources (#2285): a RePORTER row carries no
+  // sponsor columns. For an all-InfoEd project this is `rows[0]`, as before.
+  const head = rows.find((r) => !isReporterExternalId(r.externalId)) ?? rows[0];
+  const headIsReporter = isReporterExternalId(head.externalId);
 
   // Dedupe rows by cwid before producing chips. InfoEd often emits two
   // Account_Numbers for the same scholar on one project (an Equipment
@@ -499,8 +567,14 @@ export function projectFromRows(
     rows.find((r) => r.role === "PI" || r.role === "PI-Subaward") ??
     rows.find((r) => r.role === "Co-PI");
   const department = leadPiRow?.scholar.primaryDepartment ?? null;
+  const institution = leadPiRow?.scholar.primaryOrgCode ?? null;
 
-  const primeShort = resolveCanonical(head.primeSponsor, head.primeSponsorRaw);
+  // A RePORTER row has no prime-sponsor columns; it is an NIH award by
+  // construction, so its funding IC (else NIH) stands in rather than
+  // "(unknown sponsor)".
+  const primeShort =
+    resolveCanonical(head.primeSponsor, head.primeSponsorRaw) ??
+    (headIsReporter ? (canonicalizeSponsor(head.nihIc) ?? "NIH") : null);
   const directShort = resolveCanonical(
     head.directSponsor,
     head.directSponsorRaw,
@@ -648,7 +722,7 @@ export function projectFromRows(
   }
 
   return {
-    projectId: ext.accountNumber,
+    projectId: baseKey,
     title: head.title,
     sponsorText: buildSponsorText({
       primeShort,
@@ -664,6 +738,7 @@ export function projectFromRows(
     mechanism: head.mechanism,
     nihIc: head.nihIc,
     department,
+    institution,
     roles: Array.from(roles),
     startDate: earliestStart.toISOString(),
     endDate: latestEnd.toISOString(),

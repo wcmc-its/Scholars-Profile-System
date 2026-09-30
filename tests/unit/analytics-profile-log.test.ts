@@ -56,6 +56,7 @@ vi.mock("@/lib/api/profile", () => ({
     datasets: [],
     technologies: [],
     news: [],
+    mediaHighlights: [],
     disclosures: [],
     centers: [],
   })),

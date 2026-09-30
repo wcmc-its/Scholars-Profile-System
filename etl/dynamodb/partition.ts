@@ -101,6 +101,101 @@ export type CoreRecord = {
   [key: string]: unknown;
 };
 
+/**
+ * The engine's per-core staff-count item: PK=`CORE#{core_id}`,
+ * SK=`STAFF_DICT`. One item per core carrying two SIZES taken from the
+ * facility dictionary — never the CWIDs themselves (see
+ * etl/dynamodb/core-staff-mapper.ts):
+ *
+ *   `staff_count`          how many CWIDs the dictionary LISTS under `staff:`
+ *   `staff_tracked_count`  how many of those the co-author signal can MATCH
+ *
+ * `STAFF_DICT`, not `STAFF`, and the suffix is the direction marker: this item
+ * is dictionary-sourced and flows ReciterAI -> SPS. The bare `STAFF` key is
+ * reserved for a future SPS-CURATED staff list, which by the existing
+ * `(CORE#{id}, CLIENTS)` precedent (SPS writes, the engine reads) would want
+ * exactly that key and would run the other way.
+ *
+ * Note the key shape is the MIRROR of a CoreRecord's: the core is the
+ * PARTITION here (`PK`), where a CoreRecord puts the publication in `PK` and
+ * the core in `SK`. That is why the routing below cannot lean on the `CORE#`
+ * prefix alone.
+ */
+export type CoreStaffRecord = {
+  PK: string; // CORE#{core_id}
+  SK: string; // "STAFF_DICT"
+  core_id?: string;
+  staff_count?: number | string;
+  staff_tracked_count?: number | string;
+  [key: string]: unknown;
+};
+
+/**
+ * A ReciterAI PRODUCER run, from the engine's own stage ledger
+ * (`utils/stage_records.py` in the ReciterAI repo):
+ *
+ *   PK = `STAGE#{stage}#{scope}`     e.g. STAGE#daily_enrichment#GLOBAL
+ *   SK = `RUN#{started_at}`          ISO8601, so lexical order is chronological
+ *
+ * This is the ONLY producer-side run record ReciterAI keeps, and it is the
+ * answer to a question `etl_run` alone cannot ask: every ReciterAI-sourced
+ * import here is graded on whether OUR loader ran, so a producer that stopped
+ * publishing reads green forever. See etl/dynamodb/producer-run-mapper.ts for
+ * the two SK shapes and the four statuses.
+ *
+ * Note `pipeline_tools` and `pipeline_grants` write NO stage row at all — their
+ * liveness is not observable from this table. `pipeline_cores` is mid-change:
+ * it is gaining a `STAGE#cores_run#GLOBAL` row, which the mapper already reads
+ * and prefers over the age of its output once one shows up.
+ */
+export type ProducerRunRecord = {
+  PK: string; // STAGE#{stage}#{scope}
+  SK: string; // RUN#{iso} | RUN#FAILED#{iso}
+  stage?: string;
+  scope?: string;
+  status?: string; // complete | skipped | failed | partial
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number | string;
+  records_written?: number | string;
+  error_code?: string;
+  error_message?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * A ReciterAI drift-evaluator run. Unlike a ProducerRunRecord this is not a run
+ * LEDGER entry -- the two drift Lambdas write one findings row per day instead:
+ *
+ *   PK = `DRIFT#evaluation` | `DRIFT#taxonomy`
+ *   SK = `DAY#{YYYY-MM-DD}`
+ *
+ * There is no status and no started_at. What there is, is `window_end` -- the
+ * instant the evaluation covered up to, which in practice is the moment the
+ * Lambda ran (cron fires 14:00Z, window_end reads 14:00:50Z). So the row's
+ * EXISTENCE is the liveness signal and `window_end` is its timestamp.
+ *
+ * `duration_ms` is OPTIONAL because it is new: none of the 106 + 33 rows
+ * already written carry it, and ReciterAI only started emitting it after the
+ * fact. buildDriftRunWrites therefore treats its absence as a no-op rather than
+ * as a zero -- see the note there.
+ *
+ * `severity` is deliberately NOT a run outcome. DRIFT#evaluation has read WARN
+ * on all 106 rows it has ever written -- it is reporting on the DATA, not on
+ * itself, and Teams alerting already carries that. Grading it here would paint a
+ * permanently red row for a Lambda that has never once failed to run.
+ */
+export type DriftDayRecord = {
+  PK: string; // DRIFT#evaluation | DRIFT#taxonomy
+  SK: string; // DAY#{YYYY-MM-DD}
+  severity?: string;
+  record_type?: string;
+  window_start?: string;
+  window_end?: string;
+  duration_ms?: number | string;
+  [key: string]: unknown;
+};
+
 export type Buckets = {
   tax: TaxonomyRecord[];
   topics: TopicRecord[];
@@ -108,6 +203,9 @@ export type Buckets = {
   impact: ImpactRecord[];
   tools: ToolRecord[];
   cores: CoreRecord[];
+  coreStaff: CoreStaffRecord[];
+  producerRuns: ProducerRunRecord[];
+  driftDays: DriftDayRecord[];
 };
 
 /**
@@ -120,13 +218,34 @@ export type Buckets = {
  *   Block 4 IMPACT#    -> publication         begins_with(PK, "IMPACT#pmid_")
  *   Block 5 TOOL#      -> scholar_tool        begins_with(PK, "TOOL#")
  *   Block 6 PUB#/CORE# -> core                begins_with(SK, "CORE#")   <- SK, not PK
+ *   Block 6b CORE#/STAFF_DICT -> core.staff_*  PK CORE# AND SK === "STAFF_DICT"
+ *   Block 8  STAGE#    -> etl_run       begins_with(PK, "STAGE#")
+ *   Block 9  DRIFT#    -> etl_run       begins_with(PK, "DRIFT#")
  *
  * The buckets are disjoint (one `continue` per match), so the union exactly
  * reproduces what the six independent filtered scans kept. Block 7 (GRANT#) is
  * NOT handled here — it delegates to grant-opportunity-etl.ts's own scan.
+ *
+ * Block 6b is the one bucket that never had a filtered scan of its own: the
+ * STAFF_DICT item is new (ReciterAI writes it, SPS reads it), and it was
+ * previously dropped as unmatched. It is matched on the EXACT
+ * `SK === "STAFF_DICT"`, not a prefix, so BOTH siblings under the same `CORE#`
+ * partition keep falling through unmatched exactly as before: `SK = "CLIENTS"`
+ * (which SPS writes and this ETL must never read back) and the reserved
+ * `SK = "STAFF"` (a future SPS-curated list, likewise SPS-written).
  */
 export function partitionRecords(items: Array<Record<string, unknown>>): Buckets {
-  const b: Buckets = { tax: [], topics: [], faculty: [], impact: [], tools: [], cores: [] };
+  const b: Buckets = {
+    tax: [],
+    topics: [],
+    faculty: [],
+    impact: [],
+    tools: [],
+    cores: [],
+    coreStaff: [],
+    producerRuns: [],
+    driftDays: [],
+  };
   for (const it of items) {
     const pk = String(it.PK ?? "");
     const sk = String(it.SK ?? "");
@@ -136,6 +255,16 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     // only SK-CORE# items).
     if (sk.startsWith("CORE#")) {
       b.cores.push(it as CoreRecord);
+      continue;
+    }
+    // Block 6b keys on BOTH halves: PK=CORE#{core_id}, SK="STAFF_DICT". The SK
+    // is matched exactly rather than by prefix so the sibling PK=CORE#… items
+    // SPS writes stay unmatched — SK="CLIENTS" (lib/cores/client-writeback.ts)
+    // today, and the reserved SK="STAFF" tomorrow. Reading our own writeback
+    // back in would be a loop, not an ingest, and a `sk.startsWith("STAFF")`
+    // here would swallow that reserved key the day it is used.
+    if (pk.startsWith("CORE#") && sk === "STAFF_DICT") {
+      b.coreStaff.push(it as CoreStaffRecord);
       continue;
     }
     if (pk.startsWith("TAXONOMY#")) {
@@ -156,6 +285,22 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     }
     if (pk.startsWith("TOOL#")) {
       b.tools.push(it as ToolRecord);
+      continue;
+    }
+    // Block 8 — the producer's own run ledger. Unlike every bucket above it,
+    // this one is not projected into a table: it is mirrored into `etl_run` so
+    // /edit/etl-status can grade the PRODUCER, not just our loader. Matched on
+    // the PK prefix alone; the per-scope split (GLOBAL vs cwid:/pmid:) is the
+    // mapper's business, not the router's.
+    if (pk.startsWith("STAGE#")) {
+      b.producerRuns.push(it as ProducerRunRecord);
+      continue;
+    }
+    // Block 9 — the two drift Lambdas, which write findings rows rather than
+    // ledger entries. Same destination as Block 8 (etl_run) but a different
+    // shape, so a different bucket; see ./producer-run-mapper.ts.
+    if (pk.startsWith("DRIFT#")) {
+      b.driftDays.push(it as DriftDayRecord);
       continue;
     }
     // else: unmatched (e.g. a GRANT# item, or a PUB# item without an SK CORE#

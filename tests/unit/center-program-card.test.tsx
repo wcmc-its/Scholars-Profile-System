@@ -225,3 +225,40 @@ describe("CenterProgramCard (#1117)", () => {
     expect(COE_HELP).toContain(COE_EXPANSION);
   });
 });
+
+// Edit Center mockup (2026-09-25): each program is a collapsible row with a
+// leader summary and a "No description" nudge; the first program starts open.
+describe("CenterProgramCard — collapsible program rows", () => {
+  const TWO = [
+    PROGRAMS[0],
+    {
+      code: "CT",
+      label: "Cancer Therapeutics",
+      sortOrder: 20,
+      description: null,
+      leaders: [
+        { cwid: "lead003", name: "Dana Three", title: null, interim: false, role: "leader" as const, sortOrder: 0 },
+      ],
+    },
+  ];
+
+  it("opens the first program, collapses the rest, and toggles on click", () => {
+    global.fetch = okFetch() as unknown as typeof fetch;
+    render(<CenterProgramCard centerCode="meyer_cancer_center" programs={TWO} />);
+    const first = screen.getByTestId("program-toggle-CB");
+    const second = screen.getByTestId("program-toggle-CT");
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+    expect(second.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(second);
+    expect(second.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("summarises leaders and flags a missing description", () => {
+    global.fetch = okFetch() as unknown as typeof fetch;
+    render(<CenterProgramCard centerCode="meyer_cancer_center" programs={TWO} />);
+    expect(screen.getByTestId("program-toggle-CB").textContent).toContain("2 leaders · 1 COE liaison");
+    expect(screen.getByTestId("program-toggle-CT").textContent).toContain("1 leader");
+    expect(screen.queryByTestId("program-no-description-CB")).toBeNull();
+    expect(screen.getByTestId("program-no-description-CT")).toBeTruthy();
+  });
+});

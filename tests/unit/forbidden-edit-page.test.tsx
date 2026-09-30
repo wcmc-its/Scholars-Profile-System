@@ -1,9 +1,14 @@
 /**
- * `components/edit/forbidden-edit-page.tsx` — the visible 403 page rendered by
- * `/edit/scholar/[cwid]` and `/edit/publication/[pmid]` for an authenticated-
- * but-unauthorized request (#356 Phase 7 C5, UI-SPEC § States row 2).
+ * `components/edit/forbidden-edit-page.tsx` — the visible 403 page rendered for
+ * an authenticated-but-unauthorized `/edit/*` request (#356 Phase 7 C5, UI-SPEC
+ * § States row 2), generalized 2026-08-19 to also cover the ~20 console list/
+ * queue/dashboard pages this component is shared with, then widened the same
+ * day to redirect straight through — no interstitial at all — whenever the
+ * viewer's session resolves to exactly one destination. A page renders only
+ * when there's a genuine choice to show (2+ destinations) or the "unit" variant
+ * (which always has a definite, single answer but keeps its own copy).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("next/link", () => ({
@@ -22,33 +27,84 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { vi } from "vitest";
+const mockRedirect = vi.hoisted(() =>
+  vi.fn((url: string) => {
+    throw new Error(`__REDIRECT__:${url}`);
+  }),
+);
+vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 
-describe("ForbiddenEditPage", () => {
-  it("renders the SPEC-specified title copy", () => {
-    render(<ForbiddenEditPage />);
-    expect(
-      screen.getByText("You don't have permission to edit this profile."),
-    ).toBeTruthy();
+beforeEach(() => {
+  mockRedirect.mockClear();
+});
+
+describe("ForbiddenEditPage — single destination redirects straight through (2026-08-19)", () => {
+  it.each([
+    ["isCvGenerator", "/edit/profiles"],
+    ["isHonorsCurator", "/edit/honors-queue"],
+    ["isDataSharingViewer", "/edit/data-sharing"],
+    ["isDeveloper", "/edit/grant-matcha"],
+  ] as const)("with only %s on the session, redirects straight to %s — no interstitial", (flag, href) => {
+    // React re-invokes a throwing function component once to distinguish a
+    // transient error from a deterministic one (test-harness behavior, not
+    // real SSR) — assert the URL, not an exact call count.
+    expect(() => render(<ForbiddenEditPage session={{ [flag]: true }} />)).toThrow(`__REDIRECT__:${href}`);
+    expect(mockRedirect).toHaveBeenCalledWith(href);
   });
 
-  it("renders the explanatory subline naming the administrator role", () => {
-    render(<ForbiddenEditPage />);
-    expect(
-      screen.getByText(/Only an administrator can edit another scholar's profile/i),
-    ).toBeTruthy();
+  it.each([["isSuperuser"], ["isCommsSteward"]] as const)(
+    "%s alone redirects to Profiles, not the generic /edit — they can genuinely edit any scholar's profile",
+    (flag) => {
+      expect(() => render(<ForbiddenEditPage session={{ [flag]: true }} />)).toThrow(
+        "__REDIRECT__:/edit/profiles",
+      );
+    },
+  );
+
+  it("a superuser who also happens to be cv_generator redirects to Profiles — no redundant read-only duplicate to choose between", () => {
+    expect(() =>
+      render(<ForbiddenEditPage session={{ isSuperuser: true, isCvGenerator: true }} />),
+    ).toThrow("__REDIRECT__:/edit/profiles");
+    expect(mockRedirect).toHaveBeenCalledWith("/edit/profiles");
   });
 
-  it("links to /edit so the signed-in user can fall back to their own surface", () => {
-    render(<ForbiddenEditPage />);
-    const link = screen.getByRole("link", { name: /Go to my own profile editor/i });
-    expect(link.getAttribute("href")).toBe("/edit");
+  it("no session passed (the two bare-ConsoleTopBar detail pages) redirects to /edit, same as the old fallback link's target", () => {
+    expect(() => render(<ForbiddenEditPage />)).toThrow("__REDIRECT__:/edit");
+  });
+
+  it("a session with none of the recognized grants (e.g. a unit admin with no other role) redirects to /edit", () => {
+    expect(() => render(<ForbiddenEditPage session={{}} />)).toThrow("__REDIRECT__:/edit");
+  });
+});
+
+describe("ForbiddenEditPage — multiple destinations renders a choice, doesn't guess", () => {
+  it("a viewer holding more than one grant sees a link to EACH, and no redirect fires", () => {
+    render(<ForbiddenEditPage session={{ isCommsSteward: true, isHonorsCurator: true, isDeveloper: true }} />);
+    expect(mockRedirect).not.toHaveBeenCalled();
+    const links = screen.getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["Profiles", "Honors queue", "Grant Matcha"]);
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      "/edit/profiles",
+      "/edit/honors-queue",
+      "/edit/grant-matcha",
+    ]);
+  });
+
+  it("renders the generic title and subline — no specific page/action/role named", () => {
+    render(<ForbiddenEditPage session={{ isCommsSteward: true, isHonorsCurator: true }} />);
+    expect(screen.getByText("You don't have access to this page.")).toBeTruthy();
+    expect(screen.getByText(/Your account's role doesn't include it/i)).toBeTruthy();
   });
 
   it("carries the target cwid as a data attribute (diagnostic only — never visible)", () => {
-    render(<ForbiddenEditPage targetCwid="other7" />);
+    render(
+      <ForbiddenEditPage
+        targetCwid="other7"
+        session={{ isCommsSteward: true, isHonorsCurator: true }}
+      />,
+    );
     const root = document.querySelector('[data-slot="forbidden-edit-page"]');
     expect(root?.getAttribute("data-target-cwid")).toBe("other7");
     // The cwid is never in user-visible copy.
@@ -56,8 +112,18 @@ describe("ForbiddenEditPage", () => {
   });
 
   it("omits a target cwid cleanly when none is provided", () => {
-    render(<ForbiddenEditPage />);
+    render(<ForbiddenEditPage session={{ isCommsSteward: true, isHonorsCurator: true }} />);
     const root = document.querySelector('[data-slot="forbidden-edit-page"]');
     expect(root?.getAttribute("data-target-cwid")).toBe("");
+  });
+});
+
+describe("ForbiddenEditPage — unit variant (unaffected by any of the above)", () => {
+  it("keeps its own copy and never redirects, regardless of session", () => {
+    render(<ForbiddenEditPage variant="unit" targetEntity="cardiology" session={{ isDeveloper: true }} />);
+    expect(mockRedirect).not.toHaveBeenCalled();
+    expect(screen.getByText("You don't have permission to edit this unit.")).toBeTruthy();
+    const link = screen.getByRole("link", { name: "Return to Scholars" });
+    expect(link.getAttribute("href")).toBe("/");
   });
 });

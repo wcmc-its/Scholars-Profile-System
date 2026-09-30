@@ -33,14 +33,21 @@ import {
 } from "@/lib/sitemap";
 import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 
-const { mockScholarFindMany, mockTopicFindMany, mockDeptFindMany, mockCenterFindMany } = vi.hoisted(
-  () => ({
-    mockScholarFindMany: vi.fn(),
-    mockTopicFindMany: vi.fn(),
-    mockDeptFindMany: vi.fn(),
-    mockCenterFindMany: vi.fn(),
-  }),
-);
+const {
+  mockScholarFindMany,
+  mockTopicFindMany,
+  mockDeptFindMany,
+  mockCenterFindMany,
+  mockDivisionFindMany,
+  mockSuppressionFindMany,
+} = vi.hoisted(() => ({
+  mockScholarFindMany: vi.fn(),
+  mockTopicFindMany: vi.fn(),
+  mockDeptFindMany: vi.fn(),
+  mockCenterFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -48,6 +55,8 @@ vi.mock("@/lib/db", () => ({
     topic: { findMany: mockTopicFindMany },
     department: { findMany: mockDeptFindMany },
     center: { findMany: mockCenterFindMany },
+    division: { findMany: mockDivisionFindMany },
+    suppression: { findMany: mockSuppressionFindMany },
   },
 }));
 
@@ -68,10 +77,12 @@ beforeEach(() => {
     { id: "infectious_disease", refreshedAt: new Date("2026-03-02") },
   ]);
   mockDeptFindMany.mockResolvedValue([
-    { slug: "medicine", updatedAt: new Date("2026-02-01") },
-    { slug: "pediatrics", updatedAt: new Date("2026-02-02") },
+    { code: "N1280", slug: "medicine", updatedAt: new Date("2026-02-01") },
+    { code: "N1500", slug: "pediatrics", updatedAt: new Date("2026-02-02") },
   ]);
   mockCenterFindMany.mockResolvedValue([]);
+  mockDivisionFindMany.mockResolvedValue([]);
+  mockSuppressionFindMany.mockResolvedValue([]);
 });
 
 // Routes imported after the db mock is registered.
@@ -160,7 +171,7 @@ describe("lib/sitemap — buildSitemapEntries", () => {
 
   it("emits one scholar entry (0.8/weekly) per active scholar, lastmod from updatedAt", async () => {
     const entries = await buildSitemapEntries();
-    const jane = entries.find((e) => e.url.endsWith("/scholars/jane-doe"));
+    const jane = entries.find((e) => e.url.endsWith("/jane-doe"));
     expect(jane).toMatchObject({ priority: 0.8, changeFrequency: "weekly" });
     expect(jane?.lastModified).toEqual(new Date("2026-01-15"));
   });
@@ -188,6 +199,24 @@ describe("lib/sitemap — buildSitemapEntries", () => {
     );
   });
 
+  // #2245 — division pages were missing from the sitemap entirely.
+  it("emits division pages under their department slug, skipping suppressed and orphan divisions", async () => {
+    mockDivisionFindMany.mockResolvedValue([
+      { code: "D1", deptCode: "N1280", slug: "cardiology", updatedAt: new Date("2026-02-03") },
+      { code: "D2", deptCode: "N1280", slug: "retired-div", updatedAt: null },
+      { code: "D3", deptCode: "GONE", slug: "orphan", updatedAt: null },
+    ]);
+    mockSuppressionFindMany.mockResolvedValue([{ entityId: "D2" }]);
+    const entries = await buildSitemapEntries();
+    const divisionUrls = entries.map((e) => e.url).filter((u) => u.includes("/divisions/"));
+    expect(divisionUrls).toEqual([
+      "https://scholars.weill.cornell.edu/departments/medicine/divisions/cardiology",
+    ]);
+    expect(mockSuppressionFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { entityType: "division", revokedAt: null } }),
+    );
+  });
+
   it("orders static entries first, so home is always in shard 0", async () => {
     const entries = await buildSitemapEntries();
     expect(entries[0].url).toBe("https://scholars.weill.cornell.edu/");
@@ -197,7 +226,8 @@ describe("lib/sitemap — buildSitemapEntries", () => {
     mockScholarFindMany.mockRejectedValue(new Error("no DB"));
     const entries = await buildSitemapEntries();
     expect(entries).toHaveLength(3); // /, /browse, /about
-    expect(entries.every((e) => !e.url.includes("/scholars/"))).toBe(true);
+    // Scholar entries are the only 0.8/weekly rows; none survive a DB failure.
+    expect(entries.every((e) => e.priority !== 0.8)).toBe(true);
   });
 });
 
@@ -218,8 +248,12 @@ describe("lib/sitemap — buildSitemapEntries", () => {
  * `isPubliclyDisplayed` filter, and the where-clause is asserted separately.
  */
 describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
+  // Scholar entries are the only 0.8/weekly rows (D-08); topics/depts/centers
+  // are 0.6/monthly and static pages 1.0/0.5, so priority is the reliable
+  // discriminator now that scholar URLs are bare `/{slug}` (#671) rather than
+  // living under a `/scholars/` path segment.
   const slugsOf = (entries: SitemapEntry[]) =>
-    entries.filter((e) => e.url.includes("/scholars/")).map((e) => e.url);
+    entries.filter((e) => e.priority === 0.8).map((e) => e.url);
 
   it("admits role_category IS NULL in the where-clause, not just notIn", async () => {
     await buildSitemapEntries();
@@ -253,7 +287,7 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
       },
     ]);
     const urls = slugsOf(await buildSitemapEntries());
-    expect(urls).toEqual(["https://scholars.weill.cornell.edu/scholars/jane-doe"]);
+    expect(urls).toEqual(["https://scholars.weill.cornell.edu/jane-doe"]);
   });
 
   it("drops every enumerated hidden role", async () => {
@@ -294,7 +328,7 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
       { slug: "no-role-yet", updatedAt: new Date("2026-01-15"), roleCategory: null },
     ]);
     expect(slugsOf(await buildSitemapEntries())).toEqual([
-      "https://scholars.weill.cornell.edu/scholars/no-role-yet",
+      "https://scholars.weill.cornell.edu/no-role-yet",
     ]);
   });
 
@@ -327,8 +361,8 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
       { slug: "c-faculty", updatedAt: new Date("2026-01-15"), roleCategory: "postdoc" },
     ]);
     expect(slugsOf(await buildSitemapEntries())).toEqual([
-      "https://scholars.weill.cornell.edu/scholars/a-faculty",
-      "https://scholars.weill.cornell.edu/scholars/c-faculty",
+      "https://scholars.weill.cornell.edu/a-faculty",
+      "https://scholars.weill.cornell.edu/c-faculty",
     ]);
   });
 
@@ -355,7 +389,7 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
 
 describe("lib/sitemap — renderUrlset", () => {
   const entry: SitemapEntry = {
-    url: "https://scholars.weill.cornell.edu/scholars/jane-doe",
+    url: "https://scholars.weill.cornell.edu/jane-doe",
     lastModified: new Date("2026-01-15T00:00:00.000Z"),
     changeFrequency: "weekly",
     priority: 0.8,
@@ -364,7 +398,7 @@ describe("lib/sitemap — renderUrlset", () => {
   it("wraps entries in a urlset with loc/lastmod/changefreq/priority", () => {
     const xml = renderUrlset([entry]);
     expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
-    expect(xml).toContain("<loc>https://scholars.weill.cornell.edu/scholars/jane-doe</loc>");
+    expect(xml).toContain("<loc>https://scholars.weill.cornell.edu/jane-doe</loc>");
     expect(xml).toContain("<lastmod>2026-01-15T00:00:00.000Z</lastmod>");
     expect(xml).toContain("<changefreq>weekly</changefreq>");
     expect(xml).toContain("<priority>0.8</priority>");
@@ -422,7 +456,7 @@ describe("app/sitemap/[shard] — child route", () => {
     expect(body).toContain("<urlset");
     // 2 scholars + 2 topics + 2 depts + 0 centers + 3 static = 9 urls.
     expect((body.match(/<url>/g) ?? []).length).toBe(9);
-    expect(body).toContain("<loc>https://scholars.weill.cornell.edu/scholars/jane-doe</loc>");
+    expect(body).toContain("<loc>https://scholars.weill.cornell.edu/jane-doe</loc>");
   });
 
   it("returns an empty urlset for an out-of-range shard", async () => {

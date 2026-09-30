@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { buildDefinedTermJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
@@ -13,10 +12,11 @@ import {
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
+import { ScholarCardGrid } from "@/components/taxonomy/scholar-card-grid";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
-import { CellLineRail } from "@/components/method/cell-line-rail";
-import { ScrollFade } from "@/components/ui/scroll-fade";
+import { FamilyEntityRailLayout } from "@/components/method/family-entity-rail-layout";
 import type { SpotlightData } from "@/lib/api/spotlight";
 import {
   Breadcrumb,
@@ -99,6 +99,10 @@ export default async function FamilyPage({
   const cellLineLabels = Object.fromEntries(cellLineEntities.map((e) => [e.entityId, e.label]));
 
   const scLabel = supercategoryLabel(resolved.supercategory);
+  // TAXONOMY_SCHOLAR_CARDS — portrait cards (no area chips on a family page).
+  const scholarCards = isTaxonomyScholarCardsOn();
+  const feedLoadMore = isTaxonomyFeedLoadMoreOn();
+  const familyScholarsHref = `/methods/${resolved.supercategorySlug}/${resolved.familySlug}/scholars`;
 
   // Spotlight (§5.A, optional) — map the representative pubs onto SpotlightCard.
   // Omitted entirely when the family has no representative publications (e.g.
@@ -117,7 +121,11 @@ export default async function FamilyPage({
             doi: p.doi,
             authors: p.authors,
           })),
-          totalCount: representativePubs.length,
+          // The family's real distinct research-article total: the same value the
+          // feed's default (research-articles-only) view shows as its denominator
+          // (`totalResearchOnly`), so "View all N publications" matches the feed.
+          // Not `representativePubs.length`, which is just the 3 cards shown.
+          totalCount: distinctPmidTotal,
           viewAllHref: "#publications",
         }
       : null;
@@ -166,7 +174,7 @@ export default async function FamilyPage({
 
       <section className="mb-10">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          METHOD
+          Method
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {resolved.familyLabel}
@@ -194,30 +202,43 @@ export default async function FamilyPage({
             lives at `/methods/[sc]/[fam]/scholars`, so we render the chips
             WITHOUT the topic link (omit topicSlug) and provide a separate
             method-scoped "+ N more scholars →" affordance below. */}
-        {topScholars && (
+        {topScholars && scholarCards ? (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow
-              scholars={topScholars}
-              topicLabel={resolved.familyLabel}
-              enablePopover
-              contextMethods
+            <ScholarCardGrid
+              heading="Scholars using this"
+              scholars={topScholars.map((s) => ({ ...s, areas: [] }))}
+              viewAll={{ href: familyScholarsHref, count: scholarCount }}
+              popover={{
+                label: resolved.familyLabel,
+                supercategory: resolved.supercategory,
+                familyLabel: resolved.familyLabel,
+                filterable: true,
+              }}
             />
           </div>
+        ) : (
+          topScholars && (
+            <div id="top-scholars" className="scroll-mt-20">
+              <TopScholarsChipRow
+                scholars={topScholars}
+                topicLabel={resolved.familyLabel}
+                enablePopover
+                contextMethods
+                heading="Scholars using this"
+              />
+            </div>
+          )
         )}
 
-        {scholarCount > 0 && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
-            <span>
-              {scholarCount.toLocaleString()} {scholarCount === 1 ? "scholar" : "scholars"}
-            </span>
-            {topScholars && scholarCount > topScholars.length && (
-              <a
-                href={`/methods/${resolved.supercategorySlug}/${resolved.familySlug}/scholars`}
-                className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-              >
-                + {(scholarCount - topScholars.length).toLocaleString()} more scholars →
-              </a>
-            )}
+        {/* No stats line (mockup). Flag off, the chip row has no "View all", so keep the link. */}
+        {!scholarCards && topScholars && scholarCount > topScholars.length && (
+          <div className="mt-4 text-sm">
+            <a
+              href={familyScholarsHref}
+              className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            >
+              + {(scholarCount - topScholars.length).toLocaleString()} more scholars →
+            </a>
           </div>
         )}
       </section>
@@ -231,36 +252,24 @@ export default async function FamilyPage({
 
       <section id="publications" className="scroll-mt-20">
         {hasCellLines ? (
-          // #1166 Surface B — master-detail: the cell-line rail (left) drives the
-          // shared `?entity=` filter the feed (right) reads. Mirrors the
-          // supercategory layout's sticky-rail + cornell-red divider for parity.
-          <div className="mt-16">
-            <hr className="mb-10 border-border" />
-            <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
-              <div className="lg:w-[280px] lg:shrink-0 lg:self-start lg:sticky lg:top-[84px]">
-                <Suspense fallback={null}>
-                  <ScrollFade viewportClassName="lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
-                    <CellLineRail entities={cellLineEntities} />
-                  </ScrollFade>
-                </Suspense>
-              </div>
-              <div className="min-w-0 flex-1 lg:border-l-[3px] lg:border-[var(--color-primary-cornell-red)] lg:pl-6">
-                <FamilyPublicationLayout
-                  supercategorySlug={resolved.supercategorySlug}
-                  familySegment={resolved.familySlug}
-                  familyLabel={resolved.familyLabel}
-                  cellLineLabels={cellLineLabels}
-                  embedded
-                />
-              </div>
-            </div>
-          </div>
+          // #1166 Surface B: master-detail on the shared RailLayout. The entity
+          // rail (left, a sheet below lg) drives the `?entity=` filter the feed
+          // (right) reads.
+          <FamilyEntityRailLayout
+            entities={cellLineEntities}
+            supercategorySlug={resolved.supercategorySlug}
+            familySegment={resolved.familySlug}
+            familyLabel={resolved.familyLabel}
+            cellLineLabels={cellLineLabels}
+            loadMore={feedLoadMore}
+          />
         ) : (
           <FamilyPublicationLayout
             supercategorySlug={resolved.supercategorySlug}
             familySegment={resolved.familySlug}
             familyLabel={resolved.familyLabel}
             cellLineLabels={cellLineLabels}
+            loadMore={feedLoadMore}
           />
         )}
       </section>

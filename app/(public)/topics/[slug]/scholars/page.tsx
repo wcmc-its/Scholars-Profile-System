@@ -1,11 +1,15 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
+  getDistinctScholarCountForTopic,
+  getSubtopicsForTopic,
   getTopic,
   getTopicScholars,
   type TopicAllScholarRole,
 } from "@/lib/api/topics";
 import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
+import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopicAllScholars } from "@/components/topic/topic-all-scholars";
 import {
   Breadcrumb,
@@ -19,8 +23,8 @@ import {
 /**
  * Comprehensive scholar list for a topic — spec §13 "All scholars in this
  * area · N" surface, reached from the topic page's "+ N more scholars →"
- * affordance. Browse-style enumerative list with role chips, name search,
- * alpha-letter dividers, and shareable URL state. ISR with 6h fallback,
+ * affordance. Browse-style enumerative list with a subarea picker, role chips,
+ * name filter, A–Z letter bar, and shareable URL state. ISR with 6h fallback,
  * mirrors the parent topic page revalidation cadence.
  */
 export const revalidate = 21600;
@@ -30,7 +34,6 @@ export const dynamicParams = true;
 // identity classes, so `?role=doctoral_students` now falls back to "all".
 const VALID_ROLES: ReadonlyArray<TopicAllScholarRole> = ["all", "faculty", "postdocs"];
 
-const MAX_PAGE = 500;
 const MAX_QUERY_LEN = 80;
 
 function parseRole(raw: string | undefined): TopicAllScholarRole {
@@ -38,13 +41,6 @@ function parseRole(raw: string | undefined): TopicAllScholarRole {
     return raw as TopicAllScholarRole;
   }
   return "all";
-}
-
-function parsePage(raw: string | undefined): number {
-  if (!raw) return 0;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.min(n, MAX_PAGE);
 }
 
 function parseQuery(raw: string | undefined): string {
@@ -81,14 +77,25 @@ export default async function TopicScholarsPage({
   if (!topic) notFound();
 
   const role = parseRole(typeof sp.role === "string" ? sp.role : undefined);
-  const page = parsePage(typeof sp.page === "string" ? sp.page : undefined);
   const q = parseQuery(typeof sp.q === "string" ? sp.q : undefined);
+  const letter = typeof sp.letter === "string" ? sp.letter.slice(0, 1) : undefined;
 
-  const result = await getTopicScholars(slug, { page, role, q });
+  const [subtopics, total] = await Promise.all([
+    getSubtopicsForTopic(slug).then((r) => r ?? []),
+    getDistinctScholarCountForTopic(slug),
+  ]);
+  // An unknown ?sub= is ignored rather than filtering to nothing.
+  const sub = typeof sp.sub === "string" && subtopics.some((s) => s.id === sp.sub) ? sp.sub : null;
+
+  const result = await getTopicScholars(slug, { role, q, letter, subtopic: sub ?? undefined });
   if (!result) notFound();
 
+  // SPEC §B.3 HARD cap: the export covers the WHOLE cohort, so offer it only
+  // when that cohort is <= 50. The server refuses > 50 regardless.
+  const exportEligible = isScholarListExportEnabled() && total <= SCHOLAR_EXPORT_CAP;
+
   return (
-    <main className="mx-auto max-w-[1100px] px-6 py-12">
+    <main className="mx-auto max-w-[1160px] px-6 pt-7 pb-18 sm:px-10">
       <Breadcrumb className="mb-4">
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -109,22 +116,33 @@ export default async function TopicScholarsPage({
         </BreadcrumbList>
       </Breadcrumb>
 
-      <header className="mb-2">
-        <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          RESEARCH AREA
+      <header className="mt-5 flex flex-col gap-2.5">
+        <div className="text-xs font-medium tracking-[.1em] text-[var(--color-accent-slate)] uppercase">
+          Research area
         </div>
-        <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
+        <h1 className="font-serif text-[32px] leading-[1.1] font-normal sm:text-[40px]">
           Scholars in {topic.label}
         </h1>
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <p className="text-muted-foreground text-[15px] leading-normal text-pretty">
+            <span className="text-foreground font-semibold">{total.toLocaleString()}</span> scholar
+            {total === 1 ? "" : "s"} with at least one publication in this area, sorted
+            alphabetically.
+          </p>
+          {exportEligible ? (
+            <ScholarListExportButton scope="topic" params={{ slug }} count={total} />
+          ) : null}
+        </div>
       </header>
 
       <TopicAllScholars
         topicSlug={slug}
+        topicLabel={topic.label}
         result={result}
+        subtopics={subtopics}
         selectedRole={role}
+        selectedSub={sub}
         query={q}
-        page={page}
-        exportEnabled={isScholarListExportEnabled()}
       />
     </main>
   );

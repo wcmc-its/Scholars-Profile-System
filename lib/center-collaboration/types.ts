@@ -25,7 +25,12 @@ export interface CollabNode {
   name: string;
   /** Profile slug for the outbound link; `null` if the scholar has no slug. */
   slug: string | null;
-  /** Program code (matches a `CollabProgram.code`), or `null` = Unclassified. */
+  /**
+   * The node's colour-GROUP key (matches a `CollabProgram.code`), or `null` =
+   * the unclassified group. Named for the center's programs; the department
+   * network reuses it for the member's division code (naming debt — the whole
+   * graph layer is group-agnostic, so a rename is cosmetic).
+   */
   programCode: string | null;
   /**
    * Total confirmed publications — for the node tooltip ("N publications"),
@@ -97,4 +102,31 @@ export interface CenterCollaborationPayload {
   grantAxis: boolean;
   /** ISO timestamp the payload was built (stamped by the route). */
   generatedAt: string;
+}
+
+/**
+ * The unit-agnostic payload the shared network component consumes — a center's
+ * payload minus its `center` header. The department loader returns exactly this
+ * (its `programs` legend holds divisions; `CollabNode.programCode` holds the
+ * member's division code).
+ */
+export type UnitCollaborationPayload = Omit<CenterCollaborationPayload, "center">;
+
+/**
+ * UI wording for the unit's colour groups, so one network component serves a
+ * center (programs) and a department (divisions).
+ */
+export interface CollabVocab {
+  /** Singular group noun, lower-case: "program" / "division". */
+  group: string;
+  /** Plural group noun, lower-case: "programs" / "divisions". */
+  groups: string;
+  /** The "show every group" picker chip: "All programs" / "All divisions". */
+  allGroups: string;
+  /** The unit noun, lower-case: "center" / "department". */
+  unitNoun: string;
+  /** Plural member noun for the footer count: "members". */
+  memberNoun: string;
+  /** Label for the null-group legend entry / tooltip fallback. */
+  unclassifiedLabel?: string;
 }

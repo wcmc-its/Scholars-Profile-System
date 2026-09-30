@@ -8,7 +8,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import {
+  countSlugRegistrySegments,
   loadSlugRegistry,
+  loadSlugRegistryExtras,
   resolveSlugStatus,
   type SlugRegistryClient,
   type SlugStatusClient,
@@ -373,5 +375,78 @@ describe("resolveSlugStatus", () => {
     });
     const status = await resolveSlugStatus("racey", c);
     expect(status).toEqual({ state: "available", slug: "racey" });
+  });
+});
+
+// ── Profile URLs page helpers ───────────────────────────────────────────────
+
+describe("loadSlugRegistry — requested, decidedOnly", () => {
+  it("leaves pending rows out, AND'd with the search", async () => {
+    const c = client();
+    await loadSlugRegistry({ segment: "requested", query: "ab", decidedOnly: true }, c);
+    const where = (c.slugRequest.findMany as AnyMock).mock.calls[0][0].where;
+    expect(where.status).toEqual({ not: "pending" });
+    expect(where.OR).toEqual([{ requestedSlug: { contains: "ab" } }, { cwid: { contains: "ab" } }]);
+  });
+});
+
+describe("countSlugRegistrySegments", () => {
+  it("one total per segment for the query; requested (decided only) only when enabled", async () => {
+    const c = client({
+      scholar: { count: vi.fn().mockResolvedValue(7) },
+      slugHistory: { count: vi.fn().mockResolvedValue(3) },
+      fieldOverride: { count: vi.fn().mockResolvedValue(2) },
+      slugRequest: { count: vi.fn().mockResolvedValue(4) },
+    });
+    const on = await countSlugRegistrySegments("", c, { requested: true });
+    expect(on).toMatchObject({ active: 7, historical: 3, override: 2, requested: 4, collisions: 0 });
+    expect(on.reserved).toBeGreaterThan(0);
+    expect((c.slugRequest.count as AnyMock).mock.calls[0][0].where).toEqual({ status: { not: "pending" } });
+    const off = await countSlugRegistrySegments("", c, { requested: false });
+    expect(off).not.toHaveProperty("requested");
+  });
+});
+
+describe("loadSlugRegistryExtras", () => {
+  it("no rows → no reads", async () => {
+    const c = client();
+    expect(await loadSlugRegistryExtras("active", [], c)).toEqual({ people: {}, pinned: [], baseHolders: {} });
+    expect(c.scholar.findMany as AnyMock).not.toHaveBeenCalled();
+  });
+
+  it("active: department per CWID and which ones are pinned", async () => {
+    const c = client({
+      scholar: {
+        findMany: vi.fn().mockResolvedValue([
+          { cwid: "js1", preferredName: "Jane Smith", fullName: "Jane Q. Smith", primaryDepartment: "Medicine" },
+        ]),
+      },
+      fieldOverride: { findMany: vi.fn().mockResolvedValue([{ entityId: "js1" }]) },
+    });
+    const x = await loadSlugRegistryExtras("active", [{ slug: "jane-smith", cwid: "js1", name: "Jane Smith" }], c);
+    expect(x.people.js1).toEqual({ name: "Jane Smith", department: "Medicine" });
+    expect(x.pinned).toEqual(["js1"]);
+    const where = (c.fieldOverride.findMany as AnyMock).mock.calls[0][0].where;
+    expect(where).toEqual({ entityType: "scholar", fieldName: "slug", entityId: { in: ["js1"] } });
+  });
+
+  it("collisions: each base slug → its live holder, or null when free", async () => {
+    const findMany = vi
+      .fn()
+      .mockImplementation(async (args: { where: { slug?: unknown } }) =>
+        args.where.slug
+          ? [{ cwid: "js1", slug: "jane-smith", preferredName: "Jane Smith", fullName: "Jane Smith" }]
+          : [],
+      );
+    const c = client({ scholar: { findMany } });
+    const x = await loadSlugRegistryExtras(
+      "collisions",
+      [
+        { slug: "jane-smith-2", cwid: "js2", name: "Jane Smith" },
+        { slug: "sam-doe-3", cwid: "sd3", name: "Sam Doe" },
+      ],
+      c,
+    );
+    expect(x.baseHolders).toEqual({ "jane-smith": { cwid: "js1", name: "Jane Smith" }, "sam-doe": null });
   });
 });

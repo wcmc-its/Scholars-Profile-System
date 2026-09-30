@@ -71,6 +71,20 @@ const nextConfig: NextConfig = {
     "/api/edit/suppress": ["./etl/clinical-mesh/specialty-anchors.csv"],
     "/api/edit/reject": ["./etl/clinical-mesh/specialty-anchors.csv"],
     "/api/edit/revoke": ["./etl/clinical-mesh/specialty-anchors.csv"],
+    // Disease-assignment manual-add extension — `loadUnitEditContext`'s
+    // `diseaseOptions` (center only) and the `/disease-assignments` route's
+    // known-code validation both read `docs/cancer-center-person-rollup.csv`
+    // via a cwd-relative path (`lib/api/unit-edit-context.ts`). The standalone
+    // runtime image doesn't ship `docs/`, so trace the CSV into the routes that
+    // actually need it working (not merely degrading to `[]`/500) — the center
+    // editor page and the decision route. `loadUnitEditContext`'s OTHER
+    // center-context callers (history, export, `/edit/reports/*`) are left
+    // untraced on purpose: they don't render `diseaseOptions`, so the
+    // catch-and-degrade-to-`[]` fallback in `loadUnitEditContext` is fine for
+    // them. ANY new app-runtime caller that actually NEEDS `diseaseOptions` (or
+    // a direct call to `loadDiseaseCodeOptions`) populated must be added here.
+    "/edit/center/[code]": ["./docs/cancer-center-person-rollup.csv"],
+    "/api/edit/center/[code]/disease-assignments": ["./docs/cancer-center-person-rollup.csv"],
   },
   // Issue #391 — keep jsdom (pulled in by isomorphic-dompurify in
   // lib/edit/validators.ts) external to the server bundle. jsdom reads
@@ -125,8 +139,16 @@ const nextConfig: NextConfig = {
   // page (#573 follow-up). `/about/help` was removed in #573 and `/about/
   // methodology` is now a redirect stub (app/(public)/about/methodology); this
   // 308s `/about/help` so stale links land on /about rather than 404.
+  //
+  // `/edit/find-researchers` retired in the matcha-admin Phase 3 sunset —
+  // grant-matcha reads the same `?opp=` param, and Next forwards unmatched
+  // query params, so pasted/bookmarked deep links keep resolving. Temporary
+  // (307) so the path can be reclaimed later without fighting browser caches.
   async redirects() {
-    return [{ source: "/about/help", destination: "/about", permanent: true }];
+    return [
+      { source: "/about/help", destination: "/about", permanent: true },
+      { source: "/edit/find-researchers", destination: "/edit/grant-matcha", permanent: false },
+    ];
   },
   webpack: (config, { isServer }) => {
     if (!isServer) return config;

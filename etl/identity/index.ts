@@ -5,23 +5,51 @@
  * `uid` (= CWID, lowercase). Only scholars carrying a non-null, well-formed
  * ORCID in Identity get their row updated; everyone else is left null.
  *
- * Identity record shape (sample):
+ * Identity record shape (OBSERVED 2026-09-18 via a names-only scan — the ORCID is NESTED
+ * under an `identity` map, not top-level; the earlier top-level sample was assumed and the
+ * scan matched 0 rows for months while grading green, see #2675):
  *   {
  *     uid: "meb7002",
- *     primaryName: { ... },
- *     orcid: "0000-0002-1825-0097" | null,
- *     ...other identity fields we don't read here
+ *     identity: {
+ *       uid: "meb7002",
+ *       primaryName: { ... },
+ *       orcid: "0000-0002-1825-0097" | NULL,   // DynamoDB NULL type when absent
+ *       ...other identity fields we don't read here
+ *     }
  *   }
  *
  * Strategy:
  *   1. Scan the Identity table with a filter that projects only the keys we
- *      need (uid, orcid). Skips records with orcid: null at the server.
+ *      need (uid, identity.orcid). `attribute_type(identity.orcid, S)` keeps only
+ *      string-typed values server-side — a typed NULL never matches, and a
+ *      `<>` against a NULL-typed operand would be a cross-type comparison.
  *   2. Validate each ORCID string against the canonical 19-char form
  *      (16 digits in 4-char groups, with an optional 'X' check digit).
- *   3. For every Scholar whose cwid matches a uid, update the orcid column.
+ *   3. For every Scholar whose cwid matches a uid (compared LOWERCASE on both
+ *      sides — see `cwidFromIdentityItem`), update the orcid column.
  *      Scholars without a matching Identity row keep their existing orcid
  *      value — we do NOT NULL-out on absence, since Identity may lag behind
- *      ED (the system of record for who is an active scholar).
+ *      ED (the system of record for who is an active scholar). The scan
+ *      filter in step 1 means a NULL-orcid Identity row is never even read,
+ *      so absence can never overwrite anything here — including an iD the
+ *      person confirmed in SPS (`orcidConfirmedAt` set) that the Institutional
+ *      Client's rebuild has wiped from Identity (IC #155); `etl/orcid-push`
+ *      puts that one back.
+ *   4. Conflict rule: when Identity holds a non-null iD that DIFFERS from one
+ *      the person confirmed in SPS, Identity WINS — it is the authority (a
+ *      change made in Publication Manager lands there) — so the row takes
+ *      Identity's value AND `orcidConfirmedAt` is cleared (the confirmation
+ *      was of a different iD). Counted as `conflict` in the summary line;
+ *      the values themselves are never logged. This only means something
+ *      because the nightly runs `etl/orcid-push` BEFORE this step: SPS's own
+ *      confirmation is already in Identity by the time it is read here, so a
+ *      difference is someone else's write, not our previous night's push.
+ *   5. Dismissal rule: a pair the person said "Not me" to (`orcid_dismissal`)
+ *      is NEVER re-imported, even when Identity still holds it (the push
+ *      clears it there; until it does, Identity is stale, not authoritative).
+ *      Without this the dismissed iD came back onto the public profile the
+ *      next morning and the push then flipped Identity X → null every night.
+ *      Counted as `dismissed`; nothing written.
  *
  * Env:
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (or AWS_REGION)
@@ -42,8 +70,82 @@ const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 
 type IdentityRow = {
   uid?: string;
-  orcid?: string | null;
+  identity?: { orcid?: string | null } | null;
 };
+
+/** The scan's server-side shape: only rows whose NESTED `identity.orcid` is a string, and
+ *  only the two attributes the ETL reads. `identity` is aliased through
+ *  ExpressionAttributeNames so a reserved-word collision can never bite. */
+export const IDENTITY_ORCID_SCAN = {
+  FilterExpression: "attribute_type(#identity.orcid, :s)",
+  ProjectionExpression: "uid, #identity.orcid",
+  ExpressionAttributeNames: { "#identity": "identity" },
+  ExpressionAttributeValues: { ":s": "S" },
+} as const;
+
+/** The Identity `uid` as a Scholar cwid: Identity stores it lowercase ("meb7002") and so
+ *  does `scholar.cwid` (10,814 of 10,815 rows on the prod-shaped dump, binary compare).
+ *  #2682 UPPERCASED it here, reasoning from the one odd row, and so matched NOTHING —
+ *  the Map lookup below is case-sensitive even though the column's collation is not.
+ *  Lowercase both sides (the scholar Map is keyed by `cwid.toLowerCase()` too, so the one
+ *  uppercase row still matches). "" when absent. Most Identity uids are Ithaca NetIDs
+ *  (aa999 / aaa99 ...) that never match a scholar; only the aaa9999-shaped ~5% are WCM CWIDs. */
+export function cwidFromIdentityItem(row: IdentityRow): string {
+  return typeof row.uid === "string" ? row.uid.trim().toLowerCase() : "";
+}
+
+/** The trimmed ORCID string off an Identity item, or "" when absent / not a string. */
+export function orcidFromIdentityItem(row: IdentityRow): string {
+  const v = row.identity?.orcid;
+  return typeof v === "string" ? v.trim() : "";
+}
+
+/** What SPS currently holds for a scholar, keyed by lowercase cwid in the Map below. */
+export type ScholarOrcidState = {
+  orcid: string | null;
+  orcidConfirmedAt: Date | null;
+};
+
+/** The per-row outcome, so the rule is testable without a client. `update` is the plain
+ *  backfill (SPS had nothing, or an unconfirmed different value); `conflict` is the case the
+ *  header's step 4 describes — the person confirmed a DIFFERENT iD in SPS, Identity wins and
+ *  the confirmation is cleared; `dismissed` is step 5 — the person said "Not me" to exactly
+ *  this iD, so it is never written back no matter what SPS currently holds. */
+export type IdentityDecision =
+  | { kind: "skip" }
+  | { kind: "invalid" }
+  | { kind: "no_scholar" }
+  | { kind: "dismissed" }
+  | { kind: "unchanged" }
+  | { kind: "update"; cwid: string; orcid: string }
+  | { kind: "conflict"; cwid: string; orcid: string };
+
+/** The Set key for one (cwid, orcid) dismissal pair; cwid lowercased to match the Map. */
+export function dismissalKey(cwid: string, orcid: string): string {
+  return `${cwid.toLowerCase()}\u0000${orcid}`;
+}
+
+/** Pure: one Identity item against SPS's current state. Never sees a NULL-orcid Identity
+ *  row (the scan filter drops those), so it never has an "absent" branch — absence cannot
+ *  overwrite anything, confirmed or not. `dismissed` = the `orcid_dismissal` pairs, keyed by
+ *  `dismissalKey`; checked before `unchanged` so a contradicted row (SPS somehow holds the
+ *  dismissed iD) still reads `dismissed`, never a write. */
+export function decideIdentityRow(
+  row: IdentityRow,
+  scholars: ReadonlyMap<string, ScholarOrcidState>,
+  dismissed: ReadonlySet<string> = new Set(),
+): IdentityDecision {
+  const cwid = cwidFromIdentityItem(row);
+  const orcid = orcidFromIdentityItem(row);
+  if (!cwid || !orcid) return { kind: "skip" };
+  if (!ORCID_PATTERN.test(orcid)) return { kind: "invalid" };
+  const current = scholars.get(cwid);
+  if (!current) return { kind: "no_scholar" };
+  if (dismissed.has(dismissalKey(cwid, orcid))) return { kind: "dismissed" };
+  if (current.orcid === orcid) return { kind: "unchanged" };
+  if (current.orcidConfirmedAt !== null) return { kind: "conflict", cwid, orcid };
+  return { kind: "update", cwid, orcid };
+}
 
 async function main() {
   const start = Date.now();
@@ -61,11 +163,9 @@ async function main() {
       const resp = await ddb.send(
         new ScanCommand({
           TableName: TABLE,
-          // Server-side filter cuts the scan payload roughly in half — most
-          // identity rows have orcid: null.
-          FilterExpression: "attribute_exists(orcid) AND orcid <> :null",
-          ExpressionAttributeValues: { ":null": null },
-          ProjectionExpression: "uid, orcid",
+          // Server-side filter: only rows carrying a string ORCID (most carry a typed
+          // NULL), and only the two attributes read below.
+          ...IDENTITY_ORCID_SCAN,
           ExclusiveStartKey: lastKey,
         }),
       );
@@ -78,41 +178,70 @@ async function main() {
     // would no-op (and so we can report unmatched Identity records).
     const ourScholars = await db.write.scholar.findMany({
       where: { deletedAt: null },
+      select: { cwid: true, orcid: true, orcidConfirmedAt: true },
+    });
+    // Keyed LOWERCASE to match `cwidFromIdentityItem` (the collation is case-insensitive,
+    // the JS Map is not). The `where` below still uses the row's own cwid.
+    const cwidToCurrent = new Map<string, ScholarOrcidState & { cwid: string }>(
+      ourScholars.map((s) => [
+        s.cwid.toLowerCase(),
+        { cwid: s.cwid, orcid: s.orcid, orcidConfirmedAt: s.orcidConfirmedAt },
+      ]),
+    );
+
+    // "Not me" pairs (header step 5): never re-imported, whatever Identity says.
+    const dismissalRows = await db.write.orcidDismissal.findMany({
       select: { cwid: true, orcid: true },
     });
-    const cwidToCurrent = new Map(ourScholars.map((s) => [s.cwid, s.orcid]));
+    const dismissed = new Set(dismissalRows.map((d) => dismissalKey(d.cwid, d.orcid)));
 
     let updated = 0;
     let unchanged = 0;
     let invalidFormat = 0;
     let noScholar = 0;
+    let conflict = 0;
+    let dismissedCount = 0;
 
     for (const row of rows) {
-      const uid = typeof row.uid === "string" ? row.uid.trim() : "";
-      const orcid = typeof row.orcid === "string" ? row.orcid.trim() : "";
-      if (!uid || !orcid) continue;
-      if (!ORCID_PATTERN.test(orcid)) {
+      const d = decideIdentityRow(row, cwidToCurrent, dismissed);
+      if (d.kind === "skip") continue;
+      if (d.kind === "invalid") {
         invalidFormat += 1;
         continue;
       }
-      if (!cwidToCurrent.has(uid)) {
+      if (d.kind === "no_scholar") {
         noScholar += 1;
         continue;
       }
-      if (cwidToCurrent.get(uid) === orcid) {
+      if (d.kind === "dismissed") {
+        dismissedCount += 1;
+        continue;
+      }
+      if (d.kind === "unchanged") {
         unchanged += 1;
         continue;
       }
+      const target = cwidToCurrent.get(d.cwid)!.cwid;
+      if (d.kind === "conflict") {
+        // Identity wins (header step 4): take its value and drop the confirmation of the
+        // other iD. Counted separately so the summary shows it happened; no values logged.
+        await db.write.scholar.update({
+          where: { cwid: target },
+          data: { orcid: d.orcid, orcidConfirmedAt: null },
+        });
+        conflict += 1;
+        continue;
+      }
       await db.write.scholar.update({
-        where: { cwid: uid },
-        data: { orcid },
+        where: { cwid: target },
+        data: { orcid: d.orcid },
       });
       updated += 1;
     }
 
     const took = ((Date.now() - start) / 1000).toFixed(1);
     console.log(
-      `Identity ETL complete in ${took}s: ${updated} updated, ${unchanged} unchanged, ${invalidFormat} invalid, ${noScholar} no-scholar-row.`,
+      `Identity ETL complete in ${took}s: ${updated} updated, ${unchanged} unchanged, ${conflict} conflict (Identity won over an SPS confirmation), ${dismissedCount} dismissed (Not-me pair, not re-imported), ${invalidFormat} invalid, ${noScholar} no-scholar-row.`,
     );
 
     await db.write.etlRun.update({
@@ -120,7 +249,7 @@ async function main() {
       data: {
         status: "success",
         completedAt: new Date(),
-        rowsProcessed: updated,
+        rowsProcessed: updated + conflict,
       },
     });
   } catch (err) {
@@ -139,4 +268,10 @@ async function main() {
   }
 }
 
-main();
+// Run only when invoked directly (`npm run etl:identity` / the nightly task) — the module is
+// also imported by its unit test for the scan shape + item reader.
+const isDirectInvocation =
+  typeof process !== "undefined" &&
+  process.argv[1] !== undefined &&
+  import.meta.url === `file://${process.argv[1]}`;
+if (isDirectInvocation) main();

@@ -19,6 +19,7 @@ import { ConsoleShell } from "@/components/edit/console-shell";
 import { AdministratorsRoster } from "@/components/edit/administrators-roster";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadUnitAdministratorRoster } from "@/lib/api/administrators-roster";
+import { getCoreList } from "@/lib/api/cores";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -26,15 +27,78 @@ import {
   loadOwnerManagedUnitScope,
 } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
+import { isFunctionalRolesAuthzEnabled } from "@/lib/auth/functional-role-authz";
+import type {
+  FunctionalRoleRow,
+  FunctionalRoleScopeOptions,
+  GateHolder,
+} from "@/lib/edit/functional-roles";
+import {
+  canManageFunctionalRoles,
+  functionalRoleScopeOptions,
+  listFunctionalRoles,
+  listGateHolders,
+  withDirectoryNames,
+} from "@/lib/edit/functional-roles.server";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Administrators — Scholars Profile Console",
+  title: "Administrators — Scholars Console",
   robots: { index: false, follow: false },
 };
+
+/**
+ * The Functional roles tab's data, or `undefined` to leave the tab out. A
+ * failed read (e.g. `functional_role_grant` not yet applied in this env)
+ * degrades to no tab rather than failing the whole page: the org-unit roster
+ * is the page's job and must not depend on the newer table.
+ */
+async function loadFunctionalRolesTab(): Promise<
+  | {
+      rows: FunctionalRoleRow[];
+      scopeOptions: FunctionalRoleScopeOptions;
+      authzEnabled: boolean;
+      gateHolders?: GateHolder[];
+    }
+  | undefined
+> {
+  try {
+    const [tableRows, tableHolders] = await Promise.all([
+      listFunctionalRoles(db.read),
+      // The parity line is advisory: a failed holder read drops the line,
+      // not the tab.
+      listGateHolders(db.read).catch((err: unknown) => {
+        console.warn(
+          JSON.stringify({
+            event: "functional_roles_parity_load_failed",
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        return undefined;
+      }),
+    ]);
+    // Staff with no Scholar row and no stored name: one fail-soft ED lookup
+    // (never throws; on any directory error the CWID shows).
+    const { rows, holders: gateHolders } = await withDirectoryNames(tableRows, tableHolders);
+    return {
+      rows,
+      scopeOptions: functionalRoleScopeOptions(),
+      authzEnabled: isFunctionalRolesAuthzEnabled(),
+      gateHolders,
+    };
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "functional_roles_load_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return undefined;
+  }
+}
 
 export default async function AdministratorsPage() {
   const session = await getEffectiveEditSession();
@@ -49,7 +113,11 @@ export default async function AdministratorsPage() {
       path: "/edit/administrators",
       reason: "not_superuser_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage session={session} />
+      </ConsoleShell>
+    );
   }
 
   // Scope (D5): superuser ⇒ all grants; Owner ⇒ their owned subtree; nobody ⇒ 403.
@@ -65,14 +133,21 @@ export default async function AdministratorsPage() {
         path: "/edit/administrators",
         reason: "not_unit_owner",
       });
-      return <ForbiddenEditPage />;
+      return (
+        <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <ForbiddenEditPage session={session} />
+        </ConsoleShell>
+      );
     }
   }
 
-  const { entries, nameResolutionDegraded } = await loadUnitAdministratorRoster(
-    { scope },
-    db.read,
-  );
+  // Parallelized: the roster load, the core catalog and (superuser only) the
+  // functional-role registry are independent reads.
+  const [{ entries, nameResolutionDegraded }, allCores, functionalRoles] = await Promise.all([
+    loadUnitAdministratorRoster({ scope }, db.read),
+    getCoreList(db.read),
+    canManageFunctionalRoles(session) ? loadFunctionalRolesTab() : Promise.resolve(undefined),
+  ]);
 
   // The "URL requests" admin tab + pending-count pill; `null` when the
   // slug-request feature is off (hides the tab).
@@ -92,28 +167,44 @@ export default async function AdministratorsPage() {
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      unitsTab={session.isSuperuser}
+      // No unitsTab override: the deriveConsoleTabs baseline (superuser OR
+      // comms_steward) is already correct for this page. The prior
+      // `unitsTab={session.isSuperuser}` REPLACED that baseline (ConsoleShell's
+      // unitsTab merge is replace-not-OR) rather than narrowing it deliberately
+      // — it predates ConsoleShell (#977) and was never revisited when the
+      // shared baseline grew a comms_steward case, so a comms_steward who also
+      // owns a unit (the only way a non-superuser steward reaches this page —
+      // see the Forbidden gate above) silently lost a tab their role alone
+      // already earned (docs/edit-console-ia-spec.md Gap 4b).
     >
-        <h1 className="mb-1 text-xl font-semibold">Administrators</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Everyone with an Owner or Curator grant on an org unit, grouped by person. Add, change a
-          role, or revoke a grant from each card. Grants sourced from the{" "}
-          <a
-            href="https://directory.weill.cornell.edu/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[var(--apollo-maroon)] underline"
-          >
-            Web Directory
-          </a>{" "}
-          are managed there and read-only here.
-        </p>
         <AdministratorsRoster
+          header={
+            <>
+              <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
+                Administrators
+              </h1>
+              <p className="text-muted-foreground m-0 max-w-[84ch] text-[14.5px] leading-normal text-pretty">
+                Everyone with an Owner or Curator grant on an org unit. Grants from the{" "}
+                <a
+                  href="https://directory.weill.cornell.edu/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-apollo-slate underline underline-offset-[3px]"
+                >
+                  Web Directory
+                </a>{" "}
+                are read-only here; change them there. Grants made in Scholars Console can be
+                edited or revoked below.
+              </p>
+            </>
+          }
           entries={entries}
           isSuperuser={session.isSuperuser}
           actorCwid={session.cwid}
           nameResolutionDegraded={nameResolutionDegraded}
           canImpersonate={impersonationEnabled() && session.isSuperuser}
+          allCores={allCores}
+          functionalRoles={functionalRoles}
         />
     </ConsoleShell>
   );

@@ -39,6 +39,7 @@ import {
   resolveFundingPhraseBoost,
   resolveFundingTabMsm,
   resolveFundingTextEvidence,
+  resolveSearchFundingInstitutionFacet,
   type Scope,
 } from "@/lib/api/search-flags";
 import { clampAroundMarks } from "@/lib/api/result-evidence";
@@ -72,6 +73,10 @@ export type FundingFilters = {
   status?: FundingStatus[];
   /** Lead-PI primary-department strings. Multi-select OR. */
   department?: string[];
+  /** Institution facet — lead PI's `Scholar.primaryOrgCode` (WCMC, HSS, MSKCC,
+   *  ...). Multi-select OR. Accepted regardless of
+   *  `SEARCH_FUNDING_INSTITUTION_FACET`; a no-op while it's off / pre-reindex. */
+  institution?: string[];
   /** Role buckets — multi-select OR. */
   role?: FundingRoleBucket[];
   /** Issue #94 — WCM investigator CWIDs. Multi-select OR within the
@@ -210,6 +215,10 @@ export type FundingSearchResult = {
     mechanisms: SearchFacetBucket[];
     status: { active: number; endingSoon: number; recentlyEnded: number };
     departments: SearchFacetBucket[];
+    /** Institution facet — lead-PI `primaryOrgCode` buckets (bare ED codes; the
+     *  page labels them via `institutionDisplayName`). Empty while
+     *  `SEARCH_FUNDING_INSTITUTION_FACET` is off (or pre-reindex) — never omitted. */
+    institutions: SearchFacetBucket[];
     /** Counts over the `roles` bucket tokens ({@link FundingRoleBucket}). NOT a
      *  partition: `multiPi` is a strict SUBSET of `pi`. A project with ≥2 PD/PIs is
      *  written into the index with BOTH `PI` and `Multi-PI` (lib/funding-projection.ts —
@@ -319,6 +328,49 @@ function pickTextEvidence(
   return null;
 }
 
+/** A whitespace token that is ONE letter or digit, optionally followed by a
+ *  period: a middle initial (`J`, `J.`), or `T` / `C` / `1` in `T cell`,
+ *  `hepatitis C`, `type 1`. */
+const LONE_CHAR_TOKEN = /^[\p{L}\p{N}]\.?$/u;
+
+/**
+ * Issue #2243: a lone single-character token must not admit a grant by
+ * itself. Under the default OR `multi_match`, "Michael J Wolk" admitted every
+ * grant with a `J` token anywhere ("Lloyd J. Old STAR Program", "FRANK J.
+ * TUSA ...") and the title^4 boost ranked the first of them at #1.
+ *
+ * The fix is admission-only. When `q` mixes lone-character tokens with at
+ * least one longer token, `textClause` is wrapped as `bool.must: [textClause]`
+ * plus a non-scoring `filter` requiring one of the LONGER tokens to match. The
+ * scoring clause is the unchanged `textClause`, and a filter adds nothing to
+ * `_score`, so every grant that is still admitted keeps exactly the score (and
+ * therefore the relative order) it has today. The single letter still counts
+ * wherever it co-occurs: `T cell lymphoma` keeps ranking T-cell grants above
+ * B-cell grants, and `hepatitis C` keeps ranking hepatitis C above hepatitis B.
+ * The only grants dropped are the ones that matched on the lone letter alone.
+ *
+ * A query with no lone-character token, or with ONLY lone-character tokens
+ * (`q=J`), returns `textClause` itself, so that request body is
+ * byte-identical to the one sent before this change.
+ */
+export function gateLoneCharTokens(
+  trimmed: string,
+  textClause: Record<string, unknown>,
+  fields: string[],
+): Record<string, unknown> {
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const longer = tokens.filter((t) => !LONE_CHAR_TOKEN.test(t));
+  if (longer.length === 0 || longer.length === tokens.length) return textClause;
+  return {
+    bool: {
+      must: [textClause],
+      filter: [
+        { multi_match: { query: longer.join(" "), fields, type: "best_fields" } },
+      ],
+    },
+  };
+}
+
 /**
  * #1412 perf — page-level replacement for the per-card `/api/scholar/[cwid]/grants`
  * fan-out. Given the people-search page's cwids and the (already generic-stripped)
@@ -362,16 +414,20 @@ export async function investigatorGrantMatchCounts(opts: {
   const fundingFields = useFundingMsm
     ? FUNDING_FIELD_BOOSTS.map((f) => (f === "abstract^1" ? "abstract^0.5" : f))
     : [...FUNDING_FIELD_BOOSTS];
-  const textClause: Record<string, unknown> = {
-    multi_match: {
-      query: trimmed,
-      fields: fundingFields,
-      type: "best_fields",
-      ...(useFundingMsm
-        ? { operator: "or", minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM }
-        : {}),
+  const textClause = gateLoneCharTokens(
+    trimmed,
+    {
+      multi_match: {
+        query: trimmed,
+        fields: fundingFields,
+        type: "best_fields",
+        ...(useFundingMsm
+          ? { operator: "or", minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM }
+          : {}),
+      },
     },
-  };
+    fundingFields,
+  );
 
   // #295 concept union (expanded scope) — admit grants tagged with the resolved
   // descriptor's descendants even without a literal text hit. Gated exactly as
@@ -521,21 +577,27 @@ export async function searchFunding(opts: {
   const fundingFields = useFundingMsm
     ? FUNDING_FIELD_BOOSTS.map((f) => (f === "abstract^1" ? "abstract^0.5" : f))
     : [...FUNDING_FIELD_BOOSTS];
+  // Issue #2243: `gateLoneCharTokens` stops a lone initial ("Michael J Wolk")
+  // from admitting a grant on its own. Admission-only, so scores are unchanged.
   const textClause: Record<string, unknown> =
     trimmed.length > 0
-      ? {
-          multi_match: {
-            query: trimmed,
-            fields: fundingFields,
-            type: "best_fields",
-            ...(useFundingMsm
-              ? {
-                  operator: "or",
-                  minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
-                }
-              : {}),
+      ? gateLoneCharTokens(
+          trimmed,
+          {
+            multi_match: {
+              query: trimmed,
+              fields: fundingFields,
+              type: "best_fields",
+              ...(useFundingMsm
+                ? {
+                    operator: "or",
+                    minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+                  }
+                : {}),
+            },
           },
-        }
+          fundingFields,
+        )
       : { match_all: {} };
 
   // Issue #295 — OR-of-evidence. When the funding concept flag is on and `q`
@@ -651,6 +713,13 @@ export async function searchFunding(opts: {
     filters.department && filters.department.length > 0
       ? { terms: { department: filters.department } }
       : null;
+  // Institution facet — flag-gated (`SEARCH_FUNDING_INSTITUTION_FACET`):
+  // accepted regardless, a no-op (no clause, no agg) while off / pre-reindex.
+  const institutionFacetOn = resolveSearchFundingInstitutionFacet();
+  const institutionClause =
+    institutionFacetOn && filters.institution && filters.institution.length > 0
+      ? { terms: { institution: filters.institution } }
+      : null;
   const roleClause =
     filters.role && filters.role.length > 0
       ? { terms: { roles: filters.role } }
@@ -667,6 +736,7 @@ export async function searchFunding(opts: {
   if (mechanismClause) userAxisFilters.push(mechanismClause);
   if (statusClause) userAxisFilters.push(statusClause);
   if (departmentClause) userAxisFilters.push(departmentClause);
+  if (institutionClause) userAxisFilters.push(institutionClause);
   if (roleClause) userAxisFilters.push(roleClause);
   if (investigatorClause) userAxisFilters.push(investigatorClause);
 
@@ -677,6 +747,7 @@ export async function searchFunding(opts: {
     | "mechanism"
     | "status"
     | "department"
+    | "institution"
     | "role"
     | "investigator";
 
@@ -688,6 +759,7 @@ export async function searchFunding(opts: {
     if (axis !== "mechanism" && mechanismClause) out.push(mechanismClause);
     if (axis !== "status" && statusClause) out.push(statusClause);
     if (axis !== "department" && departmentClause) out.push(departmentClause);
+    if (axis !== "institution" && institutionClause) out.push(institutionClause);
     if (axis !== "role" && roleClause) out.push(roleClause);
     if (axis !== "investigator" && investigatorClause) out.push(investigatorClause);
     return out;
@@ -775,6 +847,16 @@ export async function searchFunding(opts: {
       filter: { bool: { filter: filtersExcept("department") } },
       aggs: { keys: { terms: { field: "department", size: 30 } } },
     },
+    // Institution facet agg, attached ONLY when `SEARCH_FUNDING_INSTITUTION_FACET`
+    // is on. size 50 gives headroom past the ~30 codes in `lib/institutions.ts`.
+    ...(institutionFacetOn
+      ? {
+          institutions: {
+            filter: { bool: { filter: filtersExcept("institution") } },
+            aggs: { keys: { terms: { field: "institution", size: 50 } } },
+          },
+        }
+      : {}),
     roleBuckets: {
       filter: { bool: { filter: filtersExcept("role") } },
       aggs: { keys: { terms: { field: "roles", size: 5 } } },
@@ -832,6 +914,7 @@ export async function searchFunding(opts: {
         mechanisms: [],
         status: { active: 0, endingSoon: 0, recentlyEnded: 0 },
         departments: [],
+        institutions: [],
         roles: { pi: 0, multiPi: 0, coI: 0 },
         investigators: [],
         investigatorsTotal: 0,
@@ -998,6 +1081,8 @@ export async function searchFunding(opts: {
       programTypes?: { keys: { buckets: Bucket[] } };
       mechanisms?: { keys: { buckets: Bucket[] } };
       departments?: { keys: { buckets: Bucket[] } };
+      // Present only when SEARCH_FUNDING_INSTITUTION_FACET is on.
+      institutions?: { keys: { buckets: Bucket[] } };
       roleBuckets?: { keys: { buckets: Bucket[] } };
       statusActive?: { doc_count: number };
       statusEndingSoon?: { doc_count: number };
@@ -1270,6 +1355,11 @@ export async function searchFunding(opts: {
         recentlyEnded: r.aggregations?.statusRecentlyEnded?.doc_count ?? 0,
       },
       departments: (r.aggregations?.departments?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
+      // Institution facet — `[]` (never omitted) while the flag is off / pre-reindex.
+      institutions: (r.aggregations?.institutions?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
       })),

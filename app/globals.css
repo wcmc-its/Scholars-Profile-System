@@ -40,15 +40,17 @@
    * styling hook is the `.page-title` class, not the HTML tag, because the
    * page-subject is sometimes h1 and sometimes nested inside a structural
    * container (e.g. profile sidebar) where a wider-column h2 would otherwise
-   * out-weight it. Use `.page-title` exactly once per page. Charter falls
-   * back to Tiempos/Georgia so the rule holds during font load.
+   * out-weight it. Use `.page-title` exactly once per page. Charter is
+   * self-hosted via next/font/local (#2530) so it renders identically across
+   * OS/browser instead of depending on whatever system font each resolves;
+   * Georgia is the fallback while the face loads.
    */
   --text-sm: 13px;
   --text-base: 15px;
   --text-lg: 18px;
   --text-4xl: 44px;
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-serif: 'Charter', 'Tiempos', 'Georgia', serif;
+  --font-serif: var(--font-charter), 'Charter', 'Georgia', serif;
   /* Weights (only normal + semibold used in Phase 2 per UI-SPEC checker) */
   --weight-normal: 400;
   --weight-semibold: 500;
@@ -65,7 +67,7 @@
   --color-primary-cornell-red: #B31B1B;
   --color-accent-slate: #2c4f6e;
   /* Apollo Management Console chrome — #160 self-edit launch, refreshed to the
-     Scholars Profile Console mockup (warm-neutral palette). Editor-only
+     Scholars Console mockup (warm-neutral palette). Editor-only
      (/edit/*); the public site keeps --color-primary-cornell-red. The warm
      maroon is the intentional WCM editor accent — swap here only.
      --apollo-ring is the keyboard-focus indicator for rail items on the pale
@@ -74,7 +76,12 @@
      background. */
   --apollo-bar: #2a2421; /* warm near-black header */
   --apollo-maroon: #8a1f2b; /* WCM editor maroon */
+  /* Console text tiers: primary / secondary; tertiary is --muted-foreground. */
+  --apollo-ink: #1f1b19;
+  --apollo-ink-2: #5c574d;
+  --apollo-icon: #8a847c; /* icons only */
   --apollo-maroon-press: #6e1620; /* hover / active maroon */
+  --apollo-maroon-on-bar: #c9505d; /* active-tab underline ON the dark bar (maroon vanishes there) */
   --apollo-maroon-foreground: #ffffff;
   /* APOLLO EDITOR SURFACE LANGUAGE (the /edit console's elevation rules).
    * Deliberately SEPARATE from the colour-language docblock below: that one
@@ -123,9 +130,13 @@
    * near-neutral so colour stays meaningful. Each job has ONE treatment, and
    * they read the same on every surface:
    *
-   *   BRAND    maroon (--apollo-maroon)  — the h2 rule, the active rail item,
-   *                                        and the .apollo-card spine (container
-   *                                        chrome). Brand only; never a provenance cue.
+   *   BRAND    maroon (--apollo-maroon)  — the active rail item and the primary
+   *                                        button. Brand only; never a provenance
+   *                                        cue. (The h2 rule and the .apollo-card
+   *                                        spine were dropped 2026-09-21, design
+   *                                        round 3 — the panel is a plain card.)
+   *   NOTICE   slate tint + --apollo-notice-text + Shield — the admin / proxy /
+   *                                        unit-admin editing notice above the card.
    *   YOURS    green  (--apollo-green*)  + pencil — the "Yours to edit" badge
    *                                        ONLY. "You can change it here."
    *   LOCKED   neutral (--apollo-lock-bg) + lock icon + TEXT — LockedBadge and
@@ -151,11 +162,14 @@
    *
    * Green pulls double duty (YOURS badge + success banner) — disambiguated by
    * icon + context (pencil vs check), never by hue alone, same as LOCKED.
-   * Files: attribute-rail.tsx (rail groups), edit-panel.tsx (h2 rule + badge),
-   * locked-badge.tsx. Introduce a new accent only by editing here first. */
+   * Files: attribute-rail.tsx (rail groups), edit-panel.tsx (badge),
+   * locked-badge.tsx, superuser-banner.tsx (notice). Introduce a new accent only
+   * by editing here first. */
   --apollo-slate: #34506e;
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;
+  --apollo-notice-text: #274158; /* text + icon on the slate-tint editing notice */
+  --apollo-done: #8f887d; /* grey check on a settled Home row (design round 3) */
   /* Facet-filter redesign (PROFILE_FACET_REDESIGN) — three facet hues, each a
      4-value semantic group (fill / border / text / count-subtext), theme-aware
      (#16). Topic = slate-blue, Method = indigo, Position = warm amber (the
@@ -190,7 +204,15 @@
   /* Semantic amber — "incomplete / needs you". The completeness checklist's
      to-do marker, progress fill, and missing-headshot badge: an invitation,
      never a danger-red alarm. The tint pair backs the "worth reviewing"
-     advisory badge + the COI → publications bridge callout. */
+     advisory badge + the COI → publications bridge callout.
+
+     2026-08-15: three further settled meanings live alongside this one and
+     R13's pending-judgment canon (apollo-v2-surface-audit-2026-08-14.md §4a,
+     decision 1) — confidence/tier classification (Matcha fit + eligibility
+     badges) and time-urgent deadlines (#1608, <30 days out). Four meanings
+     total; never two on the same surface. Operational-status boards
+     (etl-status) are exempt from all of this — pipeline health, not a
+     pending human decision, and never on this token system. */
   --apollo-amber: #8a5a06;
   --apollo-amber-tint: #fbf1dc;
   --apollo-amber-tint-border: #efdbaf;
@@ -292,7 +314,11 @@
   /* Apollo chrome utilities (bg-apollo-bar, text-apollo-maroon, …). */
   --color-apollo-bar: var(--apollo-bar);
   --color-apollo-maroon: var(--apollo-maroon);
+  --color-apollo-ink: var(--apollo-ink);
+  --color-apollo-ink-2: var(--apollo-ink-2);
+  --color-apollo-icon: var(--apollo-icon);
   --color-apollo-maroon-press: var(--apollo-maroon-press);
+  --color-apollo-maroon-on-bar: var(--apollo-maroon-on-bar);
   --color-apollo-maroon-foreground: var(--apollo-maroon-foreground);
   --color-apollo-page: var(--apollo-page);
   --color-apollo-surface: var(--apollo-surface);
@@ -307,6 +333,8 @@
   --color-apollo-slate: var(--apollo-slate);
   --color-apollo-slate-tint: var(--apollo-slate-tint);
   --color-apollo-slate-tint-border: var(--apollo-slate-tint-border);
+  --color-apollo-notice-text: var(--apollo-notice-text);
+  --color-apollo-done: var(--apollo-done);
   --color-apollo-green: var(--apollo-green);
   --color-apollo-green-tint: var(--apollo-green-tint);
   --color-apollo-green-tint-border: var(--apollo-green-tint-border);
@@ -357,6 +385,15 @@
   font-family: var(--font-serif);
 }
 
+/* Unit pages (department / division / center, "Unit Page v2"): every link and
+   button inside the page shell gets the Apollo keyboard-focus ring. Scoped to
+   `.unit-surface` (set on those pages' <main>) so it never ripples site-wide. */
+.unit-surface :is(a, button, [role="tab"]):focus-visible {
+  outline: 2px solid var(--apollo-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* The single white detail-panel card for /edit surfaces (Scholars Profile
    Console mockup). Exactly one per surface: EditShell wraps the active panel
    in this card; the panel itself stays flat (see edit-panel.tsx) so there is
@@ -366,14 +403,11 @@
   background: var(--apollo-surface);
   border: 1px solid var(--apollo-border);
   border-radius: var(--apollo-radius-card);
-  /* Maroon spine (inset shadow, not a border — respects the corner radius and
-     adds no reflow) turns the detail panel from a plain white box into a
-     brand-cued surface. Maroon is brand (the h2 rule + active rail item); the
-     spine is container chrome, not a provenance cue. */
-  box-shadow:
-    inset 3px 0 0 var(--apollo-maroon),
-    var(--apollo-shadow-card);
-  padding: 28px 32px 32px;
+  /* A plain card, per the design-round-3 mockup (2026-09-21). The earlier maroon
+     inset-shadow "spine" was overruled by the user; brand now lives in the
+     active rail item and the primary button only. */
+  box-shadow: var(--apollo-shadow-card);
+  padding: 24px;
 }
 @media (max-width: 640px) {
   .apollo-card {
@@ -527,12 +561,25 @@
    (via :has on the home-page-root wrapper) so other surfaces — e.g. the
    About-page anchor TOC — keep their instant jumps. Honors reduced-motion.
    The root scrolling element (html/:root) is what actually scrolls for in-page
-   anchors, so scroll-behavior must live on :root, conditioned on the home page. */
-:root:has(.home-page-root) {
+   anchors, so scroll-behavior must live on :root, conditioned on the home page.
+   The /browse hub (.browse-page-root) opts in too, for its sticky
+   section-anchor strip. */
+:root:has(.home-page-root),
+:root:has(.browse-page-root) {
   scroll-behavior: smooth;
 }
 @media (prefers-reduced-motion: reduce) {
-  :root:has(.home-page-root) {
+  :root:has(.home-page-root),
+  :root:has(.browse-page-root) {
     scroll-behavior: auto;
   }
+}
+
+/* /browse hub: every link and button gets the Apollo maroon keyboard-focus
+   ring (Departments & Centers v2 mock). Scoped to .browse-page-root so other
+   public pages are unaffected. */
+.browse-page-root :is(a, button):focus-visible {
+  outline: 2px solid var(--apollo-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

@@ -17,8 +17,8 @@ for — e.g. a non-superuser hitting `/edit/scholar/[other-cwid]`,
 Because `ForbiddenEditPage` is an ordinary Server Component returned from the
 page — not a thrown `notFound()`/`forbidden()` or a `NextResponse` with an
 overridden status — the HTTP response status is **200**, with the branded
-"You don't have permission to edit this profile." (or unit) body. The visible
-UX matches the SPEC's denial copy; only the wire status is 200 rather than 403.
+"You don't have access to this page." (or unit) body. The visible UX matches
+the SPEC's denial copy; only the wire status is 200 rather than 403.
 
 The **unauthenticated** case is different and unaffected: no session →
 `redirect("/api/auth/saml/login?return=…")` (302), reinforced by `middleware.ts`

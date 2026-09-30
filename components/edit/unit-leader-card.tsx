@@ -1,5 +1,5 @@
 /**
- * UnitLeaderCard — the unit leadership editor (#540 Phase 7,
+ * UnitLeaderCard — the department / division leadership editor (#540 Phase 7,
  * `unit-curation-edit-ui-spec.md` § 2). Edits the three-state leader override:
  *
  *   - a curated person (a directory pick → `leaderCwid: "<cwid>"`),
@@ -10,13 +10,17 @@
  * issues one POST per changed field (the backend writes one row per call).
  * "Clear override" drops both override rows so detection resumes.
  *
- * **Two write paths.** Dept/div POST `/api/edit/field` (`field_override` rows on
- * `leaderCwid` / `leaderInterim`). A **center** edits in-row via
- * `/api/edit/unit` op:"update" on the `directorCwid` / `leaderInterim` columns —
- * a center is always `source:"manual"`, so there is no ETL "detect" state and no
- * `field_override`: the leader is either a curated person or vacant
- * (`directorCwid:""` → null). `canClear` is false for a center (nothing to
- * clear).
+ * POSTs `/api/edit/field` (`field_override` rows on `leaderCwid` /
+ * `leaderInterim`) — dept/div are ETL-managed and single-role, so the
+ * override model stays the right fit for them.
+ *
+ * #2542 Phase C retired this card's CENTER branch: a center's leadership is
+ * manually-owned and vocabulary-driven (three roles — `director`,
+ * `co_director`, `associate_director` — not one), so it now has its own
+ * generic picker, `CenterLeadershipCard`
+ * (`components/edit/center-leadership-card.tsx`), writing
+ * `POST /api/edit/center-leadership` instead of the field-override contract
+ * here. This card is department/division only.
  */
 "use client";
 
@@ -39,11 +43,10 @@ type LeaderMode = "curated" | "vacant" | "detect";
 const LEADER_NOUN: Record<UnitLeaderCardProps["entityType"], string> = {
   department: "chair",
   division: "chief",
-  center: "director",
 };
 
 export type UnitLeaderCardProps = {
-  entityType: "department" | "division" | "center";
+  entityType: "department" | "division";
   entityId: string;
   leader: {
     cwid: string | null;
@@ -54,12 +57,14 @@ export type UnitLeaderCardProps = {
   };
   canClear: boolean;
   hasOverride: boolean;
+  /** Heading id — override when this card is one section of the single-scroll
+   *  unit editor (several headings on one page). */
+  headingId?: string;
 };
 
-function initialMode(leader: UnitLeaderCardProps["leader"], isCenter: boolean): LeaderMode {
+function initialMode(leader: UnitLeaderCardProps["leader"]): LeaderMode {
   if (leader.cwid !== null) return "curated";
-  // A center has no detect state — "no director" is a vacancy, not detection.
-  if (leader.explicitVacancy || isCenter) return "vacant";
+  if (leader.explicitVacancy) return "vacant";
   return "detect";
 }
 
@@ -69,17 +74,17 @@ export function UnitLeaderCard({
   leader,
   canClear,
   hasOverride,
+  headingId,
 }: UnitLeaderCardProps) {
   const noun = LEADER_NOUN[entityType];
-  const isCenter = entityType === "center";
 
   const [selected, setSelected] = React.useState<DirectoryValue | null>(
     leader.cwid !== null ? { cwid: leader.cwid, name: leader.name ?? leader.cwid, title: leader.title } : null,
   );
-  const [vacant, setVacant] = React.useState(leader.explicitVacancy || (isCenter && leader.cwid === null));
+  const [vacant, setVacant] = React.useState(leader.explicitVacancy);
   const [interim, setInterim] = React.useState(leader.interim);
 
-  const [baseMode, setBaseMode] = React.useState<LeaderMode>(initialMode(leader, isCenter));
+  const [baseMode, setBaseMode] = React.useState<LeaderMode>(initialMode(leader));
   const [baseCwid, setBaseCwid] = React.useState<string | null>(leader.cwid);
   const [baseInterim, setBaseInterim] = React.useState(leader.interim);
   const [overrideExists, setOverrideExists] = React.useState(hasOverride);
@@ -89,9 +94,7 @@ export function UnitLeaderCard({
   const [justSaved, setJustSaved] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
 
-  const rawMode: LeaderMode = selected ? "curated" : vacant ? "vacant" : "detect";
-  // A center never sits in "detect" — collapse it to "vacant" (no director).
-  const mode: LeaderMode = isCenter && rawMode === "detect" ? "vacant" : rawMode;
+  const mode: LeaderMode = selected ? "curated" : vacant ? "vacant" : "detect";
   const cwidDirty = mode !== baseMode || (mode === "curated" && selected?.cwid !== baseCwid);
   const interimDirty = interim !== baseInterim;
   const dirty = cwidDirty || interimDirty;
@@ -116,39 +119,20 @@ export function UnitLeaderCard({
     return true;
   }
 
-  // Center in-row write: /api/edit/unit op:"update" (no field_override). A
-  // vacant director is `directorCwid:""` (stored null), not a clear.
-  async function postCenterField(fieldName: string, value: string): Promise<boolean> {
-    const res = await fetch("/api/edit/unit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "update", entityType, entityId, fieldName, value }),
-    });
-    const data = (await res.json()) as { ok: boolean; error?: string };
-    if (!res.ok || data.ok !== true) {
-      setError(mapErrorToMessage(data.error ?? ""));
-      return false;
-    }
-    return true;
-  }
-
   async function save() {
     if (!dirty || isSaving) return;
     setIsSaving(true);
     setError(null);
     try {
       if (cwidDirty) {
-        const ok = isCenter
-          ? await postCenterField("directorCwid", mode === "curated" ? selected!.cwid : "")
-          : mode === "detect"
+        const ok =
+          mode === "detect"
             ? await postField("leaderCwid", "clear")
             : await postField("leaderCwid", "set", mode === "curated" ? selected!.cwid : "");
         if (!ok) return;
       }
       if (interimDirty) {
-        const ok = isCenter
-          ? await postCenterField("leaderInterim", interim ? "true" : "false")
-          : await postField("leaderInterim", "set", interim ? "true" : "false");
+        const ok = await postField("leaderInterim", "set", interim ? "true" : "false");
         if (!ok) return;
       }
       setBaseMode(mode);
@@ -181,12 +165,9 @@ export function UnitLeaderCard({
   return (
     <EditPanel
       slot="unit-leader-card"
+      headingId={headingId}
       heading="Leadership"
-      description={
-        isCenter
-          ? `Set the ${noun} for this ${entityType}, or mark the role vacant.`
-          : `Set the ${noun} for this ${entityType}, mark the role vacant, or clear the override to let the directory decide.`
-      }
+      description={`Appears on the ${entityType}’s public page. Set the ${noun}, mark the role vacant, or clear the override to let the directory decide.`}
     >
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
@@ -220,7 +201,7 @@ export function UnitLeaderCard({
                 className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
                 data-testid="unit-leader-vacant-pill"
               >
-                {isCenter ? `No ${noun} set` : "Vacant (explicit)"}
+                Vacant (explicit)
               </Badge>
             )}
             {mode === "detect" && (

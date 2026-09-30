@@ -9,9 +9,14 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from datetime import date
-import catalog, taxonomy
+import catalog, taxonomy, snapshot
 
-OUT=os.path.dirname(os.path.abspath(__file__)); PROJ=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule"); API=os.environ.get("PUBMED_API_KEY","")
+# Durable, non-git output location - see extract_databanks.py's OUT comment. (Was PROJ, declared
+# here but never used - the other 3 pipeline scripts wrote to their own script directory instead,
+# which is what made the 08-13 backfill's source CSVs vanish along with an ephemeral worktree.)
+OUT=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+API=os.environ.get("PUBMED_API_KEY","")
 engine=create_engine(f"mysql+pymysql://{os.environ['DB_USERNAME']}:{os.environ['DB_PASSWORD']}@{os.environ['DB_HOST']}/{os.environ['DB_NAME']}")
 
 # ---------- 1. unified deposit set (academic + preprint; full-text high-conf + structured) ----------
@@ -48,10 +53,11 @@ print(f"{len(dep)} deposits across {len(pmids)} pubs", flush=True)
 
 # ---------- 2. people (WCM full-time first/last authors) ----------
 inlist=",".join(str(p) for p in pmids)
-ppl=pd.read_sql(text(f"""SELECT a.pmid, i.cwid, i.givenName firstName, i.surname lastName,
+ppl_query=f"""SELECT a.pmid, i.cwid, i.givenName firstName, i.surname lastName,
     i.primaryAcademicDepartment dept, i.primaryAcademicDivision division, i.primaryTitle title, a.authorPosition position
     FROM analysis_summary_author a JOIN identity i ON i.cwid=a.personIdentifier
-    WHERE a.pmid IN ({inlist}) AND i.fullTimeFaculty='yes' AND a.authorPosition IN ('first','last')"""), engine)
+    WHERE a.pmid IN ({inlist}) AND i.fullTimeFaculty='yes' AND a.authorPosition IN ('first','last')"""
+ppl=snapshot.snapshot_query(engine, ppl_query, f"{OUT}/snapshot_ppl.csv")
 ppl['pmid']=ppl['pmid'].astype(int)
 
 # ---------- 3. article metadata from DB ----------
@@ -135,18 +141,31 @@ if os.environ.get("WRITE_DATASET_DEPOSIT"):
     import pymysql
     def nz(v): return None if pd.isna(v) else v
     def access_model(v):  # catalog.py's `access` is a free-text note, not the table's open|controlled enum
-        return "controlled" if "controlled" in str(v).lower() else "open"
+        s = str(v).lower()
+        if "open" in s and "controlled" in s: return None  # governance varies per project (e.g. Synapse "open/controlled") — don't force a bucket
+        return "controlled" if "controlled" in s else "open"
     recs=[(nz(r.cwid), r.repo, r.accession, nz(r.resource_type), nz(r.bucket), access_model(r.access),
            int(r.year) if pd.notna(r.year) else None, r.provenance, nz(r.confidence),
-           nz(r.position), int(r.pmid))
+           nz(r.position), int(r.pmid), nz(r.sensitive_cats), nz(r.sensitive_subtypes))
           for r in full.itertuples()]
     conn=pymysql.connect(host=os.environ['DB_HOST'], user=os.environ['DB_USERNAME'],
                           password=os.environ['DB_PASSWORD'], database=os.environ['DB_NAME'])
     with conn.cursor() as cur:
-        cur.executemany("""INSERT IGNORE INTO dataset_deposit
+        # ON DUPLICATE KEY UPDATE, not INSERT IGNORE: the ~1621 rows already in the table
+        # were inserted before sensitive_cats/sensitive_subtypes existed, so plain INSERT
+        # IGNORE would silently no-op on their (repository, accession_or_doi) unique key and
+        # a rerun would never backfill them. Every other column is left as originally
+        # inserted — only the two sub-typing columns are refreshed on conflict.
+        cur.executemany("""INSERT INTO dataset_deposit
             (cwid, repository, accession_or_doi, resource_type, data_type, access_model,
-             deposit_year, provenance, confidence, author_position, pmid)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", recs)
-        written=cur.rowcount
+             deposit_year, provenance, confidence, author_position, pmid, sensitive_cats, sensitive_subtypes)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+                sensitive_cats = VALUES(sensitive_cats),
+                sensitive_subtypes = VALUES(sensitive_subtypes)""", recs)
+        affected=cur.rowcount
     conn.commit(); conn.close()
-    print(f"\nwrote {written} new rows to reciterdb.dataset_deposit ({len(recs)} candidates, dupes ignored)")
+    # MySQL rowcount under ON DUPLICATE KEY UPDATE counts each inserted row as 1 and each
+    # updated (backfilled) row as 2, so this is not a plain "rows written" count.
+    print(f"\nupserted {len(recs)} candidate rows to reciterdb.dataset_deposit "
+          f"(rowcount {affected}: new inserts count 1 each, backfilled existing rows count 2 each)")

@@ -1,7 +1,7 @@
 /**
  * components/edit/request-a-change-dialog.tsx — the "Request a change" router
- * modal (#160 UI follow-up + Phase 2 server mailer). Verifies the demoted title
- * + "Regarding" line, the per-issue action verb, the callout under the selected
+ * modal (#160 UI follow-up + Phase 2 server mailer). Verifies the item-as-heading
+ * header, the per-issue action verb + description, the callout under the selected
  * row, the honest dead-end ("Got it", no request filed), switch-reset + discard
  * guard, the Phase-2 server POST (primary) with "Request sent.", and the
  * Phase-1 `mailto:` fallback (cc / structured body / CRLF injection guard)
@@ -19,7 +19,7 @@ function pickIssue(id: string) {
   fireEvent.click(within(screen.getByTestId(`rac-issue-${id}`)).getByRole("radio"));
 }
 function detailBox() {
-  return screen.getByLabelText("Add any detail (optional)") as HTMLTextAreaElement;
+  return screen.getByLabelText("What should change, and to what? (optional)") as HTMLTextAreaElement;
 }
 /** Mock `global.fetch` for the route Submit; default = server send succeeds. */
 function mockFetch(response: { ok: boolean; status?: number }) {
@@ -49,42 +49,43 @@ afterEach(() => {
 });
 
 describe("RequestAChangeDialog", () => {
-  it("opens a named dialog with a demoted title + Regarding line + focal question", () => {
+  it("opens a named dialog whose heading IS the item it was opened from", () => {
     render(
-      <RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D., Stanford" />,
+      <RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D., Stanford" />,
     );
     expect(screen.getByTestId("request-a-change-trigger")).toBeTruthy();
     open();
     expect(screen.getByRole("dialog", { name: /request a change/i })).toBeTruthy();
-    expect(screen.getByText("Regarding")).toBeTruthy();
     expect(screen.getByText("Ph.D., Stanford")).toBeTruthy();
-    expect(screen.getByText("What needs to change?")).toBeTruthy();
+    // The generic question is REPLACED by the item, not stacked above it.
+    expect(screen.queryByText("What needs to change?")).toBeNull();
   });
 
   it("honors a custom triggerTestId (read-only panels)", () => {
     render(
       <RequestAChangeDialog
         attribute="name-title"
-        cwid="abc1001"
+        cwid="abc1001" scholarName="Jane Scholar"
         triggerTestId="request-a-change-toggle"
       />,
     );
     expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
   });
 
-  it("shows the action verb as a per-row hint before selection", () => {
-    render(<RequestAChangeDialog attribute="publications" cwid="abc1001" />);
+  it("shows the action verb + the description on every row before selection", () => {
+    render(<RequestAChangeDialog attribute="publications" cwid="abc1001" scholarName="Jane Scholar" />);
     open();
-    expect(
-      within(screen.getByTestId("rac-issue-publication-missing-pubmed")).getByText(/Add by PMID/),
-    ).toBeTruthy();
+    const row = within(screen.getByTestId("rac-issue-publication-missing-pubmed"));
+    expect(row.getByText(/Add by PMID/)).toBeTruthy();
+    // The one-liner renders unselected — the scholar picks without expanding each.
+    expect(row.getByText("Add it with its PMID and it appears within a day.")).toBeTruthy();
   });
 
   it("pre-selects initialIssueId on open (per-row 'Not mine?' lands on the not-mine route)", () => {
     render(
       <RequestAChangeDialog
         attribute="publications"
-        cwid="abc1001"
+        cwid="abc1001" scholarName="Jane Scholar"
         itemLabel="My Paper"
         initialIssueId="publication-not-mine"
         triggerTestId="pub-not-mine"
@@ -102,7 +103,7 @@ describe("RequestAChangeDialog", () => {
     render(
       <RequestAChangeDialog
         attribute="publications"
-        cwid="abc1001"
+        cwid="abc1001" scholarName="Jane Scholar"
         trigger={(openDialog) => (
           <button type="button" data-testid="custom-trigger" onClick={openDialog}>
             Not mine?
@@ -119,21 +120,19 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("self-service → verb-named tool link + callout instruction (ORCID resolves {cwid})", () => {
-    render(<RequestAChangeDialog attribute="name-title" cwid="abc1001" />);
+    render(<RequestAChangeDialog attribute="name-title" cwid="abc1001" scholarName="Jane Scholar" />);
     open();
     pickIssue("orcid-wrong");
     const link = screen.getByTestId("request-a-change-open");
-    expect(link.textContent).toContain("Manage in ReCiter");
-    expect(link.getAttribute("href")).toBe(
-      "https://reciter.weill.cornell.edu/manageprofile/abc1001",
-    );
+    expect(link.textContent).toContain("Open Identifiers & Profiles");
+    expect(link.getAttribute("href")).toBe("/edit/scholar/abc1001?attr=identifiers-profiles");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     expect(screen.queryByLabelText("Add any detail (optional)")).toBeNull();
   });
 
   it("route → verb-named Submit button + the PubMed source caveat", () => {
-    render(<RequestAChangeDialog attribute="publications" cwid="abc1001" itemLabel="My Paper" />);
+    render(<RequestAChangeDialog attribute="publications" cwid="abc1001" scholarName="Jane Scholar" itemLabel="My Paper" />);
     open();
     pickIssue("publication-metadata-wrong");
     expect(screen.getByText(/authoritative record at NLM/i)).toBeTruthy(); // PubMed-source caveat
@@ -144,7 +143,7 @@ describe("RequestAChangeDialog", () => {
 
   it("route Submit POSTs to the server mailer and confirms 'Request sent.'", async () => {
     const fetchMock = mockFetch({ ok: true });
-    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" itemLabel="R01 Test Grant" />);
+    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" scholarName="Jane Scholar" itemLabel="R01 Test Grant" />);
     open();
     pickIssue("funding-wrong");
     fireEvent.change(detailBox(), { target: { value: "Sponsor is wrong." } });
@@ -169,12 +168,14 @@ describe("RequestAChangeDialog", () => {
     expect(body.noReceipt).toBe(false);
   });
 
-  it("opting out of the receipt sets noReceipt=true in the POST body", async () => {
+  it("unchecking the receipt sets noReceipt=true in the POST body", async () => {
     const fetchMock = mockFetch({ ok: true });
-    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
+    render(<RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D." />);
     open();
     pickIssue("education-wrong");
-    fireEvent.click(screen.getByRole("checkbox", { name: /don't email me a copy/i }));
+    const receipt = screen.getByRole("checkbox", { name: /email me a copy of this request/i });
+    expect(receipt.getAttribute("data-state")).toBe("checked"); // opt-OUT, so it starts on
+    fireEvent.click(receipt);
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
 
     expect(await screen.findByText("Request sent.")).toBeTruthy();
@@ -183,7 +184,7 @@ describe("RequestAChangeDialog", () => {
 
   it("falls back to the mailto: client on a non-2xx (no regression while the mailer is dark)", async () => {
     mockFetch({ ok: false, status: 503 });
-    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
+    render(<RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D." />);
     open();
     pickIssue("education-wrong");
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
@@ -195,7 +196,7 @@ describe("RequestAChangeDialog", () => {
 
   it("the fallback mailto carries cc + item label (funding → OSRA)", async () => {
     mockFetch({ ok: false, status: 503 });
-    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" itemLabel="R01 Test Grant" />);
+    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" scholarName="Jane Scholar" itemLabel="R01 Test Grant" />);
     open();
     pickIssue("funding-wrong");
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
@@ -205,8 +206,30 @@ describe("RequestAChangeDialog", () => {
     expect(decodeURIComponent(window.location.href)).toContain("Item: R01 Test Grant");
   });
 
+  it("the fallback mailto names the scholar + links back to their profile (#2480)", async () => {
+    mockFetch({ ok: false, status: 503 });
+    render(
+      <RequestAChangeDialog
+        attribute="education"
+        cwid="abc1001"
+        scholarName="Jane Scholar"
+        itemLabel="Ph.D."
+      />,
+    );
+    open();
+    pickIssue("education-wrong");
+    fireEvent.click(screen.getByTestId("request-a-change-submit"));
+    await screen.findByRole("status");
+
+    const decoded = decodeURIComponent(window.location.href);
+    expect(decoded).toContain("Scholar: Jane Scholar (abc1001)");
+    expect(decoded).toContain(
+      "Profile: https://scholars.weill.cornell.edu/edit/scholar/abc1001?attr=education",
+    );
+  });
+
   it("honest dead-end: non-PubMed explains auto-pickup and offers only 'Got it'", () => {
-    render(<RequestAChangeDialog attribute="publications" cwid="abc1001" />);
+    render(<RequestAChangeDialog attribute="publications" cwid="abc1001" scholarName="Jane Scholar" />);
     open();
     pickIssue("publication-missing-nonpubmed");
     expect(screen.getByText(/picks it up automatically/i)).toBeTruthy();
@@ -216,7 +239,7 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("explain with a fallback reveals a route box (funding NCE window)", () => {
-    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" />);
+    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" scholarName="Jane Scholar" />);
     open();
     pickIssue("funding-active-expired");
     expect(screen.getByText(/grace/i)).toBeTruthy();
@@ -227,7 +250,7 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("discards typed detail when the issue is switched (edge 2)", () => {
-    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" />);
+    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" scholarName="Jane Scholar" />);
     open();
     pickIssue("funding-wrong");
     fireEvent.change(detailBox(), { target: { value: "typed text" } });
@@ -236,7 +259,7 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("Cancel with unsaved text triggers the discard guard (edge 3)", () => {
-    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" />);
+    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" scholarName="Jane Scholar" />);
     open();
     pickIssue("funding-wrong");
     fireEvent.change(detailBox(), { target: { value: "unsaved" } });
@@ -246,7 +269,7 @@ describe("RequestAChangeDialog", () => {
 
   it("strips CRLF from detail in the fallback mailto (edge 9 — injection guard)", async () => {
     mockFetch({ ok: false, status: 503 });
-    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
+    render(<RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D." />);
     open();
     pickIssue("education-wrong");
     fireEvent.change(detailBox(), { target: { value: "line1\r\nBcc: evil@example.com" } });

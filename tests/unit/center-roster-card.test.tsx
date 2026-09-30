@@ -1,10 +1,17 @@
 /**
  * `components/edit/center-roster-card.tsx` — the rich #552 §6.1 roster table.
- * Covers the program-gated columns, derived status, the show-active-only
- * toggle, inline set PATCHes, the date-range block, and add/remove.
+ * Covers the program-gated columns, derived status, the segmented filter,
+ * inline set PATCHes, the folded date-range popover, add/remove, and the
+ * Edit Center redesign: status tabs with counts, the Program filter, paging,
+ * the left-WCM banner, confirmed-only disease chips, and the disease review
+ * sheet (confirm / reject / undo / bulk high-confidence / manual add / queue).
+ *
+ * The review sheet renders in a Radix portal, so its assertions are scoped to
+ * the sheet's own element (`sheet()`), never `document.body`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import type { RosterDiseaseRow } from "@/lib/api/unit-edit-context";
 
 vi.mock("@/components/edit/directory-people-typeahead", () => ({
   DirectoryPeopleTypeahead: ({
@@ -27,7 +34,7 @@ vi.mock("@/components/edit/directory-people-typeahead", () => ({
     ),
 }));
 
-import { CenterRosterCard, type RosterMember } from "@/components/edit/center-roster-card";
+import { CenterRosterCard, datesLabel, type RosterMember } from "@/components/edit/center-roster-card";
 
 const PROGRAMS = [
   { code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
@@ -49,19 +56,52 @@ function member(over: Partial<RosterMember>): RosterMember {
   };
 }
 
+function diseaseRow(over: Partial<RosterDiseaseRow>): RosterDiseaseRow {
+  return {
+    diseaseCode: "BREAST",
+    assignment: {
+      rank: 1,
+      focus: "primary",
+      confidence: "medium",
+      leadPubs: 2,
+      secondPubs: 1,
+      middlePubs: 2,
+      grantsLed: 0,
+      grantsSupport: 0,
+      trialsLed: 1,
+      trialsSupport: 0,
+      pubScore: 10,
+      score: 10,
+      firstYear: 2018,
+      lastYear: 2025,
+      recentPubs: 3,
+      specialtyStatus: "match",
+    },
+    decision: null,
+    drifted: false,
+    ...over,
+  };
+}
+
+const DISEASE_OPTIONS = [
+  { code: "BREAST", label: "Breast Cancer" },
+  { code: "GI_COLORECTAL", label: "Colorectal & Anal Cancer" },
+];
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
 
 function stubOk() {
-  return vi
-    .spyOn(globalThis, "fetch")
-    .mockResolvedValue(
+  // A fresh Response per call: a body can only be read once, and the bulk
+  // confirm makes several calls.
+  return vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () =>
       new Response(JSON.stringify({ ok: true, changed: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
-    );
+  );
 }
 
 function bodyOf(call: unknown[]): Record<string, unknown> {
@@ -70,19 +110,24 @@ function bodyOf(call: unknown[]): Record<string, unknown> {
 
 const base = { unitCode: "meyer_cancer_center", today: TODAY };
 
+const MEMBERSHIP_ROLES = [
+  { key: "core_faculty", label: "Core Faculty Fellow", sortOrder: 10 },
+  { key: "affiliate_faculty", label: "Affiliate Faculty Fellow", sortOrder: 20 },
+];
+
 describe("CenterRosterCard — columns", () => {
-  it("shows Type + Program columns when the center has a program taxonomy", () => {
+  it("shows Role + Program columns when the center has a program taxonomy", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={PROGRAMS} />);
     expect(screen.getByTestId("roster-type-m1")).toBeTruthy();
     expect(screen.getByTestId("roster-program-m1")).toBeTruthy();
   });
 
-  it("hides Type + Program for a center with no programs (the Cancer-Center-only gate)", () => {
+  it("hides Program for a center with no programs, but Role always shows (the Cancer-Center-only gate)", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
-    expect(screen.queryByTestId("roster-type-m1")).toBeNull();
+    expect(screen.getByTestId("roster-type-m1")).toBeTruthy();
     expect(screen.queryByTestId("roster-program-m1")).toBeNull();
-    // dates + status still present
-    expect(screen.getByTestId("roster-start-m1")).toBeTruthy();
+    // dates (folded under Member with no Program column) + status still present
+    expect(screen.getByTestId("roster-dates-trigger-m1")).toBeTruthy();
     expect(screen.getByTestId("roster-status-m1")).toBeTruthy();
   });
 
@@ -92,7 +137,47 @@ describe("CenterRosterCard — columns", () => {
   });
 });
 
-describe("CenterRosterCard — Export CSV affordance (#1102)", () => {
+describe("CenterRosterCard — Role column vocabulary (CHPC fellow roles)", () => {
+  it("renders the role select with vocabulary labels even with no programs", () => {
+    render(
+      <CenterRosterCard {...base} members={[member({})]} programs={[]} membershipRoles={MEMBERSHIP_ROLES} />,
+    );
+    const select = screen.getByTestId("roster-type-m1") as HTMLSelectElement;
+    const labels = Array.from(select.options).map((o) => o.textContent);
+    expect(labels).toEqual(["Member", "Core Faculty Fellow", "Affiliate Faculty Fellow"]);
+  });
+
+  it("renders a Member option even when the vocabulary is empty", () => {
+    render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    const select = screen.getByTestId("roster-type-m1") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["member"]);
+  });
+
+  it("changing the role POSTs set with membershipRoleKey only (not membershipType)", async () => {
+    const fetchMock = stubOk();
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[member({})]}
+        programs={[]}
+        membershipRoles={MEMBERSHIP_ROLES}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("roster-type-m1"), { target: { value: "core_faculty" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = bodyOf(fetchMock.mock.calls[0]);
+    expect(body).toMatchObject({
+      unitType: "center",
+      unitCode: "meyer_cancer_center",
+      cwid: "m1",
+      action: "set",
+      membershipRoleKey: "core_faculty",
+    });
+    expect(body).not.toHaveProperty("membershipType");
+  });
+});
+
+describe("CenterRosterCard — Export .xlsx affordance (#1102)", () => {
   it("hides the export link when exportEnabled is false (flag off / default)", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
     expect(screen.queryByTestId("center-roster-export-link")).toBeNull();
@@ -101,7 +186,7 @@ describe("CenterRosterCard — Export CSV affordance (#1102)", () => {
   it("exports the WHOLE roster — no activeOnly param, in any filter", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} exportEnabled />);
     const link = screen.getByTestId("center-roster-export-link") as HTMLAnchorElement;
-    expect(link.textContent).toMatch(/export csv/i);
+    expect(link.textContent).toMatch(/export \.xlsx/i);
     // "Active only" stopped being one of the views, so the export carries every
     // row and its `status` column distinguishes them.
     expect(link.getAttribute("href")).toBe("/edit/center/meyer_cancer_center/export");
@@ -138,27 +223,58 @@ describe("CenterRosterCard — the three mutually-exclusive filters", () => {
     expect(screen.queryByTestId("center-roster-row-pen")).toBeNull();
   });
 
-  it("the Active badge is green; the others are not", () => {
+  it("Active is plain text; the exceptions get a pill", () => {
     render(<CenterRosterCard {...base} members={members} programs={[]} />);
-    expect(screen.getByTestId("roster-status-act").className).toMatch(/apollo-green/);
+    expect(screen.getByTestId("roster-status-act").tagName).toBe("SPAN");
+    expect(screen.getByTestId("roster-status-act").className).not.toMatch(/rounded-full/);
+    expect(screen.getByTestId("roster-status-ina").className).toMatch(/rounded-full/);
     expect(screen.getByTestId("roster-status-ina").className).not.toMatch(/apollo-green/);
+  });
+
+  it("an Invited badge is amber and an Inactive badge neutral (mockup ST)", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[...members, member({ cwid: "inv", membershipRoleKey: "invited" })]}
+        programs={[]}
+      />,
+    );
+    expect(within(container).getByTestId("roster-status-inv").className).toMatch(/bg-apollo-amber-tint/);
+    expect(within(container).getByTestId("roster-status-ina").className).toMatch(/bg-apollo-surface-2/);
+  });
+
+  it("an inactive row gets the page background instead of being dimmed", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    const row = within(container).getByTestId("center-roster-row-ina");
+    expect(row.className).toMatch(/bg-apollo-page/);
+    expect(row.className).not.toMatch(/opacity-50/);
+    expect(within(container).getByTestId("center-roster-row-act").className).not.toMatch(/bg-apollo-page/);
+  });
+});
+
+describe("CenterRosterCard — dates label and 'Edit dates'", () => {
+  it("formats the four mockup cases at month precision", () => {
+    expect(datesLabel("2021-03-15", null)).toBe("Since Mar 2021");
+    expect(datesLabel("2021-03-15", "2026-06-30")).toBe("Mar 2021 – Jun 2026");
+    expect(datesLabel(null, "2026-06-30")).toBe("Ended Jun 2026");
+    expect(datesLabel(null, null)).toBe("No start date");
+  });
+
+  it("renders the label beside an 'Edit dates' link that opens the date inputs", () => {
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ startDate: "2021-03-15" })]} programs={PROGRAMS} />,
+    );
+    expect(within(container).getByTestId("roster-dates-label-m1").textContent).toBe("Since Mar 2021");
+    const trigger = within(container).getByTestId("roster-dates-trigger-m1");
+    expect(trigger.textContent).toBe("Edit");
+    fireEvent.click(trigger);
+    expect((screen.getByTestId("roster-start-m1") as HTMLInputElement).value).toBe("2021-03-15");
   });
 });
 
 describe("CenterRosterCard — inline edits", () => {
-  it("changing Type POSTs set with membershipType", async () => {
-    const fetchMock = stubOk();
-    render(<CenterRosterCard {...base} members={[member({})]} programs={PROGRAMS} />);
-    fireEvent.change(screen.getByTestId("roster-type-m1"), { target: { value: "research" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({
-      unitType: "center",
-      unitCode: "meyer_cancer_center",
-      cwid: "m1",
-      action: "set",
-      membershipType: "research",
-    });
-  });
+  // Role's own inline-edit contract (membershipRoleKey, not membershipType) is
+  // covered by "CenterRosterCard — Role column vocabulary" above.
 
   it("changing Program POSTs set with programCode", async () => {
     const fetchMock = stubOk();
@@ -171,6 +287,7 @@ describe("CenterRosterCard — inline edits", () => {
   it("setting a start date POSTs set with startDate", async () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.change(screen.getByTestId("roster-start-m1"), { target: { value: "2024-07-01" } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ action: "set", startDate: "2024-07-01" });
@@ -181,6 +298,7 @@ describe("CenterRosterCard — inline edits", () => {
     render(
       <CenterRosterCard {...base} members={[member({ startDate: "2025-01-01" })]} programs={[]} />,
     );
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.change(screen.getByTestId("roster-end-m1"), { target: { value: "2024-01-01" } });
     expect(screen.getByText(/can't be before the start date/i)).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -189,10 +307,28 @@ describe("CenterRosterCard — inline edits", () => {
   it("Add POSTs action:add and inserts the row", async () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("center-roster-add-open"));
     fireEvent.click(screen.getByTestId("typeahead-pick"));
     fireEvent.click(screen.getByTestId("center-roster-add"));
     await waitFor(() => expect(screen.getByTestId("center-roster-row-new9")).toBeTruthy());
     expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ cwid: "new9", action: "add" });
+  });
+
+  it("#1827 — flags an added member the public page won't render (publiclyListed:false)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, changed: true, publiclyListed: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<CenterRosterCard {...base} members={[member({})]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("center-roster-add-open"));
+    fireEvent.click(screen.getByTestId("typeahead-pick"));
+    fireEvent.click(screen.getByTestId("center-roster-add"));
+    await waitFor(() => expect(screen.getByTestId("roster-not-public-new9")).toBeTruthy());
+    // The add stuck (no rollback), and an ordinary listed member is not flagged.
+    expect(screen.getByTestId("center-roster-row-new9")).toBeTruthy();
+    expect(screen.queryByTestId("roster-not-public-m1")).toBeNull();
   });
 
   it("rolls back the optimistic add and shows an error when the response has no JSON body (#1828)", async () => {
@@ -200,6 +336,7 @@ describe("CenterRosterCard — inline edits", () => {
     // fix, post() threw past add()'s rollback and left a phantom row with no error.
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 401 }));
     render(<CenterRosterCard {...base} members={[]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("center-roster-add-open"));
     fireEvent.click(screen.getByTestId("typeahead-pick"));
     fireEvent.click(screen.getByTestId("center-roster-add"));
     // the optimistic row is inserted, then rolled back once the failed POST settles
@@ -210,6 +347,7 @@ describe("CenterRosterCard — inline edits", () => {
   it("Remove confirms then POSTs action:remove and drops the row", async () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.click(screen.getByTestId("roster-remove-m1"));
     // The confirm is "Remove anyway" — the row trigger stays "Remove", so the
     // two are distinguishable and this can't accidentally click the trigger.
@@ -220,6 +358,7 @@ describe("CenterRosterCard — inline edits", () => {
 
   it("the remove dialog steers to an End date rather than framing removal as cheap", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.click(screen.getByTestId("roster-remove-m1"));
     expect(screen.getByText(/End date instead/i)).toBeTruthy();
     expect(screen.getByText(/added in error/i)).toBeTruthy();
@@ -233,6 +372,7 @@ describe("CenterRosterCard — inline edits", () => {
       // membership-active so the default show-active-only filter keeps it visible.
       <CenterRosterCard {...base} members={[member({ endDate: "2999-01-01" })]} programs={[]} />,
     );
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.click(screen.getByTestId("roster-remove-m1"));
     expect(screen.getByText(/including the end date already recorded/i)).toBeTruthy();
   });
@@ -251,7 +391,7 @@ describe("departed / unresolvable members (#2324)", () => {
     expect(screen.getByTestId("center-roster-row-gone1")).toBeTruthy();
     expect(screen.getByTestId("roster-scholar-state-gone1").textContent).toBe("Left WCM");
     expect(screen.getByTestId("roster-needs-close-out").textContent).toMatch(
-      /1 member has left WCM with their membership still open/i,
+      /^1 member has left WCMTheir center membership is still open\./i,
     );
   });
 
@@ -282,6 +422,29 @@ describe("departed / unresolvable members (#2324)", () => {
     );
     expect(screen.getByTestId("center-roster-row-ghost1")).toBeTruthy();
     expect(screen.getByTestId("roster-scholar-state-ghost1").textContent).toBe("Not in directory");
+    expect(screen.queryByTestId("roster-needs-close-out")).toBeNull();
+  });
+
+  it("a Cornell (Ithaca) external member renders its name + a Cornell University badge, never Not in directory (#2519)", () => {
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "ab123", name: "Alice Big", title: "Research Associate", scholarState: "external" }),
+        ]}
+        programs={[]}
+      />,
+    );
+    expect(screen.getByTestId("center-roster-row-ab123")).toBeTruthy();
+    expect(screen.getByText("Alice Big")).toBeTruthy();
+    const badge = screen.getByTestId("roster-scholar-state-ab123");
+    expect(badge.textContent).toBe("Cornell University");
+    expect(badge.getAttribute("title")).toBe(
+      "Cornell University (Ithaca) directory member — no WCM profile",
+    );
+    expect(screen.queryByText("Not in directory")).toBeNull();
+    // Never flagged as needing close-out — an external member never had a WCM
+    // identity to have "left".
     expect(screen.queryByTestId("roster-needs-close-out")).toBeNull();
   });
 
@@ -332,11 +495,13 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     endDate: "2024-01-01",
   });
 
-  it("tints the row and outlines the End field when the membership is still open", () => {
+  it("tints the row and colors the dates label when the membership is still open", () => {
     render(<CenterRosterCard {...base} members={[openMembership]} programs={[]} />);
     const row = screen.getByTestId("center-roster-row-open1");
     expect(row.getAttribute("data-needs-close-out")).toBe("true");
     expect(row.className).toMatch(/apollo-amber/);
+    expect(screen.getByTestId("roster-dates-label-open1").className).toMatch(/apollo-amber/);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-open1"));
     expect(screen.getByTestId("roster-end-open1").className).toMatch(/apollo-amber/);
   });
 
@@ -345,7 +510,7 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     const row = screen.getByTestId("center-roster-row-shut1");
     expect(row.getAttribute("data-needs-close-out")).toBeNull();
     expect(row.className).not.toMatch(/apollo-amber/);
-    expect(screen.getByTestId("roster-end-shut1").className).not.toMatch(/apollo-amber/);
+    expect(screen.getByTestId("roster-dates-label-shut1").className).not.toMatch(/apollo-amber/);
   });
 
   it("does NOT flag a still-employed member with an open membership", () => {
@@ -353,5 +518,926 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     const row = screen.getByTestId("center-roster-row-here1");
     expect(row.getAttribute("data-needs-close-out")).toBeNull();
     expect(row.className).not.toMatch(/apollo-amber/);
+  });
+});
+
+describe("CenterRosterCard — status tabs with counts", () => {
+  const members = [
+    member({ cwid: "act", name: "Active" }),
+    member({ cwid: "inv", name: "Invitee", membershipRoleKey: "invited" }),
+    member({ cwid: "ina", name: "Inactive", endDate: "2024-01-01" }),
+    member({ cwid: "gone", name: "Gone", scholarState: "departed" }),
+  ];
+
+  it("labels each tab with its count and marks the selected one", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    const tabs = within(container).getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      "All members 4",
+      "Invited 1",
+      "Inactive 1",
+      "Left WCM 1",
+    ]);
+    expect(within(container).getByTestId("roster-filter-all").getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(within(container).getByTestId("roster-filter-invited"));
+    expect(within(container).getByTestId("roster-filter-invited").getAttribute("aria-selected")).toBe("true");
+    expect(within(container).getByTestId("roster-filter-all").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("Invited derives from the role (#2779): the tab lists the invitee and its badge says Invited", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-filter-invited"));
+    expect(within(container).getByTestId("center-roster-row-inv")).toBeTruthy();
+    expect(within(container).queryByTestId("center-roster-row-act")).toBeNull();
+    expect(within(container).getByTestId("roster-status-inv").textContent).toBe("Invited");
+  });
+
+  it("the Left WCM tab lists departed people", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-filter-departed"));
+    expect(within(container).getByTestId("center-roster-row-gone")).toBeTruthy();
+    expect(within(container).queryByTestId("center-roster-row-act")).toBeNull();
+  });
+});
+
+describe("CenterRosterCard — left-WCM banner", () => {
+  it("counts the open memberships and 'Review and set end dates' opens the Left WCM tab", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "g1", scholarState: "departed" }),
+          member({ cwid: "g2", scholarState: "departed" }),
+          member({ cwid: "g3", scholarState: "departed", endDate: "2024-01-01" }), // closed out
+          member({ cwid: "here" }),
+        ]}
+        programs={[]}
+      />,
+    );
+    const banner = within(container).getByTestId("roster-needs-close-out");
+    expect(banner.textContent).toMatch(/^2 members have left WCMTheir center membership is still open\./);
+    fireEvent.click(within(banner).getByRole("button", { name: "Review each" }));
+    expect(within(container).getByTestId("roster-filter-departed").getAttribute("aria-selected")).toBe("true");
+    expect(within(container).queryByTestId("center-roster-row-here")).toBeNull();
+    expect(within(container).queryByTestId("roster-needs-close-out")).toBeNull();
+  });
+});
+
+describe("CenterRosterCard — left-WCM banner on a phone", () => {
+  it("'Review and set end dates' scrolls the Left WCM tab into view (the tab strip scrolls sideways)", () => {
+    // jsdom has no scrollIntoView (tests/setup.ts no-ops it on
+    // HTMLElement.prototype); record calls there and restore after.
+    const scrolled: Element[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this);
+    };
+    try {
+      const { container } = render(
+        <CenterRosterCard {...base} members={[member({ cwid: "g1", scholarState: "departed" })]} programs={[]} />,
+      );
+      fireEvent.click(within(container).getByTestId("roster-needs-close-out-jump"));
+      expect(scrolled).toEqual([within(container).getByTestId("roster-filter-departed")]);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+});
+
+describe("CenterRosterCard — Program filter", () => {
+  const members = [
+    member({ cwid: "ct1", name: "Therapeutics One", programCode: "CT" }),
+    member({ cwid: "cb1", name: "Biology One", programCode: "CB" }),
+    member({ cwid: "none", name: "No Program" }),
+  ];
+
+  it("narrows to the chosen program, and Clear all filters resets it", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={PROGRAMS} />);
+    const select = within(container).getByTestId("roster-program-filter") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(["Any program", "Cancer Therapeutics", "Cancer Biology"]);
+    fireEvent.change(select, { target: { value: "CT" } });
+    expect(within(container).getByTestId("center-roster-row-ct1")).toBeTruthy();
+    expect(within(container).queryByTestId("center-roster-row-cb1")).toBeNull();
+    expect(within(container).queryByTestId("center-roster-row-none")).toBeNull();
+    expect(within(container).getByTestId("roster-filter-result-line").textContent).toBe("1 of 3 members match");
+
+    fireEvent.click(within(container).getByTestId("roster-filter-clear-all"));
+    expect(select.value).toBe("");
+    expect(within(container).getByTestId("center-roster-row-cb1")).toBeTruthy();
+  });
+
+  // CTSC's hidden Program / Diseases are DATA-driven, not keyed on
+  // `source: "ctsc-feed"`: `loadUnitEditContext` sends no programs and no
+  // disease rows for a center without a CenterProgram taxonomy (covered in
+  // tests/unit/unit-edit-context.test.ts, "a center with NO CenterProgram
+  // taxonomy gets an empty diseases list"). These two tests pin the card's
+  // half of that contract.
+  it("is absent on a center with no program taxonomy or disease data (CTSC's payload), as are the disease controls", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "ext1", scholarState: "external", source: "ctsc-feed" })]}
+        programs={[]}
+      />,
+    );
+    expect(within(container).queryByTestId("roster-program-filter")).toBeNull();
+    expect(within(container).queryByTestId("roster-disease-filter-trigger")).toBeNull();
+    expect(within(container).queryByTestId("roster-needs-review-toggle")).toBeNull();
+    expect(within(container).queryByText("Diseases")).toBeNull();
+    // Remove stays offered (in the dates popover); the server refuses it for a feed row (mapped below).
+    fireEvent.click(within(container).getByTestId("roster-dates-trigger-ext1"));
+    expect(screen.getByTestId("roster-remove-ext1")).toBeTruthy();
+  });
+
+  it("keys on the payload, not the source: a ctsc-feed row on a center WITH programs and diseases still shows them", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "ext1", scholarState: "external", source: "ctsc-feed", diseases: [diseaseRow({})] }),
+        ]}
+        programs={PROGRAMS}
+      />,
+    );
+    expect(within(container).getByTestId("roster-program-filter")).toBeTruthy();
+    expect(within(container).getByTestId("roster-disease-filter-trigger")).toBeTruthy();
+  });
+
+  it("a CTSC feed row's refused remove shows the nightly-sync message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error: "feed_owned_membership" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "ext1", scholarState: "external", source: "ctsc-feed" })]}
+        programs={[]}
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-dates-trigger-ext1"));
+    fireEvent.click(screen.getByTestId("roster-remove-ext1"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove anyway" }));
+    await waitFor(() => expect(within(container).getByText(/nightly CTSC feed/)).toBeTruthy());
+    expect(within(container).getByTestId("center-roster-row-ext1")).toBeTruthy();
+  });
+});
+
+describe("CenterRosterCard — paging", () => {
+  const many = Array.from({ length: 30 }, (_, i) =>
+    member({ cwid: `p${String(i).padStart(2, "0")}`, name: `Person ${i}` }),
+  );
+
+  it("shows 25, then the rest on 'Load more'", () => {
+    const { container } = render(<CenterRosterCard {...base} members={many} programs={[]} />);
+    expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(25);
+    expect(within(container).getByTestId("roster-range-label").textContent).toBe("Showing 25 of 30 members");
+    expect(within(container).getByTestId("roster-show-more").textContent).toBe("Load more");
+    fireEvent.click(within(container).getByTestId("roster-show-more"));
+    expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(30);
+    expect(within(container).queryByTestId("roster-show-more")).toBeNull();
+  });
+
+  it("a disease decision does not collapse the page back to 25", async () => {
+    stubOk();
+    const withDiseases = many.map((m) => ({ ...m, diseases: [diseaseRow({})] }));
+    const { container } = render(<CenterRosterCard {...base} members={withDiseases} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-show-more"));
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-p29"));
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-p29-BREAST"));
+    await waitFor(() => expect(within(sheet()).getByTestId("disease-decision-p29-BREAST")).toBeTruthy());
+    expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(30);
+  });
+
+  it("with 'Has diseases to review' on, finishing a member keeps them listed and keeps the page", async () => {
+    stubOk();
+    const withDiseases = many.map((m) => ({ ...m, diseases: [diseaseRow({})] }));
+    const { container } = render(<CenterRosterCard {...base} members={withDiseases} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    fireEvent.click(within(container).getByTestId("roster-show-more"));
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-p29"));
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-p29-BREAST"));
+    await waitFor(() => expect(within(sheet()).getByTestId("disease-decision-p29-BREAST")).toBeTruthy());
+    expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(30);
+    expect(within(container).getByTestId("center-roster-row-p29")).toBeTruthy();
+    // The count is live, though, and flipping the toggle drops the finished member.
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("29");
+    fireEvent.click(within(sheet()).getByTestId("disease-review-close"));
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    fireEvent.click(within(container).getByTestId("roster-show-more"));
+    expect(within(container).queryByTestId("center-roster-row-p29")).toBeNull();
+  });
+});
+
+describe("CenterRosterCard — scholar hover card on names", () => {
+  it("wraps a WCM member's name, but not an external member's", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "wcm1", name: "Wcm Person" }), member({ cwid: "ab12", name: "Ext Person", scholarState: "external" })]}
+        programs={[]}
+      />,
+    );
+    // Radix HoverCard's trigger marks the wrapped element with data-state.
+    expect(within(container).getByTestId("roster-name-wcm1").getAttribute("data-state")).toBe("closed");
+    expect(within(container).queryByTestId("roster-name-ab12")).toBeNull();
+  });
+});
+
+const confirmed = (code: string, rank: number) =>
+  diseaseRow({
+    diseaseCode: code,
+    assignment: { ...diseaseRow({}).assignment!, rank },
+    decision: {
+      decision: "confirmed",
+      decidedBy: "abc123",
+      decidedAt: new Date("2026-01-01"),
+      scoreAtDecision: 10,
+      confidenceAtDecision: "medium",
+    },
+  });
+
+const rejected = (code: string) =>
+  diseaseRow({
+    diseaseCode: code,
+    decision: {
+      decision: "rejected",
+      decidedBy: "abc123",
+      decidedAt: new Date("2026-01-01"),
+      scoreAtDecision: 10,
+      confidenceAtDecision: "medium",
+    },
+  });
+
+const pendingHigh = (code: string, rank: number) =>
+  diseaseRow({ diseaseCode: code, assignment: { ...diseaseRow({}).assignment!, rank, confidence: "high" } });
+
+/** The open review sheet (Radix portals it out of the card's container). */
+function sheet(): HTMLElement {
+  return screen.getByTestId("disease-review-sheet");
+}
+
+describe("CenterRosterCard — disease chips", () => {
+  it("shows an 'N to review' pill and an 'N published' count — no per-disease chips", () => {
+    const m = member({
+      diseases: [confirmed("BREAST", 1), confirmed("LUNG", 2), confirmed("SKIN", 3), diseaseRow({ diseaseCode: "GYN" })],
+    });
+    const { container } = render(<CenterRosterCard {...base} members={[m]} programs={[]} />);
+    expect(within(container).queryByTestId("roster-disease-chip-m1-BREAST")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review");
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("3 published");
+  });
+
+  it("'+ Add a disease' for a member with none, 'N published' when nothing is left to review; both open the sheet", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "has", name: "Has Rows", diseases: [confirmed("BREAST", 1), rejected("LUNG")] }),
+          member({ cwid: "none", name: "No Rows" }),
+        ]}
+        programs={[]}
+      />,
+    );
+    expect(within(container).queryByTestId("roster-disease-pending-has")).toBeNull();
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-has"));
+    expect(within(sheet()).getByText("Has Rows")).toBeTruthy();
+    fireEvent.click(within(sheet()).getByTestId("disease-review-close"));
+    expect(screen.queryByTestId("disease-review-sheet")).toBeNull();
+
+    fireEvent.click(within(container).getByTestId("roster-disease-add-none"));
+    expect(within(sheet()).getByText("No Rows")).toBeTruthy();
+    expect(within(sheet()).getByText(/no disease assignments for this member yet/i)).toBeTruthy();
+  });
+
+  it("the published count opens the sheet too", () => {
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ diseases: [confirmed("BREAST", 1)] })]} programs={[]} />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-m1"));
+    expect(within(sheet()).getByTestId("disease-card-m1-BREAST")).toBeTruthy();
+  });
+
+  it("the sheet opens on 'To review'; a decided row stays until the tab changes", async () => {
+    stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ diseases: [confirmed("LUNG", 1), diseaseRow({})] })]}
+        programs={[]}
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    expect(within(sheet()).getByTestId("disease-review-tab-review").getAttribute("aria-selected")).toBe("true");
+    expect(within(sheet()).queryByTestId("disease-card-m1-LUNG")).toBeNull();
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-m1-BREAST"));
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-decision-m1-BREAST").textContent).toBe("Confirmed"),
+    );
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-review"));
+    expect(within(sheet()).queryByTestId("disease-card-m1-BREAST")).toBeNull();
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-published"));
+    expect(within(sheet()).getByTestId("disease-card-m1-LUNG")).toBeTruthy();
+    expect(within(sheet()).getByTestId("disease-card-m1-BREAST")).toBeTruthy();
+  });
+});
+
+describe("CenterRosterCard — disease review sheet", () => {
+  it("heads with the member, program and counts; Details expands the evidence", () => {
+    const m = member({
+      title: "Professor of Medicine",
+      programCode: "CT",
+      diseases: [diseaseRow({}), confirmed("LUNG", 2), rejected("SKIN")],
+    });
+    const { container } = render(<CenterRosterCard {...base} members={[m]} programs={PROGRAMS} />);
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    const s = within(sheet());
+    expect(s.getByText("Member One")).toBeTruthy();
+    expect(s.getByText("Professor of Medicine · CWID m1 · Cancer Therapeutics")).toBeTruthy();
+    expect(s.getByTestId("disease-review-summary").textContent).toBe("1 to review · 1 published · 1 rejected");
+    const card = within(s.getByTestId("disease-card-m1-BREAST"));
+    expect(card.getByText("#1")).toBeTruthy();
+    expect(card.getByText("Primary")).toBeTruthy();
+    expect(s.getByTestId("disease-details-toggle-m1-BREAST").textContent).toMatch(
+      /5 pubs \(2 lead\) · 1 trial led · 3 recent Details$/,
+    );
+    expect(card.queryByText("Publications")).toBeNull();
+    fireEvent.click(s.getByTestId("disease-details-toggle-m1-BREAST"));
+    expect(card.getByText("Publications")).toBeTruthy();
+    expect(card.getByText("5 authored")).toBeTruthy();
+    expect(card.getByText(/2 lead · 1 second · 2 middle\. 3 recent \(2018–2025\)\./)).toBeTruthy();
+  });
+
+  it("Confirm POSTs decision:confirmed to the existing route and flips the row", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ diseases: [diseaseRow({})] })]} programs={[]} />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-m1-BREAST"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/center/meyer_cancer_center/disease-assignments");
+    expect(bodyOf(fetchMock.mock.calls[0])).toEqual({ cwid: "m1", diseaseCode: "BREAST", decision: "confirmed" });
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-decision-m1-BREAST").textContent).toBe("Confirmed"),
+    );
+    expect(within(sheet()).getByTestId("disease-review-summary").textContent).toBe("0 to review · 1 published");
+    // The roster row now counts it as published and shows no pending pill.
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("1 published");
+    expect(within(container).queryByTestId("roster-disease-pending-m1")).toBeNull();
+  });
+
+  it("Reject POSTs decision:rejected", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ diseases: [diseaseRow({})] })]} programs={[]} />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-reject-m1-BREAST"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ decision: "rejected" });
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-card-m1-BREAST").getAttribute("data-decision")).toBe("rejected"),
+    );
+  });
+
+  it("Undo on a confirmed row POSTs clear and brings back Confirm / Reject", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ diseases: [confirmed("BREAST", 1)] })]} programs={[]} />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-undo-m1-BREAST"));
+    await waitFor(() => expect(within(sheet()).getByTestId("disease-confirm-m1-BREAST")).toBeTruthy());
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ decision: "clear" });
+  });
+
+  it("'Confirm N high-confidence' confirms only the undecided high rows, one POST each", async () => {
+    const fetchMock = stubOk();
+    const m = member({
+      diseases: [pendingHigh("BREAST", 1), pendingHigh("LUNG", 2), diseaseRow({ diseaseCode: "GYN" }), confirmed("SKIN", 4)],
+    });
+    const { container } = render(<CenterRosterCard {...base} members={[m]} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    const button = within(sheet()).getByTestId("disease-confirm-high");
+    expect(button.textContent).toBe("Confirm 2 high-confidence");
+    fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual(
+      expect.arrayContaining([
+        { cwid: "m1", diseaseCode: "BREAST", decision: "confirmed" },
+        { cwid: "m1", diseaseCode: "LUNG", decision: "confirmed" },
+      ]),
+    );
+    await waitFor(() => expect(within(sheet()).queryByTestId("disease-confirm-high")).toBeNull());
+    expect(within(sheet()).getByTestId("disease-confirm-m1-GYN")).toBeTruthy();
+  });
+
+  it("a failed decision reverts the row and shows an error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error: "assignment_not_found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ diseases: [diseaseRow({})] })]} programs={[]} />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-m1-BREAST"));
+    // The sheet is modal over the card, so the message must be IN the sheet.
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-review-error").textContent).toMatch(
+        /no longer in the current assignment list/,
+      ),
+    );
+    expect(within(sheet()).getByTestId("disease-confirm-m1-BREAST")).toBeTruthy();
+  });
+});
+
+describe("CenterRosterCard — manual add (\"+ Add a disease\")", () => {
+  it("offers only codes not already on the member, and POSTs confirmed with no prior assignment", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ diseases: [diseaseRow({})] })]}
+        programs={[]}
+        diseaseOptions={DISEASE_OPTIONS}
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-add-trigger-m1"));
+    const menu = within(screen.getByTestId("disease-add-menu-m1"));
+    // BREAST is already on the member — only the other option should be offered.
+    expect(menu.queryByTestId("disease-add-option-m1-BREAST")).toBeNull();
+    fireEvent.click(menu.getByTestId("disease-add-option-m1-GI_COLORECTAL"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(bodyOf(fetchMock.mock.calls[0])).toEqual({ cwid: "m1", diseaseCode: "GI_COLORECTAL", decision: "confirmed" });
+    expect(within(sheet()).getByTestId("disease-card-m1-GI_COLORECTAL").textContent).toMatch(/manually added/i);
+  });
+
+  it("Undo on a manually-added disease removes the row entirely (nothing left to show)", async () => {
+    stubOk();
+    const manuallyAdded = diseaseRow({
+      diseaseCode: "GI_COLORECTAL",
+      assignment: null,
+      decision: {
+        decision: "confirmed",
+        decidedBy: "abc123",
+        decidedAt: new Date("2026-01-01"),
+        scoreAtDecision: null,
+        confidenceAtDecision: null,
+      },
+    });
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ diseases: [manuallyAdded] })]} programs={[]} />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-undo-m1-GI_COLORECTAL"));
+    await waitFor(() => expect(within(sheet()).queryByTestId("disease-card-m1-GI_COLORECTAL")).toBeNull());
+  });
+});
+
+describe("CenterRosterCard — 'Has diseases to review' and the review queue", () => {
+  const members = [
+    member({ cwid: "a", name: "Alpha", diseases: [diseaseRow({}), diseaseRow({ diseaseCode: "LUNG" })] }),
+    member({ cwid: "b", name: "Bravo", diseases: [confirmed("BREAST", 1)] }),
+    member({ cwid: "c", name: "Charlie", diseases: [diseaseRow({})] }),
+    member({ cwid: "d", name: "Delta", diseases: [diseaseRow({})] }),
+  ];
+
+  it("counts MEMBERS with something to review, and the toggle narrows to them", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("3");
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    expect(within(container).queryByTestId("center-roster-row-b")).toBeNull();
+    expect(within(container).getAllByTestId(/^center-roster-row-/)).toHaveLength(3);
+  });
+
+  it("the toggle narrows the disease filter's option counts too", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    const breastCount = () => {
+      fireEvent.click(within(container).getByTestId("roster-disease-filter-trigger"));
+      const text = screen.getByTestId("roster-disease-filter-option-BREAST").textContent;
+      fireEvent.keyDown(screen.getByTestId("roster-disease-filter-menu"), { key: "Escape" });
+      return text;
+    };
+    // Alpha, Bravo (confirmed), Charlie, Delta all hold BREAST.
+    expect(breastCount()).toMatch(/4$/);
+    fireEvent.click(within(container).getByTestId("roster-needs-review-toggle"));
+    // Bravo has nothing to review, so it drops out of the count.
+    expect(breastCount()).toMatch(/3$/);
+  });
+
+  it("the Next button truncates a long name so the footer fits a phone", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    const next = within(sheet()).getByTestId("disease-review-next");
+    expect(next.className).toMatch(/min-w-0/);
+    expect(within(next).getByText("Next: Charlie").className).toMatch(/truncate/);
+  });
+
+  it("Prev walks back through the queue", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    expect(within(sheet()).queryByTestId("disease-review-prev")).toBeNull();
+    fireEvent.click(within(sheet()).getByTestId("disease-review-next"));
+    fireEvent.click(within(sheet()).getByTestId("disease-review-prev"));
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toMatch(/1 of/);
+  });
+
+  it("the count follows the other filters", () => {
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.change(within(container).getByTestId("roster-search-input"), { target: { value: "alpha" } });
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("1");
+    expect(within(container).getByTestId("roster-start-review-queue").textContent).toBe("Start review queue");
+  });
+
+  it("walks the queue with 'Next', skipping anyone already finished, and Close ends it", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toBe("Review queue · 1 of 3");
+    expect(within(sheet()).getByText("Alpha")).toBeTruthy();
+    expect(within(sheet()).getByTestId("disease-review-next").textContent).toBe("Next: Charlie →");
+    fireEvent.click(within(sheet()).getByTestId("disease-review-next"));
+    expect(within(sheet()).getByText("Charlie")).toBeTruthy();
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toBe("Review queue · 2 of 3");
+
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-c-BREAST"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(within(sheet()).getByTestId("disease-review-next").textContent).toBe("Next: Delta →");
+    fireEvent.click(within(sheet()).getByTestId("disease-review-next"));
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toBe("Review queue · 3 of 3");
+    expect(within(sheet()).queryByTestId("disease-review-next")).toBeNull();
+
+    fireEvent.click(within(sheet()).getByTestId("disease-review-close"));
+    expect(screen.queryByTestId("disease-review-sheet")).toBeNull();
+    // Opening a single member afterwards is not a queue.
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-a"));
+    expect(within(sheet()).queryByTestId("disease-review-queue-position")).toBeNull();
+  });
+
+  it("the queue holds only members who still have something to review", async () => {
+    stubOk();
+    const { container } = render(<CenterRosterCard {...base} members={members} programs={[]} />);
+    // Finish Charlie outside the queue first.
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-c"));
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-c-BREAST"));
+    await waitFor(() => expect(within(sheet()).getByTestId("disease-decision-c-BREAST")).toBeTruthy());
+    fireEvent.click(within(sheet()).getByTestId("disease-review-close"));
+    // Charlie has nothing left, so the queue is Alpha then Delta.
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toBe("Review queue · 1 of 2");
+    expect(within(sheet()).getByTestId("disease-review-next").textContent).toBe("Next: Delta →");
+  });
+});
+
+describe("CenterRosterCard — bulk selection", () => {
+  const two = [member({ cwid: "a", name: "Alpha" }), member({ cwid: "b", name: "Bravo" }), member({ cwid: "c", name: "Charlie" })];
+
+  it("the bar appears on a tick; Set role POSTs once per selected member only", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard {...base} members={two} programs={[]} membershipRoles={MEMBERSHIP_ROLES} />,
+    );
+    expect(screen.queryByTestId("roster-bulk-role")).toBeNull();
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    fireEvent.click(within(container).getByTestId("roster-select-b"));
+    expect(screen.getByText("2 members selected")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("roster-bulk-role"), { target: { value: "core_faculty" } });
+    await waitFor(() => expect(screen.queryByTestId("roster-bulk-role")).toBeNull());
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      expect.objectContaining({ cwid: "a", action: "set", membershipRoleKey: "core_faculty" }),
+      expect.objectContaining({ cwid: "b", action: "set", membershipRoleKey: "core_faculty" }),
+    ]);
+  });
+
+  it("select-all ticks every shown member; Set program writes each", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(<CenterRosterCard {...base} members={two} programs={PROGRAMS} />);
+    fireEvent.click(within(container).getByTestId("roster-select-all"));
+    expect(screen.getByText("3 members selected")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("roster-bulk-program"), { target: { value: "CB" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.every((c) => bodyOf(c).programCode === "CB")).toBe(true);
+  });
+
+  it("a failed write stays selected so it can be retried", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const cwid = JSON.parse(String((init as RequestInit).body)).cwid;
+      return new Response(JSON.stringify(cwid === "b" ? { ok: false, error: "x" } : { ok: true }), {
+        status: cwid === "b" ? 500 : 200,
+      });
+    });
+    const { container } = render(<CenterRosterCard {...base} members={two} programs={PROGRAMS} />);
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    fireEvent.click(within(container).getByTestId("roster-select-b"));
+    fireEvent.change(screen.getByTestId("roster-bulk-program"), { target: { value: "CB" } });
+    await waitFor(() => expect(screen.getByText("1 member selected")).toBeTruthy());
+    expect((within(container).getByTestId("roster-select-b") as HTMLElement).getAttribute("data-state")).toBe("checked");
+  });
+
+  it("Confirm high-confidence confirms only the selected members' pending HIGH rows", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1), diseaseRow({ diseaseCode: "GYN" })] }),
+          member({ cwid: "b", name: "Bravo", diseases: [pendingHigh("LUNG", 1)] }),
+        ]}
+        programs={[]}
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    const button = screen.getByTestId("roster-bulk-confirm-high");
+    expect(button.textContent).toBe("Confirm 1 high-confidence");
+    fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(bodyOf(fetchMock.mock.calls[0])).toEqual({ cwid: "a", diseaseCode: "BREAST", decision: "confirmed" });
+  });
+});
+
+describe("CenterRosterCard — Fill dates", () => {
+  it("fills undated members from their WCM appointment start, skipping invitees, the unknown and an end-date clash; Undo clears them", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "a", wcmStartDate: "2011-09-01" }),
+          member({ cwid: "b" }), // no appointment date on file
+          member({ cwid: "c", wcmStartDate: "2020-01-01", endDate: "2019-01-01" }), // would invert the range
+          member({ cwid: "d", wcmStartDate: "2015-01-01", membershipRoleKey: "invited" }), // not joined
+          member({ cwid: "e", startDate: "2018-01-01", wcmStartDate: null }), // already dated
+        ]}
+        programs={[]}
+      />,
+    );
+    const card = within(container).getByTestId("roster-fill-dates");
+    expect(card.textContent).toMatch(/3 memberships have no start date/);
+    expect(card.textContent).toMatch(/2 can’t be filled automatically/);
+    fireEvent.click(within(card).getByTestId("roster-fill-dates-run"));
+    await waitFor(() => expect(within(container).getByTestId("roster-fill-dates-done").textContent).toMatch(/1 start date filled/));
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      expect.objectContaining({ cwid: "a", action: "set", startDate: "2011-09-01" }),
+    ]);
+    expect(within(container).getByTestId("roster-dates-label-a").textContent).toBe("Since Sep 2011");
+
+    fireEvent.click(within(container).getByTestId("roster-fill-dates-undo"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(bodyOf(fetchMock.mock.calls[1])).toEqual(expect.objectContaining({ cwid: "a", startDate: null }));
+    await waitFor(() => expect(within(container).getByTestId("roster-dates-label-a").textContent).toBe("No start date"));
+  });
+});
+
+describe("CenterRosterCard — End at departure dates", () => {
+  it("ends each open departed membership on its departure date, skipping one that would precede its Start; Undo reopens them", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "g1", scholarState: "departed", departedOn: "2026-01-15", startDate: "2020-01-01" }),
+          member({ cwid: "g2", scholarState: "departed", departedOn: "2019-01-01", startDate: "2020-01-01" }), // precedes Start
+          member({ cwid: "g3", scholarState: "departed", departedOn: null }), // no date on file
+          member({ cwid: "g4", scholarState: "departed", departedOn: "2025-01-01", endDate: "2024-06-01" }), // already closed
+          member({ cwid: "here" }),
+        ]}
+        programs={[]}
+      />,
+    );
+    const banner = within(container).getByTestId("roster-needs-close-out");
+    expect(banner.textContent).toMatch(/3 members have left WCM/);
+    expect(banner.textContent).toMatch(/is on file for 1\./);
+    fireEvent.click(within(banner).getByTestId("roster-end-departed-run"));
+    await waitFor(() =>
+      expect(within(container).getByTestId("roster-end-departed-done").textContent).toMatch(/1 membership ended at departure date/),
+    );
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      expect.objectContaining({ cwid: "g1", action: "set", endDate: "2026-01-15" }),
+    ]);
+    expect(within(container).getByTestId("roster-needs-close-out").textContent).toMatch(/2 members have left WCM/);
+
+    fireEvent.click(within(container).getByTestId("roster-end-departed-undo"));
+    await waitFor(() => expect(within(container).queryByTestId("roster-end-departed-done")).toBeNull());
+    expect(bodyOf(fetchMock.mock.calls[1])).toEqual(expect.objectContaining({ cwid: "g1", endDate: null }));
+    expect(within(container).getByTestId("roster-needs-close-out").textContent).toMatch(/3 members have left WCM/);
+  });
+
+  it("offers no End button when no departure date is usable", () => {
+    const { container } = render(
+      <CenterRosterCard {...base} members={[member({ cwid: "g3", scholarState: "departed" })]} programs={[]} />,
+    );
+    expect(within(container).queryByTestId("roster-end-departed-run")).toBeNull();
+    expect(within(container).getByTestId("roster-needs-close-out-jump")).toBeTruthy();
+  });
+});
+
+describe("CenterRosterCard — auto-publish high-confidence inferences", () => {
+  // Two undecided HIGH rows (auto-published when the switch is on), one
+  // undecided medium row (always waits), one confirmed row.
+  const mixed = () =>
+    member({
+      diseases: [pendingHigh("BREAST", 1), pendingHigh("LUNG", 2), diseaseRow({ diseaseCode: "GYN" }), confirmed("SKIN", 4)],
+    });
+
+  function stubAutoPublish(ok: boolean) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify(ok ? { ok: true, changed: true } : { ok: false, error: "write_failed" }), {
+          status: ok ? 200 : 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+  }
+
+  it("ON: the pill counts only what waits, the published line counts confirmed + auto", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review");
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("3 published · 2 automatically");
+  });
+
+  it("OFF (the default): every undecided row is pending, exactly as before", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} />);
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("3 to review");
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("1 published");
+  });
+
+  it("ON: the summary stripes the high segment, says auto-published, and explains the switch", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[mixed(), member({ cwid: "m2", name: "Two", diseases: [pendingHigh("BREAST", 1)] })]}
+        programs={[]}
+        diseaseAutoPublish
+      />,
+    );
+    const summary = within(within(container).getByTestId("roster-disease-summary"));
+    expect(summary.getByTestId("roster-disease-summary-members").textContent).toBe("1 member to review");
+    expect(summary.getByTestId("roster-disease-summary-tiers").textContent).toMatch(/3 high · auto-published/);
+    const high = summary.getByTestId("roster-disease-summary-high-segment");
+    expect(high.getAttribute("data-auto-published")).toBe("true");
+    expect(high.style.backgroundImage).toMatch(/repeating-linear-gradient/);
+    expect(summary.getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("true");
+    expect(summary.getByTestId("roster-auto-publish-help").textContent).toBe(
+      "3 inferences for 2 members are published. A curator can reject any of them; medium and low confidence stays in your queue.",
+    );
+  });
+
+  it("OFF: plain high segment and legend, and the waiting-in-queue help text", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} />);
+    const summary = within(within(container).getByTestId("roster-disease-summary"));
+    expect(summary.getByTestId("roster-disease-summary-members").textContent).toBe("1 member to review");
+    const tiers = summary.getByTestId("roster-disease-summary-tiers").textContent ?? "";
+    expect(tiers).toMatch(/2 high/);
+    expect(tiers).not.toMatch(/auto-published/);
+    const high = summary.getByTestId("roster-disease-summary-high-segment");
+    expect(high.getAttribute("data-auto-published")).toBe("false");
+    expect(high.style.backgroundImage).toBe("");
+    expect(summary.getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("false");
+    expect(summary.getByTestId("roster-auto-publish-help").textContent).toBe(
+      "High-confidence inferences wait in your queue like the rest.",
+    );
+  });
+
+  it("ON: a member with only high-confidence rows has nothing to review — no pill, no queue, no bulk confirm", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1), pendingHigh("LUNG", 2)] })]}
+        programs={[]}
+        diseaseAutoPublish
+      />,
+    );
+    expect(within(container).queryByTestId("roster-disease-pending-a")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-manage-a").textContent).toBe("2 published · 2 automatically");
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("0");
+    expect(within(container).queryByTestId("roster-start-review-queue")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-summary-members").textContent).toBe("Nothing left to review");
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    expect(screen.queryByTestId("roster-bulk-confirm-high")).toBeNull();
+  });
+
+  it("OFF: the same member is in the queue and the bulk confirm offers its high rows", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1), pendingHigh("LUNG", 2)] })]}
+        programs={[]}
+        diseaseAutoPublish={false}
+      />,
+    );
+    expect(within(container).getByTestId("roster-disease-pending-a").textContent).toBe("2 to review");
+    expect(within(container).getByTestId("roster-needs-review-count").textContent).toBe("1");
+    fireEvent.click(within(container).getByTestId("roster-select-a"));
+    expect(screen.getByTestId("roster-bulk-confirm-high").textContent).toBe("Confirm 2 high-confidence");
+  });
+
+  it("ON: the review queue skips members whose only undecided rows are auto-published", () => {
+    const { container } = render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "a", name: "Alpha", diseases: [pendingHigh("BREAST", 1)] }),
+          member({ cwid: "b", name: "Bravo", diseases: [diseaseRow({})] }),
+        ]}
+        programs={[]}
+        diseaseAutoPublish
+      />,
+    );
+    fireEvent.click(within(container).getByTestId("roster-start-review-queue"));
+    expect(within(sheet()).getByTestId("disease-review-queue-position").textContent).toBe("Review queue · 1 of 1");
+    expect(within(sheet()).getByText("Bravo")).toBeTruthy();
+  });
+
+  it("the switch POSTs the new value and the counts follow it", async () => {
+    const fetchMock = stubAutoPublish(true);
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-auto-publish-switch"));
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("3 to review");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/center/meyer_cancer_center/disease-auto-publish");
+    expect(bodyOf(fetchMock.mock.calls[0])).toEqual({ enabled: false });
+    await waitFor(() =>
+      expect(within(container).getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("false"),
+    );
+    expect(within(container).queryByTestId("roster-auto-publish-error")).toBeNull();
+  });
+
+  it("a failed switch write reverts it and shows an error", async () => {
+    stubAutoPublish(false);
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-auto-publish-switch"));
+    await waitFor(() => expect(within(container).getByTestId("roster-auto-publish-error")).toBeTruthy());
+    expect(within(container).getByTestId("roster-auto-publish-switch").getAttribute("aria-checked")).toBe("true");
+    expect(within(container).getByTestId("roster-disease-pending-m1").textContent).toBe("1 to review");
+  });
+
+  it("sheet, ON: To review excludes auto rows; Published holds confirmed + auto with an Auto-published badge", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    const s = within(sheet());
+    expect(s.getByTestId("disease-review-tab-review").textContent).toBe("To review 1");
+    expect(s.getByTestId("disease-review-tab-published").textContent).toBe("Published 3");
+    expect(s.getByTestId("disease-review-tab-all").textContent).toBe("All 4");
+    expect(s.getByTestId("disease-review-summary").textContent).toBe("1 to review · 3 published (2 automatically)");
+    // To review: only the medium row, and no "Confirm N high-confidence".
+    expect(s.getByTestId("disease-card-m1-GYN")).toBeTruthy();
+    expect(s.queryByTestId("disease-card-m1-BREAST")).toBeNull();
+    expect(s.queryByTestId("disease-confirm-high")).toBeNull();
+
+    fireEvent.click(s.getByTestId("disease-review-tab-published"));
+    const breast = within(s.getByTestId("disease-card-m1-BREAST"));
+    expect(s.getByTestId("disease-card-m1-BREAST").getAttribute("data-decision")).toBe("auto");
+    expect(breast.getByTestId("disease-auto-m1-BREAST").textContent).toBe("Auto-published");
+    expect(breast.getByTestId("disease-reject-m1-BREAST")).toBeTruthy();
+    expect(breast.getByTestId("disease-confirm-m1-BREAST")).toBeTruthy();
+    // A human-confirmed row carries no auto badge.
+    expect(s.queryByTestId("disease-auto-m1-SKIN")).toBeNull();
+    expect(s.queryByTestId("disease-card-m1-GYN")).toBeNull();
+  });
+
+  it("sheet, ON: Confirm on an auto row makes it human-confirmed; Reject stores a rejection and the row stays until the tab changes", async () => {
+    const fetchMock = stubOk();
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} diseaseAutoPublish />);
+    fireEvent.click(within(container).getByTestId("roster-disease-manage-m1"));
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-published"));
+
+    fireEvent.click(within(sheet()).getByTestId("disease-confirm-m1-BREAST"));
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-decision-m1-BREAST").textContent).toBe("Confirmed"),
+    );
+    expect(within(sheet()).queryByTestId("disease-auto-m1-BREAST")).toBeNull();
+
+    fireEvent.click(within(sheet()).getByTestId("disease-reject-m1-LUNG"));
+    await waitFor(() =>
+      expect(within(sheet()).getByTestId("disease-card-m1-LUNG").getAttribute("data-decision")).toBe("rejected"),
+    );
+    expect(fetchMock.mock.calls.map((c) => bodyOf(c))).toEqual([
+      { cwid: "m1", diseaseCode: "BREAST", decision: "confirmed" },
+      { cwid: "m1", diseaseCode: "LUNG", decision: "rejected" },
+    ]);
+    // Re-choosing the tab drops the rejected row out of Published.
+    fireEvent.click(within(sheet()).getByTestId("disease-review-tab-published"));
+    expect(within(sheet()).queryByTestId("disease-card-m1-LUNG")).toBeNull();
+    expect(within(container).getByTestId("roster-disease-manage-m1").textContent).toBe("2 published");
+  });
+
+  it("sheet, OFF: high rows sit in To review with Confirm N high-confidence, and no auto badge", () => {
+    const { container } = render(<CenterRosterCard {...base} members={[mixed()]} programs={[]} />);
+    fireEvent.click(within(container).getByTestId("roster-disease-pending-m1"));
+    const s = within(sheet());
+    expect(s.getByTestId("disease-review-tab-review").textContent).toBe("To review 3");
+    expect(s.getByTestId("disease-review-tab-published").textContent).toBe("Published 1");
+    expect(s.getByTestId("disease-confirm-high").textContent).toBe("Confirm 2 high-confidence");
+    expect(s.getByTestId("disease-card-m1-BREAST").getAttribute("data-decision")).toBe("pending");
+    expect(s.queryByTestId("disease-auto-m1-BREAST")).toBeNull();
   });
 });

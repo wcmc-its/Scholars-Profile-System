@@ -11,12 +11,17 @@
  *      - centerType="institute" by a non-Superuser → 403 not_superuser.
  *      - Parent dept not found → 400 dept_not_found.
  *      - Slug collision → 400 slug_taken.
+ *      - Superuser omits deptCode on a center → 200, audits dept_code: null
+ *        (#2541); everyone else, and every division, still 400s without one.
+ *      - A NON-Superuser creator is seeded as Owner of the new center + a
+ *        `grant_change` audit row (#2544); a Superuser creator gets neither.
  *
  *  - `op:"update"` (center in-row):
  *      - Curator edits description; success + reflectUnitChange.
  *      - slug + centerType are Superuser-only.
  *      - Slug update revalidates the old slug too (previousSlug).
- *      - directorCwid="" stores null (explicit vacancy).
+ *      - Leadership (`directorCwid` / `leaderInterim`) moved OFF this route
+ *        in #2542 Phase C — see `center-leadership-route.test.ts`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -36,6 +41,7 @@ const {
   mockTxDivisionCreate,
   mockTxCenterFindUnique,
   mockTxCenterUpdate,
+  mockTxUnitAdminCreate,
   mockReflectUnitChange,
   mockIsOrgUnitCreateSuperuserOnly,
 } = vi.hoisted(() => ({
@@ -53,6 +59,7 @@ const {
   mockTxDivisionCreate: vi.fn(),
   mockTxCenterFindUnique: vi.fn(),
   mockTxCenterUpdate: vi.fn(),
+  mockTxUnitAdminCreate: vi.fn(),
   mockReflectUnitChange: vi.fn(),
   mockIsOrgUnitCreateSuperuserOnly: vi.fn(),
 }));
@@ -106,6 +113,7 @@ const fakeTx = {
     findUnique: mockTxDivisionFindUnique,
     update: mockTxDivisionUpdate,
   },
+  unitAdmin: { create: mockTxUnitAdminCreate },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -145,11 +153,10 @@ beforeEach(() => {
     slug: "old-slug",
     description: "old",
     url: null,
-    directorCwid: null,
-    leaderInterim: false,
     centerType: "center",
   });
   mockTxCenterUpdate.mockResolvedValue({});
+  mockTxUnitAdminCreate.mockResolvedValue({});
 });
 
 describe("/api/edit/unit op:'create' — informal center", () => {
@@ -186,6 +193,31 @@ describe("/api/edit/unit op:'create' — informal center", () => {
     mockUnitAdminFindMany.mockResolvedValue([
       { entityType: "department", entityId: "MED", role: "curator" },
     ]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "X",
+        slug: "x",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_unit_owner" });
+  });
+
+  // 2026-08-26 policy widening (decision #3) is scoped to `canManageAccess` /
+  // `canGrant` (granting/revoking `unit_admin` rows) — org-unit CREATE stays
+  // excluded from comms_steward parity (`comms-steward-profile-editing-
+  // spec.md` §3b: "adding/remove org units"). This route deliberately does
+  // NOT call the widened `canManageAccess` for this reason.
+  it("comms_steward with no unit_admin row → 403 not_unit_owner (create stays excluded)", async () => {
+    mockGetEditSession.mockResolvedValue({
+      cwid: "stw001",
+      isSuperuser: false,
+      isCommsSteward: true,
+    });
+    mockUnitAdminFindMany.mockResolvedValue([]);
     const res = await POST(
       post({
         op: "create",
@@ -260,6 +292,211 @@ describe("/api/edit/unit op:'create' — informal center", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "slug_taken" });
+  });
+});
+
+describe("/api/edit/unit op:'create' — the creator's owner grant (#2544)", () => {
+  /** The audit INSERT's bound values, positionally (arg 0 is the template
+   *  strings): 1 actor_cwid, 2 target_entity_type, 3 target_entity_id,
+   *  4 action, 5 fields_changed, 6 before_values, 7 after_values. */
+  function auditCall(n: number): unknown[] {
+    return mockExecuteRaw.mock.calls[n] as unknown[];
+  }
+
+  it("a NON-Superuser Owner is seeded as Owner of the center they just created", async () => {
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Imaging Working Group",
+        slug: "imaging-working-group",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const createdCode = (await res.json()).code as string;
+
+    // Centers never cascade, so this row is the ONLY thing that leaves the
+    // creator able to edit / grant on their own center.
+    expect(mockTxUnitAdminCreate).toHaveBeenCalledTimes(1);
+    expect(mockTxUnitAdminCreate).toHaveBeenCalledWith({
+      data: {
+        entityType: "center",
+        entityId: createdCode,
+        cwid: OWNER.cwid,
+        role: "owner",
+        grantedBy: OWNER.cwid,
+      },
+    });
+  });
+
+  it("the minted grant appends a SECOND audit row — `grant_change`, after `unit_create`", async () => {
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Imaging Working Group",
+        slug: "imaging-working-group",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const createdCode = (await res.json()).code as string;
+
+    // ONE transaction, not two: a refactor that moved the grant into its own
+    // `$transaction` would produce identical row counts but could leave an
+    // ownerless center behind on a partial failure — the original bug.
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(2);
+    expect(auditCall(0)[4]).toBe("unit_create");
+
+    const grantRow = auditCall(1);
+    // `grant_change` already exists in BOTH the TS union and the audit-log
+    // ENUM — a new action would pass tsc here and then MySQL-1265 the whole
+    // transaction at runtime.
+    expect(grantRow[4]).toBe("grant_change");
+    expect(grantRow[1]).toBe(OWNER.cwid); // actor_cwid
+    expect(grantRow[2]).toBe("center"); // target_entity_type
+    expect(grantRow[3]).toBe(createdCode); // target_entity_id
+    expect(grantRow[6]).toBeNull(); // before_values — nothing existed
+    expect(JSON.parse(grantRow[7] as string)).toEqual({
+      cwid: OWNER.cwid,
+      role: "owner",
+      granted_by: OWNER.cwid,
+    });
+  });
+
+  it("a SUPERUSER creating a center mints NO unit_admin row (they already pass every check)", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Y",
+        slug: "y",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterCreate).toHaveBeenCalledTimes(1);
+    expect(mockTxUnitAdminCreate).not.toHaveBeenCalled();
+    // ...and therefore exactly one audit row.
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(auditCall(0)[4]).toBe("unit_create");
+  });
+
+  it("a coded division mints no grant either — divisions cascade from the parent dept", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "division",
+        name: "Newly Coded Division",
+        slug: "newly-coded",
+        deptCode: "MED",
+        code: "N9999",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxUnitAdminCreate).not.toHaveBeenCalled();
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("/api/edit/unit op:'create' — center with no parent department (#2541)", () => {
+  /** `after_values` is the 7th bound value of the audit INSERT (see
+   *  `appendAuditRow`'s positional order); arg 0 is the template strings. */
+  function auditAfterValues(): Record<string, unknown> {
+    return JSON.parse(mockExecuteRaw.mock.calls[0][7] as string);
+  }
+
+  it("Superuser omits deptCode entirely → 200, no dept lookup, dept_code audited null", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Cross-Campus Initiative",
+        slug: "cross-campus-initiative",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockDepartmentFindUnique).not.toHaveBeenCalled();
+    expect(mockTxCenterCreate).toHaveBeenCalledTimes(1);
+    expect(auditAfterValues()).toMatchObject({ unit_type: "center", dept_code: null });
+  });
+
+  it("Superuser sends deptCode: null (the form's wire value) → 200", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Cross-Campus Initiative",
+        slug: "cross-campus-initiative",
+        deptCode: null,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(auditAfterValues()).toMatchObject({ dept_code: null });
+  });
+
+  it("Owner (non-Superuser) still needs a deptCode — it is what admits them", async () => {
+    const res = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+    expect(mockTxCenterCreate).not.toHaveBeenCalled();
+  });
+
+  it("a division still needs a deptCode even for a Superuser — it is a real FK", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const res = await POST(
+      post({ op: "create", unitType: "division", name: "X", slug: "x", code: "N9999" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+    expect(mockTxDivisionCreate).not.toHaveBeenCalled();
+  });
+
+  it("a SUPPLIED deptCode is still validated — unknown → 400 dept_not_found", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockDepartmentFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x", deptCode: "GHOST" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "dept_not_found" });
+  });
+
+  it("deptCode:'' is NOT an omission — 400 invalid_dept_code even for a Superuser", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const res = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x", deptCode: "" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+  });
+
+  it("lockdown flag ON: a Superuser may still omit it; a non-Superuser 400s before the 403", async () => {
+    // Deliberate ordering: the file's "a 400 precedes any authz check"
+    // invariant means the missing-deptCode 400 wins over `not_superuser`.
+    mockIsOrgUnitCreateSuperuserOnly.mockReturnValue(true);
+    const denied = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x" }),
+    );
+    expect(denied.status).toBe(400);
+    expect(await denied.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const allowed = await POST(
+      post({ op: "create", unitType: "center", name: "Y", slug: "y" }),
+    );
+    expect(allowed.status).toBe(200);
   });
 });
 
@@ -536,20 +773,33 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
   });
 
-  it("directorCwid='' stores null on the column (explicit vacancy)", async () => {
-    const res = await POST(
+  // #2542 Phase C — leadership moved to POST /api/edit/center-leadership;
+  // this route no longer recognizes either field name.
+  it("directorCwid and leaderInterim are no longer valid fields on this route", async () => {
+    const cwid = await POST(
       post({
         op: "update",
         entityType: "center",
         entityId: "MEYER",
         fieldName: "directorCwid",
-        value: "",
+        value: "new0001",
       }),
     );
-    expect(res.status).toBe(200);
-    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { directorCwid: null } }),
+    expect(cwid.status).toBe(400);
+    expect(await cwid.json()).toMatchObject({ ok: false, error: "invalid_field" });
+
+    const interim = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "leaderInterim",
+        value: "true",
+      }),
     );
+    expect(interim.status).toBe(400);
+    expect(await interim.json()).toMatchObject({ ok: false, error: "invalid_field" });
+    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
   });
 
   it("Center not found → 400 unit_not_found", async () => {

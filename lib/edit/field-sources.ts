@@ -36,7 +36,7 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
   // Conflicts of interest are read-only here; the scholar manages them in WRG.
   coi: "Weill Research Gateway",
   // Mentee relationships are derived from training records (Jenzabar / EC).
-  mentees: "Jenzabar or Employee Central",
+  mentees: "Jenzabar, Medical Education rosters, or Employee Central",
   // `profile-url` is OWNED by Scholars but, like `org-unit`, is a request-only
   // pseudo-attribute — the read-only Profile URL panel renders "Request a change"
   // but no source line, so this entry exists only for Record totality.

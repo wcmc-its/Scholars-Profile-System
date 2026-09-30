@@ -5,6 +5,11 @@
  * "The badge"). Fixed bottom-right, visible on every Scholars page
  * **except** the feedback form route itself.
  *
+ * Below `sm` (640px) it collapses to an icon-only circle (#1902): a
+ * fixed button always floats over whatever scrolls beneath it, so the
+ * phone footprint is kept to ~40x40px. The footer reserves bottom
+ * padding on mobile so its last links scroll clear of it.
+ *
  * Click navigates to `/about/feedback?from=<current URL>`. The query
  * param tells the page route this is a **contextual** launch (the page
  * the user was on is the anchor); direct-typed navigation to
@@ -52,10 +57,13 @@ export function FeedbackBadge() {
       onClick={onClick}
       aria-label="Open Scholars feedback form"
       title="Help us improve Scholars"
-      className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium text-foreground shadow-md transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] right-4 z-40 inline-flex items-center gap-2 rounded-full border border-border bg-background p-2.5 text-sm font-medium text-foreground shadow-md transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:px-3.5 sm:py-2"
     >
       <MessageSquare aria-hidden="true" className="size-4 text-muted-foreground" />
-      Feedback
+      {/* Icon-only below `sm` so the badge covers less body copy on phones (#1902). */}
+      <span data-testid="feedback-badge-label" className="sr-only sm:not-sr-only">
+        Feedback
+      </span>
     </button>
   );
 }

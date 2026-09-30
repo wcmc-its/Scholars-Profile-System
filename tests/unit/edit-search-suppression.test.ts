@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   mockScholarFindFirst: vi.fn(),
+  mockScholarFindMany: vi.fn(),
   mockCenterMembershipFindMany: vi.fn(),
   mockDivisionMembershipFindMany: vi.fn(),
   mockPublicationFindFirst: vi.fn(),
@@ -26,6 +27,7 @@ const hoisted = vi.hoisted(() => ({
   mockSuppressionUpdate: vi.fn(),
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
+  mockOrgUnitRoleAssignmentFindMany: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
   mockMeshDescriptorFindMany: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
@@ -35,7 +37,11 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
-      scholar: { findFirst: hoisted.mockScholarFindFirst },
+      // The cwid-scoped `loadEsiEligibilityByCwid` read uses `findMany`.
+      scholar: {
+        findFirst: hoisted.mockScholarFindFirst,
+        findMany: hoisted.mockScholarFindMany,
+      },
       centerMembership: { findMany: hoisted.mockCenterMembershipFindMany },
       // #540 Phase 8 — `buildPeopleDoc` issues a `divisionMembership` sidecar
       // for the manual-roster division facet keys. This suite doesn't seed
@@ -47,10 +53,13 @@ vi.mock("@/lib/db", () => ({
       // then refetches the affected project's surviving rows.
       grant: { findMany: hoisted.mockGrantFindMany },
       suppression: { findMany: hoisted.mockSuppressionFindMany },
-      // Issue #532 — leadership sidecar queries; this suite doesn't exercise
-      // leadership content, so both default to empty.
+      // Issue #532 — leadership sidecar queries. #2542 contract A — sole
+      // source is `orgUnitRoleAssignment`; `department`/`division` now serve
+      // only its batched name lookup. This suite doesn't exercise leadership
+      // content, so all default to empty.
       department: { findMany: hoisted.mockDepartmentFindMany },
       division: { findMany: hoisted.mockDivisionFindMany },
+      orgUnitRoleAssignment: { findMany: hoisted.mockOrgUnitRoleAssignmentFindMany },
       // #824 §4c — `buildPeopleDoc` issues a `scholarFamily` sidecar for the
       // public method-family rollup when a gate is passed (the reconciler now
       // passes one). This suite doesn't exercise method families; the default
@@ -67,6 +76,8 @@ vi.mock("@/lib/db", () => ({
       // default empty result keeps `buildPeopleDoc` on its raw-ETL-column
       // fallback (unchanged behavior for these tests).
       fieldOverride: { findMany: hoisted.mockFieldOverrideFindMany },
+      // Trial-evidence sidecar (one cwid); no trials in this suite.
+      personClinicalTrial: { findMany: async () => [] },
     },
     // #393 — the reconciler sentinel stamp on a successful reflect.
     write: { suppression: { update: hoisted.mockSuppressionUpdate } },
@@ -176,9 +187,11 @@ beforeEach(() => {
   hoisted.mockDivisionMembershipFindMany.mockResolvedValue([]);
   hoisted.mockDepartmentFindMany.mockResolvedValue([]);
   hoisted.mockDivisionFindMany.mockResolvedValue([]);
+  hoisted.mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([]);
   hoisted.mockScholarFamilyFindMany.mockResolvedValue([]);
   hoisted.mockMeshDescriptorFindMany.mockResolvedValue([]);
   hoisted.mockFieldOverrideFindMany.mockResolvedValue([]);
+  hoisted.mockScholarFindMany.mockResolvedValue([]);
 });
 
 describe("reflectSearchSuppression — scholar suppress", () => {
@@ -245,6 +258,12 @@ describe("reflectSearchSuppression — publication per-author hide", () => {
       index: { _index: "scholars-people", _id: "ann" },
     });
     expect((body[3] as { cwid: string }).cwid).toBe("ann");
+    // The fast-path keeps `esiEligible` (one cwid-scoped read), instead of
+    // dropping the field until the next nightly rebuild.
+    expect(hoisted.mockScholarFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ cwid: "ann" }) }),
+    );
+    expect(typeof (body[3] as { esiEligible?: unknown }).esiEligible).toBe("boolean");
   });
 });
 
@@ -542,7 +561,8 @@ describe("reflectGrantSuppressions — ETL batch (#2284)", () => {
     const results = await reflectGrantSuppressions([
       { suppressionId: "sup-b1", entityId: "INFOED-ACCT1-ann" },
       { suppressionId: "sup-b2", entityId: "INFOED-ACCT2-bob" },
-      // The reporter-grants half: unparseable, no index op, still stamped.
+      // The reporter-grants half (#2285): a RePORTER row IS indexed, keyed on
+      // its core project number, and shares the batch's one scan.
       { suppressionId: "sup-b3", entityId: "reporter:ann:R01CA000001" },
     ]);
 
@@ -553,20 +573,22 @@ describe("reflectGrantSuppressions — ETL batch (#2284)", () => {
     ]);
     expect(hoisted.mockSuppressionFindMany).toHaveBeenCalledTimes(1);
     expect(hoisted.mockGrantFindMany).toHaveBeenCalledTimes(1);
-    expect(hoisted.mockBulk).toHaveBeenCalledTimes(2);
+    expect(hoisted.mockBulk).toHaveBeenCalledTimes(3);
     expect(hoisted.mockBulk.mock.calls.map((c) => c[0].body)).toEqual([
       [{ delete: { _index: "scholars-funding", _id: "ACCT1" } }],
       [{ delete: { _index: "scholars-funding", _id: "ACCT2" } }],
+      [{ delete: { _index: "scholars-funding", _id: "R01CA000001" } }],
     ]);
     // Every row stamps, including the one with nothing to project (#2204).
     expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(3);
   });
 
   it("skips the scan entirely when no id in the batch parses", async () => {
-    // The reporter-grants ETL's whole batch. A corpus scan here is pure waste.
+    // Ids that are neither InfoEd nor RePORTER were never indexed, so a corpus
+    // scan here is pure waste. (RePORTER ids DO scan since #2285.)
     const results = await reflectGrantSuppressions([
-      { suppressionId: "sup-r1", entityId: "reporter:ann:R01CA000001" },
-      { suppressionId: "sup-r2", entityId: "reporter:bob:R01CA000002" },
+      { suppressionId: "sup-r1", entityId: "LEGACY-77-ann" },
+      { suppressionId: "sup-r2", entityId: "not-an-infoed-id" },
     ]);
 
     expect(results).toEqual([

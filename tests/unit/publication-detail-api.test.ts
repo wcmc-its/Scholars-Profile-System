@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   publicationCitingFindFirst: vi.fn().mockResolvedValue(null),
   familySuppressionOverlayFindMany: vi.fn().mockResolvedValue([]),
   familySensitivityOverlayFindMany: vi.fn().mockResolvedValue([]),
+  publicationCoreFindMany: vi.fn().mockResolvedValue([]),
+  coreClaimFindMany: vi.fn().mockResolvedValue([]),
+  coreFindMany: vi.fn().mockResolvedValue([]),
   withReciterConnection: vi.fn(),
 }));
 
@@ -39,7 +42,12 @@ vi.mock("@/lib/db", () => ({
     },
     familySuppressionOverlay: { findMany: mocks.familySuppressionOverlayFindMany },
     familySensitivityOverlay: { findMany: mocks.familySensitivityOverlayFindMany },
+    publicationCore: { findMany: mocks.publicationCoreFindMany },
+    coreClaim: { findMany: mocks.coreClaimFindMany },
+    core: { findMany: mocks.coreFindMany },
   },
+  // loadActiveCoreClaimsForPmids defaults to db.read — same table, same mock.
+  db: { read: { coreClaim: { findMany: mocks.coreClaimFindMany } } },
 }));
 
 vi.mock("@/lib/sources/reciterdb", () => ({
@@ -62,12 +70,17 @@ beforeEach(() => {
   mocks.publicationCitingFindFirst.mockResolvedValue(null);
   mocks.familySuppressionOverlayFindMany.mockResolvedValue([]);
   mocks.familySensitivityOverlayFindMany.mockResolvedValue([]);
+  mocks.publicationCoreFindMany.mockResolvedValue([]);
+  mocks.coreClaimFindMany.mockResolvedValue([]);
+  mocks.coreFindMany.mockResolvedValue([]);
   delete process.env.METHODS_LENS_ENABLED;
   delete process.env.METHODS_LENS_PUB_MODAL;
   delete process.env.METHODS_LENS_TOOL_CONTEXT;
   delete process.env.METHODS_LENS_PAGES;
   delete process.env.METHODS_LENS_SENSITIVE_GATE;
   delete process.env.PUBLICATION_CITING_BRIDGE;
+  delete process.env.CORE_PUB_MODAL;
+  delete process.env.CORE_PAGES;
   mocks.withReciterConnection.mockImplementation(
     async (fn: (conn: unknown) => Promise<unknown>) => {
       const conn = {
@@ -378,6 +391,69 @@ describe("getPublicationDetail — citing publications", () => {
     const r = await getPublicationDetail("12345");
     expect(r?.citingPubs?.[0].pmid).toBe("999");
     expect(r?.citingPubsTotal).toBe(1);
+  });
+});
+
+describe("getPublicationDetail — core facilities (Manual PMID add)", () => {
+  function emptyPub() {
+    return {
+      pmid: "12345",
+      title: "Test paper",
+      journal: null,
+      year: 2024,
+      volume: null,
+      issue: null,
+      pages: null,
+      fullAuthorsString: null,
+      abstract: null,
+      impactScore: null,
+      impactJustification: null,
+      citationCount: 0,
+      pmcid: null,
+      doi: null,
+      pubmedUrl: null,
+      meshTerms: [],
+      publicationTopics: [],
+    };
+  }
+
+  it("surfaces a manually-claimed core with no engine publication_core row at all", async () => {
+    process.env.CORE_PUB_MODAL = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(emptyPub());
+    mocks.publicationCoreFindMany.mockResolvedValueOnce([]); // engine never scored this pmid
+    mocks.coreClaimFindMany.mockResolvedValue([{ pmid: "12345", coreId: "2", status: "claimed" }]);
+    mocks.coreFindMany.mockResolvedValueOnce([
+      { id: "2", name: "Biomedical Imaging", facility: "CBIC" },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.cores).toEqual([{ coreId: "2", name: "Biomedical Imaging", facility: "CBIC", href: null }]);
+    expect(mocks.coreFindMany).toHaveBeenCalledWith({
+      where: { id: { in: ["2"] } },
+      select: { id: true, name: true, facility: true },
+    });
+  });
+
+  it("returns [] (no core lookup) when there's no engine row and no manual claim", async () => {
+    process.env.CORE_PUB_MODAL = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(emptyPub());
+    mocks.publicationCoreFindMany.mockResolvedValueOnce([]);
+    mocks.coreClaimFindMany.mockResolvedValue([]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.cores).toEqual([]);
+    expect(mocks.coreFindMany).not.toHaveBeenCalled();
+  });
+
+  it("does not re-fetch a core the engine already projected, even if also manually claimed", async () => {
+    process.env.CORE_PUB_MODAL = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(emptyPub());
+    mocks.publicationCoreFindMany.mockResolvedValueOnce([
+      { coreId: "2", status: "candidate", core: { name: "Biomedical Imaging", facility: "CBIC" } },
+    ]);
+    // claimed on the SAME core the engine already projected — not "manual"
+    mocks.coreClaimFindMany.mockResolvedValue([{ pmid: "12345", coreId: "2", status: "claimed" }]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.cores).toEqual([{ coreId: "2", name: "Biomedical Imaging", facility: "CBIC", href: null }]);
+    expect(mocks.coreFindMany).not.toHaveBeenCalled(); // no manual core lookup needed
   });
 });
 

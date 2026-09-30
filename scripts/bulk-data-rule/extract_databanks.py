@@ -8,10 +8,15 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from sqlalchemy import create_engine, text
-import catalog, scan2
+import catalog, scan2, snapshot
 
 API = os.environ.get("PUBMED_API_KEY", "")
-OUT = os.path.dirname(os.path.abspath(__file__))
+# ponytail: a durable, non-git location, not the script's own directory - a full run's CSVs are
+# expensive to regenerate (a corpus-wide PubMed pass) and this repo is public, so they must never
+# risk landing in a git worktree that gets cleaned up or, worse, committed. Same directory every
+# script in this pipeline writes to; see catalog.py's own header for the "not a config file" ethos.
+OUT = os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
 
 engine = create_engine(
     f"mysql+pymysql://{os.environ['DB_USERNAME']}:{os.environ['DB_PASSWORD']}@{os.environ['DB_HOST']}/{os.environ['DB_NAME']}"
@@ -32,8 +37,7 @@ JOIN identity i ON i.cwid = a.personIdentifier
 WHERE {where}
   AND r.publicationTypeCanonical = 'Academic Article'
 """
-with engine.connect() as conn:
-    pubs = pd.read_sql(text(q), conn, params=params)
+pubs = snapshot.snapshot_query(engine, q, f"{OUT}/snapshot_corpus.csv", params)
 pubs = pubs[pubs['pmid'].notna()].copy()
 pubs['pmid'] = pubs['pmid'].astype(int).astype(str)
 yr = dict(zip(pubs['pmid'], pubs['yr']))

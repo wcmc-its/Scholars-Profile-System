@@ -122,13 +122,17 @@ describe("AdministratorsRoster — directory enrichment", () => {
         nameResolutionDegraded={true}
       />,
     );
-    // The card title falls back to the bare CWID.
-    expect(screen.getByTestId("administrators-card-staff1")).toBeTruthy();
+    // The band-row name falls back to the bare CWID.
+    expect(screen.getByTestId("administrators-person-staff1")).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByTestId("administrators-name-degraded-note")).toBeTruthy(),
     );
     // No email link when none resolved.
     expect(screen.queryByTestId("administrators-email-staff1")).toBeNull();
+    // The CWID shows once, not as both the name and the muted CWID line.
+    expect(
+      screen.getByTestId("administrators-person-staff1").textContent!.match(/staff1/g),
+    ).toHaveLength(1);
   });
 
   it("clears the note after enrichment when everyone resolves via the directory", async () => {
@@ -268,7 +272,7 @@ const manualRow = (over: Partial<AdminRosterEntry> = {}): AdminRosterEntry =>
   });
 
 describe("AdministratorsRoster — Phase C write controls", () => {
-  it("an ED row renders Revoke + role controls DISABLED with the caveat note (non-superuser)", () => {
+  it("an ED row renders a read-only role pill + 'Read-only' instead of controls (non-superuser)", () => {
     stubRouter();
     render(
       <AdministratorsRoster
@@ -278,17 +282,18 @@ describe("AdministratorsRoster — Phase C write controls", () => {
         nameResolutionDegraded={false}
       />,
     );
-    const revoke = screen.getByTestId(
-      "administrators-revoke-acd4005-department-N1280",
-    ) as HTMLButtonElement;
-    expect(revoke.disabled).toBe(true);
-    const curator = screen.getByTestId(
-      "administrators-role-curator-acd4005-department:N1280",
-    ) as HTMLButtonElement;
-    expect(curator.disabled).toBe(true);
+    // No Revoke and no role toggle — the affordance matches the route's
+    // `ed_locked` gate instead of offering a control that would 403.
+    expect(screen.queryByTestId("administrators-revoke-acd4005-department-N1280")).toBeNull();
     expect(
-      screen.getByTestId("administrators-ed-locked-note-acd4005-department-N1280"),
-    ).toBeTruthy();
+      screen.queryByTestId("administrators-role-curator-acd4005-department:N1280"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("administrators-role-acd4005-department-N1280").textContent,
+    ).toBe("Curator");
+    const note = screen.getByTestId("administrators-ed-locked-note-acd4005-department-N1280");
+    expect(note.textContent).toContain("Read-only");
+    expect(screen.getByText("Web Directory · Department Administrator")).toBeTruthy();
   });
 
   it("a manual row renders Revoke + role controls ENABLED", () => {
@@ -315,7 +320,7 @@ describe("AdministratorsRoster — Phase C write controls", () => {
     ).toBeNull();
   });
 
-  it("a superuser ALSO sees ED-row controls DISABLED (read-only for everyone)", () => {
+  it("a superuser ALSO sees ED rows read-only (read-only for everyone)", () => {
     stubRouter();
     render(
       <AdministratorsRoster
@@ -327,14 +332,10 @@ describe("AdministratorsRoster — Phase C write controls", () => {
     );
     // ED rows are managed in the Web Directory — read-only here for everyone,
     // superusers included (no override; it would just be re-synced).
-    const revoke = screen.getByTestId(
-      "administrators-revoke-acd4005-department-N1280",
-    ) as HTMLButtonElement;
-    expect(revoke.disabled).toBe(true);
-    const curator = screen.getByTestId(
-      "administrators-role-curator-acd4005-department:N1280",
-    ) as HTMLButtonElement;
-    expect(curator.disabled).toBe(true);
+    expect(screen.queryByTestId("administrators-revoke-acd4005-department-N1280")).toBeNull();
+    expect(
+      screen.queryByTestId("administrators-role-curator-acd4005-department:N1280"),
+    ).toBeNull();
     expect(
       screen.getByTestId("administrators-ed-locked-note-acd4005-department-N1280"),
     ).toBeTruthy();
@@ -404,7 +405,218 @@ describe("AdministratorsRoster — Phase C write controls", () => {
   });
 });
 
+// ── cores-as-org-units P2 — `allCores` merges into the Add-dialog options ────
+
+describe("AdministratorsRoster — allCores option merge (P2)", () => {
+  it("offers a core with zero grants as an Add-dialog option", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow()]}
+        isSuperuser={false}
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+        allCores={[{ id: "2", name: "Biomedical Imaging" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-add-trigger"));
+    const options = screen
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(options).toContain("core:2");
+  });
+
+  it("keeps the roster's real unitName for a core that already has a grant, over the allCores placeholder", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[
+          entry({
+            cwid: "own001",
+            name: "Own One",
+            nameResolved: true,
+            grants: [
+              {
+                entityType: "core",
+                entityId: "2",
+                unitName: "Biomedical Imaging (roster)",
+                role: "owner",
+                source: "manual",
+              },
+            ],
+          }),
+        ]}
+        isSuperuser={false}
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+        allCores={[{ id: "2", name: "Biomedical Imaging (catalog)" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-add-trigger"));
+    const options = screen.getAllByRole("option") as HTMLOptionElement[];
+    const coreOption = options.find((o) => o.value === "core:2");
+    expect(coreOption?.textContent).toBe("Biomedical Imaging (roster) · Core");
+  });
+
+  it("does not offer a core option when allCores is omitted (default empty)", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow()]}
+        isSuperuser={false}
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-add-trigger"));
+    const options = screen
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(options.some((v) => v.startsWith("core:"))).toBe(false);
+  });
+});
+
 // ── #729 — per-card "View as" launch shortcut gating ─────────────────────────
+
+// ── Sort + filter (§ SORT / § FILTER) ────────────────────────────────────────
+
+describe("AdministratorsRoster — sort + filter", () => {
+  const zoe = entry({
+    cwid: "zoe1",
+    name: "Zoe Zebra",
+    nameResolved: true,
+    grants: [
+      {
+        entityType: "department",
+        entityId: "A1",
+        unitName: "Anesthesiology",
+        role: "curator",
+        source: "manual",
+      },
+    ],
+  });
+  const amy = entry({
+    cwid: "amy1",
+    name: "Amy Apple",
+    nameResolved: true,
+    grants: [
+      {
+        entityType: "department",
+        entityId: "Z1",
+        unitName: "Zoology",
+        role: "curator",
+        source: "manual",
+      },
+    ],
+  });
+
+  it("defaults to sorting by person name", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    const names = screen.getAllByTestId(/^administrators-person-/).map((el) => el.getAttribute("data-testid"));
+    expect(names).toEqual(["administrators-person-amy1", "administrators-person-zoe1"]);
+  });
+
+  it("switching to 'Org unit' groups by org unit (not by person), sorted by unit name", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-sort-orgUnit"));
+    // "Anesthesiology" (zoe's unit) sorts before "Zoology" (amy's) — each
+    // renders as its own group, with the header column now "Person".
+    const unitGroups = screen
+      .getAllByTestId(/^administrators-unit-/)
+      .map((el) => el.getAttribute("data-testid"));
+    expect(unitGroups).toEqual([
+      "administrators-unit-department:A1",
+      "administrators-unit-department:Z1",
+    ]);
+    expect(screen.getByTestId("administrators-admin-department:A1-zoe1")).toBeTruthy();
+    expect(screen.getByTestId("administrators-admin-department:Z1-amy1")).toBeTruthy();
+  });
+
+  it("lists a shared org unit once, with every admin nested underneath (not once per person)", () => {
+    stubRouter();
+    const zane = entry({
+      cwid: "zan1",
+      name: "Zane Zebra",
+      nameResolved: true,
+      grants: [
+        {
+          entityType: "department",
+          entityId: "A1",
+          unitName: "Anesthesiology",
+          role: "owner",
+          source: "manual",
+        },
+      ],
+    });
+    render(
+      <AdministratorsRoster
+        entries={[zoe, zane]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-sort-orgUnit"));
+    // Both zoe and zane administer "Anesthesiology" (department:A1) — the
+    // unit's group header must render exactly once, with both admins as
+    // separate rows underneath (the bug being fixed: it used to repeat the
+    // unit's name once per person instead of grouping them).
+    expect(screen.getAllByTestId("administrators-unit-department:A1")).toHaveLength(1);
+    expect(screen.getByTestId("administrators-admin-department:A1-zoe1")).toBeTruthy();
+    expect(screen.getByTestId("administrators-admin-department:A1-zan1")).toBeTruthy();
+  });
+
+  it("filters to person-groups matching name, cwid, or org unit (case-insensitive substring)", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("administrators-filter-input"), {
+      target: { value: "zoology" },
+    });
+    expect(screen.getByTestId("administrators-person-amy1")).toBeTruthy();
+    expect(screen.queryByTestId("administrators-person-zoe1")).toBeNull();
+  });
+
+  it("shows the no-matches message (distinct from the empty-roster message) when nothing matches", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("administrators-filter-input"), {
+      target: { value: "no such person or unit" },
+    });
+    expect(screen.getByTestId("administrators-no-matches")).toBeTruthy();
+    expect(screen.queryByTestId("administrators-empty")).toBeNull();
+    expect(screen.queryByTestId("administrators-table")).toBeNull();
+  });
+});
 
 describe("AdministratorsRoster — View as (#729)", () => {
   it("renders a View-as button on other people's cards when canImpersonate", () => {
@@ -446,5 +658,154 @@ describe("AdministratorsRoster — View as (#729)", () => {
       />,
     );
     expect(screen.queryByTestId("view-as-fac001")).toBeNull();
+  });
+});
+
+// ── 2026-09 redesign: one table, collapsible multi-grant rows, filter rail ──
+
+describe("AdministratorsRoster — table redesign", () => {
+  const g = (
+    entityType: "department" | "division" | "center",
+    entityId: string,
+    unitName: string,
+    role: "owner" | "curator",
+    source: string,
+    extra: Record<string, unknown> = {},
+  ) => ({ entityType, entityId, unitName, role, source, ...extra });
+
+  // Obviously fake people.
+  const multi = entry({
+    cwid: "mul001",
+    name: "Morgan Many",
+    nameResolved: true,
+    grants: [
+      g("division", "V1", "Div Alpha", "curator", "ED:DivA"),
+      g("division", "V2", "Div Beta", "curator", "ED:DivA"),
+      g("division", "V3", "Div Gamma", "curator", "ED:DivA"),
+      g("division", "V4", "Div Delta", "curator", "ED:DivA"),
+    ],
+  });
+  const single = entry({
+    cwid: "one001",
+    name: "Oscar Once",
+    nameResolved: true,
+    grants: [
+      g("department", "D1", "Dept One", "owner", "manual", {
+        grantedBy: "boss1",
+        grantedByName: "Boss Person",
+        grantedAt: "2026-03-04T12:00:00.000Z",
+      }),
+    ],
+  });
+  const renderIt = () =>
+    render(
+      <AdministratorsRoster
+        entries={[multi, single]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+
+  it("collapses a multi-grant person to a summary that expands to one row per grant", () => {
+    stubRouter();
+    renderIt();
+    const row = screen.getByTestId("administrators-person-mul001");
+    expect(row.textContent).toContain("4 divisions");
+    expect(row.textContent).toContain("Div Alpha, Div Beta, Div Gamma, +1 more");
+    expect(row.textContent).toContain("Curator · 4");
+    expect(row.textContent).toContain("Web Directory · Division Administrator");
+    expect(screen.queryByTestId("administrators-grant-mul001-division-V1")).toBeNull();
+
+    const toggle = screen.getByTestId("administrators-expand-mul001");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    for (const id of ["V1", "V2", "V3", "V4"]) {
+      expect(screen.getByTestId(`administrators-grant-mul001-division-${id}`)).toBeTruthy();
+    }
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId("administrators-grant-mul001-division-V1")).toBeNull();
+  });
+
+  it("Expand all / Collapse all opens every multi-grant person", () => {
+    stubRouter();
+    renderIt();
+    const btn = screen.getByTestId("administrators-expand-all");
+    expect(btn.textContent).toBe("Expand all");
+    fireEvent.click(btn);
+    expect(screen.getByTestId("administrators-grant-mul001-division-V4")).toBeTruthy();
+    expect(btn.textContent).toBe("Collapse all");
+  });
+
+  it("a single manual grant shows the role toggle, Revoke, and who added it", () => {
+    stubRouter();
+    renderIt();
+    const row = screen.getByTestId("administrators-grant-one001-department-D1");
+    expect(row.textContent).toContain("Dept One");
+    expect(row.textContent).toContain("Added by Boss Person · Mar 2026");
+    expect(screen.getByTestId("administrators-role-owner-one001-department:D1")).toBeTruthy();
+    expect(screen.getByTestId("administrators-revoke-one001-department-D1")).toBeTruthy();
+    expect(screen.queryByTestId("administrators-expand-one001")).toBeNull();
+  });
+
+  it("shows people / grants / granted-here stats and a Showing footer", () => {
+    stubRouter();
+    renderIt();
+    const stats = screen.getByTestId("administrators-stats").textContent ?? "";
+    expect(stats).toContain("2 people");
+    expect(stats).toContain("5 grants");
+    expect(stats).toContain("1 granted here");
+    expect(screen.getByTestId("administrators-footer").textContent).toBe(
+      "Showing 2 of 2 people · 5 grants.",
+    );
+  });
+
+  it("'Most grants' sorts by grant count before name", () => {
+    stubRouter();
+    const many = entry({ ...multi, name: "Zed Many" });
+    render(
+      <AdministratorsRoster
+        entries={[single, many]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    const order = () =>
+      screen.getAllByTestId(/^administrators-person-/).map((el) => el.getAttribute("data-testid"));
+    expect(order()).toEqual(["administrators-person-one001", "administrators-person-mul001"]);
+    fireEvent.click(screen.getByTestId("administrators-sort-grants"));
+    expect(order()).toEqual(["administrators-person-mul001", "administrators-person-one001"]);
+  });
+
+  it("rail filters narrow by source and by grant count, with people counts; Clear resets", () => {
+    stubRouter();
+    renderIt();
+    const rail = screen.getByTestId("administrators-rail");
+    expect(rail.textContent).toContain("Web Directory1");
+    expect(rail.textContent).toContain("Granted here1");
+
+    fireEvent.click(screen.getByTestId("administrators-filter-src-manual"));
+    expect(screen.getByTestId("administrators-person-one001")).toBeTruthy();
+    expect(screen.queryByTestId("administrators-person-mul001")).toBeNull();
+
+    // AND across groups: manual source + 2–5 grants matches nobody.
+    fireEvent.click(screen.getByTestId("administrators-filter-n-2-5"));
+    expect(screen.getByTestId("administrators-no-matches")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("administrators-filters-clear"));
+    expect(screen.getByTestId("administrators-person-one001")).toBeTruthy();
+    expect(screen.getByTestId("administrators-person-mul001")).toBeTruthy();
+  });
+
+  it("OR within a group: Owner + Curator keeps both people", () => {
+    stubRouter();
+    renderIt();
+    fireEvent.click(screen.getByTestId("administrators-filter-role-owner"));
+    expect(screen.queryByTestId("administrators-person-mul001")).toBeNull();
+    fireEvent.click(screen.getByTestId("administrators-filter-role-curator"));
+    expect(screen.getByTestId("administrators-person-mul001")).toBeTruthy();
+    expect(screen.getByTestId("administrators-person-one001")).toBeTruthy();
   });
 });

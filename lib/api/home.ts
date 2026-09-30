@@ -29,7 +29,7 @@ import {
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
-import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { FEED_EXCLUDED_TYPES, NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { publicRoleWhere, isPubliclyDisplayed } from "@/lib/eligibility";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import { sampleSpotlightPapers } from "@/lib/spotlight-sampling";
@@ -134,6 +134,7 @@ export type HomeStats = {
   scholarCount: number;
   publicationCount: number;
   researchAreaCount: number;
+  subtopicCount: number;
 };
 
 export type ParentTopic = {
@@ -141,6 +142,7 @@ export type ParentTopic = {
   name: string;
   scholarCount: number;
   publicationCount: number;
+  subtopicCount: number;
 };
 
 export type HomeMethodCategory = {
@@ -296,7 +298,8 @@ function cachedHomeRead<T>(key: string, load: () => Promise<T>): Promise<T> {
  * whose parent topic no longer resolves is dropped, and a (parent, subtopic)
  * pair with no aggregate row reports `null` counts rather than a confident zero.
  * Papers are additionally dropped for suppression (#356) and for
- * `NEVER_DISPLAY_TYPES` (#2219) — the artifact is not trusted to be pre-clean.
+ * `NEVER_DISPLAY_TYPES` (#2219), and when SPS has no `publication` row for the
+ * pmid at all (#2229) — the artifact is not trusted to be pre-clean.
  *
  * Render-order: deterministic alphabetical by `parentTopicId`. The artifact
  * does not ship a position field; if editorial-priority ordering is ever
@@ -367,19 +370,31 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
   // spotlight indefinitely. Resolved as an explicit pmid set, mirroring
   // `darkPmids`, rather than a nested relation filter: a paper must be dropped
   // for a NAMED reason, not by the side effect of losing its authors.
-  const neverDisplayPmids = new Set(
+  //
+  // #2229 — the same read also names the artifact pmids SPS has NO
+  // `publication` row for. Those have no type to test above and no authors for
+  // `resolveDarkPmids`, so they used to fall out only incidentally through the
+  // zero-author guard; if that guard ever loosened they would render unvetted.
+  const publicationRows =
     pmids.length > 0
-      ? (
-          await prisma.publication.findMany({
-            where: {
-              pmid: { in: pmids },
-              publicationType: { in: [...NEVER_DISPLAY_TYPES] },
-            },
-            select: { pmid: true },
-          })
-        ).map((p) => p.pmid)
-      : [],
+      ? await prisma.publication.findMany({
+          where: { pmid: { in: pmids } },
+          select: { pmid: true, publicationType: true },
+        })
+      : [];
+  const neverDisplayTypes: ReadonlySet<string> = new Set(NEVER_DISPLAY_TYPES);
+  const neverDisplayPmids = new Set(
+    publicationRows
+      .filter((p) => p.publicationType !== null && neverDisplayTypes.has(p.publicationType))
+      .map((p) => p.pmid),
   );
+  const knownPmids = new Set(publicationRows.map((p) => p.pmid));
+  const orphanPmids = pmids.filter((pmid) => !knownPmids.has(pmid));
+  if (orphanPmids.length > 0) {
+    logSparseHide("home_spotlight_dropped_orphan_pmids", knownPmids.size, pmids.length, {
+      orphanPmids,
+    });
+  }
   // #2223 — the kill switch actually governs this surface now. OFF means a
   // hidden-class student is ABSENT from the chip row (what the QA runbook has
   // always claimed), not merely "not additionally hydrated": on prod the 690
@@ -434,7 +449,16 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
   // Prisma groupBy can't express
   // COUNT(DISTINCT cwid), so a single raw query covers both counts in one
   // round-trip. Restricted to D-15 floor (publication_topic only carries
-  // 2020+ data) and to active non-deleted scholars.
+  // 2020+ data).
+  //
+  // #2242 — the publication count is the SAME definition the linked topic
+  // page's subarea rail uses (`getSubtopicRail` in lib/api/topics.ts): DISTINCT
+  // pmids, research articles only (`FEED_EXCLUDED_TYPES`), no scholar filter.
+  // It was COUNT(*) over publication_topic, keyed (pmid, cwid, parent), so every
+  // WCM co-author counted the paper again and the card advertised 2–3× the
+  // number its own link showed. A NULL or missing publication_type is excluded,
+  // exactly as the rail's Prisma `notIn` relation filter excludes it. The
+  // active-scholar filter now applies to the scholar count only.
   const subtopicPairs = rows.map((r) => ({
     parent: r.parentTopicId,
     sub: r.subtopicId,
@@ -449,15 +473,17 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
     subtopicPairs.length > 0
       ? ((await prisma.$queryRawUnsafe(
           `SELECT pt.parent_topic_id, pt.primary_subtopic_id,
-                  COUNT(*) AS publication_count,
-                  COUNT(DISTINCT pt.cwid) AS scholar_count
+                  COUNT(DISTINCT CASE WHEN p.publication_type NOT IN (${FEED_EXCLUDED_TYPES.map(() => "?").join(", ")})
+                                      THEN pt.pmid END) AS publication_count,
+                  COUNT(DISTINCT CASE WHEN s.deleted_at IS NULL AND s.status = 'active'
+                                      THEN pt.cwid END) AS scholar_count
              FROM publication_topic pt
-             JOIN scholar s ON s.cwid = pt.cwid
+             LEFT JOIN publication p ON p.pmid = pt.pmid
+             LEFT JOIN scholar s ON s.cwid = pt.cwid
             WHERE pt.year >= ?
-              AND s.deleted_at IS NULL
-              AND s.status = 'active'
               AND (${subtopicPairs.map(() => "(pt.parent_topic_id = ? AND pt.primary_subtopic_id = ?)").join(" OR ")})
             GROUP BY pt.parent_topic_id, pt.primary_subtopic_id`,
+          ...FEED_EXCLUDED_TYPES,
           RECITERAI_YEAR_FLOOR,
           ...subtopicPairs.flatMap((p) => [p.parent, p.sub]),
         )) as CountRow[]) ?? []
@@ -501,7 +527,9 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
       // #356 — drop a paper taken down whole, or with zero displayed authors.
       // #2219 — and never a Retraction / Erratum, however clean the artifact
       // looked when it was published.
+      // #2229 — and never a pmid SPS holds no publication row for (logged above).
       if (
+        !knownPmids.has(p.pmid) ||
         authors.length === 0 ||
         darkPmids.has(p.pmid) ||
         neverDisplayPmids.has(p.pmid)
@@ -583,7 +611,7 @@ export function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
 
 async function getBrowseAllResearchAreasUncached(): Promise<ParentTopic[]> {
   const topics = await prisma.topic.findMany({
-    select: { id: true, label: true },
+    select: { id: true, label: true, _count: { select: { subtopics: true } } },
     orderBy: { label: "asc" },
   });
 
@@ -621,6 +649,7 @@ async function getBrowseAllResearchAreasUncached(): Promise<ParentTopic[]> {
     name: t.label,
     scholarCount: scholarByParent.get(t.id) ?? 0,
     publicationCount: pubByParent.get(t.id) ?? 0,
+    subtopicCount: t._count.subtopics,
   }));
 }
 
@@ -662,7 +691,7 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
   // role_category is admitted by both (an un-backfilled scholar is absent data,
   // not an unrecognized token); see publicRoleWhere() for the three-valued-logic
   // trap that makes a bare `notIn` hide every un-backfilled scholar.
-  const [publicScholars, publicationCount, researchAreaCount] = await Promise.all([
+  const [publicScholars, publicationCount, researchAreaCount, subtopicCount] = await Promise.all([
     prisma.scholar.findMany({
       where: { deletedAt: null, status: "active", ...publicRoleWhere() },
       select: { roleCategory: true },
@@ -671,6 +700,7 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
       where: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
     }),
     prisma.topic.count(),
+    prisma.subtopic.count(),
   ]);
   // ponytail: counted in-process over one column for ~8.7k rows, behind
   // cachedHomeRead. If the corpus ever outgrows that, push the prefix into SQL
@@ -679,7 +709,7 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
   const scholarCount = publicScholars.filter((s) =>
     isPubliclyDisplayed(s.roleCategory),
   ).length;
-  return { scholarCount, publicationCount, researchAreaCount };
+  return { scholarCount, publicationCount, researchAreaCount, subtopicCount };
 }
 
 // ---------------------------------------------------------------------------

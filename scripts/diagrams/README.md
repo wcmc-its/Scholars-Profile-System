@@ -77,3 +77,20 @@ up every file automatically (ordered by filename) and adds it to the viewer.
 - Diagram **content** is sourced from `docs/architecture-overview.md`,
   `docs/network-security-topology.md`, and `cdk/lib/*` — keep those authoritative;
   these files are the picture, not the source of truth.
+
+## Grant-matching views (06-08) + fact verification
+
+Views 06-08 cover the grant-matching subsystem (corpus supply chain from
+ReciterAI's `pipeline_grants`, the ingest cadences and freshness guardrails, and
+the Matcha matching surfaces/engines). Because they bake drift-prone constants
+(crons, metric/alarm values, index + flag names, engine export names),
+`verify-facts.mjs` asserts each against its real source on every build and fails
+loud when a constant can't be found. ReciterAI-side facts (the 03:00 UTC rule,
+the `reciterai-grants` task family) are checked best-effort against a local
+ReciterAI checkout's `origin/main` (`RECITERAI_DIR` overrides the location); when
+no checkout exists — e.g. CI — those probes WARN instead of failing.
+
+The renderer (`lib.mjs`/`build.mjs`) was synced 2026-08-20 with the improved
+portable copy: SVGs now carry accessible names (`role="img"` + per-node
+`<title>` hover tooltips), the gallery footer stamps the source commit, and
+`meta.edgeLegend`/`meta.seeAlso` render arrow keys and cross-links.

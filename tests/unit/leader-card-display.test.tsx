@@ -22,22 +22,41 @@ const base: Leader = {
 };
 
 describe("LeaderCard (display)", () => {
-  it("links the name to the profile when a slug is present", () => {
-    render(<LeaderCard leader={base} role="Chair" />);
+  it("makes the WHOLE card the profile link when a slug is present (Unit Page v2)", () => {
+    const { container } = render(<LeaderCard leader={base} role="Chair" />);
+    const link = screen.getByRole("link", { name: /Test Leader/ });
+    expect(link.getAttribute("href")).toContain("test-leader");
+    // The card itself is the link: it wraps the role eyebrow and the title too,
+    // and there is exactly one link (no nested name link).
+    expect(link).toBe(container.firstElementChild);
+    expect(link.textContent).toContain("Chair");
+    expect(link.textContent).toContain("Professor of Medicine");
+    expect(container.querySelectorAll("a")).toHaveLength(1);
+  });
+
+  it("keeps the card a <div> with only the name linked when the role has an expansion (no <abbr> inside a link)", () => {
+    const { container } = render(
+      <LeaderCard leader={base} role="COE Liaison" expansion={COE_EXPANSION} />,
+    );
+    expect(container.firstElementChild!.tagName).toBe("DIV");
     const link = screen.getByRole("link", { name: "Test Leader" });
     expect(link.getAttribute("href")).toContain("test-leader");
   });
 
   it("renders the name as plain text (no link) for an external leader (slug null)", () => {
     render(<LeaderCard leader={{ ...base, slug: null }} role="Chair" />);
-    expect(screen.queryByRole("link", { name: "Test Leader" })).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
     // Name still shown, and the role eyebrow still renders.
     expect(screen.getByText("Test Leader")).toBeTruthy();
     expect(screen.getByText("Chair")).toBeTruthy();
   });
 
-  it("expands COE on the liaison eyebrow, without changing the visible label", () => {
-    const { container } = render(<LeaderCard leader={base} role="COE Liaison" />);
+  it("expands COE on the liaison eyebrow (via the expansion prop), without changing the visible label", () => {
+    // #2558 — the expansion is a prop now, sourced from the vocabulary by the
+    // caller (`getCenterProgram`), not a constant `LeaderCard` imports itself.
+    const { container } = render(
+      <LeaderCard leader={base} role="COE Liaison" expansion={COE_EXPANSION} />,
+    );
     const abbr = container.querySelector("abbr");
     expect(abbr).not.toBeNull();
     expect(abbr!.textContent).toBe("COE");
@@ -47,9 +66,39 @@ describe("LeaderCard (display)", () => {
     expect(container.textContent).toContain("COE Liaison");
   });
 
-  it("does not wrap a non-COE role in an abbr", () => {
+  it("does not wrap a role in an abbr when no expansion is given", () => {
     const { container } = render(<LeaderCard leader={base} role="Interim Leader" />);
     expect(container.querySelector("abbr")).toBeNull();
     expect(screen.getByText("Interim Leader")).toBeTruthy();
+  });
+
+  it("does not wrap 'COE Liaison' in an abbr when no expansion is given", () => {
+    // Passing the literal role string is no longer sufficient by itself —
+    // without `expansion`, the caller gets plain text, matching every other role.
+    const { container } = render(<LeaderCard leader={base} role="COE Liaison" />);
+    expect(container.querySelector("abbr")).toBeNull();
+    expect(screen.getByText("COE Liaison")).toBeTruthy();
+  });
+
+  it("keeps the default mt-[22px]/max-w-[460px] wrapper classes when no className is given", () => {
+    // Every pre-existing caller (scholar/department/division pages) omits
+    // `className` — their output must stay byte-identical.
+    const { container } = render(<LeaderCard leader={base} role="Chair" />);
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.className).toContain("mt-[22px]");
+    expect(wrapper.className).toContain("max-w-[460px]");
+  });
+
+  it("replaces mt-[22px]/max-w-[460px] with an overriding className (tailwind-merge conflict resolution)", () => {
+    // The center-page leadership grid passes `className="mt-0 max-w-none"` so
+    // cards sit flush in a grid cell instead of stacking with their own margin.
+    const { container } = render(
+      <LeaderCard leader={base} role="Chair" className="mt-0 max-w-none" />,
+    );
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.className).toContain("mt-0");
+    expect(wrapper.className).toContain("max-w-none");
+    expect(wrapper.className).not.toContain("mt-[22px]");
+    expect(wrapper.className).not.toContain("max-w-[460px]");
   });
 });

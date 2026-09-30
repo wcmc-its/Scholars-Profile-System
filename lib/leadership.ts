@@ -2,9 +2,11 @@
  * Leadership-title predicates shared across layers.
  *
  * `isChairTitleFor` is the single source of truth for "does this appointment
- * title make its holder the chair of {dept}". The ETL uses it to populate
- * `Department.chairCwid` (etl/ed/index.ts via etl/ed/chief-detection.ts), and
- * the self-edit suppression guard reuses it to refuse hiding the appointment
+ * title make its holder the chair of {dept}". The ETL uses it to populate the
+ * chair `OrgUnitRoleAssignment` row (etl/ed/index.ts via
+ * etl/ed/chief-detection.ts; #2542 contract A retired `Department.chairCwid`,
+ * the prior write target), and the self-edit suppression guard reuses it to
+ * refuse hiding the appointment
  * that confers a current chair role (lib/edit/validators.ts, #160 D-leader).
  * Kept in `lib/` (not `etl/`) so the app layer can import it without crossing
  * into the ETL tree.

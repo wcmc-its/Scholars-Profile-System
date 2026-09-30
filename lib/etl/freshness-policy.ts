@@ -17,7 +17,7 @@
  * one place and invisible in the other.
  */
 
-export type Cadence = "nightly" | "weekly" | "monthly" | "annual";
+export type Cadence = "nightly" | "nightly-mirrored" | "weekly" | "monthly" | "annual";
 
 export const HOUR_MS = 60 * 60 * 1000;
 
@@ -44,9 +44,32 @@ export const HOUR_MS = 60 * 60 * 1000;
  * the producer's `manifestGeneratedAt` rather than our row's `completedAt`, a
  * perfectly healthy monthly producer still reads as 38 days old just before our
  * loader next runs. An SLA at or below 38 would false-alarm every long month.
+ *
+ * `nightly-mirrored` is that same derivation for a DAILY producer we sample
+ * daily, and it exists because #2618 forgot to do it and shipped four rows that
+ * read Late every day:
+ *
+ *   24h  gap between two on-time daily producer runs
+ * + 24h  worst-case lag before OUR nightly mirrors the newest run
+ * +  6h  grace
+ * = 54h
+ *
+ * The middle term is not hypothetical, it is the common case. The SPS nightly
+ * runs cron(0 7 * * ? *); ReciterAI's daily jobs run at 11:00, 13:00, 14:00 and
+ * 15:00 UTC -- all AFTER it. So every one of those is mirrored the FOLLOWING
+ * night, arriving 16-20h old and ageing to 40-44h before the next mirror
+ * replaces it. Against `nightly`'s 30h ceiling that is a permanent false Late.
+ *
+ * Use `nightly` only when the producer runs BEFORE 07:00 UTC (as
+ * reciterai-grants-daily at 03:00 did, ceiling 28h -- and even that is 2h of
+ * headroom, which is why it moved here too). If you are tempted to widen
+ * `nightly` instead, don't: it also covers ~25 steps THIS repo runs inside the
+ * nightly chain, where a 30h ceiling is correct and 54h would hide a real outage
+ * for an extra day.
  */
 export const SLA_HOURS: Readonly<Record<Cadence, number>> = {
   nightly: 30,
+  "nightly-mirrored": 54,
   weekly: 8 * 24,
   monthly: 40 * 24,
   annual: 400 * 24,
@@ -84,7 +107,25 @@ export type TrackedSpec = {
   /** Envs this source is expected in. Omitted = every env. */
   readonly envs?: readonly string[];
   readonly ack?: FreshnessAck;
+  /**
+   * `etl_run.status` values that count as a live run for freshness. Omitted =
+   * `success` only. A dirty-check gate whose correct outcome is often `skipped`
+   * is alive when it skips; anchoring it on `success` alone makes every quiet
+   * month read as a dead producer.
+   */
+  readonly liveStatuses?: readonly string[];
+  /**
+   * Grade on when OUR loader last succeeded (`completedAt`) rather than the
+   * producer's `manifestGeneratedAt`. For an artifact whose age is unbounded by
+   * design, with producer liveness graded on its own row.
+   */
+  readonly anchorOnRun?: boolean;
 };
+
+/** The `etl_run.status` filter for "the newest run that proves this source is alive". */
+export function liveStatusWhere(spec: TrackedSpec): string | { in: string[] } {
+  return spec.liveStatuses ? { in: [...spec.liveStatuses] } : "success";
+}
 
 /**
  * `etl_run.source` string -> cadence. The source strings are the exact values
@@ -99,24 +140,79 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // writes source "ED-Admins" (etl/ed-admins/index.ts) — a continue-tier failure
   // is invisible to the ExecutionsFailed alarm, so freshness is its only net.
   "ED-Admins": { cadence: "nightly" },
+  // Deployed nightly step CtscRoster (tier:"continue") — freshness is its only net.
+  "CTSC-Roster": { cadence: "nightly" },
   ReCiter: { cadence: "nightly" },
   // PubMed competing-interest statements backfill — runs right after ReCiter.
   "ReCiter-COI-Statements": { cadence: "nightly" },
   ASMS: { cadence: "nightly" },
-  // Excluded from the STAGING cadence (InfoEd's on-prem range overlaps the Sps
-  // VPC CIDR — see the nightlySteps comment in cdk/lib/etl-stack.ts); prod
-  // keeps the step.
-  InfoEd: { cadence: "nightly", envs: ["prod"] },
+  // Both envs since #2906 (staging was excluded 2026-06-22 → 2026-09-29).
+  InfoEd: { cadence: "nightly" },
   COI: { cadence: "nightly" },
-  "COI-Gap": { cadence: "nightly" },
+  // Moved from nightly to weekly (Paul, 2026-08-16) — it only computes
+  // against whatever COI/statement data is already in SPS-DB (see the
+  // CoiGapWeekly comment in cdk/lib/etl-stack.ts), so same-night freshness
+  // was never load-bearing.
+  "COI-Gap": { cadence: "weekly" },
   // #608 — moved from the weekly machine to nightly (mentoring chips).
   Jenzabar: { cadence: "nightly" },
   "ReCiterAI-projection": { cadence: "nightly" },
   // #918 — Scholar.orcid from the WCM Identity table.
   "Identity-orcid": { cadence: "nightly" },
+  // RPM ORCID candidates (inferred + admin-entered) mirrored from reciterdb → orcid_candidate.
+  "RPM-orcid-candidates": { cadence: "nightly" },
+  // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_name); weekly step.
+  "ORCID-registry": { cadence: "weekly" },
+  // scholar.orcid → WCM Identity via the ReCiter API (etl/orcid-push), the nightly
+  // OrcidPush step right BEFORE Identity in BOTH envs (push-then-pull, so the pull
+  // never reads our own last push as a conflict; the reciter-api secret is seeded
+  // in each). Staging runs it GET-only (ORCID_PUSH_DRY_RUN): both envs share one
+  // ReCiter, so one Identity table, and only prod writes it. Compare-then-write,
+  // so a healthy night is mostly `equal`; the step throws on a dead API rather than grade green, which is why
+  // its freshness row means something.
+  "ORCID-push": { cadence: "nightly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
-  Tools: { cadence: "nightly" },
+  //
+  // RE-ANCHORED AND ACKED, as one change. etl/tools/index.ts now stores the
+  // artifact's `generated_at` (§2.1), so this row finally grades the CONTENT
+  // rather than the liveness of our own import — and tools.json has carried
+  // generated_at 2026-06-23 since June, so it grades stale immediately. The ack
+  // is what makes that landable: the staleness becomes an accepted decision
+  // with a review date instead of a permanently red row nobody can fix, which
+  // is the cry-wolf failure the ack mechanism exists to prevent and the same
+  // shape as Spotlight's ack below.
+  //
+  // Neither half works alone, which is why they are not separable:
+  //   - anchor without ack -> a red row with no route to green;
+  //   - ack without anchor -> INERT. `gradeSource` sets `acknowledged` from
+  //     `stale && ack active`, and a completedAt-anchored Tools is never stale,
+  //     so nothing is suppressed, the reason string reaches no reader, and
+  //     etl/freshness/index.ts's anti-clutter rule logs "ack is no longer
+  //     needed — remove it" on every heartbeat.
+  //
+  // `nightly` is kept, not widened: it is the honest cadence for our import,
+  // and no cadence would be honest for the producer, which has no EventBridge
+  // schedule at all and writes no STAGE# ledger row (see
+  // etl/dynamodb/producer-run-mapper.ts) — there is nothing to grade it
+  // against. The ack, not the cadence, is carrying the staleness.
+  //
+  // At `until`: renew as a deliberate decision, or drop BOTH halves. Once the
+  // producer is scheduled the ack becomes unnecessary and the anchor stands on
+  // its own.
+  Tools: {
+    cadence: "nightly",
+    ack: {
+      until: "2026-12-31",
+      // Reader-facing copy, same rule as Spotlight's below: this string is
+      // rendered to superusers on /edit/etl-status, so it stays plain English
+      // and the technical account stays in the comment above it.
+      reason:
+        "This data is refreshed by hand rather than on a schedule. The last " +
+        "hand-published refresh was 23 June 2026, and a scheduled refresh is " +
+        "not switched on yet; there is nothing to do here.",
+    },
+  },
   // #2051 part B — deployed nightly steps (cdk/lib/etl-stack.ts
   // FamilySensitivityNightly / FamilySuppressionNightly, both tier:"continue",
   // both envs, no env split) writing sources "FamilySensitivity" /
@@ -203,6 +299,21 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // MAX_SAMPLE_AGE_HOURS in etl/integrity/index.ts). News was absent here, so
   // that delegate did not exist and a silent News death alarmed nobody.
   News: { cadence: "weekly" },
+  // Deployed nightly step (cdk/lib/etl-stack.ts ClipsNightly, tier:"continue")
+  // that writes source "NewsClips" (etl/news/clips.ts). A run with no new digest
+  // still succeeds, so staleness here means the step itself stopped running.
+  NewsClips: { cadence: "nightly" },
+  // Deployed weekly step (cdk/lib/etl-stack.ts FundingDigestWeekly, tier:"continue")
+  // that writes source "FundingDigest" (etl/opportunities/funding-digest.ts).
+  FundingDigest: { cadence: "weekly" },
+  // Honors-list scraper (etl/honors/scrape-lists.ts), its own weekly machine
+  // `scholars-honors-<env>` (cdk/lib/etl-stack.ts HonorsStateMachine), both envs.
+  // Writes source "HonorsLists" on an ALL-lists run only (the schedule); a
+  // single-list Run now does not refresh it. A run where some lists fail still
+  // succeeds (each list's failure is on its honor_list_run row and the queue's
+  // Sources tab), so this detects the schedule dying or every list failing,
+  // not one list quietly failing.
+  HonorsLists: { cadence: "weekly" },
   // Monthly cadence. Spotlight is the one source whose producer is OUTSIDE this
   // repo: ReciterAI publishes the artifact and SPS only loads what it finds, so
   // the SLA here has to track the PRODUCER's schedule, not our loader's. That
@@ -210,36 +321,34 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // ? *) in ReciterAI infra/eventbridge.json — so the 8-day weekly SLA this
   // source used to carry could never be met and reported stale by construction.
   //
-  // Caveat for whoever reads a Spotlight staleness alert next: as of 2026-07-20
-  // that EventBridge rule and its `reciterai-spotlight-orchestrator` Lambda are
-  // DECLARED IN IaC BUT NOT DEPLOYED (describe-rule and get-function-configuration
-  // both return ResourceNotFoundException, and no log group was ever created).
-  // Every artifact published so far was a human running `cli/backfill_spotlight.py
-  // --publish` by hand, most recently 2026-06-15. So this SLA describes the
-  // INTENDED cadence; until the producer is actually deployed, expect staleness
-  // and fix it upstream rather than by widening this number again. See SPS #1813.
-  Spotlight: {
-    cadence: "monthly",
-    // Not a widened SLA — the comment above is explicit that widening is the
-    // wrong response. This keeps the 40d SLA and the STALE computation intact,
-    // and only stops a producer outage we do not own from failing OUR
-    // heartbeat every night. Revisit at `until`: either the producer is
-    // deployed (drop this ack) or it is not (renew it deliberately, with a
-    // fresh date, as a decision rather than by default).
-    ack: {
-      until: "2026-09-30",
-      // Reader-facing copy, deliberately. #2281 started rendering this string to
-      // superusers on /edit/etl-status, where it was the most technical sentence
-      // on the page and the only card visible on an otherwise green day. The
-      // engineering record did not move: the comment above this block is the
-      // canonical technical account and is richer than this string ever was. Do
-      // not re-technicalise this to match its neighbour — edit the comment.
-      reason:
-        "This data is still published by hand because its automatic monthly " +
-        "refresh has not been switched on yet. The last hand-published update " +
-        "was 15 June 2026. Tracked as SPS #1813; there is nothing to do here.",
-    },
-  },
+  // Caveat for whoever reads a Spotlight staleness alert next -- UPDATED
+  // 2026-09-07, and the update reverses the old one. That rule is now DEPLOYED
+  // and firing: `aws events list-rules` shows reciterai-spotlight-monthly
+  // ENABLED against the ECS task `reciterai-spotlight`, and it ticked on
+  // 2026-09-01. The previous note here ("declared in IaC but not deployed", as
+  // of 2026-07-20) is therefore stale, and so is the inference that every
+  // artifact is hand-published.
+  //
+  // What replaces it is a subtler failure mode. The rule targets
+  // `pipeline_spotlight/orchestrator.py`, a CHEAP DIRTY GATE that shells out to
+  // the real publish only when thresholds trip -- so a healthy monthly tick can
+  // legitimately end in `skipped`, leaving the artifact untouched. The 09-01
+  // tick did exactly that. A stale Spotlight artifact is consequently NOT
+  // evidence of a dead producer, and a fresh one is not evidence of a live one.
+  // Read the producer's own stage ledger before concluding either: it is now
+  // mirrored into etl_run as `ReciterAI-spotlight-gate` (see
+  // etl/dynamodb/producer-run-mapper.ts), which is the row that distinguishes
+  // "the gate ran and declined" from "the gate stopped running". See SPS #1813.
+  //
+  // RESOLVED 2026-09-29 — the ack that used to sit here is gone for good. With the
+  // producer deployed and gating, artifact age is unbounded BY DESIGN (the same
+  // reason producer-run-mapper excludes `spotlight_publish`), so no SLA on it can
+  // be both quiet and honest. Liveness is split across two rows instead:
+  //   - `ReciterAI-spotlight-gate` (below): did the PRODUCER's monthly gate run;
+  //     `skipped` counts, a `failed` attempt paints it red.
+  //   - `Spotlight` (here): did OUR weekly loader run — anchored on completedAt,
+  //     not manifestGeneratedAt, so an unchanged artifact is not an alarm.
+  Spotlight: { cadence: "weekly", anchorOnRun: true },
   // #2293 — durable reconcilers (ADR-005 layer 3), each its own `rate(5 min)`
   // state machine outside the nightly/weekly chains, not deployed steps within
   // them. Both got a CDK status + cadence alarm at 15 min resolution when they
@@ -256,6 +365,76 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   CdnReconcile: { cadence: "nightly" },
   // Annual cadence (cron 0 9 1 7 ? *)
   Hierarchy: { cadence: "annual" },
+  // ---------------------------------------------------------------------
+  // ReciterAI PRODUCER liveness (not SPS imports).
+  //
+  // Every entry above grades a step THIS repo runs. These four grade steps
+  // ReciterAI runs, mirrored into `etl_run` from the engine's own stage ledger
+  // by etl/dynamodb/producer-run-mapper.ts -- which is where the stage names,
+  // the cron expressions they correspond to, and the reasoning for tracking
+  // exactly these four all live. They exist because a ReciterAI-sourced import
+  // reads green whenever OUR loader ran, whatever the producer did or did not
+  // publish, so an upstream stop is invisible from the rows above.
+  //
+  // Cadence mirrors the producer's EventBridge schedule, not our loader's: the
+  // thing being graded is the producer's tick. No `envs` restriction -- staging
+  // and prod scan the SAME `reciterai` table, so both see the same producer runs.
+  //
+  // No ack on any of them: all four were completing on schedule when this
+  // landed (2026-09-07), so each starts green and a red one is real news. If one
+  // goes red for a reason we accept, ack it deliberately with an expiry, the way
+  // Spotlight above does -- do not widen the cadence to hide it.
+  // `nightly-mirrored`, not `nightly`: these producers run at 11:00 and 13:00
+  // UTC, AFTER the 07:00 UTC nightly that mirrors them, so each is 18-20h old
+  // the moment it lands and ages to ~44h before the next mirror. See SLA_HOURS.
+  "ReciterAI-enrichment": { cadence: "nightly-mirrored" },
+  "ReciterAI-hot-path": { cadence: "weekly" },
+  // The gate is the liveness signal for Spotlight, and `skipped` is its normal
+  // outcome (nothing crossed the regenerate threshold). Artifact age is graded
+  // separately on the `Spotlight` row.
+  "ReciterAI-spotlight-gate": { cadence: "monthly", liveStatuses: ["success", "skipped"] },
+  "ReciterAI-onboarding-detector": { cadence: "nightly-mirrored" },
+  // The two daily drift Lambdas. They write a findings row per day rather than a
+  // ledger entry, so the row's existence is the liveness signal -- see
+  // buildDriftRunWrites. Their `severity` is NOT graded here: DRIFT#evaluation
+  // has reported WARN every day of its life because it is describing the DATA,
+  // and Teams alerting already carries that. A red row here means the Lambda
+  // stopped running, which is a different and currently undetected event.
+  // 14:00 and 15:00 UTC, so the same mirror lag applies -- these two were the
+  // pair the eyeball caught reading Late on an entirely healthy Lambda.
+  "ReciterAI-drift": { cadence: "nightly-mirrored" },
+  "ReciterAI-taxonomy-drift": { cadence: "nightly-mirrored" },
+  // The last two ReciterAI jobs, and the only ones graded on the age of their
+  // OUTPUT rather than on a record of the run. Read that difference before
+  // reacting to a red row here: it means DATA STOPPED ARRIVING, which a stopped
+  // job causes but so does a job that ran and correctly had nothing to write.
+  //
+  // Grants publishes `grants/latest/manifest.json` every day without a break
+  // (verified 2026-08-25 through 2026-09-07), so `nightly` is honest for it.
+  //
+  // Cores is graded WEEKLY against a NIGHTLY schedule (reciterai-cores-daily,
+  // cron(0 5 * * ? *)) ON PURPOSE, and the mismatch is the point. Its anchor is
+  // the newest `scored_at` on the PUB#/CORE# rows, which only advances when the
+  // run finds new publications to score -- so a nightly SLA would go red on the
+  // first quiet night and teach everyone to ignore this row. 8 days is a
+  // backstop behind `reciterai-cores-run-errors`, which is what catches a
+  // crashing run in real time. Do NOT "fix" this to nightly to match the cron.
+  // grants runs 03:00 UTC, BEFORE the mirror, so it lands ~4h old and its true
+  // ceiling is 28h -- inside `nightly`'s 30h, but by two hours, which one slow
+  // run erases. Same cadence as its siblings rather than a permanent coin flip.
+  //
+  // That "do NOT fix it" holds while cores is anchored on OUTPUT AGE, which is
+  // no longer unconditional: SPS now maps ReciterAI's `STAGE#cores_run#GLOBAL`
+  // ledger row and PREFERS it over the output-age guess when one arrives (see
+  // PRODUCER_STAGES in etl/dynamodb/producer-run-mapper.ts and Block 8 in
+  // etl/dynamodb/index.ts). Once those rows are actually landing, the anchor is
+  // a record of the RUN and a quiet night stops looking dead — and THAT is the
+  // one condition under which tightening this toward the cron becomes correct.
+  // It is a follow-up, deliberately not bundled with the mapping: tightening
+  // before real ledger rows exist and can be judged would put a nightly SLA on
+  // an anchor that is still the age of the output.
+  "ReciterAI-grants": { cadence: "nightly-mirrored" },
+  "ReciterAI-cores": { cadence: "weekly" },
 };
 
 export interface SourceStatus {
@@ -292,9 +471,8 @@ export function ackState(
 }
 
 /**
- * Whether this env is responsible for a source. The cadences genuinely differ
- * per env (InfoEd is excluded from the staging nightly over the on-prem CIDR
- * overlap), and when the env is UNSET — local runs, pre-SCHOLARS_ENV deploys —
+ * Whether this env is responsible for a source. A cadence can differ per env
+ * (none do today; InfoEd was staging-excluded until #2906), and when the env is UNSET — local runs, pre-SCHOLARS_ENV deploys —
  * an env-scoped source is skipped rather than reported missing. Reporting it
  * would tell a superuser on staging that a prod-only import "never ran".
  */

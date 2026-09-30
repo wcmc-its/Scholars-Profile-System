@@ -16,6 +16,7 @@
  * reached.
  */
 import { useEffect, useState } from "react";
+import { ScholarNameList } from "@/components/taxonomy/scholar-name-list";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import { profilePath } from "@/lib/profile-url";
@@ -31,10 +32,14 @@ export function FamilyScholarsRow({
   supercategorySlug,
   familyId,
   familyLabel,
+  variant = "chips",
 }: {
   supercategorySlug: string;
   familyId: string;
   familyLabel: string | null;
+  /** TAXONOMY_SCHOLAR_CARDS — `"names"`: a "Scholars N" heading over plain
+   *  slate name links (mockup). `"chips"` (default): today's popover chips. */
+  variant?: "chips" | "names";
 }) {
   const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
   const [includesNonFaculty, setIncludesNonFaculty] = useState(false);
@@ -77,34 +82,64 @@ export function FamilyScholarsRow({
       )}/scholars`
     : null;
 
+  const infoCopy = includesNonFaculty ? (
+    <>
+      Researchers identified by ReCiterAI from their first- or senior-author
+      publications using this method, with full-time faculty listed first.
+      Curators do not handpick this list; it updates weekly as new work
+      appears.
+    </>
+  ) : (
+    <>
+      Full-time faculty identified by ReCiterAI from their first- or
+      senior-author publications using this method. Curators do not handpick
+      this list; it updates weekly as new work appears.
+    </>
+  );
+  const capped = scholars.length >= ROSTER_CAP;
+
+  if (variant === "names") {
+    return (
+      <ScholarNameList
+        scholars={scholars}
+        // The route caps the roster, so a full page means "at least this many".
+        countLabel={`${scholars.length.toLocaleString()}${capped ? "+" : ""}`}
+        info={
+          <SectionInfoButton label="Scholars in this method" anchor="topScholars">
+            {infoCopy}
+          </SectionInfoButton>
+        }
+        footer={
+          capped && seeAllHref ? (
+            <a
+              href={seeAllHref}
+              className="inline-flex min-h-11 items-center text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline sm:min-h-0"
+            >
+              View all scholars →
+            </a>
+          ) : null
+        }
+      />
+    );
+  }
+
+  const heading = (
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      {familyLabel ? `Scholars in ${familyLabel}` : "Scholars in this method"}
+      <SectionInfoButton label="Scholars in this method" anchor="topScholars">
+        {infoCopy}
+      </SectionInfoButton>
+    </span>
+  );
+
   return (
     <div className="mb-8">
-      <div className="mb-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {familyLabel ? `Scholars in ${familyLabel}` : "Scholars in this method"}
-          <SectionInfoButton label="Scholars in this method" anchor="topScholars">
-            {includesNonFaculty ? (
-              <>
-                Researchers identified by ReCiterAI from their first- or senior-author
-                publications using this method, with full-time faculty listed first.
-                Curators do not handpick this list; it updates weekly as new work
-                appears.
-              </>
-            ) : (
-              <>
-                Full-time faculty identified by ReCiterAI from their first- or
-                senior-author publications using this method. Curators do not handpick
-                this list; it updates weekly as new work appears.
-              </>
-            )}
-          </SectionInfoButton>
-        </span>
-      </div>
+      <div className="mb-2">{heading}</div>
       <div className="flex flex-wrap gap-2 py-1">
         {scholars.map((s) => (
           <FamilyScholarChip key={s.cwid} scholar={s} />
         ))}
-        {scholars.length >= ROSTER_CAP && seeAllHref && (
+        {capped && seeAllHref && (
           <a
             href={seeAllHref}
             className="flex shrink-0 items-center rounded-full border border-border bg-background px-3 py-1 text-sm text-[var(--color-accent-slate)] transition-colors hover:border-[var(--color-accent-slate)]"

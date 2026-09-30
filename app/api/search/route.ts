@@ -32,6 +32,7 @@ import {
 } from "@/lib/api/search-taxonomy";
 import {
   stripDeprioritized,
+  stripDeprioritizedUnlessResolved,
   isAllDeprioritized,
 } from "@/lib/api/deprioritized-terms";
 import {
@@ -132,7 +133,6 @@ async function handleSearch(request: NextRequest) {
   const genericTermMode = resolveGenericTermMode();
   const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
   const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
-  const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
   // #1980 — did the strip keep enough of the query for its result to be adopted when
   // NOTHING resolved? Counted off `q` rather than `contentQuery` so the denominator is
   // what the user actually typed, independent of `stripDeprioritized`'s internals.
@@ -144,11 +144,13 @@ async function handleSearch(request: NextRequest) {
   const meshOnlyResolution = type === "publications" || type === "funding";
   const taxonomyStart = Date.now();
   let taxonomyMatch: TaxonomyMatchResult;
+  let fullQueryMeshConfidence: string | null | undefined;
   if (meshOnlyResolution) {
     // Perf #1406 — MeSH-only path (see block comment above). Same object the
     // full matcher would embed as `meshResolution`; it has its own <3-char
     // short-circuit and fails closed to null.
     let mesh = await resolveMeshDescriptor(q);
+    fullQueryMeshConfidence = mesh?.confidence;
     // Issue #692 §4.1, mesh-only shape — retry the stripped content query on a
     // weak MeSH resolution. #1982 — the full path below no longer requires a
     // curated-match miss before retrying either (it merges only `meshResolution`
@@ -186,8 +188,15 @@ async function handleSearch(request: NextRequest) {
     // `stripKeptEnough` above are still consumed by the mesh-only branch and
     // the response body below; `resolveQueryTaxonomy` recomputes its own copy
     // internally rather than taking them as params.
-    ({ taxonomyMatch } = await resolveQueryTaxonomy(q));
+    ({ taxonomyMatch, fullQueryMeshConfidence } = await resolveQueryTaxonomy(q));
   }
+  // #692 follow-up — the content query the SEARCH scores/highlights on. When the
+  // whole typed phrase resolved verbatim in MeSH ("Climate change", "Gene editing"),
+  // it is searched as typed; stripping its filler left the literal mention arm
+  // matching a fragment ("Climate"). Otherwise the strip above stands.
+  const { contentQuery: searchContentQuery, removed: searchGenericRemoved } =
+    stripDeprioritizedUnlessResolved(q, fullQueryMeshConfidence);
+  const genericDemote = genericTermMode === "on" && searchGenericRemoved.length > 0;
   const taxonomyMatchMs = Date.now() - taxonomyStart;
   // Server-Timing `taxonomy` span desc — names the resolver actually run
   // (#1406: mesh-only on the publications/funding branches). The span name
@@ -230,6 +239,12 @@ async function handleSearch(request: NextRequest) {
     taxonomyMatch.meshResolution?.descendantUis.length ?? null;
   const descendantTruncated =
     descendantCount !== null && descendantCount >= DESCENDANT_HARD_CAP;
+  // Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`) — the residual's
+  // descriptor, or null. Logged on every branch below as `meshSecondaryDescriptorUi`
+  // so the prod `search_query` stream shows how often a pair actually fires.
+  const meshSecondaryDescriptorUi =
+    taxonomyMatch.meshResolution?.secondaryConcept?.descriptorUi ?? null;
+  const secondaryConceptLabel = taxonomyMatch.meshResolution?.secondaryConcept?.name ?? null;
   const searchInterpretation = {
     scope,
     conceptLabel,
@@ -237,7 +252,15 @@ async function handleSearch(request: NextRequest) {
     meshConfidence: meshResolutionConfidence,
     descendantCount,
     descendantTruncated,
+    secondaryConceptLabel,
   };
+
+  // Institution facet — repeated multi-select of `Scholar.primaryOrgCode` codes
+  // (WCMC, HSS, MSKCC, ...), shared by all three tabs (people: `primaryOrgCode`;
+  // publications: `wcmAuthorInstitutions`; funding: lead-PI `institution`).
+  // Parsed regardless of the per-tab SEARCH_*_INSTITUTION_FACET flags; each
+  // search function no-ops it while its flag is off.
+  const institution = params.getAll("institution");
 
   // Issue #78 — Funding tab. Multi-select facets are repeated params,
   // OR within group, AND across groups. Mirrors the people/publications
@@ -259,6 +282,7 @@ async function handleSearch(request: NextRequest) {
       mechanism: orUndefined(params.getAll("mechanism")),
       status: status.length > 0 ? status : undefined,
       department: orUndefined(params.getAll("department")),
+      institution: orUndefined(institution),
       role: role.length > 0 ? role : undefined,
     };
     // Issue #295 — forward the MeSH resolution (computed once at the top of
@@ -294,6 +318,7 @@ async function handleSearch(request: NextRequest) {
         filters,
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
+        meshSecondaryDescriptorUi,
         // Issue #295 — funding concept-clause telemetry.
         meshConceptClauseFired,
         // SPEC §7.5 — resolver scope. Logged on every branch so a resolver
@@ -358,6 +383,7 @@ async function handleSearch(request: NextRequest) {
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         department: department.length > 0 ? department : undefined,
+        institution: institution.length > 0 ? institution : undefined,
         meshOnly: meshOnly || undefined,
       },
       // Issue #259 §5 — pass the MeSH resolution computed at the top of
@@ -371,7 +397,7 @@ async function handleSearch(request: NextRequest) {
       // Issue #692 — generic-term demotion (mode `on`). BM25 scores on the
       // content query (gate) with the full query discounted; inert otherwise.
       genericDemote,
-      contentQuery,
+      contentQuery: searchContentQuery,
       // §6.2 — chip's "Narrow to this concept only" opt-in. Forces
       // strict-mode admission under flag = `expanded`. `?mesh=off`
       // precedence is already enforced upstream by nulling the resolution.
@@ -417,6 +443,7 @@ async function handleSearch(request: NextRequest) {
           journal: journal.length > 0 ? journal : undefined,
           wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
           department: department.length > 0 ? department : undefined,
+          institution: institution.length > 0 ? institution : undefined,
           meshOnly: meshOnly || undefined,
         },
         // Perf (B4) — this branch reads only `broad.total` (hits are discarded
@@ -456,9 +483,19 @@ async function handleSearch(request: NextRequest) {
         // fallback). Captures the per-request shape without analysts
         // having to know which env mapping was active.
         conceptMode,
-        filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole, department, meshOnly },
+        filters: {
+          yearMin,
+          yearMax,
+          publicationType,
+          journal,
+          wcmAuthorRole,
+          department,
+          institution,
+          meshOnly,
+        },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
+        meshSecondaryDescriptorUi,
         // Issue #259 §5.4.2 / SPEC §7.5. Bucketed in the post-flip retro plot
         // to attribute recall lift to descendant-set size (small subtree →
         // small lift, broad descriptor → big lift). `null` when resolution
@@ -594,6 +631,8 @@ async function handleSearch(request: NextRequest) {
   const queryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
+    meshConfidence: taxonomyMatch.meshResolution?.confidence ?? null,
+    meshMatchedForm: taxonomyMatch.meshResolution?.matchedForm ?? null,
     knownCwids: classifierSets.cwids,
     knownSurnames: classifierSets.surnames,
     knownDepartments: classifierSets.departments,
@@ -652,6 +691,7 @@ async function handleSearch(request: NextRequest) {
       isClinical: isClinical ? true : undefined,
       professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
       earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
+      institution: institution.length > 0 ? institution : undefined,
     },
     topic,
     // Issue #309 / SPEC §6.1.2 — hand the already-computed relevance mode and
@@ -704,7 +744,7 @@ async function handleSearch(request: NextRequest) {
     // and highlight on the content query (full query discounted); inert
     // otherwise and never applied to name/department shapes.
     genericDemote,
-    contentQuery,
+    contentQuery: searchContentQuery,
     // Issue #532 — env-gated dept-shape leadership boost. Ignored for
     // non-dept shapes inside `searchPeople`.
     deptLeadershipBoost: resolveDeptLeadershipBoost(),
@@ -755,9 +795,11 @@ async function handleSearch(request: NextRequest) {
         isClinical,
         professorialRank,
         earlyStageInvestigator,
+        institution,
       },
       meshResolutionDescriptorUi,
       meshResolutionConfidence,
+      meshSecondaryDescriptorUi,
       meshDescendantSetSize: peopleDescendantSetSize,
       // #2094 — did the expansion hit DESCENDANT_HARD_CAP? Null EXACTLY when the
       // size above is null, so the truncation rate over the query log is
@@ -871,4 +913,6 @@ type SearchInterpretation = {
   /** #2094 — the walk hit DESCENDANT_HARD_CAP, so the subtree is INCOMPLETE and
    *  every downstream count/clause built from it undercounts. */
   descendantTruncated: boolean;
+  /** Two-concept resolution: the second descriptor's name, or null. */
+  secondaryConceptLabel: string | null;
 };

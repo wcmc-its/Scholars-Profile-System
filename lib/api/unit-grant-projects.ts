@@ -43,11 +43,12 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
+  fundingProjectBaseKey,
   grantRoleRank,
   groupGrantsByProject,
   multiPiExternalIds,
-  parseExternalId,
   sortPeople,
 } from "@/lib/funding-projection";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
@@ -134,19 +135,20 @@ export type UnitGrantProject = {
  * Group a unit's active grant rows into funding projects, newest first.
  *
  * 🔴 `groupGrantsByProject` SILENTLY DROPS any row whose externalId is null or
- * does not parse as `INFOED-{account}-{cwid}` — it `continue`s when
- * `parseExternalId` returns falsy. Those rows must still get a card, so they are
- * appended here as singleton groups under a `__solo__` key (the same key the
- * per-surface code used before this module existed). `__solo__` cannot collide
- * with a real project key, which is either a `coreProjectNum` or an InfoEd
- * Account_Number.
+ * is neither `INFOED-{account}-{cwid}` nor `reporter:{cwid}:{core}` — it
+ * `continue`s when `fundingProjectBaseKey` returns falsy. Those rows must still
+ * get a card, so they are appended here as singleton groups under a `__solo__`
+ * key (the same key the per-surface code used before this module existed).
+ * `__solo__` cannot collide with a real project key, which is either a
+ * `coreProjectNum` or an InfoEd Account_Number.
  *
- * In practice the residual set is empty on these surfaces: `Grant.externalId` is
- * `String @unique` (NOT NULL) in the schema, and the only non-`INFOED-` id the
- * ETL writes is `reporter:{cwid}:{core}` (etl/reporter-grants/transform.ts),
- * which every caller here already excludes via `source: { not: "RePORTER" }`.
- * The fallback is kept anyway: it costs one loop and its absence is a silently
- * vanishing card.
+ * In practice the residual set is empty: `Grant.externalId` is `String @unique`
+ * (NOT NULL) in the schema, and the ETL writes only the two forms above. (Every
+ * caller here also excludes RePORTER rows via `source: { not: "RePORTER" }` — a
+ * unit-surface scope choice, not a parse limitation; since #2285 the shared
+ * grouping, and so the funding index, keys RePORTER rows by core project
+ * number.) The fallback is kept anyway: it costs one loop and its absence is a
+ * silently vanishing card.
  */
 export function groupUnitGrantsByProject(
   rows: readonly UnitGrantRow[],
@@ -159,7 +161,7 @@ export function groupUnitGrantsByProject(
     // Same suppression gate `groupGrantsByProject` applies, so a suppressed row
     // is not resurrected as a singleton.
     if (r.externalId !== null && suppressedExternalIds.has(r.externalId)) continue;
-    if (parseExternalId(r.externalId) !== null) continue;
+    if (fundingProjectBaseKey(r.externalId) !== null) continue;
     // Key on the externalId when there IS one: two unparsable ids for the same
     // cwid that happen to share a startDate (`LEGACY-77-abc` / `LEGACY-88-abc`)
     // are two grants, and a cwid+date key collapses them into one card — the
@@ -178,8 +180,14 @@ export function groupUnitGrantsByProject(
   // Deterministic: these reads are cached (lib/api/swr-cache), so a tie broken by
   // Map insertion order — itself decided by MySQL's unspecified order within one
   // `startDate` — would make the same page render two different ways.
+  //
+  // #2082: `end_date` is ASC (soonest-ending first), matching /search?type=funding
+  // "End date (soonest)" (`{ endDate: "asc" }` after its active-first tier). Every
+  // row here is already active (`endDate >= now`, non-null), so that tier is
+  // moot and plain ASC is the same order. `most_recent` stays DESC.
+  const dir = sort === "end_date" ? -1 : 1;
   projects.sort(
-    (a, b) => b.sortKey - a.sortKey || a.projectKey.localeCompare(b.projectKey),
+    (a, b) => dir * (b.sortKey - a.sortKey) || a.projectKey.localeCompare(b.projectKey),
   );
   return projects;
 }
@@ -274,7 +282,7 @@ function buildProject(
  *
  * NO `orderBy`: row order cannot reach the output. `buildProject` re-sorts each
  * group's rows into a fixed order, and `groupUnitGrantsByProject` then applies a
- * TOTAL order over groups (`sortKey` DESC, `projectKey` ASC) with no possible
+ * TOTAL order over groups (`sortKey` DESC, or ASC for `end_date`; `projectKey` ASC) with no possible
  * tie. Asking MySQL to sort as well only buys a filesort over the unit's whole
  * active-grant pool. Ordering is established in app code, on purpose — the
  * grouping key is derived (`coreProjectNum ?? accountNumber`), so it is not a
@@ -385,11 +393,17 @@ export async function buildUnitGrantCards(
       .map((cwid) => {
         const s = scholarMap.get(cwid);
         if (!s) return null;
+        // #536 — a hidden identity class (e.g. a doctoral student PI on an F31)
+        // keeps its name on the card, but ships no slug and no headshot endpoint:
+        // the scholar load above is only `deletedAt: null` (the grant must stay in
+        // the list and the total, #718), so this is the link gate. `GrantCard`
+        // re-checks `roleCategory` so a missed strip still renders unlinked.
+        const linkable = isPubliclyDisplayed(s.roleCategory);
         return {
           name: s.preferredName,
           cwid: s.cwid,
-          slug: s.slug,
-          identityImageEndpoint: identityImageEndpoint(s.cwid),
+          slug: linkable ? s.slug : null,
+          identityImageEndpoint: linkable ? identityImageEndpoint(s.cwid) : null,
           // Unread on this path — see the note on this function. The card
           // component hardcodes its own chip class.
           isFirst: false,

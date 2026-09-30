@@ -15,13 +15,24 @@
 import * as React from "react";
 
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+/**
+ * The shared pill look for a segmented control: one source of truth for the
+ * non-compact segment, so the tool-mode tablist ({@link SegmentedTabs}) and the
+ * form-value radio groups here render identically while keeping the semantics
+ * each one needs. `selected` paints the maroon fill; `disabled` dims it.
+ */
+export function segmentPillClass(selected: boolean, disabled: boolean): string {
+  return cn(
+    "inline-flex cursor-pointer items-center rounded-md border px-3 py-1 text-sm transition-colors select-none",
+    selected
+      ? "border-apollo-maroon bg-apollo-maroon text-apollo-maroon-foreground"
+      : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
+    disabled && "cursor-not-allowed opacity-60",
+  );
+}
 
 export function SegmentedField({
   legend,
@@ -31,6 +42,7 @@ export function SegmentedField({
   disabled,
   onValueChange,
   compact = false,
+  soft = false,
 }: {
   legend: string;
   name: string;
@@ -48,6 +60,9 @@ export function SegmentedField({
    * overview generate controls pass this; the biosketch controls keep the pills.
    */
   compact?: boolean;
+  /** With `compact`: the neutral track + raised white selected segment (the overview
+   *  "Draft with AI" rail) instead of the maroon fill. */
+  soft?: boolean;
 }) {
   // Any option with a description gets a styled Radix tooltip on hover, which needs a
   // TooltipProvider ancestor. Controls with no descriptions (voice / tone / length, the
@@ -60,7 +75,9 @@ export function SegmentedField({
       onValueChange={onValueChange}
       disabled={disabled}
       className={cn(
-        compact
+        compact && soft
+          ? "border-apollo-border bg-apollo-surface-2 grid w-full auto-cols-fr grid-flow-col gap-0.5 rounded-[7px] border p-0.5"
+          : compact
           ? "border-apollo-border-strong flex w-full overflow-hidden rounded-md border"
           : "inline-flex w-fit flex-wrap gap-1 rounded-lg p-0",
       )}
@@ -73,20 +90,26 @@ export function SegmentedField({
           <label
             key={opt.value}
             htmlFor={id}
-            className={cn(
-              "cursor-pointer items-center transition-colors select-none",
-              compact
-                ? "border-apollo-border-strong flex min-w-0 flex-1 justify-center truncate border-l px-2 py-1 text-center text-[12.5px] first:border-l-0"
-                : "inline-flex rounded-md border px-3 py-1 text-sm",
-              selected
-                ? compact
-                  ? "bg-apollo-maroon text-apollo-maroon-foreground font-medium"
-                  : "border-apollo-maroon bg-apollo-maroon text-apollo-maroon-foreground"
+            className={
+              compact && soft
+                ? cn(
+                    "flex min-w-0 cursor-pointer justify-center truncate rounded-[5px] px-1 py-1.5 text-center text-[13px] transition-colors select-none",
+                    selected
+                      ? "text-foreground bg-white font-semibold shadow-[0_1px_2px_rgba(34,30,28,0.12),0_0_0_1px_var(--apollo-border-strong)]"
+                      : "text-muted-foreground hover:text-foreground",
+                    disabled && "cursor-not-allowed opacity-60",
+                  )
                 : compact
-                  ? "bg-apollo-surface text-foreground hover:bg-apollo-surface-2"
-                  : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
-              disabled && "cursor-not-allowed opacity-60",
-            )}
+                ? cn(
+                    "cursor-pointer items-center transition-colors select-none",
+                    "border-apollo-border-strong flex min-w-0 flex-1 justify-center truncate border-l px-2 py-1 text-center text-[12.5px] first:border-l-0",
+                    selected
+                      ? "bg-apollo-maroon text-apollo-maroon-foreground font-medium"
+                      : "bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
+                    disabled && "cursor-not-allowed opacity-60",
+                  )
+                : segmentPillClass(selected, disabled)
+            }
           >
             <RadioGroupItem
               id={id}
@@ -116,7 +139,9 @@ export function SegmentedField({
       <legend
         className={cn(
           "mb-1",
-          compact
+          soft
+            ? "text-muted-foreground text-xs font-semibold"
+            : compact
             ? "text-muted-foreground text-[11px] font-semibold tracking-wide uppercase"
             : "text-foreground text-sm font-medium",
         )}

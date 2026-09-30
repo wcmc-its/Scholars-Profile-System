@@ -70,6 +70,11 @@ export function PublicationsSection({
 }) {
   const [bucket, setBucket] = useState<Bucket>("all");
   const [query, setQuery] = useState("");
+  // #2213 — year groups the reader has opened by hand. A closed group renders
+  // only its summary: rendering every row inside closed <details> shipped a
+  // 17-20 MB document for the largest profiles (~7.6 KB of HTML per row).
+  // Once opened a group stays rendered, so closing it again loses nothing.
+  const [openedKeys, setOpenedKeys] = useState<ReadonlySet<string>>(() => new Set());
 
   // Per-position counts over the full input set — they don't shift as the
   // user toggles the type chip or the search box. Same stability principle
@@ -233,6 +238,11 @@ export function PublicationsSection({
               <details
                 key={`${g.key}:${controlSig}`}
                 open={open}
+                onToggle={(e) => {
+                  if (e.currentTarget.open && !openedKeys.has(g.key)) {
+                    setOpenedKeys((prev) => new Set(prev).add(g.key));
+                  }
+                }}
                 className="group"
               >
                 <summary className="flex cursor-pointer list-none items-baseline gap-3 py-4 hover:text-[var(--color-accent-slate)] [&::-webkit-details-marker]:hidden">
@@ -244,16 +254,18 @@ export function PublicationsSection({
                     {g.count} {g.count === 1 ? "publication" : "publications"}
                   </span>
                 </summary>
-                <ul className="pb-4">
-                  {g.pubs.map((p) => (
-                    <li
-                      key={p.pmid}
-                      className="border-t border-border py-3 pl-[24px] first:border-t-0"
-                    >
-                      <PublicationRow pub={p} compact currentProfileCwid={scholarCwid} />
-                    </li>
-                  ))}
-                </ul>
+                {open || openedKeys.has(g.key) ? (
+                  <ul className="pb-4">
+                    {g.pubs.map((p) => (
+                      <li
+                        key={p.pmid}
+                        className="border-t border-border py-3 pl-[24px] first:border-t-0"
+                      >
+                        <PublicationRow pub={p} compact currentProfileCwid={scholarCwid} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </details>
             );
           })}

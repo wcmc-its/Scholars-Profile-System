@@ -114,4 +114,22 @@ describe("/edit/unit/new — org-unit-create lockdown gate (#728 Phase D)", () =
     expect(treeHas(result, mockForm)).toBe(true);
     expect(treeHas(result, mockRequestDialog)).toBe(false);
   });
+
+  // 2026-08-26 policy widening (decision #3) is scoped to access management
+  // (`canManageAccess`/`canGrant`) — org-unit CREATE stays excluded from
+  // comms_steward parity (§3b). The page computes this inline rather than via
+  // `canManageAccess` for exactly that reason, so a steward with no
+  // unit_admin row must still be forbidden here.
+  it("comms_steward with no unit_admin row on the dept → forbidden, not the form", async () => {
+    mockGetEditSession.mockResolvedValue({
+      cwid: "stw001",
+      isSuperuser: false,
+      isCommsSteward: true,
+    });
+    mockGetEffectiveUnitRole.mockResolvedValue("none");
+    const result = await renderPage({ type: "center", dept: "MED" });
+    expect(treeHas(result, mockForm)).toBe(false);
+    expect(treeHas(result, mockRequestDialog)).toBe(false);
+    expect(treeHas(result, mockForbidden)).toBe(true);
+  });
 });

@@ -144,6 +144,24 @@ describe("PeopleResultCard — evidence-path lazy key paper (fetch on expand)", 
   // on-concept by construction), suppressed on the mention path (descriptorUis is blanked there, so
   // admission degrades to a free-text filter an ABSTRACT alone can satisfy — the one place a mark
   // could land on an off-concept title, which is the exact defect this redesign exists to remove).
+  it("sends the concept ROOT, not the subtree, when the page supplies conceptUi (edge WAF 2 KB query cap)", async () => {
+    const fetchFn = mockFetch({ pubs: [{ pmid: "1", title: "A paper", year: 2020 }] });
+    const wide = Array.from({ length: 200 }, (_, i) => `D${String(100000 + i)}`);
+    render(
+      <PeopleResultCard
+        {...props}
+        hit={taggedHit}
+        keyPaperConfig={{ ...keyPaperConfig, descriptorUis: wide, conceptUi: "D100000" }}
+      />,
+    );
+
+    fireEvent.click(chevron());
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
+    const url = fetchFn.mock.calls[0][0] as string;
+    expect(url).toBe("/api/search/key-paper?cwid=abc1234&q=hiv&conceptUi=D100000&label=HIV+Infections");
+    expect(url.length).toBeLessThan(2048);
+  });
+
   it("MATCHA_GLOSS_INWORDS — sends glossTerms on the tagged path", async () => {
     const fetchFn = mockFetch({ pubs: [{ pmid: "1", title: "A paper", year: 2020 }] });
     render(

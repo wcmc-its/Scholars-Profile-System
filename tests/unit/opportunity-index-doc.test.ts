@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildOpportunityDoc,
+  OPPORTUNITY_INDEX_WHERE,
   OPPORTUNITY_TOPIC_GATE,
   type OpportunityIndexRow,
 } from "@/lib/search";
@@ -94,5 +95,14 @@ describe("buildOpportunityDoc", () => {
   it("still indexes an explicit false as false — a classified row is trusted", () => {
     const { doc } = buildOpportunityDoc(row({ isHonorific: false }));
     expect(doc.isHonorific).toBe(false);
+  });
+});
+
+describe("OPPORTUNITY_INDEX_WHERE", () => {
+  it("projects research rows only and drops manually-suppressed ones (matcha-admin Phase 1b)", () => {
+    // The nightly rebuild consumes this constant (etl/search-index/index.ts),
+    // so a suppression falls out of the matchers on the next run with no
+    // manual reindex — same contract as PEOPLE_INDEX_WHERE / GRANT_INDEX_WHERE.
+    expect(OPPORTUNITY_INDEX_WHERE).toEqual({ isResearch: true, suppressedAt: null });
   });
 });

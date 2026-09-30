@@ -13,6 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseCsv, type Row } from "@/lib/csv";
 import {
   loadCancerTaxonomy,
@@ -588,12 +589,26 @@ export function selfCheck(): void {
   }
 }
 
-/** The whole pipeline, with the curated inputs passed in as text. Both entry
- *  points (local file read, in-VPC inlined) call THIS, so neither can drift. */
-export async function run(
+export type RunAssignmentsResult = {
+  rows: Assignment[];
+  rollup: RollupRow[];
+  /** `# schema_version: ...` header line the CLI's CSV output prepends. */
+  schemaVersionLine: string;
+  /** Same two values folded into `schemaVersionLine`, kept raw for callers
+   *  (the ETL step) that want them as `EtlRun.manifestSha256` /
+   *  `manifestTaxonomyVersion` rather than reparsing the formatted line. */
+  taxonomyManifestSha256: string;
+  taxonomyManifestVersion: string;
+};
+
+/** The whole pipeline, with the curated inputs passed in as text and the
+ *  structured result handed back rather than formatted CSV. `run()` below
+ *  (CLI/CSV output) and `etl/cancer-center-disease-assignments/index.ts`
+ *  (persisted table) both call THIS, so neither can drift from the other. */
+export async function runAssignments(
   rollupCsv: string, specialtyCsv: string,
   asOf: string = new Date().toISOString().slice(0, 10),
-): Promise<string> {
+): Promise<RunAssignmentsResult> {
   selfCheck();
   // `parseCsv` is column-name-agnostic (`Row = Record<string, string>`); the
   // rollup CSV's columns are known and fixed, so narrow to `RollupRow` here.
@@ -611,192 +626,214 @@ export async function run(
     host: u.hostname, port: Number(u.port) || 3306, user: decodeURIComponent(u.username),
     password: decodeURIComponent(u.password), database: u.pathname.slice(1),
   });
-  const json = (v: unknown) => {
-    if (typeof v === "string") { try { return JSON.parse(v); } catch { return null; } }
-    return v;
-  };
+  // try/finally, not a bare `await conn.end()` after the last query: the CLI
+  // entrypoint's own catch calls `process.exit(1)` on any throw, which used to
+  // paper over a leaked connection by killing the process outright. A caller
+  // that instead sets `process.exitCode` and awaits a graceful shutdown (the
+  // ETL step) would otherwise hang forever on the still-open socket.
+  try {
+    const json = (v: unknown) => {
+      if (typeof v === "string") { try { return JSON.parse(v); } catch { return null; } }
+      return v;
+    };
 
-  // `loadCancerTaxonomy` (lib/cancer-taxonomy.ts) is the ONE reader of
-  // `CancerTaxonomyDescriptor`; this script stays on the raw `mariadb` driver
-  // (deliberately, to avoid dragging Prisma/the mariadb driver into any
-  // client-bundled import chain -- see `lib/edit/manageable-units.ts`'s
-  // doc-comment for that trap) by handing it two tiny hand-written adapters
-  // instead of a Prisma client.
-  let taxonomyRunId: string | null = null;
-  const taxonomyDb: CancerTaxonomyDescriptorReader = {
-    findMany: async () => {
-      const rows: Array<{ descriptor_ui: string; topics: unknown; taxonomy_run_id: string }> =
-        await conn.query(
-          "SELECT descriptor_ui, topics, taxonomy_run_id FROM cancer_taxonomy_descriptor WHERE cancer_relevant = 1",
+    // `loadCancerTaxonomy` (lib/cancer-taxonomy.ts) is the ONE reader of
+    // `CancerTaxonomyDescriptor`; this script stays on the raw `mariadb` driver
+    // (deliberately, to avoid dragging Prisma/the mariadb driver into any
+    // client-bundled import chain -- see `lib/edit/manageable-units.ts`'s
+    // doc-comment for that trap) by handing it two tiny hand-written adapters
+    // instead of a Prisma client.
+    let taxonomyRunId: string | null = null;
+    const taxonomyDb: CancerTaxonomyDescriptorReader = {
+      findMany: async () => {
+        const rows: Array<{ descriptor_ui: string; topics: unknown; taxonomy_run_id: string }> =
+          await conn.query(
+            "SELECT descriptor_ui, topics, taxonomy_run_id FROM cancer_taxonomy_descriptor WHERE cancer_relevant = 1",
+          );
+        if (rows.length === 0) {
+          throw new Error(
+            "cancer_taxonomy_descriptor is empty -- run `npm run etl:cancer-taxonomy` first",
+          );
+        }
+        // Every row shares one taxonomy_run_id under the generator's
+        // full-replace model.
+        taxonomyRunId = rows[0].taxonomy_run_id;
+        return rows.map((r) => ({ descriptorUi: r.descriptor_ui, topics: json(r.topics) ?? [] }));
+      },
+    };
+    const meshDb: MeshDescriptorNameReader = {
+      findMany: async (args) => {
+        const uis = args.where.descriptorUi.in;
+        if (uis.length === 0) return [];
+        const rows: Array<{ descriptor_ui: string; name: string }> = await conn.query(
+          `SELECT descriptor_ui, name FROM mesh_descriptor WHERE descriptor_ui IN (${uis.map(() => "?").join(",")})`,
+          uis,
         );
-      if (rows.length === 0) {
-        throw new Error(
-          "cancer_taxonomy_descriptor is empty -- run `npm run etl:cancer-taxonomy` first",
-        );
-      }
-      // Every row shares one taxonomy_run_id under the generator's
-      // full-replace model.
-      taxonomyRunId = rows[0].taxonomy_run_id;
-      return rows.map((r) => ({ descriptorUi: r.descriptor_ui, topics: json(r.topics) ?? [] }));
-    },
-  };
-  const meshDb: MeshDescriptorNameReader = {
-    findMany: async (args) => {
-      const uis = args.where.descriptorUi.in;
-      if (uis.length === 0) return [];
-      const rows: Array<{ descriptor_ui: string; name: string }> = await conn.query(
-        `SELECT descriptor_ui, name FROM mesh_descriptor WHERE descriptor_ui IN (${uis.map(() => "?").join(",")})`,
-        uis,
+        return rows.map((r) => ({ descriptorUi: r.descriptor_ui, name: r.name }));
+      },
+    };
+    const { topicsByUi, nameByUi } = await loadCancerTaxonomy(taxonomyDb, meshDb);
+    if (!taxonomyRunId) {
+      throw new Error("cancer_taxonomy_descriptor query never ran -- unable to determine taxonomy_run_id");
+    }
+    const codeByUi = rollupCodeByUi(topicsByUi, rollup);
+    const uiByName = invertNameByUi(nameByUi);
+
+    // Provenance line: the ruleset sha256 + paired MeSH version that produced
+    // the taxonomy rows this run just read, from the SAME `EtlRun` row --
+    // deliberately not a timestamp, so the output stays byte-identical across
+    // repeated runs against the same taxonomy generation.
+    const etlRunRows = await conn.query(
+      "SELECT manifest_sha256, manifest_taxonomy_version FROM etl_run WHERE id = ?",
+      [taxonomyRunId],
+    );
+    const etlRun = etlRunRows[0];
+    if (!etlRun || !etlRun.manifest_sha256 || !etlRun.manifest_taxonomy_version) {
+      throw new Error(
+        `EtlRun ${taxonomyRunId} for cancer_taxonomy_descriptor is missing manifest_sha256/manifest_taxonomy_version`,
       );
-      return rows.map((r) => ({ descriptorUi: r.descriptor_ui, name: r.name }));
-    },
-  };
-  const { topicsByUi, nameByUi } = await loadCancerTaxonomy(taxonomyDb, meshDb);
-  if (!taxonomyRunId) {
-    throw new Error("cancer_taxonomy_descriptor query never ran -- unable to determine taxonomy_run_id");
-  }
-  const codeByUi = rollupCodeByUi(topicsByUi, rollup);
-  const uiByName = invertNameByUi(nameByUi);
-
-  // Provenance line: the ruleset sha256 + paired MeSH version that produced
-  // the taxonomy rows this run just read, from the SAME `EtlRun` row --
-  // deliberately not a timestamp, so the output stays byte-identical across
-  // repeated runs against the same taxonomy generation.
-  const etlRunRows = await conn.query(
-    "SELECT manifest_sha256, manifest_taxonomy_version FROM etl_run WHERE id = ?",
-    [taxonomyRunId],
-  );
-  const etlRun = etlRunRows[0];
-  if (!etlRun || !etlRun.manifest_sha256 || !etlRun.manifest_taxonomy_version) {
-    throw new Error(
-      `EtlRun ${taxonomyRunId} for cancer_taxonomy_descriptor is missing manifest_sha256/manifest_taxonomy_version`,
-    );
-  }
-  const schemaVersionLine =
-    `# schema_version: ruleset:${String(etlRun.manifest_sha256).slice(0, 12)} ${etlRun.manifest_taxonomy_version}`;
-
-  const today = asOf;
-  const asOfYear = Number(asOf.slice(0, 4));
-  type MemberRow = {
-    cwid: string; program_code: string | null; start_date: unknown; end_date: unknown;
-    preferred_name: string | null; pops_specialties: unknown; pops_board_certifications: unknown;
-  };
-  const memberRows: MemberRow[] = await conn.query(
-    "SELECT m.cwid, m.program_code, m.start_date, m.end_date, s.preferred_name, " +
-      "s.pops_specialties, s.pops_board_certifications FROM center_membership m " +
-      "LEFT JOIN scholar s ON s.cwid = m.cwid WHERE m.center_code = 'meyer_cancer_center'",
-  );
-  const members: Member[] = memberRows
-    .filter((r) => {
-      const d = (x: unknown) => (x ? new Date(x as string | number | Date).toISOString().slice(0, 10) : null);
-      return (!d(r.start_date) || d(r.start_date)! <= today) && (!d(r.end_date) || d(r.end_date)! >= today);
-    })
-    .map((r) => {
-      const names = new Set<string>();
-      for (const x of json(r.pops_specialties) ?? []) if (typeof x === "string" && x) names.add(x);
-      for (const x of json(r.pops_board_certifications) ?? []) if (x?.specialty) names.add(x.specialty);
-      return {
-        cwid: r.cwid, name: r.preferred_name ?? r.cwid, program: r.program_code ?? "",
-        specialties: [...names].sort(), inDirectory: r.preferred_name != null,
-      };
-    })
-    .sort((a: Member, b: Member) => a.cwid.localeCompare(b.cwid));
-
-  // Active manual suppressions. Loaded whole -- the table is small and this is
-  // exactly what the batch ETL does. A person-named artifact headed for SME
-  // review must not carry papers that were hidden for cause.
-  const suppressionRows: Array<{ entity_type: string; entity_id: string; contributor_cwid: string | null }> =
-    await conn.query(
-      "SELECT entity_type, entity_id, contributor_cwid FROM suppression " +
-        "WHERE entity_type IN ('publication','grant') AND revoked_at IS NULL",
-    );
-  const sup = foldSuppressions(
-    suppressionRows.map((r) => ({
-      entityType: r.entity_type, entityId: r.entity_id, contributorCwid: r.contributor_cwid ?? null,
-    })),
-  );
-
-  const authorships: Authorship[] = [];
-  let suppressedPubs = 0;
-  for (let i = 0; i < members.length; i += 40) {
-    const ids = members.slice(i, i + 40).map((m) => m.cwid);
-    const rows = await conn.query(
-      "SELECT pa.pmid, pa.cwid, pa.is_first, pa.is_last, pa.is_penultimate, pa.total_authors, p.year, p.mesh_terms " +
-        "FROM publication_author pa JOIN publication p ON p.pmid = pa.pmid " +
-        `WHERE pa.is_confirmed = 1 AND pa.cwid IN (${ids.map(() => "?").join(",")})`,
-      ids,
-    );
-    for (const r of rows) {
-      if (isAuthorSuppressed(sup, r.pmid, r.cwid)) { suppressedPubs++; continue; }
-      const mt = json(r.mesh_terms);
-      authorships.push({
-        pmid: r.pmid, cwid: r.cwid, year: r.year == null ? null : Number(r.year),
-        isFirst: !!r.is_first, isLast: !!r.is_last,
-        isPenultimate: !!r.is_penultimate, totalAuthors: Number(r.total_authors),
-        meshUis: Array.isArray(mt)
-          ? mt
-              .map((x: unknown) => (x && typeof x === "object" ? (x as { ui?: string }).ui : null))
-              .filter((ui): ui is string => typeof ui === "string")
-          : [],
-      });
     }
-  }
-  // Grants. `JSON_TYPE(...)='ARRAY'` -- NOT `IS NOT NULL`, which a JSON scalar
-  // null passes, reporting coverage that isn't there.
-  const grants: GrantRow[] = [];
-  let suppressedGrants = 0;
-  for (let i = 0; i < members.length; i += 40) {
-    const ids = members.slice(i, i + 40).map((m) => m.cwid);
-    const rows = await conn.query(
-      "SELECT external_id, cwid, role, mesh_descriptor_uis FROM `grant` " +
-        `WHERE JSON_TYPE(mesh_descriptor_uis) = 'ARRAY' AND JSON_LENGTH(mesh_descriptor_uis) > 0 ` +
-        `AND cwid IN (${ids.map(() => "?").join(",")})`,
-      ids,
+    const schemaVersionLine =
+      `# schema_version: ruleset:${String(etlRun.manifest_sha256).slice(0, 12)} ${etlRun.manifest_taxonomy_version}`;
+
+    const today = asOf;
+    const asOfYear = Number(asOf.slice(0, 4));
+    type MemberRow = {
+      cwid: string; program_code: string | null; start_date: unknown; end_date: unknown;
+      preferred_name: string | null; pops_specialties: unknown; pops_board_certifications: unknown;
+    };
+    const memberRows: MemberRow[] = await conn.query(
+      "SELECT m.cwid, m.program_code, m.start_date, m.end_date, s.preferred_name, " +
+        "s.pops_specialties, s.pops_board_certifications FROM center_membership m " +
+        "LEFT JOIN scholar s ON s.cwid = m.cwid WHERE m.center_code = 'meyer_cancer_center'",
     );
-    for (const r of rows) {
-      // Grant suppressions are whole-entity, keyed on `external_id`.
-      if (sup.darkGrantIds.has(r.external_id)) { suppressedGrants++; continue; }
-      const uis = json(r.mesh_descriptor_uis);
-      grants.push({
-        externalId: r.external_id, cwid: r.cwid, role: r.role ?? "",
-        meshUis: Array.isArray(uis) ? uis.filter((x: unknown) => typeof x === "string") : [],
-      });
-    }
-  }
-  // Clinical trials. `mesh_terms` is a semicolon-delimited list of descriptor
-  // NAMES, resolved against `uiByName` inside assign().
-  const trials: TrialRow[] = [];
-  for (let i = 0; i < members.length; i += 40) {
-    const ids = members.slice(i, i + 40).map((m) => m.cwid);
-    const rows = await conn.query(
-      "SELECT p.cwid, p.role, t.mesh_terms FROM person_clinical_trial p " +
-        "JOIN clinical_trial t ON t.protocol_number = p.protocol_number " +
-        `WHERE t.mesh_terms IS NOT NULL AND t.mesh_terms <> '' ` +
-        `AND p.cwid IN (${ids.map(() => "?").join(",")})`,
-      ids,
+    const members: Member[] = memberRows
+      .filter((r) => {
+        const d = (x: unknown) => (x ? new Date(x as string | number | Date).toISOString().slice(0, 10) : null);
+        return (!d(r.start_date) || d(r.start_date)! <= today) && (!d(r.end_date) || d(r.end_date)! >= today);
+      })
+      .map((r) => {
+        const names = new Set<string>();
+        for (const x of json(r.pops_specialties) ?? []) if (typeof x === "string" && x) names.add(x);
+        for (const x of json(r.pops_board_certifications) ?? []) if (x?.specialty) names.add(x.specialty);
+        return {
+          cwid: r.cwid, name: r.preferred_name ?? r.cwid, program: r.program_code ?? "",
+          specialties: [...names].sort(), inDirectory: r.preferred_name != null,
+        };
+      })
+      .sort((a: Member, b: Member) => a.cwid.localeCompare(b.cwid));
+
+    // Active manual suppressions. Loaded whole -- the table is small and this is
+    // exactly what the batch ETL does. A person-named artifact headed for SME
+    // review must not carry papers that were hidden for cause.
+    const suppressionRows: Array<{ entity_type: string; entity_id: string; contributor_cwid: string | null }> =
+      await conn.query(
+        "SELECT entity_type, entity_id, contributor_cwid FROM suppression " +
+          "WHERE entity_type IN ('publication','grant') AND revoked_at IS NULL",
+      );
+    const sup = foldSuppressions(
+      suppressionRows.map((r) => ({
+        entityType: r.entity_type, entityId: r.entity_id, contributorCwid: r.contributor_cwid ?? null,
+      })),
     );
-    for (const r of rows) {
-      trials.push({ cwid: r.cwid, role: r.role ?? "", meshNames: parseTrialMesh(r.mesh_terms) });
+
+    const authorships: Authorship[] = [];
+    let suppressedPubs = 0;
+    for (let i = 0; i < members.length; i += 40) {
+      const ids = members.slice(i, i + 40).map((m) => m.cwid);
+      const rows = await conn.query(
+        "SELECT pa.pmid, pa.cwid, pa.is_first, pa.is_last, pa.is_penultimate, pa.total_authors, p.year, p.mesh_terms " +
+          "FROM publication_author pa JOIN publication p ON p.pmid = pa.pmid " +
+          `WHERE pa.is_confirmed = 1 AND pa.cwid IN (${ids.map(() => "?").join(",")})`,
+        ids,
+      );
+      for (const r of rows) {
+        if (isAuthorSuppressed(sup, r.pmid, r.cwid)) { suppressedPubs++; continue; }
+        const mt = json(r.mesh_terms);
+        authorships.push({
+          pmid: r.pmid, cwid: r.cwid, year: r.year == null ? null : Number(r.year),
+          isFirst: !!r.is_first, isLast: !!r.is_last,
+          isPenultimate: !!r.is_penultimate, totalAuthors: Number(r.total_authors),
+          meshUis: Array.isArray(mt)
+            ? mt
+                .map((x: unknown) => (x && typeof x === "object" ? (x as { ui?: string }).ui : null))
+                .filter((ui): ui is string => typeof ui === "string")
+            : [],
+        });
+      }
     }
+    // Grants. `JSON_TYPE(...)='ARRAY'` -- NOT `IS NOT NULL`, which a JSON scalar
+    // null passes, reporting coverage that isn't there.
+    const grants: GrantRow[] = [];
+    let suppressedGrants = 0;
+    for (let i = 0; i < members.length; i += 40) {
+      const ids = members.slice(i, i + 40).map((m) => m.cwid);
+      const rows = await conn.query(
+        "SELECT external_id, cwid, role, mesh_descriptor_uis FROM `grant` " +
+          `WHERE JSON_TYPE(mesh_descriptor_uis) = 'ARRAY' AND JSON_LENGTH(mesh_descriptor_uis) > 0 ` +
+          `AND cwid IN (${ids.map(() => "?").join(",")})`,
+        ids,
+      );
+      for (const r of rows) {
+        // Grant suppressions are whole-entity, keyed on `external_id`.
+        if (sup.darkGrantIds.has(r.external_id)) { suppressedGrants++; continue; }
+        const uis = json(r.mesh_descriptor_uis);
+        grants.push({
+          externalId: r.external_id, cwid: r.cwid, role: r.role ?? "",
+          meshUis: Array.isArray(uis) ? uis.filter((x: unknown) => typeof x === "string") : [],
+        });
+      }
+    }
+    // Clinical trials. `mesh_terms` is a semicolon-delimited list of descriptor
+    // NAMES, resolved against `uiByName` inside assign().
+    const trials: TrialRow[] = [];
+    for (let i = 0; i < members.length; i += 40) {
+      const ids = members.slice(i, i + 40).map((m) => m.cwid);
+      const rows = await conn.query(
+        "SELECT p.cwid, p.role, t.mesh_terms FROM person_clinical_trial p " +
+          "JOIN clinical_trial t ON t.protocol_number = p.protocol_number " +
+          `WHERE t.mesh_terms IS NOT NULL AND t.mesh_terms <> '' ` +
+          `AND p.cwid IN (${ids.map(() => "?").join(",")})`,
+        ids,
+      );
+      for (const r of rows) {
+        trials.push({ cwid: r.cwid, role: r.role ?? "", meshNames: parseTrialMesh(r.mesh_terms) });
+      }
+    }
+
+    const { rows } = assign(members, authorships, codeByUi, uiByName, specialtyMap, grants, trials, asOfYear);
+
+    // Non-blocking, but never silent. A roster cwid with no `scholar` row
+    // contributes nothing; an incoming hire and a typo look identical here, and
+    // only a human reading the list can tell which is which.
+    const unmatched = members.filter((m) => !m.inDirectory).map((m) => m.cwid).sort();
+    const withRows = new Set(rows.map((r) => r.cwid));
+    const noEvidence = members
+      .filter((m) => m.inDirectory && !withRows.has(m.cwid)).map((m) => m.cwid).sort();
+    process.stderr.write(
+      `roster: ${members.length} active | not in directory: ${unmatched.length}` +
+        `${unmatched.length ? ` [${unmatched.join(" ")}]` : ""}` +
+        ` | in directory, no disease evidence: ${noEvidence.length}\n` +
+        `suppressed and excluded: ${suppressedPubs} authorships, ${suppressedGrants} grants\n`,
+    );
+
+    return {
+      rows, rollup, schemaVersionLine,
+      taxonomyManifestSha256: String(etlRun.manifest_sha256),
+      taxonomyManifestVersion: String(etlRun.manifest_taxonomy_version),
+    };
+  } finally {
+    await conn.end();
   }
-  await conn.end();
+}
 
-  const { rows } = assign(members, authorships, codeByUi, uiByName, specialtyMap, grants, trials, asOfYear);
-
-  // Non-blocking, but never silent. A roster cwid with no `scholar` row
-  // contributes nothing; an incoming hire and a typo look identical here, and
-  // only a human reading the list can tell which is which.
-  const unmatched = members.filter((m) => !m.inDirectory).map((m) => m.cwid).sort();
-  const withRows = new Set(rows.map((r) => r.cwid));
-  const noEvidence = members
-    .filter((m) => m.inDirectory && !withRows.has(m.cwid)).map((m) => m.cwid).sort();
-  process.stderr.write(
-    `roster: ${members.length} active | not in directory: ${unmatched.length}` +
-      `${unmatched.length ? ` [${unmatched.join(" ")}]` : ""}` +
-      ` | in directory, no disease evidence: ${noEvidence.length}\n` +
-      `suppressed and excluded: ${suppressedPubs} authorships, ${suppressedGrants} grants\n`,
-  );
-
+/** CSV-formatting wrapper around `runAssignments` -- the CLI's output shape,
+ *  unchanged by the split above. */
+export async function run(
+  rollupCsv: string, specialtyCsv: string,
+  asOf: string = new Date().toISOString().slice(0, 10),
+): Promise<string> {
+  const { rows, rollup, schemaVersionLine } = await runAssignments(rollupCsv, specialtyCsv, asOf);
   return schemaVersionLine + "\n" + toCsv(rows, labelsOf(rollup));
 }
 
@@ -811,6 +848,12 @@ async function main(): Promise<void> {
   );
 }
 
-if (process.argv[1] && process.argv[1].includes("cancer-center-disease-assignments")) {
+// Run only when invoked directly, not when imported (`runAssignments` now also
+// has an importer, `etl/cancer-center-disease-assignments/index.ts`, whose own
+// path contains this file's name as a substring -- a plain `.includes()` check
+// fired for that importer too and double-ran the pipeline under it).
+const invokedDirectly =
+  typeof process.argv[1] === "string" && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) {
   main().catch((e) => { console.error(e); process.exit(1); });
 }

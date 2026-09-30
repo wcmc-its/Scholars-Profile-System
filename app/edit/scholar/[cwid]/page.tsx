@@ -17,6 +17,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadEditContext } from "@/lib/api/edit-context";
@@ -34,8 +35,13 @@ import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
+import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
+import { isProfileLinksEnabled } from "@/lib/edit/profile-links";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
+import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import { institutionName } from "@/lib/institutions";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +72,12 @@ export default async function EditScholarPage({
     redirect(access.to);
   }
   if (access.kind === "forbidden") {
-    return <ForbiddenEditPage targetCwid={targetCwid} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage targetCwid={targetCwid} />
+      </div>
+    );
   }
   const { session, isSelf, isProxy, isUnitAdmin, unit } = access;
 
@@ -75,24 +86,26 @@ export default async function EditScholarPage({
   // #1104 — the unit can now be a center (behind UNIT_ADMIN_CENTER_PROXY),
   // resolved just like a department / division.
   let unitAdminBanner:
-    | { unitKind: "department" | "division" | "center"; unitName: string }
+    | { unitKind: "department" | "division" | "center" | "institution"; unitName: string }
     | null = null;
   if (unit) {
     const named =
-      unit.kind === "department"
-        ? await db.read.department.findUnique({
-            where: { code: unit.code },
-            select: { name: true },
-          })
-        : unit.kind === "center"
-          ? await db.read.center.findUnique({
+      unit.kind === "institution"
+        ? { name: institutionName(unit.code) }
+        : unit.kind === "department"
+          ? await db.read.department.findUnique({
               where: { code: unit.code },
               select: { name: true },
             })
-          : await db.read.division.findUnique({
-              where: { code: unit.code },
-              select: { name: true },
-            });
+          : unit.kind === "center"
+            ? await db.read.center.findUnique({
+                where: { code: unit.code },
+                select: { name: true },
+              })
+            : await db.read.division.findUnique({
+                where: { code: unit.code },
+                select: { name: true },
+              });
     unitAdminBanner = { unitKind: unit.kind, unitName: named?.name ?? unit.code };
   }
 
@@ -113,6 +126,10 @@ export default async function EditScholarPage({
   const selfOrSuperuser = isSelf || session.isSuperuser || session.isCommsSteward;
   const includeHighlights = isManualHighlightsEnabled() && selfOrSuperuser;
   const includeCoiGap = isCoiGapHintEnabled() && (isSelf || session.isSuperuser);
+  // #2634 — mentee suggestions: same actor rule as COI-gap (self or a genuine
+  // superuser; never a steward / proxy / unit-admin).
+  const includeMenteeSuggestions = isMenteeSuggestionsEnabled() && (isSelf || session.isSuperuser);
+  const includeOrcidSuggestion = isOrcidSuggestionEnabled() && (isSelf || session.isSuperuser);
   // RePORTER "Is this you?" matches — superuser parity with the COI-gap gate
   // above (self OR a genuine superuser; the confirm/revoke routes re-authorize).
   const includeReporterProfile =
@@ -128,6 +145,8 @@ export default async function EditScholarPage({
     includeHighlights,
     includeCoiGap,
     includeReporterProfile,
+    includeMenteeSuggestions,
+    includeOrcidSuggestion,
   });
   if (!ctx) {
     // The scholar row does not exist (or is soft-deleted). A 404 keeps the
@@ -149,9 +168,12 @@ export default async function EditScholarPage({
   // request, so it matches /edit exactly. The superuser direct-set card is
   // unaffected (it has no flag).
   const slugRequestEnabled = isSelf && isSlugRequestEnabled();
-  // Superuser is checked before comms_steward so a viewer who is both gets the
-  // full superuser surface; a steward-only viewer gets the restricted
-  // `comms_steward` mode (superuser rail minus slug + proxy-editors).
+  // Superuser is checked before comms_steward/cv_generator so a viewer who is
+  // more than one of these gets the higher-privilege surface. `cv_generator`
+  // (#2482) is the LAST resort, never an implicit "else": `resolveScholarEditAccess`
+  // gate 5 only admits us past `forbidden` when isSelf/isProxy/isUnitAdmin/
+  // isCommsSteward/isCvGenerator/isSuperuser — one of the two is guaranteed true
+  // here, so this is exhaustive, not a fallback guess.
   const mode = isSelf
     ? "self"
     : isProxy
@@ -160,7 +182,9 @@ export default async function EditScholarPage({
         ? "unit-admin"
         : session.isSuperuser
           ? "superuser"
-          : "comms_steward";
+          : session.isCommsSteward
+            ? "comms_steward"
+            : "cv-generator";
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set
@@ -188,6 +212,16 @@ export default async function EditScholarPage({
     // Datasets is valid only when the scholar has ≥1 deposit (the loader gates
     // the array on DATA_SHARING_SECTION).
     ctx.datasets.length > 0,
+    // #2634 — "Mentees › From your publications" is valid when the loader
+    // returned any row (active or dismissed), mirroring the rail rule.
+    ctx.menteeSuggestions.length > 0,
+    // Identifiers & Profiles is valid when EITHER of its cards is on: the ORCID
+    // flag (tab, write, suggestion share one kill switch) or #2699 profile links.
+    isOrcidSuggestionEnabled(),
+    isProfileLinksEnabled(),
+    // Media highlights is valid only when the scholar has ≥1 approved clip (the
+    // loader gates the array on MEDIA_HIGHLIGHTS_SECTION). Last positional arg.
+    ctx.mediaHighlights.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
@@ -200,7 +234,7 @@ export default async function EditScholarPage({
   // The earlier proxy / unit-admin authorization gates stay sequential by design
   // (each depends on the previous gate's verdict). Each read's comment is below.
   const panelEditable = mode !== "proxy" && mode !== "unit-admin";
-  const [latestSlugRequest, proxyEditorRows, unitAdminEditorRows] = await Promise.all([
+  const [latestSlugRequest, proxyEditorRows, unitAdminEditorRows, consoleTabs] = await Promise.all([
     // Seed the flag-gated "Profile URL" request card (#497 PR-3) with the
     // scholar's latest request, matching /edit (see `slugRequestEnabled` above).
     slugRequestEnabled ? loadLatestSlugRequest(session.cwid, db.read) : Promise.resolve(null),
@@ -223,6 +257,9 @@ export default async function EditScholarPage({
     panelEditable
       ? listUnitAdminEditorsForScholar(targetCwid, db.read as unknown as UnitAdminEditorsLookup)
       : Promise.resolve(null),
+    // Drives `EditShell`'s unit-admin "Profiles" breadcrumb (dwd2001 bug #7) —
+    // only unit-admin mode reads it, so skip the read for every other mode.
+    isUnitAdmin ? loadConsoleTabs(session, db.read) : Promise.resolve(null),
   ]);
 
   const proxyEditors =
@@ -252,7 +289,10 @@ export default async function EditScholarPage({
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
       unitAdminBanner={unitAdminBanner}
+      profilesNavVisible={consoleTabs?.profiles ?? false}
       reciterPendingEnabled={reciterPendingEnabled}
+      orcidTabEnabled={isOrcidSuggestionEnabled()}
+      profileLinksEnabled={isProfileLinksEnabled()}
       grantRecsEnabled={isGrantRecsEnabled()}
       biosketchEnabled={isBiosketchGenerateEnabled()}
       cvEnabled={isCvEnabled()}

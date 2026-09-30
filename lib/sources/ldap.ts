@@ -71,6 +71,12 @@ export const DEFAULT_NYP_AFFILIATES_FILTER =
 export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
   "weillCornellEduPrimaryTitle",
+  // Probe 2026-09-22: an HR-curated override for the primary title, carried
+  // on the PEOPLE branch only (the faculty SOR does not return it). Present
+  // on 49 of 8,769 active academic entries, always single-valued, and never
+  // present without a primary title. Outranks the primary title in
+  // `lib/scholar-title.ts`.
+  "weillCornellEduWorkingTitle",
   "weillCornellEduMiddleName",
   // Curated human-readable display name from the directory. Preferred over
   // the constructed `givenName + sn` form so initials, middle names, and
@@ -125,6 +131,16 @@ export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduPrimaryDepartmentCode",    // primary dept code (legacy 10-digit)
   "weillCornellEduDepartmentCode",           // multi-valued legacy 10-digit code
   "weillCornellEduDepartment",               // multi-valued dept name (per-appointment)
+  // Institution code of the primary appointment (WCMC, WCMC-Q, HMC, SIDRA,
+  // HSS, ...). Feeds `Scholar.primaryOrgCode` → institution administrators
+  // (lib/institutions.ts). Verbose names are NOT in ED — ReCiter's
+  // getVerbosePrimaryOrganization switch is the only mapping. Option-tagged
+  // per SOR on the person entry (probe 2026-09-21: every faculty:active
+  // person carries `;faculty`, some also `;employee` / `;affiliate` /
+  // `;cornell-ithaca`); ldapts surfaces the tagged key, so request it
+  // explicitly like `weillCornellEduReleaseCode;mail`.
+  "weillCornellEduPrimaryOrganization",
+  "weillCornellEduPrimaryOrganization;faculty",
   // Pre-concatenated postnominal degree string (e.g. "MD", "MD, MPH"). Lives
   // on the person entry — also present on the SOR parent (weillCornellEduSORRecord)
   // but NOT on the Role subordinates that fetchActiveFacultyAppointments filters
@@ -213,7 +229,14 @@ export type EdFacultyEntry = {
   /** ED title with internal HR annotations removed — see
    *  {@link stripInternalHrAnnotation}. */
   primaryTitle: string | null;
+  /** ED `weillCornellEduWorkingTitle`, same annotation strip as
+   *  `primaryTitle`. Outranks it in `lib/scholar-title.ts`. Null for the ~99%
+   *  of entries that carry no working title. */
+  workingTitle: string | null;
   primaryDepartment: string | null;
+  /** ED `weillCornellEduPrimaryOrganization` — institution code of the primary
+   *  appointment (`WCMC`, `WCMC-Q`, `HMC`, ...). See lib/institutions.ts. */
+  primaryOrgCode: string | null;
   email: string | null;
   /** Effective email release audience derived from the multi-valued
    *  `weillCornellEduReleaseCode;mail` attribute (most-permissive-wins,
@@ -343,6 +366,46 @@ const FACULTY_SOR_ATTRS = [
  *  scholar in one paginated search. Caller groups by CWID before write.
  *  Filter is `weillCornellEduStatus=faculty:active` so expired rows don't
  *  reach the database (no need to mirror the SOR's history table). */
+/** #2206 — faculty SOR PERSON (parent) records: one `weillCornellEduSORRecord`
+ *  per active faculty member, the parent of the Role rows the appointment
+ *  search reads. It carries `weillCornellEduDegree`, the same way the students
+ *  SOR parent does for doctoral students (the only population whose
+ *  `postnominal` was ever populated in prod). */
+export const DEFAULT_FACULTY_SOR_PERSON_FILTER =
+  "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduStatus=faculty:active))";
+
+/** Pure projection: cwid -> trimmed `weillCornellEduDegree` from SOR person
+ *  entries. Entries with no CWID or a blank degree are skipped; the first
+ *  non-blank value per CWID wins. */
+export function collectSorDegrees(
+  searchEntries: ReadonlyArray<Record<string, unknown>>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const e of searchEntries) {
+    const cwid = firstString(e.weillCornellEduCWID);
+    const degree = firstString(e.weillCornellEduDegree)?.trim();
+    if (!cwid || !degree || out.has(cwid)) continue;
+    out.set(cwid, degree);
+  }
+  return out;
+}
+
+/** #2206 — fetch the faculty SOR parent records' degree string, keyed by CWID.
+ *  Fallback source for `Scholar.postnominal` when the people-branch entry
+ *  returns no `weillCornellEduDegree` (0/7,721 faculty in prod, while the
+ *  students SOR parent populated 690/691). */
+export async function fetchFacultySorDegrees(client: Client): Promise<Map<string, string>> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_BASE ?? DEFAULT_FACULTY_SOR_BASE;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter: DEFAULT_FACULTY_SOR_PERSON_FILTER,
+    attributes: ["weillCornellEduCWID", "weillCornellEduDegree"],
+    paged: { pageSize: 500 },
+  });
+  return collectSorDegrees(searchEntries);
+}
+
 export async function fetchActiveFacultyAppointments(
   client: Client,
 ): Promise<EdFacultyAppointment[]> {
@@ -433,6 +496,10 @@ export type EdEmployeeRecord = {
   managerCwid: string | null;
   sorId: string;
   isPrimary: boolean;
+  /** `weillCornellEduOrgUnit;level3` — HR's lab unit ("Sallie Permar
+   *  Research"). Fallback PI signal when `manager` is a lab administrator
+   *  rather than the PI; see `labPiNameKey`. */
+  labUnitName: string | null;
 };
 
 const EMPLOYEE_SOR_ATTRS = [
@@ -441,6 +508,7 @@ const EMPLOYEE_SOR_ATTRS = [
   "weillCornellEduStatus",
   "weillCornellEduSORID",
   "weillCornellEduPrimaryEntry",
+  "weillCornellEduOrgUnit;level3",
 ] as const;
 
 /** Fetch all currently-active employee SOR records in one paginated search.
@@ -471,6 +539,7 @@ export async function fetchActiveEmployeeRecords(
       managerCwid: parseManagerCwid(managerDn),
       sorId,
       isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
+      labUnitName: firstString((e as Record<string, unknown>)["weillCornellEduOrgUnit;level3"]),
     });
   }
   return out;
@@ -559,6 +628,8 @@ export type EdPostdocEmploymentRecord = {
   startDate: Date | null;
   endDate: Date | null;
   isPrimary: boolean;
+  /** See `EdEmployeeRecord.labUnitName`. */
+  labUnitName: string | null;
 };
 
 const POSTDOC_EMPLOYMENT_ATTRS = [
@@ -571,6 +642,7 @@ const POSTDOC_EMPLOYMENT_ATTRS = [
   "weillCornellEduRoleCode",
   "title",
   "weillCornellEduPrimaryEntry",
+  "weillCornellEduOrgUnit;level3",
 ] as const;
 
 /** Active + expired postdoc role records. The role-code branch is the
@@ -626,6 +698,7 @@ export async function fetchAllPostdocEmploymentRecords(): Promise<
         startDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduStartDate)),
         endDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduEndDate)),
         isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
+        labUnitName: firstString((e as Record<string, unknown>)["weillCornellEduOrgUnit;level3"]),
       });
     }
     return out;
@@ -651,18 +724,56 @@ export async function fetchAllPostdocEmploymentRecords(): Promise<
  *
  *  Privacy: only requests CWID + name attributes. Explicitly does NOT
  *  reuse `ED_FACULTY_ATTRIBUTES` (which pulls title, department, FTE, etc.)
- *  — narrow per-call lists per the repo's LDAP minimal-attribute policy. */
+ *  — narrow per-call lists per the repo's LDAP minimal-attribute policy.
+ *  `{ org: true }` adds the primary department and primary-organization
+ *  code (the postdoc-MENTOR lookup: a manager who is not a Scholar — a lab
+ *  administrator, a departed PI — still gets a department / institution on
+ *  the Mentored publications report). */
 const PERSON_NAME_ATTRS = [
   "weillCornellEduCWID",
   "givenName",
   "sn",
   "displayName",
 ] as const;
+const PERSON_ORG_ATTRS = [
+  "weillCornellEduPrimaryDepartment",
+  // Option-tagged per SOR (see ED_FACULTY_ATTRIBUTES); the untagged request
+  // returns every tagged variant, `primaryOrganizationCode` picks one.
+  "weillCornellEduPrimaryOrganization",
+] as const;
+
+export type PersonLookup = {
+  firstName: string | null;
+  lastName: string | null;
+  /** Only with `{ org: true }`: `weillCornellEduPrimaryDepartment`. */
+  department?: string | null;
+  /** Only with `{ org: true }`: the primary-organization CODE (`WCMC`,
+   *  `NYP`, `CU`, ... — `lib/institutions.ts` names them). */
+  organization?: string | null;
+};
+
+/** The primary-organization code off an `ou=people` entry: the faculty SOR's
+ *  first, then employee, affiliate, then any other tag. */
+export function primaryOrganizationCode(entry: Record<string, unknown>): string | null {
+  const base = "weillCornellEduPrimaryOrganization";
+  for (const tag of ["faculty", "employee", "affiliate"]) {
+    const v = firstString(entry[`${base};${tag}`]);
+    if (v) return v;
+  }
+  for (const key of Object.keys(entry)) {
+    if (key === base || key.startsWith(`${base};`)) {
+      const v = firstString(entry[key]);
+      if (v) return v;
+    }
+  }
+  return null;
+}
 
 export async function fetchPersonNamesByCwid(
   cwids: string[],
-): Promise<Map<string, { firstName: string | null; lastName: string | null }>> {
-  const out = new Map<string, { firstName: string | null; lastName: string | null }>();
+  opts: { org?: boolean } = {},
+): Promise<Map<string, PersonLookup>> {
+  const out = new Map<string, PersonLookup>();
   if (cwids.length === 0) return out;
 
   const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
@@ -678,7 +789,7 @@ export async function fetchPersonNamesByCwid(
       const { searchEntries } = await client.search(searchBase, {
         scope: "sub",
         filter,
-        attributes: [...PERSON_NAME_ATTRS],
+        attributes: opts.org ? [...PERSON_NAME_ATTRS, ...PERSON_ORG_ATTRS] : [...PERSON_NAME_ATTRS],
         paged: { pageSize: 500 },
       });
       for (const e of searchEntries) {
@@ -692,7 +803,17 @@ export async function fetchPersonNamesByCwid(
         // what downstream code reads, so prefer the components.
         const firstName = givenName ?? (displayName ? displayName.split(/\s+/)[0] : null);
         const lastName = sn || (displayName ? displayName.split(/\s+/).slice(-1)[0] : null) || null;
-        out.set(cwid.toLowerCase(), { firstName, lastName });
+        out.set(
+          cwid.toLowerCase(),
+          opts.org
+            ? {
+                firstName,
+                lastName,
+                department: firstString(e.weillCornellEduPrimaryDepartment),
+                organization: primaryOrganizationCode(e as Record<string, unknown>),
+              }
+            : { firstName, lastName },
+        );
       }
     }
   } finally {
@@ -708,7 +829,7 @@ export async function fetchPersonNamesByCwid(
 /** RFC 4515 LDAP filter escaping. CWIDs are alphanumeric in practice, but
  *  hardening anyway in case ED ever returns a CWID with a hyphen or other
  *  reserved character. */
-function escapeLdapFilter(s: string): string {
+export function escapeLdapFilter(s: string): string {
   return s.replace(/[\\*()\0]/g, (c) => {
     switch (c) {
       case "\\":
@@ -849,6 +970,35 @@ export function parseManagerCwid(dn: string | null | undefined): string | null {
   return cwid.length > 0 ? cwid : null;
 }
 
+/** Lowercase a person name to a comparison key, folding diacritics and
+ *  dropping initials ("Jeffrey P. Greenfield" → "jeffrey greenfield",
+ *  "Bernhard Kühn" → "bernhard kuhn" — HR types the lab unit without the umlaut). */
+export function personNameKey(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.replace(/\./g, "").length > 1)
+    .join(" ");
+}
+
+/** HR names a PI's lab unit `<Given Surname> Research` (also Lab /
+ *  Laboratory / Program / Start Up variants). Returns the PI portion as a
+ *  `personNameKey`, or null when the unit isn't of that shape
+ *  ("Basic Science Research", "MRI Research Institute"). The caller decides
+ *  whether the key names exactly one faculty member. */
+export function labPiNameKey(unit: string | null | undefined): string | null {
+  const m = unit
+    ?.trim()
+    .match(/^(.+?)\s+(?:clinical\s+)?(?:research(?:\s+program)?|lab(?:oratory|s)?|program|start\s?up)$/i);
+  // ponytail: two-token floor only rejects "Research" / "Clinical Research";
+  // generic two-word units ("Basic Science Research") fall through and rely on
+  // the caller's faculty lookup missing. Add a stoplist if one ever hits.
+  const key = m ? personNameKey(m[1]) : "";
+  return key.split(" ").length >= 2 ? key : null;
+}
+
 /** Collapse multiple employee SOR rows per CWID into a single best-row map.
  *  Selection rule: the row marked `weillCornellEduPrimaryEntry=TRUE` with a
  *  non-null managerCwid wins; failing that, the first row with any non-null
@@ -923,8 +1073,16 @@ export async function fetchDoctoralStudents(client: Client): Promise<EdFacultyEn
  * Shared projection: LDAP search entries → EdFacultyEntry[]. Skips records with
  * no CWID. Phase 2 fields (primaryPersonTypeCode, personTypeCodes, ou, degreeCode)
  * are populated here so downstream deriveRoleCategory has everything it needs.
+ *
+ * Exported for unit tests (tests/unit/ldap-title-normalisation.test.ts). The
+ * name helpers below are pure and easy to test in isolation, but isolation is
+ * not enough here: this projection is the ONLY caller, its own callers
+ * (fetchActiveFaculty / fetchDoctoralStudents) are stubbed wholesale by
+ * tests/unit/etl-ed-slug-pin.test.ts, and reverting the preferredName line to
+ * `displayName || constructed` left the whole suite green. Exporting it is what
+ * lets a test assert the WIRING, not just the helper.
  */
-function projectEntries(
+export function projectEntries(
   searchEntries: ReadonlyArray<Record<string, unknown>>,
   fallbackOu: string,
 ): EdFacultyEntry[] {
@@ -938,13 +1096,20 @@ function projectEntries(
     const sn = stripSurnameNoise(firstString(e.sn) ?? "");
     const displayName = stripTrailingDegree(firstString(e.displayName)?.trim() ?? "");
     const constructed = [givenName, sn].filter(Boolean).join(" ").trim();
+    // fullName keeps the constructed form when it's richer than displayName
+    // (carries the explicit middle name token for full-text search recall). It
+    // is computed BEFORE preferredName because it is also the FIRST anchor the
+    // #2600 unit-qualifier strip below tries.
+    const constructedFull = [givenName, middleName, sn].filter(Boolean).join(" ").trim();
     // Prefer LDAP-curated displayName so middle names, initials, and stylized
     // capitalization ("M. Cary Reid") are honored. Concatenation can't reproduce
-    // those conventions and silently drops the curator's middle component.
-    const preferredName = displayName || constructed;
-    // fullName keeps the constructed form when it's richer than displayName
-    // (carries the explicit middle name token for full-text search recall).
-    const constructedFull = [givenName, middleName, sn].filter(Boolean).join(" ").trim();
+    // those conventions and silently drops the curator's middle component. #2600
+    // — but drop ED's own unit disambiguation tail first, since preferredName is
+    // the published name AND the slug basis. Anchors go LONGEST FIRST so a real
+    // middle name survives when it matches, while a middle name ED populates
+    // later can't silently re-attach the qualifier; see stripUnitQualifier.
+    const preferredName =
+      stripUnitQualifier(displayName, [constructedFull, constructed]) || constructed;
     const fullName = constructedFull || preferredName;
 
     const r = e as Record<string, unknown>;
@@ -956,10 +1121,22 @@ function projectEntries(
       primaryTitle: stripInternalHrAnnotation(
         firstString(e.weillCornellEduPrimaryTitle) ?? firstString(e.title) ?? null,
       ),
+      // Same normalization as primaryTitle: an annotation is an annotation
+      // whichever ED attribute carries it, and doing it here keeps every
+      // consumer of a working title on one rule.
+      workingTitle: stripInternalHrAnnotation(
+        firstString(r["weillCornellEduWorkingTitle"]) ?? null,
+      ),
       primaryDepartment:
         firstString(r["weillCornellEduPrimaryDepartment"]) ??
         firstString(e.weillCornellEduDepartment) ??
         firstString(e.ou) ??
+        null,
+      // The faculty SOR's code first (the appointment this profile is about);
+      // the untagged key is a defensive fallback — no probed entry carried one.
+      primaryOrgCode:
+        firstString(r["weillCornellEduPrimaryOrganization;faculty"]) ??
+        firstString(r["weillCornellEduPrimaryOrganization"]) ??
         null,
       email: firstString(e.mail) ?? null,
       // Multi-valued release-code parsed to the effective audience (fail-closed).
@@ -1083,6 +1260,96 @@ function stripTrailingDegree(name: string): string {
     (t) => /[A-Z]/.test(t) && !/^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?$/i.test(t),
   );
   return looksLikeDegree ? name.slice(0, m.index).trim() : name.trim();
+}
+
+/**
+ * #2600 — ED appends a unit disambiguation tail to `displayName` when a name
+ * collides with another person in the directory: "<Given> <Surname> -
+ * Infectious Diseases". `displayName` is the PUBLISHED name and the slug basis
+ * (`etl/ed/index.ts` calls `deriveSlug(f.preferredName)`), so the tail reached
+ * the profile h1, the `<title>`, the meta description, the OG card, the
+ * JSON-LD, the autocomplete completion input, and the URL itself.
+ *
+ * The rule is PREFIX-ANCHORED rather than "cut at the first ' - '": it only
+ * ever truncates back to a name ED itself constructed, never to a substring no
+ * curator authored. `anchors` is tried IN ORDER and the first that holds wins,
+ * so the caller passes the longest candidate first — `[givenName + middleName +
+ * sn, givenName + sn]`.
+ *
+ * Two anchors, not one. Anchoring solely on the middle-name form is
+ * NON-MONOTONE: a populated `weillCornellEduMiddleName` makes the anchor "Alice
+ * Renner Fenwick", which is not a prefix of "Alice Fenwick - Infectious
+ * Diseases", so the qualifier survives — and if ED backfills a middle name for
+ * one of the 45 AFTER this ships, `maybeUpdatedSlug` (etl/ed/index.ts)
+ * recomputes the base slug from the re-qualified name and re-mints, flipping a
+ * live public URL back on its own. The correlation is adverse: the curator who
+ * resolves a name collision with a unit tail is the same person who later fills
+ * in the middle name. Longest-first still keeps a genuine middle name whenever
+ * it really does match.
+ *
+ * Measured over prod on 2026-09-04, active + publicly-displayed scholars:
+ *   - 45 records have an ED-constructed name as a STRICT PREFIX of displayName,
+ *     and ALL 45 tails are the " - <Unit>" form (one of them is " - M.D.").
+ *     ZERO no-delimiter prefix extensions exist, so demanding the detached
+ *     delimiter costs nothing and protects the case where displayName is simply
+ *     the longer real name ("Mary Jane" ⊂ "Mary Jane Smith").
+ *   - 412 records differ the OTHER way — the constructed form is richer (an
+ *     unabridged middle name where displayName carries an initial). A prefix
+ *     rule never touches them.
+ *   - 15 of the 16 parenthetical names in prod are NICKNAMES sitting mid-name;
+ *     the constructed form is not a prefix of those, so they survive.
+ *   - Two records place the surname AFTER the " - ", and for both the
+ *     displayName equals the constructed form exactly, so there is no prefix
+ *     EXTENSION and the tail test declines. That is exactly why
+ *     `lib/name-sort.ts:stripUnitDisambiguation` is NOT reused here — it cuts
+ *     unconditionally, which is right for a sort key and would rename those two
+ *     people on a public page.
+ *
+ * A trailing-PARENTHETICAL branch is omitted DELIBERATELY. It fires on zero of
+ * the 45, and ED spends parentheses on nicknames (15 of the 16 above); nothing
+ * distinguishes a trailing "(Bob)" from a trailing "(Radiology)", so accepting
+ * "(" would truncate "Robert Smith (Bob)" to "Robert Smith". Add the branch
+ * back only with evidence of a real TRAILING parenthetical unit qualifier.
+ *
+ * Known limitations. The anchor comparison is exact-string and the delimiter
+ * vocabulary is exactly " - ", so each of these leaves the qualifier IN PLACE —
+ * every one fails SAFE, a no-op miss rather than a rename:
+ *   - a double space, an NBSP, or a case difference between the constructed
+ *     name and displayName breaks the prefix;
+ *   - an en/em-dash tail ("Alice Fenwick – Infectious Diseases"), or a hyphen
+ *     with no trailing space, fails the delimiter test;
+ *   - a degree between the name and the tail ("Alice Fenwick, MD - Infectious
+ *     Diseases") breaks the prefix, and `stripTrailingDegree` cannot pre-clean
+ *     it because that regex is `$`-anchored and declines a non-terminal degree.
+ * 45 is therefore a FLOOR on the records this fixes, not a count of them.
+ *
+ * One residual RENAME risk remains: if ED's `sn` carries only part of a real
+ * surname and displayName spells the rest after " - ", the rule truncates a
+ * real name. 0 such records were measured, and the two prod records that put a
+ * surname after " - " are protected by the exact-match case above.
+ *
+ * Returns `displayName` untouched whenever no anchor holds; the caller keeps
+ * its own empty-displayName fallback to the given+surname form.
+ *
+ * Exported for unit tests (tests/unit/ldap-title-normalisation.test.ts).
+ */
+export function stripUnitQualifier(displayName: string, anchors: readonly string[]): string {
+  for (const candidate of anchors) {
+    const anchor = candidate.trim();
+    // An empty anchor prefix-matches everything; skip to the next candidate
+    // rather than truncating to "". (givenName and sn are both optional in ED.)
+    if (!anchor) continue;
+    if (!displayName.startsWith(anchor)) continue;
+    // The whole rule, in one test: the tail must be whitespace, a hyphen, then
+    // whitespace. It subsumes the exact-match case (empty tail, no match) and
+    // the ATTACHED-hyphen case — a surname ED only half-carries (`sn` "Ruiz",
+    // displayName "Ana Ruiz-Delgado") leaves the tail "-Delgado", which has no
+    // leading whitespace and so is never truncated to "Ana Ruiz". That is the
+    // precise rename the prefix anchor exists to prevent.
+    if (!/^\s+-\s/.test(displayName.slice(anchor.length))) continue;
+    return anchor;
+  }
+  return displayName;
 }
 
 // ---------------------------------------------------------------------------

@@ -310,8 +310,8 @@ export function resolveFundingTabMsm(): boolean {
  * (and, in future, the chief of a queried division) above other dept members.
  * The signal source is `leadership.chairOf` / `leadership.chiefOf` on the
  * scholars-people doc, populated from `Department.chairCwid` /
- * `Division.chiefCwid` (which already reflect ADR-002 prediction + Path C
- * manual overrides).
+ * `Division.chiefCwid` (which already reflect ADR-002 prediction + the
+ * `field_override(leaderCwid)` precedence consult, #2560).
  *
  * Default `on` — confirmed against the local §3.2 eval (2026-05-28) on a
  * reindexed cluster: the boost promotes the actual chair to rank-1 on
@@ -1199,6 +1199,28 @@ export function resolveMeshTokenCoverageEnabled(): boolean {
 }
 
 /**
+ * Two-concept resolution. When ON, a query the decompose-and-resolve fallback
+ * interpreted as a `partial` window (e.g. `pancreatic cancer immunotherapy` →
+ * Pancreatic Neoplasms) has its RESIDUAL tokens (`immunotherapy`) resolved once more
+ * through the whole-form path; a hit becomes `MeshResolution.secondaryConcept`. Consumed by
+ * `resolveAreaConcentration`, which then keys the concentration boost on publications
+ * tagged in BOTH subtrees (true co-occurrence, one extra `terms` filter on the agg the
+ * concept arm already runs). Reorder-only: no admission, filter, or facet changes. The
+ * secondary is never used for a single-token query and never when the primary resolved
+ * verbatim (nothing left over). Flag OFF ⇒ `secondaryConcept` is never populated,
+ * byte-identical. Inert (never worse than one concept) unless
+ * `SEARCH_PEOPLE_CONCEPT_ARM_FIRST` is also on — the pair arm lives inside that arm.
+ *
+ * Measured need (prod `search_query`, 90 d to 2026-09-14): 32 of 68 distinct `partial`
+ * resolutions carried a residual that itself resolves cleanly — 77 searches, the largest
+ * class in the term-resolution-gap census — and on every one the second concept was
+ * inert (`pancreatic cancer immunotherapy` ranked identically to `pancreatic cancer`).
+ */
+export function resolveMeshSecondaryConceptEnabled(): boolean {
+  return process.env.SEARCH_MESH_SECONDARY_CONCEPT === "on";
+}
+
+/**
  * Entry-term tier parity. When ON, `meshMatchTier` promotes an entry-term resolution to
  * the `exact` tier IF the user's WHOLE query is the entry term that matched
  * (`isFullQueryMeshMatch`, `@/lib/api/normalize`). Same descriptor ⇒ same tier ⇒ same
@@ -1360,6 +1382,58 @@ export function resolveSearchPeopleClinicalRankFacets(): boolean {
 }
 
 /**
+ * Gates the `institution` People-search facet — a direct copy of
+ * `Scholar.primaryOrgCode` (ED `weillCornellEduPrimaryOrganization`: WCMC, HSS,
+ * MSKCC, NYP, ...) onto the people doc as the `primaryOrgCode` keyword (see
+ * `lib/search-index-docs.ts`'s `PEOPLE_INDEX_SELECT`). `searchPeople` and
+ * `/api/search` accept the `institution` request param regardless of this
+ * flag; while OFF the param is a silent no-op — no clause, no facet
+ * aggregation, never a 500 — the same reindex-then-flip posture as
+ * `resolveSearchPeopleClinicalRankFacets` above. While ON and the field is
+ * still UNMAPPED the agg matches nothing and no group renders; flip only after
+ * the nightly alias rebuild has carried the keyword mapping — an /edit
+ * single-doc reindex (`lib/edit/search-suppression.ts`) into the old index
+ * would dynamically map `primaryOrgCode` as text, and a terms agg on a text
+ * field is an OpenSearch error, not an empty facet.
+ *
+ * Staging-on / prod-off at merge (dark until a cdk deploy). Flag-parity: wire
+ * `SEARCH_PEOPLE_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPeopleInstitutionFacet(): boolean {
+  return process.env.SEARCH_PEOPLE_INSTITUTION_FACET === "on";
+}
+
+/**
+ * Gates the `institution` Publications-search facet — a `terms` filter + agg
+ * on the pub doc's `wcmAuthorInstitutions` keyword array (union of the
+ * displayable WCM authors' `Scholar.primaryOrgCode`, built beside
+ * `wcmAuthorDepartments` in `buildPublicationDoc`). Same accept-but-no-op-
+ * while-off and reindex-then-flip posture as
+ * `resolveSearchPeopleInstitutionFacet` above: flip only after the nightly
+ * publications alias rebuild has carried the keyword mapping.
+ *
+ * Staging-on / prod-off at merge. Flag-parity: wire
+ * `SEARCH_PUB_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPubInstitutionFacet(): boolean {
+  return process.env.SEARCH_PUB_INSTITUTION_FACET === "on";
+}
+
+/**
+ * Gates the `institution` Funding-search facet — a `terms` filter + agg on the
+ * funding doc's `institution` keyword (the lead PI's `Scholar.primaryOrgCode`,
+ * built beside `department` in `lib/funding-projection.ts`). Same posture as
+ * `resolveSearchPubInstitutionFacet` above: flip only after the nightly funding
+ * alias rebuild has carried the keyword mapping.
+ *
+ * Staging-on / prod-off at merge. Flag-parity: wire
+ * `SEARCH_FUNDING_INSTITUTION_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchFundingInstitutionFacet(): boolean {
+  return process.env.SEARCH_FUNDING_INSTITUTION_FACET === "on";
+}
+
+/**
  * #2306 — gates the `earlyStageInvestigator` People-search facet (backed by
  * the index-doc-only `esiEligible` field — see `loadEsiEligibilityByCwid` in
  * `lib/search-index-docs.ts`). Kept as an INDEPENDENT kill switch from
@@ -1465,4 +1539,25 @@ export function resolveDescendantTermsClauseCap(dflt: number): number {
     ovr("SEARCH_MESH_DESCENDANT_TERMS_CAP") ?? process.env.SEARCH_MESH_DESCENDANT_TERMS_CAP,
   );
   return Number.isInteger(n) && n > 0 && n <= 10000 ? n : dflt;
+}
+
+/**
+ * Clinical trials as People-search evidence. When on, the topic query matches the
+ * people doc's `trialText` (PI trials' titles / conditions / MeSH labels) and the
+ * concept attribution boost + concept-scope gate also accept `trialMeshUi`
+ * (`lib/search-trial-evidence.ts`). Reindex-then-flip: the fields come from the
+ * search-index ETL. Default OFF; `=== "on"` opt-in.
+ */
+export function resolveSearchPeopleTrialEvidence(): boolean {
+  return process.env.SEARCH_PEOPLE_TRIAL_EVIDENCE === "on";
+}
+
+/**
+ * Extra multiplier for a scholar whose PI trials are MeSH-tagged in the resolved concept,
+ * on top of the concept attribution boost (so pubs+trials > pubs-only > neither). Only read
+ * when SEARCH_PEOPLE_TRIAL_EVIDENCE is on. Default 1 (no boost); valid range (1, 3].
+ */
+export function resolveSearchPeopleTrialMeshWeight(): number {
+  const n = Number(process.env.SEARCH_PEOPLE_TRIAL_MESH_WEIGHT);
+  return Number.isFinite(n) && n > 1 && n <= 3 ? n : 1;
 }

@@ -2,7 +2,7 @@
 
 **Status:** ACCEPTED — implemented in #637 (PR #643). Source-of-record for the shipped feature; flag-gated off (`IMPERSONATION_ENABLED`) pending a deliberate enable.
 **Issue:** #637 · **Adapts:** `~/Downloads/scholars-impersonation-spec.md` (generic) · **Refs:** ADR-005, #356, #540, #101, #102/B03.
-**Decided:** prod support tool, full guards day one · amber banner · **edit-enabled, attributed to the real actor** · initiator = existing `superuser-role` · 30-min expiry · role taxonomy = `owner`/`curator` × `department`/`division`/`center` (+`scholar`) · audit recipe **v2** (`impersonated_cwid`).
+**Decided:** prod support tool, full guards day one · amber banner · **edit-enabled, attributed to the real actor** · initiator = existing `superuser-role` · 30-min expiry · role taxonomy = `owner`/`curator` × `department`/`division`/`center`/`core` (+`scholar`) · audit recipe **v2** (`impersonated_cwid`).
 
 ---
 
@@ -143,18 +143,18 @@ Enforced in `middleware.ts` on `/api/impersonation` (route-level):
 
 `POST /api/impersonation` `{ targetCwid }` → gate flag, R1, R2, R4. Effect: `withImpersonation`, audit `impersonation_start`, 204. Errors: 404 (flag off), 401 (no session), 403 (R1/R2/R4, stable reason), 404 (target not a real scholar).
 `DELETE /api/impersonation` → `withoutImpersonation`, audit `impersonation_end`, 204 (idempotent).
-`GET /api/impersonation/candidates?kind=&q=` → `[{cwid, preferredName, slug, role, unitKind, unit}]`; superusers pre-filtered out (R2). Gate flag, R1. `kind` ∈ `department|division|center|scholar|all`. Served at the edge by the `/api/impersonation*` CloudFront behavior (CachingDisabled + AllViewer — forwards cookies + the query string + POST/DELETE; #490/#624 + POST-403 guards).
+`GET /api/impersonation/candidates?kind=&q=` → `[{cwid, preferredName, slug, role, unitKind, unit}]`; superusers pre-filtered out (R2). Gate flag, R1. `kind` ∈ `department|division|center|core|scholar|all`. Served at the edge by the `/api/impersonation*` CloudFront behavior (CachingDisabled + AllViewer — forwards cookies + the query string + POST/DELETE; #490/#624 + POST-403 guards).
 `/api/auth/session` payload gains `impersonating: { targetCwid, targetName, role, unitKind, unit, startedAt } | null` and `canImpersonate: boolean`.
 
 ---
 
 ## 8. UX
 
-**Role taxonomy.** Subjects are classified by the real RBAC model (ADR-005 Amendment 1 / #540): a **role** `owner`/`curator` (`UnitRole`) over a **unit kind** `department`/`division`/`center` (`EntityType`), or plain `scholar`. The codebase labels the roles "Owner"/"Curator" (not "admin" — that is the superuser tier). A shared `pickDisplayGrant` (`lib/edit/impersonation-display.ts`; owner > curator, ties broken by unit-kind rank center > division > department) classifies a CWID identically for the probe and the candidates list, reading the administered unit's name from the grant's `entityId`.
+**Role taxonomy.** Subjects are classified by the real RBAC model (ADR-005 Amendment 1 / #540): a **role** `owner`/`curator` (`UnitRole`) over a **unit kind** `department`/`division`/`center`/`core` (`EntityType`), or plain `scholar`. The codebase labels the roles "Owner"/"Curator" (not "admin" — that is the superuser tier). A shared `pickDisplayGrant` (`lib/edit/impersonation-display.ts`; owner > curator, ties broken by unit-kind rank core > center > division > department) classifies a CWID identically for the probe and the candidates list, reading the administered unit's name from the grant's `entityId`.
 
-**Banner** — amber (`#7a4f01`→`#92611a`, `#f0b429` underline, `#fff8eb` text, AA). Full-width, sticky, pushes content down. `Viewing as <strong>Name</strong> · {Owner|Curator} · {unit} ({Dept|Div|Center})` (or `· Scholar`), a quiet `You are <real>` line, and — because editing is live — **"Changes are made as them and logged to you."** Auto-expiry countdown. Always-present "Return to my view" (`DELETE`). No dismiss. `role="status"` `aria-live="polite"`, exit keyboard-focusable. **Client-probed** (T6) — never server-only.
+**Banner** — amber (`#7a4f01`→`#92611a`, `#f0b429` underline, `#fff8eb` text, AA). Full-width, sticky, pushes content down. `Viewing as <strong>Name</strong> · {Owner|Curator} · {unit} ({Dept|Div|Center|Core})` (or `· Scholar`), a quiet `You are <real>` line, and — because editing is live — **"Changes are made as them and logged to you."** Auto-expiry countdown. Always-present "Return to my view" (`DELETE`). No dismiss. `role="status"` `aria-live="polite"`, exit keyboard-focusable. **Client-probed** (T6) — never server-only.
 
-**Switcher** — popover off `account-menu.tsx` (a `w-full` panel in a `w-[22rem]` popover), renders only when the probe reports `canImpersonate`. Search by name/CWID; **unit-kind** filter chips (All · Department · Division · Center · Scholar); each row shows `Name` over `{Owner|Curator} · {unit} ({Dept|Div|Center})` (or `Scholar`) with a "View as" action, from `/candidates`. Choosing a user ⇒ **confirm dialog always** (states writes are logged to you). (The generic "public view" target is deferred — NG2.)
+**Switcher** — popover off `account-menu.tsx` (a `w-full` panel in a `w-[22rem]` popover), renders only when the probe reports `canImpersonate`. Search by name/CWID; **unit-kind** filter chips (All · Department · Division · Center · Core · Scholar); each row shows `Name` over `{Owner|Curator} · {unit} ({Dept|Div|Center|Core})` (or `Scholar`) with a "View as" action, from `/candidates`. Choosing a user ⇒ **confirm dialog always** (states writes are logged to you). (The generic "public view" target is deferred — NG2.)
 
 ---
 

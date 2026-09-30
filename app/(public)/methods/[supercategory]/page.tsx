@@ -12,8 +12,12 @@ import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
 import { isSupercategoryExportInRange } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
-import { SupercategoryFamilyLayout } from "@/components/method/family-publication-layout";
-import type { FamilyRailItem } from "@/components/method/family-rail";
+import { ScholarCardGrid } from "@/components/taxonomy/scholar-card-grid";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import {
+  SupercategoryRailLayout,
+  type FamilyRailItem,
+} from "@/components/method/supercategory-rail-layout";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -58,13 +62,13 @@ export default async function SupercategoryPage({
   if (!sc) notFound();
 
   const [rollup, topScholars, entitySummaries] = await Promise.all([
-    getSupercategoryRollup(sc.id).catch(() => ({ families: [], allWorkPubs: [] })),
+    getSupercategoryRollup(sc.id).catch(() => ({ families: [], allWorkPubs: [], allPubCount: 0 })),
     getTopScholarsForSupercategory(sc.id).catch(() => null),
     getSupercategoryFamilyEntitySummaries(sc.id).catch(
       () => ({}) as Awaited<ReturnType<typeof getSupercategoryFamilyEntitySummaries>>,
     ),
   ]);
-  const { families, allWorkPubs } = rollup;
+  const { families, allWorkPubs, allPubCount } = rollup;
 
   // getSupercategory already rejects an all-suppressed/sensitive supercategory
   // (empty post-gate roster), so `families` is non-empty here in practice; guard
@@ -109,6 +113,9 @@ export default async function SupercategoryPage({
   // SPEC §B.3 HARD cap: offer the export ONLY when the distinct displayable
   // cohort is <= 50. Only run the (extra) count query when export is enabled, so
   // the flag-dark path stays cheap. The route refuses > 50 regardless.
+  // TAXONOMY_SCHOLAR_CARDS — portrait cards (chips = the scholar's families).
+  const scholarCards = isTaxonomyScholarCardsOn();
+
   const exportEligible =
     isScholarListExportEnabled() && (await isSupercategoryExportInRange(sc.id));
 
@@ -136,7 +143,7 @@ export default async function SupercategoryPage({
 
       <section className="mb-10">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          RESEARCH METHODS
+          Method category
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {sc.label}
@@ -148,39 +155,49 @@ export default async function SupercategoryPage({
         {/* Rolled-up top scholars across the supercategory's gated families.
             No supercategory-level "/scholars" page exists (scholar browse is
             per-family), so no scholarCount / "+ N more" affordance is passed. */}
-        {topScholars && (
+        {topScholars && scholarCards ? (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow
-              scholars={topScholars}
-              topicLabel={sc.label}
-              enablePopover
-              contextMethods
+            {/* No category-level scholars page exists, so no "View all" link. */}
+            <ScholarCardGrid
+              heading="Scholars using this"
+              scholars={topScholars.map((s) => ({ ...s, areas: s.families }))}
+              // No filter link: the category feed takes no scholar filter.
+              popover={{ label: sc.label, supercategory: sc.id }}
             />
           </div>
+        ) : (
+          topScholars && (
+            <div id="top-scholars" className="scroll-mt-20">
+              <TopScholarsChipRow
+                scholars={topScholars}
+                topicLabel={sc.label}
+                enablePopover
+                contextMethods
+                heading="Scholars using this"
+              />
+            </div>
+          )
         )}
 
-        {/* Stats — family count (additive/accurate). The distinct cross-family
-            scholar count is non-additive across co-membership, so it is not
-            shown as a raw sum here (§3.2 / OQ-3). */}
-        <div className="mt-4 flex items-baseline justify-between gap-4 border-t border-dashed border-border pt-4">
-          <div className="text-sm text-muted-foreground">
-            {families.length.toLocaleString()} method{" "}
-            {families.length === 1 ? "family" : "families"}
-          </div>
-          {exportEligible ? (
+        {/* Export stays; the mockup shows no stats line, so no family count here. */}
+        {exportEligible ? (
+          <div className="mt-4 flex justify-end">
             <ScholarListExportButton scope="supercategory" params={{ supercategory: sc.slug }} />
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </section>
 
       {/* Two-level body: family rail + ?family= right panel. */}
       <section id="families" className="scroll-mt-20">
-        <SupercategoryFamilyLayout
+        <SupercategoryRailLayout
           supercategorySlug={sc.slug}
           supercategoryLabel={sc.label}
           families={railItems}
           familyMeta={familyMeta}
           allWorkPubs={allWorkPubs}
+          allPubCount={allPubCount}
+          scholarNames={scholarCards}
+          loadMore={isTaxonomyFeedLoadMoreOn()}
         />
       </section>
     </main>

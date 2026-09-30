@@ -41,6 +41,7 @@
  * Run: npx tsx scripts/backfills/2026-06-10-import-unit-curation.ts [--dry-run] [--limit=N]
  */
 import "dotenv/config";
+import { CENTER_ENTITY_TYPE, orgUnitRoleSeedRows } from "../../lib/org-unit-roles";
 import { pathToFileURL } from "node:url";
 import { CENTERS, CENTER_PROGRAMS } from "../../prisma/center-seed-data";
 
@@ -152,6 +153,9 @@ export async function fixtureLoadCenters(
         sortOrder: c.sortOrder,
         centerType: c.centerType,
         source: "manual",
+        // #2542 Phase 1 — a fixture-loaded center needs its role vocabulary too,
+        // or every leadership test on a fresh clone / CI database FK-errors.
+        // Only on `create`: an existing center's vocabulary is curator-owned.
       },
       update: {
         name: c.name,

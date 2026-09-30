@@ -3,32 +3,41 @@ import { Wrench } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
-import { htmlToPlainText } from "@/lib/utils";
 import { formatRoleCategory } from "@/lib/role-display";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
+import { visibleInstitutionName } from "@/lib/institutions";
+import { ROSTER_ROW_TAGS, type RosterMeshChip, type RosterRowTags } from "@/lib/roster-row-tags";
+
+const FOCUS_RING =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8102E] focus-visible:ring-offset-1";
+// Unit Page v2 TOPICS chip — slate outline pill (mock: 26px, 12.5px, radius 999).
+// `max-w-full min-w-0` + a truncating label keep a long descriptor (e.g.
+// "Antineoplastic Combined Chemotherapy Protocols") inside the 1fr column at
+// 390px instead of spilling over the pubs/grants column.
+const MESH_CHIP_CLASS =
+  "inline-flex h-[26px] min-w-0 max-w-full items-center whitespace-nowrap rounded-full border border-apollo-slate bg-background px-[10px] text-[12.5px] leading-none text-apollo-slate";
 
 /**
- * Per neurology_dept_body_per_spec.html: 11px uppercase role tag with 0.06em
- * letter-spacing on a muted-secondary background, 0.5px border, 3px radius.
+ * One roster row — Unit Page v2 layout: grid 40px | 1fr | 72px, 18px vertical
+ * padding, a hairline under every row. Name (16px, slate + underline on hover)
+ * with only the membership badge beside it; then title, a meta line (division /
+ * department), an appointment line ("{role} at {institution}"), ONE tag row
+ * (TOPICS MeSH chips by default, or method chips — see `ROSTER_ROW_TAGS`), and a
+ * fixed pubs / grants column (a zero count is omitted, not dashed).
  */
-function RoleTag({ role }: { role: string }) {
-  return (
-    <span
-      className="inline-flex items-center rounded-[3px] border border-border bg-muted px-[6px] text-[11px] font-medium leading-[1.4] uppercase tracking-[0.06em] text-muted-foreground"
-    >
-      {role}
-    </span>
-  );
-}
-
 export function PersonRow({
   hit,
   trailingBadge,
   methodChips,
+  meshChips,
+  rowTags = ROSTER_ROW_TAGS,
+  activeAppointment = "All",
+  departmentContext = false,
+  diseaseRow,
 }: {
   hit: DepartmentFacultyHit;
-  /** Optional badge rendered after the role tag — e.g. the center roster's
+  /** Optional badge rendered after the name — e.g. the center roster's
    *  Research/Clinical membership-type chip. Omitted everywhere else. */
   trailingBadge?: ReactNode;
   /** #962 — top 2–3 PUBLIC method families (center roster only). Each chip shows
@@ -37,99 +46,183 @@ export function PersonRow({
    *  (a member with no public families passes `undefined`). A structural subset
    *  of `CenterMemberFamily`, so `topMethods` satisfies it directly. */
   methodChips?: Array<{ value: string; familyLabel: string; exemplarTools: string[] }>;
+  /** Unit Page v2 — the member's top ≤3 MeSH terms (`hit.topMesh`), shown as
+   *  the TOPICS chip row, each deep-linking to the profile's `?mesh=` filter. */
+  meshChips?: RosterMeshChip[];
+  /** Which single tag row renders (mock `rowTags`). No cross-fallback: in
+   *  "mesh" mode a member without MeSH terms shows no tag row. */
+  rowTags?: RosterRowTags;
+  /** The roster's active Appointment chip. The role label on the appointment
+   *  line only shows under "All" — any narrower chip already says it. */
+  activeAppointment?: string;
+  /** Rendered on the row's OWN department roster: the meta line drops the
+   *  redundant "Department of X" and shows just the division (or nothing). */
+  departmentContext?: boolean;
+  /** D1 — the public center roster's DISEASES row (`CenterDiseaseRow`),
+   *  rendered above the TOPICS row. Omitted everywhere else, so department /
+   *  division cards are unchanged. */
+  diseaseRow?: ReactNode;
 }) {
-  const deptLine = hit.divisionName
-    ? `${hit.divisionName} · Department of ${hit.departmentName}`
-    : `Department of ${hit.departmentName}`;
-  const snippet = hit.overview ? htmlToPlainText(hit.overview) : null;
+  // #2519 — a Cornell (Ithaca) external member's `departmentName` is a raw
+  // Cornell dept string (e.g. "CIO - IT Security Office"), not a WCM
+  // department to prefix, and has no division segment; it's also `""` when
+  // the person has no dept, in which case no department line renders at all.
+  const deptLine = hit.isExternal
+    ? hit.departmentName || null
+    : departmentContext
+      ? hit.divisionName || null
+      : hit.divisionName
+        ? `${hit.divisionName} · Department of ${hit.departmentName}`
+        : `Department of ${hit.departmentName}`;
+  // Appointment line (Unit Page v2 — replaces the uppercase role tag and the
+  // institution pill beside the name). The institution is a non-WCMC primary
+  // institution (absence-as-default) or, for an external member (#2519 Cornell
+  // / CTSC feed), the feed institution — an external hit has no
+  // `primaryOrgCode`, so the two never stack. The role label shows only under
+  // the "All" chip and never for full-time faculty (the default appointment).
+  const institution = hit.isExternal
+    ? hit.externalInstitution || null
+    : visibleInstitutionName(hit.primaryOrgCode);
+  const roleLabel = hit.roleCategory ? formatRoleCategory(hit.roleCategory) : null;
+  const apptLabel =
+    activeAppointment === "All" && roleLabel && roleLabel !== "Full-time faculty"
+      ? roleLabel
+      : null;
+  const apptLine =
+    apptLabel && institution ? `${apptLabel} at ${institution}` : apptLabel || institution;
 
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
+  // TOPICS chips link to the WCM profile, so only rows whose name links there.
+  const profileLinked =
+    !hit.isExternal && isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory);
+  const meshRow = rowTags === "mesh" && profileLinked ? (meshChips ?? []) : [];
+  const methodRow = rowTags === "methods" ? (methodChips ?? []) : [];
+  const nameClass =
+    "text-foreground no-underline underline-offset-[3px] transition-colors duration-[120ms] ease-out hover:text-apollo-slate hover:underline";
 
   return (
-    <div className="grid grid-cols-[48px_1fr_auto] items-start gap-[13px] py-4 border-b border-border last:border-b-0">
+    <div className="grid grid-cols-[40px_minmax(0,1fr)_72px] items-start gap-[14px] border-b border-apollo-border py-[18px]">
       <div>
         <HeadshotAvatar
-          size="md"
+          size="roster"
           cwid={hit.cwid}
           preferredName={hit.preferredName}
           identityImageEndpoint={hit.identityImageEndpoint}
         />
       </div>
-      <div className="flex min-w-0 flex-col">
-        <div className="mb-[3px] flex flex-wrap items-center gap-2 text-[15px] font-medium leading-[1.3]">
+      <div className="flex min-w-0 flex-col gap-[3px]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[16px] leading-[22px]">
           {/* #2202 — `hit.roleCategory` is a display LABEL ("Doctoral student"),
               which is not a value isPubliclyDisplayed knows; it must see the raw
               enum. The fallback keeps older payloads working — and now that the
               predicate fails closed, an unrecognized label de-links rather than
               leaks. */}
-          {isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory) ? (
+          {hit.isExternal && !hit.externalProfileUrl ? (
+            // A CTSC feed person with no SPS profile: plain name, no link.
+            <span className="text-foreground">{hit.preferredName}</span>
+          ) : hit.isExternal ? (
+            // #2519 — a Cornell (Ithaca) external member has no WCM profile
+            // (no slug, no Scholar row): link out to the Cornell directory
+            // instead, and skip `PersonPopover` (it has no WCM data to show).
+            <a
+              href={hit.externalProfileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={nameClass}
+            >
+              {hit.preferredName}
+            </a>
+          ) : isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory) ? (
             <PersonPopover cwid={hit.cwid} surface="facet">
-              <a
-                href={profilePath(hit.slug)}
-                className="hover:underline"
-                style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
-              >
+              <a href={profilePath(hit.slug)} className={nameClass}>
                 {hit.preferredName}
               </a>
             </PersonPopover>
           ) : (
-            // #536 — hidden identity class: name + role tag stay, but no
-            // profile link (the route 404s) and no navigating popover.
-            <span style={{ color: "var(--color-text-primary)" }}>{hit.preferredName}</span>
+            // #536 — hidden identity class: name stays, but no profile link
+            // (the route 404s) and no navigating popover.
+            <span className="text-foreground">{hit.preferredName}</span>
           )}
-          {hit.roleCategory && (() => {
-            const label = formatRoleCategory(hit.roleCategory);
-            return label ? <RoleTag role={label} /> : null;
-          })()}
           {trailingBadge}
         </div>
         {hit.primaryTitle && (
-          <div className="mb-[2px] text-[13px] text-muted-foreground">
+          <div className="text-[14px] leading-[20px] text-muted-foreground">
             {hit.primaryTitle}
           </div>
         )}
-        <div className="mb-[5px] text-[12.5px] text-[var(--color-text-tertiary)]">
-          {deptLine}
-        </div>
-        {snippet && (
-          <div className="text-[13px] leading-[1.5] text-muted-foreground">
-            {snippet}
+        {deptLine && (
+          <div className="text-[13px] leading-[19px] text-foreground">{deptLine}</div>
+        )}
+        {apptLine && (
+          <div className="text-[13px] leading-[19px] text-muted-foreground">{apptLine}</div>
+        )}
+        {diseaseRow}
+        {meshRow.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-[6px]">
+            <span
+              aria-hidden
+              className="mr-[2px] text-[10.5px] tracking-[0.12em] text-muted-foreground"
+            >
+              TOPICS
+            </span>
+            <ul
+              aria-label="Research topics"
+              className="m-0 flex min-w-0 max-w-full list-none flex-wrap gap-[6px] p-0"
+            >
+              {meshRow.map((c) => (
+                <li key={c.ui ?? c.label} className="min-w-0 max-w-full">
+                  {c.ui ? (
+                    <a
+                      href={`${profilePath(hit.slug)}?mesh=${encodeURIComponent(c.ui)}#publications`}
+                      title={`${c.label} — see this topic on the scholar's profile`}
+                      className={`${MESH_CHIP_CLASS} ${FOCUS_RING} no-underline transition-colors hover:bg-apollo-slate-tint hover:no-underline`}
+                    >
+                      <span className="truncate">{c.label}</span>
+                    </a>
+                  ) : (
+                    <span className={MESH_CHIP_CLASS} title={c.label}>
+                      <span className="truncate">{c.label}</span>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
-        {methodChips && methodChips.length > 0 && (
-          <div className="mt-[6px] flex flex-wrap items-center gap-[6px]">
-            {methodChips.map((c) => (
+        {methodRow.length > 0 && (
+          <div className="mt-[5px] flex flex-wrap items-center gap-[6px]">
+            {methodRow.map((c) => (
               <span
                 key={c.value}
                 title={c.exemplarTools.length > 0 ? c.exemplarTools.join(", ") : undefined}
-                className="inline-flex items-center gap-1 rounded-[3px] border border-border bg-muted px-[6px] py-[1px] text-[11px] font-medium leading-[1.4] text-muted-foreground"
+                className="inline-flex h-[22px] items-center gap-[5px] whitespace-nowrap border border-apollo-border-strong bg-apollo-page px-[7px] text-[11.5px] text-muted-foreground"
               >
-                <Wrench aria-hidden className="h-3 w-3" strokeWidth={2} />
+                <Wrench aria-hidden className="size-[11px]" strokeWidth={2} />
                 {c.familyLabel}
               </span>
             ))}
           </div>
         )}
       </div>
-      <div className="flex flex-col items-end gap-1 self-start pt-1 text-[12px] text-[var(--color-text-tertiary)]">
+      <dl className="m-0 flex flex-col gap-1 text-right text-[12px] leading-[20px] text-muted-foreground">
         {hit.pubCount > 0 && (
-          <span>
-            <b className="text-[14px] font-medium text-foreground">
+          <div>
+            <dt className="inline text-[14px] text-foreground">
               {hit.pubCount.toLocaleString()}
-            </b>{" "}
-            {pubLabel}
-          </span>
+            </dt>{" "}
+            <dd className="m-0 inline">{pubLabel}</dd>
+          </div>
         )}
         {hit.grantCount > 0 && (
-          <span>
-            <b className="text-[14px] font-medium text-foreground">
+          <div>
+            <dt className="inline text-[14px] text-foreground">
               {hit.grantCount.toLocaleString()}
-            </b>{" "}
-            {grantLabel}
-          </span>
+            </dt>{" "}
+            <dd className="m-0 inline">{grantLabel}</dd>
+          </div>
         )}
-      </div>
+      </dl>
     </div>
   );
 }

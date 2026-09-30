@@ -17,6 +17,7 @@
  * `authorizeOverviewWrite`, whose first leg is `self` — a scholar would be able to
  * approve the pending honor on their own profile. See `lib/auth/honors-curator.ts`.
  */
+import { Download } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
@@ -27,13 +28,14 @@ import { db } from "@/lib/db";
 // No `countPendingHonors` here: this page has already loaded the queue, so it
 // feeds the sub-nav badge from `groups` rather than paying for a second COUNT —
 // the same thing `/edit/slug-requests` does with `requests.length`.
-import { isHonorQueueEnabled, loadHonorQueue } from "@/lib/edit/honor-queue";
+import { isHonorQueueEnabled, loadHonorQueue, loadHonorSources } from "@/lib/edit/honor-queue";
+import { isHonorsRunNowEnabled } from "@/lib/honors/run-now";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Honors approval — Scholars Profile Console",
+  title: "Honors approval — Scholars Console",
   robots: { index: false, follow: false },
 };
 
@@ -52,7 +54,16 @@ export default async function HonorsQueuePage() {
   // (`app/api/auth/session/route.ts`), and a bare read of any role flag inherits
   // that shape and locks superusers out.
   if (!session.isSuperuser && session.isHonorsCurator !== true) {
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell
+        active="honors-queue"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
+        <ForbiddenEditPage session={session} />
+      </ConsoleShell>
+    );
   }
 
   // All three status buckets — Pending is the working queue; Approved/Rejected are
@@ -62,14 +73,16 @@ export default async function HonorsQueuePage() {
   // loads only what a scholar did NOT enter about themselves. SELF honors are
   // created `published` and never enter the pending/rejected flow, so only the
   // published load needs splitting.
-  const [groups, approved, rejected, userAsserted] = await Promise.all([
+  // Sources: the scraped honor lists and their runs (`honor_list_run`), the
+  // seed-only rosters behind the other fed rows, and the recorded loads.
+  const [groups, approved, rejected, userAsserted, sources] = await Promise.all([
     loadHonorQueue(db.read, "pending"),
     loadHonorQueue(db.read, "published", { self: false }),
     loadHonorQueue(db.read, "rejected"),
     loadHonorQueue(db.read, "published", { self: true }),
+    loadHonorSources(db.read),
   ]);
   const pendingCount = groups.reduce((sum, g) => sum + g.rows.length, 0);
-  const contestedCount = groups.filter((g) => g.contested).length;
   // The subnav's slug badge is a live count; keep it truthful on this page too
   // rather than passing 0 and making the tab lie.
   const slugRequests = isSlugRequestEnabled() ? await loadSlugRequestQueue(db.read) : [];
@@ -81,27 +94,36 @@ export default async function HonorsQueuePage() {
       pendingSlugRequests={slugRequests.length}
       pendingHonors={pendingCount}
     >
-      <div className="mb-1 flex items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold">Honors approval</h1>
-          {/* #1762 — the Research Dean's office exports the full record (all
-              statuses) as CSV. Same gate as this page enforces the route. A plain
-              <a>: /export is a CSV download route (route.ts), not a page, so
-              <Link>'s client nav + prefetch would fetch the file itself. */}
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a href="/edit/honors-queue/export" className="text-sm hover:underline" data-testid="honors-export-link">
-            Download CSV
-          </a>
+      <div className="mb-[22px] flex flex-wrap items-end gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-[300px]">
+          <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Honors approval</h1>
+          <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
+            Honors matched to scholars from external award lists. Nothing renders on a profile until
+            it&rsquo;s approved.
+          </p>
         </div>
-        <p className="text-muted-foreground mb-6 text-sm">
-          {pendingCount === 0
-            ? "Honors awaiting a decision. Nothing here renders on a profile until it is approved."
-            : `${pendingCount} honor${pendingCount === 1 ? "" : "s"} awaiting a decision${
-                contestedCount > 0
-                  ? `, including ${contestedCount} where more than one person matches the same award`
-                  : ""
-              }. Nothing here renders on a profile until it is approved.`}
-        </p>
-        <HonorsQueue pending={groups} approved={approved} rejected={rejected} userAsserted={userAsserted} />
+        {/* #1762 — the Research Dean's office exports the full record (all
+            statuses) as CSV. Same gate as this page enforces the route. A plain
+            <a>: /export is a CSV download route (route.ts), not a page, so
+            <Link>'s client nav + prefetch would fetch the file itself. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a
+          href="/edit/honors-queue/export"
+          className="border-apollo-border-strong bg-apollo-surface hover:bg-apollo-surface-2 inline-flex h-[34px] items-center gap-1.5 rounded-lg border px-3 text-[13.5px] whitespace-nowrap"
+          data-testid="honors-export-link"
+        >
+          <Download className="size-[13px]" aria-hidden />
+          Download CSV
+        </a>
+      </div>
+      <HonorsQueue
+        pending={groups}
+        approved={approved}
+        rejected={rejected}
+        userAsserted={userAsserted}
+        sources={sources}
+        runNowEnabled={isHonorsRunNowEnabled()}
+      />
     </ConsoleShell>
   );
 }

@@ -8,7 +8,10 @@ from openpyxl.utils import get_column_letter
 from datetime import date
 import catalog
 
-OUT=os.path.dirname(os.path.abspath(__file__)); PROJ=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule")
+# Durable, non-git output location - see extract_databanks.py's OUT comment.
+OUT=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+PROJ=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule")
 full=pd.read_csv(f"{OUT}/attributed_deposits.csv").rename(columns={'title_x':'title','title_y':'article_title'})
 
 # ---- merge accessions back (pmid,repo -> joined accessions) ----

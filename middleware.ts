@@ -153,9 +153,10 @@ function isGatedOrLegacyPath(pathname: string): boolean {
  * The `Host` fallback is for LOCAL DEV ONLY, where neither var is set — every
  * deployed environment always sets `SITE_URL`.
  *
- * Follow-up: `viewerHostOrp` is now redundant and can be removed from
- * `cdk/lib/edge-stack.ts` once this ships to both envs (app first, then CDK —
- * the reverse order re-opens #1930 until the image rolls).
+ * Follow-up (#1944): `viewerHostOrp` was removed from `cdk/lib/edge-stack.ts`
+ * in code once this shipped to both envs. That removal still needs its own
+ * `cdk deploy Sps-Edge-<env>` per env to take effect — merging the CDK change
+ * alone does not change anything deployed.
  *
  * Scheme is always `https`: the public site is HTTPS-only (HSTS + CloudFront
  * redirect-to-https). `x-forwarded-proto` is deliberately NOT used — at the

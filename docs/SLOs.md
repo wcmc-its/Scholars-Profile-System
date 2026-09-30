@@ -134,7 +134,7 @@ Review is a written doc-update PR, not a meeting. Each review revises the target
 - **Burn-rate alerts** (multi-window / multi-burn-rate setup à la Google SRE Workbook). Deferred until >= 30 days of post-launch SLI data; pre-launch corpus does not give a real burn-rate distribution to tune against.
 - **Per-route SLOs.** `/api/edit` writes and `/search` reads have very different latency profiles, but neither has the traffic to support an independent SLO yet. Revisit once a top-5 endpoint list emerges from real traffic.
 - **ECS `SERVICE_DEPLOYMENT_FAILED` alarm via EventBridge.** Worth shipping once the rolling-deploy circuit-breaker has fired in anger at least once; pre-launch there is no signal to tune the suppression window. Filed as a B22.x follow-on.
-- **Synthetic monitoring** (Route53 health checks, CloudWatch Synthetics canaries). Out of scope until traffic justifies a synthetic prober.
+- **Synthetic monitoring** — *no longer fully out of scope.* Since 2026-07 the `sps-edge-origin-probe-<env>` Lambda (EventBridge-scheduled; `cdk/lib/observability-stack.ts`) probes the edge and origin and emits the custom metrics behind the `sps-edge-*` alarms, which feed the `sps-app-unavailable-<env>` composite. Route53 health checks and CloudWatch Synthetics canaries specifically remain unused.
 - **Distributed tracing instrumentation** for trace-driven latency attribution. That is [B24](https://github.com/wcmc-its/Scholars-Profile-System/issues/123) and orthogonal to CloudWatch metric-based alarming.
 - **Per-env cost budgets** via tag allocation. The account is single-tenant for SPS, so the account-wide budget *is* the SPS budget.
 

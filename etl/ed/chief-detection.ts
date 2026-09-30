@@ -29,8 +29,8 @@ export type ChiefDetectionResult = {
   verdict: ChiefVerdict;
   candidates: ChiefCandidate[];
   /** What the ETL should write to Division.chiefCwid. Null for any verdict
-   *  weaker than MEDIUM — the override file (Path C) is the escape hatch.
-   *  HIGH and MEDIUM are auto-written; LOW/NONE/GAP all clear to null. */
+   *  weaker than MEDIUM — a `field_override(leaderCwid)` row is the escape
+   *  hatch. HIGH and MEDIUM are auto-written; LOW/NONE/GAP all clear to null. */
   valueToWrite: string | null;
 };
 

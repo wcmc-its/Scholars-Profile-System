@@ -6,7 +6,7 @@
  * the Request-a-change attribute, and that a hide POSTs `entityType:"mentee"`.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -49,8 +49,10 @@ describe("MenteesCard — suppressible mentees", () => {
     expect(document.querySelector('[data-slot="mentees-panel"]')).not.toBeNull();
     expect(screen.getByText("Jordan Mentee")).toBeTruthy();
     expect(screen.getByText(/Immunology \(PhD\)/)).toBeTruthy();
-    // shown → Hide; hidden_by_self → Show
-    expect(screen.getByTestId("mentee-row-self01:m1-hide")).toBeTruthy();
+    // shown → a select checkbox (hiding is the bulk verb); hidden_by_self → Show
+    expect(
+      screen.getByRole("checkbox", { name: "Select Jordan Mentee, Immunology (PhD)" }),
+    ).toBeTruthy();
     expect(screen.getByTestId("mentee-row-self01:m2-show")).toBeTruthy();
   });
 
@@ -76,10 +78,11 @@ describe("MenteesCard — suppressible mentees", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderCard([MENTEES[0]]);
 
-    fireEvent.click(screen.getByTestId("mentee-row-self01:m1-hide"));
-    // Self hide opens a lightweight confirm dialog; confirm it.
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: /^hide$/i }));
+    // Select the row, then hide the selection from the bar. A self hide is
+    // direct — no confirm dialog.
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Select Jordan Mentee/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide from profile" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0];

@@ -63,15 +63,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Steering params are NEVER trusted — normalize defensively (unknown mode → contributions,
   // count clamped to 1..5, free text trimmed/clamped). A garbage value yields a usable shape.
   const params = normalizeBiosketchParams(req.ctx.body.params);
-
-  // The Personal Statement sub-mode REQUIRES a project title + aims — without them the model
-  // cannot honestly write the "directly relevant experience" framing (spec §USER-TURN). This
-  // is the one explicit 400-on-bad-params: the inputs are not in the FACTS, so we cannot
-  // default them. Contributions mode needs neither and never trips this.
-  const missing = missingPersonalStatementInputs(params);
-  if (missing.length > 0) {
-    return editError(400, "missing_project_inputs", missing.join(","));
-  }
+  // #2654 — optional application-name label for the saved-drafts list. Untrusted free text:
+  // trimmed, clamped to the column width, empty ⇒ NULL. Never reaches the prompt.
+  const label =
+    typeof req.ctx.body.label === "string" ? req.ctx.body.label.trim().slice(0, 120) : "";
 
   // --- authorization: the SHARED bio-write predicate (self OR superuser OR granted proxy OR
   //     org-unit owner/curator). Keyed on `realCwid`, gated to non-impersonating for the
@@ -103,6 +98,17 @@ export async function POST(request: NextRequest): Promise<Response> {
     canSelectBiosketchPromptVersion || params.promptVersion === defaultBiosketchPromptVersionId()
       ? params
       : { ...params, promptVersion: defaultBiosketchPromptVersionId() };
+
+  // The Personal Statement sub-mode REQUIRES a project title + aims — without them the model
+  // cannot honestly write the "directly relevant experience" framing (spec §USER-TURN) — and,
+  // under v8, the role on the application (#2653). This is the one explicit 400-on-bad-params:
+  // the inputs are not in the FACTS, so we cannot default them. Contributions mode needs none
+  // and never trips this. Checked on the EFFECTIVE version, after the downgrade, so an
+  // unprivileged client posting v8 is not held to a role requirement v7 will never read.
+  const missing = missingPersonalStatementInputs(effectiveParams);
+  if (missing.length > 0) {
+    return editError(400, "missing_project_inputs", missing.join(","));
+  }
 
   // --- per-scholar rate limit (DB write) + facts assembly (DB read). The rate limit runs
   //     first (before the gateway call) so a burst can't run up cost; its bucket is keyed on
@@ -171,14 +177,14 @@ export async function POST(request: NextRequest): Promise<Response> {
             entries: result.entries,
             // Project title/aims: required for Personal Statement; optional steer for
             // Contributions (#917 v6 — drives the "related" products bucket). Persisted
-            // whenever present so a "Use these settings" restore can recover them.
+            // whenever present so Clone (#2654) can re-seed them into the form.
             projectTitle:
               effectiveParams.projectTitle.length > 0 ? effectiveParams.projectTitle : null,
             projectAims: effectiveParams.aims.length > 0 ? effectiveParams.aims : null,
             model: result.model,
             // The RESOLVED (post-downgrade) version actually generated with.
             promptVersion: effectiveParams.promptVersion,
-            // Persist the steering controls so "Use these settings" can restore them (incl. the
+            // Persist the steering controls so Clone (#2654) can restore them (incl. the
             // resolved prompt version, mirroring the overview history row).
             params: {
               mode: effectiveParams.mode,
@@ -186,6 +192,13 @@ export async function POST(request: NextRequest): Promise<Response> {
               emphasis: effectiveParams.emphasis,
               instructions: effectiveParams.instructions,
               promptVersion: effectiveParams.promptVersion,
+              // #2653 v8 — the role on the application + contribution line (null / "" for
+              // Contributions and for v5–v7), so a restore recovers the role the draft argued.
+              applicationRole: effectiveParams.applicationRole,
+              contributionLine: effectiveParams.contributionLine,
+              // #2665 — entries that got the over-cap tighten pass, with body length before and
+              // after, so the over-cap rate before/after tightening is countable from history.
+              tightened: result.tightened,
             },
             products: result.products ?? undefined,
             sources: result.sources ?? undefined,
@@ -196,6 +209,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             // the history panel can answer "who ran this" even for a delegated draft.
             createdByCwid: realCwid,
             impersonatedCwid,
+            label: label.length > 0 ? label : null,
           },
           select: { id: true },
         });

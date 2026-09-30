@@ -5,9 +5,10 @@
  * (without re-running the ETL) and rank them by signal strength. Output is a
  * per-division verdict so a human can decide:
  *   - which auto-detected chiefs to trust
- *   - which divisions need a manual entry in data/division-chiefs.txt
+ *   - which divisions need a curated `field_override(division, code,
+ *     'leaderCwid')` row (via /edit) to pin or clear the chief
  *
- * Why in-memory: the live `Department.chairCwid` column may be stale (e.g.
+ * Why in-memory: the live chair `OrgUnitRoleAssignment` row may be stale (e.g.
  * Medicine's chair didn't match the old regex), so the probe applies the
  * UPDATED chair-detection rule against the SOR appointments directly. That
  * way the report reflects what the next ETL run *will* produce, not what's
@@ -33,6 +34,7 @@ import {
   fetchActiveFacultyAppointments,
   openLdap,
 } from "../../lib/sources/ldap";
+import { DIVISION_CHIEF_ROLE_KEY } from "../../lib/org-unit-roles";
 
 function verdictLabel(v: ChiefVerdict): string {
   switch (v) {
@@ -75,11 +77,11 @@ async function main() {
   }
 
   const departments = await prisma.department.findMany({
-    select: { code: true, name: true, chairCwid: true },
+    select: { code: true, name: true },
   });
 
   // Compute fresh chair per dept using the in-memory SOR appointments and the
-  // updated regex. Bypasses the DB's possibly-stale chairCwid.
+  // updated regex. Bypasses the DB's possibly-stale assignment row.
   const computedChairByDept = new Map<string, { cwid: string; title: string } | null>();
   for (const dept of departments) {
     let best: { cwid: string; title: string; isPrimary: boolean; startDate: number } | null = null;
@@ -107,13 +109,22 @@ async function main() {
   }
 
   let divisions = await prisma.division.findMany({
-    select: { code: true, name: true, deptCode: true, chiefCwid: true },
+    select: { code: true, name: true, deptCode: true },
     orderBy: [{ deptCode: "asc" }, { name: "asc" }],
   });
   if (restrictToDept) {
     divisions = divisions.filter((d) => d.deptCode === restrictToDept);
   }
   const deptByCode = new Map(departments.map((d) => [d.code, d]));
+  // #2542 contract A — `OrgUnitRoleAssignment` is the sole chief store.
+  const chiefCwidByDiv = new Map(
+    (
+      await prisma.orgUnitRoleAssignment.findMany({
+        where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+        select: { entityId: true, cwid: true },
+      })
+    ).map((a) => [a.entityId, a.cwid]),
+  );
 
   // Pull preferred names for any CWID that surfaces in the report — read once.
   const reportCwids = new Set<string>();
@@ -189,8 +200,9 @@ async function main() {
     } else if (verdict === "NONE") {
       console.log(`   no division member reports to the parent chair`);
     }
-    if (div.chiefCwid && div.chiefCwid !== bestPick) {
-      console.log(`   note: DB currently has chiefCwid=${label(div.chiefCwid)}`);
+    const currentChiefCwid = chiefCwidByDiv.get(div.code) ?? null;
+    if (currentChiefCwid && currentChiefCwid !== bestPick) {
+      console.log(`   note: DB currently has chief=${label(currentChiefCwid)}`);
     }
     console.log();
   }

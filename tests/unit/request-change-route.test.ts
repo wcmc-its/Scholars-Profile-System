@@ -113,9 +113,27 @@ describe("POST /api/edit/request-change", () => {
     expect(mockSendMail).toHaveBeenCalledTimes(1);
     const arg = mockSendMail.mock.calls[0][0];
     expect(arg.to).toBe("facultyaffairs@med.cornell.edu");
-    expect(arg.subject).toBe("Scholars profile correction — Education");
+    expect(arg.subject).toBe("Scholars profile correction: Education");
     expect(arg.text).toContain("Item: Ph.D., Stanford");
     expect(arg.text).toContain("Year is wrong");
+  });
+
+  it("names the scholar + links back to their profile in the office-bound body (#2480)", async () => {
+    mockScholarFindUnique.mockResolvedValue({ email: null, preferredName: "Jane Scholar" });
+    await POST(
+      post({ attribute: "education", issueId: "education-wrong", itemId: "Ph.D., Stanford" }),
+    );
+    const arg = mockSendMail.mock.calls[0][0];
+    expect(arg.text).toContain("Scholar: Jane Scholar (self01)");
+    expect(arg.text).toContain(
+      "Profile: https://scholars.weill.cornell.edu/edit/scholar/self01?attr=education",
+    );
+  });
+
+  it("falls back to the bare cwid when the target scholar row can't be found", async () => {
+    mockScholarFindUnique.mockResolvedValue(null);
+    await POST(post({ attribute: "education", issueId: "education-wrong" }));
+    expect(mockSendMail.mock.calls[0][0].text).toContain("Scholar: self01");
   });
 
   it("carries the cc for an OSRA funding request", async () => {
@@ -199,7 +217,7 @@ describe("POST /api/edit/request-change", () => {
     expect(mockSendMail).toHaveBeenCalledTimes(2); // office + receipt
     const receipt = mockSendMail.mock.calls[1][0];
     expect(receipt.to).toBe("self01@med.cornell.edu");
-    expect(receipt.subject).toBe("Your Scholars profile change request — Education");
+    expect(receipt.subject).toBe("Your Scholars profile change request: Education");
     expect(receipt.text).toContain("Routed to: Office of Faculty Affairs");
   });
 
@@ -309,7 +327,7 @@ describe("POST /api/edit/request-change", () => {
       expect(await res.json()).toMatchObject({ ok: true, sent: true });
       const arg = mockSendMail.mock.calls[0][0];
       expect(arg.to).toBe("support@med.cornell.edu");
-      expect(arg.subject).toBe("Scholars profile correction — Org Unit");
+      expect(arg.subject).toBe("Scholars profile correction: Org Unit");
       expect(arg.text).toContain("Item: Division of Foo (division, parent: MED)");
       expect(arg.text).toContain("We need this for the new program.");
     });

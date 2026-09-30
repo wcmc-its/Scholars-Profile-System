@@ -15,6 +15,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { sampleHeroSuggestions } from "@/lib/hero-search-suggestions";
+import { searchHref } from "@/lib/search/query-url";
 
 export function TrySuggestionsChips({ count = 6 }: { count?: number }) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -30,7 +31,7 @@ export function TrySuggestionsChips({ count = 6 }: { count?: number }) {
       {suggestions.map((s) => (
         <Link
           key={s}
-          href={`/search?q=${encodeURIComponent(s)}`}
+          href={searchHref(s)}
           className="rounded-full border border-zinc-200 bg-white px-3 py-0.5 text-zinc-600 transition-colors hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] hover:no-underline"
         >
           {s}

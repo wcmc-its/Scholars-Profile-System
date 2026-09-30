@@ -71,6 +71,8 @@ vi.mock("@/lib/db", () => ({
     // #2011 — the mentee union now also reads the mentor's manual entries.
     // No override row for these fixtures: sourced mentees only.
     fieldOverride: { findUnique: async () => null },
+    // #2047 — a sourced mentee with no bridge row falls back to local authorship.
+    publicationAuthor: { findMany: async () => [] },
   },
 }));
 

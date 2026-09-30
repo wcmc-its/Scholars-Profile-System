@@ -43,6 +43,7 @@ vi.mock("@/lib/db", () => ({
                 cwid: VISIBLE_CWID,
                 preferredName: "Visible Author",
                 primaryDepartment: "Medicine",
+                primaryOrgCode: "WCMC",
               },
             },
             {
@@ -55,6 +56,7 @@ vi.mock("@/lib/db", () => ({
                 cwid: HIDDEN_CWID,
                 preferredName: "Hidden Author",
                 primaryDepartment: "Surgery",
+                primaryOrgCode: null,
               },
             },
           ],
@@ -111,6 +113,9 @@ describe("export-publications — authorship export honors per-author suppressio
 
     const ids = rows.map((r) => r.personIdentifier).sort();
     expect(ids).toEqual([HIDDEN_CWID, VISIBLE_CWID].sort());
+    // primaryInstitution: the display name (home institution spelled out — a
+    // data export, not the UI), null when the scholar has no org code.
+    expect(rows.map((r) => r.primaryInstitution)).toEqual(["Weill Cornell Medicine", null]);
   });
 
   it("emits no rows for a whole-publication takedown (contributorCwid null)", async () => {

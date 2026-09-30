@@ -6,6 +6,7 @@ import {
   assertInsertOnlyAuditGrant,
   bootstrap,
   buildGrantSql,
+  ETL_GRANTEE,
   extractStatements,
   granteeFromAppRwDsn,
   parseDsn,
@@ -268,19 +269,31 @@ describe("bootstrap", () => {
     };
   }
 
-  it("applies DDL + grant on the bootstrap conn, then verifies on the grantee conn", async () => {
-    const conn = fakeConn();
+  it("applies DDL + grant on the bootstrap conn, then verifies app-rw (own conn) and etl (bootstrap conn)", async () => {
+    const conn = fakeConn([
+      "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `etl`@`%`",
+    ]);
     const verifyConn = fakeConn([
       "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
     ]);
     await bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn });
 
     const ddl = extractStatements(AUDIT_SQL);
-    // The privileged connection runs exactly the DDL + the GRANT, and NO
-    // `SHOW GRANTS`: the least-priv bootstrap user cannot read app-rw's grants,
-    // so verification moved to the grantee's own connection.
-    expect(conn.calls).toEqual([...ddl, buildGrantSql("sps_app")]);
-    expect(conn.calls.some((c) => /^SHOW GRANTS/i.test(c))).toBe(false);
+    // The privileged connection runs the DDL, the app-rw GRANT, the etl GRANT,
+    // and (etl only) a `SHOW GRANTS FOR 'etl'@'%'` self-check -- app-rw's own
+    // grants still never get read here (the least-priv bootstrap user can't
+    // read another account's grants without SELECT on mysql.user), but etl
+    // has no bootstrap-task DSN to open a self-verify connection with, so its
+    // check runs on the bootstrap connection instead. On real Aurora that
+    // read is itself denied (see the "SHOW GRANTS visibility denial" describe
+    // block below) -- this fake just represents the (rarer, but possible)
+    // case where it succeeds.
+    expect(conn.calls).toEqual([
+      ...ddl,
+      buildGrantSql("sps_app"),
+      buildGrantSql(ETL_GRANTEE),
+      `SHOW GRANTS FOR '${ETL_GRANTEE}'@'%'`,
+    ]);
     // Verification runs as the grantee itself (CURRENT_USER), never as a named
     // account (which would need SELECT on mysql.user).
     expect(verifyConn.calls).toEqual(["SHOW GRANTS FOR CURRENT_USER()"]);
@@ -315,6 +328,16 @@ describe("bootstrap", () => {
           };
           e.errno = 1060;
           throw e;
+        }
+        if (/^SHOW GRANTS/i.test(sql)) {
+          // The etl self-check, run on this same privileged connection (see
+          // the happy-path test above for why).
+          return [
+            {
+              "Grants for etl@%":
+                "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `etl`@`%`",
+            },
+          ];
         }
         return undefined;
       }),
@@ -351,5 +374,135 @@ describe("bootstrap", () => {
     await expect(
       bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
     ).rejects.toThrow(/forbidden privilege on scholars_audit/);
+  });
+
+  describe("etl role grant (#2556 — MySQL 1142 on the autolock audit write)", () => {
+    it("issues the etl GRANT and verifies it INSERT-only via SHOW GRANTS on the bootstrap conn", async () => {
+      const conn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `etl`@`%`",
+      ]);
+      const verifyConn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+      ]);
+      await expect(
+        bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+      ).resolves.toBeUndefined();
+
+      expect(conn.calls).toContain(buildGrantSql(ETL_GRANTEE));
+      expect(conn.calls).toContain(`SHOW GRANTS FOR '${ETL_GRANTEE}'@'%'`);
+    });
+
+    it("fails-closed: an UPDATE/DELETE reported for etl on scholars_audit throws", async () => {
+      const conn = fakeConn([
+        "GRANT INSERT, DELETE ON `scholars_audit`.`manual_edit_audit` TO `etl`@`%`",
+      ]);
+      const verifyConn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+      ]);
+      await expect(
+        bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+      ).rejects.toThrow(/etl role holds a forbidden privilege on scholars_audit/);
+    });
+
+    it("fails-closed: a missing INSERT grant for etl throws", async () => {
+      // No `scholars_audit` line in the fake's SHOW GRANTS response at all --
+      // the grant never took.
+      const conn = fakeConn([]);
+      const verifyConn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+      ]);
+      await expect(
+        bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+      ).rejects.toThrow(/etl role has no INSERT grant/);
+    });
+
+    it("does not fail on excess etl grants outside scholars_audit (out of scope)", async () => {
+      const conn = fakeConn([
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON `scholars`.* TO `etl`@`%`",
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `etl`@`%`",
+      ]);
+      const verifyConn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+      ]);
+      await expect(
+        bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("etl grant verify — SHOW GRANTS visibility denial (#2567 follow-up)", () => {
+    // Empirical: sps-db-bootstrap-staging task fb765f93 (2026-08-31) --
+    //   (conn:33623, no: 1142, SQLState: 42000) SELECT command denied to user
+    //   'sps_bootstrap'@'10.46.160.141' for table 'user'
+    //   sql: SHOW GRANTS FOR 'etl'@'10.46.160.%'
+    // Aurora requires SELECT on `mysql.user` to view another account's
+    // grants at all; `sps_bootstrap`'s GRANT OPTION on `scholars_audit` does
+    // not substitute. This denial is permanent (sps_bootstrap will never hold
+    // that SELECT), so it must be tolerated, not treated as a transient fault.
+    function connThrowingOnEtlShowGrants(err: unknown): SqlConn & { calls: string[] } {
+      const calls: string[] = [];
+      return {
+        calls,
+        query: vi.fn(async (sql: string) => {
+          calls.push(sql);
+          if (/^SHOW GRANTS FOR '/i.test(sql)) throw err;
+          return undefined;
+        }),
+        end: vi.fn(async () => {}),
+      };
+    }
+
+    it("warns and continues on the empirical Aurora denial (errno 1142) -- bootstrap still succeeds", async () => {
+      const denial = new Error(
+        "(conn:33623, no: 1142, SQLState: 42000) SELECT command denied to user " +
+          "'sps_bootstrap'@'10.46.160.141' for table 'user'",
+      ) as Error & { errno: number };
+      denial.errno = 1142;
+      const conn = connThrowingOnEtlShowGrants(denial);
+      const verifyConn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+      ]);
+      const logs: string[] = [];
+
+      await expect(
+        bootstrap(conn, {
+          sqlText: AUDIT_SQL,
+          grantee: "sps_app",
+          verifyConn,
+          log: (m) => logs.push(m),
+        }),
+      ).resolves.toBeUndefined();
+
+      // The app-role verify still ran, on its own connection, unaffected by
+      // etl's denial (it happens earlier in `bootstrap()`).
+      expect(verifyConn.calls).toEqual(["SHOW GRANTS FOR CURRENT_USER()"]);
+      // The etl GRANT was still issued -- only the verify READ is skipped.
+      expect(conn.calls).toContain(buildGrantSql(ETL_GRANTEE));
+      expect(conn.calls).toContain(`SHOW GRANTS FOR '${ETL_GRANTEE}'@'%'`);
+      expect(logs.some((m) => /verify skipped/.test(m))).toBe(true);
+    });
+
+    it("fails-closed on a different error at the same call site (errno present, not 1142)", async () => {
+      const other = new Error("connection reset by peer") as Error & { errno: number };
+      other.errno = 2013;
+      const conn = connThrowingOnEtlShowGrants(other);
+      const verifyConn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+      ]);
+      await expect(
+        bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+      ).rejects.toThrow(/connection reset by peer/);
+    });
+
+    it("fails-closed on a different error with no errno at all (message fallback doesn't match)", async () => {
+      const other = new Error("ECONNRESET");
+      const conn = connThrowingOnEtlShowGrants(other);
+      const verifyConn = fakeConn([
+        "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+      ]);
+      await expect(
+        bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+      ).rejects.toThrow(/ECONNRESET/);
+    });
   });
 });

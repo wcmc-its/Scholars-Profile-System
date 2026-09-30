@@ -1,10 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
-import { resolveFundingConceptGrants, resolveSearchEvidenceRows } from "@/lib/api/search-flags";
+import {
+  resolveFundingConceptGrants,
+  resolveSearchEvidenceRows,
+  resolveSearchPeopleTrialEvidence,
+} from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
-import type { MeshResolution } from "@/lib/api/search-taxonomy";
-import type { EvidenceGrant } from "@/lib/api/result-evidence";
+import { conceptSubtreeUis, type MeshResolution } from "@/lib/api/search-taxonomy";
+import type { EvidenceGrant, EvidenceTrial } from "@/lib/api/result-evidence";
+import { loadConceptTrials } from "@/lib/api/search-trials";
 
 /**
  * GET /api/scholar/[cwid]/grants?q=<query>
@@ -39,6 +44,12 @@ import type { EvidenceGrant } from "@/lib/api/result-evidence";
  * `strength` ("tagged" when the concept axis admitted a surfaced grant, else
  * "mention") that the card turns into "N of M grants tagged <Concept>" vs the
  * "mention '<query>'" line. Flag off / no concept ⇒ text-only, byte-identical to v1.
+ *
+ * `trials=1` (Matcha's evidence block) also returns `trials`: the scholar's PI trials
+ * tagged under the concept (`loadConceptTrials`), gated on SEARCH_PEOPLE_TRIAL_EVIDENCE.
+ * ponytail: rides this route rather than its own because this path already has an edge
+ * behavior forwarding the query string (EdgeStack is manual-deploy); split it out if the
+ * two ever need different gates or caching.
  */
 export const dynamic = "force-dynamic";
 
@@ -64,6 +75,23 @@ function year(date: string | null | undefined): number | null {
   if (!date) return null;
   const y = Number(date.slice(0, 4));
   return Number.isFinite(y) && y > 1900 ? y : null;
+}
+
+/** `trials=1` + flag + a concept ⇒ `{ trials }`; otherwise nothing. A trial lookup failure
+ *  drops only the trials (logged), never the grants. */
+async function trialsFor(
+  sp: URLSearchParams,
+  cwid: string,
+  uis: string[],
+  highlightText: string,
+): Promise<{ trials?: EvidenceTrial[] }> {
+  if (sp.get("trials") !== "1" || !resolveSearchPeopleTrialEvidence() || uis.length === 0) return {};
+  try {
+    return { trials: (await loadConceptTrials(cwid, uis, highlightText)).trials };
+  } catch (err) {
+    console.error("[grants-evidence] trial lookup failed", { cwid, err });
+    return { trials: [] };
+  }
 }
 
 export async function GET(
@@ -98,10 +126,16 @@ export async function GET(
   // text-only. `searchFunding` reads only `.descendantUis` (admission) and `.name`
   // (the phrase boost / concept label), so a minimal resolution is sufficient.
   const sp = request.nextUrl.searchParams;
-  const descriptorUis = (sp.get("descriptorUis") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // `conceptUi` (root only; subtree rebuilt server-side) keeps the URL under the edge
+  // WAF's 2 KB query-string limit — see the key-paper route. `descriptorUis` is the
+  // legacy/explicit-list form.
+  const conceptUi = sp.get("conceptUi") ?? "";
+  const descriptorUis = conceptUi
+    ? await conceptSubtreeUis(conceptUi)
+    : (sp.get("descriptorUis") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
   const label = sp.get("label")?.trim() ?? "";
   const meshResolution: MeshResolution | null =
     resolveFundingConceptGrants() && descriptorUis.length > 0
@@ -158,7 +192,10 @@ export async function GET(
     // searchFunding if the mislabel proves confusing during the soak.
     const strength: "tagged" | "mention" =
       meshResolution !== null && result.hits.some((h) => h.matchedConcept) ? "tagged" : "mention";
-    return NextResponse.json({ grants, total: result.total, strength }, { headers: NO_STORE });
+    return NextResponse.json(
+      { grants, total: result.total, strength, ...(await trialsFor(sp, cwid, descriptorUis, `${contentQuery} ${label}`)) },
+      { headers: NO_STORE },
+    );
   } catch (err) {
     // This used to return EMPTY, so an OpenSearch throw rendered as "this scholar has no
     // matching grants" — indistinguishable from the truth, and logged nowhere at all. Both

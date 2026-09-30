@@ -12,6 +12,7 @@ import { grantRoleShortLabel } from "@/lib/funding-roles";
 import type {
   EvidenceGrant,
   EvidencePub,
+  EvidenceTrial,
   ResultEvidence as ResultEvidenceT,
 } from "@/lib/api/result-evidence";
 import type { AuthorRole } from "@/lib/search-index-docs";
@@ -118,6 +119,53 @@ function evidenceSummary(
   }
 }
 
+/** A PI trial tagged under the concept (Matcha). Title links to ClinicalTrials.gov when registered. */
+function TrialRow({ trial }: { trial: EvidenceTrial }) {
+  const titleHtml = trial.titleHighlight
+    ? highlightedTitleHtml(trial.titleHighlight)
+    : sanitizePubmedHtml(trial.title);
+  const parts = [
+    trial.nctNumber ?? `WCM protocol ${trial.trialId}`,
+    "PI",
+    trial.status ? (
+      <span key="status" className={trial.isActive ? "text-[var(--apollo-green)]" : undefined}>
+        {trial.status}
+      </span>
+    ) : null,
+    trial.startYear ? `started ${trial.startYear}` : null,
+  ].filter(Boolean);
+  return (
+    <div className="mt-1.5 flex gap-2.5">
+      <span className="h-fit shrink-0 rounded bg-[var(--color-accent-slate)]/10 px-1.5 py-0.5 text-[10px] tracking-[0.04em] text-[var(--color-accent-slate)]">
+        TRIAL
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-foreground text-sm leading-snug">
+          {/* Same pale-red pill as the PUB row: `highlightedTitleHtml` over the index's
+              HTML-encoded <mark> fragment; the plain title is escaped by sanitizePubmedHtml. */}
+          {trial.nctNumber ? (
+            <a
+              href={`https://clinicaltrials.gov/study/${trial.nctNumber}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              {...pubTitleProps(titleHtml, "hover:underline")}
+            />
+          ) : (
+            <span {...pubTitleProps(titleHtml)} />
+          )}
+        </div>
+        <div className="text-muted-foreground mt-0.5 text-xs">
+          {parts
+            .flatMap((part, i) => (i === 0 ? [part] : [" · ", part]))
+            .map((part, i) => (
+              <span key={i}>{part}</span>
+            ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GrantRow({ grant }: { grant: EvidenceGrant }) {
   // Absent role renders NOTHING — the scholar is on the grant but the index carries no role for
   // them; a default here would assert a rank in the award we cannot stand behind. (Same rule as
@@ -191,6 +239,7 @@ function GrantRow({ grant }: { grant: EvidenceGrant }) {
 function ArtifactLead({
   papers,
   grants,
+  trials,
   summary,
   expanded,
   onToggle,
@@ -198,6 +247,7 @@ function ArtifactLead({
 }: {
   papers: EvidencePub[];
   grants: EvidenceGrant[];
+  trials: EvidenceTrial[];
   summary: string;
   expanded: boolean;
   onToggle: () => void;
@@ -207,12 +257,15 @@ function ArtifactLead({
   // it is the one artifact that carries a FORWARD date — a paper says what someone did, an active
   // R01 says what they are doing.
   const [leadPub, ...restPubs] = papers;
-  const hasArtifact = grants.length > 0 || papers.length > 0;
+  const hasArtifact = grants.length > 0 || trials.length > 0 || papers.length > 0;
   const years = restPubs.map((p) => p.year).filter((y): y is number => y != null);
   return (
     <div className="mt-1.5" data-slot="evidence-artifact">
       {grants.map((g) => (
         <GrantRow key={g.projectId} grant={g} />
+      ))}
+      {trials.map((t) => (
+        <TrialRow key={t.trialId} trial={t} />
       ))}
       {leadPub ? <ArtifactRow pub={leadPub} /> : null}
       {expanded ? restPubs.map((p) => <ArtifactRow key={p.pmid} pub={p} />) : null}
@@ -463,6 +516,7 @@ export function EvidenceLine({
   //
   // It does NOT participate in `claimedPmids`: grants have no pmid and cannot collide with papers.
   const [grants, setGrants] = useState<EvidenceGrant[]>([]);
+  const [trials, setTrials] = useState<EvidenceTrial[]>([]);
   const grantsFetched = useRef(false);
 
   // #1366 — the pmids already shown on a sibling line drive `exclude` so this
@@ -483,12 +537,15 @@ export function EvidenceLine({
     if (!wantsLazyKeyPaper || keyPaperFetched.current) return;
     keyPaperFetched.current = true;
     setKeyPaperStatus("loading");
-    const params = new URLSearchParams({
-      cwid,
-      q: keyPaperConfig!.contentQuery,
-      descriptorUis: keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","),
-      label: keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""),
-    });
+    const params = new URLSearchParams({ cwid, q: keyPaperConfig!.contentQuery });
+    // The root UI, not the (up to 200-UI) subtree: the list form exceeds the edge WAF's 2 KB
+    // query-string limit and is 403'd. The route rebuilds the identical subtree.
+    if (!keyPaperMentionOnly && keyPaperConfig!.conceptUi) {
+      params.set("conceptUi", keyPaperConfig!.conceptUi);
+    } else {
+      params.set("descriptorUis", keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","));
+    }
+    params.set("label", keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""));
     // MATCHA_GLOSS_INWORDS — suppressed on the mention-only path, which is the ONE path where the
     // redesign's invariant does not hold: `descriptorUis` is blanked just above, so admission falls
     // back to a free-text `multi_match` over title+abstract that an ABSTRACT alone can satisfy — and
@@ -499,6 +556,11 @@ export function EvidenceLine({
     // Omitted entirely when the flag is dark (no `glossTerms` shipped at all).
     if (!keyPaperMentionOnly && keyPaperConfig!.glossTerms) {
       params.set("glossTerms", keyPaperConfig!.glossTerms);
+    }
+    if (!keyPaperMentionOnly && keyPaperConfig!.secondaryConceptUi) {
+      params.set("secondaryConceptUi", keyPaperConfig!.secondaryConceptUi);
+    } else if (!keyPaperMentionOnly && keyPaperConfig!.secondaryDescriptorUis?.length) {
+      params.set("secondaryUis", keyPaperConfig!.secondaryDescriptorUis.join(","));
     }
     const ex = Array.from(claimedPmids).join(",");
     if (ex) params.set("exclude", ex);
@@ -521,16 +583,18 @@ export function EvidenceLine({
   const ensureGrants = useCallback(() => {
     if (!artifactLead || !keyPaperConfig || grantsFetched.current) return;
     grantsFetched.current = true;
-    const params = new URLSearchParams({
-      q: keyPaperConfig.contentQuery,
-      descriptorUis: keyPaperConfig.descriptorUis.join(","),
-      label: keyPaperConfig.conceptLabel ?? "",
-    });
+    const params = new URLSearchParams({ q: keyPaperConfig.contentQuery });
+    if (keyPaperConfig.conceptUi) params.set("conceptUi", keyPaperConfig.conceptUi);
+    else params.set("descriptorUis", keyPaperConfig.descriptorUis.join(","));
+    params.set("label", keyPaperConfig.conceptLabel ?? "");
+    // The concept's PI trials ride the same fetch (empty unless SEARCH_PEOPLE_TRIAL_EVIDENCE).
+    params.set("trials", "1");
     fetch(`/api/scholar/${encodeURIComponent(cwid)}/grants?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { grants: [] }))
-      .then((d: { grants?: EvidenceGrant[] }) =>
-        setGrants((d?.grants ?? []).filter((g) => g.matchedConcept === true)),
-      )
+      .then((d: { grants?: EvidenceGrant[]; trials?: EvidenceTrial[] }) => {
+        setGrants((d?.grants ?? []).filter((g) => g.matchedConcept === true));
+        setTrials(d?.trials ?? []);
+      })
       .catch(() => setGrants([]));
   }, [artifactLead, keyPaperConfig, cwid]);
 
@@ -676,6 +740,7 @@ export function EvidenceLine({
       <ArtifactLead
         papers={repPapers}
         grants={grants}
+        trials={trials}
         summary={evidenceSummary(evidence, pubCount, methodPubCount)}
         expanded={expanded}
         onToggle={() => setExpanded((v) => !v)}

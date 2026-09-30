@@ -20,6 +20,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { grantRoleTitle } from "@/lib/funding-roles";
 import { profilePath } from "@/lib/profile-url";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 
 export function GrantCard({
   grant,
@@ -79,7 +80,11 @@ export function GrantCard({
       )}
       {grant.pis.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {grant.pis.map((p) => (
+          {grant.pis.map((p) => {
+            // #536 — a hidden identity class (doctoral student) keeps its name
+            // but gets no profile link and no headshot, as in author-chip-row.
+            const linkable = isPubliclyDisplayed(p.roleCategory ?? null);
+            return (
             <HoverTooltip
               key={p.cwid ?? p.name}
               // #2074 — BOTH arms of the old ternary asserted principal-investigator
@@ -95,23 +100,30 @@ export function GrantCard({
                   : "Investigator"
               }
             >
-              <a
-                href={p.slug ? profilePath(p.slug) : undefined}
-                className="chip chip-first flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground"
-                style={{ textDecoration: "none" }}
-              >
-                {p.identityImageEndpoint && p.cwid ? (
-                  <HeadshotAvatar
-                    size="sm"
-                    cwid={p.cwid}
-                    preferredName={p.name}
-                    identityImageEndpoint={p.identityImageEndpoint}
-                  />
-                ) : null}
-                {p.name}
-              </a>
+              {linkable ? (
+                <a
+                  href={p.slug ? profilePath(p.slug) : undefined}
+                  className="chip chip-first flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground"
+                  style={{ textDecoration: "none" }}
+                >
+                  {p.identityImageEndpoint && p.cwid ? (
+                    <HeadshotAvatar
+                      size="sm"
+                      cwid={p.cwid}
+                      preferredName={p.name}
+                      identityImageEndpoint={p.identityImageEndpoint}
+                    />
+                  ) : null}
+                  {p.name}
+                </a>
+              ) : (
+                <span className="chip chip-first flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground">
+                  {p.name}
+                </span>
+              )}
             </HoverTooltip>
-          ))}
+            );
+          })}
         </div>
       )}
       {period && (

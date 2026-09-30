@@ -91,6 +91,8 @@ function scholar(i: number, emailVisibility: string | null = "public") {
     postnominal: i % 2 === 0 ? "Ph.D." : null,
     primaryTitle: `Title ${i}`,
     primaryDepartment: `Dept ${i}`,
+    // Home / affiliate / unset, cycling so one roster covers all three.
+    primaryOrgCode: i % 3 === 0 ? "WCMC" : i % 3 === 1 ? "HSS" : null,
     roleCategory: "full_time_faculty",
     email: `scholar${i}@med.cornell.edu`,
     emailVisibility,
@@ -179,6 +181,15 @@ describe("buildScholarExport — method-family scope", () => {
     // The scope count column is the per-family pub count.
     const countIdx = header.indexOf("pubs_in_family");
     expect(body[0][countIdx]).toBe(String(SCHOLAR_EXPORT_CAP));
+
+    // primary_institution sits right after primary_department and carries the
+    // DISPLAY name for every row — home institution spelled out (a data export,
+    // not the UI, which elides WCMC), affiliate mapped, unset blank.
+    const instIdx = header.indexOf("primary_institution");
+    expect(instIdx).toBe(header.indexOf("primary_department") + 1);
+    expect(body[0][instIdx]).toBe("Weill Cornell Medicine");
+    expect(body[1][instIdx]).toBe("Hospital for Special Surgery");
+    expect(body[2][instIdx]).toBe("");
 
     // NO email / contact column anywhere — header or body.
     expect(result!.csv.toLowerCase()).not.toContain("email");

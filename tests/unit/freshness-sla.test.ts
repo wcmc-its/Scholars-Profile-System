@@ -3,17 +3,17 @@ import { describe, expect, it } from "vitest";
 // The policy module, not `etl/freshness/index` — that script runs `main()` and
 // `$disconnect()`s both Prisma clients on import, which a test (and the
 // `/edit/etl-status` page) must never trigger just to read the SLA table.
-import { SLA_HOURS, TRACKED, ackState } from "@/lib/etl/freshness-policy";
+import { SLA_HOURS, TRACKED, ackState, gradeSource } from "@/lib/etl/freshness-policy";
 
 describe("freshness SLAs", () => {
-  // Spotlight's producer lives in ReciterAI, not this repo, and publishes
-  // MONTHLY (reciterai-spotlight-monthly, cron(0 13 1 * ? *)). Under the 8-day
-  // weekly SLA it used to carry, the source was stale by construction and the
-  // scholars-heartbeat-<env> machine failed every day in BOTH envs. If someone
-  // tidies Spotlight back into the weekly block, that daily failure returns —
-  // so pin the cadence, not just the number.
-  it("tracks Spotlight on the monthly cadence, not weekly", () => {
-    expect(TRACKED.Spotlight?.cadence).toBe("monthly");
+  // Spotlight's artifact age is unbounded by design (ReciterAI's monthly gate
+  // only republishes when thresholds trip), so grading it on manifest age either
+  // cries wolf or needs a perpetually-renewed ack. The row grades OUR weekly
+  // loader on its run; the producer is graded on ReciterAI-spotlight-gate, where
+  // a `skipped` tick counts as alive.
+  it("grades Spotlight on our weekly loader run, and the producer on its gate", () => {
+    expect(TRACKED.Spotlight).toEqual({ cadence: "weekly", anchorOnRun: true });
+    expect(TRACKED["ReciterAI-spotlight-gate"]?.liveStatuses).toContain("skipped");
   });
 
   // 40d = 31d (longest month) + 7d (our weekly loader's worst-case pickup lag)
@@ -44,9 +44,76 @@ describe("freshness SLAs", () => {
   // Guards the ordering invariant the table depends on: a longer cadence must
   // tolerate a longer silence, or a source would alarm faster than it can run.
   it("keeps SLAs monotonic across cadences", () => {
-    expect(SLA_HOURS.nightly).toBeLessThan(SLA_HOURS.weekly);
+    expect(SLA_HOURS.nightly).toBeLessThan(SLA_HOURS["nightly-mirrored"]);
+    expect(SLA_HOURS["nightly-mirrored"]).toBeLessThan(SLA_HOURS.weekly);
     expect(SLA_HOURS.weekly).toBeLessThan(SLA_HOURS.monthly);
     expect(SLA_HOURS.monthly).toBeLessThan(SLA_HOURS.annual);
+  });
+
+  /**
+   * The regression this file existed to prevent and still shipped.
+   *
+   * #2618/#2621 gave every daily ReciterAI producer the `nightly` cadence,
+   * reasoning from the producer's own schedule alone. But we do not observe the
+   * producer, we observe our MIRROR of it, and the SPS nightly runs 07:00 UTC
+   * while four of these producers run at 11:00-15:00 UTC. Each of those is
+   * therefore mirrored the FOLLOWING night, arrives 16-20h old, and ages to
+   * 40-44h before the next mirror replaces it -- permanently past `nightly`'s
+   * 30h ceiling. Two rows were already reading Late on entirely healthy Lambdas
+   * when a human finally looked at the page; the other two were hours away.
+   *
+   * No test could see it because every test asserted against the producer's
+   * cadence, which is the number that was wrong. This one asserts against the
+   * arithmetic instead: worst observable age, derived from BOTH schedules.
+   */
+  describe("daily ReciterAI mirrors: SLA vs worst-case MIRRORED age", () => {
+    /** cron(0 7 * * ? *) -- cdk/lib/etl-stack.ts nightly schedule. */
+    const SPS_MIRROR_HOUR_UTC = 7;
+
+    /** ReciterAI infra/eventbridge.json, verified live 2026-09-08. */
+    const PRODUCER_HOUR_UTC: Readonly<Record<string, number>> = {
+      "ReciterAI-grants": 3,
+      "ReciterAI-enrichment": 11,
+      "ReciterAI-onboarding-detector": 13,
+      "ReciterAI-drift": 14,
+      "ReciterAI-taxonomy-drift": 15,
+    };
+
+    /**
+     * How old the newest producer run is at the instant we mirror it, plus the
+     * 24h it then ages before the next mirror can replace it.
+     */
+    const worstMirroredAgeHours = (producerHourUtc: number): number => {
+      const ageAtMirror =
+        producerHourUtc < SPS_MIRROR_HOUR_UTC
+          ? SPS_MIRROR_HOUR_UTC - producerHourUtc // mirrored the same morning
+          : 24 - (producerHourUtc - SPS_MIRROR_HOUR_UTC); // missed today, caught tomorrow
+      return ageAtMirror + 24;
+    };
+
+    it.each(Object.entries(PRODUCER_HOUR_UTC))(
+      "%s tolerates its full mirror lag without reading Late",
+      (source, hourUtc) => {
+        const spec = TRACKED[source];
+        expect(spec, `${source} is not TRACKED`).toBeDefined();
+        const worst = worstMirroredAgeHours(hourUtc);
+        expect(
+          SLA_HOURS[spec.cadence],
+          `${source}: producer runs ${hourUtc}:00 UTC, mirrored ${SPS_MIRROR_HOUR_UTC}:00 UTC, ` +
+            `so it reads up to ${worst}h old while perfectly healthy -- but cadence ` +
+            `"${spec.cadence}" alarms at ${SLA_HOURS[spec.cadence]}h`,
+        ).toBeGreaterThan(worst);
+      },
+    );
+
+    it("proves the arithmetic catches the bug that shipped", () => {
+      // A producer at 11:00 UTC mirrored at 07:00 UTC really is 44h stale at
+      // worst. If this drops to <= 30 the helper has been broken and every
+      // assertion above it goes vacuous.
+      expect(worstMirroredAgeHours(11)).toBe(44);
+      expect(worstMirroredAgeHours(3)).toBe(28);
+      expect(SLA_HOURS.nightly).toBeLessThan(worstMirroredAgeHours(11));
+    });
   });
 
   // Every tracked source must resolve to a cadence that exists in SLA_HOURS —
@@ -180,10 +247,60 @@ describe("freshness acknowledgements", () => {
     }
   });
 
-  // Documents the decision, so removing the ack when the producer finally
-  // deploys is a deliberate act rather than something nobody remembers.
-  it("Spotlight is acknowledged, not silently untracked", () => {
-    expect(TRACKED.Spotlight?.ack).toBeDefined();
-    expect(TRACKED.Spotlight?.cadence).toBe("monthly");
+  // Same posture for Tools, and the second half of this assertion is the point:
+  // the ack covers a hand-run PRODUCER, while the cadence still grades OUR
+  // nightly import. Widening the cadence instead would hide a dead import,
+  // which is the response this ack exists to avoid.
+  it("Tools is acknowledged without loosening its import cadence", () => {
+    expect(TRACKED.Tools?.ack).toBeDefined();
+    expect(TRACKED.Tools?.cadence).toBe("nightly");
+  });
+
+  /**
+   * The ack and the generated_at anchor in etl/tools/index.ts are ONE change,
+   * and this pins the HALF that is testable here: given the artifact's real age
+   * as the anchor, the ack engages. It cannot pin the anchor itself —
+   * etl/tools/index.ts runs `main()` on import, so no test may load it — so if
+   * someone reverts that file, these still pass.
+   *
+   * Worth pinning even so, because the failure this describes is silent: an ack
+   * on a source that never grades stale is INERT. `acknowledged` stays false,
+   * the reason string reaches no reader, nothing goes red, and the only symptom
+   * is a heartbeat line telling you to delete the ack you just added. The
+   * `inert` half below is that exact state, asserted so the distinction is
+   * written down rather than rediscovered.
+   *
+   * ponytail: no test on the anchor itself. Making it testable means splitting
+   * recordRun out of a module whose import has side effects — a real refactor
+   * for one assertion. The anchor is one call to parseManifestGeneratedAt,
+   * which tests/unit/freshness-anchor.test.ts already covers. Upgrade path: if
+   * etl/tools/index.ts is ever split for another reason, pin it then.
+   */
+  it("the Tools ack actually engages on the artifact's real age", () => {
+    // tools.json has carried this generated_at since June; the anchor is what
+    // puts it in front of gradeSource instead of our nightly import's clock.
+    const artifactAge = new Date("2026-06-23T00:00:00Z");
+    const now = Date.parse("2026-09-08T21:00:00Z");
+    const graded = gradeSource("Tools", TRACKED.Tools!, artifactAge, now);
+
+    expect(graded.stale).toBe(true); // the truth is still told
+    expect(graded.acknowledged).toBe(true); // ...and accepted, so no failure
+    expect(graded.ackExpired).toBe(false);
+
+    // A completedAt anchor (our import ran tonight) is the inert case: not
+    // stale, so the ack suppresses nothing and explains nothing.
+    const importRan = new Date("2026-09-08T07:12:00Z");
+    const inert = gradeSource("Tools", TRACKED.Tools!, importRan, now);
+    expect(inert.stale).toBe(false);
+    expect(inert.acknowledged).toBe(false);
+  });
+
+  it("the Tools ack expires into a real failure rather than a permanent green", () => {
+    const artifactAge = new Date("2026-06-23T00:00:00Z");
+    const afterUntil = Date.parse("2027-01-05T00:00:00Z");
+    const graded = gradeSource("Tools", TRACKED.Tools!, artifactAge, afterUntil);
+
+    expect(graded.ackExpired).toBe(true);
+    expect(graded.acknowledged).toBe(false); // counts against us again — the review trigger
   });
 });

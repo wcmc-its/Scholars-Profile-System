@@ -64,11 +64,12 @@ import {
 } from "@/lib/api/methods-overlay";
 import { coreProjectNum } from "@/lib/award-number";
 import { db } from "@/lib/db";
+import { loadTrialEvidenceByCwid } from "@/lib/search-trial-evidence";
 import {
   GRANT_INDEX_SELECT,
   GRANT_INDEX_WHERE,
+  fundingProjectBaseKey,
   groupGrantsByProject,
-  parseExternalId,
   projectFromRows,
 } from "@/lib/funding-projection";
 import {
@@ -85,6 +86,8 @@ import {
   buildPeopleDoc,
   buildPublicationDoc,
   isRequireDisplayableAuthorEnabled,
+  loadEsiEligibilityByCwid,
+  loadFundingVisibility,
   loadMeshAncestorContext,
   loadOverviewOverrides,
   type MeshAncestorContext,
@@ -172,17 +175,18 @@ export async function reflectSearchSuppression(
  * issues a `client.bulk({ refresh: true })` per row, so N rows with index ops
  * are N bulks and N refreshes. Collapsing them would mean attributing the
  * response `items` back to rows to keep the per-row best-effort result and
- * stamp, which is not worth it here: the reporter-grants batch emits no op at
- * all, and the InfoEd confidential-title net mints a handful.
+ * stamp, which is not worth it here: both ETLs mint only their NEW rows per
+ * run (the reporter-grants recency hide and the InfoEd confidential-title net
+ * are each a handful in steady state).
  *
  * ONE key scan for the whole batch. The expensive half of `buildGrantOps`
  * (`loadAllGrantSuppressions` + a full `GRANT_INDEX_WHERE` scan) is
  * entityId-INDEPENDENT, so reflecting N rows one at a time repeats it N times;
  * hoisting it is the whole reason this entry point exists rather than a loop
  * over `reflectSearchSuppression` at the call site. It is loaded lazily and at
- * most once: a batch whose ids all fail `parseExternalId` (every
- * `reporter:{cwid}:{core}` id) needs no scan, and must still STAMP — that
- * stamp is the #2204 defect.
+ * most once: a batch whose ids all fail `fundingProjectBaseKey` (neither an
+ * InfoEd nor a `reporter:{cwid}:{core}` id) needs no scan, and must still
+ * STAMP — that stamp is the #2204 defect.
  *
  * Best-effort per row, exactly like the single-row path: one row's failure is
  * logged and does not abort the batch, and nothing throws into the ETL.
@@ -201,7 +205,7 @@ export async function reflectGrantSuppressions(
       affectedCwids: [],
     };
     try {
-      if (!scan && parseExternalId(row.entityId)) scan = await scanGrantKeys();
+      if (!scan && fundingProjectBaseKey(row.entityId)) scan = await scanGrantKeys();
       results.push(await applyOps(args, await buildGrantOps(row.entityId, scan)));
     } catch (err) {
       logReflectFailure(args, err);
@@ -222,7 +226,7 @@ async function applyOps(
     // "non-search entity type (education / appointment / grant)" the
     // reconciler excludes by type — but `grant` IS in
     // RECONCILABLE_ENTITY_TYPES, and `buildGrantOps` returns [] for any
-    // entityId `parseExternalId` rejects. So a single such row returned
+    // entityId `fundingProjectBaseKey` rejects. So a single such row returned
     // `{ ok: true }` unstamped forever, and because the reconciler orders by
     // created_at and takes a fixed batch, it sat at the head of every run
     // starving the tail behind it.
@@ -306,10 +310,10 @@ async function buildReflectionOps(
   if (args.entityType === "grant") {
     // #481(a) — synchronous funding-search fast-path. entityId is the grant's
     // stable externalId (#352). Suppressing a grant role does NOT touch the
-    // people index: the people-doc grant facets (hasActiveGrants,
-    // activePiGrantCount) are NOT suppression-filtered in the nightly build
-    // either, so the fast-path stays consistent with a rebuild by emitting
-    // funding ops only.
+    // people index: hasActiveGrants / activePiGrantCount are NOT
+    // suppression-filtered in the nightly build. `piRoleEver` IS (#2081), so a
+    // suppression that removes a scholar's last PI chip leaves their "PI (ever)"
+    // flag stale until the next nightly rebuild.
     return buildGrantOps(args.entityId);
   }
   // Education / appointment (#160) have no search index, so a suppression
@@ -360,22 +364,19 @@ async function buildGrantOps(
   externalId: string,
   scan?: GrantKeyScan,
 ): Promise<Op[]> {
-  const ext = parseExternalId(externalId);
-  // Not an InfoEd grant id — never indexed, nothing to do. This is the COMMON
-  // case, not an edge case: `etl/reporter-grants/transform.ts` writes
-  // `reporter:{cwid}:{core}` ids, and `groupGrantsByProject` drops anything
-  // `parseExternalId` rejects, so RePORTER grants have no funding doc to
-  // delete. Measured on prod 2026-08-06: 295 of 311 active grant suppressions
-  // are `reporter:*`. Returning [] is correct — but it must still STAMP, which
-  // is the caller's job and was the #2204 defect: 295 unstamped rows pinned the
-  // reconciler's `take: 200` batch head forever and starved the 16 InfoEd rows
-  // (positions 284-311) that DO have a doc to delete.
+  const baseKey = fundingProjectBaseKey(externalId);
+  // Neither an InfoEd nor a RePORTER grant id — never indexed, nothing to do.
+  // RePORTER `reporter:{cwid}:{core}` ids used to land here too (#2285): the
+  // funding index dropped them, so on prod 2026-08-06 295 of 311 active grant
+  // suppressions had no doc to delete. They are indexed now, so they take the
+  // same path as InfoEd ids below. An empty op list must still STAMP, which is
+  // the caller's job and was the #2204 defect (unstamped rows pinned the
+  // reconciler's `take: 200` batch head forever).
   //
-  // The starvation is measured and is the #2204 defect. The funding-index leak
-  // it was once blamed for is NOT: a prod probe on 2026-08-06 found ZERO
-  // suppressed projects present in the funding index. So #2203's leak has some
-  // other cause, still unidentified — do not read this comment as naming it.
-  if (!ext) return [];
+  // The funding-index leak #2203 once blamed on this is NOT explained by it: a
+  // prod probe on 2026-08-06 found ZERO suppressed projects present in the
+  // funding index. Do not read this comment as naming that leak's cause.
+  if (!baseKey) return [];
 
   const { keyRows, byProject } = scan ?? (await scanGrantKeys());
 
@@ -385,7 +386,7 @@ async function buildGrantOps(
   // awardNumber is still present in the pre-drop scan.
   const targetAward =
     keyRows.find((r) => r.externalId === externalId)?.awardNumber ?? null;
-  const projectKey = coreProjectNum(targetAward) ?? ext.accountNumber;
+  const projectKey = coreProjectNum(targetAward) ?? baseKey;
 
   const survivors = byProject.get(projectKey) ?? [];
   if (survivors.length === 0) {
@@ -472,6 +473,14 @@ async function buildScholarOps(
   // re-index of a cleared bio consistent with the nightly index instead of
   // staying stale until the next full rebuild.
   const overviewOverrides = await loadOverviewOverrides(db.read, cwid);
+  // Keep the trial fields on a fast-path reindex (one cwid-scoped read).
+  const trialEvidence = await loadTrialEvidenceByCwid(db.read, cwid);
+  // #2239 — keep `grantCount` on the profile's Funding population (grant
+  // suppressions + `hideFunding`) on a fast-path reindex too; cwid/id-scoped.
+  const fundingVisibility = await loadFundingVisibility(db.read, {
+    cwid,
+    grantExternalIds: scholar.grants.map((g) => g.externalId),
+  });
   const doc = await buildPeopleDoc(
     scholar,
     db.read,
@@ -479,6 +488,13 @@ async function buildScholarOps(
     overlayGate,
     ancestors,
     overviewOverrides,
+    // Keep `esiEligible` on a fast-path reindex (one cwid-scoped read); omitting
+    // it dropped the field until the next nightly rebuild.
+    await loadEsiEligibilityByCwid(db.read, cwid),
+    trialEvidence,
+    // #2081 — `piRoleEver` drops suppressed rows, matching the funding index.
+    await loadAllGrantSuppressions(db.read),
+    fundingVisibility,
   );
   if (doc === null) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];

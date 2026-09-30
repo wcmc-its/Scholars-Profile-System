@@ -39,6 +39,13 @@
  * replacing the allocation set entirely when ANY existing allocation is
  * `"human"`-sourced (never a partial clobber of a mixed set).
  *
+ * AI ORIGINAL — every llm-sourced percent this script writes is also written
+ * to `cancerRelevantPercentAi`, the model's own value, so the report can tell
+ * a reviewer's correction from a confirmation. It moves with the percent: a
+ * row whose percent is skipped (human-sourced, or this cycle's inference
+ * failed) keeps its AI value too, so a human row's "AI said X%" stays the
+ * value the reviewer actually saw.
+ *
  * NOT AUDITED — this is a machine-run batch import, not a signed-in actor's
  * `/api/edit` write; same posture as every other ETL ingest in this repo (see
  * `lib/edit/audit.ts`). A reviewer's later override IS audited
@@ -420,6 +427,7 @@ export async function applyPlan(
           ...awardScalars,
           cancerRelevantPercent: plan.cancerRelevantPercent,
           cancerRelevantPercentSource: "llm",
+          cancerRelevantPercentAi: plan.cancerRelevantPercent,
           cancerRelevantRationale: plan.cancerRelevantRationale,
           allocations: {
             create: [{ centerCode: CENTER_CODE, programCode: allocation.programCode, programPercent: 100, source: allocation.source }],
@@ -466,6 +474,7 @@ export async function applyPlan(
         ? {
             cancerRelevantPercent: plan.cancerRelevantPercent,
             cancerRelevantPercentSource: "llm",
+            cancerRelevantPercentAi: plan.cancerRelevantPercent,
             cancerRelevantRationale: plan.cancerRelevantRationale,
           }
         : {}),

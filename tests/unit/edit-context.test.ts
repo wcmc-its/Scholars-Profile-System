@@ -27,9 +27,11 @@ type FakeClient = {
   appointment: { findMany: AnyMock };
   education: { findMany: AnyMock };
   grant: { findMany: AnyMock };
-  department: { findFirst: AnyMock };
+  department: { findUnique: AnyMock };
+  orgUnitRoleAssignment: { findFirst: AnyMock };
   coiActivity: { findMany: AnyMock };
   coiGapCandidate: { findMany: AnyMock };
+  menteeSuggestion: { findMany: AnyMock };
   publication: { findMany: AnyMock };
   publicationConflictStatement: { findMany: AnyMock };
   scholarTechnology: { findMany: AnyMock };
@@ -63,12 +65,20 @@ function fakeClient(): FakeClient {
     appointment: { findMany: vi.fn().mockResolvedValue([]) },
     education: { findMany: vi.fn().mockResolvedValue([]) },
     grant: { findMany: vi.fn().mockResolvedValue([]) },
-    department: { findFirst: vi.fn().mockResolvedValue(null) },
+    // #2542 contract A — the chair lock resolves `Department.chairCwid`'s
+    // successor, `OrgUnitRoleAssignment`, then the department's name via
+    // `findUnique` keyed on the assignment's `entityId`. Default to "not a
+    // chair" (no assignment).
+    department: { findUnique: vi.fn().mockResolvedValue(null) },
+    orgUnitRoleAssignment: { findFirst: vi.fn().mockResolvedValue(null) },
     // COI — read-only; default to "no disclosures".
     coiActivity: { findMany: vi.fn().mockResolvedValue([]) },
     // COI-gap candidates — default to "none". Only queried when the loader is
     // called with `{ includeCoiGap: true }` (the self-only gate).
     coiGapCandidate: { findMany: vi.fn().mockResolvedValue([]) },
+    // #2634 mentee suggestions — default "none"; only queried with
+    // `{ includeMenteeSuggestions: true }`.
+    menteeSuggestion: { findMany: vi.fn().mockResolvedValue([]) },
     // Publications — the COI-gap loader joins this by pmid for the per-source
     // year + sort date. Default to "no rows" (year/ts fall back to null/0).
     publication: { findMany: vi.fn().mockResolvedValue([]) },
@@ -703,7 +713,12 @@ describe("loadEditContext — entity attributes (#160 appointments / education /
     c.appointment.findMany.mockResolvedValue(opts.appointments ?? []);
     c.education.findMany.mockResolvedValue(opts.educations ?? []);
     c.grant.findMany.mockResolvedValue(opts.grants ?? []);
-    c.department.findFirst.mockResolvedValue(opts.chairedDept ?? null);
+    // #2542 contract A — the chair lock's assignment lookup, then the
+    // department's name via `findUnique` keyed on the assignment's `entityId`.
+    c.orgUnitRoleAssignment.findFirst.mockResolvedValue(
+      opts.chairedDept ? { entityId: "MED" } : null,
+    );
+    c.department.findUnique.mockResolvedValue(opts.chairedDept ?? null);
     c.suppression.findMany
       .mockResolvedValueOnce([]) // scholar-level
       .mockResolvedValueOnce(opts.entitySuppressions ?? []); // entity-level
@@ -1011,6 +1026,19 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
     expect(c.personDatasetDeposit.findMany).not.toHaveBeenCalled();
   });
 
+  it("queries person_dataset_deposit when the flag is off but the scholar's own showDatasets override is set", async () => {
+    delete process.env.DATA_SHARING_SECTION;
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.fieldOverride.findMany.mockResolvedValue([{ fieldName: "showDatasets" }]);
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets).toHaveLength(1);
+    expect(c.personDatasetDeposit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: SELF } }),
+    );
+  });
+
   it("populates datasets as 'shown' (flag on, no suppressions) using the cwid scope", async () => {
     process.env.DATA_SHARING_SECTION = "on";
     const c = fakeClient();
@@ -1217,6 +1245,109 @@ describe("loadEditContext — mentees (suppressible)", () => {
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => []);
     expect(ctx!.mentees).toEqual([]);
+  });
+});
+
+describe("loadEditContext — mentee suggestions (#2634 gate + exclusion + evidence join)", () => {
+  const suggRow = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    mentorCwid: SELF,
+    menteeCwid: "pxr4012",
+    menteeName: "Priya Raman",
+    menteeTitle: "Postdoctoral Associate",
+    menteeUnit: "Pediatrics",
+    kind: "postdoc",
+    tier: "presumptive",
+    nCoPubs: 2,
+    nMentorLastAuthor: 1,
+    nMenteeFirstAuthor: 1,
+    firstYear: 2024,
+    lastYear: 2026,
+    menteeFirstPublishedYear: 2021,
+    strong: true,
+    evidence: [
+      { id: "41022331", year: 2026, menteeRank: 1, mentorRank: 9, total: 9 },
+      { id: "40118872", year: 2025, menteeRank: 1, mentorRank: 7, total: 7 },
+    ],
+    computedAt: new Date("2026-09-14T05:00:00Z"),
+    dismissedAt: null,
+    dismissedBy: null,
+    dismissReason: null,
+    ...over,
+  });
+
+  it("never queries mentee_suggestion without the opt-in", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => []);
+    expect(ctx!.menteeSuggestions).toEqual([]);
+    expect(c.menteeSuggestion.findMany).not.toHaveBeenCalled();
+  });
+
+  it("drops already-listed mentees (sourced + hand-entered), keeps dismissed rows, joins + caps evidence", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockImplementation((args: { where?: { cwid?: string }; select?: unknown }) =>
+      Promise.resolve(args.where?.cwid === SELF ? scholarRow() : null),
+    );
+    c.fieldOverride.findUnique.mockImplementation((args: {
+      where: { entityType_entityId_fieldName: { fieldName: string } };
+    }) =>
+      Promise.resolve(
+        args.where.entityType_entityId_fieldName.fieldName === "manualMentees"
+          ? { value: JSON.stringify([{ name: "Rowan Ellis", cwid: "rce4001" }]) }
+          : null,
+      ),
+    );
+    c.menteeSuggestion.findMany.mockResolvedValue([
+      suggRow(),
+      // Sourced mentee → excluded.
+      suggRow({ id: 2, menteeCwid: "src4002", menteeName: "Sourced Mentee" }),
+      // Hand-entered mentee → excluded.
+      suggRow({ id: 3, menteeCwid: "rce4001", menteeName: "Rowan Ellis" }),
+      // Dismissed → kept, with the reason.
+      suggRow({
+        id: 4,
+        menteeCwid: "kao4007",
+        menteeName: "Kate Ojo",
+        dismissedAt: new Date("2026-09-01T00:00:00Z"),
+        dismissedBy: SELF,
+        dismissReason: "colleague",
+        evidence: Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, year: 2020, menteeRank: 1, mentorRank: 2, total: 2 })),
+      }),
+    ]);
+    c.publication.findMany.mockResolvedValue([
+      { pmid: "41022331", title: "Single-cell atlas", journal: "J Clin Invest", year: 2026 },
+    ]);
+    const ctx = await loadEditContext(
+      SELF,
+      asClient(c),
+      undefined,
+      async () => [{ cwid: "src4002", fullName: "Sourced Mentee", programName: null, programType: null, manualOnly: false }],
+      { includeMenteeSuggestions: true },
+    );
+    expect(c.menteeSuggestion.findMany.mock.calls[0][0].where).toEqual({ mentorCwid: SELF });
+    expect(ctx!.menteeSuggestions.map((s) => s.id)).toEqual([1, 4]);
+    const [priya, kate] = ctx!.menteeSuggestions;
+    expect(priya).toMatchObject({
+      menteeCwid: "pxr4012",
+      kind: "postdoc",
+      tier: "presumptive",
+      strong: true,
+      dismissedAt: null,
+      dismissReason: null,
+    });
+    // Title/journal joined from Publication; a missing pub leaves them null but
+    // keeps the ETL-snapshotted year and ranks.
+    expect(priya.evidence).toEqual([
+      { id: "41022331", year: 2026, title: "Single-cell atlas", journal: "J Clin Invest", menteeRank: 1, mentorRank: 9, total: 9 },
+      { id: "40118872", year: 2025, title: null, journal: null, menteeRank: 1, mentorRank: 7, total: 7 },
+    ]);
+    expect(kate.dismissedAt).toBe("2026-09-01T00:00:00.000Z");
+    expect(kate.dismissReason).toBe("colleague");
+    expect(kate.evidence).toHaveLength(10);
+    // The publication join is scoped to the (capped) evidence ids.
+    const pubWhere = c.publication.findMany.mock.calls[0][0].where;
+    expect(pubWhere.pmid.in).toHaveLength(12); // 2 + 10 capped
   });
 });
 
@@ -1898,5 +2029,65 @@ describe("loadEditContext — highlights (#836)", () => {
     expect(ctx!.highlights!.pickable.map((p) => p.pmid).sort()).toEqual(["100", "300"]);
     // 200 is gone, so the AI default is 300 (7), 100 (5).
     expect(ctx!.highlights!.aiPmids).toEqual(["300", "100"]);
+  });
+});
+
+describe("loadEditContext — ORCID suggestion (includeOrcidSuggestion)", () => {
+  // Opaque tokens, never real iDs. The nightly RPM mirror re-creates an `rpm_admin` row
+  // from the frozen `admin_orcid` even after the scholar removed that iD, so the loader
+  // must drop every dismissed (cwid, iD) pair before the fold — or the removed iD reads
+  // as "on file" again the next morning.
+  const row = (orcid: string, source: string, articlesAccepted = 0) => ({
+    cwid: SELF,
+    orcid,
+    source,
+    articlesAccepted,
+    articlesRejected: 0,
+  });
+  function orcidClient(
+    candidates: ReturnType<typeof row>[],
+    dismissals: Array<{ cwid: string; orcid: string }>,
+  ) {
+    const c = fakeClient() as FakeClient & {
+      orcidCandidate: { findMany: AnyMock };
+      orcidDismissal: { findMany: AnyMock };
+    };
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.orcidCandidate = { findMany: vi.fn().mockResolvedValue(candidates) };
+    c.orcidDismissal = { findMany: vi.fn().mockResolvedValue(dismissals) };
+    return c;
+  }
+
+  it("a dismissed rpm_admin iD is not on file and not evidence; the surviving strong iD is suggested", async () => {
+    const c = orcidClient(
+      [row("iD-a", "rpm_admin"), row("iD-a", "rpm_inferred", 4), row("iD-b", "rpm_inferred", 2)],
+      [{ cwid: SELF, orcid: "iD-a" }],
+    );
+    const ctx = await loadEditContext(SELF, asClient(c), new Date(), undefined, {
+      includeOrcidSuggestion: true,
+    });
+    expect(c.orcidDismissal.findMany).toHaveBeenCalledWith({
+      where: { cwid: SELF },
+      select: { cwid: true, orcid: true },
+    });
+    expect(ctx!.orcidVerdict).toEqual({ tier: "strong", orcid: "iD-b", accepted: 2 });
+    expect(ctx!.orcidCandidates.map((r) => r.orcid)).toEqual(["iD-b"]);
+  });
+
+  it("without a dismissal the same rows read as asserted (the admin iD on file)", async () => {
+    const c = orcidClient([row("iD-a", "rpm_admin"), row("iD-b", "rpm_inferred", 2)], []);
+    const ctx = await loadEditContext(SELF, asClient(c), new Date(), undefined, {
+      includeOrcidSuggestion: true,
+    });
+    expect(ctx!.orcidVerdict).toEqual({ tier: "asserted", orcid: "iD-a", accepted: 0 });
+    expect(ctx!.orcidCandidates.map((r) => r.orcid)).toEqual(["iD-a", "iD-b"]);
+  });
+
+  it("off → neither table is read", async () => {
+    const c = orcidClient([row("iD-a", "rpm_admin")], []);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(c.orcidCandidate.findMany).not.toHaveBeenCalled();
+    expect(c.orcidDismissal.findMany).not.toHaveBeenCalled();
+    expect(ctx!.orcidVerdict).toBeNull();
   });
 });

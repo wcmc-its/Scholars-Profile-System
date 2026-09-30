@@ -4,13 +4,19 @@
  * Renders the same {q, filters, sort} payload as the CSV exports into a
  * numbered Vancouver-style bibliography:
  *
- *   1. Smith JA, **Wolf M**, Jones BC, et al. Klotho and Clinical Outcomes
- *      in CKD. Am J Kidney Dis. 2024. doi:10.1053/j.ajkd.2023.10.015.
- *      PMID: 38670054. PMCID: PMC11098699.
+ *   1. Smith JA, **Wolf M**, Jones BC. Klotho and Clinical Outcomes in
+ *      CKD. Am J Kidney Dis. 2024;83(4):512-520.
+ *      doi:10.1053/j.ajkd.2023.10.015. PMID: 38670054. PMCID: PMC11098699.
  *
- * Vancouver vs the spec's AMA: journal name is NOT italicized; authors
- * past the 6th collapse to "..., et al." Everything else (sentence-case
- * title, hyperlinked PMID/PMCID/DOI, WCM-author bolding) carries over.
+ * Vancouver vs the spec's AMA: journal name is NOT italicized. Everything
+ * else (sentence-case title, hyperlinked PMID/PMCID/DOI, WCM-author
+ * bolding) carries over.
+ *
+ * NOTE: there is deliberately no "..., et al." collapse. An earlier version
+ * of this docblock claimed authors past the 6th collapse; `buildAuthorRuns`
+ * has always iterated EVERY token with no cap, so a 30-author paper prints
+ * 30 names. The claim was documentation of a rule nobody implemented — if
+ * the et-al collapse is actually wanted, it is a change, not a bug fix.
  *
  * Bolding rule: only authors *selected* via the `wcmAuthor` filter on
  * the search page are bold. The reciter ETL marks every WCM-affiliated
@@ -22,9 +28,10 @@
  * publications, bold them throughout") more directly than bolding every
  * WCM coauthor.
  *
- * Volume / issue / pages aren't currently in the Scholars data layer
- * (#89 spec §6.1 calls them out); the citation renders Year only after
- * the journal until those fields are plumbed through.
+ * Volume / issue / pages ARE in the Scholars data layer (#89 spec §6.1
+ * calls them out); the citation renders them after the year via the
+ * shared `formatVolIssuePages` helper, which also reads a literal "NULL"
+ * volume/issue/pages as absent (#2580) rather than printing it.
  */
 import {
   AlignmentType,
@@ -43,6 +50,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
+import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { displayPublicationType } from "@/lib/publication-types";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
 import { lastNameKey } from "@/lib/last-name-key";
@@ -104,6 +112,11 @@ async function fetchPmidsForBibliography(
   // needed here; mirror the live `searchPublications` clause exactly.
   if (filters.department && filters.department.length > 0) {
     filter.push({ terms: { wcmAuthorDepartments: filters.department } });
+  }
+  // Institution facet — same contract: the client only sends `institution`
+  // when SEARCH_PUB_INSTITUTION_FACET is on; mirror the live clause exactly.
+  if (filters.institution && filters.institution.length > 0) {
+    filter.push({ terms: { wcmAuthorInstitutions: filters.institution } });
   }
   // Issue #1025 — Mentoring-activity facet. Resolve the selected program
   // buckets to a pmid union exactly as `searchPublications` does; an empty
@@ -203,22 +216,6 @@ type PubForCitation = {
   pmcid: string | null;
 };
 
-/** Build the volume/issue/pages segment in NLM punctuation. Output:
- *  ";Vol(Issue):Pages." with each piece omitted gracefully when null.
- *  Returns "" when all three are null so the citation skips the block. */
-function formatVolIssuePages(
-  volume: string | null,
-  issue: string | null,
-  pages: string | null,
-): string {
-  if (!volume && !issue && !pages) return "";
-  let s = "";
-  if (volume) s += volume;
-  if (issue) s += `(${issue})`;
-  if (pages) s += `:${pages}`;
-  return s;
-}
-
 function buildCitationParagraph(
   index: number,
   pub: PubForCitation,
@@ -234,6 +231,8 @@ function buildCitationParagraph(
   // Falls back to the verbose journal title when the abbreviation is
   // missing — happens for ~5% of pubs the ETL didn't hit.
   const journalForCitation = pub.journalAbbrev ?? pub.journal ?? "";
+  // #2580 — the shared formatter also treats a literal "NULL" volume/issue/pages
+  // as absent; the local copy printed `2024;NULL(NULL):NULL.` into the .docx.
   const volIssuePages = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
   // Title strips a single trailing period (PubMed inconsistency); we
   // always re-emit one after the title so spacing is uniform.
@@ -243,9 +242,17 @@ function buildCitationParagraph(
 
   // PMID/PMCID assemble as one block joined by ; (NLM convention) with
   // a single trailing period after the whole block.
+  //
+  // #2580 — `Publication.pmid` carries a source-prefixed article id for
+  // non-PubMed records ("SCOPUS:105037533819"), which this used to label
+  // `PMID:` AND wrap in a `pubmed.ncbi.nlm.nih.gov/SCOPUS:.../` hyperlink —
+  // a link that is dead the moment the reader clicks it in Word. The shared
+  // helper decides the label and hands back `href: null` for those, so they
+  // render as plain "Scopus: 105037533819".
+  const id = citationIdentifier(pub.pmid);
   const idRuns: (TextRun | ExternalHyperlink)[] = [
-    new TextRun({ text: "PMID: " }),
-    hyperlinkRun(pub.pmid, `https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`),
+    new TextRun({ text: `${id.label}: ` }),
+    id.href ? hyperlinkRun(id.value, id.href) : new TextRun({ text: id.value }),
   ];
   if (pub.pmcid) {
     idRuns.push(new TextRun({ text: "; PMCID: " }));

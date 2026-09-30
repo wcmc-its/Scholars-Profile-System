@@ -28,6 +28,7 @@ const {
   mockDepartmentFindUnique,
   mockDivisionFindUnique,
   mockCenterFindUnique,
+  mockCoreFindUnique,
   mockUnitAdminFindMany,
   mockUnitAdminFindUnique,
   mockTxUnitAdminUpsert,
@@ -40,6 +41,7 @@ const {
   mockDepartmentFindUnique: vi.fn(),
   mockDivisionFindUnique: vi.fn(),
   mockCenterFindUnique: vi.fn(),
+  mockCoreFindUnique: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockUnitAdminFindUnique: vi.fn(),
   mockTxUnitAdminUpsert: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock("@/lib/db", () => ({
       department: { findUnique: mockDepartmentFindUnique },
       division: { findUnique: mockDivisionFindUnique },
       center: { findUnique: mockCenterFindUnique },
+      core: { findUnique: mockCoreFindUnique },
       unitAdmin: {
         findMany: mockUnitAdminFindMany,
         findUnique: mockUnitAdminFindUnique,
@@ -85,6 +88,9 @@ const OWNER = { cwid: "own001", isSuperuser: false };
 const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 const SUPERUSER = { cwid: "sup001", isSuperuser: true };
+// 2026-08-26 policy widening (decision #3) — full access-management parity,
+// with NO unit_admin row of their own.
+const STEWARD = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 const fakeTx = {
   unitAdmin: { upsert: mockTxUnitAdminUpsert, delete: mockTxUnitAdminDelete },
@@ -114,6 +120,7 @@ beforeEach(() => {
     department: { slug: "medicine" },
   });
   mockCenterFindUnique.mockResolvedValue({ code: "MEYER", slug: "meyer" });
+  mockCoreFindUnique.mockResolvedValue({ id: "2" });
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "department", entityId: "MED", role: "owner" },
   ]);
@@ -223,6 +230,34 @@ describe("/api/edit/grant", () => {
       }),
     );
     expect(res.status).toBe(200);
+  });
+
+  // 2026-08-26 policy widening (decision #3) — a comms_steward grants any
+  // role on any unit even with NO unit_admin row of their own.
+  it("comms_steward grants owner on a unit with no unit_admin row of their own", async () => {
+    mockGetEditSession.mockResolvedValue(STEWARD);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        entityType: "center",
+        entityId: "MEYER",
+        cwid: "new001",
+        role: "owner",
+        action: "grant",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxUnitAdminUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          entityType: "center",
+          entityId: "MEYER",
+          cwid: "new001",
+          role: "owner",
+          grantedBy: "stw001",
+        }),
+      }),
+    );
   });
 
   it("Revoke uses the same predicate; revoke of non-existent row → 200 no-op", async () => {
@@ -407,5 +442,219 @@ describe("/api/edit/grant", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "invalid_role" });
+  });
+
+  // ── cores-as-org-units P2 — entityType "core" (flat, no cascade, no ED
+  // source, no post-commit reflection) ────────────────────────────────────
+
+  describe("entityType: core", () => {
+    it("Core owner grants curator on the core", async () => {
+      mockUnitAdminFindUnique
+        .mockResolvedValueOnce({ role: "owner" }) // getCoreOwnerRole: actor's role on the core
+        .mockResolvedValueOnce(null); // idempotency probe: no existing grant
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "new001",
+          role: "curator",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockTxUnitAdminUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            entityType: "core",
+            entityId: "2",
+            cwid: "new001",
+            role: "curator",
+            grantedBy: "own001",
+          }),
+        }),
+      );
+      expect(mockExecuteRaw).toHaveBeenCalledOnce();
+      // Cores have no public owner/curator list — nothing to revalidate.
+      expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    });
+
+    it("Curator on a core tries to grant → 403 authority_violation", async () => {
+      mockUnitAdminFindUnique.mockResolvedValueOnce({ role: "curator" });
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "new001",
+          role: "curator",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ ok: false, error: "authority_violation" });
+    });
+
+    it("Non-admin on a core → 403 scope_violation", async () => {
+      mockGetEditSession.mockResolvedValue(NONADMIN);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "new001",
+          role: "curator",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ ok: false, error: "scope_violation" });
+    });
+
+    it("Superuser grants any role on a core", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "new001",
+          role: "owner",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    });
+
+    // 2026-08-26 policy widening (decision #3) — canManageAccess/canGrant is
+    // deliberately NOT kind-specific; a comms_steward grants on a core too,
+    // with no unit_admin row of their own on that core.
+    it("comms_steward grants a role on a core with no unit_admin row of their own", async () => {
+      mockGetEditSession.mockResolvedValue(STEWARD);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "new001",
+          role: "curator",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    });
+
+    it("Core not found → 400 unit_not_found", async () => {
+      mockCoreFindUnique.mockResolvedValue(null);
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "GHOST",
+          cwid: "new001",
+          role: "curator",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ ok: false, error: "unit_not_found" });
+    });
+
+    it("Core revoke writes the delete + audit row (no reflectUnitChange)", async () => {
+      mockUnitAdminFindUnique
+        .mockResolvedValueOnce({ role: "owner" })
+        .mockResolvedValueOnce({ role: "curator", grantedBy: "own001", source: "manual" });
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "rev001",
+          role: "curator",
+          action: "revoke",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockTxUnitAdminDelete).toHaveBeenCalledOnce();
+      expect(mockExecuteRaw).toHaveBeenCalledOnce();
+      expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    });
+
+    it("A core row is never ED-locked, even if `source` started with 'ED:' (no ED source ever writes a core row in practice)", async () => {
+      mockUnitAdminFindUnique
+        .mockResolvedValueOnce({ role: "owner" })
+        .mockResolvedValueOnce({ role: "curator", grantedBy: "ED-ETL", source: "ED:DA" });
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "ed0001",
+          role: "owner",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockTxUnitAdminUpsert).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── institution administrators — entityType "institution" (flat like a core;
+  // existence = lib/institutions.ts, no table) ────────────────────────────
+
+  describe("entityType: institution", () => {
+    it("Superuser grants owner on a mapped institution code; no reflection", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "institution",
+          entityId: "HMC",
+          cwid: "mam001",
+          role: "owner",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockTxUnitAdminUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            entityType: "institution",
+            entityId: "HMC",
+            cwid: "mam001",
+          }),
+        }),
+      );
+      expect(mockCoreFindUnique).not.toHaveBeenCalled();
+      expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    });
+
+    it("Non-admin on an institution → 403 scope_violation", async () => {
+      mockGetEditSession.mockResolvedValue(NONADMIN);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "institution",
+          entityId: "HMC",
+          cwid: "mam001",
+          role: "curator",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ ok: false, error: "scope_violation" });
+    });
+
+    it("Unmapped institution code → 400 unit_not_found", async () => {
+      mockGetEditSession.mockResolvedValue(SUPERUSER);
+      const res = await POST(
+        post({
+          entityType: "institution",
+          entityId: "WCMC",
+          cwid: "mam001",
+          role: "owner",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ ok: false, error: "unit_not_found" });
+    });
   });
 });

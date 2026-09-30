@@ -29,10 +29,22 @@ describe("SuperuserBanner", () => {
     expect(screen.getByRole("alert").getAttribute("data-slot")).toBe("superuser-banner");
   });
 
-  it("renders a ShieldAlert icon (an svg child of the alert)", () => {
+  it("renders the slate-tint notice with a Shield icon (design round 3)", () => {
     render(<SuperuserBanner targetLabel="Jane" />);
-    const svg = screen.getByRole("alert").querySelector("svg");
-    expect(svg).not.toBeNull();
+    const banner = screen.getByRole("alert");
+    expect(banner.querySelector("svg.lucide-shield")).not.toBeNull();
+    expect(banner.className).toContain("bg-apollo-slate-tint");
+    expect(banner.className).not.toContain("maroon");
+  });
+
+  it("uses the read-only copy when readOnly=true (#2482 cv_generator), not the editing claim", () => {
+    render(<SuperuserBanner targetLabel="Alex Other" readOnly />);
+    const banner = screen.getByRole("alert");
+    expect(banner.textContent).toContain("viewing");
+    expect(banner.textContent).toContain("read-only");
+    expect(banner.textContent).not.toContain("editing");
+    expect(banner.textContent).not.toContain("as an administrator");
+    expect(banner.querySelector("strong")?.textContent).toBe("Alex Other");
   });
 
   it("uses the publication copy when targetKind='publication'", () => {

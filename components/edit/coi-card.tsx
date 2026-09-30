@@ -58,11 +58,10 @@ export function CoiCard({
     <EditPanel
       slot="coi-panel"
       attribute="coi"
-      heading="Conflicts of Interest"
+      heading="Conflicts of interest"
       description={`External relationships and financial interests ${possessive === "your" ? "you" : scholarName} disclosed in the Weill Research Gateway. These are shown on the public profile and aren't editable here.`}
+      headerAction={<LockedBadge />}
     >
-      <LockedBadge />
-
       {groups.length === 0 ? (
         <p className="text-muted-foreground text-sm" data-testid="coi-empty">
           {mode === "superuser"
@@ -77,7 +76,7 @@ export function CoiCard({
                 {group}
                 <DisclosureGroupInfoTooltip group={group} />
               </h3>
-              <p className="text-foreground text-base leading-snug">{entities.join("; ")}</p>
+              <p className="text-foreground text-base leading-snug">{entities.join(" · ")}</p>
             </div>
           ))}
         </div>
@@ -118,7 +117,12 @@ export function CoiCard({
           Disclosures are managed in the Weill Research Gateway. Use Request a Change to correct one at
           its source.
         </p>
-        <RequestAChangeDialog attribute="coi" cwid={cwid} triggerTestId="request-a-change-toggle" />
+        <RequestAChangeDialog
+          attribute="coi"
+          cwid={cwid}
+          scholarName={scholarName}
+          triggerTestId="request-a-change-toggle"
+        />
       </div>
     </EditPanel>
   );

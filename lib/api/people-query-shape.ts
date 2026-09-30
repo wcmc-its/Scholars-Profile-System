@@ -60,6 +60,18 @@ export interface ClassifyPeopleQueryInput {
    */
   meshResolved: boolean;
   /**
+   * #2777 — `meshResolution.confidence` when resolved. `exact` / `entry-term`
+   * mean the whole query is one descriptor's name or entry term; `partial` is
+   * only a word-window of it. Omitted/null ⇒ treated as not verbatim.
+   */
+  meshConfidence?: "exact" | "entry-term" | "partial" | null;
+  /**
+   * #2777 — `meshResolution.matchedForm`. The resolution can come from the
+   * #692 filler-stripped retry ("rice research" -> "rice"), so the verbatim
+   * rule counts tokens here, not in `query`.
+   */
+  meshMatchedForm?: string | null;
+  /**
    * Lowercased `Scholar.cwid` values. CWID detection is exact set membership —
    * `scholar.cwid` is the PK, so this catches all-letter CWIDs (`rgcryst`)
    * that no format regex could, with zero false positives.
@@ -108,11 +120,12 @@ function departmentLeftover(
  *   1. empty query                       -> "empty"
  *   2. one CWID-shaped token             -> "cwid"
  *   3. department (leftover empty)       -> "department"
- *   4. surname anchor AND topic signal   -> "hybrid"
- *   5. department AND non-empty leftover -> "hybrid"
- *   6. surname anchor                    -> "name"
- *   7. topic signal                      -> "topic"
- *   8. otherwise                         -> "unclassified"
+ *   4. multi-token verbatim MeSH match   -> "topic"
+ *   5. surname anchor AND topic signal   -> "hybrid"
+ *   6. department AND non-empty leftover -> "hybrid"
+ *   7. surname anchor                    -> "name"
+ *   8. topic signal                      -> "topic"
+ *   9. otherwise                         -> "unclassified"
  *
  * Pure department is promoted above the surname-anchor rules (#528): a query
  * that exactly matches a known department name is overwhelmingly a department
@@ -120,7 +133,15 @@ function departmentLeftover(
  * ("pediatrics", "population health sciences"). Without this, the dept-shape
  * template (§6.1.4) never runs for those queries.
  *
- * Pure `name` (rule 6) is reached only when there is no topic signal, which
+ * The same reasoning promotes a verbatim MeSH match above the surname rules
+ * (#2777): when the WHOLE query is a descriptor name or entry term ("long
+ * covid" -> Post-Acute COVID-19 Syndrome), the surname collision on one of its
+ * words is incidental, and hybrid's name boost would pin scholars surnamed
+ * Long above the topical ones. Single-token matched forms are excluded so a bare
+ * surname that is also a descriptor ("rice", "stone") keeps its hybrid
+ * reading; "cantley ras" resolves at most `partial`, so it stays hybrid.
+ *
+ * Pure `name` (rule 7) is reached only when there is no topic signal, which
  * implies fewer than 4 tokens — so the SPEC's "1-3 token" name constraint
  * holds without a separate gate.
  */
@@ -164,6 +185,13 @@ export function classifyPeopleQuery(
   // exactly a known department phrase, with no extra tokens, routes to the
   // department template regardless of any surname collision on its tokens.
   if (departmentSignal && !departmentHasLeftover) return "department";
+
+  // #2777 — the whole multi-token query is one descriptor: topic, even when a
+  // token is also a surname.
+  const verbatimMesh =
+    input.meshConfidence === "exact" || input.meshConfidence === "entry-term";
+  const matchedTokens = (input.meshMatchedForm ?? "").trim().split(/\s+/).filter(Boolean).length;
+  if (input.meshResolved && verbatimMesh && matchedTokens > 1) return "topic";
 
   if (surnameAnchor && topicSignal) return "hybrid";
   if (departmentHasLeftover) return "hybrid";

@@ -57,6 +57,7 @@
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db, disconnect } from "../../lib/db";
 import { clearTopicRebuildWindow } from "../../lib/etl-state";
@@ -65,16 +66,51 @@ import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { planPublicationTopicPrune } from "./publication-topic-prune";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
-import { buildPublicationCoreWrites } from "./publication-core-mapper";
+import { projectPublicationCores } from "./publication-core-mapper";
+import { planPublicationCorePrune } from "./publication-core-prune";
+import { buildCoreStaffWrites } from "./core-staff-mapper";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
-import { projectGrantOpportunities } from "./grant-opportunity-etl";
+import {
+  emitOpportunityCorpusFreshnessMetric,
+  projectGrantOpportunities,
+} from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
 import { partitionRecords } from "./partition";
+import {
+  CORES_SOURCE,
+  DRIFT_SOURCES,
+  GRANTS_SOURCE,
+  PRODUCER_STAGES,
+  buildCoresRecencyWrite,
+  buildDriftRunWrites,
+  buildProducerRunWrites,
+  buildRecencyWrite,
+  latestCoreScoredAt,
+} from "./producer-run-mapper";
+import { parseManifestGeneratedAt } from "../freshness/anchor";
 import { fetchExcludedTopicIds } from "./excluded-topics";
 import { planTopicPrune } from "./topic-prune";
 
+
+/** A core the engine emitted nothing for this run: its rows are RETAINED, not
+ *  pruned, so one quiet producer cannot empty a whole review queue overnight.
+ *  Loud on purpose — this is a producer question, not routine ETL noise. */
+function warnHeldCores(held: readonly { pmid: string; coreId: string }[]): void {
+  const byCore = new Map<string, number>();
+  for (const k of held) byCore.set(k.coreId, (byCore.get(k.coreId) ?? 0) + 1);
+  console.warn(
+    `publication_core prune HELD BACK ${held.length} row(s) across ${byCore.size} core(s) ` +
+      "that received ZERO writes this run (engine emitted nothing for them -- investigate " +
+      "upstream rather than deleting a live queue): " +
+      [...byCore].map(([id, n]) => `core ${id}=${n}`).join(", "),
+  );
+}
+
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
+/** Shared ReciterAI artifacts bucket — same one etl/tools and etl/spotlight read. */
+const ARTIFACTS_BUCKET = process.env.ARTIFACTS_BUCKET ?? "wcmc-reciterai-artifacts";
+const GRANTS_MANIFEST_KEY = "grants/latest/manifest.json";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
 
 async function main() {
@@ -127,7 +163,10 @@ async function main() {
       `Single scan complete: ~${scanned} items examined; partitioned into ` +
         `tax=${buckets.tax.length}, topics=${buckets.topics.length}, ` +
         `faculty=${buckets.faculty.length}, impact=${buckets.impact.length}, ` +
-        `tools=${buckets.tools.length}, cores=${buckets.cores.length}.`,
+        `tools=${buckets.tools.length}, cores=${buckets.cores.length}, ` +
+        `coreStaff=${buckets.coreStaff.length}, ` +
+        `producerRuns=${buckets.producerRuns.length}, ` +
+        `driftDays=${buckets.driftDays.length}.`,
     );
 
     // ===================================================================
@@ -828,57 +867,131 @@ async function main() {
     const coreItems = buckets.cores;
     console.log(`Found ${coreItems.length} CORE# records.`);
 
-    // Pure, unit-tested per-record mapping + FK guards; see ./publication-core-mapper.ts.
-    const coreMap = buildPublicationCoreWrites(coreItems, { knownCoreIds, knownPmidSet });
-    console.log(
-      `publication_core candidates: ${coreMap.writes.length} (skipped: ` +
-        `${coreMap.skippedMissingCore} missing core, ` +
-        `${coreMap.skippedMissingPublication} missing publication, ` +
-        `${coreMap.skippedMissingFields} missing required fields, ` +
-        `${coreMap.skippedBelowThreshold} below threshold).`,
+    // Map + write in one call: the per-record FK/field guards, the payload both
+    // upsert halves derive from, and the batched (pmid, coreId) upsert all live
+    // in ./publication-core-mapper.ts, where a test drives them against a
+    // recording writer. Nothing of Block 6's write path is inlined here — a
+    // statement between the mapping and the write is exactly how a column
+    // silently stopped being written before.
+    const coreMap = await projectPublicationCores(
+      coreItems,
+      { knownCoreIds, knownPmidSet },
+      db.write,
+      { log: (m) => console.log(m) },
     );
+    const pubCoreRowsUpserted = coreMap.upserted;
 
-    // Idempotent upsert keyed on (pmid, coreId). Same batch shape as Block 2.
-    let pubCoreRowsUpserted = 0;
-    const CORE_BATCH = 100;
-    for (let i = 0; i < coreMap.writes.length; i += CORE_BATCH) {
-      const chunk = coreMap.writes.slice(i, i + CORE_BATCH);
-      await Promise.all(
-        chunk.map((w) =>
-          db.write.publicationCore.upsert({
-            where: { pmid_coreId: { pmid: w.pmid, coreId: w.coreId } },
-            create: {
-              pmid: w.pmid,
-              coreId: w.coreId,
-              likelihood: w.likelihood,
-              status: w.status,
-              signalCoauthors: w.signalCoauthors,
-              signalAck: w.signalAck,
-              ackAlias: w.ackAlias,
-              ackSnippet: w.ackSnippet,
-              llmScore: w.llmScore,
-              llmRationale: w.llmRationale,
-              authorAffinity: w.authorAffinity,
-              scoredAt: w.scoredAt,
-            },
-            update: {
-              likelihood: w.likelihood,
-              status: w.status,
-              signalCoauthors: w.signalCoauthors,
-              signalAck: w.signalAck,
-              ackAlias: w.ackAlias,
-              ackSnippet: w.ackSnippet,
-              llmScore: w.llmScore,
-              llmRationale: w.llmRationale,
-              authorAffinity: w.authorAffinity,
-              scoredAt: w.scoredAt,
-            },
-          }),
-        ),
+    // ----- Block 6 keyed prune (#2601) ---------------------------------
+    // The upsert loop only ADDS/updates pairs. When the engine re-scores a core
+    // and DEMOTES a (pmid, coreId) to `below_threshold`, the mapper drops it
+    // (skippedBelowThreshold above) so it falls out of the write set entirely —
+    // and the stale row then sits in the owner's claim queue forever. 148 such
+    // rows accumulated on core 14 and were being deleted by hand after every
+    // re-score. Delete the existing keys absent from this run's write set, but
+    // only when the write set clears the guardedReplace floor, so a partial or
+    // truncated scan can never mass-delete (mirrors the Block 2 prune above).
+    //
+    // Safe for human review work: claims/rejections are NOT stored here. They
+    // live in the ETL-immune `core_claim` table (ADR-005), which has no FK to
+    // publication_core (so no cascade, no constraint failure), and every read
+    // surface re-attaches a CLAIMED pair whose engine row is gone via its
+    // manual-PMID-add path (lib/api/core-queue.ts, cores.ts,
+    // publication-detail.ts). Delete-only, so it needs no transaction: a partial
+    // prune is safe (the next run finishes it).
+    const existingPubCoreKeys = await db.write.publicationCore.findMany({
+      select: { pmid: true, coreId: true },
+    });
+    const corePrunePlan = planPublicationCorePrune(
+      coreMap.writes,
+      existingPubCoreKeys,
+      await db.write.publicationCore.count(),
+    );
+    if (!corePrunePlan.prune) {
+      console.warn(
+        `publication_core prune SKIPPED -- ${corePrunePlan.reason}; likely a ` +
+          "partial CORE# scan, retaining stale rows this run.",
       );
-      pubCoreRowsUpserted += chunk.length;
+    } else if (corePrunePlan.held.length > 0 && corePrunePlan.stale.length === 0) {
+      warnHeldCores(corePrunePlan.held);
+      console.log("publication_core prune: no stale pairs.");
+    } else if (corePrunePlan.stale.length === 0) {
+      console.log("publication_core prune: no stale pairs.");
+    } else {
+      let corePruned = 0;
+      const CORE_PRUNE_BATCH = 200;
+      for (let i = 0; i < corePrunePlan.stale.length; i += CORE_PRUNE_BATCH) {
+        const chunk = corePrunePlan.stale.slice(i, i + CORE_PRUNE_BATCH);
+        const res = await db.write.publicationCore.deleteMany({
+          where: { OR: chunk.map((k) => ({ pmid: k.pmid, coreId: k.coreId })) },
+        });
+        corePruned += res.count;
+      }
+      if (corePrunePlan.held.length > 0) warnHeldCores(corePrunePlan.held);
+      console.log(`publication_core prune: removed ${corePruned} stale pair(s).`);
     }
-    console.log(`publication_core upserts complete: ${pubCoreRowsUpserted} rows.`);
+
+    // ===================================================================
+    // Block 6b: CORE#/STAFF_DICT → core.staff_count + core.staff_tracked_count
+    // ===================================================================
+    // ReciterAI publishes one item per core at PK=CORE#{core_id},
+    // SK=STAFF_DICT carrying TWO counts taken from the facility dictionary:
+    // `staff_count` (how many CWIDs its `staff:` key LISTS) and
+    // `staff_tracked_count` (how many of those the co-author signal, signal 2,
+    // can actually MATCH). The review queue renders both.
+    //
+    // Both, because the second is the one the signal runs on and it is
+    // routinely smaller: pipeline_cores/signals.py `coauthorship_index` reads
+    // the core's `tracked_staff_cwids`, not its `staff:` list, so a listed
+    // staff member with no personIdentifier upstream is invisible to it. The
+    // two counts differ on 9 of the 14 live cores, and three of those list
+    // staff while tracking none. Landing only `staff_count` would let the
+    // queue tell an owner "the co-author signal draws on N core staff" for a
+    // core where it cannot fire at all.
+    //
+    // COUNTS ONLY, by contract. The roster itself stays in the dictionary:
+    // the consumer renders two integers, so mirroring staff CWIDs into MySQL
+    // would be PII surface bought for nothing.
+    //
+    // Note the direction, which the SK suffix marks. STAFF_DICT is
+    // dictionary-sourced, ReciterAI → SPS. The sibling (CORE#{core_id},
+    // CLIENTS) item runs the OTHER way — SPS writes it
+    // (lib/cores/client-writeback.ts), the engine reads it — and the bare
+    // (CORE#{core_id}, STAFF) key is reserved for a future SPS-curated staff
+    // list that would run that way too. This block must never touch either;
+    // ./partition.ts keeps all three apart on the exact SK.
+    //
+    // ABSENT IS NOT ZERO. `update` (not `upsert`, and not a blanket
+    // updateMany-to-0 first) on ONLY the cores this run actually saw: a core
+    // with no STAFF_DICT item keeps whatever counts it already had, and both
+    // columns stay NULL for a core the engine has never published. A
+    // fail-soft read on a path that WRITES is a wipe, and a nightly that
+    // zeroed every core the moment the producer went quiet would be exactly
+    // that. `staff_count: 0` in a present item IS written, because "the
+    // dictionary lists no staff for this core" is real, useful review state.
+    // The two counts are written together or not at all — see the mapper.
+    const coreStaffItems = buckets.coreStaff;
+    console.log(`Found ${coreStaffItems.length} CORE#/STAFF_DICT record(s).`);
+    const staffMap = buildCoreStaffWrites(coreStaffItems, { knownCoreIds });
+    console.log(
+      `core staff counts candidates: ${staffMap.writes.length} (skipped: ` +
+        `${staffMap.skippedMissingCore} unresolvable core id, ` +
+        `${staffMap.skippedUnknownCore} unknown core, ` +
+        `${staffMap.skippedMissingCount} absent/invalid staff_count, ` +
+        `${staffMap.skippedMissingTracked} absent/invalid staff_tracked_count, ` +
+        `${staffMap.skippedIncoherent} tracked > listed).`,
+    );
+    let coreStaffRowsUpdated = 0;
+    for (const w of staffMap.writes) {
+      await db.write.core.update({
+        where: { id: w.coreId },
+        data: { staffCount: w.staffCount, staffTrackedCount: w.staffTrackedCount },
+      });
+      coreStaffRowsUpdated += 1;
+    }
+    console.log(
+      `core staff count updates complete: ${coreStaffRowsUpdated} core(s) ` +
+        `(${knownCoreIds.size - coreStaffRowsUpdated} left untouched — no STAFF_DICT item this run).`,
+    );
 
     // ===================================================================
     // Block 7: GRANT# → opportunity  (GrantRecs Phase 2)
@@ -896,6 +1009,110 @@ async function main() {
     });
     const opportunityRowsUpserted = grantResult.upserted;
 
+    // Phase 0a — opportunity corpus freshness. A "successful" Block 7 says
+    // nothing about the corpus being alive UPSTREAM: the projection happily
+    // re-upserts whatever GRANT# holds, so a frozen upstream corpus kept
+    // "succeeding" nightly for 6+ weeks with no alarm. Emit the per-source
+    // MAX(ingested_at) ages to CloudWatch right after the projection; the
+    // etl-stack alarm on SPS/ETL OpportunityCorpusIngestAgeDays does the
+    // paging. SCHOLARS_ENV-gated and fail-soft inside the helper — a metric
+    // hiccup must never fail or delay the nightly.
+    await emitOpportunityCorpusFreshnessMetric(db.write, {
+      log: (m) => console.log(`  ${m}`),
+    });
+
+    // ===================================================================
+    // Block 8: STAGE# -> etl_run  (ReciterAI PRODUCER liveness)
+    // ===================================================================
+    // Mirrors the engine's own stage ledger into `etl_run` so /edit/etl-status
+    // grades the PRODUCER as well as this loader. See ./producer-run-mapper.ts
+    // for why that distinction matters and for the ledger's four sharp edges.
+    //
+    // Fail-soft ON PURPOSE, and safe to be: this block only ever INSERTS rows
+    // that do not exist yet, so a failure loses nothing — the next nightly reads
+    // `since` from the table and backfills whatever this run missed. That makes
+    // it the rare degrade-instead-of-throw that does not turn a blip into an
+    // outage, and it keeps an auxiliary liveness signal from failing a nightly
+    // whose real job is the projection above. Loud, because a permanently
+    // failing mirror would otherwise be exactly the silent gap it exists to
+    // detect.
+    try {
+      const producerSources = [
+        ...new Set([
+          ...Object.values(PRODUCER_STAGES),
+          ...Object.values(DRIFT_SOURCES),
+          CORES_SOURCE,
+          GRANTS_SOURCE,
+        ]),
+      ];
+      const seen = await db.write.etlRun.groupBy({
+        by: ["source"],
+        where: { source: { in: producerSources } },
+        _max: { startedAt: true },
+      });
+      const since = new Map(seen.map((r) => [r.source, r._max.startedAt]));
+      // Tier C — cores' FALLBACK signal, the age of its own output, for the
+      // passes where the ledger has no `cores_run` row to offer (every pass,
+      // until ReciterAI's own change deploys). Free: buckets.cores is in hand.
+      const coresAt = latestCoreScoredAt(buckets.cores);
+
+      // Tier B — grants keeps no run record either, but it publishes a manifest.
+      // Fail-soft on its own: a manifest we cannot read must not cost us the
+      // five signals above, and the next nightly retries. parseManifestGenerated
+      // At returns null (so: no row) on an absent, malformed or FUTURE stamp.
+      let grantsAt: Date | null = null;
+      try {
+        const body = await new S3Client({ region: REGION }).send(
+          new GetObjectCommand({ Bucket: ARTIFACTS_BUCKET, Key: GRANTS_MANIFEST_KEY }),
+        );
+        const manifest = JSON.parse(await body.Body!.transformToString()) as {
+          generated_at?: string;
+        };
+        grantsAt = parseManifestGeneratedAt(manifest.generated_at, Date.now());
+        if (grantsAt === null) {
+          console.warn(
+            `ReciterAI grants manifest carries no usable generated_at (${String(manifest.generated_at)}) -- no liveness row written`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `ReciterAI grants manifest unreadable (no liveness row this run): ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+
+      // The ledger first, then the output-age tier BEHIND it. Cores is the one
+      // job both halves can speak for -- `cores_run` and `latestCoreScoredAt`
+      // resolve to the same source -- so buildCoresRecencyWrite drops the
+      // output-age row once the ledger carries a cores run record at all. Two
+      // rows for one run would double-count, and the output-age row would keep
+      // the watermark moving even on a night the run died. It is keyed on the
+      // SCANNED rows rather than on this pass's writes for the reason set out
+      // there: an already-mirrored ledger row produces no write, which a
+      // write-keyed guard would misread as "no ledger".
+      const producerWrites = [
+        ...buildProducerRunWrites(buckets.producerRuns, since),
+        ...buildDriftRunWrites(buckets.driftDays, since),
+        ...buildCoresRecencyWrite(buckets.producerRuns, coresAt, since),
+        ...buildRecencyWrite(GRANTS_SOURCE, grantsAt, since),
+      ];
+      if (producerWrites.length > 0) {
+        await db.write.etlRun.createMany({ data: producerWrites });
+      }
+      const unseen = producerSources.filter((src) => !since.has(src));
+      console.log(
+        `ReciterAI producer runs: mirrored ${producerWrites.length} new run(s) across ` +
+          `${new Set(producerWrites.map((w) => w.source)).size} stage(s)` +
+          (unseen.length > 0 ? ` (first mirror for: ${unseen.join(", ")})` : ""),
+      );
+    } catch (err) {
+      console.error(
+        "ReciterAI producer-run mirror FAILED (projection unaffected; the next run " +
+          "backfills what this one missed): " +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+
     // ===================================================================
     // Bookkeeping
     // ===================================================================
@@ -907,7 +1124,8 @@ async function main() {
       scholarToolRowsInserted +
       opportunityRowsUpserted +
       coreRowsUpserted +
-      pubCoreRowsUpserted;
+      pubCoreRowsUpserted +
+      coreStaffRowsUpdated;
     await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
@@ -920,7 +1138,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}, core_staff_counts=${coreStaffRowsUpdated}`,
     );
   } catch (err) {
     await db.write.etlRun.update({

@@ -3,7 +3,12 @@
  *
  * Both signals here are properties of the OPPORTUNITY alone (never of a scholar), so they are
  * known before any ask runs and are cheap enough to compute per browse row.
+ *
+ * CLIENT-SAFE — this module reaches the browser bundle (grant-matcha-panel imports it), so it
+ * must never import `@/lib/db` or anything that constructs prisma at module scope (the
+ * `manageable-units` trap in CLAUDE.md).
  */
+import type { CareerStage } from "@/lib/career-stage";
 
 function stringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
@@ -64,6 +69,91 @@ export function facultyPiMayHold(eligibilityFlags: unknown, eligibility: unknown
   const stages = careerStagesOf(eligibility);
   if (stages.length === 0) return true;
   return stages.some((s) => HOLDABLE_STAGES.has(s));
+}
+
+/**
+ * Grant Matcha — what THIS opportunity actually requires of a researcher. Every field is
+ * "absent ⇒ that axis does not render": the rail is relevance-driven, not a fixed 3-axis panel.
+ *
+ * `careerStages` is the load-bearing HARD axis (33.8% of mapped opportunities restrict it).
+ * `esiTargeted` is SOFT by design — the extractor's `esi_targeted` is a priority, not a gate,
+ * so it demotes and never hides. `usRequired` is DISPLAY-ONLY: person-level US citizenship is
+ * required by only 4.2% of opportunities and SPS holds no scholar citizenship field, so a US
+ * toggle would either filter nothing or imply data we do not have.
+ */
+export type EligibilityRequirements = {
+  /** Stages the opportunity admits. `null` ⇒ unrestricted ⇒ no career-stage axis. */
+  careerStages: readonly CareerStage[] | null;
+  /**
+   * The sponsor's OWN eligibility wording, verbatim, so the axis can cite what produced it.
+   *
+   * 🔴 Without this the rail states "Required: Early career · Mid career · Senior · Postdoc" —
+   * SPS's internal stage vocabulary — over an opportunity whose SYNOPSIS never mentions career
+   * stage, because the eligibility text lives in a different column that nothing renders. It reads
+   * as a requirement the matcher invented. It is not: `spin:095001` carries "Physician or Medical
+   * Professional; Faculty Member; Researcher or Investigator; Postdoctoral".
+   */
+  stageSource?: string | null;
+  esiTargeted: boolean;
+  usRequired: boolean;
+};
+
+/** Faculty maps to the three post-training stages; `careerStageBucket` has no "faculty" bucket. */
+export const FACULTY_STAGES: readonly CareerStage[] = ["early", "mid", "senior"];
+
+/**
+ * Values that appear in `career_stages` but are NOT career stages (screening spec §3.2 — the
+ * extraction contract mixes two axes into one array).
+ *
+ * 🔴 A role must not trip the restriction signal. Measured on staging 2026-07-28: 27 of 304
+ * opportunities carry `clinician`, and on the 2 where it is the ONLY value the rail stated
+ * "Required: Early career · Mid career · Senior" — stages taken from the derived flags, which the
+ * sponsor never mentioned — while the restriction it DID state (be a clinician) went unshown and
+ * unenforced. Dropping roles here makes those 2 render no axis, which is the truth: they state no
+ * career-stage requirement.
+ *
+ * Enforcing the clinician restriction is a separate, larger job (#2042): SPS has `isClinician`, but
+ * a second hard axis needs its own gate, badge, floor and relax control for 0.7% of the corpus.
+ */
+const NON_STAGE_ROLES: ReadonlySet<string> = new Set(["clinician"]);
+
+/**
+ * Turn an opportunity's stored eligibility into the axes the rail should render.
+ *
+ * The RESTRICTION SIGNAL is the structured map's `career_stages` being non-empty — the same test
+ * `deriveEligibilityFlagsFromMap` uses (`etl/dynamodb/grant-opportunity-mapper.ts`), where an empty
+ * array explicitly means "no person-level restriction". The ALLOWED SET then comes from the derived
+ * flags, which are what SPS already reads. Deriving the axis from the flags alone would render it on
+ * ~88% of opportunities and bury the officer in a filter that mostly restricts nothing.
+ */
+export function requirementsFrom(
+  eligibilityFlags: unknown,
+  eligibility: unknown,
+  eligibilityRaw?: unknown,
+): EligibilityRequirements {
+  const flags = stringArray(eligibilityFlags);
+  const map = asMap(eligibility);
+  // Only STAGE values restrict — a role in this array says who may apply, not at what stage.
+  const restricts = stringArray(map.career_stages).some((s) => !NON_STAGE_ROLES.has(s));
+
+  const allowed: CareerStage[] = [];
+  if (flags.includes("student_only")) allowed.push("grad");
+  if (flags.includes("faculty_eligible")) allowed.push(...FACULTY_STAGES);
+  if (flags.includes("postdoc_eligible")) allowed.push("postdoc");
+
+  // The sponsor's own eligibility wording, so the rail can cite what the stage list came from.
+  // Usually a short semicolon list ("Faculty Member; Postdoctoral | United States"); the rail
+  // clamps it, so no length cap here. Blank when the column is empty — never a fabricated source.
+  const source = typeof eligibilityRaw === "string" ? eligibilityRaw.trim() : "";
+
+  return {
+    // An empty allowed set would hide EVERYONE off malformed data, so it degrades to "no axis"
+    // rather than to an empty page — a filter that can only filter everything is worse than none.
+    careerStages: restricts && allowed.length > 0 ? allowed : null,
+    stageSource: source || null,
+    esiTargeted: map.esi_targeted === true,
+    usRequired: map.us_citizen_or_permanent_resident_required === true,
+  };
 }
 
 /**

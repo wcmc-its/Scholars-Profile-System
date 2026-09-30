@@ -23,14 +23,17 @@ PubMed <CoiStatement>  ──(ReCiter → ReciterDB.reporting_conflicts; upstrea
         │  etl:reciter:coi-statements   (nightly, alongside ReCiter — same WCM-DB path)
         ▼
 publication_conflict_statement   (per-PMID verbatim COI text)
-        │  etl:coi-gap   (nightly, after etl:coi — reads SPS-DB only)
+        │  etl:coi-gap   (weekly — reads SPS-DB only, whatever the nightly
+        │                 Coi/ReciterCoiStatements steps most recently wrote)
         │     ├─ extract → attribute → diff-vs-disclosed → tier
         ▼
 coi_gap_candidate   (the seeded recommendations; High renders on /edit when the flag is on)
 ```
 
-The two ETL steps run in the nightly cadence (`etl/orchestrate.ts` and the
-EtlStack nightly Step Function) exactly like every other source. The gap
+`etl:reciter:coi-statements` runs nightly (alongside ReCiter, same WCM-DB path).
+`etl:coi-gap` moved from nightly to the EtlStack weekly Step Function (Paul,
+2026-08-16) — it only computes against whatever COI/statement data SPS-DB
+already holds, so same-night freshness was never load-bearing. The gap
 computation reads only SPS-DB and is not network-blocked; seeding the upstream
 `publication_conflict_statement` table depends on the same WCM-ReciterDB path the
 ReCiter source needs (#443), with an S3 import bridge as the interim
@@ -237,7 +240,7 @@ crowd) is where the "9+" cap earns its keep.
 - **Self-only by default**, with superuser parity (#892) for operator review on a
   scholar's `/edit`. Never exposed to curators, proxies/unit-admins, the public,
   the search index, or any compliance feed.
-- **Durable dismissal.** A scholar's "Not relevant" is respected; the nightly job
+- **Durable dismissal.** A scholar's "Not relevant" is respected; the weekly job
   never re-surfaces a dismissed candidate.
 - **Flag-gated.** `SELF_EDIT_COI_GAP_HINT` is **off in both envs** until Faculty
   Affairs / Compliance sign off on concept *and* copy, and a High-tier precision
@@ -247,10 +250,13 @@ crowd) is where the "9+" cap earns its keep.
 
 ## Operational notes
 
-- **Cadence:** nightly, in the EtlStack nightly Step Function
-  (`etl:reciter:coi-statements` near the ReCiter step; `etl:coi-gap` after the COI
-  step). Incremental via the `EtlRun(source="COI-Gap")` watermark; `--full`
-  recomputes all. Reconciliation preserves dismissals across runs
+- **Cadence:** `etl:reciter:coi-statements` runs nightly (near the ReCiter
+  step); `etl:coi-gap` runs weekly (`CoiGapWeekly` in the EtlStack weekly Step
+  Function, after `CancerCenterDiseaseAssignmentsWeekly`) — moved off nightly
+  2026-08-16, since it only computes against whatever COI/statement data
+  SPS-DB already holds. Incremental via the `EtlRun(source="COI-Gap")`
+  watermark; `--full` recomputes all. Reconciliation preserves dismissals
+  across runs
   (`lib/coi-gap/lifecycle.ts`).
 - **Refresh staging on demand:** a one-off Fargate `run-task` on
   `sps-etl-staging` with `command: ["npm","run","etl:coi-gap"]` (ETL SG, private

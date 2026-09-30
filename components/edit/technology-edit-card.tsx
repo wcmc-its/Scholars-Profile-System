@@ -138,9 +138,8 @@ export function TechnologyEditCard({ mode, scholarName, technologies }: Technolo
       slot="technologies-panel"
       heading="Available technologies"
       description={`Inventions of ${possessive} that the Center for Technology Licensing lists as available to license. These are shown on the public profile and aren't editable here.`}
+      headerAction={<LockedBadge />}
     >
-      <LockedBadge />
-
       <ul
         className="border-apollo-border rounded-md border px-4 py-1"
         data-slot="technologies-panel-list"

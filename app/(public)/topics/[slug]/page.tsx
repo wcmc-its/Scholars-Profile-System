@@ -5,13 +5,20 @@ import { buildDefinedTermJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   getTopic,
   getTopScholarsForTopic,
-  getSubtopicsForTopic,
+  getSubtopicRail,
   getDistinctScholarCountForTopic,
+  fetchTopSubtopicsForScholars,
 } from "@/lib/api/topics";
-import { getSpotlightCardsForTopic } from "@/lib/api/spotlight";
+import { getSpotlightCardsForTopic, TOPIC_SPOTLIGHT_POOL_MAX } from "@/lib/api/spotlight";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
+import {
+  ScholarCardGrid,
+  SCHOLAR_CARD_LIMIT,
+  type ScholarCardData,
+} from "@/components/taxonomy/scholar-card-grid";
+import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
-import { SubtopicPublicationLayout } from "@/components/topic/subtopic-publication-layout";
+import { TopicRailLayout } from "@/components/topic/topic-rail-layout";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -65,16 +72,39 @@ export default async function TopicPage({
   const topic = await loadTopic(slug);
   if (!topic) notFound();
 
-  const [topScholars, spotlightCards, subtopics, scholarCount] = await Promise.all([
+  const [topScholars, spotlightCards, subtopicRail, scholarCount] = await Promise.all([
     getTopScholarsForTopic(slug).catch(() => null),
-    getSpotlightCardsForTopic(slug).catch(() => null),
-    getSubtopicsForTopic(slug).catch(() => null),
+    // Up to 9 cards, paged 3 at a time; ≤3 renders exactly as before.
+    getSpotlightCardsForTopic(slug, { limit: TOPIC_SPOTLIGHT_POOL_MAX }).catch(() => null),
+    getSubtopicRail(slug).catch(() => null),
     loadScholarCount(slug).catch(() => 0),
   ]);
 
-  const subtopicList = subtopics ?? [];
-  const subtopicCount = subtopicList.length;
-  const totalPubsForStats = subtopicList.reduce((sum, s) => sum + s.pubCount, 0);
+  // TAXONOMY_SCHOLAR_CARDS — portrait cards with each scholar's top subareas
+  // (primary-subtopic counts, the rail's rule) in place of the chip row.
+  const scholarCards = isTaxonomyScholarCardsOn();
+  let cardScholars: ScholarCardData[] | null = null;
+  if (scholarCards && topScholars) {
+    const top = topScholars.slice(0, SCHOLAR_CARD_LIMIT);
+    const areasByCwid = await fetchTopSubtopicsForScholars(
+      slug,
+      top.map((s) => s.cwid),
+    ).catch(() => new Map<string, { id: string; displayName: string }[]>());
+    cardScholars = top.map((s) => ({
+      cwid: s.cwid,
+      slug: s.slug,
+      preferredName: s.preferredName,
+      primaryTitle: s.primaryTitle,
+      identityImageEndpoint: s.identityImageEndpoint,
+      areas: (areasByCwid.get(s.cwid) ?? []).map((a) => a.displayName),
+    }));
+  }
+
+  const subtopicList = subtopicRail?.subtopics ?? [];
+  // One count definition (phase 4): distinct research articles, every
+  // relevance tier — the "All subareas" row, the Spotlight "View all N" and
+  // the unfiltered feed's "Publications N" all read it.
+  const totalPubsForStats = subtopicRail?.totalPubCount ?? 0;
   const spotlightData = spotlightCards
     ? {
         cards: spotlightCards,
@@ -115,7 +145,7 @@ export default async function TopicPage({
       {/* Hero */}
       <section className="mb-10">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          RESEARCH AREA
+          Research area
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {topic.label}
@@ -128,40 +158,47 @@ export default async function TopicPage({
 
         {/* Top scholars chip row — inside hero, D-10. id="top-scholars"
             anchors deep-links from the home page spotlight section. */}
-        {topScholars && (
+        {cardScholars ? (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow
-              scholars={topScholars}
-              scholarCount={scholarCount}
-              topicSlug={slug}
-              topicLabel={topic.label}
+            <ScholarCardGrid
+              heading="Scholars in this area"
+              scholars={cardScholars}
+              viewAll={{
+                href: `/topics/${encodeURIComponent(slug)}/scholars`,
+                count: scholarCount,
+              }}
+              popover={{ label: topic.label, topicSlug: slug, filterable: true }}
             />
           </div>
+        ) : (
+          topScholars && (
+            <div id="top-scholars" className="scroll-mt-20">
+              <TopScholarsChipRow
+                scholars={topScholars}
+                scholarCount={scholarCount}
+                topicSlug={slug}
+                topicLabel={topic.label}
+              />
+            </div>
+          )
         )}
 
-        {/* Stats — dashed border under scholars row */}
-        {(totalPubsForStats > 0 || subtopicCount > 0) && (
-          <div className="mt-4 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
-            {[
-              totalPubsForStats > 0
-                ? `${totalPubsForStats.toLocaleString()} publications`
-                : null,
-              subtopicCount > 0 ? `${subtopicCount.toLocaleString()} subareas` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-        )}
       </section>
 
       {/* Spotlight (§16) — replaces the prior Recent Highlights surface. */}
-      <Spotlight data={spotlightData} />
+      <Spotlight data={spotlightData} paged />
 
-      {/* Layout B: sticky subtopic rail + CSR publication feed.
+      {/* Layout B: subtopic rail (sheet below lg) + CSR publication feed.
           id="publications" anchors deep-links from the home page spotlight
           section. */}
       <section id="publications" className="scroll-mt-20">
-        <SubtopicPublicationLayout topicSlug={slug} subtopics={subtopicList} />
+        <TopicRailLayout
+          topicSlug={slug}
+          subtopics={subtopicList}
+          totalPubCount={totalPubsForStats}
+          scholarNames={scholarCards}
+          loadMore={isTaxonomyFeedLoadMoreOn()}
+        />
       </section>
     </main>
   );

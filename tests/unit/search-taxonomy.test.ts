@@ -43,6 +43,7 @@ vi.mock("@/lib/db", () => ({
 import {
   _clearDescendantsForTests,
   _resetMeshMapForTests,
+  conceptSubtreeUis,
   matchQueryToTaxonomy,
   normalizeForMatch,
   resolveMeshDescriptor,
@@ -1551,6 +1552,17 @@ describe("resolveMeshDescriptor — #2088 hard override beats a genuine NLM entr
     expect(r?.descriptorUi).toBe("D008279");
   });
 
+  it("'crispr' resolves to CRISPR-Cas Systems, not the Repeats descriptor that owns the entry term", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      { ...D_MRI, descriptorUi: "D064112", name: "Clustered Regularly Interspaced Short Palindromic Repeats", entryTerms: ["CRISPR"], treeNumbers: ["G02.111.570.080.708.800.325.500"] },
+      { ...D_MRI, descriptorUi: "D064113", name: "CRISPR-Cas Systems", entryTerms: ["CRISPR-Cas System"], treeNumbers: ["G05.308.203.374.394"] },
+    ]);
+    mockMeshAliasFindMany.mockResolvedValue([]);
+    const r = await resolveMeshDescriptor("CRISPR");
+    expect(r?.descriptorUi).toBe("D064113");
+    expect(r?.confidence).toBe("entry-term");
+  });
+
   it("falls through to the normal entry-term hit if the override's target UI is absent (stale)", async () => {
     // Functional Neuroimaging (D059907) missing from this load — the override
     // must not error, it should behave as if it weren't there.
@@ -2137,6 +2149,17 @@ describe("resolveQueryTaxonomy (#2115) — #1980 stripKeptEnough guard", () => {
     expect(taxonomyMatch.meshResolution?.descriptorUi).toBe("D007668");
     expect(taxonomyMatch.meshResolution?.confidence).toBe("exact");
   });
+
+  it("#692 follow-up: fullQueryMeshConfidence is the UNSTRIPPED query's, not the retry's", async () => {
+    // The adopted retry is exact, but the phrase as typed resolved nothing — so the
+    // search must still strip. Reporting the final confidence would stop that.
+    const adopted = await resolveQueryTaxonomy("kidney disease");
+    expect(adopted.taxonomyMatch.meshResolution?.confidence).toBe("exact");
+    expect(adopted.fullQueryMeshConfidence).toBeNull();
+    // A query that resolves as typed reports its own confidence.
+    const verbatim = await resolveQueryTaxonomy("kidney");
+    expect(verbatim.fullQueryMeshConfidence).toBe("exact");
+  });
 });
 
 /**
@@ -2272,5 +2295,42 @@ describe("resolveQueryTaxonomy (#1982) — a curated match no longer blocks the 
     // `Coronary Vessels` shares no token with the dropped `disease`/`patients` — rejected,
     // exactly as it is with no curated match at all.
     expect(taxonomyMatch.meshResolution).toBeNull();
+  });
+});
+
+describe("conceptSubtreeUis — the key-paper/grants routes rebuild the page's subtree", () => {
+  // A broad concept past DESCENDANT_HARD_CAP: the list the card used to put in the URL
+  // (~2.1 KB at 200 UIs) was 403'd by the edge WAF. The card now sends only the root;
+  // the route must rebuild EXACTLY the list the page resolved, or it picks other papers.
+  const root = {
+    descriptorUi: "D002318",
+    name: "Cardiovascular Diseases",
+    entryTerms: ["Cardiovascular Disease"],
+    scopeNote: null,
+    dateRevised: new Date("2024-01-01"),
+    localPubCoverage: null,
+    treeNumbers: ["C14"],
+  };
+  const kids = Array.from({ length: 250 }, (_, i) => ({
+    descriptorUi: `D${String(900000 + i)}`,
+    name: `Kid ${i}`,
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: new Date("2024-01-01"),
+    localPubCoverage: null,
+    treeNumbers: [`C14.${String(100 + i)}`],
+  }));
+
+  it("equals the resolved concept's descendantUis, truncation and order included", async () => {
+    mockMeshFindMany.mockResolvedValue([root, ...kids]);
+    const r = await resolveMeshDescriptor("cardiovascular disease");
+    expect(r?.descendantUis).toHaveLength(200);
+    expect(await conceptSubtreeUis("D002318")).toEqual(r!.descendantUis);
+  });
+
+  it("returns [] for a malformed UI (unauthenticated param)", async () => {
+    mockMeshFindMany.mockResolvedValue([root]);
+    expect(await conceptSubtreeUis("D002318,D1")).toEqual([]);
+    expect(await conceptSubtreeUis("")).toEqual([]);
   });
 });

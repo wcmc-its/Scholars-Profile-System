@@ -6,6 +6,30 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Content formatting for rendered overview HTML — the marks the overview
+ * editor's toolbar can actually produce (bold, italics, lists, links).
+ *
+ * #2579 — every surface that renders this HTML used to carry its own idea of
+ * the intent. The public profile spelled these utilities out; both /edit
+ * surfaces wrote `prose prose-sm` instead, which styles nothing here: the
+ * project is on Tailwind v4, `app/globals.css` has no
+ * `@plugin "@tailwindcss/typography"`, the package isn't installed, and no
+ * `.prose` rule exists in any stylesheet. So an inserted link rendered as
+ * plain text while composing AND in the read-only preview, and only became
+ * visible once published — leaving an editor no way to spot a stray or missing
+ * link short of reading the HTML, which they can't do.
+ *
+ * Keep this as ONE constant so the composing, preview and published views
+ * can't drift apart again. Layout and chrome (padding, borders, min-height,
+ * base text colour) stay local to each surface; only the content marks are
+ * shared, so adopting it on the profile is a no-op there.
+ */
+export const OVERVIEW_HTML_CLASS =
+  "[&_a]:text-[var(--color-accent-slate)] [&_a]:underline [&_a]:underline-offset-4 " +
+  "[&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 " +
+  "[&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1";
+
+/**
  * Strip VIVO serializer artifacts from an HTML string before rendering.
  *
  * VIVO's Turtle exporter double-escapes Windows line endings, storing \\r\\n

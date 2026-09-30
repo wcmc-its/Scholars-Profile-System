@@ -61,6 +61,13 @@ describe("detailForAction", () => {
     expect(detailForAction("slug_request", null, { slug: "jane-doe" })).toBe("jane-doe");
     expect(detailForAction("field_override", { overview: "x" }, { overview: "y" })).toBeNull();
   });
+
+  it("names the removed old URL for a slug_redirect_remove", () => {
+    expect(labelForAction("slug_redirect_remove")).toBe("Removed old profile URL redirect");
+    expect(detailForAction("slug_redirect_remove", { oldSlug: "j-doe", currentSlug: "jane-doe" }, null)).toBe(
+      "/j-doe",
+    );
+  });
 });
 
 describe("shapeScholarAuditRows", () => {

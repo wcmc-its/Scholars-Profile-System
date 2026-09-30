@@ -100,6 +100,7 @@ export const FUNDING_INDEX = "scholars-funding";
 // GrantRecs Phase 2 — funding OPPORTUNITIES (not awarded grants), projected
 // from the `opportunity` MySQL table (itself fed by ReciterAI `GRANT#`).
 export const OPPORTUNITIES_INDEX = "scholars-opportunities";
+export const TRIALS_INDEX = "scholars-trials";
 
 /**
  * Mapping for the people index. Note that authorship-weighted contributions
@@ -372,6 +373,15 @@ export const peopleIndexMapping = {
       // cardiology-anchored `C14`). OMIT-on-empty; gated query-side by
       // SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR. Populated by etl/pops → buildPeopleDoc.
       clinicalSpecialtyMeshTree: { type: "keyword" },
+      // Clinical trials the scholar is PI on (`lib/search-trial-evidence.ts`).
+      // `trialMeshUi` = CT.gov MeSH resolved to descriptor UIs (concept match,
+      // like `publicationMeshUi`); `trialText` = titles + conditions + MeSH
+      // labels. Queried only under SEARCH_PEOPLE_TRIAL_EVIDENCE. OMIT-on-empty.
+      trialMeshUi: { type: "keyword" },
+      trialText: { type: "text", analyzer: "scholar_text" },
+      // Per-trial descriptor UIs, `_source`-read only, for the card's
+      // "Clinical research · N trials" count (trials tagged under the query concept).
+      trialMesh: { type: "object", enabled: false },
       // #1836 — `clinicalAnchors`: per-specialty {specialty, boardCertified, tree}
       // rows, `_source`-read ONLY (never queried) to label the clinical evidence
       // row for a disease-subtree match. `enabled: false` so it is stored but not
@@ -402,6 +412,13 @@ export const peopleIndexMapping = {
       // could derive it for — not omit-on-empty, so the boolean `term` filter
       // behind `SEARCH_PEOPLE_ESI_FACET` gets correct counts on both sides.
       esiEligible: { type: "boolean" },
+      // Institution facet — direct copy of `Scholar.primaryOrgCode` (ED
+      // `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, HMH,
+      // WCMC-Q, ...). `keyword` for an exact multi-select `terms` filter +
+      // terms agg (mirrors `professorialRank`), behind
+      // `SEARCH_PEOPLE_INSTITUTION_FACET`. OMIT-on-empty in `buildPeopleDoc`.
+      // Labels are resolved in the page via `institutionDisplayName`.
+      primaryOrgCode: { type: "keyword" },
     },
   },
 };
@@ -511,6 +528,10 @@ export const publicationsIndexMapping = {
       // `SEARCH_PUB_DEPARTMENT_FILTER`; populated on every reindex so the
       // flag flip needs no second reindex.
       wcmAuthorDepartments: { type: "keyword" },
+      // Institution facet — keyword array of the displayable WCM authors'
+      // `Scholar.primaryOrgCode`s (WCMC, HSS, MSKCC, ...), same union /
+      // omit-on-empty shape as `wcmAuthorDepartments`; `SEARCH_PUB_INSTITUTION_FACET`.
+      wcmAuthorInstitutions: { type: "keyword" },
       // Pre-rendered author chips for the WCM-coauthor stack on results.
       wcmAuthors: {
         type: "nested",
@@ -597,6 +618,9 @@ export const fundingIndexMapping = {
       mechanism: { type: "keyword" },
       nihIc: { type: "keyword" },
       department: { type: "keyword" },
+      // Institution facet — lead PI's `Scholar.primaryOrgCode` (WCMC, HSS,
+      // MSKCC, ...), same lead-PI rule as `department`; `SEARCH_FUNDING_INSTITUTION_FACET`.
+      institution: { type: "keyword" },
       // Role keyword array per project — populated with every bucket the
       // project belongs to (PI, Multi-PI, Co-I) so a single `terms` filter
       // matches without post-aggregation logic.
@@ -1457,6 +1481,14 @@ export const OPPORTUNITY_TOPIC_GATE = 0.3;
 /** A `topic_vector` entry as stored on the `opportunity` row. */
 export type OpportunityTopicScore = { topic_id: string; score: number; rationale?: string };
 
+/**
+ * The `opportunity` rows the index builder projects (mirrors PEOPLE_INDEX_WHERE /
+ * GRANT_INDEX_WHERE): research rows only, and never a manually-suppressed one
+ * (matcha-admin Phase 1b) — a suppression drops the doc on the next nightly
+ * rebuild, so the matchers stop retrieving it without a manual reindex.
+ */
+export const OPPORTUNITY_INDEX_WHERE = { isResearch: true, suppressedAt: null } as const;
+
 /** The `opportunity` columns the index builder selects (Prisma row subset). */
 export type OpportunityIndexRow = {
   opportunityId: string;
@@ -1535,3 +1567,46 @@ export function buildOpportunityDoc(
   };
   return { id: row.opportunityId, doc };
 }
+
+/**
+ * Clinical trials tab (SEARCH_TRIALS_TAB). One doc per trial, deduped by NCT
+ * number (the institutional export registers some studies under several
+ * protocol numbers). Built by `loadTrialDocs` (`lib/search-trial-evidence.ts`);
+ * reuses the funding analyzer. `meshDescriptorUi` = CT.gov MeSH resolved to UIs.
+ */
+export const trialsIndexMapping = {
+  settings: fundingIndexMapping.settings,
+  mappings: {
+    properties: {
+      trialId: { type: "keyword" },
+      nctNumber: { type: "keyword" },
+      title: { type: "text", analyzer: "funding_text" },
+      briefSummary: { type: "text", analyzer: "funding_text" },
+      conditions: { type: "text", analyzer: "funding_text" },
+      meshTerms: { type: "text", analyzer: "funding_text" },
+      meshDescriptorUi: { type: "keyword" },
+      piNames: { type: "text", analyzer: "funding_text" },
+      piCwids: { type: "keyword" },
+      pis: { type: "object", enabled: false },
+      status: { type: "keyword" },
+      statusBucket: { type: "keyword" },
+      phase: { type: "keyword" },
+      studyType: { type: "keyword" },
+      studyTypeKeys: { type: "keyword" },
+      departments: { type: "keyword" },
+      meshLabels: { type: "keyword" },
+      statusKey: { type: "keyword" },
+      statusRank: { type: "integer" },
+      startDate: { type: "keyword" },
+      startYear: { type: "integer" },
+      startEstimated: { type: "boolean" },
+      endDate: { type: "keyword" },
+      endEstimated: { type: "boolean" },
+      interventions: { type: "keyword", index: false },
+      interventionTypes: { type: "keyword" },
+      hasResults: { type: "boolean" },
+      sponsorClass: { type: "keyword" },
+      principalSponsor: { type: "keyword" },
+    },
+  },
+};

@@ -113,6 +113,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             })
           ).map((s) => s.slug),
         );
+        // #2606 — another scholar's old URL still redirects from its history
+        // slug; taking it would hijack that redirect. Own history is reclaimable.
+        for (const h of await tx.slugHistory.findMany({
+          where: { currentCwid: { not: entityId } },
+          select: { oldSlug: true },
+        })) {
+          taken.add(h.oldSlug);
+        }
         const derived = nextAvailableSlug(
           deriveSlug(scholar.preferredName) || entityId.toLowerCase(),
           taken,

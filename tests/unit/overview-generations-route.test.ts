@@ -16,7 +16,13 @@ const {
   mockEnabled,
   mockListGenerations,
   mockLoadProvenance,
+  mockListVersions,
+  mockLoadImported,
+  mockLoadNames,
 } = vi.hoisted(() => ({
+  mockListVersions: vi.fn(),
+  mockLoadImported: vi.fn(),
+  mockLoadNames: vi.fn(),
   mockResolveIdentity: vi.fn(),
   mockAuthorize: vi.fn(),
   mockLogDenial: vi.fn(),
@@ -36,6 +42,9 @@ vi.mock("@/lib/edit/overview-generator", () => ({ isOverviewGenerateEnabled: moc
 vi.mock("@/lib/edit/overview-provenance", () => ({
   listOverviewGenerations: mockListGenerations,
   loadOverviewProvenance: mockLoadProvenance,
+  listOverviewVersions: mockListVersions,
+  loadImportedOverview: mockLoadImported,
+  loadHistoryNames: mockLoadNames,
 }));
 
 import { GET } from "@/app/api/edit/overview/generations/route";
@@ -77,8 +86,21 @@ beforeEach(() => {
       params: PARAMS,
       createdAt: CREATED_AT,
       text: "<p>Draft one.</p>",
+      name: "Short take",
+      createdByCwid: "self01",
     },
   ]);
+  mockListVersions.mockResolvedValue([
+    {
+      id: "v1",
+      html: "<p>Saved.</p>",
+      origin: "generated",
+      savedByCwid: "admin1",
+      createdAt: UPDATED_AT,
+    },
+  ]);
+  mockLoadImported.mockResolvedValue("<p>Imported.</p>");
+  mockLoadNames.mockResolvedValue({ self01: "Pat Self" });
   mockLoadProvenance.mockResolvedValue({
     origin: "generated",
     model: "anthropic/claude-sonnet-4.5",
@@ -144,8 +166,21 @@ describe("GET /api/edit/overview/generations", () => {
           params: PARAMS,
           createdAt: CREATED_AT.toISOString(),
           text: "<p>Draft one.</p>",
+          name: "Short take",
+          by: "Pat Self",
         },
       ],
+      // admin1 has no scholar row → no name.
+      versions: [
+        {
+          id: "v1",
+          html: "<p>Saved.</p>",
+          origin: "generated",
+          createdAt: UPDATED_AT.toISOString(),
+          by: null,
+        },
+      ],
+      importedHtml: "<p>Imported.</p>",
       provenance: {
         origin: "generated",
         model: "anthropic/claude-sonnet-4.5",

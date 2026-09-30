@@ -12,15 +12,18 @@ import {
 } from "@/lib/api/administrators-roster";
 
 type UnitAdminRow = {
-  entityType: "department" | "division" | "center";
+  entityType: "department" | "division" | "center" | "core";
   entityId: string;
   cwid: string;
   role: "owner" | "curator";
   source: string;
   /** Directory name captured at pull time (ed-admins ETL); resolves non-Scholar admins. */
   granteeName?: string | null;
+  grantedBy?: string;
+  createdAt?: Date;
 };
 type NamedRow = { code: string; name: string };
+type CoreRow = { id: string; name: string };
 type ScholarRow = { cwid: string; preferredName: string; primaryTitle: string | null };
 
 /** A minimal in-memory `AdminRosterClient` honoring the `{ in: [...] }` filters. */
@@ -29,6 +32,7 @@ function makeClient(data: {
   departments?: NamedRow[];
   divisions?: NamedRow[];
   centers?: NamedRow[];
+  cores?: CoreRow[];
   scholars?: ScholarRow[];
 }): AdminRosterClient {
   const inFilter = <T extends { code: string }>(rows: T[], codes: string[] | undefined) =>
@@ -54,6 +58,12 @@ function makeClient(data: {
     center: {
       findMany: async (args: { where: { code: { in: string[] } } }) =>
         inFilter(data.centers ?? [], args.where.code.in).map((r) => ({ ...r })),
+    },
+    core: {
+      findMany: async (args: { where: { id: { in: string[] } } }) =>
+        (data.cores ?? [])
+          .filter((c) => args.where.id.in.includes(c.id))
+          .map((c) => ({ ...c })),
     },
     scholar: {
       findMany: async (args: { where: { cwid: { in: string[] } } }) =>
@@ -202,6 +212,28 @@ describe("loadUnitAdministratorRoster — provenance + name resolution", () => {
     expect(entries[0].name).toBe("Curated Name");
   });
 
+  it("resolves a core grant's name, distinct from a center grant on the same roster (cores-as-org-units P2)", async () => {
+    const client = makeClient({
+      unitAdmin: [
+        { entityType: "core", entityId: "2", cwid: "p1", role: "owner", source: "manual" },
+        { entityType: "center", entityId: "C1", cwid: "p1", role: "curator", source: "ED:DA" },
+      ],
+      cores: [{ id: "2", name: "Biomedical Imaging" }],
+      centers: [{ code: "C1", name: "Center One" }],
+      scholars: [{ cwid: "p1", preferredName: "P One", primaryTitle: null }],
+    });
+    const { entries } = await loadUnitAdministratorRoster({}, client);
+    expect(entries).toHaveLength(1);
+    const grants = entries[0].grants;
+    expect(grants).toHaveLength(2);
+    const core = grants.find((g) => g.entityType === "core")!;
+    expect(core.unitName).toBe("Biomedical Imaging");
+    expect(core.entityId).toBe("2");
+    const center = grants.find((g) => g.entityType === "center")!;
+    expect(center.unitName).toBe("Center One");
+    expect(center.entityId).toBe("C1");
+  });
+
   it("uses the bare code when a unit row is missing", async () => {
     const client = makeClient({
       unitAdmin: [
@@ -212,5 +244,48 @@ describe("loadUnitAdministratorRoster — provenance + name resolution", () => {
     });
     const { entries } = await loadUnitAdministratorRoster({}, client);
     expect(entries[0].grants[0].unitName).toBe("GONE");
+  });
+});
+
+describe("loadUnitAdministratorRoster — grant provenance (Added by)", () => {
+  it("carries grantedBy + createdAt and resolves a manual granter's Scholar name", async () => {
+    const client = makeClient({
+      unitAdmin: [
+        {
+          entityType: "department",
+          entityId: "D1",
+          cwid: "p1",
+          role: "owner",
+          source: "manual",
+          grantedBy: "boss1",
+          createdAt: new Date("2026-03-04T12:00:00Z"),
+        },
+        {
+          entityType: "division",
+          entityId: "V1",
+          cwid: "p1",
+          role: "curator",
+          source: "ED:DivA",
+          grantedBy: "ED-ETL",
+          createdAt: new Date("2026-01-02T12:00:00Z"),
+        },
+      ],
+      departments: [{ code: "D1", name: "Dept One" }],
+      divisions: [{ code: "V1", name: "Div One" }],
+      scholars: [
+        { cwid: "p1", preferredName: "P One", primaryTitle: null },
+        { cwid: "boss1", preferredName: "Boss Person", primaryTitle: null },
+      ],
+    });
+    const { entries } = await loadUnitAdministratorRoster({}, client);
+    // The granter is not a grantee — they must not become a roster row.
+    expect(entries.map((e) => e.cwid)).toEqual(["p1"]);
+    const dept = entries[0].grants.find((g) => g.entityId === "D1")!;
+    expect(dept.grantedBy).toBe("boss1");
+    expect(dept.grantedByName).toBe("Boss Person");
+    expect(dept.grantedAt).toBe("2026-03-04T12:00:00.000Z");
+    const div = entries[0].grants.find((g) => g.entityId === "V1")!;
+    expect(div.grantedBy).toBe("ED-ETL");
+    expect(div.grantedByName).toBeNull();
   });
 });

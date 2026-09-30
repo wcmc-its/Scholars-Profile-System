@@ -211,7 +211,10 @@ export class DataStack extends Stack {
           snapshotIdentifier: snapshotId,
           snapshotCredentials: rds.SnapshotCredentials.fromSecret(itsMaster),
           engine: rds.DatabaseClusterEngine.auroraMysql({
-            version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
+            version: rds.AuroraMysqlEngineVersion.of(
+              "8.0.mysql_aurora.3.10.5",
+              "8.0",
+            ),
           }),
           vpc,
           vpcSubnets: dataSubnets,
@@ -235,7 +238,10 @@ export class DataStack extends Stack {
     } else {
       cluster = new rds.DatabaseCluster(this, "AuroraCluster", {
         engine: rds.DatabaseClusterEngine.auroraMysql({
-          version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
+          version: rds.AuroraMysqlEngineVersion.of(
+            "8.0.mysql_aurora.3.10.5",
+            "8.0",
+          ),
         }),
         credentials: rds.Credentials.fromGeneratedSecret("scholars_admin", {
           // Env-prefixed because account `665083158573` hosts both staging and

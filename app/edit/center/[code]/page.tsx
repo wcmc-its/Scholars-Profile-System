@@ -21,12 +21,14 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 
 export const dynamic = "force-dynamic";
 
@@ -66,9 +68,17 @@ export default async function EditCenterPage({
       targetEntityType: "center",
       targetEntityId: code,
     });
-    return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage variant="unit" targetEntity={code} />
+      </div>
+    );
   }
 
   const { attr } = (await searchParams) ?? {};
-  return <UnitEditPage ctx={ctx} attr={attr} />;
+  // Drives `EditShell`'s "Org units" breadcrumb (dwd2001 bug #7) — the same
+  // units-tab predicate `/edit/units` itself gates on, not a bespoke check.
+  const consoleTabs = await loadConsoleTabs(session, db.read);
+  return <UnitEditPage ctx={ctx} attr={attr} orgUnitsNavVisible={consoleTabs.units} />;
 }

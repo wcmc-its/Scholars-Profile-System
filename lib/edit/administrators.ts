@@ -26,6 +26,26 @@ export function isAdministratorsTabEnabled(): boolean {
 }
 
 /**
+ * Whether to advertise the "Administrators" tab in the admin sub-nav for this
+ * viewer (D5): the feature is enabled AND the viewer is a superuser or owns at
+ * least one unit (`ownerUnitCount`, from `loadOwnerManagedUnitScope`). Mirrors
+ * the shape of `isMethodsTabVisible` / `isDataQualityTabVisible` /
+ * `isDataSharingDashboardTabVisible` — the sibling bundled predicates this one
+ * was missing (`docs/edit-console-ia-spec.md` Gap 3).
+ *
+ * Not yet called anywhere live — `admin-subnav.tsx` still hard-gates on
+ * `superuserSurfaces`, and no page ORs an owner signal into `administratorsTab`.
+ * Landed for `lib/edit/console-tabs.server.ts` (the proposed loader) to consume;
+ * wiring it into the shipped nav is a separate, explicitly-gated change.
+ */
+export function isAdministratorsTabVisible(
+  session: { isSuperuser: boolean },
+  ownerUnitCount: number,
+): boolean {
+  return isAdministratorsTabEnabled() && (session.isSuperuser || ownerUnitCount > 0);
+}
+
+/**
  * The Prisma surface `loadOwnerManagedUnitScope` reads — a `PrismaClient` (or a
  * `db.read` client) satisfies it structurally. Kept narrow so the unit tests can
  * mock exactly these models.

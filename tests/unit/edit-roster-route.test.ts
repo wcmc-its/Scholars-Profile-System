@@ -26,9 +26,11 @@ const {
   mockTxCenterMembershipCreate,
   mockTxCenterMembershipDelete,
   mockTxCenterMembershipUpsert,
+  mockTxOrgUnitRoleFindUnique,
   mockTxDivisionMembershipCreate,
   mockTxDivisionMembershipDelete,
   mockReflectUnitChange,
+  mockScholarFindUnique,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -42,9 +44,11 @@ const {
   mockTxCenterMembershipCreate: vi.fn(),
   mockTxCenterMembershipDelete: vi.fn(),
   mockTxCenterMembershipUpsert: vi.fn(),
+  mockTxOrgUnitRoleFindUnique: vi.fn(),
   mockTxDivisionMembershipCreate: vi.fn(),
   mockTxDivisionMembershipDelete: vi.fn(),
   mockReflectUnitChange: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
@@ -70,6 +74,7 @@ vi.mock("@/lib/db", () => ({
       centerMembership: { findUnique: mockCenterMembershipFindUnique },
       divisionMembership: { findUnique: mockDivisionMembershipFindUnique },
       centerProgram: { findMany: mockCenterProgramFindMany },
+      scholar: { findUnique: mockScholarFindUnique },
     },
     write: { $transaction: mockTransaction },
   },
@@ -83,12 +88,25 @@ import { POST } from "@/app/api/edit/roster/route";
 const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 
+const mockTxCenterRoleCreateMany = vi.fn();
+// #2557 Phase E — the gate's read, inside the same tx. Defaults to `[]`
+// (unrestricted) in `beforeEach` below, matching the real empty-table
+// behavior every existing test here implicitly relies on.
+const mockTxOrgUnitRoleScopeFindMany = vi.fn();
+
 const fakeTx = {
   centerMembership: {
     create: mockTxCenterMembershipCreate,
     delete: mockTxCenterMembershipDelete,
     upsert: mockTxCenterMembershipUpsert,
   },
+  // #2542 — a membership write seeds this center's role vocabulary first, so
+  // `membership_role_key`'s FK resolves even before the Phase 1 backfill runs.
+  // `findUnique` backs the new `membershipRoleKey` vocabulary-group check.
+  orgUnitRole: { createMany: mockTxCenterRoleCreateMany, findUnique: mockTxOrgUnitRoleFindUnique },
+  // #2557 Phase E — `handleCenter`'s allowlist gate reads this before any
+  // write.
+  orgUnitRoleScope: { findMany: mockTxOrgUnitRoleScopeFindMany },
   divisionMembership: {
     create: mockTxDivisionMembershipCreate,
     delete: mockTxDivisionMembershipDelete,
@@ -133,8 +151,18 @@ beforeEach(() => {
   mockDivisionMembershipFindUnique.mockResolvedValue(null);
   mockCenterProgramFindMany.mockResolvedValue([]);
   mockTxCenterMembershipCreate.mockResolvedValue(BLANK_ROW);
+  mockScholarFindUnique.mockResolvedValue({
+    roleCategory: "full_time_faculty",
+    deletedAt: null,
+    status: "active",
+  });
   mockTxCenterMembershipUpsert.mockResolvedValue(BLANK_ROW);
   mockTxCenterMembershipDelete.mockResolvedValue(BLANK_ROW);
+  mockTxOrgUnitRoleScopeFindMany.mockResolvedValue([]);
+  // Default: any `membershipRoleKey` the tests exercise resolves as a real
+  // MEMBERSHIP-group vocabulary row. Individual tests override this to
+  // exercise the unknown-key / wrong-group rejections.
+  mockTxOrgUnitRoleFindUnique.mockResolvedValue({ roleGroup: "membership" });
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "center", entityId: "MEYER", role: "curator" },
   ]);
@@ -149,12 +177,43 @@ describe("/api/edit/roster — center", () => {
     expect(await res.json()).toMatchObject({ ok: true, changed: true });
     expect(mockTxCenterMembershipCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { centerCode: "MEYER", cwid: "fac001", source: "manual-ui" },
+        // #2542 — a row the roster editor creates IS a roster member, so it
+        // carries the `member` role even with no `membershipType` in the body.
+        // A NULL `membershipRoleKey` would mean "leadership only, not on the
+        // roster" and would hide them from every member count.
+        data: {
+          centerCode: "MEYER",
+          cwid: "fac001",
+          source: "manual-ui",
+          membershipRoleKey: "member",
+        },
       }),
     );
     expect(mockReflectUnitChange).toHaveBeenCalledWith(
       expect.objectContaining({ unitKind: "center", unitSlug: "meyer" }),
     );
+  });
+
+  it("#1827 — add reports publiclyListed per the public center-roster gate", async () => {
+    const add = async () =>
+      (await POST(
+        post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "add" }),
+      ).then((r) => r.json())) as { ok: boolean; changed: boolean; publiclyListed?: boolean };
+
+    // Active, publicly-displayed scholar → listed.
+    expect(await add()).toMatchObject({ ok: true, changed: true, publiclyListed: true });
+
+    // Each silent-drop class still ADDS (200, row written) but is flagged.
+    for (const scholar of [
+      null, // no Scholar row (staff, student, non-WCM, ED record not landed)
+      { roleCategory: "full_time_faculty", deletedAt: new Date("2026-01-01"), status: "active" },
+      { roleCategory: "full_time_faculty", deletedAt: null, status: "suppressed" },
+      { roleCategory: "doctoral_student_phd", deletedAt: null, status: "active" },
+    ]) {
+      mockScholarFindUnique.mockResolvedValueOnce(scholar);
+      expect(await add()).toMatchObject({ ok: true, changed: true, publiclyListed: false });
+    }
+    expect(mockTxCenterMembershipCreate).toHaveBeenCalledTimes(5);
   });
 
   it("Re-adding an existing member → 200 no-op (no DB write)", async () => {
@@ -303,7 +362,10 @@ describe("/api/edit/roster — #552 set action + extended fields", () => {
     );
     expect(res.status).toBe(200);
     const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
-    expect(call.update).toEqual({ membershipType: null });
+    // #2542 — `membershipType` is DERIVED. Clearing it means "unclassified",
+    // which is the `member` role, and `member` derives straight back to a null
+    // enum — so the public badge and type facet see exactly what they saw before.
+    expect(call.update).toEqual({ membershipRoleKey: "member", membershipType: null });
   });
 
   it("programCode on a center with no taxonomy → 400 no_taxonomy", async () => {
@@ -377,5 +439,101 @@ describe("/api/edit/roster — #552 set action + extended fields", () => {
     expect(mockTxDivisionMembershipCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { divisionCode: "CARDIO", cwid: "fac001", source: "manual-ui" } }),
     );
+  });
+});
+
+describe("/api/edit/roster — membershipRoleKey (CHPC fellow roles)", () => {
+  it("set with a real membership-group key upserts membershipRoleKey + derived membershipType", async () => {
+    mockTxOrgUnitRoleFindUnique.mockResolvedValue({ roleGroup: "membership" });
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "core_faculty",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
+    expect(call.update).toEqual({ membershipRoleKey: "core_faculty", membershipType: null });
+    expect(mockTxOrgUnitRoleFindUnique).toHaveBeenCalledWith({
+      where: { entityType_key: { entityType: "center", key: "core_faculty" } },
+      select: { roleGroup: true },
+    });
+  });
+
+  it("membershipRoleKey null normalizes to 'member'", async () => {
+    const res = await POST(
+      post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "set", membershipRoleKey: null }),
+    );
+    expect(res.status).toBe(200);
+    const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
+    expect(call.update).toEqual({ membershipRoleKey: "member", membershipType: null });
+  });
+
+  it("an unknown membershipRoleKey → 400 invalid_membership_role_key, no write", async () => {
+    mockTxOrgUnitRoleFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "not_a_real_role",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_membership_role_key" });
+    expect(mockTxCenterMembershipUpsert).not.toHaveBeenCalled();
+  });
+
+  it("a LEADERSHIP-group key → 400 invalid_membership_role_key (not offered as a roster role)", async () => {
+    mockTxOrgUnitRoleFindUnique.mockResolvedValue({ roleGroup: "leadership" });
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "director",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_membership_role_key" });
+    expect(mockTxCenterMembershipUpsert).not.toHaveBeenCalled();
+  });
+
+  it("both membershipType and membershipRoleKey present → 400, no transaction", async () => {
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipType: "research",
+        membershipRoleKey: "core_faculty",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_membership_role_key" });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("membershipRoleKey on a division → 400 roster_field_center_only", async () => {
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "division", entityId: "CARDIO", role: "curator" },
+    ]);
+    const res = await POST(
+      post({
+        unitType: "division",
+        unitCode: "CARDIO",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "core_faculty",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "roster_field_center_only" });
   });
 });

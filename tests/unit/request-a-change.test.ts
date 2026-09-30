@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MENTEE_SOURCE_SYSTEMS,
   REQUEST_A_CHANGE,
   getChangeConfig,
   resolveSelfServiceHref,
@@ -47,7 +48,10 @@ describe("REQUEST_A_CHANGE — structure", () => {
       for (const { label, action } of REQUEST_A_CHANGE[a].issues) {
         expect(label.length).toBeGreaterThan(0);
         if (action.kind === "self-service") {
-          expect(action.href).toMatch(/^https:\/\//);
+          // An external tool (https) or an in-app edit surface (the ORCID item
+          // points at the Identifiers & Profiles tab, since ReCiter Manage
+          // Profile is campus-only).
+          expect(action.href).toMatch(/^(https:\/\/|\/edit\/)/);
           expect(action.tool.length).toBeGreaterThan(0);
           expect(action.instruction.length).toBeGreaterThan(0);
         } else if (action.kind === "route") {
@@ -114,9 +118,22 @@ describe("operator routing decisions", () => {
     }
   });
 
-  it("non-PubMed missing publication explains it's unsupported (no route)", () => {
+  it("non-PubMed missing publication explains the curator path (no route)", () => {
     const a = issue("publications", "publication-missing-nonpubmed").action;
     expect(a.kind).toBe("explain");
+    if (a.kind === "explain") {
+      expect(a.detail).toContain("library curation team");
+      expect(a.detail).not.toContain("can't be displayed");
+    }
+  });
+
+  it("the 'don't want it on my profile' row POINTS at Hide, never owns a suppress path", () => {
+    const a = issue("publications", "publication-unwanted").action;
+    // An explain, so the modal keeps no write path of its own: the list's own
+    // tick-row + SelectionBar control stays the single place a hide happens.
+    expect(a.kind).toBe("explain");
+    expect(a.kind === "explain" && a.detail).toContain("Hide from profile");
+    expect(a.kind === "explain" && a.fallbackEmail).toBeUndefined();
   });
 
   it("publication metadata routes to ITS support (operator decision #2)", () => {
@@ -166,13 +183,14 @@ describe("operator routing decisions", () => {
     }
   });
 
-  it("mentee corrections route to ITS support, sourced from Jenzabar or Employee Central", () => {
+  it("mentee corrections route to ITS support, sourced from all three mentee systems", () => {
     for (const id of ["mentee-not-mine", "mentee-missing", "mentee-details-wrong"]) {
       const a = issue("mentees", id).action;
       expect(a.kind).toBe("route");
       if (a.kind === "route") {
         expect(a.email).toBe("support@med.cornell.edu");
-        expect(a.sourceSystem).toBe("Jenzabar or Employee Central");
+        expect(a.sourceSystem).toBe(MENTEE_SOURCE_SYSTEMS);
+        expect(a.note).toContain("Medical Education rosters");
       }
     }
   });

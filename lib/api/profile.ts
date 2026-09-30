@@ -6,11 +6,18 @@
  * profile page server component imports this directly for ISR; the equivalent
  * external API endpoint would call the same function.
  */
+import { alsoIn, type AlsoInLink } from "@/lib/edit/clip-repeats";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
+import {
+  CENTER_ENTITY_TYPE,
+  CENTER_PROGRAM_ENTITY_TYPE,
+  formatLeadershipTitle,
+} from "@/lib/org-unit-roles";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
   getEffectiveOverview,
+  getProfileLinks,
   getSelectedHighlightPmids,
   isAuthorHidden,
   loadContributorSuppressions,
@@ -19,17 +26,20 @@ import {
   pickManualHighlights,
 } from "@/lib/api/manual-layer";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { isProfileLinksEnabled, type ProfileLinks } from "@/lib/edit/profile-links";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
+import { profileFundingRows } from "@/lib/grants/project-count";
 import { isFundingActive } from "@/lib/funding-active";
 import { multiPiExternalIds } from "@/lib/funding-projection";
 import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { formatPublishedName } from "@/lib/postnominal";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import {
   isMethodsLensEnabled,
@@ -41,6 +51,7 @@ import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { getScholarCenterAffiliations, type ScholarCenterAffiliation } from "@/lib/api/centers";
 import { isProfileCenterAffiliationEnabled } from "@/lib/profile/center-affiliation-flag";
 import type { ProfileAppointmentEntry } from "@/lib/profile/profile-appointments";
+import { shouldSuppressPreStart } from "@/lib/appointment-artifacts";
 import { rankForSelectedHighlights, scorePublication, type ScoredPublication } from "@/lib/ranking";
 
 // `isFundingActive` (issue #78, decision Q6) moved to the Prisma-free
@@ -473,9 +484,15 @@ export type ProfilePayload = {
    *  Null when absent. Combine with preferredName via `publishedName` for
    *  display surfaces. */
   postnominal: string | null;
-  /** preferredName with postnominal appended ("Curtis Cole, MD") when present.
+  /** preferredName with postnominal appended ("Alina Serrano, MD") when present.
    *  Single source of truth for any UI that renders a scholar's published
-   *  name (profile H1, author chips, search results, etc.). */
+   *  name (profile H1, author chips, search results, etc.).
+   *
+   *  Built by `formatPublishedName` (#2599), NOT by raw concatenation, so this
+   *  field carries #201's normalization ("Doctor of Philosophy" → "PhD") and the
+   *  enrolled-doctoral-student suppression. It feeds the WCM CV export's signature
+   *  block and PI line (`lib/edit/cv-export.ts`) via `POST /api/edit/cv`, which
+   *  applies no role carve of its own — see the call site. */
   publishedName: string;
   fullName: string;
   primaryTitle: string | null;
@@ -491,6 +508,11 @@ export type ProfilePayload = {
    *  `primaryDepartment`. Resolved via lib/org-unit-names.ts:officialUnitName
    *  conceptually, but precomputed here so the view stays presentational. */
   departmentOfficialName: string | null;
+  /** Bare ED `weillCornellEduPrimaryOrganization` code (`HSS`, `MSKCC`, `WCMC`;
+   *  null until the ED ETL writes it). The sidebar renders it through
+   *  `visibleInstitutionName` — absence-as-default, so WCMC and null show
+   *  nothing. */
+  primaryOrgCode: string | null;
   /** Issue #167 — division name when the scholar has a populated divCode
    *  AND the joined division name is not "Administration" (an admin-style
    *  level2 unit that should not be surfaced as a research/clinical
@@ -499,10 +521,11 @@ export type ProfilePayload = {
   division: string | null;
   /** #1266 — formatted leadership-role lines (Chair / Chief / Center Director /
    *  Program Leader), in that order; empty when the scholar holds none. Sourced
-   *  from Department.chairCwid / Division.chiefCwid / Center.directorCwid +
-   *  CenterProgramLeader rows and rendered beneath `primaryTitle`. Center and
-   *  program lines are curated and sparse, so they appear only where curation
-   *  exists. */
+   *  entirely from `OrgUnitRoleAssignment` rows (#2542 contract A retired the
+   *  `Department.chairCwid` / `Division.chiefCwid` / `Center.directorCwid`
+   *  fallbacks; #2558 retired a per-program leader table the same way) and
+   *  rendered beneath `primaryTitle`. Center and program lines are curated
+   *  and sparse, so they appear only where curation exists. */
   leadershipTitles: string[];
   email: string | null;
   /** email-visibility-spec § Cache-safety. True when PROFILE_EMAIL_RELEASE_GATE
@@ -528,6 +551,10 @@ export type ProfilePayload = {
    *  orcid is null. Sourced by etl/identity. Used by lib/seo/jsonld to
    *  append an https://orcid.org/<id> URL to Person.sameAs. */
   orcid: string | null;
+  /** #2699 — faculty-entered external profile links (`field_override('profileLinks')`),
+   *  `{ platform: canonical https URL }`. Rendered in the Contact card and pushed
+   *  into JSON-LD `sameAs`. `{}` when none or `SELF_EDIT_PROFILE_LINKS` is off. */
+  profileLinks: ProfileLinks;
   overview: string | null;
   appointments: Array<{
     title: string;
@@ -678,8 +705,9 @@ export type ProfilePayload = {
   }>;
   /** Dataset deposits this scholar authored/deposited (S-Index / Bulk Data
    *  Rule spec, Phase 2). Sourced from reciterdb by etl/data-sharing. EMPTY
-   *  unless DATA_SHARING_SECTION is on — ships dark, same precedent as
-   *  clinicalTrials. All author positions (display scope, not metric scope —
+   *  unless DATA_SHARING_SECTION is on, or the scholar has opted in via
+   *  `showDatasets` (the env default flipped off 2026-08-24) — ships dark,
+   *  same precedent as clinicalTrials. All author positions (display scope, not metric scope —
    *  spec Attribution: display vs. metric). A per-contributor suppression
    *  (this scholar hid their own row) drops it from THIS profile only; a
    *  whole-entity suppression drops it everywhere. */
@@ -748,6 +776,17 @@ export type ProfilePayload = {
     /** Absolute thumbnail URL under the WCM origin; null when none. */
     thumbnailUrl: string | null;
   }>;
+  /** Media highlights — press clips from the External Affairs "WCM in the News"
+   *  digest (etl/news/clips.ts): news_mention rows with `outlet` set, published
+   *  only after comms review. Same row shape as `news` plus the outlet. Dark
+   *  unless MEDIA_HIGHLIGHTS_SECTION is on; `news` never carries these rows. */
+  mediaHighlights: Array<
+    ProfilePayload["news"][number] & {
+      outlet: string;
+      /** The story's other visible copies ("Also in …"), capped (`alsoIn`). */
+      alsoIn: { shown: AlsoInLink[]; more: number };
+    }
+  >;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
@@ -808,6 +847,57 @@ export type ProfilePayload = {
  * This function returns ALL appointments with `isActive` annotated; the UI
  * decides how to present them.
  */
+/** A published news_mention row as the profile renders it (News and Media highlights). */
+/** A Media highlights clip as the profile shows it: headline, outlet, date — NO
+ *  excerpt. A clip's text is the digest's "• Dr. X" bullet: usually just the
+ *  scholar's own name, occasionally a one-line summary of unknown authorship
+ *  (the digest is a Muck Rack newsletter). It still drives matching and shows to
+ *  reviewers in /edit/media-highlights-queue; it is never published. */
+export function toClipRow(
+  n: Parameters<typeof toNewsRow>[0] & { outlet: string },
+): Omit<ProfilePayload["mediaHighlights"][number], "alsoIn"> {
+  return { ...toNewsRow(n), excerpt: null, outlet: n.outlet };
+}
+
+/**
+ * One profile entry per clip STORY (story grouping, lib/edit/clip-repeats.ts):
+ * each lead — a visible clip with no `duplicateOf` — carrying its visible
+ * copies as "Also in …" links, first seen first. `rows` are the scholar's
+ * published, profile-visible clips. A copy whose lead is not among them is
+ * dropped: hiding the lead hides the whole story.
+ */
+export function toClipStories(
+  rows: ReadonlyArray<Parameters<typeof toNewsRow>[0] & { id: string; outlet: string; duplicateOf: string | null }>,
+): ProfilePayload["mediaHighlights"] {
+  const copiesOf = new Map<string, typeof rows[number][]>();
+  for (const r of rows) {
+    if (r.duplicateOf) copiesOf.set(r.duplicateOf, [...(copiesOf.get(r.duplicateOf) ?? []), r]);
+  }
+  const time = (d: Date | null) => (d ? d.getTime() : Number.MAX_SAFE_INTEGER);
+  return rows
+    .filter((r) => r.duplicateOf === null)
+    .map((lead) => {
+      const copies = [...(copiesOf.get(lead.id) ?? [])].sort((a, b) => time(a.publishedAt) - time(b.publishedAt));
+      return { ...toClipRow(lead), alsoIn: alsoIn(lead.outlet, copies) };
+    });
+}
+
+function toNewsRow(n: {
+  url: string;
+  title: string;
+  publishedAt: Date | null;
+  excerpt: string | null;
+  thumbnailUrl: string | null;
+}): ProfilePayload["news"][number] {
+  return {
+    url: n.url,
+    title: n.title,
+    publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
+    excerpt: n.excerpt,
+    thumbnailUrl: n.thumbnailUrl,
+  };
+}
+
 function annotateAppointments<
   T extends { startDate: Date | null; endDate: Date | null; isInterim: boolean },
 >(appts: T[], now: Date) {
@@ -893,15 +983,16 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(authors: T[], owner
   return next;
 }
 
-/** A trial we never display (withdrawn / never-enrolled). Checked before the
- *  active test below so "no longer available" doesn't count as "available".
- *  The institutional `overallCurrentStatus` vocabulary (OPEN/CLOSED TO ACCRUAL,
- *  IRB STUDY CLOSURE, SUSPENDED) has no withdrawn state, so this only matches the
- *  ClinicalTrials.gov terms — kept for any future CTgov-sourced status.
+/** A trial we never display on the public profile: withdrawn / never-enrolled
+ *  (ClinicalTrials.gov terms), or institutionally SUSPENDED — usually a
+ *  temporary regulatory, safety or sponsor hold that a public "Suspended" label
+ *  would misrepresent; if it reopens, OnCore flips it to OPEN TO ACCRUAL and it
+ *  reappears. Admin reports still list it. Checked before the active test below
+ *  so "no longer available" doesn't count as "available".
  *  @internal exported for tests. */
-export function isWithdrawnTrialStatus(status: string | null): boolean {
+export function isHiddenTrialStatus(status: string | null): boolean {
   const s = (status ?? "").toLowerCase();
-  return s.includes("withdrawn") || s.includes("no longer available");
+  return s.includes("withdrawn") || s.includes("no longer available") || s.trim() === "suspended";
 }
 
 /** Coarse Active vs Completed split for the trial section, from the raw status.
@@ -1065,6 +1156,7 @@ export const getScholarFullProfileBySlug = cache(
       leadershipTitles,
       sectionOverrideRows,
       projectSiblingRows,
+      profileLinks,
     ] = await Promise.all([
       // The effective `overview` merges a manual `field_override` over the ETL
       // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
@@ -1104,6 +1196,31 @@ export const getScholarFullProfileBySlug = cache(
               meshTerms: true,
               impactScore: true,
               authors: {
+                // WCM authorship rows only — a projection guard, not a
+                // behavior change: the `wcmAuthors` mapper below already
+                // requires `au.scholar`, which a null-cwid row never has, so
+                // output is identical with or without it. No deployed
+                // environment holds a null-cwid row anyway: the only writer
+                // that runs deployed, `buildAuthorshipRows` in
+                // etl/reciter/index.ts, skips authors outside `ourCwidSet`
+                // and returns an `AuthorshipRow` whose `cwid` is a
+                // non-nullable `string`, and the FK that could mint one with
+                // no writer involved (`PublicationAuthor.scholar` is
+                // `onDelete: SetNull`) never fires, because no deployed path
+                // hard-deletes a `Scholar` — only `seed/index.ts` does, and
+                // departures soft-delete via `deletedAt`. Staging was counted
+                // as a check on that (0 of 285,587, 2026-09); other
+                // environments were not counted. `seed/publications.ts` is
+                // the one writer of non-WCM rows. This keeps such rows from
+                // being hauled over the wire per publication just to be
+                // dropped.
+                //
+                // Confirmed rows only (#2261, parity with #2220 on the home
+                // spotlight and every other chip surface in lib/api): the
+                // owner query above filters `isConfirmed: true`, and
+                // resolveDarkPmids gates darkness over confirmed authors, so
+                // the chip row must count the same authors.
+                where: { isConfirmed: true, cwid: { not: null } },
                 orderBy: { position: "asc" },
                 include: {
                   scholar: {
@@ -1151,52 +1268,181 @@ export const getScholarFullProfileBySlug = cache(
         ? getScholarCenterAffiliations(scholar.cwid)
         : Promise.resolve([] as ScholarCenterAffiliation[]),
       // #1266 — leadership-role title lines (Chair / Chief / Center Director /
-      // Program Leader), rendered beneath the academic rank. Point lookups on the
-      // already-populated FK columns; each returns 0-1 rows for almost every
-      // scholar. Chair/Chief come from the ED ETL (populated); Center director and
-      // CenterProgramLeader are curated and sparse, so those lines appear only
-      // where curation exists — an empty array renders nothing.
-      // ponytail: centerProgramLeader.cwid is unindexed but the table is tiny; add
-      // @@index([cwid]) only if profile-load latency ever flags it.
+      // Program Leader), rendered beneath the academic rank. Each query below
+      // returns 0-1 rows for almost every scholar. Department/division
+      // leadership is ETL-synced nightly (`etl/ed/index.ts`'s
+      // `writeUnitLeaderAssignment`); center director and program-leader
+      // assignments are curated and sparse, so those lines appear only where
+      // curation exists — an empty array renders nothing.
       Promise.all([
-        prisma.department.findMany({
-          where: { chairCwid: scholar.cwid },
-          select: { name: true, officialName: true },
-        }),
-        prisma.division.findMany({
-          where: { chiefCwid: scholar.cwid },
-          select: { name: true },
-        }),
-        prisma.center.findMany({
-          where: { directorCwid: scholar.cwid },
-          select: { name: true, officialName: true, leaderInterim: true },
-        }),
-        prisma.centerProgramLeader.findMany({
-          // #1570 — only program LEADS produce a "Leader, {program}" title line;
-          // a `coe_liaison` row is NOT a leadership title and is excluded here.
-          where: { cwid: scholar.cwid, role: "leader" },
-          select: {
-            interim: true,
-            program: {
-              select: {
-                label: true,
-                center: { select: { name: true, officialName: true } },
-              },
-            },
+        // #2542 contract A — department leadership is an `OrgUnitRoleAssignment`
+        // row only; `Department.chairCwid` no longer exists as a read source.
+        // `profileTitle` gates whether holding the role is a title at all.
+        prisma.orgUnitRoleAssignment.findMany({
+          where: {
+            cwid: scholar.cwid,
+            entityType: "department",
+            role: { roleGroup: "leadership", profileTitle: true },
           },
+          select: {
+            entityId: true,
+            interim: true,
+            sortOrder: true,
+            role: { select: { label: true } },
+          },
+          orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
-      ]).then(([chairDepts, chiefDivs, dirCenters, progLeads]) => [
-        ...chairDepts.map((d) => `Chair, ${d.officialName ?? d.name}`),
-        ...chiefDivs.map((d) => `Chief, ${d.name}`),
-        ...dirCenters.map(
-          (c) =>
-            `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
-        ),
-        ...progLeads.map(
-          (l) =>
-            `${l.interim ? "Interim Leader" : "Leader"}, ${l.program.label} (${l.program.center.officialName ?? l.program.center.name})`,
-        ),
-      ]),
+        // Same shape for divisions — `Division.chiefCwid` no longer exists as
+        // a read source.
+        prisma.orgUnitRoleAssignment.findMany({
+          where: {
+            cwid: scholar.cwid,
+            entityType: "division",
+            role: { roleGroup: "leadership", profileTitle: true },
+          },
+          select: {
+            entityId: true,
+            interim: true,
+            sortOrder: true,
+            role: { select: { label: true } },
+          },
+          orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
+        }),
+        // #2542 — center leadership is an `OrgUnitRoleAssignment` row, not
+        // `Center.directorCwid`. `profileTitle` is what decides whether holding
+        // a role shows as a title here: the `center_program` `coe_liaison`
+        // entry below deliberately seeds `profileTitle: false`, so it never
+        // surfaces. The center's NAME is resolved separately — the assignment
+        // is polymorphic on (entityType, entityId) with no FK to `center`.
+        prisma.orgUnitRoleAssignment.findMany({
+          where: {
+            cwid: scholar.cwid,
+            entityType: CENTER_ENTITY_TYPE,
+            role: { roleGroup: "leadership", profileTitle: true },
+          },
+          select: {
+            entityId: true,
+            interim: true,
+            sortOrder: true,
+            role: { select: { label: true } },
+          },
+          orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
+        }),
+        // #2558 — program leadership is an `OrgUnitRoleAssignment` row too,
+        // `entityType: "center_program"`, `entityId`
+        // `"{centerCode}:{programCode}"`. `profileTitle` gates it exactly as
+        // it does above: `coe_liaison` seeds `profileTitle: false`, so this
+        // query only ever surfaces `leader` rows. The assignment carries no FK
+        // to `CenterProgram`, so the program's label and center name are
+        // resolved separately, below. Contract PR — the retired per-program
+        // leader table's dual-read fallback is gone; this is the only source
+        // now.
+        prisma.orgUnitRoleAssignment.findMany({
+          where: {
+            cwid: scholar.cwid,
+            entityType: CENTER_PROGRAM_ENTITY_TYPE,
+            role: { roleGroup: "leadership", profileTitle: true },
+          },
+          select: {
+            entityId: true,
+            interim: true,
+            sortOrder: true,
+            role: { select: { label: true } },
+          },
+          orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
+        }),
+      ]).then(async ([deptAssignments, divAssignments, dirCenters, progAssignments]) => {
+        // One batched name lookup for the centers the assignments point at.
+        const dirCenterRows = dirCenters.length
+          ? await prisma.center.findMany({
+              where: { code: { in: dirCenters.map((c) => c.entityId) } },
+              select: { code: true, name: true, officialName: true },
+            })
+          : [];
+        const dirCenterName = new Map(
+          dirCenterRows.map((c) => [c.code, c.officialName ?? c.name]),
+        );
+        // Same batched-name-lookup shape for the departments/divisions the
+        // assignments point at — the assignment carries no FK to either
+        // table, only the unit's code.
+        const [deptAssignmentRows, divAssignmentRows] = await Promise.all([
+          deptAssignments.length
+            ? prisma.department.findMany({
+                where: { code: { in: deptAssignments.map((a) => a.entityId) } },
+                select: { code: true, name: true, officialName: true },
+              })
+            : Promise.resolve([]),
+          divAssignments.length
+            ? prisma.division.findMany({
+                where: { code: { in: divAssignments.map((a) => a.entityId) } },
+                select: { code: true, name: true },
+              })
+            : Promise.resolve([]),
+        ]);
+        const deptAssignmentName = new Map(
+          deptAssignmentRows.map((d) => [d.code, d.officialName ?? d.name]),
+        );
+        const divAssignmentName = new Map(divAssignmentRows.map((d) => [d.code, d.name]));
+        // #2558 Phase 1 — batched (label, center name) lookup for the programs
+        // `progAssignments` points at. The assignment carries no FK to
+        // `CenterProgram`, only its polymorphic `entityId`
+        // (`"{centerCode}:{programCode}"`), so it is parsed back apart here.
+        const progAssignmentInfo = new Map<string, { label: string; centerName: string }>();
+        if (progAssignments.length > 0) {
+          const pairs = progAssignments.map((a) => {
+            const [centerCode, programCode] = a.entityId.split(":");
+            return { centerCode: centerCode ?? "", programCode: programCode ?? "" };
+          });
+          const programRows = await prisma.centerProgram.findMany({
+            where: { OR: pairs.map((p) => ({ centerCode: p.centerCode, code: p.programCode })) },
+            select: {
+              centerCode: true,
+              code: true,
+              label: true,
+              center: { select: { name: true, officialName: true } },
+            },
+          });
+          for (const p of programRows) {
+            progAssignmentInfo.set(`${p.centerCode}:${p.code}`, {
+              label: p.label,
+              centerName: p.center.officialName ?? p.center.name,
+            });
+          }
+        }
+        return [
+          // Departments — sole source is the assignment table (#2542 contract A).
+          ...deptAssignments.flatMap((a) => {
+            const unitName = deptAssignmentName.get(a.entityId);
+            return unitName
+              ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
+              : [];
+          }),
+          // Divisions — sole source is the assignment table.
+          ...divAssignments.flatMap((a) => {
+            const unitName = divAssignmentName.get(a.entityId);
+            return unitName
+              ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
+              : [];
+          }),
+          // A row whose center vanished contributes no title line rather than a
+          // half-rendered one.
+          ...dirCenters.flatMap((c) => {
+            const unitName = dirCenterName.get(c.entityId);
+            return unitName
+              ? [`${formatLeadershipTitle(c.role.label, c.interim)}, ${unitName}`]
+              : [];
+          }),
+          // #2558 — programs covered by an assignment row. The label comes from
+          // the vocabulary (seeded "Leader"), matching every other assignment
+          // branch above.
+          ...progAssignments.flatMap((a) => {
+            const info = progAssignmentInfo.get(a.entityId);
+            return info
+              ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${info.label} (${info.centerName})`]
+              : [];
+          }),
+        ];
+      }),
       // section-visibility-spec — the per-scholar section-hide overrides. Only
       // rows set to "true" (hidden) are read; a "false" row (or none) is "shown".
       // Filters the payload below so a hidden section's data never ships.
@@ -1216,6 +1462,9 @@ export const getScholarFullProfileBySlug = cache(
       // this round (it needs nothing but the already-fetched grant rows) so it
       // costs no extra round trip. Skipped entirely for a scholar with no grants.
       loadProjectSiblingRows(scholar.grants),
+      // #2699 — external profile links, read only when the flag is on (else `{}`,
+      // keeping the surface fully dark).
+      isProfileLinksEnabled() ? getProfileLinks(scholar.cwid, prisma) : Promise.resolve({}),
     ]);
     const hiddenSections = new Set(sectionOverrideRows.map((r) => r.fieldName));
 
@@ -1270,11 +1519,13 @@ export const getScholarFullProfileBySlug = cache(
     // Dataset deposits (#data-sharing) — per-contributor suppression, same
     // shape as publication (a wrong extraction on one co-author's profile
     // shouldn't take the row down for every depositor). Flag-gated like the
-    // mapper below (dark unless DATA_SHARING_SECTION is on) so this never
-    // touches `scholar.datasetDeposits` in an env/test fixture that predates
-    // the relation.
+    // mapper below (dark unless DATA_SHARING_SECTION is on, OR the scholar's
+    // own `showDatasets` opt-in — the env default flipped off 2026-08-24) so
+    // this never touches `scholar.datasetDeposits` in an env/test fixture that
+    // predates the relation.
     const datasetsSectionOn =
-      process.env.DATA_SHARING_SECTION === "on" && !hiddenSections.has("hideDatasets");
+      (process.env.DATA_SHARING_SECTION === "on" && !hiddenSections.has("hideDatasets")) ||
+      hiddenSections.has("showDatasets");
     const datasetSuppressions = datasetsSectionOn
       ? await loadContributorSuppressions(
           "dataset_deposit",
@@ -1487,14 +1738,33 @@ export const getScholarFullProfileBySlug = cache(
       preferredName: scholar.preferredName,
       roleCategory: scholar.roleCategory,
       postnominal: scholar.postnominal,
-      publishedName: scholar.postnominal
-        ? `${scholar.preferredName}, ${scholar.postnominal}`
-        : scholar.preferredName,
+      // #2599 — was a raw `${preferredName}, ${postnominal}` concatenation, which
+      // bypassed BOTH helpers. This payload has no role carve anywhere upstream:
+      // `getScholarFullProfileBySlug` filters only on `deletedAt`/`status`, and
+      // `authorizeCvExport` gates on self / superuser / assigned proxy / unit-admin /
+      // `cv_generator` — none of which is a role-category carve. So
+      // `POST /api/edit/cv` for an enrolled doctoral student printed
+      // "<name>, Doctor of Philosophy" into the WCM CV signature block and the
+      // PI line (`lib/edit/cv-export.ts`) — a document the scholar submits.
+      //
+      // SECOND EFFECT, DELIBERATE: routing through here also applies #201's
+      // normalization to the public profile `<h1>` and metadata, so the handful of
+      // faculty who record an EARNED degree in full-title form now render
+      // "<name>, PhD" rather than "<name>, Doctor of Philosophy". That is #201's
+      // original intent, and it is what makes the /edit queues' claim to preview
+      // "exactly what an approval will publish" true — until now the queues
+      // normalized and the profile did not.
+      publishedName: formatPublishedName(
+        scholar.preferredName,
+        scholar.postnominal,
+        scholar.roleCategory,
+      ),
       fullName: scholar.fullName,
       primaryTitle: scholar.primaryTitle,
       primaryDepartment: scholar.primaryDepartment,
       departmentSlug: scholar.department?.slug ?? null,
       departmentOfficialName: scholar.department?.officialName ?? null,
+      primaryOrgCode: scholar.primaryOrgCode ?? null,
       // Issue #167 — belt-and-suspenders filter for the "Administration"
       // division label. The ED ETL drops Administration at the divCode level
       // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
@@ -1531,6 +1801,7 @@ export const getScholarFullProfileBySlug = cache(
       hasClinicalProfile: scholar.hasClinicalProfile,
       clinicalProfileUrl: scholar.clinicalProfileUrl,
       orcid: scholar.orcid,
+      profileLinks,
       overview: effectiveOverview,
       appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
         title: a.title,
@@ -1545,13 +1816,16 @@ export const getScholarFullProfileBySlug = cache(
       // #1323 — REVEALED historical appointments only (`ED-HISTORICAL` +
       // showOnProfile). Hidden rows are omitted so this CloudFront PATH-cached
       // payload stays viewer-independent. Sorted by end date descending (most
-      // recent first; nulls last).
+      // recent first; nulls last). `shouldSuppressPreStart` additionally hides
+      // a "Pre-Start Academic" placeholder once the scholar has any OTHER
+      // appointment on file — see lib/appointment-artifacts.ts.
       pastAppointments: scholar.appointments
         .filter(
           (a) =>
             a.source === "ED-HISTORICAL" &&
             a.showOnProfile === true &&
-            !suppressedAppointmentIds.has(a.externalId),
+            !suppressedAppointmentIds.has(a.externalId) &&
+            !shouldSuppressPreStart(a.title, scholar.appointments.length),
         )
         .sort((a, b) => {
           const ae = a.endDate ? a.endDate.getTime() : -Infinity;
@@ -1616,11 +1890,13 @@ export const getScholarFullProfileBySlug = cache(
       // last ETL run), promote it on the fly. Lets the profile section
       // reflect canonical-lookup updates without re-ingesting.
       // section-visibility — `hideFunding` drops the whole Funding section.
-      grants: hiddenSections.has("hideFunding")
-        ? []
-        : scholar.grants
-            // #160 — drop a suppressed grant role from the funding section.
-            .filter((g) => !suppressedGrantIds.has(g.externalId))
+      // #160 — a suppressed grant role drops too. The population rule is shared
+      // with the people-index builder (`profileFundingRows`, #2239) so the
+      // search card's "N grants" counts exactly the rows this section lists.
+      grants: profileFundingRows(scholar.grants, {
+        hideFunding: hiddenSections.has("hideFunding"),
+        suppressedGrantIds,
+      })
             .map((g) => {
               const lowerConfidenceCutoff = new Date(now);
               lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);
@@ -1692,7 +1968,7 @@ export const getScholarFullProfileBySlug = cache(
         // addition to the CLINICAL_TRIALS_SECTION dark-launch gate).
         process.env.CLINICAL_TRIALS_SECTION === "on" && !hiddenSections.has("hideClinicalTrials")
           ? scholar.clinicalTrials
-              .filter((ct) => !isWithdrawnTrialStatus(ct.trial.status))
+              .filter((ct) => !isHiddenTrialStatus(ct.trial.status))
               .map((ct) => ({
                 protocolNumber: ct.trial.protocolNumber,
                 nctNumber: ct.trial.nctNumber,
@@ -1717,8 +1993,10 @@ export const getScholarFullProfileBySlug = cache(
               })
           : [],
       // Dataset deposits (#data-sharing). Dark unless DATA_SHARING_SECTION is
-      // on, same precedent as clinicalTrials/CLINICAL_TRIALS_SECTION.
-      // section-visibility — `hideDatasets` drops the whole section. A
+      // on, or the scholar's own `showDatasets` opt-in (env default off since
+      // 2026-08-24) — same precedent as clinicalTrials/CLINICAL_TRIALS_SECTION.
+      // section-visibility — `hideDatasets` drops the whole section when the
+      // env default is on (preserved for that case). A
       // whole-entity suppression (darkIds) drops the deposit for every
       // scholar; a per-contributor suppression (hiddenContributorsById) drops
       // it from just this profile. Sorted by deposit year descending — no
@@ -1787,13 +2065,14 @@ export const getScholarFullProfileBySlug = cache(
       // already filtered to published + per-row-visible rows.
       news:
         process.env.NEWS_MENTIONS_SECTION === "on" && !hiddenSections.has("hideNews")
-          ? scholar.newsMentions.map((n) => ({
-              url: n.url,
-              title: n.title,
-              publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
-              excerpt: n.excerpt,
-              thumbnailUrl: n.thumbnailUrl,
-            }))
+          ? scholar.newsMentions.filter((n) => n.outlet === null).map(toNewsRow)
+          : [],
+      // Clips share the table (and `hideNews`) but render in their own section.
+      mediaHighlights:
+        process.env.MEDIA_HIGHLIGHTS_SECTION === "on" && !hiddenSections.has("hideNews")
+          ? toClipStories(
+              scholar.newsMentions.flatMap((n) => (n.outlet === null ? [] : [{ ...n, outlet: n.outlet }])),
+            )
           : [],
       keywords,
       // section-visibility — `hideMethods` drops the Methods & Tools lens from the
@@ -1819,9 +2098,16 @@ export const getScholarFullProfileBySlug = cache(
           ? {
               cwid: scholar.postdoctoralMentor.cwid,
               slug: scholar.postdoctoralMentor.slug,
-              publishedName: scholar.postdoctoralMentor.postnominal
-                ? `${scholar.postdoctoralMentor.preferredName}, ${scholar.postdoctoralMentor.postnominal}`
-                : scholar.postdoctoralMentor.preferredName,
+              // #2599 — the sibling of `publishedName` above, and the same
+              // exposure: the only gate here is deletedAt/status, so a hidden
+              // identity class DOES reach this card (the `roleCategory` field
+              // below exists precisely so the view can render it as plain text
+              // rather than a link). Route it through the same helper.
+              publishedName: formatPublishedName(
+                scholar.postdoctoralMentor.preferredName,
+                scholar.postdoctoralMentor.postnominal,
+                scholar.postdoctoralMentor.roleCategory,
+              ),
               primaryTitle: scholar.postdoctoralMentor.primaryTitle ?? null,
               identityImageEndpoint: identityImageEndpoint(scholar.postdoctoralMentor.cwid),
               roleCategory: scholar.postdoctoralMentor.roleCategory,
@@ -1857,6 +2143,7 @@ export async function getScholarOgData(slug: string): Promise<{
   preferredName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  primaryOrgCode: string | null;
   slug: string;
   roleCategory: string | null;
 } | null> {
@@ -1867,6 +2154,7 @@ export async function getScholarOgData(slug: string): Promise<{
       preferredName: true,
       primaryTitle: true,
       primaryDepartment: true,
+      primaryOrgCode: true,
       roleCategory: true,
     },
   });
@@ -1889,6 +2177,7 @@ export function buildProfileJsonLd(profile: ProfilePayload): Record<string, unkn
     identityImageEndpoint: profile.identityImageEndpoint,
     clinicalProfileUrl: profile.clinicalProfileUrl ?? null,
     orcid: profile.orcid ?? null,
+    externalProfileUrls: Object.values(profile.profileLinks ?? {}),
     keywords: profile.keywords.keywords,
     // #684 — bare (postnominal-free) name drives givenName/familyName +
     // alternateName; the postnominal becomes honorificSuffix.

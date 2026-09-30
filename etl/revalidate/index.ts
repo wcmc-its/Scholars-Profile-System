@@ -30,6 +30,7 @@
  */
 import { db } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
+import { buildSitemapEntries, sitemapChunkCount } from "@/lib/sitemap";
 
 /**
  * Origins from which `/api/revalidate` may be reached. Each entry matches an
@@ -149,7 +150,12 @@ export async function runRevalidate(): Promise<void> {
     console.log(`[Revalidate] queued ${depts.length} department page(s)`);
 
     await requestRevalidate("/sitemap.xml");
-    console.log("[Revalidate] queued /sitemap.xml");
+    // #2262 — the index is only shard links; the URLs live in the shards.
+    const shards = sitemapChunkCount((await buildSitemapEntries()).length);
+    for (let i = 0; i < shards; i++) {
+      await requestRevalidate(`/sitemap/${i}.xml`);
+    }
+    console.log(`[Revalidate] queued /sitemap.xml + ${shards} shard(s)`);
   } catch (err) {
     console.warn("[Revalidate] could not enumerate paths:", err);
   } finally {

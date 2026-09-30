@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   isDataQualityDashboardEnabled,
-  isDataQualityTabVisible,
   isEmptyScope,
   loadDataQualityScope,
 } from "@/lib/edit/data-quality";
@@ -25,10 +24,13 @@ function fakeClient(grants: unknown[] = [], divisions: unknown[] = []): FakeClie
   };
 }
 const asClient = (c: FakeClient) => c as unknown as ScopeClient;
-const session = (over: Partial<{ cwid: string; isSuperuser: boolean; isCommsSteward: boolean }> = {}) => ({
+const session = (
+  over: Partial<{ cwid: string; isSuperuser: boolean; isCommsSteward: boolean; isCvGenerator: boolean }> = {},
+) => ({
   cwid: "edt1001",
   isSuperuser: false,
   isCommsSteward: false,
+  isCvGenerator: false,
   ...over,
 });
 
@@ -50,19 +52,6 @@ describe("isDataQualityDashboardEnabled", () => {
   });
 });
 
-describe("isDataQualityTabVisible", () => {
-  it("hidden when the flag is off, even for a superuser", () => {
-    process.env.EDIT_DATA_QUALITY_DASHBOARD = "off";
-    expect(isDataQualityTabVisible({ isSuperuser: true, isCommsSteward: false })).toBe(false);
-  });
-  it("shown to a superuser or comms_steward when on; hidden for neither", () => {
-    process.env.EDIT_DATA_QUALITY_DASHBOARD = "on";
-    expect(isDataQualityTabVisible({ isSuperuser: true, isCommsSteward: false })).toBe(true);
-    expect(isDataQualityTabVisible({ isSuperuser: false, isCommsSteward: true })).toBe(true);
-    expect(isDataQualityTabVisible({ isSuperuser: false, isCommsSteward: false })).toBe(false);
-  });
-});
-
 describe("loadDataQualityScope", () => {
   it("a superuser is a global editor — { all: true }, no grant query", async () => {
     const c = fakeClient();
@@ -74,6 +63,13 @@ describe("loadDataQualityScope", () => {
   it("a comms_steward is a global editor — { all: true }", async () => {
     const scope = await loadDataQualityScope(session({ isCommsSteward: true }), asClient(fakeClient()));
     expect(scope).toEqual({ all: true });
+  });
+
+  it("a cv_generator is a global (read-only) viewer — { all: true }, no grant query (#2482)", async () => {
+    const c = fakeClient();
+    const scope = await loadDataQualityScope(session({ isCvGenerator: true }), asClient(c));
+    expect(scope).toEqual({ all: true });
+    expect(c.unitAdmin.findMany).not.toHaveBeenCalled();
   });
 
   it("a dept Owner gets the dept + its divisions (cascade); a curator counts too", async () => {
@@ -105,6 +101,19 @@ describe("loadDataQualityScope", () => {
       expect(scope.centerCodes).toEqual(["CTR1"]);
     }
     // No departments → no division-cascade lookup.
+    expect(c.division.findMany).not.toHaveBeenCalled();
+  });
+
+  it("an institution grant lands in institutionCodes (a scholar column, no expansion)", async () => {
+    const c = fakeClient([{ entityType: "institution", entityId: "HMC" }]);
+    const scope = await loadDataQualityScope(session(), asClient(c));
+    expect(scope.all).toBe(false);
+    if (scope.all === false) {
+      expect(scope.unitCodes).toEqual([]);
+      expect(scope.centerCodes).toEqual([]);
+      expect(scope.institutionCodes).toEqual(["HMC"]);
+    }
+    expect(isEmptyScope(scope)).toBe(false);
     expect(c.division.findMany).not.toHaveBeenCalled();
   });
 

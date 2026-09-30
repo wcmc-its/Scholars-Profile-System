@@ -1,5 +1,5 @@
 /**
- * The "Honors & Distinctions" `/edit` rail item (#1760 follow-up).
+ * The "Honors & distinctions" `/edit` rail item (#1760 follow-up).
  *
  * Honors shipped as a sub-card INSIDE the Appointments tab, which made it
  * undiscoverable — an honor is not an appointment, and it has its own profile
@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { visibleAttrKeys } from "@/components/edit/edit-page";
 
-describe("visibleAttrKeys — Honors & Distinctions rail item", () => {
+describe("visibleAttrKeys — Honors & distinctions rail item", () => {
   it("is its OWN rail key, not nested under appointments", () => {
     expect(visibleAttrKeys("self", false)).toContain("honors");
   });

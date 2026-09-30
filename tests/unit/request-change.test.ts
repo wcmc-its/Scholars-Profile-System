@@ -79,66 +79,78 @@ describe("resolveRequestChange", () => {
 
 describe("subjectFor", () => {
   it("is the fixed attribute-scoped subject", () => {
-    expect(subjectFor("Education")).toBe("Scholars profile correction — Education");
+    expect(subjectFor("Education")).toBe("Scholars profile correction: Education");
   });
 
   it("is static for org-unit — no user free text reaches the subject (§ 4.6.1)", () => {
-    expect(subjectFor("Org Unit")).toBe("Scholars profile correction — Org Unit");
+    expect(subjectFor("Org Unit")).toBe("Scholars profile correction: Org Unit");
   });
 });
 
 describe("composeBody", () => {
-  it("renders the structured Issue/Item/Source block + detail + signature", () => {
+  it("renders the Scholar/Profile lines + structured Issue/Item/Source block + detail + signature (#2480)", () => {
     const body = composeBody({
+      attribute: "education",
+      targetCwid: "self01",
+      targetName: "Jane Scholar",
       issueLabel: "A degree, field, institution, or year is wrong",
       itemLabel: "Ph.D., Stanford",
       sourceSystem: "ASMS",
       detail: "The year should be 2009.",
       actorCwid: "self01",
-      targetCwid: "self01",
     });
+    expect(body).toContain("Scholar: Jane Scholar (self01)");
+    expect(body).toContain("Profile: https://scholars.weill.cornell.edu/edit/scholar/self01?attr=education");
     expect(body).toContain("Issue: A degree, field, institution, or year is wrong");
     expect(body).toContain("Item: Ph.D., Stanford");
     expect(body).toContain("Source: ASMS");
     expect(body).toContain("The year should be 2009.");
-    expect(body).toContain("— Sent from the WCM Scholars profile editor by self01.");
+    expect(body).toContain("Sent from the WCM Scholars profile editor by self01.");
   });
 
-  it("falls back to placeholders for a section-level request with no detail", () => {
+  it("falls back to the bare cwid when the target name is unknown", () => {
     const body = composeBody({
+      attribute: "education",
+      targetCwid: "self01",
+      targetName: null,
       issueLabel: "My title is wrong",
       sourceSystem: "primary appointment",
       actorCwid: "self01",
-      targetCwid: "self01",
     });
+    expect(body).toContain("Scholar: self01");
     expect(body).toContain("Item: (whole section)");
     expect(body).toContain("(no additional detail provided)");
   });
 
   it("names the target when a superuser acts on another scholar", () => {
     const body = composeBody({
+      attribute: "appointments",
+      targetCwid: "scholar9",
+      targetName: "Scholar Nine",
       issueLabel: "An academic appointment is missing",
       actorCwid: "adm001",
-      targetCwid: "scholar9",
     });
     expect(body).toContain("by adm001 on behalf of scholar9.");
   });
 
   it("collapses CRLF in the single-line fields (header/format guard)", () => {
     const body = composeBody({
+      attribute: "education",
+      targetCwid: "self01",
+      targetName: "line1\r\nBcc: evil@example.com",
       issueLabel: "ok",
       itemLabel: "line1\r\nBcc: evil@example.com",
       actorCwid: "self01",
-      targetCwid: "self01",
     });
     expect(body).toContain("Item: line1 Bcc: evil@example.com");
+    expect(body).toContain("Scholar: line1 Bcc: evil@example.com (self01)");
     expect(body).not.toContain("\r");
   });
 });
 
 describe("receiptSubjectFor / composeReceiptBody", () => {
   it("subject names the attribute", () => {
-    expect(receiptSubjectFor("Education")).toBe("Your Scholars profile change request — Education");
+    expect(receiptSubjectFor("Education")).toBe("Your Scholars profile change request: Education");
   });
 
   it("restates the issue / item / routed-to office + detail", () => {

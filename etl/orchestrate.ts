@@ -68,6 +68,9 @@ async function main() {
     // than failing, so it is safe in the chain on the same footing as ReCiter
     // even before #443 lands.
     ["ReCiter-COI-Statements", "etl/reciter/backfill-coi-statements.ts"],
+    ["RPM-orcid-candidates", "etl/orcid-candidates/index.ts"],
+    // Weekly in the deployed Step Function; here it runs with the rest of the chain.
+    ["ORCID-registry", "etl/orcid-registry/index.ts"],
     ["ASMS", "etl/asms/index.ts"],
     ["InfoEd", "etl/infoed/index.ts"],
     ["Jenzabar", "etl/jenzabar/index.ts"],
@@ -78,6 +81,7 @@ async function main() {
     // safe in the chain even before #443 LDAP routing lands. (Deployed Step
     // Function nightly wiring is held pending OQ-4.)
     ["ED-Admins", "etl/ed-admins/index.ts"],
+    ["CTSC-Roster", "etl/ctsc-roster/index.ts"],
     ["RePORTER", "etl/reporter/index.ts"],
     ["NSF", "etl/nsf/index.ts"],
     ["Gates", "etl/gates/index.ts"],

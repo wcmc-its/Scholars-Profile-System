@@ -137,7 +137,9 @@ fall outside the active-academic filter; leaving them in the file is safe
 ### Adding a new center
 
 1. Add the center row in `prisma/seed-centers.ts` (code, name, slug,
-   sortOrder, optionally directorCwid + description).
+   sortOrder, optionally description). Set the director afterward through
+   `/edit` — it's an `OrgUnitRoleAssignment` row, not a seed field (#2542
+   contract A retired `Center.directorCwid`).
 2. Run `npx tsx prisma/seed-centers.ts` to upsert.
 3. Drop a `data/center-members/<slug>.txt` with one CWID per line.
 4. Run the membership loader.
@@ -152,11 +154,13 @@ Each `<slug>.txt` should carry a header comment with:
 
 ## Future work
 
-- **Director detection.** Title-based regex pass to populate
-  `Center.directorCwid`, mirroring the chair-detection helper in
-  `etl/ed/chief-detection.ts`. Expected to catch ~5-7 of the 8 centers
-  cleanly (Cancer Center / Brain & Mind / Drukier / IPM directors all have
-  detectable titles).
+- **Director detection.** Title-based regex pass to auto-populate the
+  director `OrgUnitRoleAssignment` row (#2542 contract A retired
+  `Center.directorCwid`; the target is now the assignment, not a column),
+  mirroring the chair-detection helper in `etl/ed/chief-detection.ts`.
+  Expected to catch ~5-7 of the 8 centers cleanly (Cancer Center / Brain &
+  Mind / Drukier / IPM directors all have detectable titles). Not built —
+  center directors are set manually through `/edit` today.
 - **Resolve the four ambiguities listed above.** Each requires a small
   product/data decision, not engineering work.
 - **Iris Cantor and Aging Research roster expansion** — once you have

@@ -46,6 +46,9 @@ export type FirstHideNoticeDialogProps = {
    * affordance (the inline body link or the footer button).
    */
   onNotMine: () => void;
+  /** How many publications the pending hide covers — the copy is written for
+   *  one paper and pluralises from here (the bulk path, #2718). Default 1. */
+  count?: number;
 };
 
 export function FirstHideNoticeDialog({
@@ -53,26 +56,30 @@ export function FirstHideNoticeDialog({
   onOpenChange,
   onHide,
   onNotMine,
+  count = 1,
 }: FirstHideNoticeDialogProps) {
+  const many = count > 1;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>You&apos;re about to hide this paper.</DialogTitle>
+          <DialogTitle>
+            You&apos;re about to hide {many ? `these ${count} papers` : "this paper"}.
+          </DialogTitle>
           <DialogDescription>
-            Hiding removes it from your Scholars profile only — it&apos;s
-            display-only and reversible, and it changes nothing upstream. If this
-            paper is yours and you&apos;d just rather not show it, hiding is
-            exactly right.
+            Hiding removes {many ? "them" : "it"} from your Scholars profile only — it&apos;s
+            display-only and reversible, and it changes nothing upstream. If{" "}
+            {many ? "they are" : "this paper is"} yours and you&apos;d just rather not show{" "}
+            {many ? "them" : "it"}, hiding is exactly right.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="text-sm text-muted-foreground">
+        <div className="text-muted-foreground text-sm">
           <p>
             <span className="text-foreground font-medium">
-              Is this paper not actually yours?
+              {many ? "Are some of these not actually yours?" : "Is this paper not actually yours?"}
             </span>{" "}
-            Then don&apos;t hide it —{" "}
+            Then don&apos;t hide {many ? "those" : "it"} —{" "}
             <a
               href={PUBLICATION_MANAGER_URL}
               target="_blank"
@@ -80,16 +87,16 @@ export function FirstHideNoticeDialog({
               onClick={onNotMine}
               className="text-apollo-slate hover:underline"
             >
-              reject it in Publication Manager
+              reject {many ? "them" : "it"} in Publication Manager
             </a>{" "}
-            so the misattribution is corrected at the source (it otherwise keeps
-            appearing in internal reports and the Faculty Review Tool; the
-            correction reaches Scholars in about a day).{" "}
+            so the misattribution is corrected at the source (it otherwise keeps appearing in
+            internal reports and the Faculty Review Tool; the correction reaches Scholars in about a
+            day).{" "}
             <span className="text-foreground font-medium">
               Only reject papers that genuinely aren&apos;t yours
             </span>{" "}
-            — rejecting your own work to tidy your profile feeds the wrong signal
-            into the matching algorithm and weakens attribution for everyone.
+            — rejecting your own work to tidy your profile feeds the wrong signal into the matching
+            algorithm and weakens attribution for everyone.
           </p>
         </div>
 
@@ -115,7 +122,7 @@ export function FirstHideNoticeDialog({
             onClick={onHide}
             data-testid="first-hide-confirm"
           >
-            Hide it
+            {many ? `Hide ${count}` : "Hide it"}
           </Button>
         </DialogFooter>
       </DialogContent>

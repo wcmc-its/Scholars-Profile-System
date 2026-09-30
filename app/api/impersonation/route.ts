@@ -36,6 +36,7 @@ import {
 } from "@/lib/auth/session";
 import { assertImpersonable, canImpersonate } from "@/lib/auth/effective-identity";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { resolveGlobalRole } from "@/lib/auth/global-roles";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { verifyRequestOrigin } from "@/lib/edit/authz";
@@ -69,7 +70,7 @@ function noContentWithCookie(cookie: SerializedSessionCookie): NextResponse {
  *   2. no session              → 401
  *   3. cross-origin / non-JSON → 403 / 415 (R4, CSRF)
  *   4. real cwid not superuser → 403 `not_superuser` (R1 — REAL cwid, never effective)
- *   5. target not a scholar or comms_steward → 404 `target_not_found`
+ *   5. target not a scholar/unit-admin/comms_steward/global-role holder → 404 `target_not_found`
  *   6. target IS a superuser   → 403 `target_is_superuser` (R2, down-only)
  * On success: re-seal with the overlay, audit `impersonation_start`, 204.
  */
@@ -134,7 +135,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .findFirst({ where: { cwid: targetCwid }, select: { cwid: true } })
           .then((row) => row !== null)
           .catch(() => false);
-  if (!target && !targetIsSteward && !targetIsUnitAdmin) {
+  // …OR one of the four other global LDAP-group roles (cv_generator,
+  // honors_curator, data_sharing_viewer, development — `lib/auth/global-roles.ts`).
+  // Same reasoning as the steward/unit-admin branches: each is a narrower
+  // preview than the acting superuser already has, R2 below still rejects a
+  // superuser target, and each is profile-less as often as not (Faculty
+  // Affairs / Research Dean's office / compliance staff, not faculty) — the
+  // exact population that was hard-404ing here before this grant.
+  const targetGlobalRole =
+    target || targetIsSteward || targetIsUnitAdmin ? null : await resolveGlobalRole(targetCwid);
+  if (!target && !targetIsSteward && !targetIsUnitAdmin && !targetGlobalRole) {
     return editError(404, "target_not_found", "targetCwid");
   }
 

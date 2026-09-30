@@ -10,7 +10,7 @@
  * + the env-driven default resolver only.
  */
 
-export type BiosketchPromptVersionId = "v5" | "v6" | "v7";
+export type BiosketchPromptVersionId = "v5" | "v6" | "v7" | "v8";
 
 export type BiosketchPromptVersionStatus = "default" | "experimental" | "deprecated";
 
@@ -37,24 +37,51 @@ export type BiosketchPromptVersionMeta = {
    * by the generator to gate title extraction in `parseBiosketchEntries`.
    */
   emitsTitle?: boolean;
+  /**
+   * #2653 v8 — whether the Personal Statement takes a REQUIRED role-on-the-application
+   * (`BiosketchParams.applicationRole`, one prompt fragment per role) and an optional
+   * contribution line. v5–v7 ignore both fields. Consumed by `missingPersonalStatementInputs`
+   * (the route's 400 + the form's disabled Generate) and the generator's user turn.
+   */
+  applicationRole?: boolean;
+  /**
+   * #2653 v8 — whether the narrative may carry parenthetical references to the ten listed
+   * products (keyed in the payload, rendered lead-author-and-year, validated post-parse) and
+   * the faithfulness pass checks a referenced claim against that product's record. v5–v7 = no.
+   */
+  productReferences?: boolean;
 };
 
 /**
- * Insertion order = selector order (default first). v7 adds a short subject heading to each
- * contribution (the NIH "Contributions to Science" heading format) on top of everything in v6;
- * v6 is the role/four-elements/grounded-impact overhaul, kept selectable for A/B + as the
- * one-step-back rollback target; v5 is the prior baseline.
+ * Insertion order = selector order (default first). v8 (#2653, default since 2026-09-18 by
+ * product decision, ahead of the v7 regression harness) adds the role-on-the-application
+ * selector for the Personal Statement and keyed product references on top of everything in
+ * v7; v7 adds a short subject heading to each contribution (the NIH "Contributions to
+ * Science" heading format) on top of v6 and is the one-step-back rollback target; v6 is the
+ * role/four-elements/grounded-impact overhaul, kept selectable for A/B; v5 is the prior
+ * baseline.
  */
 export const BIOSKETCH_PROMPT_VERSION_METAS: Record<
   BiosketchPromptVersionId,
   BiosketchPromptVersionMeta
 > = {
+  v8: {
+    id: "v8",
+    label: "v8 — role on application, product references",
+    description:
+      "Everything in v7, plus: the Personal Statement takes your role on the application (PD/PI, MPI, Co-Investigator, Mentor, Consultant, Core Director, OSC, Candidate) and argues fitness for that role; the narrative may reference the ten listed products in NIH lead-author-and-year form; URLs and out-of-list keys are stripped, other parenthetical references are flagged for review.",
+    status: "default",
+    groundsImpact: true,
+    emitsTitle: true,
+    applicationRole: true,
+    productReferences: true,
+  },
   v7: {
     id: "v7",
     label: "v7 — titled contributions",
     description:
-      "Everything in v6, plus a short subject heading on each contribution (the NIH “Contributions to Science” heading format) so a reader can tell at a glance what each one is about. Same role, four NIH elements, grounded impact, length band, em-dash ban, and entity-grounding floor.",
-    status: "default",
+      "Everything in v6, plus a short subject heading on each contribution (the NIH “Contributions to Science” heading format) so a reader can tell at a glance what each one is about. Same role, four NIH elements, grounded impact, length band, em-dash ban, and entity-grounding floor. The one-step-back rollback target.",
+    status: "experimental",
     groundsImpact: true,
     emitsTitle: true,
   },
@@ -81,7 +108,7 @@ export const BIOSKETCH_PROMPT_VERSION_IDS = Object.keys(
 ) as BiosketchPromptVersionId[];
 
 /** The compiled-in baseline default (the rollback target if the env lever is unset/invalid). */
-export const BIOSKETCH_DEFAULT_PROMPT_VERSION: BiosketchPromptVersionId = "v7";
+export const BIOSKETCH_DEFAULT_PROMPT_VERSION: BiosketchPromptVersionId = "v8";
 
 export function isValidBiosketchPromptVersionId(
   value: unknown,
@@ -116,4 +143,14 @@ export function biosketchVersionGroundsImpact(id: BiosketchPromptVersionId): boo
 /** Whether a version emits a per-contribution TITLE line the parser extracts (#917 v7). */
 export function biosketchVersionEmitsTitle(id: BiosketchPromptVersionId): boolean {
   return BIOSKETCH_PROMPT_VERSION_METAS[id]?.emitsTitle === true;
+}
+
+/** Whether a version takes the Personal Statement role-on-the-application (#2653 v8). */
+export function biosketchVersionUsesApplicationRole(id: BiosketchPromptVersionId): boolean {
+  return BIOSKETCH_PROMPT_VERSION_METAS[id]?.applicationRole === true;
+}
+
+/** Whether a version permits keyed product references in the narrative (#2653 v8). */
+export function biosketchVersionUsesProductReferences(id: BiosketchPromptVersionId): boolean {
+  return BIOSKETCH_PROMPT_VERSION_METAS[id]?.productReferences === true;
 }

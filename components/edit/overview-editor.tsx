@@ -40,13 +40,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
+import { cn, OVERVIEW_HTML_CLASS } from "@/lib/utils";
 
 export type OverviewEditorProps = {
   /** The initial sanitized HTML to load into the editor. Empty string = blank document. */
   initialHtml: string;
   /** Fires on every content change with the serialized HTML — empty document serializes to `""`. */
   onChange: (html: string) => void;
+  /** `text-sm` content in a shorter box — for a field whose rendered form is
+   *  `text-sm` (the report description's "About this report" disclosure), so
+   *  what is typed reads at the size it will show. Default: the bio's
+   *  `text-base` in a 12rem box. */
+  dense?: boolean;
 };
 
 /** Permitted URL schemes for `<a href>` — mirrors the server-side validators. */
@@ -56,7 +61,7 @@ const LINK_SCHEME_REGEX = /^(https?:|mailto:)/i;
  * The WYSIWYG bio editor. A `'use client'` island — loaded only on `/edit/*`,
  * never in the public bundle.
  */
-export function OverviewEditor({ initialHtml, onChange }: OverviewEditorProps) {
+export function OverviewEditor({ initialHtml, onChange, dense = false }: OverviewEditorProps) {
   const editor = useEditor({
     content: initialHtml,
     // Next 15 + React 19 SSR-hydration safety: defer the first render so the
@@ -96,8 +101,11 @@ export function OverviewEditor({ initialHtml, onChange }: OverviewEditorProps) {
         role: "textbox",
         "aria-multiline": "true",
         class: cn(
-          "min-h-[12rem] px-4 py-3 text-base leading-relaxed",
-          "prose prose-sm max-w-none",
+          dense ? "min-h-[8rem] px-3 py-2 text-sm leading-relaxed" : "min-h-[12rem] px-4 py-3 text-base leading-relaxed",
+          // #2579 — was `prose prose-sm max-w-none`, which matched no rule (no
+          // typography plugin on Tailwind v4), so an inserted link was
+          // indistinguishable from plain text while composing it.
+          OVERVIEW_HTML_CLASS,
           "focus:outline-none",
         ),
       },

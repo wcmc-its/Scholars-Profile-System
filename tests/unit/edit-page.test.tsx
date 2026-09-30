@@ -16,11 +16,29 @@ vi.mock("@/components/edit/overview-editor", () => ({
     <textarea data-testid="mock-editor" defaultValue={initialHtml} />
   ),
 }));
+// Mock the CV tool to skip its fetch-on-mount — its own internals are covered
+// elsewhere; here we only care whether EditShell wraps it `inert` (#2482).
+vi.mock("@/components/edit/cv-tool", () => ({
+  CvTool: () => (
+    <button type="button" data-testid="download-cv">
+      Download CV (WCM format)
+    </button>
+  ),
+}));
+// EditShell's top bar now mounts the real, self-fetching AccountMenu
+// (context="console" — dwd2001 nav fix), which probes /api/auth/session on
+// every mount. Stub it out: this file isn't testing the account menu (that's
+// account-menu.test.tsx / console-top-bar.test.tsx), and several cases here
+// assert exact `fetch` call counts that a live probe would pollute.
+vi.mock("@/components/site/account-menu", () => ({ AccountMenu: () => null }));
 
 import { EditPage } from "@/components/edit/edit-page";
 import type { EditContext } from "@/lib/api/edit-context";
 
 const ctx: EditContext = {
+  // #2719 — null is the flag-off shape: the Title row stays a plain read-only
+  // value, which is what every assertion in this file expects.
+  titlePicker: null,
   scholar: {
     cwid: "self01",
     slug: "self-slug",
@@ -29,6 +47,7 @@ const ctx: EditContext = {
     primaryTitle: "Professor of Medicine",
     postnominal: "MD, MPH",
     primaryDepartment: "Medicine",
+    primaryOrgCode: "WCMC",
     email: "self01@med.cornell.edu",
     emailVisibility: "public",
     orcid: null,
@@ -96,6 +115,7 @@ const ctx: EditContext = {
   // below exercises the populated case.
   technologies: [],
   news: [],
+  mediaHighlights: [],
   // DATA_SHARING_SECTION — empty by default (loader returns [] unless the flag
   // is on AND the scholar has deposits); a dedicated describe block below
   // exercises the populated case.
@@ -112,7 +132,13 @@ const ctx: EditContext = {
   // #2011 — no hand-entered mentees in the default fixture; the sourced roster
   // above is what the hide-only panel renders.
   manualMentees: [],
+  profileLinks: {},
   manualMenteeUnresolvedCwids: [],
+  // #2634 — empty by default (loader returns [] unless SELF_EDIT_MENTEE_SUGGESTIONS
+  // is on for a genuine self/superuser viewer); a describe block below populates it.
+  menteeSuggestions: [],
+  orcidVerdict: null,
+  orcidCandidates: [],
   // SELF_EDIT_COI_GAP_HINT — empty by default (loader returns [] unless the
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.
@@ -185,7 +211,12 @@ describe("EditPage router — the Apollo shell + rail", () => {
 
   it("uses a single app-level h1 (no repeated '{Attribute} for {Name}' heading)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Scholars Profile Console");
+    // The h1 now wraps a brand Link (badge + wordmark) to /edit (dwd2001 nav
+    // fix), so match by accessible name — not raw textContent, which also
+    // includes the aria-hidden "WCM" badge glyph — for the console name.
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Scholars Console" }),
+    ).toBeTruthy();
   });
 
   it("defaults to the task-first Home panel for self", () => {
@@ -204,34 +235,40 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(link.textContent).toContain("Edit");
   });
 
-  it("Home: no bio shows 'Write your overview' as the actionable task", () => {
+  it("Home: no bio shows 'No overview yet' as an open item, in the self voice", () => {
     const noBio: EditContext = { ...ctx, scholar: { ...ctx.scholar, overview: "   " } };
     render(<EditPage ctx={noBio} mode="self" />);
     const overview = screen.getByTestId("home-item-overview");
-    expect(overview.textContent).toContain("Write your overview");
+    expect(overview.textContent).toContain("No overview yet");
+    expect(overview.textContent).toContain("Two or three sentences on your research focus.");
     const cta = screen.getByTestId("home-card-overview");
     expect(cta.getAttribute("href")).toBe("/edit?attr=overview");
     expect(cta.textContent).toContain("Write");
   });
 
-  it("Home: pins the completeness numerator, never a percentage", () => {
+  it("Home: pins the heading as a word count of the open rows, never a percentage or fraction", () => {
     // bio ✓ + 1 pub ✓ + visibility ✓; the headshot probe stays "loading" in
-    // jsdom (no Image load) so it doesn't count → exactly 3 of 4.
+    // jsdom (no Image load) so it is informational, not open; the fixture has
+    // no ORCID → one open row.
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByText("3 of 4 done")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
+    expect(screen.getByText("Everything else on this profile is either complete or maintained from WCM records.")).toBeTruthy();
     expect(screen.queryByText(/%/)).toBeNull();
+    expect(screen.queryByText(/\d of \d/)).toBeNull();
   });
 
-  it("Home: each essential is load-bearing — no bio + no pubs counts only visibility (1 of 4)", () => {
+  it("Home: the heading counts open rows — no bio + no ORCID are two; an empty publications feed is informational, not open", () => {
     const sparse: EditContext = {
       ...ctx,
       scholar: { ...ctx.scholar, overview: "" },
       publications: [],
     };
     render(<EditPage ctx={sparse} mode="self" />);
-    expect(screen.getByText("1 of 4 done")).toBeTruthy();
-    // Publications-empty row state.
-    expect(screen.getByTestId("home-item-publications").textContent).toContain("None shown yet");
+    expect(screen.getByRole("heading", { level: 2, name: "Two items need you" })).toBeTruthy();
+    // Publications-empty row state sits under the disclosure, not among the open rows.
+    const pubs = screen.getByTestId("home-item-publications");
+    expect(pubs.textContent).toContain("None shown yet");
+    expect(pubs.closest("ul")?.id).toBe("home-completed-items");
   });
 
   it("Home: the headshot item hands off to the Web Directory in a new tab", () => {
@@ -255,15 +292,117 @@ describe("EditPage router — the Apollo shell + rail", () => {
 
   // The headshot's presence is a client-side image probe (no server signal); the
   // present branch also mounts Radix AvatarImage — stubImage drives both.
-  it("Home: a loadable headshot resolves to 'Headshot added' and completes the profile (4 of 4)", async () => {
+  it("Home: a loadable headshot resolves to 'Headshot added' and completes all but the ORCID row (one needs you)", async () => {
     stubImage("load");
     try {
       render(<EditPage ctx={ctx} mode="self" />);
       expect(await screen.findByText("Headshot added")).toBeTruthy();
-      expect(screen.getByText("4 of 4 done")).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("Home: the ORCID row — not on file → to-do with the reason; CTA into the tab when the flag is on", () => {
+    render(<EditPage ctx={ctx} mode="self" orcidTabEnabled />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain("ORCID iD not on file");
+    expect(row.textContent).toContain(
+      "Needed for NIH SciENcv biosketches; also makes your publication matching more reliable.",
+    );
+    expect(row.textContent).not.toContain("has no ORCID iD on file");
+    const cta = screen.getByTestId("home-card-orcid");
+    expect(cta.textContent).toContain("Add");
+    expect(cta.getAttribute("href")).toBe("/edit?attr=identifiers-profiles");
+  });
+
+  it("Home: the ORCID row — a strong inference asks 'Is this your ORCID iD?' with the evidence and a Review button; it does not count as done", () => {
+    const withSuggestion: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 3 },
+    };
+    render(<EditPage ctx={withSuggestion} mode="self" orcidTabEnabled />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain("Is this your ORCID iD?");
+    expect(row.textContent).toContain("0000-0002-9930-2193 · on 3 of your accepted publications in ReCiter");
+    expect(row.textContent).toContain("WCM records");
+    expect(screen.getByTestId("home-card-orcid").textContent).toContain("Review");
+    expect(screen.getByTestId("home-card-orcid").getAttribute("href")).toBe("/edit?attr=identifiers-profiles");
+    expect(screen.getByTestId("home-item-orcid-why").textContent).toBe(
+      "Needed for NIH SciENcv biosketches; also makes your publication matching more reliable.",
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
+    // The iD in the row links to its orcid.org record; ReCiter links out to Publication Manager.
+    expect(within(row).getByRole("link", { name: "ReCiter" }).getAttribute("href")).toBe("https://reciter.weill.cornell.edu/");
+    expect(within(row).getByRole("link", { name: "0000-0002-9930-2193" }).getAttribute("href")).toBe(
+      "https://orcid.org/0000-0002-9930-2193",
+    );
+  });
+
+  it("Identifiers & Profiles: the candidate rows reach the card as per-source evidence — under the on-file iD, and as a 'different iD' block when the inferred rows disagree", () => {
+    const onFileWithEvidence: EditContext = {
+      ...ctx,
+      scholar: { ...ctx.scholar, orcid: "0000-0002-1825-0097" },
+      orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+      orcidCandidates: [
+        { orcid: "0000-0002-1825-0097", source: "rpm_admin", accepted: 0, rejected: 0 },
+        { orcid: "0000-0002-9930-2193", source: "rpm_inferred", accepted: 4, rejected: 0 },
+        { orcid: "0000-0002-9930-2193", source: "orcid_email", accepted: 0, rejected: 0 },
+      ],
+    };
+    render(<EditPage ctx={onFileWithEvidence} mode="self" attr="identifiers-profiles" orcidTabEnabled />);
+    expect(screen.getByTestId("orcid-on-file-evidence").textContent).toContain("Entered in ReCiter Publication Manager");
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toBe("On file");
+    const also = screen.getByTestId("orcid-also-suggested");
+    expect(also.textContent).toContain("0000-0002-9930-2193");
+    expect(screen.getByTestId("orcid-also-suggested-status").textContent).toBe("High confidence suggestion");
+    expect(within(also).getByTestId("orcid-also-suggested-evidence").querySelectorAll("li")).toHaveLength(2);
+  });
+
+  it("Home: with the flag off the ORCID CTA hands off to ReCiter Manage Profile (external), and the tab is not in the rail", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    const cta = screen.getByTestId("home-card-orcid");
+    expect(cta.textContent).toContain("Add in ReCiter");
+    expect(cta.getAttribute("href")).toBe(`https://reciter.weill.cornell.edu/manageprofile/${ctx.scholar.cwid}`);
+    expect(cta.getAttribute("target")).toBe("_blank");
+    expect(screen.queryByRole("link", { name: "Identifiers & profiles" })).toBeNull();
+  });
+
+  it("?attr=identifiers-profiles renders the ORCID card when the flag is on", () => {
+    const withSuggestion: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 3 },
+    };
+    render(<EditPage ctx={withSuggestion} mode="self" attr="identifiers-profiles" orcidTabEnabled />);
+    expect(document.querySelector('[data-slot="orcid-card"]')).not.toBeNull();
+    expect(screen.getByTestId("orcid-confirm")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Identifiers & profiles" })).toBeTruthy();
+  });
+
+  it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done, nothing left open", () => {
+    const onFile: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+    };
+    render(<EditPage ctx={onFile} mode="self" />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain("ORCID iD on file");
+    expect(row.textContent).toContain("0000-0002-1825-0097");
+    expect(screen.queryByTestId("home-card-orcid")).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "Nothing needs you" })).toBeTruthy();
+  });
+
+  it("Home: the ORCID row in superuser voice names the scholar by first name — second person is the editor", () => {
+    const withSuggestion: EditContext = {
+      ...ctx,
+      orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 0 },
+    };
+    render(<EditPage ctx={withSuggestion} mode="superuser" />);
+    const row = screen.getByTestId("home-item-orcid");
+    expect(row.textContent).toContain("Is this Alex's ORCID iD?");
+    expect(row.textContent).toContain("matches Alex's record in the ORCID registry");
+    expect(row.textContent).toContain("makes Alex's publication matching more reliable");
+    expect(row.textContent).not.toContain("their");
   });
 
   it("Home: a 404 headshot resolves to the 'Add a headshot' to-do", async () => {
@@ -276,12 +415,72 @@ describe("EditPage router — the Apollo shell + rail", () => {
     }
   });
 
+  it("Home: completed items are collapsed by default under a disclosure; open items sit outside it", () => {
+    // bio ✓, visibility ✓, 1 pub ✓, headshot still probing (info) → 4 in the
+    // completed group; the only open item is the ORCID iD (not on file).
+    render(<EditPage ctx={ctx} mode="self" />);
+    const toggle = screen.getByTestId("home-completed-toggle");
+    expect(toggle.textContent).toContain("4 completed items");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const list = document.getElementById(toggle.getAttribute("aria-controls")!) as HTMLElement;
+    expect(list.hidden).toBe(true);
+    expect(within(list).getByTestId("home-item-overview")).toBeTruthy();
+    expect(within(list).getByTestId("home-item-visibility")).toBeTruthy();
+    expect(within(list).getByTestId("home-item-headshot")).toBeTruthy();
+    expect(within(list).getByTestId("home-item-publications")).toBeTruthy();
+    expect(within(list).queryByTestId("home-item-orcid")).toBeNull();
+    expect(screen.getByTestId("home-item-orcid")).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.textContent).toContain("Hide 4 completed items");
+    expect(list.hidden).toBe(false);
+  });
+
+  it("Home: 'One item needs you' is singular, and the disclosure counts the rest", async () => {
+    stubImage("load");
+    try {
+      const onFile: EditContext = {
+        ...ctx,
+        scholar: { ...ctx.scholar, overview: "" },
+        orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+      };
+      render(<EditPage ctx={onFile} mode="self" />);
+      expect(await screen.findByText("Headshot added")).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
+      expect(screen.getByTestId("home-completed-toggle").textContent).toContain("4 completed items");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("Home: all five satisfied → 'Nothing needs you', no open rows, five completed items", async () => {
+    stubImage("load");
+    try {
+      const complete: EditContext = {
+        ...ctx,
+        orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+      };
+      render(<EditPage ctx={complete} mode="self" />);
+      expect(await screen.findByText("Headshot added")).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 2, name: "Nothing needs you" })).toBeTruthy();
+      expect(
+        screen.getByText("Everything on this profile is either complete or maintained from WCM records."),
+      ).toBeTruthy();
+      const toggle = screen.getByTestId("home-completed-toggle");
+      expect(toggle.textContent).toContain("5 completed items");
+      const list = document.getElementById(toggle.getAttribute("aria-controls")!) as HTMLElement;
+      expect(within(list).getAllByTestId(/^home-item-/)).toHaveLength(5);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("an unknown ?attr falls back to the default (Home)", () => {
     render(<EditPage ctx={ctx} mode="self" attr="does-not-exist" />);
     expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
   });
 
-  it("?attr=appointments renders the Appointments panel + a row", () => {
+  it("?attr=appointments renders the Positions panel + a row", () => {
     render(<EditPage ctx={ctx} mode="self" attr="appointments" />);
     expect(document.querySelector('[data-slot="appointments-panel"]')).not.toBeNull();
     expect(screen.getByTestId("appointment-row-appt-1")).toBeTruthy();
@@ -289,8 +488,8 @@ describe("EditPage router — the Apollo shell + rail", () => {
   });
 
   // #1557 — self-serve reveal. The scholar themselves (mode="self") sees the
-  // Historical Appointments reveal panel, not just curators/stewards.
-  it("?attr=appointments surfaces the Historical Appointments panel to the SELF scholar (#1557)", () => {
+  // Earlier ranks section, not just curators/stewards.
+  it("?attr=appointments surfaces the Earlier ranks section to the SELF scholar (#1557)", () => {
     const withHistorical: EditContext = {
       ...ctx,
       historicalAppointments: [
@@ -305,9 +504,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
       ],
     };
     render(<EditPage ctx={withHistorical} mode="self" attr="appointments" />);
-    expect(
-      document.querySelector('[data-slot="historical-appointments-panel"]'),
-    ).not.toBeNull();
+    expect(screen.getByText("Earlier ranks")).toBeTruthy();
     expect(screen.getByTestId("historical-appointment-row-hist-1")).toBeTruthy();
   });
 
@@ -350,12 +547,73 @@ describe("EditPage router — the Apollo shell + rail", () => {
     }
   });
 
-  it("?attr=name-title renders the read-only panel with Request a Change", () => {
+  it("?attr=name-title renders the read-only panel with a Request a change link per row", () => {
     render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
-    expect(screen.getByText("This section is not editable.")).toBeTruthy();
-    expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
+    expect(screen.queryByText("This section is not editable.")).toBeNull();
+    // One link per row replaces the panel-level trigger.
+    expect(screen.queryByTestId("request-a-change-toggle")).toBeNull();
+    for (const row of ["name", "title", "degrees", "department", "institution"]) {
+      expect(screen.getByTestId(`request-a-change-row-${row}`)).toBeTruthy();
+    }
+    // A row's link opens the router with that row's issue already selected.
+    fireEvent.click(screen.getByTestId("request-a-change-row-degrees"));
+    const radio = within(screen.getByTestId("rac-issue-degrees-wrong")).getByRole("radio");
+    expect(radio.getAttribute("aria-checked")).toBe("true");
     // Email moved to its own tab — the Name & Title panel no longer echoes it.
     expect(screen.queryByText("self01@med.cornell.edu")).toBeNull();
+    // Institution row: the home code is named, not echoed bare.
+    expect(screen.getByText("Institution")).toBeTruthy();
+    expect(screen.getByText("Weill Cornell Medicine")).toBeTruthy();
+    expect(screen.queryByText("WCMC")).toBeNull();
+  });
+
+  it("name-title: an empty row reads None on record; the Photo tab is one row with its own link", () => {
+    const noDeg = { ...ctx, scholar: { ...ctx.scholar, postnominal: null } };
+    const { unmount } = render(<EditPage ctx={noDeg} mode="self" attr="name-title" />);
+    expect(screen.getByText("None on record")).toBeTruthy();
+    unmount();
+    render(<EditPage ctx={ctx} mode="self" attr="photo" />);
+    expect(screen.getByTestId("request-a-change-row-photo")).toBeTruthy();
+    expect(screen.queryByTestId("request-a-change-toggle")).toBeNull();
+    expect(screen.queryByText("This section is not editable.")).toBeNull();
+  });
+
+  it("name-title says choose only to a superuser / comms steward, and only when there is a choice", () => {
+    const picker = {
+      options: [
+        { tier: "working", label: "Working title", value: "Associate Dean" },
+        { tier: "chief", label: "Division chief", value: null },
+        { tier: "centerHead", label: "Center head", value: null },
+        { tier: "primary", label: "Primary title", value: "Professor of Medicine" },
+      ],
+      current: "Associate Dean",
+      override: null,
+      pending: null,
+    };
+    const withPicker = { ...ctx, titlePicker: picker } as typeof ctx;
+    const { unmount } = render(<EditPage ctx={withPicker} mode="self" attr="name-title" />);
+    // The scholar (and a proxy / unit admin) can't pick, so no "choose" sentence;
+    // the read-only list carries the Request a change pointer instead.
+    expect(screen.queryByText(/which recorded title is displayed/)).toBeNull();
+    expect(screen.getByTestId("title-recourse")).toBeTruthy();
+    unmount();
+    const opCtx = { ...superuserCtx, titlePicker: picker } as typeof superuserCtx;
+    const again = render(<EditPage ctx={opCtx} mode="superuser" attr="name-title" />);
+    expect(screen.getByText(/You can choose which recorded title is displayed\./)).toBeTruthy();
+    again.unmount();
+    render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
+    expect(screen.queryByText(/which recorded title is displayed/)).toBeNull();
+  });
+
+  it("name-title names a non-WCM primary institution and blanks a null one", () => {
+    const hss = { ...ctx, scholar: { ...ctx.scholar, primaryOrgCode: "HSS" } };
+    const { unmount } = render(<EditPage ctx={hss} mode="self" attr="name-title" />);
+    expect(screen.getByText("Hospital for Special Surgery")).toBeTruthy();
+    unmount();
+    const none = { ...ctx, scholar: { ...ctx.scholar, primaryOrgCode: null } };
+    render(<EditPage ctx={none} mode="self" attr="name-title" />);
+    expect(screen.getByText("Institution")).toBeTruthy();
+    expect(screen.queryByText("Weill Cornell Medicine")).toBeNull();
   });
 
   it("?attr=email renders the read-only Email tab: email, visibility label + explainer, Web Directory link", () => {
@@ -364,20 +622,20 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByText("self01@med.cornell.edu")).toBeTruthy();
     // 'public' → "Public" label per SPEC table A.
     expect(screen.getByTestId("email-visibility-label").textContent).toBe("Public");
-    expect(screen.getByTestId("email-visibility-explainer")).toBeTruthy();
-    // #919 — usage line, first-person for self.
-    expect(screen.getByTestId("email-usage-note").textContent).toBe(
-      "This is the contact email shown on your public profile.",
+    expect(screen.getByTestId("email-visibility-explainer").textContent).toBe(
+      "Anyone on the web can see it on the public profile.",
     );
     // #919 — download / on-network policy note (general; no numeric cap surfaced).
     const policy = screen.getByTestId("email-download-policy");
     expect(policy.textContent).toMatch(/signed in or on the campus network/i);
     expect(policy.textContent).toMatch(/internal directory export/i);
     expect(policy.textContent).toMatch(/that access is logged/i);
-    expect(policy.textContent).toMatch(/excluded from the export/i);
-    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
+    expect(policy.textContent).toMatch(/left out of the export/i);
+    expect(policy.textContent).toMatch(/bulk downloads of large groups aren.t supported/i);
     expect(policy.textContent).not.toMatch(/50/);
-    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    // Locked-panels canvas: provenance in the header pill, no "not editable" footer.
+    expect(screen.getByText("Enterprise Directory")).toBeTruthy();
+    expect(screen.queryByText("This section is not editable.")).toBeNull();
     // Read-only: no control that writes the release code, just the SOR link.
     const link = screen.getByTestId("email-web-directory-link");
     expect(link.getAttribute("href")).toBe(
@@ -385,16 +643,11 @@ describe("EditPage router — the Apollo shell + rail", () => {
     );
   });
 
-  it("Email tab reframes the usage line + policy note to the scholar's name for a superuser (#919)", () => {
+  it("Email tab copy is voice-neutral, so a superuser never reads 'your' (#919)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="email" />);
-    // possessive → "{ScholarName}'s" (preferredName), matching the explainer's framing.
-    expect(screen.getByTestId("email-usage-note").textContent).toBe(
-      "This is the contact email shown on Alex Other's public profile.",
-    );
-    const policy = screen.getByTestId("email-download-policy");
-    expect(policy.textContent).toMatch(/download Alex Other's email/i);
-    expect(policy.textContent).not.toMatch(/\byour\b/i);
-    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
+    const panel = document.querySelector('[data-slot="email-panel"]')!;
+    expect(panel.textContent).not.toMatch(/\byour\b/i);
+    expect(panel.textContent).toContain("The contact email on the public profile, and who can see it.");
   });
 
   it("Email tab labels 'institution' as Institution only", () => {
@@ -423,8 +676,11 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(document.querySelector('[data-slot="mentees-panel"]')).not.toBeNull();
     expect(screen.getByTestId("mentee-row-self01:mentee9")).toBeTruthy();
     expect(screen.getByText("Jordan Mentee")).toBeTruthy();
-    // Suppressible → a Hide control is present (not a read-only panel).
-    expect(screen.getByTestId("mentee-row-self01:mentee9-hide")).toBeTruthy();
+    // Suppressible → the row carries a select checkbox for the bulk hide verb
+    // (not a read-only panel).
+    expect(
+      within(screen.getByTestId("mentee-row-self01:mentee9")).getByRole("checkbox"),
+    ).toBeTruthy();
   });
 
   it("?attr=coi renders the read-only Conflicts of Interest panel, grouped + not editable", () => {
@@ -563,6 +819,84 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(screen.getByTestId("coi-gap-back").getAttribute("href")).toBe(
       "/edit/scholar/other7?attr=coi",
     );
+  });
+});
+
+describe("EditPage router — mentee-suggestions rail + Mentees pointer (#2634)", () => {
+  const sugg = (id: number, over: Partial<EditContext["menteeSuggestions"][number]> = {}) => ({
+    id,
+    menteeCwid: `mnt${id}`,
+    menteeName: `Mentee ${id}`,
+    menteeTitle: null,
+    menteeUnit: null,
+    kind: "postdoc" as const,
+    tier: "presumptive" as const,
+    nCoPubs: 3,
+    nMentorLastAuthor: 2,
+    firstYear: 2024,
+    lastYear: 2026,
+    menteeFirstPublishedYear: 2022,
+    strong: false,
+    dismissedAt: null,
+    dismissReason: null,
+    evidence: [],
+    ...over,
+  });
+  const withSugg: EditContext = {
+    ...ctx,
+    menteeSuggestions: [sugg(1), sugg(2), sugg(3, { dismissedAt: "2026-09-01T00:00:00.000Z", dismissReason: "colleague" })],
+  };
+
+  it("no rows → no rail item, and ?attr=mentee-suggestions canonicalizes away", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="mentee-suggestions" />);
+    expect(screen.queryByTestId("rail-mentee-suggestions")).toBeNull();
+    expect(document.querySelector('[data-slot="mentee-suggestions-panel"]')).toBeNull();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
+  });
+
+  it("rows → nested child right after Mentees, badge = ACTIVE (non-dismissed) count", () => {
+    render(<EditPage ctx={withSugg} mode="self" />);
+    const item = screen.getByTestId("rail-mentee-suggestions");
+    expect(item.textContent).toContain("From your publications");
+    expect(item.className).toContain("pl-7");
+    expect(item.querySelector('[aria-label="2 to review"]')?.textContent).toBe("2");
+    // Immediately follows Mentees in the rail (it nests under the preceding item).
+    const keys = Array.from(document.querySelectorAll('[data-testid^="rail-"]')).map((el) =>
+      el.getAttribute("data-testid"),
+    );
+    expect(keys.indexOf("rail-mentee-suggestions")).toBe(keys.indexOf("rail-mentees") + 1);
+    expect(keys.indexOf("rail-coi")).toBe(keys.indexOf("rail-mentee-suggestions") + 1);
+  });
+
+  it("a dismissed-only history still surfaces the item, without a badge or a Mentees pointer", () => {
+    const goneOnly: EditContext = { ...ctx, menteeSuggestions: [withSugg.menteeSuggestions[2]] };
+    render(<EditPage ctx={goneOnly} mode="self" attr="mentees" />);
+    const item = screen.getByTestId("rail-mentee-suggestions");
+    expect(item.querySelector('[aria-label$="to review"]')).toBeNull();
+    expect(screen.queryByTestId("mentee-suggestions-pointer")).toBeNull();
+  });
+
+  it("Mentees tab shows one pointer line linking to the sub-view on the ACTIVE surface", () => {
+    render(<EditPage ctx={withSugg} mode="self" attr="mentees" />);
+    const p = screen.getByTestId("mentee-suggestions-pointer");
+    expect(p.textContent).toContain("2 co-authors look like trainees");
+    expect(p.querySelector("a")?.getAttribute("href")).toBe("/edit?attr=mentee-suggestions");
+  });
+
+  it("?attr=mentee-suggestions renders the card; superuser gets the scholar-named add button + superuser hrefs", () => {
+    const suCtx: EditContext = { ...superuserCtx, menteeSuggestions: withSugg.menteeSuggestions };
+    render(<EditPage ctx={suCtx} mode="superuser" attr="mentee-suggestions" />);
+    expect(document.querySelector('[data-slot="mentee-suggestions-panel"]')).not.toBeNull();
+    expect(screen.getByTestId("mentee-suggestion-add-1").textContent).toBe("Add for Alex Other");
+    expect(screen.getByTestId("mentee-suggestions-back").getAttribute("href")).toBe(
+      "/edit/scholar/other7?attr=mentees",
+    );
+  });
+
+  it("is never offered to a proxy", () => {
+    render(<EditPage ctx={withSugg} mode="proxy" attr="mentee-suggestions" />);
+    expect(screen.queryByTestId("rail-mentee-suggestions")).toBeNull();
+    expect(document.querySelector('[data-slot="mentee-suggestions-panel"]')).toBeNull();
   });
 });
 
@@ -753,20 +1087,20 @@ describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () =>
     "Email tab reads in third person for a %s editor (parity with superuser)",
     (mode) => {
       render(<EditPage ctx={superuserCtx} mode={mode} attr="email" />);
-      expect(screen.getByTestId("email-usage-note").textContent).toBe(
-        "This is the contact email shown on Alex Other's public profile.",
-      );
-      expect(screen.getByTestId("email-download-policy").textContent).not.toMatch(/\byour\b/i);
+      const panel = document.querySelector('[data-slot="email-panel"]')!;
+      expect(panel.textContent).not.toMatch(/\byour\b/i);
     },
   );
 
   it.each(["proxy", "unit-admin"] as const)(
-    "Home board reads third-person ('Profile completeness', not 'Complete your profile') for a %s editor",
+    "Home board reads third-person (the scholar's name, never 'your') for a %s editor",
     (mode) => {
       render(<EditPage ctx={superuserCtx} mode={mode} attr="home" />);
-      expect(screen.getByText("Profile completeness")).toBeTruthy();
-      expect(screen.queryByText("Complete your profile")).toBeNull();
-      expect(screen.queryByText("Yours to edit")).toBeNull();
+      expect(screen.getByTestId("home-item-overview").textContent).toContain(
+        "Showing at the top of Alex Other's public profile.",
+      );
+      expect(screen.getByTestId("home-item-orcid").textContent).toContain("makes Alex's publication matching");
+      expect(document.querySelector('[data-slot="home-panel"]')?.textContent).not.toMatch(/\byour\b/);
     },
   );
 
@@ -784,6 +1118,29 @@ describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () =>
       ).toBe("self");
     },
   );
+});
+
+describe("EditPage — unit-admin Profiles crumb (dwd2001 bug #7)", () => {
+  it("forwards profilesNavVisible={true} to EditShell's navigable 'Profiles' crumb for a unit admin", () => {
+    render(<EditPage ctx={superuserCtx} mode="unit-admin" profilesNavVisible={true} />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const link = within(crumb).getByTestId("edit-subnav-profiles");
+    expect(link.getAttribute("href")).toBe("/edit/profiles");
+  });
+
+  it("defaults to the flat unit-admin label when profilesNavVisible is omitted", () => {
+    render(<EditPage ctx={superuserCtx} mode="unit-admin" />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
+    expect(within(crumb).getByTestId("edit-subnav-unit-admin")).toBeTruthy();
+  });
+
+  it("a proxy editor stays flat even when profilesNavVisible={true} — proxy mode never reads it", () => {
+    render(<EditPage ctx={superuserCtx} mode="proxy" profilesNavVisible={true} />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
+    expect(within(crumb).getByTestId("edit-subnav-proxy")).toBeTruthy();
+  });
 });
 
 describe("EditPage router — superuser mode", () => {
@@ -808,10 +1165,10 @@ describe("EditPage router — superuser mode", () => {
     ).toBeTruthy();
   });
 
-  it("Home (superuser): third-person header, Overview is editable (#844), Publications has a Review CTA, no units section", () => {
+  it("Home (superuser): needs-you header, Overview is editable (#844), Publications has a Review CTA, no units section", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="home" />);
-    // Reframed, third-person heading.
-    expect(screen.getByText("Profile completeness")).toBeTruthy();
+    // Same count as self: only the ORCID row is open (no pubs / probing headshot are informational).
+    expect(screen.getByRole("heading", { level: 2, name: "One item needs you" })).toBeTruthy();
     // #844 — the Overview is now editable by a superuser → an "Edit" CTA (not the
     // pre-#844 read-only "View") that hangs off the superuser base path.
     const overviewCta = screen.getByTestId("home-card-overview");
@@ -870,10 +1227,8 @@ describe("EditPage router — superuser mode", () => {
     };
     try {
       render(<EditPage ctx={noBio} mode="superuser" attr="overview" />);
-      // #1246 — the Draft-with-AI block now starts collapsed regardless of bio
-      // state; expand it to reach the Generate button.
+      // The Draft-with-AI rail sits beside the editor, always open.
       expect(screen.getByTestId("overview-draft-block")).toBeTruthy();
-      fireEvent.click(screen.getByTestId("overview-draft-block-toggle"));
       expect(screen.getByTestId("overview-generate")).toBeTruthy();
     } finally {
       fetchSpy.mockRestore();
@@ -980,9 +1335,8 @@ describe("EditPage router — superuser mode", () => {
 });
 
 describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", () => {
-  // Scope assertions to the attribute rail's <nav>; HomePanel renders its own
-  // "Yours to edit" / "From WCM systems" section labels, so an unscoped getByText
-  // would collide.
+  // Scope assertions to the attribute rail's <nav> so panel copy never collides
+  // with rail group labels.
   const rail = () => within(screen.getByRole("navigation", { name: "Profile attributes" }));
 
   it("regroups the self rail when the flag is on: floating Home, Tools, Settings, WCM sub-headers", () => {
@@ -1079,5 +1433,28 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     expect(q.queryByText("Tools")).toBeNull();
     expect(q.queryByText("Settings")).toBeNull();
     expect(q.queryByText("landing")).toBeNull();
+  });
+});
+
+describe("EditPage router — cv_generator mode (#2482, read-only)", () => {
+  it("?attr=overview is inert (write affordance blocked) and the banner reads read-only", () => {
+    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="overview" />);
+    expect(screen.getByRole("alert").textContent).toContain("read-only");
+    expect(screen.getByRole("alert").textContent).not.toContain("as an administrator");
+    // The overview editor mount (mock-editor) renders inside the inert wrapper.
+    expect(screen.getByTestId("mock-editor").closest("[inert]")).not.toBeNull();
+  });
+
+  it("?attr=cv is the ONE exception — the Download CV button stays interactive", () => {
+    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="cv" cvEnabled />);
+    // Banner still tells the truth even on the exempted panel.
+    expect(screen.getByRole("alert").textContent).toContain("read-only");
+    // But the download control is NOT wrapped inert.
+    expect(screen.getByTestId("download-cv").closest("[inert]")).toBeNull();
+  });
+
+  it("sees the CV rail item (superuser-parity content set) when cvEnabled", () => {
+    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="home" cvEnabled />);
+    expect(screen.getByText("CV (WCM format)")).toBeTruthy();
   });
 });

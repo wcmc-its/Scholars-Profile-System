@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isActiveTrialStatus, isWithdrawnTrialStatus } from "@/lib/api/profile";
+import { isActiveTrialStatus, isHiddenTrialStatus } from "@/lib/api/profile";
 
 describe("clinical-trials status classification", () => {
   it("treats the institutional OPEN TO ACCRUAL as active", () => {
@@ -19,16 +19,18 @@ describe("clinical-trials status classification", () => {
     expect(isActiveTrialStatus("Terminated")).toBe(false);
   });
 
-  it("hides withdrawn (CTgov); no institutional status is withdrawn", () => {
-    expect(isWithdrawnTrialStatus("Withdrawn")).toBe(true);
-    expect(isWithdrawnTrialStatus("No longer available")).toBe(true);
-    expect(isWithdrawnTrialStatus("OPEN TO ACCRUAL")).toBe(false);
-    expect(isWithdrawnTrialStatus("SUSPENDED")).toBe(false);
+  it("hides withdrawn (CTgov) and institutionally SUSPENDED trials", () => {
+    expect(isHiddenTrialStatus("Withdrawn")).toBe(true);
+    expect(isHiddenTrialStatus("No longer available")).toBe(true);
+    expect(isHiddenTrialStatus("SUSPENDED")).toBe(true);
+    expect(isHiddenTrialStatus("OPEN TO ACCRUAL")).toBe(false);
+    expect(isHiddenTrialStatus("CLOSED TO ACCRUAL")).toBe(false);
+    expect(isHiddenTrialStatus("IRB STUDY CLOSURE")).toBe(false);
   });
 
   it("handles null/empty", () => {
     expect(isActiveTrialStatus(null)).toBe(false);
     expect(isActiveTrialStatus("")).toBe(false);
-    expect(isWithdrawnTrialStatus(null)).toBe(false);
+    expect(isHiddenTrialStatus(null)).toBe(false);
   });
 });

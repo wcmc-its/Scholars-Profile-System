@@ -1184,3 +1184,73 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
     expect(body._source).not.toContain("clinicalExpertise");
   });
 });
+
+// Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`) — the second descriptor's
+// per-scholar count rides on the counted `tagged` lead as `secondary`, read from the
+// same `meshSubtreeCounts` map as the primary. Same hop as #1955 above: only
+// `lib/api/search.ts` attaches it, so only a `searchPeople` assertion covers it.
+const COVID = "D000086382";
+
+describe("searchPeople — two-concept `secondary` count on the tagged lead", () => {
+  // The STACKED path (`selectEvidenceLines`, what the deployed page renders under
+  // SEARCH_EVIDENCE_REASON_COUNTS=on) builds its own tagged line — it shipped
+  // without `secondary` while the single-evidence path had it, and this suite
+  // was green. Assert both.
+  it("stacked lines: the secondary rides on the tagged lead too", async () => {
+    process.env.SEARCH_EVIDENCE_REASON_COUNTS = "on";
+    try {
+      hitSourcePatch = { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 } };
+      process.env[EVIDENCE] = "on";
+      const result = await searchPeople({
+        q: "microbiome",
+        relevanceMode: "v3",
+        shape: "topic",
+        matchExplain: true,
+        reasonFromDoc: true,
+        meshDescriptorUi: MICROBIOTA,
+        meshDescriptorName: "Microbiota",
+        meshDescendantUis: [MICROBIOTA, MYCOBIOME],
+        matchAwareContext: { methodFamily: null, topics: [] },
+        meshSecondary: { descriptorUi: COVID, name: "COVID-19" },
+      });
+      const lines = result.hits[0].evidenceLines;
+      expect(lines).toBeDefined();
+      expect(lines?.find((l) => l.kind === "publications")).toMatchObject({
+        strength: "tagged",
+        secondary: { term: "COVID-19", count: 4 },
+      });
+    } finally {
+      delete process.env.SEARCH_EVIDENCE_REASON_COUNTS;
+    }
+  });
+
+  it("attaches the secondary term + the scholar's own count under it", async () => {
+    const ev = await leadEvidenceFor(
+      { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 } },
+      { meshSecondary: { descriptorUi: COVID, name: "COVID-19" } },
+    );
+    expect(ev).toMatchObject({
+      kind: "publications",
+      strength: "tagged",
+      term: "Microbiota",
+      secondary: { term: "COVID-19", count: 4 },
+    });
+  });
+
+  it("omits `secondary` when the scholar has nothing under the second descriptor", async () => {
+    const ev = await leadEvidenceFor(
+      { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12 } },
+      { meshSecondary: { descriptorUi: COVID, name: "COVID-19" } },
+    );
+    expect(ev).toMatchObject({ strength: "tagged", term: "Microbiota" });
+    expect(ev).not.toHaveProperty("secondary");
+  });
+
+  it("no secondary concept ⇒ byte-identical lead (no `secondary` key)", async () => {
+    const ev = await leadEvidenceFor({
+      publicationMeshUi: [MICROBIOTA],
+      meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 },
+    });
+    expect(ev).not.toHaveProperty("secondary");
+  });
+});

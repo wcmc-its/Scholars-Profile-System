@@ -32,6 +32,32 @@ export const OKABE_ITO = [
   "#000000", // black (last resort)
 ] as const;
 
+/**
+ * Extended colourblind-safe palette for units with more than six groups (a
+ * department can have 14 divisions). The six core Okabe-Ito hues come first —
+ * so a ≤6-group unit colours exactly as with `OKABE_ITO` — followed by Paul
+ * Tol's "muted" qualitative scheme. No hue repeats and none is the Unclassified
+ * gray. 15 hues cannot all be told apart at a glance; the UI leans on the
+ * one-group-at-a-time default and on labels in the group rollup view.
+ */
+export const EXTENDED_GROUP_PALETTE = [
+  "#0072B2", // blue
+  "#D55E00", // vermillion
+  "#009E73", // bluish green
+  "#CC79A7", // reddish purple
+  "#E69F00", // orange
+  "#56B4E9", // sky blue
+  "#332288", // indigo (Tol muted)
+  "#88CCEE", // cyan
+  "#44AA99", // teal
+  "#117733", // green
+  "#999933", // olive
+  "#DDCC77", // sand
+  "#CC6677", // rose
+  "#882255", // wine
+  "#AA4499", // purple
+] as const;
+
 /** Neutral gray for the synthetic "Unclassified" (null-program) group. */
 export const UNCLASSIFIED_COLOR = "#9AA0A6";
 export const UNCLASSIFIED_LABEL = "Unclassified";
@@ -42,16 +68,19 @@ export const UNCLASSIFIED_KEY = "__unclassified__";
  * Assign a color to each program by position. Inputs MUST already be in
  * `sortOrder` order. The null/Unclassified program is always gray and does not
  * consume a palette slot, so coloring is unaffected by whether it is present.
+ * `palette` defaults to Okabe-Ito (the center); the department loader passes
+ * `EXTENDED_GROUP_PALETTE` when it has more than six divisions.
  */
 export function assignProgramColors(
   programs: Array<{ code: string | null; label: string }>,
+  palette: readonly string[] = OKABE_ITO,
 ): CollabProgram[] {
   let slot = 0;
   return programs.map((p) => {
     if (p.code === null) {
       return { code: null, label: p.label, color: UNCLASSIFIED_COLOR };
     }
-    const color = OKABE_ITO[slot % OKABE_ITO.length];
+    const color = palette[slot % palette.length];
     slot += 1;
     return { code: p.code, label: p.label, color };
   });

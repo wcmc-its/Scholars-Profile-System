@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   suppressionFindMany: vi.fn(),
   suppressionUpdate: vi.fn(),
+  suppressionDeleteMany: vi.fn(),
   reflectGrantSuppressions: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("@/lib/db", () => ({
       suppression: {
         findMany: hoisted.suppressionFindMany,
         update: hoisted.suppressionUpdate,
+        deleteMany: hoisted.suppressionDeleteMany,
       },
     },
   },
@@ -28,6 +30,7 @@ vi.mock("@/lib/edit/search-suppression", () => ({
 }));
 
 import {
+  dropSystemSuppressionsForDeletedGrants,
   joinAccountPeriods,
   planSuppressionRepoints,
   repointReissuedSuppressions,
@@ -278,6 +281,44 @@ describe("repointReissuedSuppressions (#2224)", () => {
 });
 
 /**
+ * #2224 follow-up — the other half of "the award simply left the feed". The
+ * plan above correctly declines to re-point it; without this the auto-minted
+ * takedown it leaves behind fails `etl:integrity` every night forever. Prod
+ * 2026-09-03 spent a night red on exactly one such row.
+ */
+describe("dropSystemSuppressionsForDeletedGrants (#2224)", () => {
+  const GONE = "INFOED-111111-abc1234";
+
+  beforeEach(() => {
+    hoisted.suppressionDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+  });
+
+  it("deletes only the ETL's own un-revoked takedowns, and only on the stale ids", async () => {
+    await dropSystemSuppressionsForDeletedGrants([GONE]);
+
+    // Every clause is load-bearing. Without `createdBy` this silently voids a
+    // curator's takedown, which is the failure #2224 exists to catch; without
+    // `revokedAt` it deletes a human's "not actually confidential" tombstone,
+    // and `reconcileConfidentialTitles` (which dedupes on entityId across
+    // revoked rows) then re-hides the award the next time it appears.
+    expect(hoisted.suppressionDeleteMany).toHaveBeenCalledWith({
+      where: {
+        entityType: "grant",
+        createdBy: "system-confidential-title",
+        revokedAt: null,
+        entityId: { in: [GONE] },
+      },
+    });
+  });
+
+  it("touches nothing when the run pruned no grants", async () => {
+    await dropSystemSuppressionsForDeletedGrants([]);
+
+    expect(hoisted.suppressionDeleteMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * Wiring. A mutation run deleted each call below and left the suite green: the
  * helpers are well pinned, but nothing asserted they are ever CALLED, so
  * reverting the whole delivered payload cost nothing. Source-text assertions,
@@ -293,6 +334,14 @@ describe("the grant-suppression call sites are wired into the InfoEd ETL", () =>
   it("InfoEd main() re-points reissued suppressions (#2224)", () => {
     expect(INFOED).toMatch(
       /await repointReissuedSuppressions\(\s*plan\.staleExternalIds,\s*existingGrants,\s*plan\.toCreate,?\s*\)/,
+    );
+  });
+
+  it("InfoEd main() drops the auto-minted takedowns of pruned grants (#2224)", () => {
+    // Ordering is the assertion: run BEFORE the re-point and this deletes the
+    // rows the re-point was about to move onto the reissued id.
+    expect(INFOED).toMatch(
+      /await repointReissuedSuppressions\([\s\S]*?\)\s*;\s*await dropSystemSuppressionsForDeletedGrants\(\s*plan\.staleExternalIds,?\s*\)/,
     );
   });
 

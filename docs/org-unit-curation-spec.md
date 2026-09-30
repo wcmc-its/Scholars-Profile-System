@@ -69,11 +69,12 @@ D-03 chair detection matches the appointment **title** by regex, requiring the
 title's `{dept}` to match the department name. Concrete case found on staging:
 **Michael G. Stewart's** title *is* "Chair of Otolaryngology", but the department's
 ED name is "Otolaryngology **Head and Neck Surgery**" — so the regex misses it and
-`chairCwid` stays null. Endowed/acting chairs fail the same way. The durable fix is
-the curated `field_override(department, code, leaderCwid)` layer, which the ED chair
-phase consults (etl/ed/index.ts:949-959) and which short-circuits the regex
-(line 1042). The backfill writes these overrides (and the `chairCwid` column for
-immediate display).
+no chair assignment gets written. Endowed/acting chairs fail the same way. The
+durable fix is the curated `field_override(department, code, leaderCwid)` layer,
+which the ED chair phase consults (etl/ed/index.ts:949-959) and which
+short-circuits the regex (line 1042). The backfill writes these overrides
+(and the chair `OrgUnitRoleAssignment` row for immediate display — #2542
+contract A retired the `chairCwid` column this line used to describe).
 
 ---
 
@@ -113,7 +114,7 @@ are conservative placeholders — **comms to refine via `/edit`**.
 `N1760` stays a **department** (retains privileges) per comms — slated to move to
 Centers/Institutes later.
 
-### 5c. Departments — chairs only (`field_override` + `chairCwid`)
+### 5c. Departments — chairs only (`field_override` + `OrgUnitRoleAssignment`)
 
 | Code | Department | Chair (CWID) |
 |---|---|---|
@@ -131,9 +132,10 @@ Centers/Institutes later.
 ## 6. Known limitations / follow-ups
 
 - **External leaders** (not WCM scholars, e.g. Joel Stein / Rehab Med, Columbia
-  primary appt) are handled by `lib/external-leaders.ts`: the `chairCwid` is still
-  written, and the leader renders as name + Directory-API photo with **no profile
-  link**. This is a deliberate carve-out from the "leader CWID must resolve to a
+  primary appt) are handled by `lib/external-leaders.ts`: the chair
+  `OrgUnitRoleAssignment` row is still written, and the leader renders as name +
+  Directory-API photo with **no profile link**. This is a deliberate carve-out
+  from the "leader CWID must resolve to a
   displayable scholar" rule; remove the entry once the person becomes a WCM
   scholar. It currently covers **department leaders only** — a center director who
   isn't a WCM scholar would need the same fallback wired into `getCenter`. All 8

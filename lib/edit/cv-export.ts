@@ -16,6 +16,7 @@
  */
 import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
+import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { fundingRoleLabel, isPiRole } from "@/lib/funding-roles";
 import {
   appendToLabelParagraph,
@@ -100,6 +101,56 @@ export function isCvEnabled(): boolean {
 
 const NA = "N/A";
 
+/**
+ * #2582 — the appointment tables' second column is headed "Institution, city and
+ * state", but the only value SPS can put there is a UNIT label: ED gives
+ * `ProfileAppointment.organization` as the level-1 org-unit name (see
+ * `appointmentOrganization()` in `etl/ed/index.ts`, #2226), which is what the
+ * profile sidebar renders as the muted unit line. Rows therefore printed a bare
+ * "Library" or "Population Health Sciences" under an institution heading.
+ *
+ * SPS has no primary-institution field to read (`docs/scholar-cv-generator-spec.md`
+ * §5: `wcmc_person.institution_id` is never selected and there is no
+ * `primaryAffiliation` model), so the institution half is COMPOSED from this
+ * constant. Single source of truth — the ETL, the export and the tests all read
+ * it, so the owner's choice between the marketing name and the legal
+ * "Weill Cornell Medical College" is a one-line change here.
+ */
+export const CV_HOME_INSTITUTION = "Weill Cornell Medicine, New York, NY";
+
+/**
+ * #2582 — does this string already NAME an institution, so appending
+ * {@link CV_HOME_INSTITUTION} would be wrong or redundant?
+ *
+ * Catches WCM itself (ED's own `"Weill Cornell Medicine"` fallback), the NYP /
+ * hospital rows, and the external or prior-employer institutions that arrive on
+ * POPS and historical rows. Errs toward leaving a value ALONE: a WCM unit that
+ * happens to contain "Institute" keeps today's bare label rather than risking a
+ * false institution claim on a row that is genuinely external.
+ *
+ * Every token `isHospital` routes on is repeated here — `\bnyp\b` included,
+ * which is why it appears despite "presbyterian" covering the spelled-out name.
+ * That makes "a hospital-routed row is never composed" hold on this heuristic
+ * ALONE, rather than resting on the provenance gate: an ED faculty-feed row
+ * whose org unit happened to carry a hospital token would otherwise route to
+ * D2 and still be composed.
+ *
+ * ponytail: a token list cannot tell "Memorial Sloan Kettering Cancer Center"
+ * from a WCM unit — the provenance gate in `appointmentRows` is what actually
+ * keeps non-WCM rows safe, and this is the second belt. The real fix is
+ * importing a per-appointment primary-affiliation field (institution + city +
+ * state) from ED, which is #1325's territory; delete this heuristic when that
+ * field lands.
+ */
+const NAMES_INSTITUTION_RE =
+  /cornell|presbyterian|hospital|\bnyp\b|university|college|institute|medical cent(?:er|re)|school of medicine/i;
+
+/** The "Institution, city and state" cell for an ED-sourced appointment row. */
+function institutionCell(org: string): string {
+  if (!org || NAMES_INSTITUTION_RE.test(org)) return org;
+  return `${org}, ${CV_HOME_INSTITUTION}`;
+}
+
 // ── small formatting helpers ────────────────────────────────────────────────
 
 function year(date: string | null | undefined): string {
@@ -154,15 +205,6 @@ function authorRuns(authorsString: string | null, selected: ReadonlySet<string>)
   return runs;
 }
 
-function volIssuePages(volume: string | null, issue: string | null, pages: string | null): string {
-  if (!volume && !issue && !pages) return "";
-  let s = "";
-  if (volume) s += volume;
-  if (issue) s += `(${issue})`;
-  if (pages) s += `:${pages}`;
-  return s;
-}
-
 /** A single Vancouver citation as runs (surname bold). Plain text — PMID/DOI are
  *  not hyperlinked (the template-fill path avoids relationship plumbing). */
 function citationRuns(index: number, pub: PubForCitation, selected: ReadonlySet<string>): Run[] {
@@ -172,10 +214,16 @@ function citationRuns(index: number, pub: PubForCitation, selected: ReadonlySet<
   runs.push({ text: `${pub.title.replace(/\.+$/, "")}. ` });
   const journal = pub.journalAbbrev ?? pub.journal;
   if (journal) runs.push({ text: `${journal}. ` });
-  const vip = volIssuePages(pub.volume, pub.issue, pub.pages);
+  // #2580 — the shared formatter treats a literal "NULL" volume/issue/pages as
+  // absent; the local copy printed `2024;NULL(NULL):NULL.` into the CV.
+  const vip = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
   if (pub.year !== null) runs.push({ text: vip ? `${pub.year};${vip}. ` : `${pub.year}. ` });
   if (pub.doi) runs.push({ text: `doi: ${pub.doi}. ` });
-  runs.push({ text: `PMID: ${pub.pmid}${pub.pmcid ? `; PMCID: ${pub.pmcid}` : ""}.` });
+  // #2580 — `pmid` carries a source-prefixed id for non-PubMed records, so the
+  // label is decided per-record ("PMID: 38670054" vs "Scopus: 105037533819")
+  // rather than hard-coded. This path emits no hyperlinks either way.
+  const id = citationIdentifier(pub.pmid);
+  runs.push({ text: `${id.label}: ${id.value}${pub.pmcid ? `; PMCID: ${pub.pmcid}` : ""}.` });
   return runs;
 }
 
@@ -225,7 +273,17 @@ function appointmentRows(
     const key = `${title}|${org}`.toLowerCase();
     if ((!title && !org) || seen.has(key)) return;
     seen.add(key);
-    (isHospital(org) ? hospital : academic).push({ cells: [title, org, dates], source });
+    // #2582 — route and dedupe on the RAW string FIRST, then compose the cell.
+    // `isHospital` matches on this exact value, so composing before the test
+    // could flip a row into the wrong table; composing after cannot.
+    //
+    // Only the ED faculty feed ("appointments") is composed. Those rows are
+    // WCM org-unit labels by construction, whereas POPS ("pops") and the NYP
+    // affiliate feed ("nyp") already supply real institution names — a
+    // provenance gate, so a POPS row naming an institution the token heuristic
+    // does not recognise still cannot acquire a false WCM claim.
+    const cell = source === "appointments" ? institutionCell(org) : org;
+    (isHospital(org) ? hospital : academic).push({ cells: [title, cell, dates], source });
   };
   for (const a of p.appointments)
     add(

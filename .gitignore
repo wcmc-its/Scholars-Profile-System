@@ -122,6 +122,9 @@ data/seo/*
 !data/search/
 data/search/*
 !data/search/deprioritized-terms.json
+# Exception: new-descriptor redirects (Uveal Melanoma -> Uveal Neoplasms) — hand-curated
+# from a staging coverage probe, resolver-side, reviewed by PR like the list above.
+!data/search/mesh-redirects.json
 # #594 §3: the specific-subtopic LLM basket (derived from the DB subtopic taxonomy),
 # the corrected "WCM presence" instrument alongside the broad flagship queries.
 !data/seo/specific-queries.json
@@ -191,3 +194,13 @@ scripts/search-eval/captures/
 # spine-eval artifacts: spine-eval-out/ holds ranked cwids (real people) and this repo is PUBLIC.
 scripts/search-eval/spine-eval-out/
 scripts/search-eval/extractions.json
+
+# design-sync (claude.ai/design)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+
+# Scratch: standalone renders of the WAF block-page bodies (edge-stack.ts). Never commit.
+.preview-*.html

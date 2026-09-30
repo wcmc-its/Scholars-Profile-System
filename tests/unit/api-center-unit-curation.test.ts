@@ -4,8 +4,9 @@
  * Centers are manually-owned (no ETL writes the `center` table); fields are
  * edited in-row, so there is no `field_override` merge here.
  *
- *  - Centers carry `leaderInterim` as a real column (Phase 1) — surface it
- *    on `director.isInterim`.
+ *  - Centers carry the interim qualifier on the leadership holder's
+ *    `OrgUnitRoleAssignment` row (#2542 contract A — `Center.leaderInterim`
+ *    no longer exists as a read source) — surface it on `leadership[0].isInterim`.
  *  - edge 20 — whole-unit suppression on a center renders as 404 (null).
  *  - `loadUnitFieldOverrides("center", ...)` is short-circuited; this file
  *    asserts a center read does not issue a `field_override` query.
@@ -19,24 +20,41 @@ const {
   mockCenterMembershipFindMany,
   mockSuppressionFindFirst,
   mockFieldOverrideFindMany,
+  mockAssignmentFindFirst,
+  mockAssignmentFindMany,
+  mockOrgUnitRoleFindUnique,
+  mockFetchDirectoryPeopleByCwid,
 } = vi.hoisted(() => ({
+  mockFetchDirectoryPeopleByCwid: vi.fn(),
   mockCenterFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockCenterMembershipFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
+  mockAssignmentFindFirst: vi.fn(),
+  mockAssignmentFindMany: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     center: { findUnique: mockCenterFindUnique },
+    // #2542 contract A — leadership is a LIST of `OrgUnitRoleAssignment` rows
+    // fetched with `findMany` (`getCenterUncached`, `lib/api/centers.ts`) —
+    // the SOLE source; `Center.directorCwid` / `Center.leaderInterim` no
+    // longer exist as read sources, so `orgUnitRole.findUnique` (the old
+    // pre-backfill fallback's vocabulary lookup) is never called any more.
+    orgUnitRoleAssignment: { findFirst: mockAssignmentFindFirst, findMany: mockAssignmentFindMany },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
     scholar: { findUnique: mockScholarFindUnique, findMany: mockScholarFindMany },
     centerMembership: { findMany: mockCenterMembershipFindMany },
     suppression: { findFirst: mockSuppressionFindFirst },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
   },
 }));
+
+vi.mock("@/lib/sources/ldap", () => ({ fetchDirectoryPeopleByCwid: mockFetchDirectoryPeopleByCwid }));
 
 import { getCenter } from "@/lib/api/centers";
 
@@ -46,8 +64,6 @@ const CENTER = {
   slug: "meyer-cancer-center",
   description: "Cancer research center.",
   url: null,
-  directorCwid: "dir0001",
-  leaderInterim: false,
   scholarCount: 42,
 };
 
@@ -60,14 +76,22 @@ const DIRECTOR_SCHOLAR = {
 
 function defaultBaselineMocks() {
   mockCenterFindUnique.mockResolvedValue(CENTER);
-  mockScholarFindUnique.mockResolvedValue(DIRECTOR_SCHOLAR);
+  // `getCenterUncached` batches leadership holders through `scholar.findMany`
+  // (`cwid: { in: [...] }`), not `findUnique` — the single-cwid lookup is
+  // stubbed too (asserted un-called below) but never wired into the loader.
+  mockScholarFindMany.mockResolvedValue([DIRECTOR_SCHOLAR]);
   // #552 Phase 4 — getCenter now recomputes scholarCount from the active
-  // roster; an empty membership read is fine for these director/suppression
+  // roster; an empty membership read is fine for these leadership/suppression
   // assertions (none of which inspect scholarCount).
   mockCenterMembershipFindMany.mockResolvedValue([]);
-  mockScholarFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
   mockFieldOverrideFindMany.mockResolvedValue([]);
+  // #2542 contract A — the assignment row is the sole source; the `dir0001`
+  // identity these tests were originally written against.
+  mockAssignmentFindMany.mockResolvedValue([
+    { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+  ]);
+  mockOrgUnitRoleFindUnique.mockResolvedValue({ label: "Director" });
 }
 
 describe("getCenter — unit-curation read-merge (#540)", () => {
@@ -80,31 +104,68 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     mockSuppressionFindFirst.mockResolvedValue({ id: "sup-1" });
 
     expect(await getCenter("meyer-cancer-center")).toBeNull();
-    // Short-circuit before director lookup.
-    expect(mockScholarFindUnique).not.toHaveBeenCalled();
+    // Short-circuit before the leadership scholar lookup.
+    expect(mockScholarFindMany).not.toHaveBeenCalled();
   });
 
-  it("surfaces the in-row leaderInterim column on director.isInterim", async () => {
+  it("surfaces the assignment row's interim flag on leadership[0].isInterim", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({ ...CENTER, leaderInterim: true });
+    mockAssignmentFindMany.mockResolvedValue([
+      { cwid: "dir0001", roleKey: "director", interim: true, role: { label: "Director" } },
+    ]);
 
     const result = await getCenter("meyer-cancer-center");
-    expect(result?.director?.isInterim).toBe(true);
+    expect(result?.leadership).toHaveLength(1);
+    expect(result?.leadership[0]?.cwid).toBe("dir0001");
+    expect(result?.leadership[0]?.roleLabel).toBe("Director");
+    expect(result?.leadership[0]?.isInterim).toBe(true);
   });
 
-  it("director.isInterim defaults to false from the column", async () => {
+  it("leadership[0].isInterim defaults to false from the assignment row", async () => {
     defaultBaselineMocks();
     const result = await getCenter("meyer-cancer-center");
-    expect(result?.director?.isInterim).toBe(false);
+    expect(result?.leadership).toHaveLength(1);
+    expect(result?.leadership[0]?.cwid).toBe("dir0001");
+    expect(result?.leadership[0]?.isInterim).toBe(false);
   });
 
-  it("a center with no directorCwid produces director=null", async () => {
+  it("names a leader with no Scholar row from ED and renders them unlinked", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({ ...CENTER, directorCwid: null });
+    mockAssignmentFindMany.mockResolvedValue([
+      { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+      { cwid: "stf0001", roleKey: "executive_director", interim: false, role: { label: "Executive Director" } },
+    ]);
+    mockFetchDirectoryPeopleByCwid.mockResolvedValue([
+      { cwid: "stf0001", name: "Staff Leader", title: "Administrative Director", dept: null, firstName: null, lastName: null, email: null },
+    ]);
 
     const result = await getCenter("meyer-cancer-center");
-    expect(result?.director).toBeNull();
-    expect(mockScholarFindUnique).not.toHaveBeenCalled();
+    expect(mockFetchDirectoryPeopleByCwid).toHaveBeenCalledWith(["stf0001"]);
+    expect(result?.leadership.map((l) => [l.cwid, l.preferredName, l.slug, l.roleLabel])).toEqual([
+      ["dir0001", "Center Director", "center-director", "Director"],
+      ["stf0001", "Staff Leader", null, "Executive Director"],
+    ]);
+  });
+
+  it("drops only the non-Scholar leader's card when ED fails", async () => {
+    defaultBaselineMocks();
+    mockAssignmentFindMany.mockResolvedValue([
+      { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+      { cwid: "stf0001", roleKey: "executive_director", interim: false, role: { label: "Executive Director" } },
+    ]);
+    mockFetchDirectoryPeopleByCwid.mockRejectedValue(new Error("ldap down"));
+
+    const result = await getCenter("meyer-cancer-center");
+    expect(result?.leadership.map((l) => l.cwid)).toEqual(["dir0001"]);
+  });
+
+  it("a center with no assignment rows produces an empty leadership list", async () => {
+    defaultBaselineMocks();
+    mockAssignmentFindMany.mockResolvedValue([]);
+
+    const result = await getCenter("meyer-cancer-center");
+    expect(result?.leadership).toEqual([]);
+    expect(mockScholarFindMany).not.toHaveBeenCalled();
   });
 
   it("never issues a field_override query for a center — write path rejects them anyway", async () => {

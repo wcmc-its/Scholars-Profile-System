@@ -1,9 +1,11 @@
 /**
  * Root people URL `/{slug}` (#671 — people canonical URL migration).
  *
- * Canonical (renders the profile in place) when `PROFILE_CANONICAL === "root"`.
- * Otherwise (the default) this is a permanent-redirect alias to the legacy
- * canonical `/scholars/{slug}` form — the pre-#671 behavior (#497 §5.3).
+ * Canonical: renders the profile in place. The pre-#671 behavior (a
+ * permanent-redirect alias to `/scholars/{slug}`, #497 §5.3) applied only
+ * while the `PROFILE_CANONICAL` rollback flag was unset/"scholars"; both envs
+ * cut over to root on 2026-07-14 and the flag has since been removed (#671)
+ * — root is now the only mode.
  *
  * Lives inside the `(public)` route group so it inherits the site chrome
  * (header / footer / PublicationModalProvider). Next resolves explicit
@@ -20,7 +22,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 
 import { looksLikeSlug, RESERVED_SLUGS } from "@/lib/slug";
 import { resolveBySlugOrHistory } from "@/lib/url-resolver";
-import { canonicalProfilePath, isRootCanonical } from "@/lib/profile-url";
+import { canonicalProfilePath } from "@/lib/profile-url";
 import { buildProfileMetadata } from "@/lib/profile-metadata";
 import { ProfileView } from "@/components/profile/profile-view";
 
@@ -35,9 +37,9 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  // This route owns the profile metadata only when root is canonical; otherwise
-  // it only redirects or 404s, so skip the profile fetch.
-  if (!isRootCanonical() || RESERVED_SLUGS.has(slug) || !looksLikeSlug(slug)) {
+  // This route only owns profile metadata for a plausible, non-reserved slug;
+  // otherwise it only redirects or 404s, so skip the profile fetch.
+  if (RESERVED_SLUGS.has(slug) || !looksLikeSlug(slug)) {
     return {};
   }
   return buildProfileMetadata(slug);
@@ -60,10 +62,6 @@ export default async function RootProfileRoute({
   if (resolved.type === "redirect") {
     permanentRedirect(canonicalProfilePath(resolved.targetSlug));
   }
-  // Direct hit: `slug` is the current canonical slug.
-  if (!isRootCanonical()) {
-    // Root is an alias for now — 301 to the canonical /scholars form.
-    permanentRedirect(canonicalProfilePath(resolved.slug));
-  }
+  // Direct hit: `slug` is the current canonical slug — render in place.
   return <ProfileView slug={resolved.slug} />;
 }

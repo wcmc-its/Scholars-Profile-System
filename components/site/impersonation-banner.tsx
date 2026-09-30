@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties } from "react";
+import Link from "next/link";
 
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
 
@@ -33,6 +34,12 @@ import { useImpersonationProbe } from "@/components/site/use-impersonation-probe
  * (`NEXT_PUBLIC_IMPERSONATION_TTL_SECONDS`, default 1800) measured from the
  * overlay's `startedAt`; it is advisory — the authoritative expiry is the server
  * seam (`lib/auth/effective-identity.ts`).
+ *
+ * A third line ("Can access: …", `ROLE_LINKS` below) links straight to the
+ * target's own destination(s). Without it, a superuser previewing a narrower
+ * role has no way to know where that role's own console page lives — the four
+ * global roles aren't even searchable in the switcher, and reloading on
+ * whatever `/edit/*` page they started from just as likely 403s.
  */
 
 const AMBER_GRADIENT = "linear-gradient(90deg, #7a4f01 0%, #92611a 100%)";
@@ -51,33 +58,85 @@ const RETURN_BUTTON_STYLE = {
   "--tw-ring-offset-color": "#7a4f01",
 } as CSSProperties;
 
-const ROLE_LABEL: Record<"owner" | "curator" | "scholar" | "comms_steward", string> = {
+type SubjectRole =
+  | "owner"
+  | "curator"
+  | "scholar"
+  | "comms_steward"
+  | "cv_generator"
+  | "honors_curator"
+  | "data_sharing_viewer"
+  | "development";
+
+const ROLE_LABEL: Record<SubjectRole, string> = {
   owner: "Owner",
   curator: "Curator",
   scholar: "Scholar",
   comms_steward: "Communications Steward",
+  cv_generator: "CV Generator",
+  honors_curator: "Honors Curator",
+  data_sharing_viewer: "Data Sharing Viewer",
+  development: "Development",
+};
+
+/**
+ * Where the target's own role actually goes (2026-08-19 — a superuser
+ * impersonating a search-blind global role, e.g. `development`, otherwise has
+ * no way to find the one page it unlocks: the switcher can't enumerate them
+ * (`impersonation-switcher.tsx`'s exact-CWID-fallback docblock), and reloading
+ * on whatever `/edit/*` page the superuser started from just as likely lands
+ * on `ForbiddenEditPage` for the target's real, narrower permissions). Static,
+ * not probe-fetched — every one of these roles has a FIXED destination (each
+ * global role's own doc comment calls out its single entry point; `owner`/
+ * `curator` get the same two links `lib/auth/console-links.ts` gives a
+ * non-superuser unit admin), so no extra round trip is needed. `Record<SubjectRole,
+ * …>` mirrors `ROLE_LABEL` above — a role added to the union fails to compile
+ * here until it's placed.
+ */
+const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href: string }>> = {
+  scholar: [{ label: "Their profile", href: "/edit" }],
+  owner: [
+    { label: "Profiles", href: "/edit/profiles" },
+    { label: "Org units", href: "/edit/units" },
+  ],
+  curator: [
+    { label: "Profiles", href: "/edit/profiles" },
+    { label: "Org units", href: "/edit/units" },
+  ],
+  // Mirrors `buildConsoleLinks`' steward collapse (#2521): one "Admin console"
+  // door; the steward's own AdminSubnav fans out to Method families and the
+  // rest from there (incl. cores + access management since #2522).
+  comms_steward: [{ label: "Admin console", href: "/edit/profiles" }],
+  cv_generator: [{ label: "Profiles (read-only)", href: "/edit/profiles" }],
+  honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
+  data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
+  development: [{ label: "Grant Matcha", href: "/edit/grant-matcha" }],
 };
 
 /** Compact unit-kind suffix for the banner's subject line. */
-const KIND_SHORT: Record<"department" | "division" | "center", string> = {
+const KIND_SHORT: Record<"department" | "division" | "center" | "core" | "institution", string> = {
   department: "Dept",
   division: "Div",
   center: "Center",
+  core: "Core",
+  institution: "Institution",
 };
 
 /**
  * The subject descriptor after the name: a plain `Scholar`, or
- * `Owner · {unit} ({Dept|Div|Center})` for a unit owner/curator (ADR-005
+ * `Owner · {unit} ({Dept|Div|Center|Core})` for a unit owner/curator (ADR-005
  * Amendment 1 role × unit-kind, #540).
  */
 function subjectDescriptor(im: {
-  role: "owner" | "curator" | "scholar" | "comms_steward";
-  unitKind: "department" | "division" | "center" | null;
+  role: SubjectRole;
+  unitKind: "department" | "division" | "center" | "core" | "institution" | null;
   unit: string | null;
 }): string {
-  // A scholar and a comms_steward both carry no administered unit — the role
-  // label stands alone.
-  if (im.role === "scholar" || im.role === "comms_steward") return ROLE_LABEL[im.role];
+  // Only owner/curator carry an administered unit — every other role (a plain
+  // scholar, comms_steward, or any global LDAP-group role) stands alone. A
+  // positive check (owner/curator) rather than an enumeration of the unit-less
+  // roles, so a future role added to `SubjectRole` needs no edit here.
+  if (im.role !== "owner" && im.role !== "curator") return ROLE_LABEL[im.role];
   const unit = im.unit ? ` · ${im.unit}` : "";
   const kind = im.unitKind ? ` (${KIND_SHORT[im.unitKind]})` : "";
   return `${ROLE_LABEL[im.role]}${unit}${kind}`;
@@ -160,6 +219,17 @@ export function ImpersonationBanner() {
           <p className="text-xs leading-tight" style={{ color: "#f6e6c4" }}>
             You are {realName ?? "signed in as yourself"}. Changes are made as{" "}
             {firstName} and logged to you.
+          </p>
+          <p className="text-xs leading-tight" style={{ color: "#f6e6c4" }} data-testid="impersonation-role-links">
+            Can access:{" "}
+            {ROLE_LINKS[impersonating.role].map((link, i) => (
+              <span key={link.href}>
+                {i > 0 && " · "}
+                <Link href={link.href} className="underline hover:no-underline" style={{ color: AMBER_TEXT }}>
+                  {link.label}
+                </Link>
+              </span>
+            ))}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">

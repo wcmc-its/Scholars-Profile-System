@@ -28,15 +28,26 @@ function selectByCode(
   return pool.map((r) => ({ code: r.code, name: r.name }));
 }
 
+function selectById(
+  rows: Row[],
+  args: { where?: { id?: { in?: string[] } } } | undefined,
+): Array<{ id: string; name: string }> {
+  const inList = args?.where?.id?.in;
+  const pool = inList ? rows.filter((r) => inList.includes(r.code)) : rows;
+  return pool.map((r) => ({ id: r.code, name: r.name }));
+}
+
 function makeClient(opts: {
   grants?: Grant[];
   departments?: Row[];
   divisions?: Row[];
   centers?: Row[];
+  cores?: Row[];
 }) {
   const dept = vi.fn(async (args?: never) => selectByCode(opts.departments ?? [], args));
   const div = vi.fn(async (args?: never) => selectByCode(opts.divisions ?? [], args));
   const ctr = vi.fn(async (args?: never) => selectByCode(opts.centers ?? [], args));
+  const core = vi.fn(async (args?: never) => selectById(opts.cores ?? [], args));
   const grants = vi.fn(async () => (opts.grants ?? []).map((g) => ({ ...g })));
   return {
     client: {
@@ -44,8 +55,18 @@ function makeClient(opts: {
       department: { findMany: dept },
       division: { findMany: div },
       center: { findMany: ctr },
+      // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
+      // query; it used to be a nested `leaders` relation on `center`.
+      orgUnitRoleAssignment: {
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async () => ({})),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      core: { findMany: core },
     } as never,
-    spies: { grants, dept, div, ctr },
+    spies: { grants, dept, div, ctr, core },
   };
 }
 
@@ -59,6 +80,7 @@ describe("unitEditHref / unitKindLabel", () => {
     expect(unitKindLabel("department")).toBe("Department");
     expect(unitKindLabel("division")).toBe("Division");
     expect(unitKindLabel("center")).toBe("Center");
+    expect(unitKindLabel("core")).toBe("Core");
   });
 });
 
@@ -66,10 +88,18 @@ describe("loadManageableUnits", () => {
   it("returns all-empty and skips name lookups when there are no grants", async () => {
     const { client, spies } = makeClient({ grants: [] });
     const result = await loadManageableUnits("cwid1", client);
-    expect(result).toEqual({ departments: [], divisions: [], centers: [], total: 0 });
+    expect(result).toEqual({
+      departments: [],
+      divisions: [],
+      centers: [],
+      cores: [],
+      institutions: [],
+      total: 0,
+    });
     expect(spies.dept).not.toHaveBeenCalled();
     expect(spies.div).not.toHaveBeenCalled();
     expect(spies.ctr).not.toHaveBeenCalled();
+    expect(spies.core).not.toHaveBeenCalled();
   });
 
   it("groups grants by kind, resolves names, and builds hrefs", async () => {
@@ -78,13 +108,24 @@ describe("loadManageableUnits", () => {
         { entityType: "department", entityId: "N1280", role: "owner" },
         { entityType: "division", entityId: "D-CARD", role: "curator" },
         { entityType: "center", entityId: "man-onc", role: "owner" },
+        { entityType: "core", entityId: "2", role: "owner" },
       ],
       departments: [{ code: "N1280", name: "Medicine" }],
       divisions: [{ code: "D-CARD", name: "Cardiology" }],
       centers: [{ code: "man-onc", name: "Cancer Center" }],
+      cores: [{ code: "2", name: "Biomedical Imaging" }],
     });
     const r = await loadManageableUnits("cwid1", client);
-    expect(r.total).toBe(3);
+    expect(r.total).toBe(4);
+    expect(r.cores).toEqual([
+      {
+        kind: "core",
+        code: "2",
+        name: "Biomedical Imaging",
+        role: "owner",
+        href: "/edit/core/2",
+      },
+    ]);
     expect(r.departments).toEqual([
       {
         kind: "department",
@@ -154,6 +195,27 @@ describe("loadManageableUnits", () => {
     expect(r.total).toBe(1);
   });
 
+  it("resolves an institution grant from the static catalog (no table read) and links it to the Profiles roster; drops an unmapped code", async () => {
+    const { client, spies } = makeClient({
+      grants: [
+        { entityType: "institution", entityId: "HMC", role: "owner" },
+        { entityType: "institution", entityId: "NOT-A-CODE", role: "curator" },
+      ],
+    });
+    const r = await loadManageableUnits("cwid1", client);
+    expect(r.institutions).toEqual([
+      {
+        kind: "institution",
+        code: "HMC",
+        name: "Hamad Medical Corporation",
+        role: "owner",
+        href: "/edit/profiles",
+      },
+    ]);
+    expect(r.total).toBe(1);
+    expect(spies.dept).not.toHaveBeenCalled();
+  });
+
   it("sorts each group by name", async () => {
     const { client } = makeClient({
       grants: [
@@ -196,7 +258,6 @@ type DeptRow = {
   officialName?: string | null;
   compactName?: string | null;
   category?: string;
-  chairCwid?: string | null;
   scholarCount?: number;
   source?: string;
 };
@@ -205,7 +266,6 @@ type DivRow = {
   name: string;
   slug?: string;
   description?: string | null;
-  chiefCwid?: string | null;
   scholarCount?: number;
   source?: string;
   deptCode?: string;
@@ -219,11 +279,18 @@ type CtrRow = {
   officialName?: string | null;
   compactName?: string | null;
   centerType?: string;
-  directorCwid?: string | null;
-  leaderInterim?: boolean;
   scholarCount?: number;
   sortOrder?: number;
   source?: string;
+};
+// #2542 contract A — chair/chief/director all arrive as `OrgUnitRoleAssignment`
+// rows from sibling queries keyed by `entityType`; none of the four legacy
+// columns exist as a read source any more.
+type LeaderAssignment = {
+  entityType: "department" | "division" | "center";
+  entityId: string;
+  cwid: string;
+  interim: boolean;
 };
 type Suppr = { entityType: string; entityId: string };
 type ScholarRow = { cwid: string; preferredName: string };
@@ -233,19 +300,33 @@ type MembershipRow = {
   startDate?: Date | null;
   endDate?: Date | null;
 };
+type CoreRow = {
+  id: string;
+  name: string;
+  description?: string | null;
+  source?: string;
+  leaders?: Array<{ cwid: string; interim?: boolean }>;
+};
 
 function makeDirectoryClient(opts: {
   departments?: DeptRow[];
   divisions?: DivRow[];
   centers?: CtrRow[];
+  cores?: CoreRow[];
   suppressions?: Suppr[];
   scholars?: ScholarRow[];
   /** Center roster rows — centers count live off these, never off the row. */
   memberships?: MembershipRow[];
+  /** #2542 contract A — chair/chief/director assignments, fetched as three
+   *  sibling queries (one per `entityType`). */
+  leaderAssignments?: LeaderAssignment[];
 }) {
   const dept = vi.fn(async () => opts.departments ?? []);
   const div = vi.fn(async () => opts.divisions ?? []);
   const ctr = vi.fn(async () => opts.centers ?? []);
+  const core = vi.fn(async () =>
+    (opts.cores ?? []).map((r) => ({ source: "reciterai-core-dictionary", leaders: [], ...r })),
+  );
   const suppression = vi.fn(async () => opts.suppressions ?? []);
   const scholar = vi.fn(async (args?: { where?: { cwid?: { in?: string[] } } }) => {
     const inList = args?.where?.cwid?.in ?? [];
@@ -259,16 +340,27 @@ function makeDirectoryClient(opts: {
         .map((m) => ({ startDate: null, endDate: null, ...m }));
     },
   );
+  // Dispatches by `where.entityType` — the loader issues three sibling
+  // queries (department/division/center), one per leadership kind. No
+  // assignment rows by default, so a fixture that does not care about
+  // leadership need not spell any out.
+  const orgUnitRoleAssignment = vi.fn(async (args?: { where?: { entityType?: string } }) => {
+    const entityType = args?.where?.entityType;
+    return (opts.leaderAssignments ?? []).filter((a) => a.entityType === entityType);
+  });
   return {
     client: {
       department: { findMany: dept },
       division: { findMany: div },
       center: { findMany: ctr },
+      core: { findMany: core },
       suppression: { findMany: suppression },
       scholar: { findMany: scholar },
       centerMembership: { findMany: centerMembership },
+      // #2542 — the director is an assignment row, fetched as a sibling query.
+      orgUnitRoleAssignment: { findMany: orgUnitRoleAssignment },
     } as never,
-    spies: { dept, div, ctr, suppression, scholar, centerMembership },
+    spies: { dept, div, ctr, core, suppression, scholar, centerMembership, orgUnitRoleAssignment },
   };
 }
 
@@ -284,12 +376,14 @@ describe("loadAllUnitsDirectory", () => {
           officialName: "Samuel J. Wood Library",
           compactName: "Library",
           category: "administrative",
-          chairCwid: "abc1234",
           scholarCount: 5,
           source: "ED",
         },
       ],
       scholars: [{ cwid: "abc1234", preferredName: "Jane Chair" }],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N1280", cwid: "abc1234", interim: false },
+      ],
     });
     const r = await loadAllUnitsDirectory(client);
     expect(r).toHaveLength(1);
@@ -319,7 +413,6 @@ describe("loadAllUnitsDirectory", () => {
           name: "Cardiology",
           slug: "cardiology",
           description: null,
-          chiefCwid: null,
           scholarCount: 2,
           source: "ED",
           deptCode: "N1280",
@@ -347,14 +440,15 @@ describe("loadAllUnitsDirectory", () => {
           slug: "cancer",
           description: "Onc.",
           centerType: "institute",
-          directorCwid: "dir9999",
-          leaderInterim: true,
           scholarCount: 9,
           sortOrder: 3,
           source: "seed",
         },
       ],
       scholars: [{ cwid: "dir9999", preferredName: "Acting Director" }],
+      leaderAssignments: [
+        { entityType: "center", entityId: "man-onc", cwid: "dir9999", interim: true },
+      ],
     });
     const r = await loadAllUnitsDirectory(client);
     const ctr = r.find((u) => u.code === "man-onc")!;
@@ -368,7 +462,10 @@ describe("loadAllUnitsDirectory", () => {
 
   it("leaderName is null (not the bare cwid) when the leader isn't a scholar — gap signal", async () => {
     const { client } = makeDirectoryClient({
-      departments: [{ code: "N9", name: "Orphan Dept", chairCwid: "ghost1", scholarCount: 0 }],
+      departments: [{ code: "N9", name: "Orphan Dept", scholarCount: 0 }],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N9", cwid: "ghost1", interim: false },
+      ],
       // no matching scholar row for ghost1
     });
     const r = await loadAllUnitsDirectory(client);
@@ -379,8 +476,9 @@ describe("loadAllUnitsDirectory", () => {
   it("external-leader overlay (keyed by unit code) wins with no scholar row", async () => {
     const { client } = makeDirectoryClient({
       // N1540 is Joel Stein in EXTERNAL_LEADERS; jos7021 has no scholar row.
-      departments: [
-        { code: "N1540", name: "Rehabilitation Medicine", chairCwid: "jos7021", scholarCount: 1 },
+      departments: [{ code: "N1540", name: "Rehabilitation Medicine", scholarCount: 1 }],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N1540", cwid: "jos7021", interim: false },
       ],
     });
     const r = await loadAllUnitsDirectory(client);
@@ -414,7 +512,7 @@ describe("loadAllUnitsDirectory", () => {
     expect(r.find((u) => u.code === "live")!.retired).toBe(false);
   });
 
-  it("sorts by kind (dept, division, center) then name", async () => {
+  it("sorts by kind (dept, division, center, core) then name — cores last", async () => {
     const { client } = makeDirectoryClient({
       departments: [
         { code: "N2", name: "Surgery", scholarCount: 0 },
@@ -422,6 +520,7 @@ describe("loadAllUnitsDirectory", () => {
       ],
       divisions: [{ code: "D1", name: "Cardiology", scholarCount: 0 }],
       centers: [{ code: "C1", name: "Brain Center", scholarCount: 0 }],
+      cores: [{ id: "1", name: "Aardvark Core" }], // name-sorts first alphabetically — kind wins anyway
     });
     const r = await loadAllUnitsDirectory(client);
     expect(r.map((u) => `${u.kind}:${u.name}`)).toEqual([
@@ -429,7 +528,72 @@ describe("loadAllUnitsDirectory", () => {
       "department:Surgery",
       "division:Cardiology",
       "center:Brain Center",
+      "core:Aardvark Core",
     ]);
+  });
+
+  it("maps a core: name-only official/compact, id as both code and slug, no parent/category/centerType, never retired", async () => {
+    const { client } = makeDirectoryClient({
+      cores: [{ id: "14", name: "Research Informatics", description: "The core.", source: "reciterai-core-dictionary" }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({
+      kind: "core",
+      code: "14",
+      officialName: "Research Informatics",
+      compactName: "Research Informatics",
+      description: "The core.",
+      slug: "14",
+      kindLabel: "Core",
+      category: null,
+      centerType: null,
+      parentDeptCode: null,
+      parentDeptName: null,
+      sortOrder: null,
+      scholarCount: 0,
+      retired: false,
+      href: "/edit/core/14",
+    });
+  });
+
+  it("core leadership: first leader by sortOrder resolved, interim carried, skips the external-leader overlay", async () => {
+    const { client } = makeDirectoryClient({
+      // N1540 is Joel Stein in EXTERNAL_LEADERS — a core id colliding with that
+      // code string would be a coincidence, not a real overlay match, so this
+      // core must NOT pick up the overlay name.
+      cores: [
+        {
+          id: "N1540",
+          name: "Multi-Led Core",
+          leaders: [
+            { cwid: "second1", interim: false },
+            { cwid: "first0001", interim: true },
+          ],
+        },
+      ],
+      scholars: [
+        { cwid: "first0001", preferredName: "First Leader" },
+        { cwid: "second1", preferredName: "Second Leader" },
+      ],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    // The mock ignores the real orderBy/take Prisma args, so this only proves
+    // the mapping reads leaders[0] — sortOrder ordering itself is DB-enforced,
+    // not something a mocked findMany can verify.
+    expect(r[0].leaderCwid).toBe("second1");
+    expect(r[0].leaderName).toBe("Second Leader");
+    expect(r[0].leaderInterim).toBe(false);
+  });
+
+  it("a leaderless core has null leaderCwid/leaderName and false leaderInterim", async () => {
+    const { client } = makeDirectoryClient({
+      cores: [{ id: "2", name: "No Leader Core" }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r[0].leaderCwid).toBeNull();
+    expect(r[0].leaderName).toBeNull();
+    expect(r[0].leaderInterim).toBe(false);
   });
 
   // The directory must count a center's roster live. `Center.scholarCount`
@@ -461,5 +625,32 @@ describe("loadAllUnitsDirectory", () => {
     });
     const r = await loadAllUnitsDirectory(client);
     expect(r[0].scholarCount).toBe(0);
+  });
+
+  // #2542 contract A — dept/div leaderInterim now comes from the assignment
+  // row's own `interim` flag (there is no column any more). Previously this
+  // was hardcoded `false` for both kinds.
+  it("a department/division assignment's interim flag carries through", async () => {
+    const { client } = makeDirectoryClient({
+      departments: [{ code: "N1280", name: "Medicine", scholarCount: 0 }],
+      divisions: [{ code: "D-CARD", name: "Cardiology", scholarCount: 0 }],
+      scholars: [
+        { cwid: "chr001", preferredName: "Dana Chair" },
+        { cwid: "chf001", preferredName: "Chris Chief" },
+      ],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N1280", cwid: "chr001", interim: true },
+        { entityType: "division", entityId: "D-CARD", cwid: "chf001", interim: false },
+      ],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r.find((u) => u.code === "N1280")).toMatchObject({
+      leaderCwid: "chr001",
+      leaderInterim: true,
+    });
+    expect(r.find((u) => u.code === "D-CARD")).toMatchObject({
+      leaderCwid: "chf001",
+      leaderInterim: false,
+    });
   });
 });

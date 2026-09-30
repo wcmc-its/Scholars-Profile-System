@@ -1,0 +1,44 @@
+-- #2578 — record WHERE the news-mention name matched, so the approval queue can
+-- tell a reviewer why a candidate scored the way it did.
+--
+-- The queue proposes (scholar, article) candidates from a deterministic prose
+-- name scan, and a large share of reviewer REJECTIONS were endowed-professorship
+-- titles that embed a DIFFERENT faculty member's name — usually an emeritus or
+-- memorialized figure the article is not about:
+--
+--   "…and the O. Wayne Isom Professor of Cardiothoracic Surgery, commended…"
+--       proposed O. Wayne Isom at HIGH. The feed's own tags name Dr. Leonard
+--       Girardi, who holds that chair; Isom is not tagged.
+--   "…the Gebroe Family Professor of Hematology-Oncology in honor of Morton
+--    Coleman, M.D. …" proposed Morton Coleman at HIGH. The feed tags Dr. Scott
+--       Tagawa; Coleman is not tagged.
+--
+-- The fix is that the newsroom feed already publishes its own faculty tag list
+-- per story (`term_node_tid`), authored by the people who wrote the article, and
+-- the ETL was parsing it out and throwing it away. `match_basis` records which
+-- stream produced the hit:
+--
+--   'TAG'     the feed tags this scholar on this story       -> likelihood HIGH
+--   'BODY'    named in the article prose                     -> likelihood MEDIUM
+--   'CAPTION' named only in a photo's alt text               -> likelihood LOW
+--   'TITLE'   named in prose, but EVERY occurrence sits
+--             inside an endowed-chair / memorial phrase      -> likelihood LOW
+--
+-- It is a SEPARATE column rather than more values on `likelihood` because the
+-- two are orthogonal: `likelihood` also folds in contested-ness (a folded full
+-- name shared by >1 scholar caps at MEDIUM however it was found), so it cannot
+-- carry both "how confident" and "found where".
+--
+-- Additive and nullable, no backfill. Existing rows keep match_basis NULL, which
+-- reads correctly as "matched before this signal existed" — and the next
+-- etl/news run recomputes basis and likelihood for every ETL-owned NAME row it
+-- re-scrapes (reconcile() patches detected_name/likelihood/match_basis/source_ref
+-- on a NAME->NAME refresh). A human-touched row is never re-tiered, which is the
+-- table's standing review-state discipline, not an oversight: a curator's
+-- approve/reject already outranks any score the ETL could assign.
+--
+-- VARCHAR(16) leaves headroom over the longest current value ('CAPTION', 7).
+-- Null for VIVO (identifier join) and CURATOR (manual entry) rows, which have no
+-- name match to describe.
+
+ALTER TABLE `news_mention` ADD COLUMN `match_basis` VARCHAR(16) NULL;

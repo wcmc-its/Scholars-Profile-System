@@ -10,15 +10,17 @@
  *
  * Auth + targeting mirror the sibling POPS preview / CV download routes exactly:
  * `?cwid=` defaults to the session cwid (self); a foreign target is gated by the
- * SAME `authorizeOverviewWrite` predicate (no drift). Flag-gated behind
- * `EDIT_CV_EXPORT` (off ⇒ 404). Mentees re-apply the mentor's FERPA hide choices
- * (the loader does not). Read-only; nothing is persisted.
+ * SAME `authorizeCvExport` predicate (no drift) — the bio-write predicate
+ * widened for the read-only `cv_generator` role (#2482), since this route never
+ * writes anything. Flag-gated behind `EDIT_CV_EXPORT` (off ⇒ 404). Mentees
+ * re-apply the mentor's FERPA hide choices (the loader does not). Read-only;
+ * nothing is persisted.
  */
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
-import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
+import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { cvOutline, isCvEnabled, type PopsEnrichment } from "@/lib/edit/cv-export";
 import { fetchPops } from "@/lib/edit/pops";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
@@ -41,7 +43,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const requested = new URL(request.url).searchParams.get("cwid")?.trim();
   const targetCwid = requested && requested.length > 0 ? requested : session.cwid;
 
-  const authz = await authorizeOverviewWrite({
+  const authz = await authorizeCvExport({
     session,
     realCwid,
     impersonatedCwid,

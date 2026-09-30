@@ -32,6 +32,7 @@ const {
   menteeCopubPubFindMany,
   suppressionFindMany,
   publicationAuthorFindMany,
+  publicationFindMany,
 } = vi.hoisted(() => ({
   phdFindMany: vi.fn(async () => [] as unknown[]),
   postdocFindMany: vi.fn(async () => [] as unknown[]),
@@ -46,6 +47,7 @@ const {
   // Issue #443/#185 — dark-pmid suppression of the badge count + chip preview.
   suppressionFindMany: vi.fn(async () => [] as unknown[]),
   publicationAuthorFindMany: vi.fn(async () => [] as unknown[]),
+  publicationFindMany: vi.fn(async () => [] as unknown[]),
 }));
 
 vi.mock("@/lib/sources/reciterdb", () => ({ withReciterConnection }));
@@ -65,6 +67,7 @@ vi.mock("@/lib/db", () => ({
     // console.error count the DE-SILENCE case below asserts on.
     fieldOverride: { findUnique: async () => null },
     publicationAuthor: { findMany: publicationAuthorFindMany },
+    publication: { findMany: publicationFindMany },
   },
 }));
 
@@ -90,6 +93,7 @@ beforeEach(() => {
   // (loadPublicationSuppressions early-returns on zero rows).
   suppressionFindMany.mockResolvedValue([]);
   publicationAuthorFindMany.mockResolvedValue([]);
+  publicationFindMany.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -251,6 +255,54 @@ describe("getMenteesForMentor — MENTORING_COPUB_BRIDGE (issue #443)", () => {
 
     expect(copubSourceAvailable).toBe(true);
     expect(mentees[0].copublicationCount).toBe(0);
+  });
+
+  it("#2047: a sourced mentee missing from a non-empty bridge gets local co-pubs, not a stale zero", async () => {
+    // Bridge last imported before m1 landed in the (nightly) roster: rows exist
+    // for another mentee only, and the table is non-empty, so the source reads
+    // as available. m1's co-pubs must come from local authorship, not render 0.
+    phdFindMany.mockResolvedValue([
+      PHD_ROW,
+      { ...PHD_ROW, menteeCwid: "m2", menteeFirstName: "Casey" },
+    ]);
+    menteeCopubFindMany.mockResolvedValue([{ menteeCwid: "m2", count: 5, preview: [] }]);
+    publicationAuthorFindMany.mockResolvedValue([
+      { cwid: "mentor01", pmid: "111" },
+      { cwid: "mentor01", pmid: "222" },
+      { cwid: "m1", pmid: "111" },
+      { cwid: "m1", pmid: "222" },
+      { cwid: "m1", pmid: "333" }, // m1-only: not a co-pub
+    ]);
+    publicationFindMany.mockResolvedValue(
+      ["111", "222"].map((pmid, i) => ({
+        pmid,
+        title: `Shared ${pmid}`,
+        journal: "J. Test",
+        year: 2024 - i,
+        doi: null,
+        pmcid: null,
+        volume: null,
+        issue: null,
+        pages: null,
+        citationCount: 0,
+        abstract: null,
+        fullAuthorsString: "Mentor A, Mentee B",
+      })),
+    );
+
+    const { mentees, copubSourceAvailable } = await getMenteesForMentor("mentor01");
+
+    expect(copubSourceAvailable).toBe(true);
+    const byCwid = new Map(mentees.map((m) => [m.cwid, m]));
+    expect(byCwid.get("m1")?.copublicationCount).toBe(2);
+    expect(byCwid.get("m1")?.copublicationPreview.map((p) => p.pmid)).toEqual([111, 222]);
+    // The bridge-covered mentee is untouched, and only the gap is asked locally.
+    expect(byCwid.get("m2")?.copublicationCount).toBe(5);
+    const [args] = publicationAuthorFindMany.mock.calls[0] as unknown as [
+      { where: { cwid: { in: string[] } } },
+    ];
+    expect(args.where.cwid.in).toEqual(["mentor01", "m1"]);
+    expect(withReciterConnection).not.toHaveBeenCalled();
   });
 
   it("degrades to unavailable when the bridge table is empty (not yet imported)", async () => {

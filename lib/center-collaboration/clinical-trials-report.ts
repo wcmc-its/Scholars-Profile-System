@@ -21,8 +21,8 @@
  *     profile section only (and is already "on" in every env —
  *     `cdk/lib/app-stack.ts`); the underlying ETL table is fair game for an
  *     authenticated admin report regardless of the public flag's state.
- *   - Withdrawn trials are NOT dropped (the public profile drops them via
- *     `isWithdrawnTrialStatus`). An admin report is a work tool — showing the
+ *   - Withdrawn and suspended trials are NOT dropped (the public profile drops them via
+ *     `isHiddenTrialStatus`). An admin report is a work tool — showing the
  *     full set of links beats a curated subset.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -40,6 +40,8 @@ export type ClinicalTrialsReportClient = Pick<
 export type ClinicalTrialsReportRow = {
   cwid: string;
   personName: string;
+  /** `Scholar.primaryDepartment`; null when unknown. */
+  department: string | null;
   /** 'Principal Investigator' | 'Investigator' — raw `PersonClinicalTrial.role`. */
   role: string;
   protocolNumber: string;
@@ -48,6 +50,8 @@ export type ClinicalTrialsReportRow = {
   title: string;
   phase: string | null;
   principalSponsor: string | null;
+  /** `ClinicalTrial.sponsorClass` key (industry, nih, ...); null = unknown. */
+  sponsorClass: string | null;
   status: string | null;
   /** Coarse active/completed split, via the same `isActiveTrialStatus` the
    *  public profile section uses — drives the active-first sort. */
@@ -71,12 +75,12 @@ export async function loadClinicalTrialsReport(
   const today = todayIso();
   const memberships = await client.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, startDate: true, endDate: true },
+    select: { cwid: true, startDate: true, endDate: true, membershipRoleKey: true },
   });
   const activeCwids = [
     ...new Set(
       memberships
-        .filter((m) => isCenterMembershipActive(m.startDate, m.endDate, today))
+        .filter((m) => isCenterMembershipActive(m, today))
         .map((m) => m.cwid),
     ),
   ];
@@ -84,10 +88,11 @@ export async function loadClinicalTrialsReport(
 
   const scholars = await client.scholar.findMany({
     where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
-    select: { cwid: true, preferredName: true },
+    select: { cwid: true, preferredName: true, primaryDepartment: true },
   });
   if (scholars.length === 0) return [];
   const nameByCwid = new Map(scholars.map((s) => [s.cwid, s.preferredName]));
+  const deptByCwid = new Map(scholars.map((s) => [s.cwid, s.primaryDepartment ?? null]));
 
   const links = await client.personClinicalTrial.findMany({
     where: { cwid: { in: [...nameByCwid.keys()] } },
@@ -97,12 +102,14 @@ export async function loadClinicalTrialsReport(
   const rows: ClinicalTrialsReportRow[] = links.map((link) => ({
     cwid: link.cwid,
     personName: nameByCwid.get(link.cwid) ?? link.cwid,
+    department: deptByCwid.get(link.cwid) ?? null,
     role: link.role,
     protocolNumber: link.protocolNumber,
     nctNumber: link.trial.nctNumber,
     title: link.trial.title,
     phase: link.trial.phase,
     principalSponsor: link.trial.principalSponsor,
+    sponsorClass: link.trial.sponsorClass,
     status: link.trial.status,
     isActive: isActiveTrialStatus(link.trial.status),
   }));

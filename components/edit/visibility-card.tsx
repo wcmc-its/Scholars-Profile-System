@@ -64,7 +64,9 @@ import type { EditContextScholar } from "@/lib/api/edit-context";
  * whole-profile control with one switch per hideable section.
  */
 export type SectionVisibilityCardState = {
-  /** Section keys (`SECTION_VISIBILITY_FIELDS`) currently hidden. */
+  /** Section keys (`SECTION_VISIBILITY_FIELDS`) with a stored `"true"`
+   *  override — "hidden" for every key except `showDatasets`, which is
+   *  inverted (see `SECTION_PANEL_DEFS`). */
   hidden: readonly string[];
   /** Per-section hidden-RECORD counts from the edit-context suppression state
    *  (no new query) — only the three sections with per-record hiding carry one. */
@@ -86,7 +88,14 @@ export type SectionVisibilityCardState = {
 /** The nine hideable sections, in display order. `recordAttr` links the audit
  *  count to that section's record-level card; `null` = no per-record hiding.
  *  `hideTechnologies` is applicability-gated (see `SectionsPanel`) — it only
- *  renders for a scholar who actually has a CTL technologies section. */
+ *  renders for a scholar who actually has a CTL technologies section.
+ *
+ *  `showDatasets` is the ONE inverted key: `DATA_SHARING_SECTION` defaults
+ *  off at the env level, so its row is an opt-IN, not a hide. `SectionsPanel`
+ *  special-cases `key === "showDatasets"` (isHidden calc, confirm-gating
+ *  direction, and the stored-value polarity) to flip the semantics while
+ *  keeping this row's on-screen "Hidden"/"Visible" language identical to its
+ *  eight siblings. */
 const SECTION_PANEL_DEFS = [
   { key: "hideMentoring", label: "Mentoring", recordAttr: "mentees", countKey: "hideMentoring" },
   { key: "hideEducation", label: "Education", recordAttr: "education", countKey: "hideEducation" },
@@ -96,7 +105,7 @@ const SECTION_PANEL_DEFS = [
   { key: "hideClinicalTrials", label: "Clinical research", recordAttr: null, countKey: null },
   { key: "hideMethods", label: "Methods & Tools", recordAttr: null, countKey: null },
   { key: "hideTechnologies", label: "Available technologies", recordAttr: null, countKey: null },
-  { key: "hideDatasets", label: "Datasets", recordAttr: null, countKey: null },
+  { key: "showDatasets", label: "Datasets", recordAttr: null, countKey: null },
 ] as const;
 
 type SuppressionRow = { id: string; reason: string };
@@ -354,10 +363,15 @@ function SectionsPanel({
   const [pendingKey, setPendingKey] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
+  // `hide` is the section's semantic target state (true = hidden), matching
+  // this row's on-screen "Hidden"/"Visible" language for every def — INCLUDING
+  // `showDatasets`, whose stored field value is the opposite polarity (`"true"`
+  // means shown, not hidden), so `storedTrue` flips it just for that one key.
   async function writeSection(key: string, hide: boolean) {
     setError(null);
     setPendingKey(key);
     try {
+      const storedTrue = key === "showDatasets" ? !hide : hide;
       const res = await fetch("/api/edit/field", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -365,7 +379,7 @@ function SectionsPanel({
           entityType: "scholar",
           entityId: cwid,
           fieldName: key,
-          value: hide ? "true" : "false",
+          value: storedTrue ? "true" : "false",
         }),
       });
       const data = (await res.json()) as { ok?: boolean };
@@ -375,7 +389,7 @@ function SectionsPanel({
       }
       setHidden((prev) => {
         const next = new Set(prev);
-        if (hide) next.add(key);
+        if (storedTrue) next.add(key);
         else next.delete(key);
         return next;
       });
@@ -388,10 +402,14 @@ function SectionsPanel({
   }
 
   // Hide (switch → on) gates on a confirm dialog; show (switch → off) applies
-  // immediately (UI-SPEC § Feedback — never gate restoration).
+  // immediately (UI-SPEC § Feedback — never gate restoration). `showDatasets`
+  // reverses which transition is sensitive: it's SHOWING the section (exposing
+  // data-sharing info publicly for the first time against the env-level
+  // default-off) that needs confirmation, not hiding it back to default.
   function onToggle(key: string, checked: boolean) {
-    if (checked) setConfirmKey(key);
-    else void writeSection(key, false);
+    const needsConfirm = key === "showDatasets" ? !checked : checked;
+    if (needsConfirm) setConfirmKey(key);
+    else void writeSection(key, checked);
   }
 
   const poss = showThirdPerson ? `${scholarName ?? "this scholar"}'s` : "your";
@@ -416,7 +434,9 @@ function SectionsPanel({
       >
         <ul className="divide-border flex flex-col divide-y">
           {defs.map((def) => {
-            const isHidden = hidden.has(def.key);
+            // `showDatasets` stores the opposite polarity ("true" = shown) —
+            // see the SECTION_PANEL_DEFS comment above.
+            const isHidden = def.key === "showDatasets" ? !hidden.has(def.key) : hidden.has(def.key);
             const count = def.countKey ? state.hiddenRecordCounts[def.countKey] : 0;
             return (
               <li
@@ -459,20 +479,30 @@ function SectionsPanel({
         )}
       </EditPanel>
 
+      {/* `showDatasets` is the one row where confirm gates SHOWING, not hiding
+          (see `onToggle`) — flip the copy/label/variant/target for it. */}
       <ConfirmDialog
         open={confirmKey !== null}
         onOpenChange={(open) => {
           if (!open) setConfirmKey(null);
         }}
-        title={`Hide the ${confirmDef?.label ?? "section"} section?`}
-        description={`The ${confirmDef?.label ?? "section"} section will be removed from ${poss} public profile. The underlying data stays in Scholars and remains searchable — you can show it again at any time.`}
+        title={
+          confirmKey === "showDatasets"
+            ? `Show the ${confirmDef?.label ?? "section"} section?`
+            : `Hide the ${confirmDef?.label ?? "section"} section?`
+        }
+        description={
+          confirmKey === "showDatasets"
+            ? `The ${confirmDef?.label ?? "section"} section will be added to ${poss} public profile, showing dataset deposit records you're a contributor on.`
+            : `The ${confirmDef?.label ?? "section"} section will be removed from ${poss} public profile. The underlying data stays in Scholars and remains searchable — you can show it again at any time.`
+        }
         reasonMode="optional-preset"
-        confirmLabel="Hide section"
-        confirmVariant="destructive"
+        confirmLabel={confirmKey === "showDatasets" ? "Show section" : "Hide section"}
+        confirmVariant={confirmKey === "showDatasets" ? "default" : "destructive"}
         onConfirm={async () => {
           const key = confirmKey;
           if (!key) return;
-          await writeSection(key, true);
+          await writeSection(key, key !== "showDatasets");
           setConfirmKey(null);
         }}
       />

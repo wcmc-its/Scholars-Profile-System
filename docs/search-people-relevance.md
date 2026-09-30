@@ -12,7 +12,8 @@ Changing ranking or evidence display means satisfying that contract, not just ma
 
 Scope: `searchPeople` (`lib/api/search.ts:1537`). The Publications and Funding tabs use
 `searchPublications` / `searchFunding`, which share the MeSH resolver but none of the ranking machinery
-described here. See [Traps](#traps).
+described here. So does the Clinical research tab (`searchTrials`, `lib/api/search-trials.ts`,
+flag `SEARCH_TRIALS_TAB`). See [Traps](#traps).
 
 ## The formula
 
@@ -299,13 +300,14 @@ and the escalation described in Layer 3, which demotes this must to optional.
 | `publicationTitles` | 6 | **blob** — see below |
 | `publicationMesh` | 4 | **blob** — see below |
 | `methodFamily` | 4 | appended when `SEARCH_PEOPLE_METHOD_FAMILY` is on (`lib/api/search.ts:2044, 2077`) |
+| `trialText` | 1 | **blob** — appended when `SEARCH_PEOPLE_TRIAL_EVIDENCE` is on (`lib/api/search.ts:2311` at 50e336d8): titles, conditions and MeSH labels of the scholar's PI trials (see [Clinical research evidence](#clinical-research-evidence)) |
 
 Compare the non-topic default ladder (`lib/search.ts:662-671`): name 10, AOI 6, titles 1, mesh 0.5. The
 topic ladder inverts that deliberately — a topic query is not a name query.
 
-**`methodFamily` is SET-affecting**, because it joins the msm-bearing `must`. It does *not* change msm
+**`methodFamily` and `trialText` are SET-affecting**, because they join the msm-bearing `must`. Neither changes msm
 token accounting — required-token count is a function of the analyzed **query**, not the field list
-(`lib/search.ts:701-702`, and the code says so at `lib/api/search.ts:2034-2036`). It adds one more place a
+(`lib/search.ts:701-702`, and the code says so at `lib/api/search.ts:2034-2036`). Each adds one more place a
 token can be found.
 
 ### Why `cross_fields` + `operator: "or"`
@@ -496,6 +498,33 @@ MESH_ATTRIBUTION_WEIGHT[tier] }` pushed at `lib/api/search.ts:2812-2819` into th
 escalation, of the sparse count, and of scope. On a normal non-sparse `expanded` query this reorder plus
 the area boost is the concept layer's entire query-side footprint.
 
+### Clinical research evidence
+
+Flag `SEARCH_PEOPLE_TRIAL_EVIDENCE` (`resolveSearchPeopleTrialEvidence`, `lib/api/search-flags.ts:1551`,
+reads `=== "on"`). Wired `on` in staging, `off` in prod (`cdk/lib/app-stack.ts:2233`, grounded at
+50e336d8). Built by `loadTrialEvidenceByCwid` (`lib/search-trial-evidence.ts`) into two people-doc fields
+(`lib/search-index-docs.ts:1657-1658`), so the flag needs a people reindex behind it:
+
+- **Source.** `person_clinical_trial`, which holds PI links only (#2769), from the institutional OnCore
+  feed. Trials whose OnCore status the profile hides (withdrawn, suspended; `isHiddenTrialStatus`) are
+  skipped.
+- **`trialText`** — each trial's title, conditions and MeSH labels, joined. Enters the topic ladder at
+  boost 1 (see [Field ladder](#field-ladder)).
+- **`trialMeshUi`** — the trial's MeSH labels (ClinicalTrials.gov's NLM-assigned
+  `conditionBrowseModule`) resolved to descriptor UIs through `resolveMeshDescriptor`, the resolver the
+  RePORTER grant keywords use. A trial with no NCT number has no MeSH and contributes text only. The
+  build throws if no label resolves at all (a MeSH-map outage would otherwise strip every trial silently).
+
+With the flag on, `conceptUiClause` (`lib/api/search.ts:2299-2307`) ORs `trialMeshUi` into two of the
+three places above: the `match=concept` gate (**SET**, `:2662, :2668`) and the `MESH_ATTRIBUTION_WEIGHT`
+filter (**ORDER**, `:3172`). Escalate-on-sparse still keys on `publicationMeshUi` alone, so a trial tag
+never admits a scholar under `expanded` scope.
+
+Display: the hit carries `trialMatchCount` (`:4584-4591`), the number of the scholar's MeSH-tagged PI
+trials with at least one UI inside `descendantUis`; the card renders it as a secondary
+"Clinical research · N trials" line under Also matched, never the lead
+(`components/search/people-result-card.tsx:268-272`). Omitted when zero or when no concept resolved.
+
 ### Tiers
 
 `meshMatchTier(confidence, anchorCount, { fullQueryMatch })` (`lib/search.ts:813-830`): `partial` ->
@@ -551,6 +580,7 @@ On people, anchors act three ways:
 | contiguous-window decompose | resolves at `partial` | `SEARCH_MESH_RESOLUTION_FALLBACK` | `:1399-1401` |
 | window coverage guard | suppresses a window hit | `SEARCH_MESH_RESOLVE_TOKEN_COVERAGE` | `:1519-1521` |
 | acronym sense guard | returns **null** | `SEARCH_ACRONYM_SENSE_GUARD` | `:1412-1419` |
+| `SEARCH_PEOPLE_TRIAL_EVIDENCE` | off | on `:2233` | off | Adds `trialText^1` to the topic `must` and ORs `trialMeshUi` into the concept gate and attribution boost. Needs a people reindex. See [Clinical research evidence](#clinical-research-evidence). | `search-flags.ts:1551-1553`; `search.ts:2298-2311` |
 | `scope=exact` | resolution nulled by callers | URL param | `route.ts:226, 584` |
 
 These change **whether and which** descriptor resolves, and therefore whether every mechanic above exists

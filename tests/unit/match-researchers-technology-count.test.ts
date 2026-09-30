@@ -1,10 +1,10 @@
 /**
  * CTL licensable-IP counts on ranked researchers — display data only.
  *
- * `technologyCount` feeds the ★ column on /edit/find-researchers. It must be
- * attached to every row and must NEVER move the ordering: the translational-IP
- * boost that once read it was removed 2026-07-09 (unmeasured mechanism list,
- * synthetic-corpus evidence).
+ * `technologyCount` feeds the CTL-technologies affordances on the matcha
+ * surfaces. It must be attached to every row and must NEVER move the ordering:
+ * the translational-IP boost that once read it was removed 2026-07-09
+ * (unmeasured mechanism list, synthetic-corpus evidence).
  */
 import { describe, expect, it } from "vitest";
 

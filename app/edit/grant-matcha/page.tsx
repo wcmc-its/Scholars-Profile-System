@@ -4,20 +4,27 @@
  * per-concept OpenSearch fan-out → RRF fuse). Same surface as `/edit/matcha`, but the ask is
  * SEEDED from an opportunity's title + synopsis instead of a pasted sponsor description.
  *
- * Dark page (PR1): reachable by URL only while `GRANT_MATCHA` is on — no console nav tab yet
- * (a later PR surfaces it). Gate mirrors `/edit/matcha` (superuser OR development role) AND adds
+ * Gate mirrors `/edit/matcha` (superuser OR development role) AND adds
  * `isGrantMatchaEnabled()`; `notFound()` while either flag is off so the dark surface is never
- * revealed. The data route (`/api/edit/matcha`) is the real authorization boundary and re-checks.
- * `force-dynamic` + `noindex`, mirroring the other `/edit/*` pages.
+ * revealed. That is byte-for-byte the `grantMatcha` predicate in
+ * `lib/edit/console-tabs.server.ts` — the page admits exactly whom the nav tab shows (I2),
+ * the same hand-mirrored parity every sibling page keeps. The data route (`/api/edit/matcha`)
+ * is the real authorization boundary and re-checks. `force-dynamic` + `noindex`, mirroring the
+ * other `/edit/*` pages.
+ *
+ * The page splits into Browse / Submissions sub-tabs (`GrantMatchaTabs`): Browse is the
+ * matcher exactly as before; Submissions rehomes the opportunity URL intake (its original
+ * `/edit/find-researchers` mount was retired by the sunset).
  */
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { GrantMatchaPanel } from "@/components/edit/grant-matcha-panel";
+import { GrantMatchaTabs } from "@/components/edit/grant-matcha-tabs";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isMatchaEnabled } from "@/lib/api/matcha";
-import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
+import { isGrantMatchaEnabled, isMatchaAdminEnabled } from "@/lib/edit/grant-recs";
+import { isOpportunityIntakeEnabled } from "@/lib/edit/opportunity-submission";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -26,7 +33,7 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Grant Matcha — Scholars Profile Console",
+  title: "Grant Matcha — Scholars Console",
   robots: { index: false, follow: false },
 };
 
@@ -45,7 +52,16 @@ export default async function GrantMatchaPage() {
       path: "/edit/grant-matcha",
       reason: "not_developer_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell
+        active="grant-matcha"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
+        <ForbiddenEditPage session={session} />
+      </ConsoleShell>
+    );
   }
 
   // Fold into the shared console — mirrors `/edit/matcha`.
@@ -56,15 +72,16 @@ export default async function GrantMatchaPage() {
     : null;
 
   return (
-    // ponytail: reuse `active="matcha"` — this dark page has no nav tab of its own yet (a later PR
-    // adds one to `admin-subnav.tsx`). Grant Matcha IS Matcha, so highlighting Matcha is honest.
     <ConsoleShell
-      active="matcha"
+      active="grant-matcha"
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <GrantMatchaPanel />
+      <GrantMatchaTabs
+        intakeEnabled={isOpportunityIntakeEnabled()}
+        adminEnabled={isMatchaAdminEnabled()}
+      />
     </ConsoleShell>
   );
 }

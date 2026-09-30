@@ -63,6 +63,7 @@ function mockPeopleClient(
     // chief rows match.
     department: { findMany: vi.fn().mockResolvedValue([]) },
     division: { findMany: vi.fn().mockResolvedValue([]) },
+    orgUnitRoleAssignment: { findMany: vi.fn().mockResolvedValue([]) },
   } as unknown as Parameters<typeof buildPeopleDoc>[1];
 }
 
@@ -109,6 +110,9 @@ describe("buildPublicationDoc — golden snapshots", () => {
             preferredName: "Ann Researcher",
             deletedAt: null,
             status: "active",
+            // Institution facet — exercises the `wcmAuthorInstitutions` union
+            // (WCMC + HSS across the two displayable authors).
+            primaryOrgCode: "WCMC",
           },
         },
         {
@@ -139,6 +143,7 @@ describe("buildPublicationDoc — golden snapshots", () => {
             preferredName: "Bob Senior",
             deletedAt: null,
             status: "active",
+            primaryOrgCode: "HSS",
           },
         },
       ] as unknown as PublicationForIndex["authors"],
@@ -269,6 +274,8 @@ describe("buildPeopleDoc — golden snapshots", () => {
       // #2300 — direct-copy scalars (PEOPLE_INDEX_SELECT now selects both).
       hasClinicalProfile: true,
       professorialRank: "Associate Professor",
+      // Institution facet — direct-copy scalar, exercises the populated branch.
+      primaryOrgCode: "WCMC",
       deptCode: "MED",
       divCode: "CARD",
       department: { name: "Medicine" },
@@ -280,6 +287,9 @@ describe("buildPeopleDoc — golden snapshots", () => {
         {
           cwid: "ann1234",
           role: "PI",
+          // #2081 — `piRoleEver` keys on the funding-index row predicate, which
+          // needs a real (NOT NULL in the schema) externalId.
+          externalId: "INFOED-ACC-001-ann1234",
           endDate: FAR_FUTURE,
           mechanism: "R01",
         },

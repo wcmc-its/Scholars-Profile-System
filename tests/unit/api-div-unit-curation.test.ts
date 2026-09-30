@@ -28,6 +28,8 @@ const {
   mockSuppressionFindMany,
   mockFieldOverrideFindMany,
   mockSuppressionFindFirst,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockDivisionFindFirst: vi.fn(),
@@ -45,6 +47,8 @@ const {
   mockSuppressionFindMany: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -70,6 +74,8 @@ vi.mock("@/lib/db", () => ({
       findMany: mockSuppressionFindMany,
     },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
     $queryRawUnsafe: mockQueryRawUnsafe,
   },
 }));
@@ -89,7 +95,6 @@ const DIVISION = {
   slug: "cardiology",
   description: "ETL-seeded division blurb.",
   url: null,
-  chiefCwid: "etl0002",
   scholarCount: 50,
   source: "ED",
 };
@@ -122,6 +127,16 @@ function defaultBaselineMocks() {
   mockSuppressionFindMany.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
   mockDivisionMembershipFindMany.mockResolvedValue([]);
+  // #2542 contract A — no vocabulary row by default; the chief resolves
+  // through the `OrgUnitRoleAssignment` row (`Division.chiefCwid` no longer
+  // exists as a read source), matching the `etl0002` identity these tests
+  // were originally written against.
+  mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+    cwid: "etl0002",
+    interim: false,
+    role: { label: "Chief" },
+  });
 }
 
 describe("getDivision — unit-curation read-merge (#540)", () => {
@@ -167,6 +182,35 @@ describe("getDivision — unit-curation read-merge (#540)", () => {
     );
   });
 
+  it("drops the chief card for a hidden identity class (#2260)", async () => {
+    defaultBaselineMocks();
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "etl0002",
+      preferredName: "ETL Chief",
+      slug: "etl-chief",
+      primaryTitle: "Chief of Cardiology",
+      roleCategory: "affiliate_alumni",
+    });
+    const result = await getDivision("medicine", "cardiology");
+    expect(result?.chief).toBeNull();
+  });
+
+  it.each([
+    ["soft-deleted", { deletedAt: new Date("2026-01-01") }],
+    ["non-active", { status: "suppressed" }],
+  ])("drops the chief card for a %s leader (#2260)", async (_label, extra) => {
+    defaultBaselineMocks();
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "etl0002",
+      preferredName: "ETL Chief",
+      slug: "etl-chief",
+      primaryTitle: "Chief of Cardiology",
+      ...extra,
+    });
+    const result = await getDivision("medicine", "cardiology");
+    expect(result?.chief).toBeNull();
+  });
+
   it("leaderCwid override of \"\" is explicit vacancy; no chief, no auto-detect fallback (edge 6)", async () => {
     defaultBaselineMocks();
     mockFieldOverrideFindMany.mockResolvedValue([
@@ -186,6 +230,80 @@ describe("getDivision — unit-curation read-merge (#540)", () => {
     ]);
 
     const result = await getDivision("medicine", "cardiology");
+    expect(result?.chief?.isInterim).toBe(true);
+  });
+
+  // #2542 — the render-layer repoint. Before this, `division-page.tsx`
+  // hardcoded `role="Chief"` with no vocabulary at all; now the label comes
+  // from the assignment's own vocabulary-joined `role.label`, so a steward
+  // rename via /edit/roles must show up here without a code change.
+  it("resolves chief.role from the assignment's vocabulary-joined label, not the hardcoded 'Chief' literal", async () => {
+    defaultBaselineMocks();
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+      cwid: "etl0002",
+      interim: false,
+      role: { label: "Division Head" },
+    });
+
+    const result = await getDivision("medicine", "cardiology");
+    expect(result?.chief?.role).toBe("Division Head");
+  });
+
+  // `fallbackLabel` is consulted only on the OVERRIDE branch — the assignment
+  // branch's label always comes from the joined `OrgUnitRole` row.
+  it("falls back to 'Chief' when no vocabulary row exists yet (override branch, pre-seed behavior)", async () => {
+    defaultBaselineMocks();
+    mockFieldOverrideFindMany.mockResolvedValue([
+      { fieldName: "leaderCwid", value: "ovr0002" },
+    ]);
+    mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "ovr0002",
+      preferredName: "Curated Chief",
+      slug: "curated-chief",
+      primaryTitle: "Professor",
+    });
+    const result = await getDivision("medicine", "cardiology");
+    expect(result?.chief?.role).toBe("Chief");
+  });
+
+  // #2542 — the full override > assignment precedence, mirroring the
+  // department-side test in `api-dept-unit-curation.test.ts`.
+  it("leaderCwid override wins over an existing OrgUnitRoleAssignment row, which is never even queried", async () => {
+    defaultBaselineMocks();
+    mockFieldOverrideFindMany.mockResolvedValue([
+      { fieldName: "leaderCwid", value: "ovr0002" },
+    ]);
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "ovr0002",
+      preferredName: "Curated Chief",
+      slug: "curated-chief",
+      primaryTitle: "Professor",
+    });
+
+    const result = await getDivision("medicine", "cardiology");
+    expect(result?.chief?.cwid).toBe("ovr0002");
+    expect(mockOrgUnitRoleAssignmentFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("with no override, the OrgUnitRoleAssignment row is the sole source of the chief", async () => {
+    defaultBaselineMocks();
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+      cwid: "assign002",
+      interim: true,
+      role: { label: "Chief" },
+    });
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "assign002",
+      preferredName: "Assignment-Table Chief",
+      slug: "assignment-table-chief",
+      primaryTitle: "Professor",
+    });
+
+    const result = await getDivision("medicine", "cardiology");
+    // The scholar lookup went to THIS assignment's cwid, not the baseline
+    // fixture's default assignment cwid ("etl0002").
+    expect(result?.chief?.cwid).toBe("assign002");
     expect(result?.chief?.isInterim).toBe(true);
   });
 

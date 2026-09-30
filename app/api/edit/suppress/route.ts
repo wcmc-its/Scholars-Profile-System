@@ -173,20 +173,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       contributorCwid: contributor,
       ownerCwid,
     });
-    // Scholar-assigned proxy editor (#779 / scholar-proxy-spec.md). A granted
-    // proxy may hide ONLY the granted scholar's OWN authorship — `publication`
-    // AND `contributorCwid === the granted scholar` (a positive allowlist:
-    // never another author's authorship, never a whole-publication takedown,
-    // never a scholar/grant/education/appointment/mentee suppression —
-    // PE-03/IS-2). Keyed on `realCwid`, never while impersonating (PE-01/IS-1);
-    // D3 conflict re-check runs fail-closed (PE-02).
-    if (
-      !authz.ok &&
-      entityType === "publication" &&
-      contributor !== null &&
-      impersonatedCwid === null
-    ) {
-      if (await isGrantedProxy(realCwid, contributor, db.read as unknown as ProxyLookup)) {
+    // The DELEGATED-HIDE allowlist (PE-03 as amended 2026-09-22).
+    //
+    // Originally `publication` only. That was narrower than the principle it
+    // cited: scholar-proxy-spec § D4 says a proxy gets "the scholar's surface,
+    // no more", and the scholar's OWN surface already includes hiding their own
+    // appointment / education / grant (`authorizeSuppress`'s whole-entity
+    // branch). So a proxy or unit admin asking to hide a wrong appointment got a
+    // 403 that could never succeed, for a row the scholar could hide themselves.
+    //
+    // Still EXCLUDED, deliberately: `scholar` (a whole-profile suppression),
+    // `mentee`, and `dataset_deposit` / a whole-publication takedown — those stay
+    // superuser-only. The `leadership_appointment_not_suppressible` 409 guard
+    // sits upstream of this block and is unaffected, so a proxy still cannot hide
+    // the appointment that confers a chair role.
+    const DELEGATED_SUPPRESSIBLE = ["publication", "appointment", "education", "grant"] as const;
+    // Whose profile the hide is FOR: the contributor on a per-author publication
+    // hide, the owning scholar on a whole-entity appointment/education/grant hide.
+    const delegatedSubject: string | null =
+      entityType === "publication" ? contributor : (contributor ?? ownerCwid ?? null);
+    const delegatedEligible =
+      (DELEGATED_SUPPRESSIBLE as readonly string[]).includes(entityType) &&
+      delegatedSubject !== null &&
+      // A publication hide is still per-author only — never a whole-entity takedown.
+      (entityType !== "publication" || contributor !== null) &&
+      impersonatedCwid === null;
+
+    // Scholar-assigned proxy editor (#779 / scholar-proxy-spec.md). Keyed on
+    // `realCwid`, never while impersonating (PE-01/IS-1); the D3 conflict
+    // re-check runs fail-closed (PE-02).
+    if (!authz.ok && delegatedEligible && delegatedSubject !== null) {
+      if (await isGrantedProxy(realCwid, delegatedSubject, db.read as unknown as ProxyLookup)) {
         const conflict = await checkProxyConflictingRole(
           realCwid,
           db.read as unknown as ProxyLookup,
@@ -197,7 +214,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         } else {
           logEditDenial({
             actorCwid: realCwid,
-            targetCwid: contributor,
+            targetCwid: delegatedSubject,
             path: PATH,
             reason: "proxy_conflict",
           });
@@ -205,20 +222,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
     }
-    // Org-unit administrator as profile editor (Amendment 4). Same positive
-    // allowlist as the proxy hide — `publication` AND `contributorCwid === the
-    // author` only — and the same `realCwid`-keyed / not-impersonating gate
-    // (IS-1). An owner/curator of a unit the author belongs to may hide that
-    // author's misattributed publication; the conferring unit is audited.
-    if (
-      !authz.ok &&
-      entityType === "publication" &&
-      contributor !== null &&
-      impersonatedCwid === null
-    ) {
+    // Org-unit administrator as profile editor (Amendment 4). Same allowlist and
+    // the same `realCwid`-keyed / not-impersonating gate (IS-1). An owner/curator
+    // of a unit the subject belongs to may hide that scholar's wrong row; the
+    // conferring unit is audited.
+    if (!authz.ok && delegatedEligible && delegatedSubject !== null) {
       const unit = await resolveEditableUnitViaUnitAdmin(
         realCwid,
-        contributor,
+        delegatedSubject,
         db.read as unknown as UnitScholarLookup,
       );
       if (unit) {

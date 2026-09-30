@@ -15,14 +15,21 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { centerFindUnique, membershipFindMany, scholarFindMany, programFindMany, authorFindMany } =
-  vi.hoisted(() => ({
-    centerFindUnique: vi.fn(),
-    membershipFindMany: vi.fn(),
-    scholarFindMany: vi.fn(),
-    programFindMany: vi.fn(),
-    authorFindMany: vi.fn(),
-  }));
+const {
+  centerFindUnique,
+  membershipFindMany,
+  scholarFindMany,
+  programFindMany,
+  authorFindMany,
+  suppressionFindMany,
+} = vi.hoisted(() => ({
+  centerFindUnique: vi.fn(),
+  membershipFindMany: vi.fn(),
+  scholarFindMany: vi.fn(),
+  programFindMany: vi.fn(),
+  authorFindMany: vi.fn(),
+  suppressionFindMany: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -31,6 +38,7 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: scholarFindMany },
     centerProgram: { findMany: programFindMany },
     publicationAuthor: { findMany: authorFindMany },
+    suppression: { findMany: suppressionFindMany },
     grant: { findMany: vi.fn(async () => []) },
   },
 }));
@@ -50,6 +58,7 @@ beforeEach(() => {
   scholarFindMany.mockReset();
   programFindMany.mockReset();
   authorFindMany.mockReset();
+  suppressionFindMany.mockReset();
 
   centerFindUnique.mockResolvedValue({ code: CODE, name: "Test Center" });
   membershipFindMany.mockResolvedValue([
@@ -58,6 +67,7 @@ beforeEach(() => {
   ]);
   programFindMany.mockResolvedValue([]);
   authorFindMany.mockResolvedValue([]);
+  suppressionFindMany.mockResolvedValue([]);
 });
 
 describe("buildCenterCollaboration — #536 role carve", () => {
@@ -92,5 +102,51 @@ describe("buildCenterCollaboration — #536 role carve", () => {
     expect(payload!.nodes.map((n) => n.cwid)).toEqual(["aaa1001"]);
     // The co-authored paper loses its second member and so is no longer an edge.
     expect(payload!.papers).toEqual([]);
+  });
+});
+
+describe("buildCenterCollaboration — publication suppression", () => {
+  beforeEach(() => {
+    scholarFindMany.mockResolvedValue([
+      member("aaa1001", "Ada Faculty", "full_time_faculty"),
+      member("bbb2002", "Bo Faculty", "full_time_faculty"),
+    ]);
+  });
+
+  it("a dark pmid forms no edge and leaves every member's pubCount", async () => {
+    authorFindMany.mockResolvedValue([
+      { pmid: "1", cwid: "aaa1001", publication: { year: 2024 } },
+      { pmid: "1", cwid: "bbb2002", publication: { year: 2024 } },
+      { pmid: "2", cwid: "aaa1001", publication: { year: 2023 } },
+      { pmid: "2", cwid: "bbb2002", publication: { year: 2023 } },
+      { pmid: "3", cwid: "aaa1001", publication: { year: 2022 } },
+    ]);
+    suppressionFindMany.mockResolvedValue([
+      { entityId: "2", contributorCwid: null },
+      { entityId: "3", contributorCwid: null },
+    ]);
+    const payload = await buildCenterCollaboration(CODE);
+    expect(payload!.papers.map((p) => p.pmid)).toEqual(["1"]);
+    expect(payload!.nodes.map((n) => n.pubCount)).toEqual([1, 1]);
+  });
+
+  it("a per-author hide removes that member, dropping a 2-member edge", async () => {
+    authorFindMany
+      .mockResolvedValueOnce([
+        { pmid: "1", cwid: "aaa1001", publication: { year: 2024 } },
+        { pmid: "1", cwid: "bbb2002", publication: { year: 2024 } },
+      ])
+      // derived-dark read: aaa1001 is still visible, so pmid 1 is not dark.
+      .mockResolvedValueOnce([
+        { pmid: "1", cwid: "aaa1001" },
+        { pmid: "1", cwid: "bbb2002" },
+      ]);
+    suppressionFindMany.mockResolvedValue([{ entityId: "1", contributorCwid: "bbb2002" }]);
+    const payload = await buildCenterCollaboration(CODE);
+    expect(payload!.papers).toEqual([]);
+    expect(payload!.nodes.map((n) => [n.cwid, n.pubCount])).toEqual([
+      ["aaa1001", 1],
+      ["bbb2002", 0],
+    ]);
   });
 });

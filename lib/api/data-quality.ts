@@ -1,31 +1,59 @@
 /**
- * The Data Quality roster query (`docs/data-quality-dashboard-spec.md`).
+ * The shared scholar-roster query behind TWO pages that both sort by
+ * prominence + leadership: `/edit/profiles` ("Profiles" — headshot/overview
+ * gaps, Status, everyone who can see Profiles) and `/edit/coi` ("COI" —
+ * pending conflict-of-interest review, superuser-only). One query engine,
+ * one candidate set per request; each PAGE decides which columns to render
+ * and sanitizes `gap`/`overviewAge` down to the values that make sense for
+ * it (see the module doc comments on both pages) — a stray `?gap=has-coi` on
+ * Profiles, or `?gap=no-headshot` on COI, must not narrow the row set by a
+ * dimension that page doesn't show, or it leaks that dimension's data through
+ * which rows come back even with the column withheld.
  *
- * Loads the scholars in the viewer's scope, computes each one's data-quality gaps
- * (headshot / overview / pending COI suggestions) and a rolled-our-own
- * "prominence" score, then sorts by prominence and paginates. Read-only; the page
- * deep-links each row into the existing per-scholar edit surface.
+ * Loads the scholars in the viewer's scope and computes each one's gaps
+ * (headshot / overview presence + freshness), pending-COI counts, and a
+ * rolled-our-own "prominence" score, then sorts by prominence and paginates.
+ * Read-only; the page deep-links each row into the existing per-scholar edit
+ * surface.
  *
  * Authorization/scope is the page's responsibility to *resolve* (via
  * `loadDataQualityScope`), but the scope MUST live in the query (so the UI is
  * never the boundary) — `opts.scope` does exactly that.
  *
- * Aggregates (chairs, chiefs, PI-grant counts, COI counts, overview overrides) are
- * read GROUPED BY cwid across the whole table and joined to the candidate set
- * in-app, rather than with an `in: [thousands of cwids]` clause — the candidate
- * set can be every active scholar for a superuser, and the grouped aggregates are
- * each one bounded query.
+ * Aggregates (chairs, chiefs, PI-grant counts, COI counts) are read GROUPED BY
+ * cwid across the whole table and joined to the candidate set in-app, rather
+ * than with an `in: [thousands of cwids]` clause — the candidate set can be
+ * every active scholar for a superuser, and the grouped aggregates are each
+ * one bounded query.
  *
- * Server-only by construction (uses Prisma) — no `server-only` import so it loads
- * under vitest with a fake client, matching `edit-roster.ts`.
+ * Server-only by construction (uses Prisma) — no `server-only` import so it
+ * loads under vitest with a fake client, matching `edit-roster.ts`.
  */
 import { toCsv } from "@/lib/csv";
 import { PI_ROLES } from "@/lib/funding-roles";
-import { formatRoleCategory } from "@/lib/role-display";
+import { byCareerStage, formatRoleCategory } from "@/lib/role-display";
+import {
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
+import { loadCenterDirectors, scoreProminence } from "@/lib/api/prominence";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
+import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
+import {
+  decodeUnitValues,
+  isCurrentCenterMembership,
+  loadSelectedDivisionRosterCwids,
+  parsePersonFilter,
+  parseUnitValue,
+  personFilterWhere,
+  unitCodes,
+  utcToday,
+} from "@/lib/edit/person-filter";
+import { institutionDisplayName } from "@/lib/institutions";
 
 /** The Prisma surface this loader reads — a `db.read` client satisfies it. */
 export type DataQualityClient = Pick<
@@ -38,11 +66,13 @@ export type DataQualityClient = Pick<
   | "coiGapCandidate"
   | "fieldOverride"
   | "centerMembership"
+  | "divisionMembership"
   | "overviewProvenance"
+  | "orgUnitRoleAssignment"
 >;
 
-/** A single org-unit filter (department / division / center); reused from the
- *  Profiles roster so the encoding stays consistent. */
+/** A single org-unit filter (department / division / center / institution);
+ *  reused from the Profiles roster so the encoding stays consistent. */
 export type { EditRosterUnitFilter };
 
 /** Grant `role` values that count as a principal-investigator role ("times as PI").
@@ -56,79 +86,20 @@ export { PI_ROLES };
 
 /** #536 hidden identity classes — not publicly displayed; mirrors
  *  `isPubliclyDisplayed` in `lib/eligibility.ts`. Excluded when the viewer turns
- *  the hidden-scholars filter off (the dashboard defaults to including them). */
+ *  the hidden-scholars filter off (the roster defaults to including them). */
 const HIDDEN_ROLES = ["doctoral_student", "affiliate_alumni"] as const;
 
-/** Prominence weights — kept here so they're easy to tune in one place.
- *  Leadership weights mirror the people-search #532 constants (chair > chief). */
-const W_HINDEX = 0.5;
-const W_PI = 0.5;
-const W_NIH_PI = 0.5;
-const W_CHAIR = 3.0;
-const W_CHIEF = 1.5;
-const W_FACULTY = 1.0;
-
 /**
- * Institutional-leadership sort tiers (lower number ranks higher), #1 v2 decision.
- * The Dean must rank #1 even though he is not a department chair. Tiers 0/1 are
- * derived from `primaryTitle` TEXT — no hand-maintained cwid map — so the set
- * stays current as titles change; chairs/chiefs (tier 2) keep their FK-based
- * prominence boost; everyone else is tier 3. Within a tier, prominence then name.
+ * The prominence weights, the leadership tiers and the title heuristic moved to
+ * `lib/api/prominence.ts` when the news-approval queue needed to sort by the same
+ * score — one definition, so tuning a weight can't leave two surfaces ranking
+ * differently. This module still owns the whole-roster READS (grouped aggregates
+ * across the entire table, see the module doc comment); only the arithmetic moved.
  *
- *   0 — THE Dean (an unmodified "Dean": not Associate/…, not school-specific)
- *   1 — the active deanery + named institutional officers (Provost/President/EVP)
- *   2 — department chairs / division chiefs (FK-identified)
- *   3 — everyone else
- *
- * Emeritus/Emerita titles are excluded from leadership entirely — a retired dean
- * ranks by prominence like everyone else (#1 v2 refinement).
+ * Re-exported, not redeclared: importers of this module (and the roster's own
+ * `tests/unit/data-quality-loader.test.ts`) keep the path they already use.
  */
-export const LEADERSHIP_TIER = { dean: 0, deanery: 1, chairChief: 2, none: 3 } as const;
-
-const TITLE_EMERITUS = /\bemerit(?:us|a|i)\b/i;
-const HAS_DEAN = /\bdean\b/i;
-/** Modifiers that demote a "Dean" title out of tier 0 (it's a sub-dean). */
-const SUBDEAN_MODIFIER = /\b(?:associate|assistant|affiliate|senior|interim|deputy|vice)\b/i;
-/** A school/college-specific deanship (Graduate School, WCM-Qatar) is not THE dean. */
-const SCHOOL_SPECIFIC_DEAN = /\b(?:graduate school|qatar)\b/i;
-
-/** A concise label for an active (non-Emeritus) deanery / institutional-officer title. */
-function deaneryLabel(title: string): string | null {
-  if (/\bsenior associate dean\b/i.test(title)) return "Senior Associate Dean";
-  if (/\bassociate dean\b/i.test(title)) return "Associate Dean";
-  if (/\bassistant dean\b/i.test(title)) return "Assistant Dean";
-  if (/\baffiliate dean\b/i.test(title)) return "Affiliate Dean";
-  if (/\b(?:vice|deputy) dean\b/i.test(title)) return "Vice Dean";
-  if (/\binterim dean\b/i.test(title)) return "Interim Dean";
-  if (HAS_DEAN.test(title)) return "Dean"; // school-specific dean (Graduate School / Qatar)
-  if (/\bprovost\b/i.test(title)) return "Provost";
-  if (/\bpresident\b/i.test(title)) return "President";
-  if (/\bexecutive vice (?:president|dean)\b|\bevp\b/i.test(title)) return "EVP";
-  return null;
-}
-
-/**
- * Classify a scholar's leadership tier + display label from their title + the
- * chair/chief FK flags. THE Dean (tier 0) sorts above the active deanery (tier 1),
- * which sorts above FK chairs/chiefs (tier 2), which sort above everyone (tier 3).
- */
-export function classifyLeadership(
-  title: string | null,
-  isChair: boolean,
-  isChief: boolean,
-): { tier: number; label: string | null } {
-  const t = (title ?? "").trim();
-  if (t && !TITLE_EMERITUS.test(t)) {
-    if (HAS_DEAN.test(t) && !SUBDEAN_MODIFIER.test(t) && !SCHOOL_SPECIFIC_DEAN.test(t)) {
-      return { tier: LEADERSHIP_TIER.dean, label: "Dean" };
-    }
-    const label = deaneryLabel(t);
-    if (label) return { tier: LEADERSHIP_TIER.deanery, label };
-  }
-  if (isChair) return { tier: LEADERSHIP_TIER.chairChief, label: "Chair" };
-  if (isChief) return { tier: LEADERSHIP_TIER.chairChief, label: "Chief" };
-  return { tier: LEADERSHIP_TIER.none, label: null };
-}
+export { LEADERSHIP_TIER, classifyLeadership } from "@/lib/api/prominence";
 
 const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 
@@ -165,14 +136,18 @@ function classifyOverview(
 
 export type HeadshotState = "present" | "missing" | "unknown";
 
-export type DataQualityGapFilter = "all" | "no-headshot" | "no-overview" | "has-coi";
-
 /** Overview-freshness bucket (#6); see `classifyOverview`. */
 export type OverviewState = "never" | "imported" | "lt1yr" | "1to2yr" | "gt2yr";
-/** The "overview last updated" filter — "all" plus the freshness buckets. */
+/** The "overview last updated" filter — "all" plus the freshness buckets.
+ *  Profiles-only; the COI page never parses this (module doc comment). */
 export type OverviewAgeFilter = "all" | OverviewState;
 
-/** One row in the dashboard table. Plain-serializable (crosses to a client UI). */
+/** "no-headshot"/"no-overview" are Profiles-only; "has-coi" is COI-page-only.
+ *  Each page sanitizes the value down to the subset that applies to it before
+ *  it ever reaches this module — see the module doc comment. */
+export type DataQualityGapFilter = "all" | "no-headshot" | "no-overview" | "has-coi";
+
+/** One row in the roster table. Plain-serializable (crosses to a client UI). */
 export type DataQualityEntry = {
   cwid: string;
   slug: string;
@@ -186,15 +161,27 @@ export type DataQualityEntry = {
   /** Leadership display label for the row/CSV ("Dean", "Associate Dean",
    *  "Provost", "Chair", "Chief", …) or null. */
   leadership: string | null;
-  /** Leadership sort tier (0 Dean · 1 deanery · 2 chair/chief · 3 none). */
+  /** Leadership sort tier: 0 THE Dean, then the EA ladder 1–12, 13 none. */
   leadershipTier: number;
-  /** "present" | "missing" | "unknown" (not yet probed by etl:headshot). */
+  /** True when the profile is publicly visible (`status === 'active'`); false
+   *  when it is suppressed (self or admin). Drives the Visible / Hidden chip. */
+  isVisible: boolean;
+  /** "present" | "missing" | "unknown" (not yet probed by etl:headshot).
+   *  Profiles-only. */
   headshot: HeadshotState;
+  /** ISO time etl:headshot last got a definitive answer (#2264); null = never.
+   *  An indeterminate probe never stamps it, so a verdict can be old. Profiles-only. */
+  headshotCheckedAt: string | null;
+  /** Profiles-only. */
   hasOverview: boolean;
-  /** ISO date the overview was last edited in /edit; null when imported/never. */
+  /** ISO date the overview was last edited in /edit; null when imported/never.
+   *  Profiles-only. */
   overviewUpdatedAt: string | null;
-  /** Overview freshness bucket (#1077 parity). */
+  /** Overview freshness bucket (#1077 parity). Profiles-only. */
   overviewState: OverviewState;
+  /** Pending COI-review counts. COI-page-only — Profiles must never render
+   *  these (see the Profiles page's own doc comment on why `gap` is sanitized
+   *  server-side, not just hidden in the UI). */
   pendingCoiHigh: number;
   pendingCoiMedium: number;
   prominence: number;
@@ -209,22 +196,32 @@ export type DataQualityOptions = {
   query?: string;
   /** Person-type (roleCategory) multi-select (#4); raw DB values. Empty = no filter. */
   roleCategories?: readonly string[];
-  /** Org-unit multi-select (#5): departments / divisions / centers, OR'd together. */
-  units?: readonly EditRosterUnitFilter[];
-  /** Gap-type filter; defaults to "all". */
+  /** Org-unit multi-select (#5): the RAW `unit` values (`dept:CODE` …), OR'd
+   *  together. Given but none decode → match nothing (`personFilterWhere`). */
+  unitValues?: readonly string[];
+  /** Gap-type filter; defaults to "all". Each caller sanitizes this to the
+   *  subset of `DataQualityGapFilter` that applies to it (module doc comment)
+   *  — an unsanitized value would filter the row set by a dimension that
+   *  page's columns never show, leaking that dimension's data anyway. */
   gap?: DataQualityGapFilter;
-  /** Overview-freshness filter (#6); defaults to "all". */
+  /** Overview-freshness filter (#6); defaults to "all". Profiles-only — the
+   *  COI page never sets this. */
   overviewAge?: OverviewAgeFilter;
   /** Include #536 hidden identity classes (doctoral students / alumni). Default
    *  true; ignored when a specific person-type is chosen. */
   includeHidden?: boolean;
+  /** Only suppressed (not publicly visible) profiles. Profiles-only. */
+  hiddenOnly?: boolean;
+  /** Rank multi-select (ORed); see `RANK_WHERE`. Empty = no filter. */
+  ranks?: readonly RankFilter[];
   /** Page size (default 50, capped at 200). */
   limit?: number;
   /** Page offset (default 0). */
   offset?: number;
 };
 
-/** Gap counts across the in-scope, filtered (pre-gap-filter) set — for summary chips. */
+/** Gap counts across the in-scope, filtered (pre-gap-filter) set — for summary
+ *  chips. Both pages get the full set back; each renders only its own slice. */
 export type DataQualityCounts = {
   /** Scholars in scope after person-type/department/hidden filters (pre gap filter). */
   inScope: number;
@@ -240,6 +237,42 @@ export type DataQualityResult = {
   counts: DataQualityCounts;
 };
 
+/** Rank facet values, highest first. */
+export const RANK_FILTERS = ["professor", "associate", "assistant", "instructor"] as const;
+export type RankFilter = (typeof RANK_FILTERS)[number];
+const RANK_LABELS: Record<RankFilter, string> = {
+  professor: "Professor",
+  associate: "Associate Professor",
+  assistant: "Assistant Professor",
+  instructor: "Instructor / Lecturer",
+};
+/** Person types the Rank facet supersedes (hidden from the Person type facet). */
+const RANK_SUBSUMED_TYPES = ["instructor", "lecturer"] as const;
+
+const titleContainsAny = (words: readonly string[]): Prisma.ScholarWhereInput => ({
+  professorialRank: null,
+  OR: words.flatMap((w) => [
+    { primaryTitle: { contains: w } },
+    { edPrimaryTitle: { contains: w } },
+  ]),
+});
+
+/**
+ * Rank. The three professorial ranks come from `Scholar.professorialRank` (the
+ * ASMS-authoritative ED rank leaf, `lib/faculty-rank.ts`). ED has no rank leaf
+ * for Instructor / Lecturer and the person type buries most of them under
+ * full-time / affiliated faculty, so those two match on title — only for
+ * scholars with no professorial rank, so "Professor; Lecturer in X" stays a
+ * Professor. MySQL's default collation makes `contains` case-insensitive.
+ */
+const RANK_WHERE: Record<RankFilter, Prisma.ScholarWhereInput> = {
+  professor: { professorialRank: "Professor" },
+  associate: { professorialRank: "Associate Professor" },
+  assistant: { professorialRank: "Assistant Professor" },
+  // One rank: both are non-professorial teaching titles (27 Lecturers in prod).
+  instructor: titleContainsAny(["Instructor", "Lecturer"]),
+};
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
@@ -247,38 +280,133 @@ function nonEmpty(s: string | null | undefined): boolean {
   return typeof s === "string" && s.trim().length > 0;
 }
 
-/** A center membership active by date today (pending / expired excluded). Mirrors
- *  `isCenterMembershipActive` (`lib/api/centers.ts`) — duplicated here so this
- *  module keeps its light, vitest-loadable import graph (no `server-only` /
- *  `lib/db`), exactly as `lib/api/edit-roster.ts` does. */
-function isMembershipActive(
-  startDate: Date | null,
-  endDate: Date | null,
-  today: string,
-): boolean {
-  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
-  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
-  if (start && start > today) return false; // pending
-  if (end && end < today) return false; // expired
-  return true;
+/** Tag-stripped, whitespace-collapsed first ~300 chars (the card clamps to 3 lines). */
+function excerpt(html: string | null | undefined): string | null {
+  if (!nonEmpty(html)) return null;
+  const text = html!.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 300) : null;
+}
+
+/** One current appointment for the roster hover card. */
+export type RosterTitle = { title: string; organization: string; isPrimary: boolean };
+
+/**
+ * Current appointments (primary first) for ONE roster page's cwids — the hover
+ * card's "Titles". Separate from the roster loader so the ~9k-row prominence
+ * pass never reads appointments. Historical ED rows are excluded.
+ */
+export async function loadRosterTitles(
+  cwids: readonly string[],
+  client: Pick<PrismaClient, "appointment">,
+): Promise<Record<string, RosterTitle[]>> {
+  if (cwids.length === 0) return {};
+  const today = new Date();
+  const rows = await client.appointment.findMany({
+    where: {
+      cwid: { in: [...cwids] },
+      source: { not: "ED-HISTORICAL" },
+      OR: [{ endDate: null }, { endDate: { gte: today } }],
+    },
+    select: { cwid: true, title: true, organization: true, isPrimary: true },
+    orderBy: [{ isPrimary: "desc" }, { title: "asc" }],
+  });
+  const out: Record<string, RosterTitle[]> = {};
+  for (const r of rows) {
+    (out[r.cwid] ??= []).push({ title: r.title, organization: r.organization, isPrimary: r.isPrimary });
+  }
+  return out;
+}
+
+/** Everything the /edit scholar hover card shows, for one cwid. */
+export type ScholarCard = {
+  cwid: string;
+  name: string;
+  slug: string;
+  isVisible: boolean;
+  hasHeadshot: boolean;
+  /** Already release-gated for an internal viewer; `null` = withheld or none. */
+  email: string | null;
+  personType: string | null;
+  titles: RosterTitle[];
+  hasOverview: boolean;
+  /** ISO date of the last /edit save; `null` + hasOverview = imported seed. */
+  overviewUpdatedAt: string | null;
+  overviewExcerpt: string | null;
+};
+
+/**
+ * One scholar's hover card — the per-cwid twin of the roster's card fields
+ * (same override-wins overview, same provenance date, same current titles).
+ * `null` for an unknown or deleted cwid.
+ */
+export async function loadScholarCard(
+  cwid: string,
+  client: Pick<PrismaClient, "scholar" | "fieldOverride" | "overviewProvenance" | "appointment">,
+  gateEmail: (email: string | null, visibility: string | null) => string | null,
+): Promise<ScholarCard | null> {
+  const [s, override, prov, titles] = await Promise.all([
+    client.scholar.findFirst({
+      where: { cwid, deletedAt: null },
+      select: {
+        cwid: true,
+        preferredName: true,
+        slug: true,
+        status: true,
+        hasHeadshot: true,
+        email: true,
+        emailVisibility: true,
+        roleCategory: true,
+        overview: true,
+      },
+    }),
+    client.fieldOverride.findFirst({
+      where: { entityType: "scholar", entityId: cwid, fieldName: "overview" },
+      select: { value: true },
+    }),
+    client.overviewProvenance.findUnique({ where: { cwid }, select: { updatedAt: true } }),
+    loadRosterTitles([cwid], client),
+  ]);
+  if (!s) return null;
+  const overview = nonEmpty(override?.value) ? override!.value : s.overview;
+  return {
+    cwid: s.cwid,
+    name: s.preferredName,
+    slug: s.slug,
+    isVisible: s.status === "active",
+    hasHeadshot: s.hasHeadshot === true,
+    email: gateEmail(s.email, s.emailVisibility),
+    personType: formatRoleCategory(s.roleCategory),
+    titles: titles[cwid] ?? [],
+    hasOverview: nonEmpty(overview),
+    overviewUpdatedAt: prov?.updatedAt.toISOString() ?? null,
+    overviewExcerpt: excerpt(overview),
+  };
 }
 
 /**
- * Build the candidate `where`: in-scope, active, non-deleted scholars, with the
- * optional name/CWID search, person-type, org-unit, and hidden-roles filters
- * applied. Each independent OR-group is pushed as its own element of `AND` so the
- * groups compose without clobbering one another.
+ * Build the candidate `where`: in-scope, non-deleted scholars (both visible and
+ * suppressed — the Status column shows which), with the optional name/CWID
+ * search, person-type, org-unit, and hidden-roles filters applied. Each
+ * independent OR-group is pushed as its own element of `AND` so the groups
+ * compose without clobbering one another.
  *
  * `filterCenterCwids` = members of the SELECTED center units (#5 filter);
- * `scopeCenterCwids` = members of the viewer's GRANTED center units (scope).
+ * `scopeCenterCwids` = members of the viewer's GRANTED center units (scope);
+ * `scopeRosterCwids` = manual DIVISION-roster members of the viewer's granted
+ * divisions (scope) — see the module-level note on `scopeRosterCwids` in
+ * `computeDataQualityEntries` for why this must be unioned in;
+ * `filterRosterCwids` = hand-added members of the SELECTED divisions (a `div:`
+ * filter matches them too, `lib/edit/person-filter.ts`).
  */
 function buildWhere(
   opts: DataQualityOptions,
   scopeCenterCwids: readonly string[],
   filterCenterCwids: readonly string[],
+  scopeRosterCwids: readonly string[],
+  filterRosterCwids: readonly string[] = [],
 ): Prisma.ScholarWhereInput {
   const and: Prisma.ScholarWhereInput[] = [];
-  const where: Prisma.ScholarWhereInput = { deletedAt: null, status: "active" };
+  const where: Prisma.ScholarWhereInput = { deletedAt: null };
 
   // Name / CWID free-text search (#3) — each whitespace token is its own AND
   // clause so it never clobbers the scope / unit / hidden-roles OR groups, and
@@ -286,30 +414,25 @@ function buildWhere(
   const q = opts.query?.trim();
   if (q) and.push(...buildScholarNameClauses(q));
 
-  // Person-type multi-select (#4). An explicit selection governs; the hidden-roles
-  // toggle is then moot (the viewer asked for exactly these types).
-  const roles = (opts.roleCategories ?? []).filter(Boolean);
-  if (roles.length > 0) {
-    where.roleCategory = { in: [...roles] };
+  // Person-type (#4) and org-unit (#5) multi-selects — the shared rule
+  // (`lib/edit/person-filter.ts`). An explicit type selection governs; the
+  // hidden-roles toggle is then moot (the viewer asked for exactly these types).
+  // Units OR together; centers were pre-resolved to current-member cwids by the
+  // caller; selected units that resolve to nothing match nothing.
+  const person = personFilterWhere(
+    { types: [...(opts.roleCategories ?? [])], unitValues: [...(opts.unitValues ?? [])] },
+    filterCenterCwids,
+    filterRosterCwids,
+  );
+  if (person.roleCategory) {
+    where.roleCategory = person.roleCategory;
   } else if (opts.includeHidden === false) {
     // Exclude hidden identity classes but KEEP nulls (fail-open display, #536).
     and.push({ OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLES] } }] });
   }
-
-  // Org-unit multi-select (#5): selected departments / divisions / centers OR
-  // together. Centers were pre-resolved to member cwids by the caller.
-  const units = opts.units ?? [];
-  if (units.length > 0) {
-    const deptCodes = units.filter((u) => u.kind === "department").map((u) => u.code);
-    const divCodes = units.filter((u) => u.kind === "division").map((u) => u.code);
-    const unitOr: Prisma.ScholarWhereInput[] = [];
-    if (deptCodes.length > 0) unitOr.push({ deptCode: { in: deptCodes } });
-    if (divCodes.length > 0) unitOr.push({ divCode: { in: divCodes } });
-    if (filterCenterCwids.length > 0) unitOr.push({ cwid: { in: [...filterCenterCwids] } });
-    // Units selected but nothing resolves (e.g. an empty center) → match nothing
-    // rather than silently dropping the filter.
-    and.push(unitOr.length > 0 ? { OR: unitOr } : { cwid: { in: [] } });
-  }
+  if (person.unit) and.push(person.unit);
+  if (opts.hiddenOnly) where.status = { not: "active" };
+  if (opts.ranks && opts.ranks.length > 0) and.push({ OR: opts.ranks.map((r) => RANK_WHERE[r]) });
 
   if (opts.scope.all === false) {
     const scopeOr: Prisma.ScholarWhereInput[] = [];
@@ -317,7 +440,11 @@ function buildWhere(
       scopeOr.push({ deptCode: { in: opts.scope.unitCodes } });
       scopeOr.push({ divCode: { in: opts.scope.unitCodes } });
     }
-    if (scopeCenterCwids.length > 0) scopeOr.push({ cwid: { in: [...scopeCenterCwids] } });
+    const scopeMembershipCwids = [...new Set([...scopeCenterCwids, ...scopeRosterCwids])];
+    if (scopeMembershipCwids.length > 0) scopeOr.push({ cwid: { in: scopeMembershipCwids } });
+    // Institution scope is a scholar column (ED primary organization), no expansion.
+    const institutionCodes = opts.scope.institutionCodes ?? [];
+    if (institutionCodes.length > 0) scopeOr.push({ primaryOrgCode: { in: institutionCodes } });
     // Empty scope → match nothing (the route forbids this case before we get here,
     // but be safe rather than returning everyone).
     and.push(scopeOr.length > 0 ? { OR: scopeOr } : { cwid: { in: [] } });
@@ -336,23 +463,40 @@ async function computeDataQualityEntries(
   opts: DataQualityOptions,
   client: DataQualityClient,
 ): Promise<{ entries: DataQualityEntry[]; counts: DataQualityCounts }> {
+  // Manual DIVISION-roster membership, viewer's granted divisions only. Amendment
+  // 4 derives a scholar's editable units as deptCode ∪ divCode ∪ `DivisionMembership`
+  // (`lib/edit/unit-scholar-authz.ts`), so a roster-only member IS editable by
+  // that division's admin — but the deptCode/divCode column match in `buildWhere`
+  // cannot see them. Without this the roster would under-list people the
+  // per-scholar editor still lets an admin open (the exact drift `loadEditRoster`
+  // fixed pre-merge — see its retired doc comment history). Passing the whole
+  // `unitCodes` set (department codes included) is harmless: a department code
+  // never appears as a `divisionCode`.
+  const scopeRosterCwids =
+    opts.scope.all === false && opts.scope.unitCodes.length > 0
+      ? await client.divisionMembership
+          .findMany({
+            where: { divisionCode: { in: opts.scope.unitCodes } },
+            select: { cwid: true },
+          })
+          .then((rows) => [...new Set(rows.map((r) => r.cwid))])
+      : [];
+
   // Center membership expands to member cwids (a center scopes by membership, not
   // a scholar column) for BOTH the viewer's granted scope and a selected center
   // *filter* (#5) — read in one query, partitioned in-app.
   const scopeCenterCodes =
     opts.scope.all === false ? opts.scope.centerCodes : [];
-  const filterCenterCodes = (opts.units ?? [])
-    .filter((u) => u.kind === "center")
-    .map((u) => u.code);
+  const filterCenterCodes = unitCodes(decodeUnitValues(opts.unitValues ?? []), "center");
   const allCenterCodes = [...new Set([...scopeCenterCodes, ...filterCenterCodes])];
 
   let scopeCenterCwids: string[] = [];
   let filterCenterCwids: string[] = [];
   if (allCenterCodes.length > 0) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = utcToday();
     const rows = await client.centerMembership.findMany({
       where: { centerCode: { in: allCenterCodes } },
-      select: { cwid: true, centerCode: true, startDate: true, endDate: true },
+      select: { cwid: true, centerCode: true, startDate: true, endDate: true, membershipRoleKey: true },
     });
     const scopeSet = new Set(scopeCenterCodes);
     const filterSet = new Set(filterCenterCodes);
@@ -362,7 +506,7 @@ async function computeDataQualityEntries(
       // Exclude pending / expired memberships (consistent with every other center
       // surface) — a still-active scholar who rotated off a center must not appear
       // when that center is filtered or scoped.
-      if (!isMembershipActive(r.startDate, r.endDate, today)) continue;
+      if (!isCurrentCenterMembership(r, today)) continue;
       if (scopeSet.has(r.centerCode)) scope.add(r.cwid);
       if (filterSet.has(r.centerCode)) filter.add(r.cwid);
     }
@@ -370,10 +514,12 @@ async function computeDataQualityEntries(
     filterCenterCwids = [...filter];
   }
 
-  const where = buildWhere(opts, scopeCenterCwids, filterCenterCwids);
+  const filterRosterCwids = await loadSelectedDivisionRosterCwids(client, opts.unitValues ?? []);
+  const where = buildWhere(opts, scopeCenterCwids, filterCenterCwids, scopeRosterCwids, filterRosterCwids);
 
   // Candidate identities + prominence inputs. The whole in-scope set loads (the
   // prominence sort is computed in-app over all of it, then paginated).
+  const centerDirectorsRead = loadCenterDirectors(client);
   const [candidates, chairRows, chiefRows, piRows, nihPiRows, coiRows, overrideRows, provRows] =
     await Promise.all([
       client.scholar.findMany({
@@ -384,16 +530,31 @@ async function computeDataQualityEntries(
           preferredName: true,
           primaryTitle: true,
           roleCategory: true,
+          status: true,
           overview: true,
           hIndex: true,
           scoredPubCount: true,
           hasHeadshot: true,
+          headshotCheckedAt: true,
           department: { select: { name: true } },
           division: { select: { name: true } },
         },
       }),
-      client.department.findMany({ select: { chairCwid: true } }),
-      client.division.findMany({ select: { chiefCwid: true } }),
+      // #2542 contract A — chair/director/chief come from `OrgUnitRoleAssignment`
+      // only; `Department.chairCwid` / `Division.chiefCwid` no longer exist as
+      // read sources. `roleKey` itself distinguishes Chair vs. Director (#58) —
+      // see the `chairLabelByCwid` build below.
+      client.orgUnitRoleAssignment.findMany({
+        where: {
+          entityType: "department",
+          roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        },
+        select: { cwid: true, roleKey: true },
+      }),
+      client.orgUnitRoleAssignment.findMany({
+        where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+        select: { cwid: true },
+      }),
       client.grant.groupBy({
         by: ["cwid"],
         // PI prominence weights WCM-administered grants only; exclude RePORTER
@@ -419,13 +580,23 @@ async function computeDataQualityEntries(
       client.overviewProvenance.findMany({ select: { cwid: true, updatedAt: true } }),
     ]);
 
-  const chairs = new Set(chairRows.map((r) => r.chairCwid).filter((c): c is string => !!c));
-  const chiefs = new Set(chiefRows.map((r) => r.chiefCwid).filter((c): c is string => !!c));
+  // "Chair" for clinical/mixed/basic departments, "Director" for
+  // administrative ones (#58 / #2542) — a plain membership Set can't carry
+  // that distinction, so this is a label map instead. A cwid chairing more
+  // than one department (unusual) keeps the LAST department's label; no
+  // ordering is defined or needed for that edge case today.
+  const chairLabelByCwid = new Map<string, string>();
+  for (const r of chairRows) {
+    chairLabelByCwid.set(r.cwid, r.roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair");
+  }
+  const chiefs = new Set(chiefRows.map((r) => r.cwid));
+  const centerDirectors = await centerDirectorsRead;
   const piCount = new Map(piRows.map((r) => [r.cwid, r._count._all]));
   const nihPiCount = new Map(nihPiRows.map((r) => [r.cwid, r._count._all]));
-  const overviewOverride = new Set(
-    overrideRows.filter((r) => nonEmpty(r.value)).map((r) => r.entityId),
+  const overrideText = new Map(
+    overrideRows.filter((r) => nonEmpty(r.value)).map((r) => [r.entityId, r.value] as const),
   );
+  const overviewOverride = new Set(overrideText.keys());
   const provByCwid = new Map(provRows.map((r) => [r.cwid, r.updatedAt]));
   const coiHigh = new Map<string, number>();
   const coiMedium = new Map<string, number>();
@@ -437,19 +608,25 @@ async function computeDataQualityEntries(
   const now = Date.now();
 
   let entries: DataQualityEntry[] = candidates.map((s) => {
-    const isChair = chairs.has(s.cwid);
+    const chairLabel = chairLabelByCwid.get(s.cwid) ?? null;
+    const isChair = chairLabel !== null;
     const isChief = chiefs.has(s.cwid);
-    const pi = piCount.get(s.cwid) ?? 0;
-    const nihPi = nihPiCount.get(s.cwid) ?? 0;
-    const prominence =
-      Math.log1p(s.scoredPubCount ?? 0) +
-      W_HINDEX * Math.log1p(s.hIndex ?? 0) +
-      Math.max(isChair ? W_CHAIR : 0, isChief ? W_CHIEF : 0) +
-      W_PI * Math.log1p(pi) +
-      W_NIH_PI * Math.log1p(nihPi) +
-      (s.roleCategory === "full_time_faculty" ? W_FACULTY : 0);
-
-    const { tier, label } = classifyLeadership(s.primaryTitle ?? null, isChair, isChief);
+    // The formula + tier rules live in `lib/api/prominence.ts` (one definition,
+    // shared with the news queue). The READS stay here: this loader scores the
+    // whole in-scope roster from grouped aggregates, which is the opposite shape
+    // to `computeProminence`'s bounded `IN` reads.
+    const { prominence, leadershipTier, leadershipLabel } = scoreProminence({
+      scoredPubCount: s.scoredPubCount,
+      hIndex: s.hIndex,
+      roleCategory: s.roleCategory ?? null,
+      primaryTitle: s.primaryTitle ?? null,
+      chairLabel,
+      isChief,
+      isCenterDirector: centerDirectors.has(s.cwid),
+      department: s.department?.name ?? null,
+      piCount: piCount.get(s.cwid) ?? 0,
+      nihPiCount: nihPiCount.get(s.cwid) ?? 0,
+    });
 
     const headshot: HeadshotState =
       s.hasHeadshot === true ? "present" : s.hasHeadshot === false ? "missing" : "unknown";
@@ -470,9 +647,11 @@ async function computeDataQualityEntries(
       roleCategory: s.roleCategory ?? null,
       isChair,
       isChief,
-      leadership: label,
-      leadershipTier: tier,
+      leadership: leadershipLabel,
+      leadershipTier,
+      isVisible: s.status === "active",
       headshot,
+      headshotCheckedAt: s.headshotCheckedAt?.toISOString() ?? null,
       hasOverview,
       overviewUpdatedAt,
       overviewState,
@@ -483,7 +662,7 @@ async function computeDataQualityEntries(
     };
   });
 
-  // Summary counts across the in-scope, filtered set (before the gap/age filters).
+  // Summary counts across the in-scope, filtered set (before the gap filter).
   const counts: DataQualityCounts = {
     inScope: entries.length,
     missingHeadshot: entries.filter((e) => e.headshot === "missing").length,
@@ -491,12 +670,14 @@ async function computeDataQualityEntries(
     withCoi: entries.filter((e) => e.pendingCoiHigh > 0).length,
   };
 
-  // Gap filter.
+  // Gap filter — each caller has already sanitized `gap` to the subset that
+  // applies to it (module doc comment), so only one of these three branches
+  // ever actually narrows the set for a given page.
   if (opts.gap === "no-headshot") entries = entries.filter((e) => e.headshot === "missing");
   else if (opts.gap === "no-overview") entries = entries.filter((e) => !e.hasOverview);
   else if (opts.gap === "has-coi") entries = entries.filter((e) => e.pendingCoiHigh > 0);
 
-  // Overview-age filter (#6) — independent of the gap filter above.
+  // Overview-age filter (#6) — Profiles-only; the COI page never sets this.
   if (opts.overviewAge && opts.overviewAge !== "all") {
     entries = entries.filter((e) => e.overviewState === opts.overviewAge);
   }
@@ -513,7 +694,7 @@ async function computeDataQualityEntries(
   return { entries, counts };
 }
 
-/** Load one page of the dashboard — the prominence-sorted slice + total + counts. */
+/** Load one page of the roster — the prominence-sorted slice + total + counts. */
 export async function loadDataQualityRoster(
   opts: DataQualityOptions,
   client: DataQualityClient,
@@ -555,21 +736,18 @@ export async function loadDataQualityExport(
   };
 }
 
-const CSV_HEADERS = [
-  "rank",
-  "cwid",
-  "name",
-  "title",
-  "unit",
-  "person_type",
-  "leadership",
+const BASE_CSV_HEADERS = ["rank", "cwid", "name", "title", "unit", "person_type", "leadership"] as const;
+/** Profiles-only columns (Status + gaps). */
+const PROFILE_CSV_HEADERS = [
+  "visible",
   "headshot",
+  "headshot_checked",
   "has_overview",
   "overview_updated",
-  "pending_coi_high",
-  "pending_coi_medium",
-  "prominence",
 ] as const;
+/** COI-page-only columns. */
+const COI_CSV_HEADERS = ["pending_coi_high", "pending_coi_medium"] as const;
+const TAIL_CSV_HEADERS = ["prominence"] as const;
 
 /** The CSV "overview_updated" cell: the edit date (YYYY-MM-DD) when known,
  *  "imported" for the un-edited VIVO seed, "" when there's no overview. */
@@ -579,24 +757,44 @@ function overviewUpdatedCell(e: DataQualityEntry): string {
 }
 
 /** Serialize export rows to a CSV string. `rank` is the 1-based position in the
- *  prominence-sorted set the rows arrive in. */
-export function buildDataQualityCsv(rows: readonly DataQualityEntry[]): string {
-  const body = rows.map((e, i) => [
-    i + 1,
-    e.cwid,
-    e.name,
-    e.title ?? "",
-    e.unit ?? "",
-    formatRoleCategory(e.roleCategory) ?? e.roleCategory ?? "",
-    e.leadership ?? "",
-    e.headshot,
-    e.hasOverview ? "yes" : "no",
-    overviewUpdatedCell(e),
-    e.pendingCoiHigh,
-    e.pendingCoiMedium,
-    e.prominence.toFixed(2),
-  ]);
-  return toCsv(CSV_HEADERS, body);
+ *  prominence-sorted set the rows arrive in. `includeProfileCols`/`includeCoi`
+ *  must match what the CALLING page's table actually renders — Profiles sets
+ *  `{includeProfileCols:true, includeCoi:false}`, the COI page the reverse.
+ *  Never `true` for both: each dimension is scoped to its own page (module
+ *  doc comment), and the CSV must not carry a column its page never shows. */
+export function buildDataQualityCsv(
+  rows: readonly DataQualityEntry[],
+  opts: { includeProfileCols: boolean; includeCoi: boolean },
+): string {
+  const headers = [
+    ...BASE_CSV_HEADERS,
+    ...(opts.includeProfileCols ? PROFILE_CSV_HEADERS : []),
+    ...(opts.includeCoi ? COI_CSV_HEADERS : []),
+    ...TAIL_CSV_HEADERS,
+  ];
+  const body = rows.map((e, i) => {
+    const base = [
+      i + 1,
+      e.cwid,
+      e.name,
+      e.title ?? "",
+      e.unit ?? "",
+      formatRoleCategory(e.roleCategory) ?? e.roleCategory ?? "",
+      e.leadership ?? "",
+    ];
+    const profile = opts.includeProfileCols
+      ? [
+          e.isVisible ? "yes" : "no",
+          e.headshot,
+          e.headshotCheckedAt?.slice(0, 10) ?? "",
+          e.hasOverview ? "yes" : "no",
+          overviewUpdatedCell(e),
+        ]
+      : [];
+    const coi = opts.includeCoi ? [e.pendingCoiHigh, e.pendingCoiMedium] : [];
+    return [...base, ...profile, ...coi, e.prominence.toFixed(2)];
+  });
+  return toCsv(headers, body);
 }
 
 // ---------------------------------------------------------------------------
@@ -614,18 +812,8 @@ function parseOverviewAge(v: string | undefined): OverviewAgeFilter {
     : "all";
 }
 
-/** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE`). */
-function parseUnitValue(v: string): EditRosterUnitFilter | null {
-  const sep = v.indexOf(":");
-  if (sep < 0) return null;
-  const kind = v.slice(0, sep);
-  const code = v.slice(sep + 1);
-  if (!code) return null;
-  if (kind === "dept") return { kind: "department", code };
-  if (kind === "div") return { kind: "division", code };
-  if (kind === "center") return { kind: "center", code };
-  return null;
-}
+/** Moved to `lib/edit/person-filter.ts`; re-exported for existing importers. */
+export { parseUnitValue };
 
 export type ParsedDataQualityParams = {
   q: string;
@@ -634,13 +822,21 @@ export type ParsedDataQualityParams = {
   /** The raw encoded unit values (`dept:CODE` …) — for href building + UI seeding. */
   unitValues: string[];
   gap: DataQualityGapFilter;
+  /** Profiles-only; the COI page parses this too (dual-source parser, module
+   *  doc comment) but never passes it through to `loadDataQualityRoster`. */
   overviewAge: OverviewAgeFilter;
   includeHidden: boolean;
+  /** Profiles roster: `?students=1` includes doctoral students / alumni, which
+   *  it hides by default. (The COI page keeps the older `hidden=0` switch.) */
+  includeStudents: boolean;
+  /** Profiles roster: `?visibility=hidden` lists only suppressed profiles. */
+  hiddenOnly: boolean;
+  ranks: RankFilter[];
   page: number;
 };
 
 /**
- * Parse the dashboard's filter/pagination query params from EITHER a Web
+ * Parse the roster's filter/pagination query params from EITHER a Web
  * `URLSearchParams` (the export route) OR a Next.js searchParams object (the
  * page) — the dual-source idiom from `lib/api/search-flags.ts`. Multi-value
  * params (`type`, `unit`) arrive as repeated keys.
@@ -656,15 +852,7 @@ export function parseDataQualityParams(
   const first = (key: string): string | undefined => valuesOf(key)[0];
 
   const q = (first("q") ?? "").trim();
-  const roleCategories = valuesOf("type")
-    .map((v) => v.trim())
-    .filter(Boolean);
-  const unitValues = valuesOf("unit")
-    .map((v) => v.trim())
-    .filter(Boolean);
-  const units = unitValues
-    .map(parseUnitValue)
-    .filter((u): u is EditRosterUnitFilter => u !== null);
+  const { types: roleCategories, unitValues, units } = parsePersonFilter(source);
   const hidden = first("hidden");
 
   return {
@@ -675,6 +863,9 @@ export function parseDataQualityParams(
     gap: parseGap(first("gap")),
     overviewAge: parseOverviewAge(first("overviewAge")),
     includeHidden: !(hidden === "0" || hidden === "false"),
+    includeStudents: first("students") === "1",
+    hiddenOnly: first("visibility") === "hidden",
+    ranks: RANK_FILTERS.filter((r) => valuesOf("rank").includes(r)),
     page: Math.max(Number.parseInt(first("page") ?? "0", 10) || 0, 0),
   };
 }
@@ -695,9 +886,19 @@ export type DataQualityFacets = {
   departments: Array<DataQualityFacetOption & { divisions: DataQualityFacetOption[] }>;
   /** Research centers (value `center:CODE`), with active-member counts. */
   centers: DataQualityFacetOption[];
+  /** ED primary organizations present on active scholars (value `inst:CODE`,
+   *  label `institutionDisplayName`). No null bucket: a scholar with no
+   *  `primaryOrgCode` (pre-backfill rows) is simply not selectable here. */
+  institutions: DataQualityFacetOption[];
+  /** Rank (value = `RankFilter`), highest first, zero-count ranks dropped. */
+  ranks?: DataQualityFacetOption[];
 };
 
 const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
+
+const byCountDesc = (a: DataQualityFacetOption, b: DataQualityFacetOption) =>
+  b.count - a.count || a.label.localeCompare(b.label);
+
 
 /**
  * Load the filter-bar facets. Counts are STATIC (independent of the other current
@@ -712,28 +913,38 @@ const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
  * `groupBy` — a few may point at since-inactivated scholars.
  */
 export async function loadDataQualityFacets(client: DataQualityClient): Promise<DataQualityFacets> {
-  const today = new Date();
-  const [deptRows, divRows, ctrRows, roleAgg, deptAgg, divAgg, ctrAgg] = await Promise.all([
-    client.department.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
-    client.division.findMany({
-      select: { code: true, name: true, deptCode: true },
-      orderBy: { name: "asc" },
-    }),
-    client.center.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
-    client.scholar.groupBy({ by: ["roleCategory"], where: ACTIVE_WHERE, _count: { _all: true } }),
-    client.scholar.groupBy({ by: ["deptCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
-    client.scholar.groupBy({ by: ["divCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
-    client.centerMembership.groupBy({
-      by: ["centerCode"],
-      where: {
-        AND: [
-          { OR: [{ startDate: null }, { startDate: { lte: today } }] },
-          { OR: [{ endDate: null }, { endDate: { gte: today } }] },
-        ],
-      },
-      _count: { _all: true },
-    }),
-  ]);
+  // Same UTC calendar day as the filter (isCurrentCenterMembership), so option counts match results.
+  const today = new Date(utcToday());
+  const [deptRows, divRows, ctrRows, roleAgg, deptAgg, divAgg, instAgg, ctrAgg] =
+    await Promise.all([
+      client.department.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
+      client.division.findMany({
+        select: { code: true, name: true, deptCode: true },
+        orderBy: { name: "asc" },
+      }),
+      client.center.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
+      client.scholar.groupBy({ by: ["roleCategory"], where: ACTIVE_WHERE, _count: { _all: true } }),
+      client.scholar.groupBy({ by: ["deptCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
+      client.scholar.groupBy({ by: ["divCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
+      client.scholar.groupBy({
+        by: ["primaryOrgCode"],
+        where: ACTIVE_WHERE,
+        _count: { _all: true },
+      }),
+      client.centerMembership.groupBy({
+        by: ["centerCode"],
+        where: {
+          AND: [
+            { OR: [{ startDate: null }, { startDate: { lte: today } }] },
+            { OR: [{ endDate: null }, { endDate: { gte: today } }] },
+            // Invitees are not current members. Explicit null arm: Prisma
+            // `not` never matches a NULL row in MySQL.
+            { OR: [{ membershipRoleKey: null }, { membershipRoleKey: { not: INVITED_ROLE_KEY } }] },
+          ],
+        },
+        _count: { _all: true },
+      }),
+    ]);
 
   const roleCount = new Map(
     roleAgg.map((r) => [r.roleCategory ?? "", r._count._all] as const),
@@ -745,12 +956,17 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
   const roleCategories: DataQualityFacetOption[] = roleAgg
     .map((r) => r.roleCategory)
     .filter((v): v is string => Boolean(v))
+    // The `instructor` / `lecturer` person types hold only the handful whose sole
+    // faculty flag is that leaf (7 in prod vs ~900 Instructor-titled scholars, most
+    // typed full-time or affiliated). The Rank facet finds them all; offering the
+    // tiny bucket here reads as "we only have 7 instructors".
+    .filter((v) => !(RANK_SUBSUMED_TYPES as readonly string[]).includes(v))
     .map((value) => ({
       value,
       label: formatRoleCategory(value) ?? value,
       count: roleCount.get(value) ?? 0,
     }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort(byCareerStage);
 
   // Show each division's parent department in its label, so every division is
   // self-identifying — division names are unique only within a department (both
@@ -767,18 +983,47 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
     divByDept.set(d.deptCode, arr);
   }
 
-  const departments = deptRows.map((dep) => ({
-    value: `dept:${dep.code}`,
-    label: dep.name,
-    count: deptCount.get(dep.code) ?? 0,
-    divisions: divByDept.get(dep.code) ?? [],
-  }));
+  // Units and institutions list largest-first (counts are static, so the order
+  // never reshuffles under a click); the facet's search box covers finding one by name.
+  const departments = deptRows
+    .map((dep) => ({
+      value: `dept:${dep.code}`,
+      label: dep.name,
+      count: deptCount.get(dep.code) ?? 0,
+      divisions: (divByDept.get(dep.code) ?? []).sort(byCountDesc),
+    }))
+    .sort(byCountDesc);
 
-  const centers: DataQualityFacetOption[] = ctrRows.map((c) => ({
-    value: `center:${c.code}`,
-    label: c.name,
-    count: ctrCount.get(c.code) ?? 0,
-  }));
+  const centers: DataQualityFacetOption[] = ctrRows
+    .map((c) => ({
+      value: `center:${c.code}`,
+      label: c.name,
+      count: ctrCount.get(c.code) ?? 0,
+    }))
+    .sort(byCountDesc);
 
-  return { roleCategories, departments, centers };
+  const institutions: DataQualityFacetOption[] = instAgg
+    .flatMap((r) =>
+      r.primaryOrgCode
+        ? [
+            {
+              value: `inst:${r.primaryOrgCode}`,
+              label: institutionDisplayName(r.primaryOrgCode),
+              count: r._count._all,
+            },
+          ]
+        : [],
+    )
+    .sort(byCountDesc);
+
+  const rankCounts = await Promise.all(
+    RANK_FILTERS.map((r) => client.scholar.count({ where: { ...ACTIVE_WHERE, ...RANK_WHERE[r] } })),
+  );
+  const ranks = RANK_FILTERS.map((value, i) => ({
+    value,
+    label: RANK_LABELS[value],
+    count: rankCounts[i],
+  })).filter((r) => r.count > 0);
+
+  return { roleCategories, departments, centers, institutions, ranks };
 }

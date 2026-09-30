@@ -137,3 +137,33 @@ describe("Dept GrantCard — investigator chip tooltip (#2074)", () => {
     expect(tips[1]).toBe("Co-Investigator");
   });
 });
+
+describe("Dept GrantCard — hidden identity class (#536)", () => {
+  const person = (roleCategory: string | null): AuthorChip => ({
+    name: "Test Student",
+    cwid: "zzz9999",
+    slug: "test-student",
+    identityImageEndpoint: "https://example.invalid/headshot/zzz9999",
+    isFirst: true,
+    isLast: false,
+    roleCategory,
+    grantRole: "PI",
+  });
+
+  it("renders a doctoral-student PI unlinked and without a headshot", () => {
+    const { container, getByText } = render(
+      <GrantCard grant={{ ...baseGrant, pis: [person("doctoral_student_phd")] }} />,
+    );
+    expect(getByText("Test Student")).toBeTruthy();
+    expect(container.querySelector('a[href*="test-student"]')).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.innerHTML).not.toContain("zzz9999");
+  });
+
+  it("still links a publicly displayed PI", () => {
+    const { container } = render(
+      <GrantCard grant={{ ...baseGrant, pis: [person("full_time_faculty")] }} />,
+    );
+    expect(container.querySelector('a[href*="test-student"]')).not.toBeNull();
+  });
+});

@@ -76,9 +76,35 @@ export function authorizeFieldEdit(
   session: EditSession,
   target: {
     entityId: string;
-    fieldName: "overview" | "slug" | "selectedHighlightPmids" | "manualMentees";
+    fieldName:
+      | "overview"
+      | "slug"
+      | "selectedHighlightPmids"
+      | "manualMentees"
+      | "primaryTitle"
+      | "primaryTitleRequest";
   },
 ): AuthzResult {
+  // #2719 — SETTING the display title is superuser / comms_steward only. Not
+  // self: a scholar picking their own headline title is a governance question
+  // (the institution speaks with one voice — the same reasoning behind the
+  // single role vocabulary in `lib/org-unit-roles.ts`). Not a unit admin either
+  // (Paul, 2026-09-23): everyone else asks via the Title row's Request a change.
+  if (target.fieldName === "primaryTitle") {
+    if (session.isSuperuser || session.isCommsSteward) return ALLOW;
+    return { ok: false, reason: "not_superuser" };
+  }
+
+  // #2719 — REQUESTING a title is the scholar's own surface. It has no public
+  // effect until an operator approves, so the self test is the whole gate; a
+  // proxy is handled at the route (PE-03), exactly as `overview` is.
+  if (target.fieldName === "primaryTitleRequest") {
+    if (session.cwid === target.entityId || session.isSuperuser || session.isCommsSteward) {
+      return ALLOW;
+    }
+    return { ok: false, reason: "not_self" };
+  }
+
   if (
     target.fieldName === "overview" ||
     target.fieldName === "selectedHighlightPmids" ||
@@ -400,45 +426,65 @@ export type CoreOwnerLookup = {
   unitAdmin: {
     findUnique: (args: {
       where: {
-        entityType_entityId_cwid: { entityType: "core"; entityId: string; cwid: string };
+        entityType_entityId_cwid: { entityType: FlatUnitKind; entityId: string; cwid: string };
       };
       select: { role: true };
     }) => Promise<{ role: "owner" | "curator" } | null>;
   };
 };
 
+/** Unit kinds with no cascade — one composite-key `UnitAdmin` lookup answers
+ *  the role. `core` = a core facility; `institution` = an ED primary-
+ *  organization code (lib/institutions.ts). */
+export type FlatUnitKind = "core" | "institution";
+
 /**
- * The actor's role on a core facility. A core owner is
- * `UnitAdmin(entityType="core", entityId=coreId)`. Cores are flat — there is no
- * dept→division cascade — so this is a single composite-key lookup. Superuser is
- * NOT minted here (it's handled in {@link authorizeCoreClaim}) so the audit log
- * records the role the actor actually held.
+ * The actor's role on a flat unit: `UnitAdmin(entityType, entityId)` and
+ * nothing else — no dept→division cascade. Superuser is NOT minted here (the
+ * callers handle it) so the audit log records the role the actor actually held.
  */
-export async function getCoreOwnerRole(
+export async function getFlatUnitRole(
   session: EditSession,
-  coreId: string,
+  entityType: FlatUnitKind,
+  entityId: string,
   db: CoreOwnerLookup,
 ): Promise<EffectiveUnitRole> {
   const row = await db.unitAdmin.findUnique({
-    where: {
-      entityType_entityId_cwid: { entityType: "core", entityId: coreId, cwid: session.cwid },
-    },
+    where: { entityType_entityId_cwid: { entityType, entityId, cwid: session.cwid } },
     select: { role: true },
   });
   return row?.role ?? "none";
 }
 
 /**
- * `POST /api/edit/core-claim`. An owner/curator of the core (or a Superuser) may
+ * The actor's role on a core facility. A core owner is
+ * `UnitAdmin(entityType="core", entityId=coreId)`. See {@link getFlatUnitRole};
+ * superuser is handled in {@link authorizeCoreClaim}.
+ */
+export async function getCoreOwnerRole(
+  session: EditSession,
+  coreId: string,
+  db: CoreOwnerLookup,
+): Promise<EffectiveUnitRole> {
+  return getFlatUnitRole(session, "core", coreId, db);
+}
+
+/**
+ * `POST /api/edit/core-claim` (and the shared gate for `/api/edit/core`'s
+ * content/leader writes + the `/edit/core/[coreId]` pages). An owner/curator of
+ * the core, a Superuser, or — per the 2026-08-26 policy widening (decision #6,
+ * `comms-steward-profile-editing-spec.md` §11) — a comms_steward may
  * claim/reject a (publication, core) usage candidate for THAT core. Pure given
- * the looked-up role. No comms_steward parity — cores are a separate domain from
- * profile-content stewardship.
+ * the looked-up role. Cores were previously a separate domain with NO
+ * comms_steward parity; the operator confirmed full curator-parity on cores
+ * (content edits, leaders/roster, and this claim queue) reusing this one
+ * predicate, so every core-gated surface picks up the widening for free.
  */
 export function authorizeCoreClaim(
   session: EditSession,
   coreRole: EffectiveUnitRole,
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (coreRole === "owner" || coreRole === "curator") return ALLOW;
   return { ok: false, reason: "not_core_owner" };
 }
@@ -456,8 +502,9 @@ export function canEditUnit(
   // A comms_steward edits any EXISTING unit's content at curator parity
   // (description / leadership / roster) — comms-steward-profile-editing-spec.md
   // §3b "minus adding/remove org units" excludes only create/delete + grants,
-  // not editing existing units. Grants stay Owner/Superuser (`canManageAccess`)
-  // and unit create/delete is not widened — so this confers content editing only.
+  // not editing existing units. As of the 2026-08-26 policy widening
+  // (decision #3), `canManageAccess` ALSO admits comms_steward now — it's
+  // unit create/delete specifically that stays unwidened, not grants.
   if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "owner" || effectiveRole === "curator") return ALLOW;
   return { ok: false, reason: "not_curator" };
@@ -468,12 +515,21 @@ export function canEditUnit(
  * row requires Owner role on the target unit (or Superuser). A Curator can
  * edit but cannot delegate — this is the load-bearing line that keeps
  * Curators from widening their own access via a self-granted Owner row.
+ *
+ * A comms_steward is also admitted, full stop — the 2026-08-26 policy
+ * widening (decision #3, `comms-steward-profile-editing-spec.md` §11): FULL
+ * access-management parity on every org unit kind (department / division /
+ * center / core), uniformly, regardless of the actor's own `effectiveRole`
+ * on that unit. This is deliberately NOT kind-specific — do not special-case
+ * cores here or anywhere `canManageAccess` is read. It does not touch the
+ * Curator-non-delegation line above, which still turns on `effectiveRole`
+ * alone for a non-steward, non-superuser actor.
  */
 export function canManageAccess(
   session: EditSession,
   effectiveRole: EffectiveUnitRole,
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "owner") return ALLOW;
   return { ok: false, reason: "not_unit_owner" };
 }
@@ -492,13 +548,22 @@ export function canManageAccess(
  * The split matches Amendment 1 § A1.5 #1 — the event payload also carries
  * the target `role` so an `authority_violation` makes plain *which* role the
  * actor failed to mint.
+ *
+ * A comms_steward is modeled on the Superuser branch — the 2026-08-26 policy
+ * widening (decision #3, `comms-steward-profile-editing-spec.md` §11): FULL
+ * access-management parity on every unit, every kind, so a steward grants
+ * either role anywhere even though they hold no `unit_admin` row of their
+ * own (`effectiveRole` stays whatever it actually is — "none" for a steward
+ * with no personal grant — for the audit log's sake; it just never gates
+ * them). This does not touch the Curator (`authority_violation`) or no-role
+ * (`scope_violation`) denials for a NON-steward, non-superuser actor.
  */
 export function canGrant(
   session: EditSession,
   effectiveRole: EffectiveUnitRole,
   _targetRole: "owner" | "curator",
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "none") return { ok: false, reason: "scope_violation" };
   if (effectiveRole === "curator") return { ok: false, reason: "authority_violation" };
   // effectiveRole === "owner": Amendment 1 § A1.4 C — owner→owner is permitted
@@ -533,7 +598,10 @@ export function logEditDenial(params: {
   targetCwid: string;
   path: string;
   reason: string;
-  targetEntityType?: UnitKind;
+  /** `UnitKind` plus the flat kinds — cores and institutions never appear in
+   *  `UnitRef`/`UnitKind` itself (no dept→division-style cascade), but the
+   *  grant route logs denials for their grants too. */
+  targetEntityType?: UnitKind | FlatUnitKind;
   targetEntityId?: string;
   role?: "owner" | "curator";
 }): void {

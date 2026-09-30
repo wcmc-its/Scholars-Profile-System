@@ -36,7 +36,7 @@ and they behave differently on purpose.
 | Surface | Cohort cap | Release-code filter | Email gate |
 |---|---|---|---|
 | #847 scope export (`lib/api/export-scholars.ts`) — method-family / supercategory / topic / subtopic | `SCHOLAR_EXPORT_CAP = 50`, server refuses above it | **yes** (`isEmailExportableByReleaseCode`) | `SCHOLAR_LIST_EXPORT_EMAIL` + internal viewer + #536 carve + release code |
-| `/edit` unit exports — center / department / division roster CSV | **none** — a unit's full membership | **no** (`exportEmailCell`) | `SCHOLAR_LIST_EXPORT_EMAIL` + #536 carve |
+| `/edit` unit exports — center roster .xlsx, department / division roster CSV | **none** — a unit's full membership | **no** (`exportEmailCell`) | `SCHOLAR_LIST_EXPORT_EMAIL` + #536 carve |
 
 The `/edit` unit exports were added in #2316 and un-gated from the release code in
 #2323, a deliberate change to the § B.3 policy by the spec owner.

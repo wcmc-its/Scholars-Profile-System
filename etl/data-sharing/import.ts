@@ -15,8 +15,8 @@
  * when the NDJSON yields 0 rows — pass `--allow-empty` only to deliberately
  * clear the tables.
  *
- * NDJSON contract: see export.ts (one raw source-row object per line). Blank
- * and malformed lines are skipped + counted.
+ * NDJSON contract: see export.ts (one raw source-row object per line, including
+ * sensitiveCats/sensitiveSubtypes). Blank and malformed lines are skipped + counted.
  *
  * Env (AWS default credential chain — never hardcode keys):
  *   DATA_SHARING_BUCKET   (default ARTIFACTS_BUCKET, else wcmc-reciterai-artifacts)
@@ -64,6 +64,8 @@ function parseNdjson(text: string): { rows: SourceRow[]; skipped: number } {
         accessionOrDoi: (o.accessionOrDoi as string) ?? null,
         resourceType: (o.resourceType as string) ?? null,
         dataType: (o.dataType as string) ?? null,
+        sensitiveCats: (o.sensitiveCats as string) ?? null,
+        sensitiveSubtypes: (o.sensitiveSubtypes as string) ?? null,
         accessModel: (o.accessModel as string) ?? null,
         depositYear: (o.depositYear as number | string) ?? null,
         provenance: (o.provenance as string) ?? null,

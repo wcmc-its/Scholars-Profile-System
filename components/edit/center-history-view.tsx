@@ -12,6 +12,7 @@
  */
 import Link from "next/link";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import type { CenterAuditEntry, RosterFieldChange } from "@/lib/api/center-audit";
 
 export type CenterHistoryViewProps = {
@@ -36,9 +37,18 @@ const CHANGE_LABEL: Record<CenterAuditEntry["changeKind"], string> = {
 
 const FIELD_LABEL: Record<RosterFieldChange["field"], string> = {
   type: "Type",
+  // #2542 — `role` is the stored membership role key that `type` is derived
+  // from; the two move together on an ordinary roster edit, so both render.
+  role: "Role",
   program: "Program",
   start: "Start",
   end: "End",
+  // Disease-assignment plan §5 — a `disease_assignment_decision` row's one
+  // `fieldChanges` entry (`lib/api/center-audit.ts`'s `deriveDiseaseChange`):
+  // "Disease: BREAST → confirmed".
+  disease: "Disease",
+  // A `disease_auto_publish_set` row — the center's switch, "off → on".
+  autoPublish: "Auto-publish high-confidence",
 };
 
 /** Format a stored ISO-8601 instant as a compact UTC wall-clock string. */
@@ -49,9 +59,17 @@ function formatTs(iso: string): string {
   return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
-/** Render one row's diff: a dash for add/remove, "Field: a → b" lines for modify. */
+/**
+ * Render one row's diff: "Field: a → b" lines when `fieldChanges` is
+ * non-empty, else a dash. A roster row only populates `fieldChanges` on
+ * `modify` (add/remove is the whole row — the Member column already says
+ * who); a `disease_assignment_decision` row populates it on every kind, since
+ * the code + decision IS the row's content even for a first decision or a
+ * clear (`deriveDiseaseChange`) — so this checks `fieldChanges.length`
+ * directly rather than gating on `changeKind`.
+ */
 function DiffSummary({ entry }: { entry: CenterAuditEntry }) {
-  if (entry.changeKind !== "modify" || entry.fieldChanges.length === 0) {
+  if (entry.fieldChanges.length === 0) {
     return <span className="text-muted-foreground">—</span>;
   }
   return (
@@ -76,72 +94,77 @@ export function CenterHistoryView({
   unavailable = false,
 }: CenterHistoryViewProps) {
   return (
-    <main
-      className="mx-auto w-full max-w-[var(--max-content)] px-6 py-10"
-      data-slot="center-history-view"
-      data-center-code={centerCode}
-    >
-      <p className="mb-4">
-        <Link
-          href={`/edit/center/${encodeURIComponent(centerCode)}`}
-          className="text-apollo-slate hover:underline"
-        >
-          &larr; Back to {centerName}
-        </Link>
-      </p>
-
-      <h1 className="page-title">Roster change history</h1>
-      <p className="text-muted-foreground mt-2">
-        {centerName} — roster changes in the last {windowDays} days. Read-only.
-      </p>
-
-      {unavailable ? (
-        <p className="text-muted-foreground mt-8" data-testid="center-history-unavailable">
-          Change history is temporarily unavailable. Please try again later or contact ITS Support
-          if this persists.
+    <div className="bg-apollo-page min-h-screen">
+      {/* This page has no `AdminSubnav` below it, so the top bar must supply the
+          account menu / Back-to-Scholars / Sign-out itself (dwd2001 nav fix). */}
+      <ConsoleTopBar variant="console" showAccountMenu />
+      <main
+        className="mx-auto w-full max-w-[var(--max-content)] px-6 py-10"
+        data-slot="center-history-view"
+        data-center-code={centerCode}
+      >
+        <p className="mb-4">
+          <Link
+            href={`/edit/center/${encodeURIComponent(centerCode)}`}
+            className="text-apollo-slate hover:underline"
+          >
+            &larr; Back to {centerName}
+          </Link>
         </p>
-      ) : entries.length === 0 ? (
-        <p className="text-muted-foreground mt-8" data-testid="center-history-empty">
-          No roster changes recorded in the last {windowDays} days.
+
+        <h1 className="page-title font-bold">Roster change history</h1>
+        <p className="text-muted-foreground mt-2">
+          {centerName} — roster changes in the last {windowDays} days. Read-only.
         </p>
-      ) : (
-        <div className="mt-8 overflow-x-auto">
-          <table className="w-full text-sm" data-testid="center-history-table">
-            <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-              <tr className="border-apollo-border border-b">
-                <th className="px-3 py-2 font-medium">When</th>
-                <th className="px-3 py-2 font-medium">Actor</th>
-                <th className="px-3 py-2 font-medium">Change</th>
-                <th className="px-3 py-2 font-medium">Member</th>
-                <th className="px-3 py-2 font-medium">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((e) => (
-                <tr
-                  key={e.id}
-                  className="border-apollo-border border-b align-top"
-                  data-testid={`center-history-row-${e.id}`}
-                  data-change-kind={e.changeKind}
-                >
-                  <td className="px-3 py-2 whitespace-nowrap">{formatTs(e.ts)}</td>
-                  <td className="px-3 py-2">
-                    {e.actorCwid}
-                    {e.impersonatedCwid && (
-                      <span className="text-muted-foreground"> (as {e.impersonatedCwid})</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{CHANGE_LABEL[e.changeKind]}</td>
-                  <td className="px-3 py-2 font-medium whitespace-nowrap">{e.targetCwid}</td>
-                  <td className="px-3 py-2">
-                    <DiffSummary entry={e} />
-                  </td>
+
+        {unavailable ? (
+          <p className="text-muted-foreground mt-8" data-testid="center-history-unavailable">
+            Change history is temporarily unavailable. Please try again later or contact ITS
+            Support if this persists.
+          </p>
+        ) : entries.length === 0 ? (
+          <p className="text-muted-foreground mt-8" data-testid="center-history-empty">
+            No roster changes recorded in the last {windowDays} days.
+          </p>
+        ) : (
+          <div className="mt-8 overflow-x-auto">
+            <table className="w-full text-sm" data-testid="center-history-table">
+              <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+                <tr className="border-apollo-border border-b">
+                  <th className="px-3 py-2 font-medium">When</th>
+                  <th className="px-3 py-2 font-medium">Actor</th>
+                  <th className="px-3 py-2 font-medium">Change</th>
+                  <th className="px-3 py-2 font-medium">Member</th>
+                  <th className="px-3 py-2 font-medium">Details</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </main>
+              </thead>
+              <tbody>
+                {entries.map((e) => (
+                  <tr
+                    key={e.id}
+                    className="border-apollo-border border-b align-top"
+                    data-testid={`center-history-row-${e.id}`}
+                    data-change-kind={e.changeKind}
+                  >
+                    <td className="px-3 py-2 whitespace-nowrap">{formatTs(e.ts)}</td>
+                    <td className="px-3 py-2">
+                      {e.actorCwid}
+                      {e.impersonatedCwid && (
+                        <span className="text-muted-foreground"> (as {e.impersonatedCwid})</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{CHANGE_LABEL[e.changeKind]}</td>
+                    <td className="px-3 py-2 font-medium whitespace-nowrap">{e.targetCwid || "—"}</td>
+                    <td className="px-3 py-2">
+                      <DiffSummary entry={e} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }

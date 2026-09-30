@@ -102,3 +102,38 @@ describe("getTopicScholars — #536 role carve", () => {
     expect(Object.keys(result!.roleCounts).sort()).toEqual(["all", "faculty", "postdocs"]);
   });
 });
+
+describe("getTopicScholars — letter + subarea filters", () => {
+  const rows = [
+    scholarRow("a1", "Ada Brown", "full_time_faculty"),
+    scholarRow("a2", "Cy Baker", "full_time_faculty"),
+    scholarRow("a3", "Di Kamel", "postdoc"),
+  ];
+
+  it("narrows hits to one letter, falling back to the first available", async () => {
+    scholarFindMany.mockResolvedValue(rows);
+    const k = await getTopicScholars(TOPIC, { letter: "k" });
+    expect(k!.letters).toEqual(["B", "K"]);
+    expect(k!.letter).toBe("K");
+    expect(k!.hits.map((h) => h.cwid)).toEqual(["a3"]);
+
+    const z = await getTopicScholars(TOPIC, { letter: "Z" });
+    expect(z!.letter).toBe("B");
+    expect(z!.hits.map((h) => h.cwid)).toEqual(["a2", "a1"]);
+  });
+
+  it("a name search returns every match, not one letter", async () => {
+    scholarFindMany.mockResolvedValue(rows);
+    const r = await getTopicScholars(TOPIC, { q: "a", letter: "K" });
+    expect(r!.letter).toBeNull();
+    expect(r!.hits).toHaveLength(3);
+  });
+
+  it("scopes the scholar universe to the subarea", async () => {
+    await getTopicScholars(TOPIC, { subtopic: "sub-1" });
+    const where = scholarFindMany.mock.calls[0][0].where as Record<string, unknown>;
+    expect(where.publicationTopics).toEqual({
+      some: { parentTopicId: TOPIC, primarySubtopicId: "sub-1" },
+    });
+  });
+});

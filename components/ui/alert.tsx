@@ -23,8 +23,12 @@ const alertVariants = cva(
     variants: {
       variant: {
         info: "bg-card text-card-foreground border-border",
+        // The description used to render at `text-destructive/90` — red-600 dimmed a
+        // further 10% over the card fill, which lands under 4.5:1 and made the longest,
+        // most important copy on the surface (the NIH rewrite caution) the hardest to
+        // read. Full-strength destructive clears 4.5:1 on the card in both themes.
         destructive:
-          "text-destructive bg-card border-destructive/30 [&>svg]:text-current *:data-[slot=alert-description]:text-destructive/90",
+          "text-destructive bg-card border-destructive/30 [&>svg]:text-current *:data-[slot=alert-description]:text-destructive",
       },
     },
     defaultVariants: {
@@ -54,10 +58,7 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-title"
-      className={cn(
-        "col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight",
-        className,
-      )}
+      className={cn("col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight", className)}
       {...props}
     />
   );

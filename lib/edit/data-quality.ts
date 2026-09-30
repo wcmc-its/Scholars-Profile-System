@@ -1,15 +1,21 @@
 /**
- * Data Quality dashboard — feature flag, tab visibility, and access scope
- * (`docs/data-quality-dashboard-spec.md`).
+ * Profiles roster — feature flag (for its COI-review slice) and access scope.
  *
- * The dashboard (`/edit/data-quality`) is a read-only, prominence-sorted list of
- * scholars and their data-quality gaps (missing headshot / overview, pending COI
- * suggestions). It is for every `/edit` user EXCEPT a plain scholar editing their
- * own profile: a superuser or comms_steward sees ALL scholars; a unit Owner /
- * Curator sees only scholars in the unit(s) they administer (dept→division
- * cascade + center memberships). This module supplies the flag gate, the sub-nav
- * visibility predicate, and the server-side scope resolver — the query, never the
+ * `/edit/profiles` ("Profiles") is a prominence-sorted list of scholars, scoped
+ * for every `/edit` user EXCEPT a plain scholar editing their own profile: a
+ * superuser or comms_steward sees ALL scholars; a unit Owner / Curator sees only
+ * scholars in the unit(s) they administer (dept→division cascade + center
+ * memberships). This module supplies the scope resolver — the query, never the
  * UI, is the boundary.
+ *
+ * `isDataQualityDashboardEnabled` now gates one narrower thing: the COI-review
+ * column/filter on that same Profiles page, which is ALSO superuser-only
+ * (`session.isSuperuser` — a comms_steward or unit Owner/Curator does not get
+ * it, unlike the rest of the roster). Formerly this flag gated a whole standalone
+ * "Data Quality dashboard" page (`docs/data-quality-dashboard-spec.md`) with its
+ * own nav tab; that surface was folded into Profiles and its headshot/overview
+ * gap tracking was dropped, keeping only the COI slice under this flag. The name
+ * stuck for historical reasons — `EDIT_DATA_QUALITY_DASHBOARD` is the live env var.
  *
  * Server-only by construction for the scope resolver (reads Prisma via a narrow
  * injected client) — no `server-only` import so it loads under vitest with a fake
@@ -20,27 +26,13 @@ import type { EditSession } from "@/lib/auth/superuser";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /**
- * Whether the Data Quality dashboard is enabled (off by default). When off the
- * route 404s and the sub-nav tab is hidden — mirroring `isAdministratorsTabEnabled`
- * / `isMethodsTabVisible`.
+ * Whether the COI-review column/filter on the Profiles roster is enabled (off
+ * by default). When off, the column and filter option are hidden for every
+ * viewer, including superusers — mirroring `isAdministratorsTabEnabled` /
+ * `isMethodsTabVisible`. Still superuser-only when on (see module doc comment).
  */
 export function isDataQualityDashboardEnabled(): boolean {
   return process.env.EDIT_DATA_QUALITY_DASHBOARD === "on";
-}
-
-/**
- * Whether to advertise the "Data quality" tab in the admin sub-nav for this
- * viewer on a STEWARD surface: the feature is enabled AND the viewer is a global
- * editor (superuser or comms_steward), so they can open the org-wide dashboard.
- * A unit Owner/Curator is NOT a global editor — the `/edit/units` page ORs this
- * with "has manageable units" so they still get the tab there (scoped to their
- * units), while never being shown it on surfaces they can't open.
- */
-export function isDataQualityTabVisible(session: {
-  isSuperuser: boolean;
-  isCommsSteward: boolean;
-}): boolean {
-  return isDataQualityDashboardEnabled() && (session.isSuperuser || session.isCommsSteward);
 }
 
 /**
@@ -52,7 +44,15 @@ export function isDataQualityTabVisible(session: {
  */
 export type DataQualityScope =
   | { all: true }
-  | { all: false; unitCodes: string[]; centerCodes: string[] };
+  | {
+      all: false;
+      unitCodes: string[];
+      centerCodes: string[];
+      /** ED primary-organization codes the viewer administers (`unit_admin`
+       *  entityType `institution`, lib/institutions.ts) — matched against
+       *  `Scholar.primaryOrgCode`. Optional so older scope literals still type. */
+      institutionCodes?: string[];
+    };
 
 /** The narrow Prisma surface the scope resolver reads. */
 export type DataQualityScopeClient = Pick<PrismaClient, "unitAdmin" | "division">;
@@ -68,7 +68,11 @@ export async function loadDataQualityScope(
   session: EditSession,
   db: DataQualityScopeClient,
 ): Promise<DataQualityScope> {
-  if (session.isSuperuser || session.isCommsSteward) return { all: true };
+  // `cv_generator` (#2482) is a global READ-only role: it gets the same `{ all:
+  // true }` scope as superuser/comms_steward here (this resolver only decides
+  // WHICH scholars are listed, never write access), but stays excluded from
+  // the superuser-only COI-review column (`session.isSuperuser`, unaffected).
+  if (session.isSuperuser || session.isCommsSteward || session.isCvGenerator) return { all: true };
 
   const grants = await db.unitAdmin.findMany({
     where: { cwid: session.cwid },
@@ -77,6 +81,7 @@ export async function loadDataQualityScope(
 
   const unitCodes = new Set<string>();
   const centerCodes = new Set<string>();
+  const institutionCodes = new Set<string>();
   const deptCodes: string[] = [];
   for (const g of grants) {
     if (g.entityType === "department") {
@@ -86,6 +91,8 @@ export async function loadDataQualityScope(
       unitCodes.add(g.entityId);
     } else if (g.entityType === "center") {
       centerCodes.add(g.entityId);
+    } else if (g.entityType === "institution") {
+      institutionCodes.add(g.entityId);
     }
   }
 
@@ -98,10 +105,20 @@ export async function loadDataQualityScope(
     for (const d of divisions) unitCodes.add(d.code);
   }
 
-  return { all: false, unitCodes: [...unitCodes], centerCodes: [...centerCodes] };
+  return {
+    all: false,
+    unitCodes: [...unitCodes],
+    centerCodes: [...centerCodes],
+    institutionCodes: [...institutionCodes],
+  };
 }
 
 /** True when a non-global viewer's scope is empty — the route renders Forbidden. */
 export function isEmptyScope(scope: DataQualityScope): boolean {
-  return scope.all === false && scope.unitCodes.length === 0 && scope.centerCodes.length === 0;
+  return (
+    scope.all === false &&
+    scope.unitCodes.length === 0 &&
+    scope.centerCodes.length === 0 &&
+    (scope.institutionCodes ?? []).length === 0
+  );
 }

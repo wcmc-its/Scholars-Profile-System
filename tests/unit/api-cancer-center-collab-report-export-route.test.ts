@@ -6,8 +6,8 @@
  * justification, synopsis) and the taxonomy "why": matched or not, which
  * term(s)/topic(s). `matchedTopics`/`matchedUis`/`loadCancerTaxonomy` are
  * mocked here — their own correctness is covered by `cancer-taxonomy.test.ts`;
- * this test is about the route's CSV shape, filename, and scoping (`?cwid=`
- * vs. whole report).
+ * this test is about the route's CSV shape, filename, and scoping to one
+ * `?cwid=`. The whole-report mode (no `cwid`) is retired (plan D1): 400.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -84,7 +84,7 @@ beforeEach(() => {
   mockCenterFindUnique.mockResolvedValue(CENTER);
   mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: CENTER.code, role: "curator" }]);
   mockCandidateFindMany.mockResolvedValue([{ cwid: "c1" }]);
-  mockScholarFindMany.mockResolvedValue([{ cwid: "c1", preferredName: "Ada Lovelace" }]);
+  mockScholarFindMany.mockResolvedValue([{ cwid: "c1", preferredName: "Ada Lovelace", primaryOrgCode: "HSS" }]);
   mockAuthorFindMany.mockResolvedValue([
     {
       pmid: "111",
@@ -144,19 +144,20 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
   });
 
   it("200s a CSV with one row per paper, full citation detail + the match reasoning", async () => {
-    const res = await GET(get("http://localhost/x"), params());
+    const res = await GET(get("http://localhost/x?cwid=c1"), params());
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("text/csv");
-    expect(res.headers.get("Content-Disposition")).toContain('filename="meyer_cancer_center-cancer-relevance-full.csv"');
     const csv = await res.text();
     const lines = csv.trim().split("\r\n");
     expect(lines[0]).toBe(
-      "cwid,surname,given_name,pmid,article_title,journal_title,publication_type,year,is_cancer_related,matched_terms,matched_topics,impact_score,impact_justification,synopsis",
+      "cwid,surname,given_name,pmid,article_title,journal_title,publication_type,year,is_cancer_related,matched_terms,matched_topics,impact_score,impact_justification,synopsis,institution",
     );
     expect(lines).toContain(
-      "c1,Lovelace,Ada,111,A Study of Breast Neoplasms,J Oncol,Academic Article,2020,yes,Breast Neoplasms,breast,4.2,Cited widely,Found a thing.",
+      "c1,Lovelace,Ada,111,A Study of Breast Neoplasms,J Oncol,Academic Article,2020,yes,Breast Neoplasms,breast,4.2,Cited widely,Found a thing.,Hospital for Special Surgery",
     );
-    expect(lines).toContain("c1,Lovelace,Ada,222,Unrelated Work,J Misc,Academic Article,2021,no,,,,,");
+    expect(lines).toContain(
+      "c1,Lovelace,Ada,222,Unrelated Work,J Misc,Academic Article,2021,no,,,,,,Hospital for Special Surgery",
+    );
   });
 
   it("scopes to one candidate and uses the per-person filename when ?cwid= is given", async () => {
@@ -167,11 +168,27 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
     expect(res.headers.get("Content-Disposition")).toContain('filename="meyer_cancer_center-c1-cancer-relevance.csv"');
   });
 
-  it("returns just the header row when the center has no candidates", async () => {
+  it("returns just the header row when the cwid isn't one of the center's candidates", async () => {
     mockCandidateFindMany.mockResolvedValue([]);
-    const res = await GET(get("http://localhost/x"), params());
+    const res = await GET(get("http://localhost/x?cwid=zz9"), params());
     expect(res.status).toBe(200);
     const csv = await res.text();
     expect(csv.trim().split("\r\n")).toHaveLength(1);
+  });
+
+  it("400s without ?cwid= — the whole-report CSV is retired — never reading candidates or papers", async () => {
+    const res = await GET(get("http://localhost/x"), params());
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "missing_cwid", field: "cwid" });
+    expect(mockCandidateFindMany).not.toHaveBeenCalled();
+    expect(mockAuthorFindMany).not.toHaveBeenCalled();
+    // Blank is the same as missing.
+    expect((await GET(get("http://localhost/x?cwid=%20"), params())).status).toBe(400);
+  });
+
+  it("keeps the per-person (?cwid=) export working regardless of the cohort cap", async () => {
+    const res = await GET(get("http://localhost/x?cwid=c1"), params());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/csv");
   });
 });

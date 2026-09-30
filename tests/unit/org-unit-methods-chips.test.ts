@@ -33,6 +33,9 @@ const {
   mockSensitivityOverlayFindMany,
   mockChipsEnabled,
   mockSensitiveGateOn,
+  mockFieldOverrideFindMany,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockScholarFindFirst: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -49,6 +52,9 @@ const {
   mockSensitivityOverlayFindMany: vi.fn(),
   mockChipsEnabled: vi.fn(),
   mockSensitiveGateOn: vi.fn(),
+  mockFieldOverrideFindMany: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -68,6 +74,12 @@ vi.mock("@/lib/db", () => ({
     scholarFamily: { findMany: mockScholarFamilyFindMany },
     familySuppressionOverlay: { findMany: mockSuppressionOverlayFindMany },
     familySensitivityOverlay: { findMany: mockSensitivityOverlayFindMany },
+    // #2542 contract A — `getDivisionFaculty`'s chief-first ordering now runs
+    // through `resolveUnitLeader` (override > assignment) unconditionally;
+    // both default to "no leader" so these chips-focused tests need not care.
+    fieldOverride: { findMany: mockFieldOverrideFindMany },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
   },
 }));
 
@@ -130,6 +142,9 @@ beforeEach(() => {
   // Overlay gate defaults to "nothing suppressed / nothing sensitive".
   mockSuppressionOverlayFindMany.mockResolvedValue([]);
   mockSensitivityOverlayFindMany.mockResolvedValue([]);
+  mockFieldOverrideFindMany.mockResolvedValue([]);
+  mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
 });
 
 describe("getDepartmentFaculty method chips (#974)", () => {

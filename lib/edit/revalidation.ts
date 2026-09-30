@@ -232,6 +232,10 @@ export async function reflectUnitChange(params: {
   /** #1117 — for a center program edit (leaders/description), the program code
    *  whose dedicated page `/centers/{slug}/programs/{code}` must also flush. */
   programCode?: string;
+  /** Every program page of the center, for an edit that changes what all of
+   *  them render (the published-disease roster data on each program's
+   *  GroupedRoster). Merged with `programCode`. */
+  programCodes?: readonly string[];
 }): Promise<void> {
   const paths: string[] = ["/browse"];
   if (params.unitKind === "department") {
@@ -249,11 +253,23 @@ export async function reflectUnitChange(params: {
       paths.push(`/centers/${params.previousSlug}`);
     }
     // #1117 — the program's own ISR page renders the leaders/description.
-    if (params.programCode) {
-      paths.push(`/centers/${params.unitSlug}/programs/${params.programCode}`);
+    const programCodes = new Set(params.programCodes ?? []);
+    if (params.programCode) programCodes.add(params.programCode);
+    for (const programCode of programCodes) {
+      paths.push(`/centers/${params.unitSlug}/programs/${programCode}`);
     }
   }
   revalidatePaths(paths);
+  // Unit Page v2 — each unit page has research-area views under
+  // `{unitPath}/areas/{topic}` (the hero preview's "See all"). They render the
+  // same hero, so a leader/description/slug edit must purge them at the edge
+  // too; an invalidation of `/departments/x` does not cover sub-paths. The
+  // area routes read searchParams (dynamic render, no ISR entry), so only the
+  // CDN needs the wildcard — it is off the revalidatePath allow-list by design.
+  const areaWildcards = paths
+    .filter((p) => p.startsWith("/departments/") || p.startsWith("/centers/"))
+    .filter((p) => !p.includes("/programs/"))
+    .map((p) => `${p}/areas/*`);
   // #1537 — the ISR/CDN busts above don't touch the in-process swr-cache Map
   // that getCenter/getDepartment/getDivision (+ their members/pubs/spotlight
   // reads) serve through, so the origin task would re-serve the pre-edit rollup
@@ -264,7 +280,7 @@ export async function reflectUnitChange(params: {
       ? ["division:", "department:"]
       : [`${params.unitKind}:`];
   for (const prefix of bustPrefixes) bust(prefix);
-  await invalidateCloudFront(paths);
+  await invalidateCloudFront([...paths, ...areaWildcards]);
 }
 
 /**

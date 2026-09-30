@@ -24,6 +24,9 @@ import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
 import {
   listOverviewGenerations,
+  listOverviewVersions,
+  loadHistoryNames,
+  loadImportedOverview,
   loadOverviewProvenance,
 } from "@/lib/edit/overview-provenance";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
@@ -61,9 +64,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const [generations, provenance] = await Promise.all([
+    const [generations, provenance, versions, importedHtml] = await Promise.all([
       listOverviewGenerations(targetCwid),
       loadOverviewProvenance(targetCwid),
+      listOverviewVersions(targetCwid),
+      loadImportedOverview(targetCwid),
+    ]);
+    const names = await loadHistoryNames([
+      ...generations.map((g) => g.createdByCwid),
+      ...versions.map((v) => v.savedByCwid),
     ]);
     return editOk({
       generations: generations.map((g) => ({
@@ -73,7 +82,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         params: g.params,
         createdAt: g.createdAt.toISOString(),
         text: g.text,
+        name: g.name,
+        by: names[g.createdByCwid] ?? null,
       })),
+      // Saved overviews, newest first — the newest is the live text.
+      versions: versions.map((v) => ({
+        id: v.id,
+        html: v.html,
+        origin: v.origin,
+        createdAt: v.createdAt.toISOString(),
+        by: names[v.savedByCwid] ?? null,
+      })),
+      // The previous-profile-system text, for the History panel's Restore.
+      importedHtml,
       provenance: provenance
         ? {
             origin: provenance.origin,

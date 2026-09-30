@@ -50,12 +50,14 @@ describe("recencyShouldSuppress", () => {
 describe("groupProjectsByCore", () => {
   it("collapses fiscal years of one award: earliest start, latest end, max FY, summed amount", () => {
     const grouped = groupProjectsByCore([
-      fyProj({ fiscal_year: 2018, project_start_date: "2018-09-01", project_end_date: "2019-08-31", award_amount: 50000 }),
-      fyProj({ fiscal_year: 2020, project_start_date: "2020-09-01", project_end_date: "2023-08-31", award_amount: 70000 }),
+      fyProj({ fiscal_year: 2018, appl_id: 1, project_start_date: "2018-09-01", project_end_date: "2019-08-31", award_amount: 50000 }),
+      fyProj({ fiscal_year: 2020, appl_id: 2, project_start_date: "2020-09-01", project_end_date: "2023-08-31", award_amount: 70000 }),
     ]);
     expect(grouped).toHaveLength(1);
     const g = grouped[0]!;
     expect(g.coreProjectNum).toBe("R01CA245678");
+    // most-recent-FY wins, same rule as awardNumber/title.
+    expect(g.applId).toBe(2);
     expect(g.startDate?.toISOString().slice(0, 10)).toBe("2018-09-01");
     expect(g.endDate?.toISOString().slice(0, 10)).toBe("2023-08-31");
     expect(g.maxFiscalYear).toBe(2020);
@@ -86,6 +88,7 @@ describe("groupProjectsByCore", () => {
 const grouped = (over: Partial<GroupedProject>): GroupedProject => ({
   coreProjectNum: "R01CA245678",
   awardNumber: "5R01CA245678-03",
+  applId: 1000001,
   orgName: "STANFORD UNIVERSITY",
   title: "A study",
   startDate: new Date("2018-09-01"),
@@ -148,5 +151,23 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
 
   it("the recency default-hide reflects what it mints (#2284)", () => {
     expect(REPORTER).toContain("await reflectGrantSuppressions(minted)");
+  });
+
+  it("the v2 auto-lock write appends a B03 audit row, inside the same transaction", () => {
+    const autolockStart = REPORTER.indexOf('action.kind === "autolock-confirm"');
+    const autoLockedIncrement = REPORTER.indexOf("autoLocked++", autolockStart);
+    expect(autolockStart).toBeGreaterThan(-1);
+    expect(autoLockedIncrement).toBeGreaterThan(autolockStart);
+    const autolockBlock = REPORTER.slice(autolockStart, autoLockedIncrement);
+    // The audit call must be inside the SAME $transaction(async (tx) => {...})
+    // as the person_nih_profile + reporterProfileCandidate writes, not a
+    // separate call after it commits — appendAuditRow's atomicity contract.
+    const txStart = autolockBlock.indexOf("$transaction(async (tx)");
+    expect(txStart).toBeGreaterThan(-1);
+    const txBlock = autolockBlock.slice(txStart);
+    expect(txBlock).toContain("appendAuditRow(tx,");
+    expect(txBlock).toContain('action: "reporter_profile_confirm"');
+    expect(txBlock).toContain('actorCwid: "system-autolock"');
+    expect(txBlock).toContain('targetEntityType: "reporter_profile_candidate"');
   });
 });

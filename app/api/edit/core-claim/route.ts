@@ -11,9 +11,11 @@
  * cores run reads it as a repeat-user prior (dormant-safe; never fails the claim).
  *
  * Authorization (403): owner OR curator of THIS core
- * (`UnitAdmin(entityType="core", entityId=coreId)`), or a Superuser. The grant of
- * that role is a separate Superuser action (`unit_admin` row); until the admin
- * write-UI ships it is provisioned by direct row insert.
+ * (`UnitAdmin(entityType="core", entityId=coreId)`), a Superuser, or (2026-08-26
+ * policy widening, decision #6) a comms_steward — full curator-parity on every
+ * core, regardless of any `unit_admin` row the steward personally holds. The
+ * grant of an owner/curator role itself now also admits a comms_steward
+ * (`canGrant`, decision #3).
  */
 import { type NextRequest, type NextResponse } from "next/server";
 

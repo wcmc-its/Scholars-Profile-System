@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { notFound } from "next/navigation";
 import { SidebarCard } from "@/components/profile/sidebar-card";
 import { ProfileSectionNav } from "@/components/profile/profile-section-nav";
@@ -21,6 +22,7 @@ import { ScrollFade } from "@/components/ui/scroll-fade";
 import { EditMyProfileButton } from "@/components/scholar/edit-my-profile-button";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
+import { countGrantProjects } from "@/lib/grants/project-count";
 import { ClinicalTrialsSection } from "@/components/profile/clinical-trials-section";
 import { DatasetsSection } from "@/components/profile/datasets-section";
 import { TechnologiesSection } from "@/components/profile/technologies-section";
@@ -52,6 +54,13 @@ import {
 import { isProfileFacetRedesignEnabled } from "@/lib/profile/facet-redesign-flag";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { profilePath } from "@/lib/profile-url";
+import { visibleInstitutionName } from "@/lib/institutions";
+import {
+  isProfileLinksEnabled,
+  PROFILE_LINK_PLATFORM_KEYS,
+  PROFILE_LINK_PLATFORMS,
+} from "@/lib/edit/profile-links";
+import { OVERVIEW_HTML_CLASS } from "@/lib/utils";
 
 /**
  * Shared profile render body (#671). Rendered by both the canonical route and
@@ -74,6 +83,20 @@ export async function ProfileView({ slug }: { slug: string }) {
   // React `cache()` entry per request instead of computing the payload twice.
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
+
+  // #2699 — the Contact card's identity links: ORCID first, then the
+  // faculty-entered external profiles in platform order. The whole list rides
+  // SELF_EDIT_PROFILE_LINKS (the loader already returns `{}` for the links when
+  // off; the ORCID row is gated here so the public render is dark as one).
+  const externalProfiles: Array<{ label: string; url: string }> = [
+    ...(isProfileLinksEnabled() && profile.orcid
+      ? [{ label: "ORCID", url: `https://orcid.org/${profile.orcid}` }]
+      : []),
+    ...PROFILE_LINK_PLATFORM_KEYS.flatMap((k) => {
+      const url = profile.profileLinks?.[k];
+      return url ? [{ label: PROFILE_LINK_PLATFORMS[k].label, url }] : [];
+    }),
+  ];
 
   // #536 — hidden identity classes (doctoral students) have no public profile
   // page. The route 404s rather than rendering a thin profile or leaving a
@@ -126,6 +149,9 @@ export async function ProfileView({ slug }: { slug: string }) {
   // the field, matching `profileAppointments` above.
   const honors = sortHonors(profile.honors ?? []);
   const honorCount = honors.length;
+  // #2238/#2239 — Funding header = funding projects, the same shared count the
+  // people-index `grantCount` uses, so card and profile agree.
+  const fundingProjectCount = countGrantProjects(profile.grants);
 
   // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
   // for scholars with no recorded mentor relationships, in which case the
@@ -248,10 +274,19 @@ export async function ProfileView({ slug }: { slug: string }) {
                   })()}
                 </div>
               ) : null}
+              {/* Primary institution, non-WCMC only (absence-as-default, same
+                  policy as #242): an HSS / MSKCC / HMC scholar gets one line
+                  under the department; a WCM scholar renders exactly as before. */}
+              {(() => {
+                const inst = visibleInstitutionName(profile.primaryOrgCode);
+                return inst ? (
+                  <div className="text-muted-foreground mt-0.5 text-sm">{inst}</div>
+                ) : null;
+              })()}
               <EditMyProfileButton profileSlug={profile.slug} profileCwid={profile.cwid} />
             </div>
 
-            {profile.email || profile.hasClinicalProfile ? (
+            {profile.email || profile.hasClinicalProfile || externalProfiles.length > 0 ? (
               <SidebarCard title="Contact">
                 <ul className="flex flex-col gap-2">
                   {profile.email ? (
@@ -286,10 +321,24 @@ export async function ProfileView({ slug }: { slug: string }) {
                         rel="noopener noreferrer"
                         className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                       >
-                        Clinical profile →
+                        Clinical profile ↗
                       </a>
                     </li>
                   ) : null}
+                  {/* #2699 — ORCID (was JSON-LD-only) and the faculty-entered
+                      external profiles. `rel="me"` is the identity-link rel. */}
+                  {externalProfiles.map((p) => (
+                    <li key={p.label}>
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="me noopener noreferrer"
+                        className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                      >
+                        {p.label} →
+                      </a>
+                    </li>
+                  ))}
                 </ul>
               </SidebarCard>
             ) : profile.contactEmailRevealable ? (
@@ -360,7 +409,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                           card can legitimately mix dated and undated rows.
                           Every other appointment renderer suppresses the same
                           way (Past Appointments below,
-                          components/edit/appointments-card.tsx,
+                          components/edit/positions-card.tsx,
                           components/edit/profile-appointments-card.tsx) —
                           keep them in step. */}
                       <div className="text-muted-foreground mt-0.5 text-xs">
@@ -373,39 +422,60 @@ export async function ProfileView({ slug }: { slug: string }) {
               </SidebarCard>
             ) : null}
 
-            {/* #1323 — Past Appointments: REVEALED historical (`ED-HISTORICAL`)
-                roles the scholar opted to show. Hidden ones never reach the
-                payload, so this card simply renders whatever survived. Each
-                row shows a start–end year range. `?? []` tolerates a stale
-                CloudFront/ISR payload built before this field existed during a
-                rolling deploy. */}
-            {(profile.pastAppointments ?? []).length > 0 ? (
-              <SidebarCard title="Past Appointments">
-                <ul className="flex flex-col gap-3">
-                  {(profile.pastAppointments ?? []).map((a, i) => {
-                    const startYear = a.startDate ? a.startDate.slice(0, 4) : null;
-                    const endYear = a.endDate ? a.endDate.slice(0, 4) : null;
-                    const yearRange =
-                      startYear && endYear
-                        ? `${startYear}–${endYear}`
-                        : startYear
-                          ? `${startYear}–`
-                          : endYear
-                            ? `–${endYear}`
-                            : "";
-                    return (
-                      <li key={i} className="leading-snug">
-                        <div className="font-semibold">{a.title}</div>
-                        <div className="text-muted-foreground mt-0.5 text-xs">
-                          {a.organization}
-                          {yearRange ? ` · ${yearRange}` : ""}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </SidebarCard>
-            ) : null}
+            {/* #1323 — Past Appointments: historical (`ED-HISTORICAL`) roles,
+                shown unless a curator hid one (see Appointment.showOnProfile).
+                `?? []` tolerates a stale CloudFront/ISR payload built before
+                this field existed during a rolling deploy. Capped at
+                PAST_APPOINTMENTS_CAP with the rest behind a zero-JS "Show
+                All" — long-tenured faculty can otherwise crowd this narrow
+                sidebar. */}
+            {(profile.pastAppointments ?? []).length > 0 ? (() => {
+              const PAST_APPOINTMENTS_CAP = 3;
+              const past = profile.pastAppointments ?? [];
+              const head = past.slice(0, PAST_APPOINTMENTS_CAP);
+              const rest = past.slice(PAST_APPOINTMENTS_CAP);
+              const row = (a: (typeof past)[number], i: number) => {
+                const startYear = a.startDate ? a.startDate.slice(0, 4) : null;
+                const endYear = a.endDate ? a.endDate.slice(0, 4) : null;
+                const yearRange =
+                  startYear && endYear
+                    ? `${startYear}–${endYear}`
+                    : startYear
+                      ? `${startYear}–`
+                      : endYear
+                        ? `–${endYear}`
+                        : "";
+                return (
+                  <li key={i} className="leading-snug">
+                    <div className="font-semibold">{a.title}</div>
+                    <div className="text-muted-foreground mt-0.5 text-xs">
+                      {a.organization}
+                      {yearRange ? ` · ${yearRange}` : ""}
+                    </div>
+                  </li>
+                );
+              };
+              return (
+                <SidebarCard title="Past Appointments">
+                  <ul className="flex flex-col gap-3">{head.map(row)}</ul>
+                  {rest.length > 0 ? (
+                    <details className="group mt-3">
+                      <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer list-none items-center gap-1 text-xs select-none [&::-webkit-details-marker]:hidden">
+                        <ChevronRight
+                          className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+                          aria-hidden="true"
+                        />
+                        <span className="group-open:hidden">Show all {head.length + rest.length}</span>
+                        <span className="hidden group-open:inline">Show fewer</span>
+                      </summary>
+                      <ul className="mt-3 flex flex-col gap-3">
+                        {rest.map((a, i) => row(a, i + head.length))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </SidebarCard>
+              );
+            })() : null}
 
             {/* #1568 — self-asserted roles/leadership the ED feed doesn't carry
                 (WCM_LEADERSHIP). Owner-entered on /edit, profile-only. */}
@@ -502,7 +572,7 @@ export async function ProfileView({ slug }: { slug: string }) {
           {profile.overview ? (
             <Section id="overview" title="Overview">
               <div
-                className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline [&_a]:underline-offset-4 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
+                className={`text-base leading-relaxed text-zinc-800 dark:text-zinc-200 ${OVERVIEW_HTML_CLASS}`}
                 dangerouslySetInnerHTML={{ __html: profile.overview }}
               />
             </Section>
@@ -586,9 +656,12 @@ export async function ProfileView({ slug }: { slug: string }) {
               headingLg
               // "N active" left the rail and became a real filter chip inside
               // GrantsSection — a number you can act on beats one you can only read.
+              // #2238 — counts funding PROJECTS (renewal years collapsed), the
+              // unit the list below renders one row per; `grants.length` counted
+              // award records and read "9 grants" over five rows.
               count={{
-                value: profile.grants.length,
-                unit: profile.grants.length === 1 ? "grant" : "grants",
+                value: fundingProjectCount,
+                unit: fundingProjectCount === 1 ? "grant" : "grants",
               }}
               headerAction={
                 profile.nihReporterProfileId !== null ? (
@@ -617,7 +690,7 @@ export async function ProfileView({ slug }: { slug: string }) {
           {honors.length > 0 ? (
             <Section
               id="honors"
-              title="Honors & Distinctions"
+              title="Honors & distinctions"
               headingLg
               count={{
                 value: honorCount,
@@ -718,6 +791,22 @@ export async function ProfileView({ slug }: { slug: string }) {
             </Section>
           ) : null}
 
+          {/* Press clips from the External Affairs "WCM in the News" digest,
+              published after comms review (etl/news/clips.ts). */}
+          {profile.mediaHighlights.length > 0 ? (
+            <Section
+              id="media-highlights"
+              title="Media highlights"
+              headingLg
+              count={{
+                value: profile.mediaHighlights.length,
+                unit: profile.mediaHighlights.length === 1 ? "clip" : "clips",
+              }}
+            >
+              <NewsSection news={profile.mediaHighlights} />
+            </Section>
+          ) : null}
+
           {mentees.length > 0 ? (() => {
             // Issue #189 — header link points to the all-mentees co-pubs
             // rollup. Hidden when no mentee has any co-pub (the rollup
@@ -809,20 +898,12 @@ export async function ProfileView({ slug }: { slug: string }) {
                           {group}
                           <DisclosureGroupInfoTooltip group={group} />
                         </h3>
-                        <p className="text-base leading-snug">{entities.join("; ")}</p>
+                        <p className="text-base leading-snug">{entities.join(" · ")}</p>
                       </div>
                     ))}
                   </div>
                 );
               })()}
-              <p className="text-muted-foreground mt-6 border-t border-border pt-4 text-sm">
-                <Link
-                  href="/about#disclosures"
-                  className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-                >
-                  About these disclosures →
-                </Link>
-              </p>
             </Section>
           ) : null}
         </div>

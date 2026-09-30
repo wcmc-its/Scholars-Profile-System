@@ -3,6 +3,57 @@
 exports[`AppStack prod matches the snapshot 1`] = `
 {
   "Outputs": {
+    "BulkDataRuleEcrRepoUri": {
+      "Description": "SPS bulk-data-rule pipeline image ECR repository URI (containerization design, 2026-08-14)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Fn::Select": [
+                4,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "BulkDataRuleEcrRepository3BE802ED",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".dkr.ecr.",
+            {
+              "Fn::Select": [
+                3,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "BulkDataRuleEcrRepository3BE802ED",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "BulkDataRuleEcrRepository3BE802ED",
+            },
+          ],
+        ],
+      },
+    },
     "DeployRoleArn": {
       "Description": "SPS GitHub Actions deploy role ARN",
       "Value": {
@@ -315,10 +366,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
-                "Name": "GRANT_MATCHER_ABSTAIN_FLOOR",
-                "Value": "0",
-              },
-              {
                 "Name": "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
                 "Value": "E28NKDFXC7K2ZL",
               },
@@ -375,6 +422,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "EDIT_DATA_SHARING_DASHBOARD",
+                "Value": "on",
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
               },
@@ -384,6 +435,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_MENTEE_SUGGESTIONS",
                 "Value": "on",
               },
               {
@@ -419,12 +474,24 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "CENTER_DISEASE_FACET",
+                "Value": "off",
+              },
+              {
+                "Name": "ORG_UNIT_ROLE_CONSOLE",
+                "Value": "on",
+              },
+              {
                 "Name": "CLINICAL_TRIALS_SECTION",
                 "Value": "on",
               },
               {
                 "Name": "DATA_SHARING_SECTION",
                 "Value": "off",
+              },
+              {
+                "Name": "CORNELL_DIRECTORY_MEMBERS",
+                "Value": "on",
               },
               {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
@@ -436,6 +503,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "NEWS_APPROVAL_QUEUE",
+                "Value": "on",
+              },
+              {
+                "Name": "MEDIA_HIGHLIGHTS_SECTION",
                 "Value": "on",
               },
               {
@@ -471,7 +542,23 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "MATCHA_ADMIN",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_ORCID_SUGGESTION",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_PROFILE_LINKS",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLAR_TITLE_RESOLUTION",
                 "Value": "on",
               },
               {
@@ -499,6 +586,30 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "ITS:Library:Scholars/honors-curator-role",
               },
               {
+                "Name": "HONORS_RUN_NOW",
+                "Value": "off",
+              },
+              {
+                "Name": "HONORS_STATE_MACHINE_ARN",
+                "Value": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-prod",
+              },
+              {
+                "Name": "DATA_SHARING_VIEWER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
+              },
+              {
+                "Name": "CV_GENERATOR_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_CV_GENERATOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/cv-generator-role",
+              },
+              {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",
                 "Value": "on",
               },
@@ -516,7 +627,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "POPS_BASE_URL",
@@ -532,7 +643,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "BIOSKETCH_PROMPT_VERSION_DEFAULT",
-                "Value": "v7",
+                "Value": "v8",
               },
               {
                 "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
@@ -565,6 +676,19 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "SPS_USAGE_REGION",
                 "Value": "us-east-1",
+              },
+              {
+                "Name": "SPS_PUBLIC_ALB_FULL_NAME",
+                "Value": {
+                  "Fn::GetAtt": [
+                    "PublicAlb84330974",
+                    "LoadBalancerFullName",
+                  ],
+                },
+              },
+              {
+                "Name": "SPS_APP_UNAVAILABLE_ALARM",
+                "Value": "sps-app-unavailable-prod",
               },
               {
                 "Name": "SHOW_BETA_BADGE",
@@ -647,6 +771,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_INSTITUTION_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PUB_INSTITUTION_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_INSTITUTION_FACET",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "on",
               },
@@ -665,6 +801,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_PEOPLE_AREA_BOOST",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_TRIAL_EVIDENCE",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_TRIAL_MESH_WEIGHT",
+                "Value": "1",
+              },
+              {
+                "Name": "SEARCH_TRIALS_TAB",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_ARM_FIRST",
@@ -739,6 +887,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_MESH_SECONDARY_CONCEPT",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_MESH_ENTRY_TIER_PARITY",
                 "Value": "on",
               },
@@ -761,10 +913,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
-              },
-              {
-                "Name": "PROFILE_CANONICAL",
-                "Value": "root",
               },
               {
                 "Name": "METHODS_LENS_ENABLED",
@@ -893,6 +1041,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
                 "Value": "",
+              },
+              {
+                "Name": "FUNCTIONAL_ROLES_AUTHZ",
+                "Value": "on",
+              },
+              {
+                "Name": "TAXONOMY_SCHOLAR_CARDS",
+                "Value": "on",
+              },
+              {
+                "Name": "TAXONOMY_FEED_LOAD_MORE",
+                "Value": "on",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
@@ -1267,6 +1427,51 @@ exports[`AppStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_DN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_DN::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
             ],
           },
           {
@@ -1453,6 +1658,20 @@ service:
         },
       },
       "Type": "AWS::SSM::Parameter",
+    },
+    "BulkDataRuleEcrRepository3BE802ED": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "ImageScanningConfiguration": {
+          "ScanOnPush": true,
+        },
+        "LifecyclePolicy": {
+          "LifecyclePolicyText": "{"rules":[{"rulePriority":1,"description":"Keep the last 30 tagged images","selection":{"tagStatus":"tagged","tagPatternList":["*"],"countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}},{"rulePriority":2,"description":"Expire untagged images after 7 days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countNumber":7,"countUnit":"days"},"action":{"type":"expire"}}]}",
+        },
+        "RepositoryName": "scholars-bulk-data-rule-prod",
+      },
+      "Type": "AWS::ECR::Repository",
+      "UpdateReplacePolicy": "Retain",
     },
     "DbBootstrapLogGroupAF64F8C3": {
       "DeletionPolicy": "Retain",
@@ -3444,6 +3663,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3738,6 +3969,25 @@ service:
             },
             {
               "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
                 "logs:CreateLogStream",
                 "logs:PutLogEvents",
               ],
@@ -3846,6 +4096,30 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleCloudWatchReadPolicy431A64E8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "cloudwatch:GetMetricData",
+                "cloudwatch:DescribeAlarmHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-cloudwatch-read",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleCoreClaimWritebackPolicyE86AA84B": {
       "Properties": {
         "PolicyDocument": {
@@ -3912,6 +4186,27 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleHonorsRunNowPolicy88BAC4EA": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-prod",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-honors-run-now",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",
@@ -4282,6 +4577,57 @@ service:
 exports[`AppStack staging matches the snapshot 1`] = `
 {
   "Outputs": {
+    "BulkDataRuleEcrRepoUri": {
+      "Description": "SPS bulk-data-rule pipeline image ECR repository URI (containerization design, 2026-08-14)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Fn::Select": [
+                4,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "BulkDataRuleEcrRepository3BE802ED",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".dkr.ecr.",
+            {
+              "Fn::Select": [
+                3,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "BulkDataRuleEcrRepository3BE802ED",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "BulkDataRuleEcrRepository3BE802ED",
+            },
+          ],
+        ],
+      },
+    },
     "DeployRoleArn": {
       "Description": "SPS GitHub Actions deploy role ARN",
       "Value": {
@@ -4576,10 +4922,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "GRANT_MATCHER_ABSTAIN_FLOOR",
-                "Value": "0.1",
-              },
-              {
                 "Name": "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
                 "Value": "E17NRWINXLP3B3",
               },
@@ -4636,6 +4978,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "EDIT_DATA_SHARING_DASHBOARD",
+                "Value": "on",
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
               },
@@ -4645,6 +4991,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_MENTEE_SUGGESTIONS",
                 "Value": "on",
               },
               {
@@ -4680,11 +5030,23 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "CENTER_DISEASE_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "ORG_UNIT_ROLE_CONSOLE",
+                "Value": "on",
+              },
+              {
                 "Name": "CLINICAL_TRIALS_SECTION",
                 "Value": "on",
               },
               {
                 "Name": "DATA_SHARING_SECTION",
+                "Value": "off",
+              },
+              {
+                "Name": "CORNELL_DIRECTORY_MEMBERS",
                 "Value": "on",
               },
               {
@@ -4697,6 +5059,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "NEWS_APPROVAL_QUEUE",
+                "Value": "on",
+              },
+              {
+                "Name": "MEDIA_HIGHLIGHTS_SECTION",
                 "Value": "on",
               },
               {
@@ -4717,7 +5083,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "MATCHA_GLOSS_RERANK",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "MATCHA_GLOSS_RERANK_LAMBDA",
@@ -4732,7 +5098,23 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "MATCHA_ADMIN",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_ORCID_SUGGESTION",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_PROFILE_LINKS",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLAR_TITLE_RESOLUTION",
                 "Value": "on",
               },
               {
@@ -4758,6 +5140,30 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_HONORS_CURATOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/honors-curator-role",
+              },
+              {
+                "Name": "HONORS_RUN_NOW",
+                "Value": "off",
+              },
+              {
+                "Name": "HONORS_STATE_MACHINE_ARN",
+                "Value": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-staging",
+              },
+              {
+                "Name": "DATA_SHARING_VIEWER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
+              },
+              {
+                "Name": "CV_GENERATOR_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_CV_GENERATOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/cv-generator-role",
               },
               {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",
@@ -4793,7 +5199,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "BIOSKETCH_PROMPT_VERSION_DEFAULT",
-                "Value": "v7",
+                "Value": "v8",
               },
               {
                 "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
@@ -4826,6 +5232,19 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SPS_USAGE_REGION",
                 "Value": "us-east-1",
+              },
+              {
+                "Name": "SPS_PUBLIC_ALB_FULL_NAME",
+                "Value": {
+                  "Fn::GetAtt": [
+                    "PublicAlb84330974",
+                    "LoadBalancerFullName",
+                  ],
+                },
+              },
+              {
+                "Name": "SPS_APP_UNAVAILABLE_ALARM",
+                "Value": "sps-app-unavailable-staging",
               },
               {
                 "Name": "SHOW_BETA_BADGE",
@@ -4908,6 +5327,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_INSTITUTION_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PUB_INSTITUTION_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_INSTITUTION_FACET",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "on",
               },
@@ -4925,6 +5356,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_AREA_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_TRIAL_EVIDENCE",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_TRIAL_MESH_WEIGHT",
+                "Value": "1.2",
+              },
+              {
+                "Name": "SEARCH_TRIALS_TAB",
                 "Value": "on",
               },
               {
@@ -5000,6 +5443,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_MESH_SECONDARY_CONCEPT",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_MESH_ENTRY_TIER_PARITY",
                 "Value": "on",
               },
@@ -5022,10 +5469,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
-              },
-              {
-                "Name": "PROFILE_CANONICAL",
-                "Value": "root",
               },
               {
                 "Name": "METHODS_LENS_ENABLED",
@@ -5154,6 +5597,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
                 "Value": "",
+              },
+              {
+                "Name": "FUNCTIONAL_ROLES_AUTHZ",
+                "Value": "on",
+              },
+              {
+                "Name": "TAXONOMY_SCHOLAR_CARDS",
+                "Value": "on",
+              },
+              {
+                "Name": "TAXONOMY_FEED_LOAD_MORE",
+                "Value": "on",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
@@ -5528,6 +5983,51 @@ exports[`AppStack staging matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_DN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_DN::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
             ],
           },
           {
@@ -5714,6 +6214,20 @@ service:
         },
       },
       "Type": "AWS::SSM::Parameter",
+    },
+    "BulkDataRuleEcrRepository3BE802ED": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "ImageScanningConfiguration": {
+          "ScanOnPush": true,
+        },
+        "LifecyclePolicy": {
+          "LifecyclePolicyText": "{"rules":[{"rulePriority":1,"description":"Keep the last 30 tagged images","selection":{"tagStatus":"tagged","tagPatternList":["*"],"countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}},{"rulePriority":2,"description":"Expire untagged images after 7 days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countNumber":7,"countUnit":"days"},"action":{"type":"expire"}}]}",
+        },
+        "RepositoryName": "scholars-bulk-data-rule-staging",
+      },
+      "Type": "AWS::ECR::Repository",
+      "UpdateReplacePolicy": "Retain",
     },
     "CustomAWSCDKOpenIdConnectProviderCustomResourceProviderHandlerF2C543E0": {
       "DependsOn": [
@@ -7705,6 +8219,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -7999,6 +8525,25 @@ service:
             },
             {
               "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
                 "logs:CreateLogStream",
                 "logs:PutLogEvents",
               ],
@@ -8107,6 +8652,30 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleCloudWatchReadPolicy431A64E8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "cloudwatch:GetMetricData",
+                "cloudwatch:DescribeAlarmHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-cloudwatch-read",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleCoreClaimWritebackPolicyE86AA84B": {
       "Properties": {
         "PolicyDocument": {
@@ -8173,6 +8742,27 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleHonorsRunNowPolicy88BAC4EA": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": "arn:aws:states:us-east-1:123456789012:stateMachine:scholars-honors-staging",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-honors-run-now",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",

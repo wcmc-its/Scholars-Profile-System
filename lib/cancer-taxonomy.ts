@@ -41,7 +41,7 @@ let cached: TaxonomyLookup | null = null;
 /**
  * Reads the `CancerTaxonomyDescriptor` table (filtered to `cancerRelevant:
  * true`, forward-compat with a future non-relevant row shape) once per
- * process and builds `topicsByUi`, then resolves display names for exactly
+ * process (an empty read is NOT cached, see below) and builds `topicsByUi`, then resolves display names for exactly
  * that UI set against `MeshDescriptor` — NOT the whole table, unlike the old
  * CSV taxonomy's `loadTaxonomy`, which had to load every descriptor to do its
  * own live subtree walk. That walk is now precomputed, so this only ever
@@ -74,8 +74,24 @@ export async function loadCancerTaxonomy(
     for (const n of names) nameByUi.set(n.descriptorUi, n.name);
   }
 
-  cached = { topicsByUi, nameByUi };
-  return cached;
+  const lookup = { topicsByUi, nameByUi };
+  // Never cache an EMPTY lookup: a task that started while the table was
+  // still empty (fresh env, generator not yet run) would otherwise serve
+  // zeros for the life of the process. Re-read until it has rows.
+  if (topicsByUi.size > 0) cached = lookup;
+  return lookup;
+}
+
+/** Message thrown by `assertCancerTaxonomyPopulated`. */
+export const EMPTY_CANCER_TAXONOMY_MESSAGE = "cancer taxonomy is empty; run etl:cancer-taxonomy first";
+
+/**
+ * Guard for writers: an empty lookup means the generator hasn't run (or the
+ * table was wiped), NOT that nothing is cancer-relevant. Writing results
+ * computed against it would replace good rows with all-zero ones, so throw.
+ */
+export function assertCancerTaxonomyPopulated(lookup: TaxonomyLookup): void {
+  if (lookup.topicsByUi.size === 0) throw new Error(EMPTY_CANCER_TAXONOMY_MESSAGE);
 }
 
 /** A publication's own MeSH UIs hit the cancer taxonomy at all. */

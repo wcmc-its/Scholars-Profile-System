@@ -34,6 +34,7 @@ import {
   loadPublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { htmlToPlainText } from "@/lib/utils";
+import { institutionDisplayName } from "@/lib/institutions";
 
 /** Hardcoded ceiling for Phase 1; spec §7.1 hard cap is 30,000. */
 export const EXPORT_MAX_LIMIT = 5000;
@@ -53,6 +54,7 @@ export type AuthorshipRow = {
   lastName: string;
   firstName: string;
   primaryDepartment: string | null;
+  primaryInstitution: string | null;
   pmid: string;
   title: string;
   year: number | null;
@@ -175,6 +177,11 @@ async function fetchExportPmids(req: ExportRequest): Promise<string[]> {
   if (filters.department && filters.department.length > 0) {
     filter.push({ terms: { wcmAuthorDepartments: filters.department } });
   }
+  // Institution facet — same contract: the client only sends `institution`
+  // when SEARCH_PUB_INSTITUTION_FACET is on; mirror the live clause exactly.
+  if (filters.institution && filters.institution.length > 0) {
+    filter.push({ terms: { wcmAuthorInstitutions: filters.institution } });
+  }
   // Issue #1025 — Mentoring-activity facet. Resolve the selected program
   // buckets to a pmid union exactly as `searchPublications` does; an empty
   // union collapses to `match_none` so the export returns zero rows rather
@@ -234,6 +241,7 @@ export async function fetchAuthorshipRows(
               cwid: true,
               preferredName: true,
               primaryDepartment: true,
+              primaryOrgCode: true,
             },
           },
         },
@@ -262,7 +270,8 @@ export async function fetchAuthorshipRows(
       .filter((a) => a.scholar)
       .map((a) => a.scholar!.cwid);
     if (isPublicationDark(suppressions, pub.pmid, confirmedWcmCwids)) continue;
-    const authorsClean = stripBrackets(pub.authorsString);
+    // #2581 — the untruncated byline; see the note on the article-row select.
+    const authorsClean = stripBrackets(pub.fullAuthorsString ?? pub.authorsString);
     for (const a of pub.authors) {
       if (!a.scholar) continue;
       if (isAuthorHidden(suppressions, pub.pmid, a.scholar.cwid)) continue;
@@ -272,6 +281,10 @@ export async function fetchAuthorshipRows(
         lastName: last,
         firstName: first,
         primaryDepartment: a.scholar.primaryDepartment,
+        // Data export: the display name for every row, WCMC included.
+        primaryInstitution: a.scholar.primaryOrgCode
+          ? institutionDisplayName(a.scholar.primaryOrgCode)
+          : null,
         pmid: pub.pmid,
         title: plainTitleForCsv(pub.title),
         year: pub.year,
@@ -311,6 +324,14 @@ export async function fetchArticleRows(
       citationCount: true,
       publicationType: true,
       authorsString: true,
+      // #2581 — `authorsString` is the TRUNCATED byline (see Publication): on a
+      // prod census it is shorter than `fullAuthorsString` on 76,232 of 193,662
+      // publications, dropping 3.68 authors on average and up to 1,264. An
+      // export that silently omits co-authors is the defect; prefer the full
+      // field, which is populated on every row that has a byline at all (the
+      // fallback below never actually fires in prod — 0 rows have one without
+      // the other — but it costs nothing and matches the other citation paths).
+      fullAuthorsString: true,
       // Confirmed, active WCM authors — needed only to derive publication
       // darkness (a pub whose every confirmed WCM author is hidden is dark).
       // Same author carve as fetchAuthorshipRows.
@@ -353,7 +374,7 @@ export async function fetchArticleRows(
         : null,
       citationCount: pub.citationCount,
       publicationType: pub.publicationType,
-      authors: stripBrackets(pub.authorsString),
+      authors: stripBrackets(pub.fullAuthorsString ?? pub.authorsString),
     });
   }
   return rows;
@@ -364,6 +385,7 @@ export const AUTHORSHIP_HEADERS: ReadonlyArray<keyof AuthorshipRow> = [
   "lastName",
   "firstName",
   "primaryDepartment",
+  "primaryInstitution",
   "pmid",
   "title",
   "year",

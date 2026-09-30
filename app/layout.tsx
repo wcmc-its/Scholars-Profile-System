@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { FeedbackBadge } from "@/components/site/feedback-badge";
 import { FeedbackBadgeProvider } from "@/components/site/feedback-badge-context";
@@ -9,6 +10,37 @@ const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
   display: "swap",
+});
+
+// #2530 — self-hosted so the page-title serif renders identically across OS
+// and browser instead of resolving whatever Charter (or a fallback) the
+// local system happens to have.
+const charter = localFont({
+  src: [
+    {
+      path: "./fonts/charter/charter_regular.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "./fonts/charter/charter_italic.woff2",
+      weight: "400",
+      style: "italic",
+    },
+    {
+      path: "./fonts/charter/charter_bold.woff2",
+      weight: "700",
+      style: "normal",
+    },
+    {
+      path: "./fonts/charter/charter_bold_italic.woff2",
+      weight: "700",
+      style: "italic",
+    },
+  ],
+  variable: "--font-charter",
+  display: "swap",
+  adjustFontFallback: "Times New Roman",
 });
 
 export const metadata: Metadata = {
@@ -39,7 +71,7 @@ export default function RootLayout({
   // never even shipped to the browser when the flag is off.
   const showFeedbackBadge = process.env.FEEDBACK_BADGE_ENABLED === "on";
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={`${inter.variable} ${charter.variable}`}>
       <body className="bg-background text-foreground antialiased">
         <FeedbackBadgeProvider>
           {/* #637 — "View as" banner above all chrome. Client-probed (T6) and

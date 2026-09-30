@@ -33,6 +33,7 @@ const {
   mockSubmissionDeleteMany,
   mockSubmissionFindMany,
   mockSubmissionFindUnique,
+  mockSubmissionFindFirst,
   mockGetEffectiveEditSession,
   mockCachedReasonAgg,
 } = vi.hoisted(() => ({
@@ -50,6 +51,7 @@ const {
   mockSubmissionDeleteMany: vi.fn(),
   mockSubmissionFindMany: vi.fn(),
   mockSubmissionFindUnique: vi.fn(),
+  mockSubmissionFindFirst: vi.fn(),
   mockGetEffectiveEditSession: vi.fn(),
   // #1780 Phase 2 — the real `cachedReasonAgg` BYPASSES its cache under VITEST (returns `load()`
   // directly), so the route's cache KEY is never exercised by default. This capturing stub keeps
@@ -72,6 +74,7 @@ vi.mock("@/lib/db", () => ({
       sponsorMatchSubmission: {
         findMany: mockSubmissionFindMany,
         findUnique: mockSubmissionFindUnique,
+        findFirst: mockSubmissionFindFirst,
       },
     },
     write: {
@@ -140,6 +143,7 @@ beforeEach(() => {
   mockTopicFindMany.mockResolvedValue([]);
   mockRankForDescription.mockResolvedValue([]);
   mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
+  mockSubmissionFindFirst.mockResolvedValue(null); // no persisted answer unless a test plants one
 });
 
 describe("rankResearchersForDescription (engine)", () => {
@@ -567,6 +571,122 @@ describe("POST /api/edit/matcha (route)", () => {
     });
   });
 
+  describe("persisted results (replay without re-running the engine)", () => {
+    const concept = {
+      term: "cancer metabolism",
+      kind: "concept",
+      members: [],
+      centrality: 0.9,
+      weightFactor: 1,
+    };
+    const candidate = {
+      cwid: "a",
+      name: "A",
+      profileSlug: "a",
+      title: null,
+      department: null,
+      fusedScore: 0.1,
+      contributions: [],
+      technologyCount: 0,
+    };
+    beforeEach(() => {
+      process.env.MATCHA_SPINE = "on";
+      mockRankSpine.mockResolvedValue({
+        concepts: [concept],
+        candidates: [candidate],
+        titleSummary: "Cancer metabolism — Acme",
+      });
+    });
+
+    it("persists the engine's answer with the run, under the route's full cache key", async () => {
+      await POST(postRequest(developerCtx, { description: "x", include: ["organoids"] }));
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.result).toEqual({
+        concepts: [concept],
+        candidates: [candidate],
+        titleSummary: "Cancer metabolism — Acme",
+      });
+      // The SAME key the in-RAM cache used — include/eligibility variants stay distinct.
+      expect(data.resultKey).toBe(String(mockCachedReasonAgg.mock.calls[0][0]));
+      expect(data.resultKey).toMatch(/^sponsor:spine:[0-9a-f]{64}:inc:[0-9a-f]{64}$/);
+      // The lookup that preceded it asked for exactly that key on this paste's hash.
+      expect(mockSubmissionFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { descriptionHash: data.descriptionHash, resultKey: data.resultKey },
+          orderBy: { createdAt: "desc" },
+        }),
+      );
+    });
+
+    it("never persists an EMPTY answer — the same rule as the in-RAM cache", async () => {
+      mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
+      await POST(postRequest(developerCtx, { description: "x" }));
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.result).toBeUndefined();
+      expect(data.resultKey).toBeUndefined();
+    });
+
+    it("never persists a DEGRADED (dictionary-fallback) answer, even one with candidates", async () => {
+      // A Bedrock blip makes the spine answer from the dictionary extractor. That ranking can be
+      // non-empty, so the empty check passes — but stored with no expiry it would be the answer
+      // for every later replay of this paste. The RAM cache forgets it in 30 min; the row must not
+      // remember it at all.
+      mockRankSpine.mockResolvedValue({
+        concepts: [concept],
+        candidates: [candidate],
+        degraded: true,
+      });
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(resp.status).toBe(200);
+      expect((await resp.json()).candidates).toEqual([candidate]); // still served
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.result).toBeUndefined();
+      expect(data.resultKey).toBeUndefined();
+    });
+
+    it("serves a persisted answer WITHOUT running the engine, labelled with its date", async () => {
+      mockSubmissionFindFirst.mockResolvedValue({
+        result: { concepts: [concept], candidates: [candidate], titleSummary: "Stored — Acme" },
+        createdAt: new Date("2026-09-04T16:30:38Z"),
+      });
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(resp.status).toBe(200);
+      const body = await resp.json();
+      expect(body.candidates).toEqual([candidate]);
+      expect(body.titleSummary).toBe("Stored — Acme");
+      expect(body.asOf).toBe("2026-09-04T16:30:38.000Z");
+      expect(mockRankSpine).not.toHaveBeenCalled();
+      expect(mockCachedReasonAgg).not.toHaveBeenCalled();
+      // The ask is still recorded — but this row carries no answer of its own.
+      expect(mockSubmissionCreate).toHaveBeenCalledTimes(1);
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.candidateCount).toBe(1);
+      expect(data.result).toBeUndefined();
+      expect(data.resultKey).toBeUndefined();
+    });
+
+    it("`fresh: true` skips the stored answer, runs the engine, and persists the new run", async () => {
+      mockSubmissionFindFirst.mockResolvedValue({
+        result: { concepts: [], candidates: [candidate] },
+        createdAt: new Date("2026-09-04T16:30:38Z"),
+      });
+      const resp = await POST(postRequest(developerCtx, { description: "x", fresh: true }));
+      const body = await resp.json();
+      expect(mockSubmissionFindFirst).not.toHaveBeenCalled();
+      expect(mockRankSpine).toHaveBeenCalledTimes(1);
+      expect(body.asOf).toBeUndefined();
+      expect(mockSubmissionCreate.mock.calls[0][0].data.resultKey).toMatch(/^sponsor:spine:/);
+    });
+
+    it("a failed lookup is a cold run, not an error", async () => {
+      mockSubmissionFindFirst.mockRejectedValue(new Error("replica down"));
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(resp.status).toBe(200);
+      expect(mockRankSpine).toHaveBeenCalledTimes(1);
+      expect((await resp.json()).asOf).toBeUndefined();
+    });
+  });
+
   // ── Retention (#6d) ───────────────────────────────────────────────────────
   describe("retained searches", () => {
     it("retains the search — the paste IN FULL, its handle, engine, count and actor", async () => {
@@ -641,7 +761,51 @@ describe("POST /api/edit/matcha (route)", () => {
       // BY HASH, NOT BY ID. Revert this to `{ where: { id: "s1" } }` and the sponsor's words
       // survive their own deletion.
       expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
-        where: { descriptionHash: "h-abc" },
+        where: { descriptionHash: "h-abc", submittedBy: "dev1" },
+      });
+    });
+
+    it("DELETE is scoped like GET (#1776): out-of-scope 404s and erases nothing; own row erases", async () => {
+      // A developer is not a superuser, so GET shows them only their own rows. DELETE must apply
+      // the SAME predicate — otherwise they could erase a paste they are not allowed to read.
+      // Out of scope: the scoped lookup finds nothing (a real DB would not match another
+      // officer's row under `submittedBy: "dev1"`).
+      mockSubmissionFindUnique.mockResolvedValue(null);
+      const denied = await DELETE(postRequest(developerCtx, { submissionId: "theirs" }));
+      expect(denied.status).toBe(404);
+      expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({
+        id: "theirs",
+        submittedBy: "dev1",
+      });
+      expect(mockSubmissionDeleteMany).not.toHaveBeenCalled();
+
+      // In scope: the same developer deleting their own row succeeds, and the erase is bounded
+      // by the same scope so a colleague's run of an identical paste survives.
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-mine" });
+      mockSubmissionDeleteMany.mockResolvedValue({ count: 1 });
+      const ok = await DELETE(postRequest(developerCtx, { submissionId: "mine" }));
+      expect(ok.status).toBe(200);
+      expect(mockSubmissionFindUnique.mock.calls[1][0].where).toEqual({
+        id: "mine",
+        submittedBy: "dev1",
+      });
+      expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
+        where: { descriptionHash: "h-mine", submittedBy: "dev1" },
+      });
+    });
+
+    it("DELETE by a SUPERUSER is unscoped — erasure on behalf of any officer", async () => {
+      const superCtx = {
+        ...developerCtx,
+        session: { cwid: "su1", isSuperuser: true, isDeveloper: false },
+      };
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-any" });
+      mockSubmissionDeleteMany.mockResolvedValue({ count: 2 });
+      const resp = await DELETE(postRequest(superCtx, { submissionId: "theirs" }));
+      expect(resp.status).toBe(200);
+      expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({ id: "theirs" });
+      expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
+        where: { descriptionHash: "h-any" },
       });
     });
 

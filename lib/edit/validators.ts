@@ -29,6 +29,7 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { CWID_PATTERN } from "@/lib/cwid";
 import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
+import { DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
 import { stripOverviewTailArtifacts } from "@/lib/text/overview-artifacts";
 import { repairEncoding } from "@/lib/text/repair-encoding";
@@ -55,6 +56,14 @@ import { repairEncoding } from "@/lib/text/repair-encoding";
  * the payload boundary (`lib/api/profile.ts`). It rides this list to reuse the
  * boolean write / authz / audit path, and is deliberately absent from the
  * Visibility card's Sections panel — its switch lives on the Education panel.
+ *
+ * `showDatasets` is the one INVERTED key: `DATA_SHARING_SECTION` defaults off
+ * at the env level (2026-08-24), so there is nothing for `hideDatasets` to hide
+ * by default — instead a scholar opts BACK IN. Value `"true"` SHOWS the
+ * Datasets section despite the env default; absent/`"false"` leaves it hidden.
+ * `hideDatasets` stays in the list too (unused while the env default is off,
+ * but preserved so a scholar's prior hide choice is honored if the env default
+ * is ever flipped back to "on").
  */
 export const SECTION_VISIBILITY_FIELDS = [
   "hideMentoring",
@@ -68,6 +77,7 @@ export const SECTION_VISIBILITY_FIELDS = [
   "hideTechnologies",
   "hideNews",
   "hideDatasets",
+  "showDatasets",
 ] as const;
 export type SectionVisibilityField = (typeof SECTION_VISIBILITY_FIELDS)[number];
 
@@ -82,7 +92,9 @@ export function isSectionVisibilityField(value: string): value is SectionVisibil
  * manual Highlights override (a JSON array of PMIDs), gated by the
  * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; `manualMentees` is the #2011
  * mentor-entered mentee list (a JSON array of objects, see
- * `lib/edit/manual-mentee.ts`); the `SECTION_VISIBILITY_FIELDS` are the
+ * `lib/edit/manual-mentee.ts`); `profileLinks` is the #2699 external-profile
+ * links object (a JSON object of canonical URLs, see
+ * `lib/edit/profile-links.ts`); the `SECTION_VISIBILITY_FIELDS` are the
  * section-visibility booleans. The allowlist only narrows the field name;
  * per-field validation + flags govern acceptance.
  */
@@ -91,6 +103,14 @@ export const EDITABLE_FIELDS = [
   "slug",
   "selectedHighlightPmids",
   "manualMentees",
+  "profileLinks",
+  // #2719 — the display-title picker. `primaryTitle` is an operator's pick,
+  // `primaryTitleRequest` a scholar's (or proxy's) pending request for one.
+  // Neither is free text: both must equal one of the four options computed in
+  // `lib/edit/title-picker.ts`, which is what keeps a title pick from being
+  // the upstream-scalar masking that made `slug` superuser-only.
+  "primaryTitle",
+  "primaryTitleRequest",
   ...SECTION_VISIBILITY_FIELDS,
 ] as const;
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -578,23 +598,34 @@ export async function findSuppressibleEntityOwner(
 }
 
 /** The Prisma surface the chair-appointment guard needs. */
-type ChairLookupClient = Pick<PrismaClient, "department">;
+type ChairLookupClient = Pick<PrismaClient, "department" | "orgUnitRoleAssignment">;
 
 /**
  * True when this appointment confers a *current* department chair role — its
- * owner is some `Department.chairCwid` AND the title matches that department's
- * chair phrase (`isChairTitleFor`, the same predicate the ETL uses to populate
- * `chairCwid`). The suppress endpoint refuses to hide such an appointment
- * (409, #160 D-leader) so the profile can't contradict the column-driven
- * leader card. Other appointments of a chair stay suppressible.
+ * owner holds the department's `chair`/`director` `OrgUnitRoleAssignment` AND
+ * the title matches that department's chair phrase (`isChairTitleFor`, the
+ * same predicate the ETL uses to write the assignment (#2542 contract A —
+ * was `Department.chairCwid`)). The suppress endpoint refuses to hide such an
+ * appointment (409, #160 D-leader) so the profile can't contradict the
+ * assignment-driven leader card. Other appointments of a chair stay
+ * suppressible.
  */
 export async function isChairAppointment(
   ownerCwid: string,
   title: string,
   client: ChairLookupClient,
 ): Promise<boolean> {
-  const dept = await client.department.findFirst({
-    where: { chairCwid: ownerCwid },
+  const assignment = await client.orgUnitRoleAssignment.findFirst({
+    where: {
+      cwid: ownerCwid,
+      entityType: "department",
+      roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { entityId: true },
+  });
+  if (!assignment) return false;
+  const dept = await client.department.findUnique({
+    where: { code: assignment.entityId },
     select: { name: true },
   });
   if (!dept) return false;

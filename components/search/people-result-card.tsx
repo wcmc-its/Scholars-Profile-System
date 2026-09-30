@@ -15,6 +15,7 @@ import {
 import { EvidenceLine } from "@/components/search/evidence-line";
 import type { EvidenceGrant, ResultEvidence } from "@/lib/api/result-evidence";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
+import { visibleInstitutionName } from "@/lib/institutions";
 
 /**
  * Search-results person row (issue #8 sketch-002-revised).
@@ -34,6 +35,15 @@ import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
  */
 export type KeyPaperConfig = {
   descriptorUis: string[];
+  /** Root UI of `descriptorUis` when that list is exactly one resolved concept's subtree.
+   *  Sent INSTEAD of the list (the route rebuilds the identical subtree) — a 200-UI list
+   *  in the URL exceeds the edge WAF's 2 KB query-string limit and is 403'd. */
+  conceptUi?: string;
+  /** Two-concept pair — the secondary concept's subtree; papers tagged under both lead
+   *  the key-paper list. Absent when the query resolved a single concept. */
+  secondaryDescriptorUis?: string[];
+  /** Root UI of `secondaryDescriptorUis`; same role as `conceptUi`. */
+  secondaryConceptUi?: string;
   contentQuery: string;
   /** #1351 — resolved concept name, so a tagged key paper's title highlights the
    *  concept term (not just the literal query). Empty for a free-text-only query. */
@@ -78,6 +88,7 @@ const SECONDARY_LABEL: Record<string, string> = {
   concept: "Concept",
   keyword: "Keyword",
   funding: "Funding",
+  trials: "Clinical research",
 };
 
 /** Uniform fold rule — a folded secondary is now a LABEL plus a subordinate detail
@@ -202,6 +213,7 @@ export function PeopleResultCard({
   // text-only. The server flag (SEARCH_FUNDING_CONCEPT_GRANTS) decides whether to act
   // on these, so passing them when off is harmless.
   const grantDescriptorUis = keyPaperConfig?.descriptorUis.join(",") ?? "";
+  const grantConceptUi = keyPaperConfig?.conceptUi ?? "";
   const grantConceptLabel = keyPaperConfig?.conceptLabel ?? "";
 
   // #1412 — cards are keyed by cwid and persist across query navigations, so drop a
@@ -213,11 +225,15 @@ export function PeopleResultCard({
     setGrants((prev) => (prev.length ? [] : prev));
   }, [qParam]);
 
-  const deptLine = hit.divisionName
+  const unitLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
     : hit.deptName
       ? `Department of ${hit.deptName}`
       : hit.primaryDepartment ?? null;
+  // Non-WCMC primary institution joins the line (absence-as-default, same as
+  // the profile header / popover): a WCM scholar's card is unchanged.
+  const deptLine =
+    [unitLine, visibleInstitutionName(hit.primaryOrgCode)].filter(Boolean).join(" · ") || null;
 
   const roleLabel = hit.roleCategory ? formatRoleCategory(hit.roleCategory) : null;
 
@@ -249,7 +265,11 @@ export function PeopleResultCard({
   // (exactly one) still collapses under "Also matched" (#1381 follow-up), but the
   // umbrella toggle then expands straight to that secondary's records — one click.
   const lesserLines = lines ? lines.slice(1) : [];
-  const secondaryCount = lesserLines.length + (hasFunding ? 1 : 0);
+  // Clinical research — PI trials tagged within the query concept. Always a secondary
+  // (never the lead), and only on the stacked surface.
+  const trialCount = stacked ? (hit.trialMatchCount ?? 0) : 0;
+  const hasTrials = trialCount > 0;
+  const secondaryCount = lesserLines.length + (hasFunding ? 1 : 0) + (hasTrials ? 1 : 0);
   const singleSecondary = secondaryCount === 1;
 
   // When a topic-matching grant IS the query match, drop the generic NO-MATCH
@@ -348,7 +368,8 @@ export function PeopleResultCard({
     let alive = true;
     const params = new URLSearchParams({ q: qParam });
     if (grantDescriptorUis) {
-      params.set("descriptorUis", grantDescriptorUis);
+      if (grantConceptUi) params.set("conceptUi", grantConceptUi);
+      else params.set("descriptorUis", grantDescriptorUis);
       params.set("label", grantConceptLabel);
     }
     fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/grants?${params.toString()}`)
@@ -362,7 +383,7 @@ export function PeopleResultCard({
     return () => {
       alive = false;
     };
-  }, [fundingRecordsOpen, qParam, hit.cwid, grantDescriptorUis, grantConceptLabel]);
+  }, [fundingRecordsOpen, qParam, hit.cwid, grantDescriptorUis, grantConceptUi, grantConceptLabel]);
 
   const fundingNode =
     hasFunding ? (
@@ -483,12 +504,16 @@ export function PeopleResultCard({
       detail: unit(Math.min(grantsTotal, fundingDenominator), "grant"),
     });
   }
-  // ponytail: 3 chips fit one line at typical widths now that each carries a count
-  // ("Research area" 13 chars → "Research area · 11 pubs" 23), which is the same property
-  // the cap of 4 encoded for bare labels; more collapse to "+N". Realistic secondary
-  // counts are 2–3 (`selectEvidenceLines` emits at most one line per kind, plus funding),
-  // so this rarely bites. Bump it if cards routinely carry more.
-  const shownChips = secondaryChips.slice(0, 3);
+  // ponytail: cap of 4 chips, more collapse to "+N". Research area + Clinical + Funding +
+  // Clinical research is a common full set now that trials are evidence, and a cap of 3
+  // hid the fourth behind "+1". The line wraps (flex-wrap), so a narrow card takes two lines.
+  if (hasTrials) {
+    secondaryChips.push({
+      label: SECONDARY_LABEL.trials,
+      detail: `${trialCount} trial${trialCount === 1 ? "" : "s"}`,
+    });
+  }
+  const shownChips = secondaryChips.slice(0, 4);
   const chipOverflow = secondaryChips.length - shownChips.length;
 
   // The demoted "Also matched" rows — the lesser stacked lines + the (demoted) Funding
@@ -520,6 +545,19 @@ export function PeopleResultCard({
         />
       ))}
       {hasFunding ? fundingNode : null}
+      {hasTrials ? (
+        <LesserReason label={SECONDARY_LABEL.trials}>
+          {trialCount} trial{trialCount === 1 ? "" : "s"}
+          {grantConceptLabel ? (
+            <>
+              {" "}tagged{" "}
+              <span className="font-[450] text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
+                {grantConceptLabel}
+              </span>
+            </>
+          ) : null}
+        </LesserReason>
+      ) : null}
     </>
   );
 

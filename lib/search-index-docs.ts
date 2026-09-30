@@ -25,8 +25,11 @@ import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import {
   isAuthorHidden,
   isPublicationDark,
+  loadAllGrantSuppressions,
+  loadEntitySuppressions,
   type PublicationSuppressions,
 } from "@/lib/api/manual-layer";
+import { countGrantProjects, profileFundingRows } from "@/lib/grants/project-count";
 // Issue #824 §4c — the public method-family rollup is gated through the SAME
 // #800/#801 overlay every public Method surface uses. `isFamilyPubliclyVisible`
 // is a pure predicate (no DB / no module side effect), and `methods-overlay`
@@ -42,7 +45,9 @@ import { deriveGrantSignals } from "@/lib/api/match-researchers";
 // `lib/funding-roles.ts` is deliberately import-free — safe here, unlike
 // `lib/api/data-quality.ts`, which re-exports the same PI_ROLES but constructs Prisma.
 import { isPiRole } from "@/lib/funding-roles";
+import { hasFundingPiChip } from "@/lib/funding-projection";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
+import type { TrialEvidence } from "@/lib/search-trial-evidence";
 import { buildClinicalAnchors, loadSpecialtyAnchorMap } from "@/lib/clinical-mesh-anchors";
 import {
   buildMeshAncestorIndex,
@@ -55,6 +60,11 @@ import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { publicRoleWhere } from "@/lib/eligibility";
+import {
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 
 // ---------------------------------------------------------------------------
 // Authorship weights — publications-doc index-time term repetition.
@@ -255,6 +265,51 @@ export async function loadOverviewOverrides(
   return byCwid;
 }
 
+/** #2239 — what the profile Funding section hides, for `buildPeopleDoc`'s
+ *  `grantCount` (see {@link loadFundingVisibility}). */
+export type FundingVisibility = {
+  /** Scholars whose `hideFunding` section override is set ("true"). */
+  hideFundingCwids: ReadonlySet<string>;
+  /** Active #160 grant suppressions, by grant `externalId`. */
+  suppressedGrantIds: ReadonlySet<string>;
+};
+
+const NO_SUPPRESSED_GRANTS: ReadonlySet<string> = new Set();
+
+/**
+ * #2239 — load the funding-section visibility inputs the profile applies to its
+ * Funding list (`lib/api/profile.ts` → `profileFundingRows`), so the people doc's
+ * `grantCount` counts the same rows.
+ *
+ * Without `scope` (the nightly build): corpus-wide, one read each — the grant
+ * suppression read is `loadAllGrantSuppressions`, batch-only by contract. With
+ * `scope` (the single-scholar fast path): cwid- and id-scoped, via the
+ * per-request `loadEntitySuppressions`.
+ */
+export async function loadFundingVisibility(
+  client: Pick<PrismaClient, "fieldOverride" | "suppression">,
+  scope?: { cwid: string; grantExternalIds: readonly string[] },
+): Promise<FundingVisibility> {
+  const [hideRows, suppressedGrantIds] = await Promise.all([
+    client.fieldOverride.findMany({
+      where: {
+        entityType: "scholar",
+        fieldName: "hideFunding",
+        value: "true",
+        ...(scope ? { entityId: scope.cwid } : {}),
+      },
+      select: { entityId: true },
+    }),
+    scope
+      ? loadEntitySuppressions("grant", scope.grantExternalIds, client)
+      : loadAllGrantSuppressions(client),
+  ]);
+  return {
+    hideFundingCwids: new Set(hideRows.map((r) => r.entityId)),
+    suppressedGrantIds,
+  };
+}
+
 /**
  * #2300 — bulk-load `esiEligible` (labeled "Early Stage Investigator" in the
  * UI — see `lib/search.ts`'s mapping comment) into a `cwid -> boolean` map,
@@ -264,9 +319,9 @@ export async function loadOverviewOverrides(
  * feed it the right rows.
  *
  * CRITICAL: this query is DELIBERATELY UNFILTERED on `grants` — no
- * `source: { not: "RePORTER" }` where-clause, unlike `PEOPLE_INDEX_SELECT`'s
- * `grants` relation (which intentionally scopes grantCount / hasActiveGrants /
- * activePiGrantCount to WCM-administered awards only). `deriveGrantSignals`'
+ * `source: { not: "RePORTER" }` filter, unlike `buildPeopleDoc`'s `wcmGrants`
+ * (which intentionally scopes hasActiveGrants / activePiGrantCount to
+ * WCM-administered awards only). `deriveGrantSignals`'
  * ESI-forfeiture check needs a scholar's FULL grant history, including
  * prior-institution RePORTER-sourced records — a RePORTER-only major-PI award
  * still forfeits ESI eligibility. Feeding it the filtered relation would
@@ -279,9 +334,11 @@ export async function loadOverviewOverrides(
  */
 export async function loadEsiEligibilityByCwid(
   client: Pick<PrismaClient, "scholar">,
+  // Scope to one scholar for the /edit single-doc fast-path reindex.
+  cwid?: string,
 ): Promise<Map<string, boolean>> {
   const rows = await client.scholar.findMany({
-    where: PEOPLE_INDEX_WHERE,
+    where: cwid ? { ...PEOPLE_INDEX_WHERE, cwid } : PEOPLE_INDEX_WHERE,
     select: {
       cwid: true,
       grants: { select: { endDate: true, role: true, mechanism: true } },
@@ -479,6 +536,27 @@ export const PUBLICATION_INDEX_WHERE = {
 
 export const PUBLICATION_INDEX_INCLUDE = {
   authors: {
+    // WCM authorship rows only, for both callers that build a deployed index
+    // (etl/search-index/index.ts, lib/edit/search-suppression.ts). These rows
+    // feed `authorNames` in `buildPublicationDoc`, a ^2-boosted BM25 field:
+    // widening the byline multiplies that field's length on every publication
+    // doc, moving BM25 field-length normalization and so every relevance
+    // score, with nothing failing. That is a legitimate change to make — but
+    // as a decision A/B'd against scripts/search-eval/, not a side effect of
+    // an ETL change. Against deployed data it filters nothing, structurally:
+    // the only writer that runs deployed, `buildAuthorshipRows` in
+    // etl/reciter/index.ts, skips authors outside `ourCwidSet` and returns an
+    // `AuthorshipRow` whose `cwid` is a non-nullable `string`, and the FK that
+    // could mint one with no writer involved (`PublicationAuthor.scholar` is
+    // `onDelete: SetNull`) never fires, because no deployed path hard-deletes
+    // a `Scholar` — only `seed/index.ts` does, and departures soft-delete via
+    // `deletedAt`. So no deployed environment holds a null-cwid row. Staging
+    // was counted as a check on that (0 of 285,587, 2026-09); other
+    // environments were not counted. But `seed/publications.ts` writes non-WCM
+    // rows, so an index built from a seeded dev database does lose those names.
+    // `buildPublicationDoc` itself does not filter — a caller passing its own
+    // rows keeps the full byline.
+    where: { cwid: { not: null } },
     orderBy: { position: "asc" },
     include: {
       scholar: {
@@ -503,6 +581,12 @@ export const PUBLICATION_INDEX_INCLUDE = {
           deptCode: true,
           primaryDepartment: true,
           department: { select: { name: true } },
+          // Institution facet (`wcmAuthorInstitutions`) — `Scholar.primaryOrgCode`
+          // (ED `weillCornellEduPrimaryOrganization`: WCMC, HSS, MSKCC, ...),
+          // unioned across the same displayable-author set as `deptCode`.
+          // Only consumed under `SEARCH_PUB_INSTITUTION_FACET`; emitted
+          // unconditionally (omit-on-empty) so a reindex populates it.
+          primaryOrgCode: true,
         },
       },
     },
@@ -571,9 +655,12 @@ export const PEOPLE_INDEX_SELECT = {
   // line reads O(1) — same doc-precompute pattern as `meshSubtreeCounts`. Suppressed
   // / hidden pmids are filtered in `buildPeopleDoc` against the kept-authorship set.
   publicationTopics: { select: { pmid: true, parentTopicId: true } },
-  // Exclude source='RePORTER' — the person-doc grantCount + active-grant signals
-  // count WCM-administered awards only, not individual prior-institution history.
-  grants: { where: { source: { not: "RePORTER" } } },
+  // UNFILTERED by source (#2081, #2239). `piRoleEver` must see the same rows the
+  // funding index does (RePORTER kept, #2285), and `grantCount` counts the
+  // population the profile Funding section lists, which includes
+  // prior-institution RePORTER awards. hasActiveGrants / activePiGrantCount
+  // re-apply the `source != 'RePORTER'` filter in `buildPeopleDoc` (`wcmGrants`).
+  grants: true,
   authorships: {
     // Issue #63 — drop Retraction / Erratum so retracted-paper titles
     // and MeSH don't pull a person into search results for unrelated
@@ -606,6 +693,10 @@ export const PEOPLE_INDEX_SELECT = {
   // facet. Both are direct copies onto the doc in `buildPeopleDoc` below.
   hasClinicalProfile: true,
   professorialRank: true,
+  // Institution facet — `Scholar.primaryOrgCode` (ED
+  // `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, ...).
+  // Plain scalar, direct copy onto the doc in `buildPeopleDoc` below.
+  primaryOrgCode: true,
 } satisfies Prisma.ScholarSelect;
 
 export type ScholarForIndex = Prisma.ScholarGetPayload<{
@@ -760,6 +851,12 @@ export function buildPublicationDoc(
       if (deptName) wcmAuthorDepartments.add(`name:${deptName}`);
     }
   }
+  // Institution facet — union of the displayable WCM authors' `primaryOrgCode`
+  // (same author set + omit-on-empty contract as `wcmAuthorDepartments`).
+  const wcmAuthorInstitutions = new Set<string>();
+  for (const a of wcmAuthorRows) {
+    if (a.scholar!.primaryOrgCode) wcmAuthorInstitutions.add(a.scholar!.primaryOrgCode);
+  }
 
   const mesh = extractMeshLabels(p.meshTerms);
   const meshUis = extractMeshDescriptorUis(p.meshTerms);
@@ -808,6 +905,11 @@ export function buildPublicationDoc(
     ...(wcmAuthorDepartments.size > 0
       ? { wcmAuthorDepartments: Array.from(wcmAuthorDepartments) }
       : {}),
+    // Institution facet — OMIT-on-empty keyword array of the displayable WCM
+    // authors' `primaryOrgCode`s (`SEARCH_PUB_INSTITUTION_FACET`).
+    ...(wcmAuthorInstitutions.size > 0
+      ? { wcmAuthorInstitutions: Array.from(wcmAuthorInstitutions) }
+      : {}),
     // Issue #259 §1.6 — OMIT-on-empty: pubs with zero publication_topic
     // rows write nothing for this field, not an empty array. Lets `_source`
     // consumers distinguish "no signal" from "[]".
@@ -850,14 +952,18 @@ export function buildPublicationDoc(
  *     accepts N per-scholar queries here in exchange for the fast-path
  *     getting the one-cwid variant naturally; the prior whole-table
  *     `centerCodesByCwid` preload is dropped.
- *   - **`chairedDepartments`** (issue #532) — `Department` rows where
- *     `chairCwid = s.cwid`. The DB column already reflects ADR-002 chair
- *     detection AND the Path C manual override, so reading it here surfaces
- *     the authoritative chair set with no new ingestion. Usually 0 rows;
- *     occasionally 1; rarely >1 (cross-dept chairs do exist at WCM).
+ *   - **`chairedDepartments`** (issue #532) — `OrgUnitRoleAssignment` rows
+ *     for `cwid = s.cwid`, `entityType: "department"` (#2542 contract A —
+ *     `Department.chairCwid` no longer exists). The assignment is written
+ *     by the ED ETL immediately after its ADR-002 chair-detection +
+ *     `field_override(leaderCwid)` precedence consult (#2560), so reading it
+ *     here surfaces the same authoritative chair set the retired column did.
+ *     Usually 0 rows; occasionally 1; rarely >1 (cross-dept chairs do exist
+ *     at WCM).
  *   - **`chieffedDivisions`** (issue #532) — same shape for
- *     `Division.chiefCwid`. ADR-002 Path B (`detectDivisionChief`) + Path C
- *     overrides have already settled the value the column carries.
+ *     `entityType: "division"`. ADR-002 Path B (`detectDivisionChief`) + the
+ *     `field_override(leaderCwid)` consult have already settled the value
+ *     the assignment row carries.
  *
  * Returns `null` when the scholar is not indexable (forward-compat: with
  * current callers the scholar row is always `PEOPLE_INDEX_WHERE`-filtered,
@@ -876,6 +982,7 @@ export async function buildPeopleDoc(
     | "department"
     | "division"
     | "scholarFamily"
+    | "orgUnitRoleAssignment"
   >,
   sup: PublicationSuppressions,
   // Issue #824 §4c — OPTIONAL public method-family overlay gate. When provided
@@ -912,10 +1019,22 @@ export async function buildPeopleDoc(
   // in the map (`false` when the map has no entry for this cwid — matches
   // `deriveGrantSignals`' own conservative "unknown degree year -> not
   // eligible" posture, never a different default). When OMITTED — every
-  // existing test, and any caller that doesn't pass it (e.g. the
-  // single-doc fast-path, until it's wired) — the field is never emitted,
+  // existing test, and any caller that doesn't pass it — the field is never emitted,
   // so the produced doc is byte-identical to today.
   esiEligibleByCwid?: Map<string, boolean>,
+  // OPTIONAL per-cwid clinical-trial evidence (`loadTrialEvidenceByCwid`).
+  // When OMITTED the trial fields are never emitted (byte-identical doc).
+  trialEvidenceByCwid?: Map<string, TrialEvidence>,
+  // #2081 — OPTIONAL active grant-suppression set (`loadAllGrantSuppressions`),
+  // the same set the funding index drops rows by. Feeds `piRoleEver` so a
+  // suppressed PI row no longer counts toward "PI (ever)" while rendering no
+  // chip. When OMITTED no row is treated as suppressed.
+  suppressedGrants?: ReadonlySet<string>,
+  // #2239 — OPTIONAL funding-section visibility (`loadFundingVisibility`): the
+  // #160 grant suppressions and `hideFunding` section overrides the profile
+  // applies to its Funding list, so `grantCount` counts that same population.
+  // When OMITTED no row is treated as suppressed or hidden.
+  fundingVisibility?: FundingVisibility,
 ): Promise<Record<string, unknown> | null> {
   // #2113 — effective overview, read-merged against the override map (see
   // the parameter doc above). Drives both `overview` / `overviewLength`
@@ -1212,6 +1331,7 @@ export async function buildPeopleDoc(
   // (count DESC, then label ASC). OMIT-on-empty: scholars with no MeSH on any
   // visible pub write nothing for this field (mirrors `publicationMeshUi`).
   const topMeshTerms = topMeshTermsFromCounts(topMeshAgg);
+  const trial = trialEvidenceByCwid?.get(s.cwid);
 
   // D-exact — materialize the per-concept distinct-pub map for the People reason
   // line. `meshSubtreeCounts[conceptUi]` = the scholar's distinct visible pubs
@@ -1266,10 +1386,17 @@ export async function buildPeopleDoc(
   // NIH multiple-PI award, so a scholar whose only principal-investigator standing
   // is on an MPI award indexed as `piRoleEver: false` and never appeared in the PI
   // facet at all.
+  //
+  // #2081 — `piRoleEver` ("PI (ever)") is computed with the funding index's own
+  // chip predicate over ALL the scholar's grant rows, so the facet counts exactly
+  // the displayed scholars who render as a PI chip on a Funding row (RePORTER
+  // rows included, suppressed rows excluded). The other grant signals stay
+  // scoped to WCM-administered awards (not prior-institution RePORTER history).
   const now = new Date();
-  const hasActiveGrants = s.grants.some((g) => isFundingActive(g.endDate, now));
-  const piRoleEver = s.grants.some((g) => isPiRole(g.role));
-  const activePiGrantCount = s.grants.reduce((n, g) => {
+  const wcmGrants = s.grants.filter((g) => g.source !== "RePORTER");
+  const hasActiveGrants = wcmGrants.some((g) => isFundingActive(g.endDate, now));
+  const piRoleEver = hasFundingPiChip(s.grants, suppressedGrants ?? new Set<string>());
+  const activePiGrantCount = wcmGrants.reduce((n, g) => {
     if (!isPiRole(g.role)) return n;
     if (!isFundingActive(g.endDate, now)) return n;
     if (isTrainingOnlyGrant(g)) return n;
@@ -1407,10 +1534,11 @@ export async function buildPeopleDoc(
       centerCode: true,
       startDate: true,
       endDate: true,
+      membershipRoleKey: true,
     },
   });
   for (const row of centerRows) {
-    if (!isCenterMembershipActive(row.startDate, row.endDate, centerToday)) {
+    if (!isCenterMembershipActive(row, centerToday)) {
       continue;
     }
     deptDivKeys.push(`center:${row.centerCode}`);
@@ -1442,25 +1570,45 @@ export async function buildPeopleDoc(
   }
   void divisionName; // retained for potential future enrichment
 
-  // Issue #532 — leadership sidecar queries. `Department.chairCwid` and
-  // `Division.chiefCwid` are populated by the ED ETL with override-applied
-  // values (ADR-002 Path B prediction + Path C `data/division-chiefs.txt`
-  // manual overrides), so reading them here yields the authoritative chair /
-  // chief set. Both queries are point lookups on indexed columns; the
-  // expected row count for any one scholar is 0 (almost all), 1 (chairs /
-  // chiefs), or rarely >1 (cross-dept appointments). Stored lowercased
-  // because the dept-template's `function_score` term filter is matched
-  // against `query.trim().toLowerCase()` and the classifier's
-  // `knownDepartments` set is itself lowercased.
+  // Issue #532 — leadership sidecar queries. #2542 contract A: sole source is
+  // `OrgUnitRoleAssignment`, which the ED ETL writes immediately after every
+  // `Department.chairCwid` / `Division.chiefCwid` write (ADR-002 Path B
+  // prediction + the `field_override(leaderCwid)` precedence consult,
+  // #2560) — so this yields the same authoritative chair / chief set the
+  // now-retired columns did. The assignment carries no FK to `department` /
+  // `division` (polymorphic on `entityId`), so the unit name is a second
+  // batched lookup. The expected row count for any one scholar is 0 (almost
+  // all), 1 (chairs / chiefs), or rarely >1 (cross-dept appointments).
+  // Stored lowercased because the dept-template's `function_score` term
+  // filter is matched against `query.trim().toLowerCase()` and the
+  // classifier's `knownDepartments` set is itself lowercased.
+  const [chairAssignments, chiefAssignments] = await Promise.all([
+    client.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid: s.cwid,
+        entityType: "department",
+        roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+      },
+      select: { entityId: true },
+    }),
+    client.orgUnitRoleAssignment.findMany({
+      where: { cwid: s.cwid, entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+      select: { entityId: true },
+    }),
+  ]);
   const [chairedDepartments, chieffedDivisions] = await Promise.all([
-    client.department.findMany({
-      where: { chairCwid: s.cwid },
-      select: { name: true },
-    }),
-    client.division.findMany({
-      where: { chiefCwid: s.cwid },
-      select: { name: true },
-    }),
+    chairAssignments.length
+      ? client.department.findMany({
+          where: { code: { in: chairAssignments.map((a) => a.entityId) } },
+          select: { name: true },
+        })
+      : Promise.resolve([]),
+    chiefAssignments.length
+      ? client.division.findMany({
+          where: { code: { in: chiefAssignments.map((a) => a.entityId) } },
+          select: { name: true },
+        })
+      : Promise.resolve([]),
   ]);
   const chairOf = chairedDepartments.map((d) => d.name.toLowerCase());
   const chiefOf = chieffedDivisions.map((d) => d.name.toLowerCase());
@@ -1576,6 +1724,9 @@ export async function buildPeopleDoc(
     // with no surviving descriptor write nothing, so `_source` consumers and the
     // `terms` filter distinguish "no signal" from "[]".
     ...(publicationMeshUi.length > 0 ? { publicationMeshUi } : {}),
+    ...(trial?.meshUi.length ? { trialMeshUi: trial.meshUi } : {}),
+    ...(trial?.text ? { trialText: trial.text } : {}),
+    ...(trial?.trials.length ? { trialMesh: trial.trials.map((ui) => ({ ui })) } : {}),
     // #1959 — source-only companion to the field above: the gate-dropped
     // ancestors of kept descriptors, so `alsoParent` can distinguish "the parent
     // tag is absent" from "the parent tag is below the min-evidence gate".
@@ -1602,7 +1753,16 @@ export async function buildPeopleDoc(
     isComplete,
     personType,
     publicationCount: kept,
-    grantCount: s.grants.length,
+    // #2238/#2239 — funding PROJECTS over the rows the profile Funding section
+    // lists (shared `profileFundingRows` + `countGrantProjects`), so the card's
+    // "N grants" equals the profile header. Was `s.grants.length`: raw award
+    // rows, RePORTER excluded, suppression and `hideFunding` ignored.
+    grantCount: countGrantProjects(
+      profileFundingRows(s.grants, {
+        hideFunding: fundingVisibility?.hideFundingCwids.has(s.cwid) ?? false,
+        suppressedGrantIds: fundingVisibility?.suppressedGrantIds ?? NO_SUPPRESSED_GRANTS,
+      }),
+    ),
     mostRecentPubDate,
     // Issue #532 — leadership signal (OMIT-on-empty: scholars who are
     // neither chair nor chief write nothing for this field, mirroring
@@ -1663,6 +1823,11 @@ export async function buildPeopleDoc(
     // `_source` consumers and the `exists` filter distinguish "no rank" from
     // an empty string.
     ...(s.professorialRank ? { professorialRank: s.professorialRank } : {}),
+    // Institution facet — direct copy of `Scholar.primaryOrgCode` (ED
+    // `weillCornellEduPrimaryOrganization`). NULL pre-backfill and on rows ED
+    // carries no faculty-tagged value for — OMIT-on-empty (same as
+    // `professorialRank` above), so a null row simply has no facet bucket.
+    ...(s.primaryOrgCode ? { primaryOrgCode: s.primaryOrgCode } : {}),
     // #2300 — "Early Stage Investigator" in every human-facing surface (facet
     // label / chip / tooltip); `esiEligible` is the pre-existing internal
     // code name (`lib/api/match-researchers.ts`) and is kept as-is here. See

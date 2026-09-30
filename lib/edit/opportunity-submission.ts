@@ -10,7 +10,7 @@
  * through the SAME scorer as the rest of the corpus and DynamoDB stays the
  * source of truth. Rows come back through the ordinary nightly `etl:dynamodb`
  * projection; the drain marks each item `processed` / `rejected` and this
- * module's Query surfaces that status on `/edit/find-researchers`.
+ * module's Query surfaces that status on `/edit/grant-matcha`.
  *
  * Key shape: every queue item shares the constant partition key `SUBMISSION`
  * with a time-ordered sort key (`<ISO ts>#<uuid8>`). One partition keeps the
@@ -125,7 +125,7 @@ export interface SubmissionDdbClient {
   send(
     command: PutCommand | QueryCommand | DeleteCommand | UpdateCommand,
     options?: { abortSignal?: AbortSignal },
-  ): Promise<{ Items?: Record<string, unknown>[] }>;
+  ): Promise<{ Items?: Record<string, unknown>[]; LastEvaluatedKey?: Record<string, unknown> }>;
 }
 
 let ddbSingleton: SubmissionDdbClient | undefined;
@@ -210,24 +210,31 @@ function mapSubmissionItem(item: Record<string, unknown>): OpportunitySubmission
 
 /**
  * All submissions, newest-first (the SK is ISO-time-prefixed, so key order IS
- * time order). The queue is human-paced — a page of 200 covers years; no
- * pagination until reality disagrees.
+ * time order). Reads the WHOLE partition: etl:funding-digest submits ~60 links
+ * a week, and both its dedup and the panel's findDuplicate must see a
+ * rejected/suppressed item however old it is.
  */
 export async function listSubmissions(
   opts: { ddb?: SubmissionDdbClient } = {},
 ): Promise<OpportunitySubmission[]> {
   const ddb = opts.ddb ?? defaultDdb();
-  const result = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: "PK = :pk",
-      ExpressionAttributeValues: { ":pk": SUBMISSION_PK },
-      ScanIndexForward: false,
-      Limit: 200,
-    }),
-    { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
-  );
-  return (result.Items ?? []).map(mapSubmissionItem);
+  const out: OpportunitySubmission[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const result = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk",
+        ExpressionAttributeValues: { ":pk": SUBMISSION_PK },
+        ScanIndexForward: false,
+        ExclusiveStartKey: start,
+      }),
+      { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
+    );
+    out.push(...(result.Items ?? []).map(mapSubmissionItem));
+    start = result.LastEvaluatedKey;
+  } while (start);
+  return out;
 }
 
 /**
@@ -326,8 +333,10 @@ export async function suppressSubmission(
 // ---------------------------------------------------------------------------
 
 export interface DuplicateCheckResult {
-  /** A corpus row already carries this URL (any source). */
-  opportunity: { opportunityId: string; title: string } | null;
+  /** A corpus row already carries this URL (any source). `suppressedAt` rides
+   *  along (matcha-admin Phase 1b) so the 409 payload can say "duplicate of a
+   *  SUPPRESSED row" — the caller may restore it instead of resubmitting. */
+  opportunity: { opportunityId: string; title: string; suppressedAt: Date | string | null } | null;
   /** A queue item (pending or processed) already carries this URL. */
   submission: { submissionId: string; status: SubmissionStatus } | null;
 }
@@ -344,14 +353,23 @@ export interface DuplicateCheckResult {
  */
 export function findDuplicate(
   normalizedUrl: string,
-  corpus: ReadonlyArray<{ opportunityId: string; title: string; sourceUrl: string }>,
+  corpus: ReadonlyArray<{
+    opportunityId: string;
+    title: string;
+    sourceUrl: string;
+    suppressedAt?: Date | string | null;
+  }>,
   submissions: ReadonlyArray<OpportunitySubmission>,
 ): DuplicateCheckResult {
   let opportunity: DuplicateCheckResult["opportunity"] = null;
   for (const row of corpus) {
     const normalized = normalizeOpportunityUrl(row.sourceUrl);
     if (normalized.ok && normalized.normalized === normalizedUrl) {
-      opportunity = { opportunityId: row.opportunityId, title: row.title };
+      opportunity = {
+        opportunityId: row.opportunityId,
+        title: row.title,
+        suppressedAt: row.suppressedAt ?? null,
+      };
       break;
     }
   }

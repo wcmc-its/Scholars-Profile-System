@@ -73,7 +73,7 @@ import { db } from "../../lib/db";
 // readability (FK checks are disabled in the dump header, so any order loads).
 // To add/remove a table, edit this one list.
 // ---------------------------------------------------------------------------
-const CURATED_TABLES: readonly string[] = [
+export const CURATED_TABLES: readonly string[] = [
   // --- Org units: structure, names, membership, admins ---
   "department",
   "division",
@@ -83,6 +83,21 @@ const CURATED_TABLES: readonly string[] = [
   // (research/clinical) is a Prisma ENUM realized as the `membership_type`
   // column on `center_membership`, so that data is already captured below.
   "center_membership",
+  // #2542 — the org-unit role vocabulary, one list per unit kind.
+  // `center_membership`'s role keys reference it, so dumping the memberships
+  // without it would restore rows pointing at a vocabulary that no longer exists
+  // (the dump header disables FK checks, so that restore would SUCCEED and leave
+  // the keys orphaned rather than erroring).
+  "org_unit_role",
+  // #2542 — leadership assignments. Hand-curated, and the successor to
+  // `center.director_cwid`; omitting it would back up a center's roster and
+  // silently lose who leads it.
+  "org_unit_role_assignment",
+  // #2557 Phase E — a role's unit allowlist. Small and hand-curated (two rows
+  // on day one, both Meyer); omitting it would back up the vocabulary and the
+  // memberships it governs while silently losing which units a restricted
+  // role is scoped to.
+  "org_unit_role_scope",
   "division_membership",
   "unit_admin",
   // --- Methods & tools: family-visibility overlays (DB is the SOR) ---
@@ -93,6 +108,14 @@ const CURATED_TABLES: readonly string[] = [
   //     are stored here, so these are part of the org-unit curation surface. ---
   "field_override",
   "suppression",
+  // ReciterAI #383 / SPS #2607 (CWID-only pass) — a core owner's manually
+  // attested "known client" list; ETL-immune, same posture as `core_claim`
+  // (not itself curated here — see the note at its own migration for why).
+  "core_client",
+  // Core Review Queue v2 PR B — PMIDs a core owner sent to their review queue
+  // by hand ("Add PMIDs → Send to review"). User-entered, ETL-immune, and
+  // nothing upstream can regenerate it, so it belongs with `core_client`.
+  "core_queue_add",
 ];
 
 interface ColumnMeta {

@@ -77,6 +77,9 @@ export type PersonJsonLdInput = {
    *  `https://orcid.org/<id>` URL and appended to `sameAs`. Strong signal
    *  for AI/LLM entity resolution. Null when not registered. */
   orcid?: string | null;
+  /** #2699 — faculty-entered external profile URLs (LinkedIn, X, Bluesky, Google
+   *  Scholar, ResearchGate), already canonical; each is appended to `sameAs`. */
+  externalProfileUrls?: readonly string[];
   /** Top MeSH keywords from this scholar's accepted publications, used
    *  verbatim for `knowsAbout`. Pass the aggregation already produced by
    *  `aggregateKeywords` (sorted by pubCount desc). Capped at
@@ -146,6 +149,7 @@ export function buildPersonJsonLd(
   const sameAs: string[] = [];
   if (profile.orcid) sameAs.push(`https://orcid.org/${profile.orcid}`);
   if (profile.clinicalProfileUrl) sameAs.push(profile.clinicalProfileUrl);
+  sameAs.push(...(profile.externalProfileUrls ?? []));
 
   const url = `${baseUrl}${canonicalProfilePath(profile.slug)}`;
 

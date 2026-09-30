@@ -130,7 +130,11 @@ export function staleSources(
  * magnitude — it has never recorded a >= 100 sample, so `minPreviousRows` catches
  * it first. If that ever changes, it belongs here too.
  */
-export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set(["News"]);
+// NewsClips (etl/news/clips.ts) is the same upsert, so the same change count:
+// a night with no digest in the bucket legitimately scores 0.
+// FundingDigest counts only NEW submissions (most digest links are already in
+// the corpus or queue), and is 0 on every non-prod env by design.
+export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set(["News", "NewsClips", "FundingDigest"]);
 
 /**
  * A >50% overnight drop on a source that previously processed a substantial

@@ -23,6 +23,7 @@
  * Run: npx tsx prisma/seed-center-members.ts
  */
 import "dotenv/config";
+import { CENTER_ENTITY_TYPE, MEMBER_ROLE_KEY, orgUnitRoleSeedRows } from "../lib/org-unit-roles";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../lib/db";
@@ -38,6 +39,15 @@ function parseCwids(content: string): string[] {
 }
 
 async function main() {
+  // #2542 — the role vocabulary is ONE list per unit kind for the whole
+  // institution, not a per-unit copy, so it is seeded once here rather than
+  // nested on each center. `skipDuplicates` makes it idempotent and means a
+  // re-run can never clobber a label a steward has edited.
+  await db.write.orgUnitRole.createMany({
+    data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
+    skipDuplicates: true,
+  });
+
   let entries: string[] = [];
   try {
     entries = await readdir(MEMBERS_DIR);
@@ -91,11 +101,16 @@ async function main() {
       where: { centerCode: center.code, source: { startsWith: "file:" } },
     });
     if (matched.length > 0) {
+      // The vocabulary is seeded once at the top of `main()` — one list per unit
+      // kind, so there is nothing per-center to seed here any more.
       await db.write.centerMembership.createMany({
         data: matched.map((cwid) => ({
           centerCode: center.code,
           cwid,
           source: "file:" + file,
+          // #2542 — a file-loaded row is an ordinary roster member. Its derived
+          // `membershipType` stays null, exactly as it was before.
+          membershipRoleKey: MEMBER_ROLE_KEY,
         })),
       });
     }

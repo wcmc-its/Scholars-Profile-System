@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, type Mock } from "vitest";
+import { describe, expect, it, vi, beforeEach, type Mock } from "vitest";
 import { EXPECTED_HEADSHOT_URL, FIXTURE_CWID } from "../fixtures/scholar";
 
 // Mock Prisma BEFORE importing the module under test.
@@ -67,10 +67,46 @@ vi.mock("@/lib/db", () => ({
     department: { findMany: vi.fn(async () => []) },
     division: { findMany: vi.fn(async () => []) },
     center: { findMany: vi.fn(async () => []) },
-    centerProgramLeader: { findMany: vi.fn(async () => []) },
+    // #2558 — batched (label, center name) lookup for programs an
+    // `orgUnitRoleAssignment` (entityType center_program) row points at.
+    centerProgram: { findMany: vi.fn(async () => []) },
+    // #2542 contract A — department/division/center leadership titles read
+    // `orgUnitRoleAssignment` exclusively (`Department.chairCwid` /
+    // `Division.chiefCwid` / `Center.directorCwid` / `Center.leaderInterim` no
+    // longer exist as read sources). #2558 — center-program leadership titles
+    // read `orgUnitRoleAssignment` too (entityType `center_program`).
+    orgUnitRoleAssignment: { findMany: vi.fn(async () => []) },
+    orgUnitRole: {
+      findMany: vi.fn(async () => []),
+      findUnique: vi.fn(async () => null),
+    },
     $queryRawUnsafe: vi.fn(async () => []),
   },
 }));
+
+/** The mock surface `loadLeadershipMocks` resets before each leadership test,
+ *  so one test's `mockImplementation`/`mockResolvedValue` never bleeds into
+ *  the next (they're module-level `vi.fn()`s shared across this whole file). */
+type LeadershipMockClient = {
+  department: { findMany: Mock };
+  division: { findMany: Mock };
+  center: { findMany: Mock };
+  centerProgram: { findMany: Mock };
+  orgUnitRoleAssignment: { findMany: Mock };
+  orgUnitRole: { findMany: Mock; findUnique: Mock };
+};
+
+async function loadLeadershipMocks(): Promise<LeadershipMockClient> {
+  const { prisma } = (await import("@/lib/db")) as unknown as { prisma: LeadershipMockClient };
+  prisma.department.findMany.mockReset().mockResolvedValue([]);
+  prisma.division.findMany.mockReset().mockResolvedValue([]);
+  prisma.center.findMany.mockReset().mockResolvedValue([]);
+  prisma.centerProgram.findMany.mockReset().mockResolvedValue([]);
+  prisma.orgUnitRoleAssignment.findMany.mockReset().mockResolvedValue([]);
+  prisma.orgUnitRole.findMany.mockReset().mockResolvedValue([]);
+  prisma.orgUnitRole.findUnique.mockReset().mockResolvedValue(null);
+  return prisma;
+}
 
 describe("profile serializer", () => {
   it("includes identityImageEndpoint computed from CWID", async () => {
@@ -126,5 +162,236 @@ describe("profile serializer", () => {
       include: { honors: { where: unknown } };
     };
     expect(args.include.honors.where).toEqual({ status: "published", showOnProfile: true });
+  });
+
+  // The per-publication `authors` read is scoped to WCM rows. Downstream the
+  // `wcmAuthors` mapper requires `au.scholar`, so this filter cannot change the
+  // payload — it is there so that an ingest of external authors is a decision
+  // rather than a silent widening of every publication's byline over the wire.
+  // Asserted on the QUERY for the same reason the honors gate above is: a mock
+  // returns whatever it is told, so only the where-clause can prove the scope.
+  // Also confirmed-only (#2261, parity with #2220): an unconfirmed row must
+  // never surface as a co-author chip.
+  it("scopes each publication's author rows to confirmed WCM rows in the loader query", async () => {
+    const { prisma } = (await import("@/lib/db")) as unknown as {
+      prisma: { publicationAuthor: { findMany: Mock } };
+    };
+    const { getScholarFullProfileBySlug } = await import("@/lib/api/profile");
+
+    prisma.publicationAuthor.findMany.mockClear();
+    await getScholarFullProfileBySlug("wcm-authors-guard-fixture");
+
+    const args = prisma.publicationAuthor.findMany.mock.calls.at(-1)?.[0] as {
+      include: { publication: { select: { authors: { where: unknown } } } };
+    };
+    expect(args.include.publication.select.authors.where).toEqual({
+      isConfirmed: true,
+      cwid: { not: null },
+    });
+  });
+
+  // Primary institution on public labels — absence-as-default. The payload
+  // carries the bare code; the metadata description (and the sidebar, via the
+  // same `visibleInstitutionName`) names it ONLY when it is non-WCMC.
+  it("exposes primaryOrgCode and names a non-WCMC institution in the metadata description", async () => {
+    const { prisma } = (await import("@/lib/db")) as unknown as {
+      prisma: { scholar: { findFirst: Mock } };
+    };
+    const { getScholarFullProfileBySlug } = await import("@/lib/api/profile");
+    const { buildProfileMetadata } = await import("@/lib/profile-metadata");
+    const base = await prisma.scholar.findFirst.getMockImplementation()!();
+
+    prisma.scholar.findFirst.mockResolvedValueOnce({ ...base, primaryOrgCode: "HSS" });
+    expect((await getScholarFullProfileBySlug("hss-fixture"))?.primaryOrgCode).toBe("HSS");
+
+    prisma.scholar.findFirst.mockResolvedValueOnce({ ...base, primaryOrgCode: "HSS" });
+    expect((await buildProfileMetadata("hss-meta-fixture")).description).toBe(
+      "Associate Professor — Medicine — Hospital for Special Surgery",
+    );
+
+    prisma.scholar.findFirst.mockResolvedValueOnce({ ...base, primaryOrgCode: "WCMC" });
+    expect((await buildProfileMetadata("wcmc-meta-fixture")).description).toBe(
+      "Associate Professor — Medicine",
+    );
+  });
+});
+
+// #58 / #2542 contract A — `profile.ts`'s own leadership-title lines
+// (`payload.leadershipTitles`) render straight from the assignment's own
+// vocabulary-joined `role.label` (department chair vs. director, division
+// chief) — no `Department.chairCwid` / `Division.chiefCwid` column, and no
+// category ternary, exist as a source any more.
+describe("profile serializer — department/division leadership titles (#58 / #2542 contract A)", () => {
+  beforeEach(loadLeadershipMocks);
+
+  async function leadershipTitles(): Promise<string[]> {
+    const mod: Record<string, unknown> = await import("@/lib/api/profile");
+    const fn = (mod as {
+      getScholarFullProfileBySlug?: (id: string) => Promise<{ leadershipTitles?: string[] } | null>;
+    }).getScholarFullProfileBySlug;
+    const payload = await fn!("jane-doe");
+    return payload?.leadershipTitles ?? [];
+  }
+
+  it("labels a clinical/mixed/basic department's leader 'Chair' from its OrgUnitRoleAssignment", async () => {
+    const prisma = await loadLeadershipMocks();
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "department") return [];
+        return [{ entityId: "MED", interim: false, sortOrder: 0, role: { label: "Chair" } }];
+      },
+    );
+    prisma.department.findMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", officialName: null },
+    ]);
+    expect(await leadershipTitles()).toEqual(["Chair, Medicine"]);
+  });
+
+  it("labels an administrative department's leader 'Director', not 'Chair'", async () => {
+    const prisma = await loadLeadershipMocks();
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "department") return [];
+        return [{ entityId: "LIB", interim: false, sortOrder: 0, role: { label: "Director" } }];
+      },
+    );
+    prisma.department.findMany.mockResolvedValue([
+      { code: "LIB", name: "Library", officialName: null },
+    ]);
+    expect(await leadershipTitles()).toEqual(["Director, Library"]);
+  });
+
+  it("labels a division's leader 'Chief' from its OrgUnitRoleAssignment", async () => {
+    const prisma = await loadLeadershipMocks();
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "division") return [];
+        return [{ entityId: "HEME", interim: false, sortOrder: 0, role: { label: "Chief" } }];
+      },
+    );
+    prisma.division.findMany.mockResolvedValue([{ code: "HEME", name: "Hematology" }]);
+    expect(await leadershipTitles()).toEqual(["Chief, Hematology"]);
+  });
+
+  it("a row whose department/division vanished contributes no title line", async () => {
+    const prisma = await loadLeadershipMocks();
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType === "department") {
+          return [{ entityId: "GONE", interim: false, sortOrder: 0, role: { label: "Chair" } }];
+        }
+        return [];
+      },
+    );
+    prisma.department.findMany.mockResolvedValue([]); // the department vanished
+    expect(await leadershipTitles()).toEqual([]);
+  });
+
+  it("renders the assignment's own vocabulary label + interim, whatever the label", async () => {
+    const prisma = await loadLeadershipMocks();
+    prisma.department.findMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", officialName: "Department of Medicine" },
+    ]);
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "department") return [];
+        return [
+          {
+            entityId: "MED",
+            interim: true,
+            sortOrder: 10,
+            // Deliberately NOT the literal "Chair"/"Director" — proves the
+            // rendered text is the vocabulary's label, not a hardcoded noun.
+            role: { label: "Chair Emeritus" },
+          },
+        ];
+      },
+    );
+    expect(await leadershipTitles()).toEqual(["Interim Chair Emeritus, Department of Medicine"]);
+  });
+
+  it("scopes the department + division assignment queries to the scholar, gated by profileTitle", async () => {
+    const prisma = await loadLeadershipMocks();
+    await leadershipTitles();
+    const deptCall = prisma.orgUnitRoleAssignment.findMany.mock.calls.find(
+      (c: unknown[]) => (c[0] as { where: { entityType: string } }).where.entityType === "department",
+    );
+    expect(deptCall?.[0]).toMatchObject({
+      where: {
+        cwid: expect.any(String),
+        entityType: "department",
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
+    });
+    const divCall = prisma.orgUnitRoleAssignment.findMany.mock.calls.find(
+      (c: unknown[]) => (c[0] as { where: { entityType: string } }).where.entityType === "division",
+    );
+    expect(divCall?.[0]).toMatchObject({
+      where: {
+        cwid: expect.any(String),
+        entityType: "division",
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
+    });
+  });
+});
+
+// #2558 — the retired per-program leader table folded into the org-unit role
+// vocabulary. Mirrors the department/division describe block above, minus the
+// dual-read fallback: the contract PR migrated the read onto
+// `orgUnitRoleAssignment` (entityType `center_program`) exclusively.
+describe("profile serializer — center program leadership titles (#2558)", () => {
+  beforeEach(loadLeadershipMocks);
+
+  async function leadershipTitles(): Promise<string[]> {
+    const mod: Record<string, unknown> = await import("@/lib/api/profile");
+    const fn = (mod as {
+      getScholarFullProfileBySlug?: (id: string) => Promise<{ leadershipTitles?: string[] } | null>;
+    }).getScholarFullProfileBySlug;
+    const payload = await fn!("jane-doe");
+    return payload?.leadershipTitles ?? [];
+  }
+
+  it("labels a program leader 'Leader, <program> (<center>)', with interim, from the assignment + vocabulary", async () => {
+    const prisma = await loadLeadershipMocks();
+    prisma.centerProgram.findMany.mockResolvedValue([
+      {
+        centerCode: "meyer_cancer_center",
+        code: "CB",
+        label: "Cancer Biology",
+        center: { name: "Meyer Cancer Center", officialName: null },
+      },
+    ]);
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "center_program") return [];
+        return [
+          {
+            entityId: "meyer_cancer_center:CB",
+            interim: true,
+            sortOrder: 0,
+            role: { label: "Leader" },
+          },
+        ];
+      },
+    );
+    expect(await leadershipTitles()).toEqual([
+      "Interim Leader, Cancer Biology (Meyer Cancer Center)",
+    ]);
+  });
+
+  it("scopes the center_program assignment query to the scholar + kind, gated by profileTitle — the query that excludes coe_liaison (seeded profileTitle: false)", async () => {
+    const prisma = await loadLeadershipMocks();
+    await leadershipTitles();
+    const call = prisma.orgUnitRoleAssignment.findMany.mock.calls.find(
+      (c: unknown[]) => (c[0] as { where: { entityType: string } }).where.entityType === "center_program",
+    );
+    expect(call?.[0]).toMatchObject({
+      where: {
+        cwid: expect.any(String),
+        entityType: "center_program",
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
+    });
   });
 });

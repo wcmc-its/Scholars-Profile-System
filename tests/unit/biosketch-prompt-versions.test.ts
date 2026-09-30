@@ -6,6 +6,7 @@ import {
   BIOSKETCH_SYSTEM_PROMPT,
   BIOSKETCH_SYSTEM_PROMPT_V6,
   BIOSKETCH_SYSTEM_PROMPT_V7,
+  BIOSKETCH_SYSTEM_PROMPT_V8,
   resolveBiosketchPromptImpl,
 } from "@/lib/edit/biosketch-generator";
 import {
@@ -13,6 +14,8 @@ import {
   BIOSKETCH_PROMPT_VERSION_IDS,
   biosketchVersionEmitsTitle,
   biosketchVersionGroundsImpact,
+  biosketchVersionUsesApplicationRole,
+  biosketchVersionUsesProductReferences,
   defaultBiosketchPromptVersionId,
   isValidBiosketchPromptVersionId,
   listSelectableBiosketchPromptVersions,
@@ -21,9 +24,10 @@ import {
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 describe("biosketch prompt-version registry (#917 v6)", () => {
-  it("default is v7, and the ids list it first (selector order)", () => {
-    expect(BIOSKETCH_DEFAULT_PROMPT_VERSION).toBe("v7");
-    expect(BIOSKETCH_PROMPT_VERSION_IDS[0]).toBe("v7");
+  it("default is v8, and the ids list it first (selector order)", () => {
+    expect(BIOSKETCH_DEFAULT_PROMPT_VERSION).toBe("v8");
+    expect(BIOSKETCH_PROMPT_VERSION_IDS[0]).toBe("v8");
+    expect(BIOSKETCH_PROMPT_VERSION_IDS).toContain("v7");
     expect(BIOSKETCH_PROMPT_VERSION_IDS).toContain("v6");
     expect(BIOSKETCH_PROMPT_VERSION_IDS).toContain("v5");
   });
@@ -39,8 +43,10 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
 
   it("listSelectable returns the metas in insertion order (default first)", () => {
     const metas = listSelectableBiosketchPromptVersions();
-    expect(metas.map((m) => m.id)).toEqual(["v7", "v6", "v5"]);
+    // v8 is the default (2026-09-18); v7 sits behind it as the one-step-back rollback.
+    expect(metas.map((m) => m.id)).toEqual(["v8", "v7", "v6", "v5"]);
     expect(metas[0].status).toBe("default");
+    expect(metas[1].status).toBe("experimental");
   });
 
   it("v6 and v7 ground impact on bibliometrics; v5 does not", () => {
@@ -49,10 +55,24 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
     expect(biosketchVersionGroundsImpact("v5")).toBe(false);
   });
 
-  it("only v7 emits a per-contribution title", () => {
+  it("v7 and v8 emit a per-contribution title; v5 / v6 do not", () => {
+    expect(biosketchVersionEmitsTitle("v8")).toBe(true);
     expect(biosketchVersionEmitsTitle("v7")).toBe(true);
     expect(biosketchVersionEmitsTitle("v6")).toBe(false);
     expect(biosketchVersionEmitsTitle("v5")).toBe(false);
+  });
+
+  it("only v8 takes the role on the application and permits product references (#2653)", () => {
+    expect(biosketchVersionUsesApplicationRole("v8")).toBe(true);
+    expect(biosketchVersionUsesProductReferences("v8")).toBe(true);
+    for (const id of ["v5", "v6", "v7"] as const) {
+      expect(biosketchVersionUsesApplicationRole(id)).toBe(false);
+      expect(biosketchVersionUsesProductReferences(id)).toBe(false);
+    }
+    expect(isValidBiosketchPromptVersionId("v8")).toBe(true);
+    // v8 is the compiled default; v7 stays selectable + a valid env-lever rollback target.
+    expect(BIOSKETCH_DEFAULT_PROMPT_VERSION).toBe("v8");
+    expect(resolveBiosketchPromptImpl("v8").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT_V8);
   });
 
   describe("defaultBiosketchPromptVersionId — env lever", () => {
@@ -69,9 +89,9 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
 
     it("falls back to the compiled default on an invalid/unset value", () => {
       process.env.BIOSKETCH_PROMPT_VERSION_DEFAULT = "nonsense";
-      expect(defaultBiosketchPromptVersionId()).toBe("v7");
+      expect(defaultBiosketchPromptVersionId()).toBe("v8");
       delete process.env.BIOSKETCH_PROMPT_VERSION_DEFAULT;
-      expect(defaultBiosketchPromptVersionId()).toBe("v7");
+      expect(defaultBiosketchPromptVersionId()).toBe("v8");
     });
 
     it("v6 stays a valid rollback target for the env lever", () => {
@@ -85,12 +105,12 @@ describe("biosketch prompt-version registry (#917 v6)", () => {
     expect(resolveBiosketchPromptImpl("v5").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT);
     expect(resolveBiosketchPromptImpl("v6").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT_V6);
     expect(resolveBiosketchPromptImpl("v7").systemPrompt).toBe(BIOSKETCH_SYSTEM_PROMPT_V7);
-    // invalid → live default (v7 unless the env lever says otherwise)
-    expect(resolveBiosketchPromptImpl("bogus").id).toBe("v7");
+    // invalid → live default (v8 unless the env lever says otherwise)
+    expect(resolveBiosketchPromptImpl("bogus").id).toBe("v8");
   });
 
-  it("the impl map exposes exactly the three versions", () => {
-    expect(Object.keys(BIOSKETCH_PROMPT_IMPLS).sort()).toEqual(["v5", "v6", "v7"]);
+  it("the impl map exposes exactly the four versions", () => {
+    expect(Object.keys(BIOSKETCH_PROMPT_IMPLS).sort()).toEqual(["v5", "v6", "v7", "v8"]);
   });
 });
 
@@ -132,6 +152,30 @@ describe("biosketch system prompts — byte-identity + v6 content", () => {
     expect(prompt).not.toContain("(PI / co-PI / co-Investigator of <grant title>)");
     // The model is pointed at the LABEL, not the raw abbreviation.
     expect(prompt).toContain("`roleLabel`");
+  });
+
+  it("v7 (BIOSKETCH_SYSTEM_PROMPT_V7) is byte-identical — the v8 rollback target must not drift", () => {
+    // #2653 — pinned when v8 landed, computed from origin/master's v7 (identical to this branch's).
+    expect(sha(BIOSKETCH_SYSTEM_PROMPT_V7)).toBe(
+      "9a7f8678eec5563e13eaa87b915a481cc8b159ba1af103d14b613787cfc70087",
+    );
+  });
+
+  it("v8 adds the role-on-application block and the keyed reference contract on top of v7 (#2653)", () => {
+    const v8 = BIOSKETCH_SYSTEM_PROMPT_V8;
+    expect(v8).not.toBe(BIOSKETCH_SYSTEM_PROMPT_V7);
+    expect(v8).toContain("ROLE ON THE APPLICATION");
+    expect(v8).toContain("PRODUCT REFERENCES");
+    expect(v8).toContain("[P2, P5]");
+    // the v6 loose-reference block is REPLACED, not stacked
+    expect(v8).not.toContain("REFERENCES INSIDE THE NARRATIVE");
+    // carries the v7 register unchanged (title, four elements, grounded impact, em-dash ban, floor)
+    expect(v8).toContain("TITLE EACH CONTRIBUTION");
+    expect(v8).toContain("FOUR REQUIRED ELEMENTS");
+    expect(v8).toContain("IMPACT, GROUNDED CONDITIONALLY");
+    expect(v8).toContain("Do not use em dashes or en dashes");
+    expect(v8).toContain("Use only what FACTS contains.");
+    expect(v8).toMatch(/NEVER as "co-PI"/);
   });
 
   it("v6 is a distinct prompt from v5", () => {

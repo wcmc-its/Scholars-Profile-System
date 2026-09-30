@@ -6,7 +6,27 @@
  * the fake client's `unitAdmin.findMany` serves both it and the access query,
  * branching on the `where.cwid` discriminator.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// #2519 continuation — the Cornell (Ithaca) external-member hydration reaches
+// `ExternalMember` through `lib/api/external-members.ts`'s own `prisma`
+// singleton (not the injected `client` this file otherwise uses), and is
+// gated on the same flag the public roster union reads. Mock both the same
+// way `cornell-render-union-centers.test.ts` mocks the public path.
+const { externalMemberFindMany, isCornellDirectoryMembersEnabledMock } = vi.hoisted(() => ({
+  externalMemberFindMany: vi.fn(
+    async (): Promise<Array<{ cuid: string; displayName: string; title: string | null }>> => [],
+  ),
+  isCornellDirectoryMembersEnabledMock: vi.fn(() => false),
+}));
+
+vi.mock("@/lib/db", () => ({
+  prisma: { externalMember: { findMany: externalMemberFindMany } },
+}));
+
+vi.mock("@/lib/edit/cornell-directory-flag", () => ({
+  isCornellDirectoryMembersEnabled: isCornellDirectoryMembersEnabledMock,
+}));
 
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 
@@ -17,6 +37,9 @@ const CURATOR = { cwid: "cur001", isSuperuser: false, isCommsSteward: false };
 const OWNER = { cwid: "own001", isSuperuser: false, isCommsSteward: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false, isCommsSteward: false };
 const SUPERUSER = { cwid: "sup001", isSuperuser: true, isCommsSteward: false };
+// 2026-08-26 policy widening (decision #3) — full access-management parity,
+// with NO unit_admin row of their own.
+const STEWARD = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 type Opts = {
   department?: unknown;
@@ -34,6 +57,8 @@ type Opts = {
     preferredName: string;
     primaryTitle: string | null;
     deletedAt?: Date | null;
+    status?: string;
+    roleCategory?: string | null;
   }>;
   siblings?: Array<{ code: string; name: string; slug: string }>;
   centerMembers?: Array<{
@@ -49,9 +74,64 @@ type Opts = {
     label: string;
     sortOrder: number;
     description: string | null;
-    leaders: Array<{ cwid: string; interim: boolean; role?: string; sortOrder: number }>;
+  }>;
+  /** #2558 — a program's leaders, now `OrgUnitRoleAssignment` rows
+   *  (`entityType: "center_program"`, `entityId: "{centerCode}:{programCode}"`),
+   *  not a nested `CenterProgram.leaders` relation (the retired per-program
+   *  leader table this migrated off of). */
+  programAssignments?: Array<{
+    entityId: string;
+    cwid: string;
+    interim: boolean;
+    roleKey?: string;
+    sortOrder: number;
   }>;
   divisionMembers?: Array<{ cwid: string; source: string }>;
+  diseaseAssignments?: Array<{
+    cwid: string;
+    diseaseCode: string;
+    rank: number;
+    focus: string;
+    confidence: string;
+    leadPubs: number;
+    secondPubs: number;
+    middlePubs: number;
+    grantsLed: number;
+    grantsSupport: number;
+    trialsLed: number;
+    trialsSupport: number;
+    pubScore: number;
+    score: number;
+    firstYear: number | null;
+    lastYear: number | null;
+    recentPubs: number;
+    specialtyStatus: string;
+  }>;
+  /** Roster "Fill dates" — `appointment.findMany` rows. */
+  appointments?: Array<{ cwid: string; startDate: Date | null }>;
+  diseaseDecisions?: Array<{
+    cwid: string;
+    diseaseCode: string;
+    decision: string;
+    decidedBy: string;
+    decidedAt: Date;
+    /** null for a manual add (no backing assignment row to snapshot). */
+    scoreAtDecision: number | null;
+    confidenceAtDecision: string | null;
+  }>;
+  /** #2542 — the center's director assignment, from its own query. */
+  leaderAssignment?: { cwid: string; interim: boolean } | null;
+  /** #2542 Phase C — the center's LEADERSHIP-group `OrgUnitRole` vocabulary
+   *  rows (`orgUnitRole.findMany`), pre-sorted (the mock doesn't apply
+   *  `orderBy`, same convention as `centerPrograms` above). */
+  leadershipRoles?: Array<{ key: string; label: string; singleHolder: boolean; sortOrder: number }>;
+  /** #2542 Phase C — the center's leadership holders (`orgUnitRoleAssignment`
+   *  rows with `entityType: "center"`, dispatched by `findMany` below). */
+  leadershipAssignments?: Array<{ cwid: string; interim: boolean; roleKey: string }>;
+  /** #2557 Phase E — `OrgUnitRoleScope` allowlist rows, filtered per-call by
+   *  `roleKey` the same way the real `isRoleAllowedAtUnit` reads them; empty
+   *  (the default) means every role is unrestricted. */
+  leadershipScopeRows?: Array<{ roleKey: string; entityId: string }>;
 };
 
 function fakeClient(o: Opts) {
@@ -66,6 +146,29 @@ function fakeClient(o: Opts) {
       findMany: vi.fn().mockResolvedValue(o.siblings ?? []),
     },
     center: { findUnique: vi.fn().mockResolvedValue(o.center ?? null) },
+    // #2542 / #2558 — leadership is an `OrgUnitRoleAssignment` row fetched with
+    // its own query; it used to be a nested `leaders` relation on `center` /
+    // `centerProgram`. `findMany` dispatches by `where.entityType`: the
+    // director query (`findFirst`) is separate, so `findMany` here only ever
+    // serves the `center_program` program-leadership query.
+    orgUnitRoleAssignment: {
+      findFirst: vi.fn(async () => o.leaderAssignment ?? null),
+      findMany: vi.fn(async (args?: { where?: { entityType?: string } }) =>
+        args?.where?.entityType === "center_program"
+          ? (o.programAssignments ?? [])
+          : args?.where?.entityType === "center"
+            ? (o.leadershipAssignments ?? [])
+            : [],
+      ),
+    },
+    // #2542 Phase C — the leadership vocabulary + its per-role scope
+    // allowlist (#2557 Phase E), read by the leadership-card loader.
+    orgUnitRole: { findMany: vi.fn(async () => o.leadershipRoles ?? []) },
+    orgUnitRoleScope: {
+      findMany: vi.fn(async (args: { where: { roleKey: string } }) =>
+        (o.leadershipScopeRows ?? []).filter((r) => r.roleKey === args.where.roleKey),
+      ),
+    },
     unitAdmin: { findMany: unitAdminFindMany },
     fieldOverride: { findMany: vi.fn().mockResolvedValue(o.overrides ?? []) },
     suppression: { findFirst: vi.fn().mockResolvedValue(o.suppression ?? null) },
@@ -73,10 +176,18 @@ function fakeClient(o: Opts) {
     centerMembership: { findMany: vi.fn().mockResolvedValue(o.centerMembers ?? []) },
     centerProgram: { findMany: vi.fn().mockResolvedValue(o.centerPrograms ?? []) },
     divisionMembership: { findMany: vi.fn().mockResolvedValue(o.divisionMembers ?? []) },
+    cancerCenterDiseaseAssignment: { findMany: vi.fn().mockResolvedValue(o.diseaseAssignments ?? []) },
+    cancerCenterDiseaseDecision: { findMany: vi.fn().mockResolvedValue(o.diseaseDecisions ?? []) },
+    appointment: { findMany: vi.fn().mockResolvedValue(o.appointments ?? []) },
   };
 }
 
 const asClient = (c: ReturnType<typeof fakeClient>) => c as unknown as Client;
+
+beforeEach(() => {
+  isCornellDirectoryMembersEnabledMock.mockReturnValue(false);
+  externalMemberFindMany.mockReset().mockResolvedValue([]);
+});
 
 const DEPT = {
   code: "N1280",
@@ -84,7 +195,6 @@ const DEPT = {
   description: "ETL blurb",
   url: null,
   slug: "medicine",
-  chairCwid: "chr001",
   source: "ED",
 };
 
@@ -192,6 +302,33 @@ describe("loadUnitEditContext — department", () => {
     expect(ctx!.access![1]).toMatchObject({ cwid: "staff9", name: "staff9", title: null });
   });
 
+  // 2026-08-26 policy widening (decision #3) — a comms_steward with NO
+  // unit_admin row of their own still sees the access array (full grant
+  // parity, uniform across unit kinds); `actorRole` still floors at
+  // "curator" for content-editing rail filtering, which is a separate signal
+  // from access management (`components/edit/unit-edit-page.tsx` gates the
+  // Access tab on `ctx.access !== null`, not on `actorRole`).
+  it("a comms_steward with no unit_admin row still sees the access array", async () => {
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      STEWARD,
+      asClient(
+        fakeClient({
+          department: DEPT,
+          roleRows: [],
+          accessRows: [
+            { cwid: "own001", role: "owner", grantedBy: "sup001", createdAt: new Date("2026-05-02") },
+          ],
+        }),
+      ),
+    );
+    expect(ctx).not.toBeNull();
+    expect(ctx!.actorRole).toBe("curator");
+    expect(ctx!.access).toHaveLength(1);
+    expect(ctx!.access![0]).toMatchObject({ cwid: "own001", role: "owner" });
+  });
+
   it("resolves the leader chip from Scholar", async () => {
     const ctx = await loadUnitEditContext(
       "department",
@@ -200,6 +337,9 @@ describe("loadUnitEditContext — department", () => {
       asClient(
         fakeClient({
           department: DEPT,
+          // #2542 contract A — the department's chair/director assignment,
+          // from its own query (was `Department.chairCwid`).
+          leaderAssignment: { cwid: "chr001", interim: false },
           scholars: [{ cwid: "chr001", preferredName: "Dana Chair", primaryTitle: "MD, PhD" }],
         }),
       ),
@@ -218,6 +358,42 @@ describe("loadUnitEditContext — department", () => {
     expect(ctx!.unit.leader.cwid).toBeNull();
     expect(ctx!.unit.leader.explicitVacancy).toBe(true);
   });
+
+  // #2542 contract A — dept/div carry no `leaderInterim` column; the assignment
+  // row's own `interim` flag is the fallback, exactly as `resolveUnitLeader`
+  // (`lib/api/unit-leader.ts`) documents.
+  it("an interim assignment renders interim when no leaderInterim override exists", async () => {
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          department: DEPT,
+          leaderAssignment: { cwid: "chr001", interim: true },
+          scholars: [{ cwid: "chr001", preferredName: "Dana Chair", primaryTitle: "MD, PhD" }],
+        }),
+      ),
+    );
+    expect(ctx!.unit.leader.interim).toBe(true);
+  });
+
+  it("a leaderInterim override wins over the assignment row's own interim flag", async () => {
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          department: DEPT,
+          leaderAssignment: { cwid: "chr001", interim: true },
+          overrides: [{ fieldName: "leaderInterim", value: "false" }],
+          scholars: [{ cwid: "chr001", preferredName: "Dana Chair", primaryTitle: "MD, PhD" }],
+        }),
+      ),
+    );
+    expect(ctx!.unit.leader.interim).toBe(false);
+  });
 });
 
 describe("loadUnitEditContext — roster scholarState (#2324)", () => {
@@ -226,7 +402,6 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
     name: "New Division",
     description: null,
     slug: "new-division",
-    chiefCwid: null,
     source: "manual",
     deptCode: "N1280",
     department: { name: "Medicine", slug: "medicine" },
@@ -239,6 +414,8 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
       preferredName: string;
       primaryTitle: string | null;
       deletedAt: Date | null;
+      status?: string;
+      roleCategory?: string | null;
     }>,
   ) {
     const ctx = await loadUnitEditContext(
@@ -272,6 +449,8 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
     expect(roster[0].scholarState).toBe("departed");
     expect(roster[0].name).toBe("Gone Person");
     expect(roster[0].title).toBe("Professor");
+    // The ED-sync detection day — "End at departure dates" writes it.
+    expect(roster[0].departedOn).toBe("2026-01-15");
   });
 
   it("a cwid with NO scholar row is `unknown`, and the name still falls back to the cwid", async () => {
@@ -306,6 +485,28 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
     ]);
   });
 
+  it("#1827 — publiclyListed mirrors the public roster gate (suppressed / hidden role / no row ⇒ false)", async () => {
+    const roster = await rosterFor(
+      [
+        { cwid: "here1", source: "manual-ui" },
+        { cwid: "supp1", source: "manual-ui" },
+        { cwid: "stud1", source: "manual-ui" },
+        { cwid: "ghost1", source: "manual-ui" },
+      ],
+      [
+        { cwid: "here1", preferredName: "Here", primaryTitle: null, deletedAt: null, status: "active", roleCategory: "full_time_faculty" },
+        { cwid: "supp1", preferredName: "Supp", primaryTitle: null, deletedAt: null, status: "suppressed", roleCategory: "full_time_faculty" },
+        { cwid: "stud1", preferredName: "Stud", primaryTitle: null, deletedAt: null, status: "active", roleCategory: "doctoral_student" },
+      ],
+    );
+    expect(roster.map((r) => [r.cwid, r.scholarState, r.publiclyListed])).toEqual([
+      ["here1", "active", true],
+      ["supp1", "active", false],
+      ["stud1", "active", false],
+      ["ghost1", "unknown", false],
+    ]);
+  });
+
   it("the scholar lookup does NOT filter on deletedAt", async () => {
     // Guard: adding `deletedAt: null` to that where-clause would turn every
     // departure into a bare-cwid `unknown` row and destroy the history.
@@ -321,6 +522,90 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
   });
 });
 
+describe("loadUnitEditContext — Cornell (Ithaca) external roster hydration (#2519)", () => {
+  const manualDivision = {
+    code: "N9001",
+    name: "New Division",
+    description: null,
+    slug: "new-division",
+    source: "manual",
+    deptCode: "N1280",
+    department: { name: "Medicine", slug: "medicine" },
+  };
+
+  it("flag ON — a cornell-ithaca row hydrates name/title from ExternalMember and reports scholarState: external", async () => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(true);
+    externalMemberFindMany.mockResolvedValue([
+      { cuid: "ab123", displayName: "Alice Big", title: "Research Associate" },
+    ]);
+    const ctx = await loadUnitEditContext(
+      "division",
+      "N9001",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          division: manualDivision,
+          divisionMembers: [{ cwid: "ab123", source: "cornell-ithaca" }],
+          scholars: [],
+        }),
+      ),
+    );
+    const roster = ctx!.roster!;
+    expect(roster[0].name).toBe("Alice Big");
+    expect(roster[0].title).toBe("Research Associate");
+    expect(roster[0].scholarState).toBe("external");
+    // The batched lookup ran once for the whole roster, not once per row.
+    expect(externalMemberFindMany).toHaveBeenCalledTimes(1);
+    expect(externalMemberFindMany).toHaveBeenCalledWith({ where: { cuid: { in: ["ab123"] } } });
+  });
+
+  it("flag ON — a WCM (non-cornell) row is unchanged", async () => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(true);
+    const roster = (
+      await loadUnitEditContext(
+        "division",
+        "N9001",
+        SUPERUSER,
+        asClient(
+          fakeClient({
+            division: manualDivision,
+            divisionMembers: [{ cwid: "wcm001", source: "manual-ui" }],
+            scholars: [
+              { cwid: "wcm001", preferredName: "Wendy Cwm", primaryTitle: "Professor", deletedAt: null },
+            ],
+          }),
+        ),
+      )
+    )!.roster!;
+    expect(roster[0].name).toBe("Wendy Cwm");
+    expect(roster[0].title).toBe("Professor");
+    expect(roster[0].scholarState).toBe("active");
+    // No cornell cwids on this roster — the batched lookup never fires.
+    expect(externalMemberFindMany).not.toHaveBeenCalled();
+  });
+
+  it("flag OFF — a cornell-ithaca row is left as today (no ExternalMember query, name falls back to cwid)", async () => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(false);
+    const roster = (
+      await loadUnitEditContext(
+        "division",
+        "N9001",
+        SUPERUSER,
+        asClient(
+          fakeClient({
+            division: manualDivision,
+            divisionMembers: [{ cwid: "ab123", source: "cornell-ithaca" }],
+            scholars: [],
+          }),
+        ),
+      )
+    )!.roster!;
+    expect(roster[0].name).toBe("ab123");
+    expect(roster[0].scholarState).toBe("unknown");
+    expect(externalMemberFindMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("loadUnitEditContext — manual division roster", () => {
   it("a manual division carries a roster; an ED division does not", async () => {
     const manual = {
@@ -328,7 +613,6 @@ describe("loadUnitEditContext — manual division roster", () => {
       name: "New Division",
       description: null,
       slug: "new-division",
-      chiefCwid: null,
       source: "manual",
       deptCode: "N1280",
       department: { name: "Medicine", slug: "medicine" },
@@ -355,10 +639,15 @@ describe("loadUnitEditContext — manual division roster", () => {
         title: null,
         source: "manual-ui",
         membershipType: null,
+        membershipRoleKey: null,
         programCode: null,
         startDate: null,
         endDate: null,
         scholarState: "active",
+        publiclyListed: true,
+        diseases: [],
+        wcmStartDate: null,
+        departedOn: null,
       },
     ]);
     expect(ctx!.unit.deptName).toBe("Medicine");
@@ -385,10 +674,9 @@ describe("loadUnitEditContext — center", () => {
       description: "Institute blurb",
       url: "https://precision.weill.cornell.edu",
       slug: "precision-institute",
-      directorCwid: "dir001",
       centerType: "institute",
-      leaderInterim: true,
     };
+    // #2542 — leadership is an `OrgUnitRoleAssignment` row from its own query.
     const ctx = await loadUnitEditContext(
       "center",
       "man-abc12345",
@@ -396,6 +684,7 @@ describe("loadUnitEditContext — center", () => {
       asClient(
         fakeClient({
           center,
+          leaderAssignment: { cwid: "dir001", interim: true },
           centerMembers: [
             {
               cwid: "mem9",
@@ -407,20 +696,22 @@ describe("loadUnitEditContext — center", () => {
             },
           ],
           // Provided in DB-sorted order (the mock doesn't apply orderBy). #1117 —
-          // each program carries its description + leader join rows.
+          // each program carries its description; leaders are a separate
+          // `OrgUnitRoleAssignment` query (#2558), grouped by `entityId` below.
           centerPrograms: [
+            { code: "CB", label: "Cancer Biology", sortOrder: 10, description: "Cancer biology." },
+            { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null },
+          ],
+          // #1570 — an explicit liaison, plus a pre-#1570 row with no `roleKey`.
+          programAssignments: [
+            { entityId: "man-abc12345:CB", cwid: "dir001", interim: false, sortOrder: 0 },
             {
-              code: "CB",
-              label: "Cancer Biology",
-              sortOrder: 10,
-              description: "Cancer biology.",
-              leaders: [
-                // #1570 — an explicit liaison, plus a pre-#1570 row with no `role`.
-                { cwid: "dir001", interim: false, sortOrder: 0 },
-                { cwid: "liai001", interim: false, role: "coe_liaison", sortOrder: 0 },
-              ],
+              entityId: "man-abc12345:CB",
+              cwid: "liai001",
+              interim: false,
+              roleKey: "coe_liaison",
+              sortOrder: 0,
             },
-            { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
           ],
           scholars: [
             { cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" },
@@ -450,11 +741,16 @@ describe("loadUnitEditContext — center", () => {
         startDate: "2024-07-01",
         endDate: null,
         scholarState: "unknown",
+        publiclyListed: false,
+        diseases: [],
+        wcmStartDate: null,
+        departedOn: null,
       },
     ]);
     // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with
-    // each program's description + resolved leaders. #1570 — each leader carries
-    // its `role`; a row written before #1570 (no `role`) narrows to "leader".
+    // each program's description + resolved leaders (#2558 — grouped from the
+    // `OrgUnitRoleAssignment` query by `entityId`). #1570 — each leader carries
+    // its `role`; a row with no `roleKey` narrows to "leader".
     expect(ctx!.programs).toEqual([
       {
         code: "CB",
@@ -482,5 +778,437 @@ describe("loadUnitEditContext — center", () => {
       },
       { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
     ]);
+  });
+
+  it("returns null for department/division and [] by default for a center", async () => {
+    const dept = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(fakeClient({ department: DEPT })),
+    );
+    expect(dept!.centerLeadership).toBeNull();
+
+    const center = await loadUnitEditContext(
+      "center",
+      "man-x",
+      SUPERUSER,
+      asClient(fakeClient({ center: { code: "man-x", name: "X", description: null, url: null, slug: "x", centerType: "center" } })),
+    );
+    expect(center!.centerLeadership).toEqual([]);
+  });
+
+  // #2542 Phase C — one section per LEADERSHIP-group vocabulary entry,
+  // holders grouped by role and name-resolved, `singleHolder` passed
+  // through, and a role with an `OrgUnitRoleScope` allowlist that excludes
+  // THIS center dropped entirely (#2557 Phase E).
+  it("loads the leadership vocabulary with grouped holders, dropping a scoped-out role", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center: {
+            code: "meyer",
+            name: "Meyer Cancer Center",
+            description: null,
+            url: null,
+            slug: "meyer",
+            centerType: "center",
+          },
+          leadershipRoles: [
+            { key: "director", label: "Director", singleHolder: true, sortOrder: 10 },
+            { key: "co_director", label: "Co-Director", singleHolder: false, sortOrder: 20 },
+            // Scoped to a DIFFERENT center — must be dropped from the result.
+            { key: "associate_director", label: "Associate Director", singleHolder: false, sortOrder: 30 },
+          ],
+          leadershipScopeRows: [{ roleKey: "associate_director", entityId: "other_center" }],
+          leadershipAssignments: [
+            { cwid: "dir001", interim: true, roleKey: "director" },
+            { cwid: "cod001", interim: false, roleKey: "co_director" },
+            { cwid: "cod002", interim: false, roleKey: "co_director" },
+          ],
+          scholars: [
+            { cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" },
+            { cwid: "cod001", preferredName: "Dr Co One", primaryTitle: "PhD" },
+            // cod002 has no Scholar row — falls back to the raw cwid.
+          ],
+        }),
+      ),
+    );
+    expect(ctx!.centerLeadership).toEqual([
+      {
+        key: "director",
+        label: "Director",
+        singleHolder: true,
+        sortOrder: 10,
+        holders: [{ cwid: "dir001", name: "Dr Director", title: "MD", interim: true }],
+      },
+      {
+        key: "co_director",
+        label: "Co-Director",
+        singleHolder: false,
+        sortOrder: 20,
+        holders: [
+          { cwid: "cod001", name: "Dr Co One", title: "PhD", interim: false },
+          { cwid: "cod002", name: null, title: null, interim: false },
+        ],
+      },
+      // `associate_director` is scoped to a different center — absent here.
+    ]);
+  });
+});
+
+describe("loadUnitEditContext — center disease assignments (plan §5/§6)", () => {
+  const center = {
+    code: "meyer",
+    name: "Meyer Cancer Center",
+    description: null,
+    url: null,
+    slug: "meyer",
+    centerType: "center",
+    leaders: [],
+  };
+  // A stand-in `CenterProgram` taxonomy — the gate these tests all run under
+  // (bug fix, staging report 2026-08-26): `diseases` only ever populates for a
+  // center that has one, see the dedicated describe block below.
+  const PROGRAMS: NonNullable<Opts["centerPrograms"]> = [
+    { code: "BR", label: "Breast", sortOrder: 1, description: null },
+  ];
+  const assignment = (over: Partial<NonNullable<Opts["diseaseAssignments"]>[number]> = {}) => ({
+    cwid: "mem1",
+    diseaseCode: "BREAST",
+    rank: 1,
+    focus: "primary",
+    confidence: "medium",
+    leadPubs: 5,
+    secondPubs: 2,
+    middlePubs: 1,
+    grantsLed: 1,
+    grantsSupport: 0,
+    trialsLed: 0,
+    trialsSupport: 1,
+    pubScore: 40,
+    score: 50,
+    firstYear: 2019,
+    lastYear: 2025,
+    recentPubs: 3,
+    specialtyStatus: "matched",
+    ...over,
+  });
+  const decision = (over: Partial<NonNullable<Opts["diseaseDecisions"]>[number]> = {}) => ({
+    cwid: "mem1",
+    diseaseCode: "BREAST",
+    decision: "confirmed",
+    decidedBy: "cur001",
+    decidedAt: new Date("2026-08-01"),
+    scoreAtDecision: 50,
+    confidenceAtDecision: "medium",
+    ...over,
+  });
+
+  it("an unreviewed assignment carries a null decision and no drift", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [assignment()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([
+      { diseaseCode: "BREAST", assignment: expect.objectContaining({ rank: 1 }), decision: null, drifted: false },
+    ]);
+  });
+
+  it("sends an undated member's EARLIEST appointment start as wcmStartDate; a dated member gets none", async () => {
+    const client = fakeClient({
+      center,
+      centerMembers: [
+        { cwid: "mem1", source: "manual" },
+        { cwid: "mem2", source: "manual", startDate: new Date("2020-01-01") },
+      ],
+      centerPrograms: PROGRAMS,
+      appointments: [
+        { cwid: "mem1", startDate: new Date("2015-07-01") },
+        { cwid: "mem1", startDate: new Date("2011-09-01") },
+      ],
+    });
+    const ctx = await loadUnitEditContext("center", "meyer", SUPERUSER, asClient(client));
+    expect(ctx!.roster!.find((r) => r.cwid === "mem1")!.wcmStartDate).toBe("2011-09-01");
+    expect(ctx!.roster!.find((r) => r.cwid === "mem2")!.wcmStartDate).toBeNull();
+    expect(client.appointment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ cwid: { in: ["mem1"] } }) }),
+    );
+  });
+
+  it("a rejected decision flags drift once the current row is high-confidence", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [assignment({ confidence: "high" })],
+          diseaseDecisions: [decision({ decision: "rejected", confidenceAtDecision: "medium" })],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases![0].drifted).toBe(true);
+  });
+
+  it("a rejected decision does NOT flag when confidence stayed below high", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [assignment({ confidence: "medium" })],
+          diseaseDecisions: [decision({ decision: "rejected", confidenceAtDecision: "low" })],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases![0].drifted).toBe(false);
+  });
+
+  it("a confirmed decision flags drift once its assignment row disappears entirely", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [], // the ETL's latest full-replace dropped this pair
+          diseaseDecisions: [decision({ decision: "confirmed" })],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([
+      { diseaseCode: "BREAST", assignment: null, decision: expect.objectContaining({ decision: "confirmed" }), drifted: true },
+    ]);
+  });
+
+  it("a confirmed decision does NOT flag while its assignment row still exists", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [assignment()],
+          diseaseDecisions: [decision()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases![0].drifted).toBe(false);
+  });
+
+  it("ranks live assignments first, trailing decision-only rows by code", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [assignment({ diseaseCode: "LUNG", rank: 1 }), assignment({ diseaseCode: "GYN", rank: 2 })],
+          diseaseDecisions: [decision({ diseaseCode: "BREAST" })], // orphaned — no assignment row
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases!.map((d) => d.diseaseCode)).toEqual(["LUNG", "GYN", "BREAST"]);
+  });
+
+  it("manual add (plan's manual-add extension): a decision with NO matching assignment row still produces a diseases entry — assignment null, decision populated with a null score/confidence snapshot", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          // No assignment rows at all for this member — the generator never
+          // suggested BREAST for them — only a curator's manual-add decision.
+          diseaseAssignments: [],
+          diseaseDecisions: [
+            decision({ scoreAtDecision: null, confidenceAtDecision: null }),
+          ],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([
+      {
+        diseaseCode: "BREAST",
+        assignment: null,
+        decision: expect.objectContaining({
+          decision: "confirmed",
+          scoreAtDecision: null,
+          confidenceAtDecision: null,
+        }),
+        // NOT drifted: a manual add never had an assignment row to lose —
+        // `confidenceAtDecision: null` is the "never had evidence" signal
+        // `isDiseaseDecisionDrifted` uses to tell this apart from a real
+        // confirmed decision whose evidence later disappeared (§6).
+        drifted: false,
+      },
+    ]);
+  });
+
+  it("bug fix (staging report 2026-08-26): a center with NO CenterProgram taxonomy gets an empty diseases list even though its roster members DO have assignment/decision rows — a Cancer-Center-adjacent center (e.g. Health Equity) must not inherit shared members' disease data", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: [], // no program taxonomy — not the Cancer Center
+          diseaseAssignments: [assignment()],
+          diseaseDecisions: [decision()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([]);
+  });
+
+  it("control: a center WITH a CenterProgram taxonomy still gets its diseases populated", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [assignment()],
+          diseaseDecisions: [decision()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).not.toEqual([]);
+  });
+});
+
+describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => {
+  const center = {
+    code: "meyer",
+    name: "Meyer Cancer Center",
+    description: null,
+    url: null,
+    slug: "meyer",
+    centerType: "center",
+    leaders: [],
+  };
+
+  it("a center WITH a CenterProgram taxonomy carries the canonical disease-code -> label list, sorted by label", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null }],
+        }),
+      ),
+    );
+    expect(ctx!.diseaseOptions).not.toBeNull();
+    expect(ctx!.diseaseOptions!.length).toBeGreaterThan(0);
+    // One real, known code from `docs/cancer-center-person-rollup.csv`.
+    expect(ctx!.diseaseOptions).toContainEqual({ code: "BREAST", label: "Breast Cancer" });
+    // Sorted by label — every entry's label is <= the next one's.
+    const labels = ctx!.diseaseOptions!.map((o) => o.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it("bug fix (staging report 2026-08-26): a center with NO CenterProgram taxonomy gets no manual-add picker payload — diseaseOptions is null", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(fakeClient({ center, centerPrograms: [] })),
+    );
+    expect(ctx!.diseaseOptions).toBeNull();
+  });
+
+  it("carries the center's auto-publish switch (stored value, read on the center query)", async () => {
+    const client = fakeClient({
+      center: { ...center, diseaseAutoPublish: false },
+      centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null }],
+    });
+    const ctx = await loadUnitEditContext("center", "meyer", SUPERUSER, asClient(client));
+    expect(ctx!.diseaseAutoPublish).toBe(false);
+    expect(client.center.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ diseaseAutoPublish: true }) }),
+    );
+  });
+
+  it("auto-publish reads ON when the column is on (the default)", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center: { ...center, diseaseAutoPublish: true },
+          centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null }],
+        }),
+      ),
+    );
+    expect(ctx!.diseaseAutoPublish).toBe(true);
+  });
+
+  it("auto-publish is null for a program-less center, like diseaseOptions", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(fakeClient({ center: { ...center, diseaseAutoPublish: true }, centerPrograms: [] })),
+    );
+    expect(ctx!.diseaseAutoPublish).toBeNull();
+  });
+
+  it("is null for a department/division — not a center", async () => {
+    const dept = {
+      code: "N1280",
+      name: "Medicine",
+      description: null,
+      url: null,
+      slug: "medicine",
+      source: "ED",
+    };
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(fakeClient({ department: dept })),
+    );
+    expect(ctx!.diseaseOptions).toBeNull();
+    expect(ctx!.diseaseAutoPublish).toBeNull();
   });
 });

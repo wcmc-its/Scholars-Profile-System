@@ -39,6 +39,15 @@ describe("pickDisplayGrant", () => {
     expect(top).toEqual({ role: "owner", entityType: "department", entityId: "D1" });
   });
 
+  it("ranks core above center in an equal-role tie (facility owners are non-faculty administrators)", () => {
+    expect(
+      pickDisplayGrant([
+        { role: "owner", entityType: "center", entityId: "C1" },
+        { role: "owner", entityType: "core", entityId: "2" },
+      ]),
+    ).toMatchObject({ entityType: "core" });
+  });
+
   it("breaks an equal-role tie by unit-kind rank center > division > department", () => {
     expect(
       pickDisplayGrant([
@@ -59,19 +68,26 @@ describe("pickDisplayGrant", () => {
 describe("resolveImpersonationDisplay", () => {
   function stubClient(
     grants: Array<{ role: "owner" | "curator"; entityType: string; entityId: string }>,
-    names: { department?: string; division?: string; center?: string } = {},
+    names: { department?: string; division?: string; center?: string; core?: string } = {},
   ): ImpersonationDisplayClient {
     return {
       unitAdmin: { findMany: async () => grants },
       department: { findUnique: async () => (names.department ? { name: names.department } : null) },
       division: { findUnique: async () => (names.division ? { name: names.division } : null) },
       center: { findUnique: async () => (names.center ? { name: names.center } : null) },
+      core: { findUnique: async () => (names.core ? { name: names.core } : null) },
     } as unknown as ImpersonationDisplayClient;
   }
 
   it("a CWID with no grant is a scholar at their home unit", async () => {
     const out = await resolveImpersonationDisplay("sch001", stubClient([]), "Pediatrics");
     expect(out).toEqual({ role: "scholar", unitKind: null, unit: "Pediatrics" });
+  });
+
+  it("an institution-only admin (no Scholar row) reads role/unitKind=institution, named from the catalog with no table read", async () => {
+    const client = stubClient([{ role: "owner", entityType: "institution", entityId: "HMC" }]);
+    const out = await resolveImpersonationDisplay("mam001", client, null);
+    expect(out).toEqual({ role: "owner", unitKind: "institution", unit: "Hamad Medical Corporation" });
   });
 
   it("a center owner reads role=owner, unitKind=center, the center's name", async () => {
@@ -83,6 +99,17 @@ describe("resolveImpersonationDisplay", () => {
       "Medicine",
     );
     expect(out).toEqual({ role: "owner", unitKind: "center", unit: "Meyer Cancer Center" });
+  });
+
+  it("a core owner reads role=owner, unitKind=core, the core's name (id-keyed, not code-keyed)", async () => {
+    const out = await resolveImpersonationDisplay(
+      "own002",
+      stubClient([{ role: "owner", entityType: "core", entityId: "2" }], {
+        core: "Biomedical Imaging",
+      }),
+      null,
+    );
+    expect(out).toEqual({ role: "owner", unitKind: "core", unit: "Biomedical Imaging" });
   });
 
   it("a department curator reads role=curator, unitKind=department, the dept name", async () => {

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   publicationFindMany: vi.fn(),
   publicationCount: vi.fn(),
   subtopicFindMany: vi.fn().mockResolvedValue([]),
+  subtopicCount: vi.fn().mockResolvedValue(1615),
   spotlightFindMany: vi.fn(),
   scholarFindMany: vi.fn(),
   scholarCount: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock("@/lib/db", () => ({
     },
     subtopic: {
       findMany: mocks.subtopicFindMany,
+      count: mocks.subtopicCount,
     },
     publication: {
       findMany: mocks.publicationFindMany,
@@ -124,10 +126,11 @@ beforeEach(() => {
   methodMocks.isMethodPagesEnabled.mockReset();
   // Default the page flag on so most cases exercise the happy path.
   methodMocks.isMethodPagesEnabled.mockReturnValue(true);
-  // #2219 — getSpotlights now resolves a NEVER_DISPLAY_TYPES pmid set. Default
-  // it to "no retracted papers in the pool" so the pre-existing cases are
-  // unaffected; the #2219 case overrides it.
-  mockPublicationFindMany.mockResolvedValue([]);
+  // #2219 / #2229 — getSpotlights reads the artifact pmids' publication rows to
+  // resolve NEVER_DISPLAY_TYPES and pmids SPS has no row for. Default it to
+  // "every pmid exists and is a research article" so the pre-existing cases are
+  // unaffected; the #2219 / #2229 cases override it.
+  mockPublicationFindMany.mockImplementation(publicationRowsFor({}));
   // Flag ON is the live value in every env — default the suite to it so the
   // pre-existing spotlight cases keep exercising the production path (#2223).
   process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS = "on";
@@ -140,6 +143,18 @@ afterEach(() => {
 });
 
 // ---------- helpers for spotlight fixtures ----------
+
+/**
+ * A prisma.publication.findMany stand-in: one row per requested pmid, typed
+ * "Academic Article" unless `overrides` names a type — or `null`, meaning SPS
+ * has NO publication row for that pmid (#2229).
+ */
+function publicationRowsFor(overrides: Record<string, string | null>) {
+  return async (args: { where: { pmid: { in: string[] } } }) =>
+    args.where.pmid.in
+      .filter((pmid) => overrides[pmid] !== null)
+      .map((pmid) => ({ pmid, publicationType: overrides[pmid] ?? "Academic Article" }));
+}
 
 function makeSpotlightRow(over: {
   subtopicId: string;
@@ -434,7 +449,7 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
       Array.from({ length: 68 }, (_, i) => ({
         id: `topic_${i}`,
         label: `Topic ${i}`,
-        description: null,
+        _count: { subtopics: 0 },
       })),
     );
     mockQueryRaw.mockResolvedValue(
@@ -457,8 +472,8 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
 
   it("merges scholar counts onto parent topic rows", async () => {
     mockTopicFindMany.mockResolvedValue([
-      { id: "cancer_genomics", label: "Cancer Genomics", description: null },
-      { id: "neuroscience", label: "Neuroscience", description: null },
+      { id: "cancer_genomics", label: "Cancer Genomics", _count: { subtopics: 9 } },
+      { id: "neuroscience", label: "Neuroscience", _count: { subtopics: 4 } },
     ]);
     mockQueryRaw.mockResolvedValue([
       { parent_topic_id: "cancer_genomics", scholar_count: 42, publication_count: 312 },
@@ -466,8 +481,8 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
     ]);
     const result = await getBrowseAllResearchAreas();
     expect(result).toEqual([
-      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312 },
-      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89 },
+      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312, subtopicCount: 9 },
+      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89, subtopicCount: 4 },
     ]);
   });
 });
@@ -674,6 +689,7 @@ describe("getHomeStats — advertised scholars == findable scholars (#2222)", ()
     expect(stats.scholarCount).toBe(8722);
     expect(stats.publicationCount).toBe(189_144);
     expect(stats.researchAreaCount).toBe(67);
+    expect(stats.subtopicCount).toBe(1615);
   });
 
   it("ALSO applies isPubliclyDisplayed — an out-of-band suffixed student passes the denylist and must not be advertised", async () => {
@@ -783,7 +799,7 @@ describe("getSpotlights — NEVER_DISPLAY_TYPES defense-in-depth (#2219)", () =>
     // The nightly PubMedRetractions ETL stamped 6000 AFTER the artifact was
     // published — the artifact still lists it and always will until the
     // producer republishes.
-    mockPublicationFindMany.mockResolvedValue([{ pmid: "6000" }]);
+    mockPublicationFindMany.mockImplementation(publicationRowsFor({ "6000": "Retraction" }));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await getSpotlights();
     warn.mockRestore();
@@ -792,18 +808,23 @@ describe("getSpotlights — NEVER_DISPLAY_TYPES defense-in-depth (#2219)", () =>
     expect(result).toBeNull();
   });
 
-  it("queries the exclusion by publicationType, scoped to the artifact's pmids", async () => {
+  it("reads publication types scoped to the artifact's pmids, and drops an Erratum too", async () => {
     const pmids = ["6100", "6101", "6102", "6103", "6104", "6105"];
     sixSpotlights(pmids);
     mockPublicationAuthorFindMany.mockResolvedValue(
       pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
     );
-    await getSpotlights();
+    mockPublicationFindMany.mockImplementation(publicationRowsFor({ "6103": "Erratum" }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getSpotlights();
+    warn.mockRestore();
     const call = mockPublicationFindMany.mock.calls.at(-1)?.[0] as {
-      where: { pmid: { in: string[] }; publicationType: { in: string[] } };
+      where: { pmid: { in: string[] } };
+      select: Record<string, boolean>;
     };
-    expect(call.where.publicationType.in).toEqual(["Retraction", "Erratum"]);
     expect(call.where.pmid.in).toEqual(pmids);
+    expect(call.select).toEqual({ pmid: true, publicationType: true });
+    expect(result).toBeNull();
   });
 
   it("keeps every paper when nothing in the pool is retracted", async () => {
@@ -983,5 +1004,71 @@ describe("getSpotlights — the artifact outlives its taxonomy (#2218)", () => {
     const live = result!.find((c) => c.subtopicId === "sub_1")!;
     expect(live.publicationCount).toBe(40);
     expect(live.scholarCount).toBe(8);
+  });
+});
+
+describe("getSpotlights — artifact pmids SPS has no publication row for (#2229)", () => {
+  it("drops the orphan pmid for a NAMED logged reason, even when it resolves authors", async () => {
+    const pmids = ["7000", "7001", "7002", "7003", "7004", "7005"];
+    sixSpotlights(pmids);
+    // Every pmid resolves a WCM author — so the zero-author guard can NOT be
+    // what drops 7002. Only the explicit orphan check does.
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    mockPublicationFindMany.mockImplementation(publicationRowsFor({ "7002": null }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getSpotlights();
+    const orphanLogs = warn.mock.calls
+      .map((c) => c[0])
+      .filter((m): m is string => typeof m === "string")
+      .filter((m) => m.includes("home_spotlight_dropped_orphan_pmids"))
+      .map((m) => JSON.parse(m) as { orphanPmids: string[] });
+    warn.mockRestore();
+    expect(orphanLogs).toHaveLength(1);
+    expect(orphanLogs[0].orphanPmids).toEqual(["7002"]);
+    // Its card's only paper is gone → 5 cards, under the floor of 6.
+    expect(result).toBeNull();
+  });
+
+  it("logs nothing and keeps every card when every pmid has a publication row", async () => {
+    const pmids = ["7100", "7101", "7102", "7103", "7104", "7105"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getSpotlights();
+    const orphanLogs = warn.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("home_spotlight_dropped_orphan_pmids"),
+    );
+    warn.mockRestore();
+    expect(orphanLogs).toHaveLength(0);
+    expect(result).toHaveLength(6);
+  });
+});
+
+describe("getSpotlights — card count matches the topic page's subarea rail (#2242)", () => {
+  it("counts DISTINCT research-article pmids, not publication_topic rows", async () => {
+    const pmids = ["7200", "7201", "7202", "7203", "7204", "7205"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    await getSpotlights();
+    const [sql, ...params] = mockQueryRaw.mock.calls.at(-1) as [string, ...unknown[]];
+    const flat = sql.replace(/\s+/g, " ");
+    // publication_topic is keyed (pmid, cwid, parent): COUNT(*) counts a paper
+    // once per WCM co-author, which is how the card advertised 2–3× the rail.
+    expect(flat).not.toMatch(/COUNT\(\*\)/);
+    expect(flat).toMatch(
+      /COUNT\(DISTINCT CASE WHEN p\.publication_type NOT IN \(\?, \?, \?, \?\) THEN pt\.pmid END\) AS publication_count/,
+    );
+    // The rail's research-articles-only type filter (FEED_EXCLUDED_TYPES).
+    expect(params.slice(0, 4)).toEqual(["Retraction", "Erratum", "Letter", "Editorial Article"]);
+    // The active-scholar filter scopes the scholar count only; the rail counts
+    // papers without it, so it must not be an inner-join WHERE clause.
+    expect(flat).toMatch(/LEFT JOIN scholar s/);
+    expect(flat).not.toMatch(/WHERE[^]*s\.deleted_at IS NULL[^]*GROUP BY/);
   });
 });

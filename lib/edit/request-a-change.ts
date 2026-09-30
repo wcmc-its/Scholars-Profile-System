@@ -49,8 +49,14 @@ const WEILL_RESEARCH_GATEWAY_URL = "https://wrg.weill.cornell.edu";
  *  publications "Request a change" path and the first-hide notice (#570). */
 export const PUBLICATION_MANAGER_URL = "https://reciter.weill.cornell.edu/";
 /** ORCID self-management; `{cwid}` is substituted by the panel at render. */
-const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
+export const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
+/** The in-app ORCID surface (Identifiers & Profiles tab), per scholar. */
+export const ORCID_TAB_URL = "/edit/scholar/{cwid}?attr=identifiers-profiles";
 
+/** Where sourced mentees come from: PhD advisees (Jenzabar), MD / MD-PhD / ECR
+ *  roster mentees (Medical Education, via the ReCiterDB bridge) and postdocs
+ *  (Employee Central through the Enterprise Directory). Shared by /edit copy. */
+export const MENTEE_SOURCE_SYSTEMS = "Jenzabar, Medical Education rosters, or Employee Central";
 const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
 const FACULTY_AFFAIRS_EMAIL = "facultyaffairs@med.cornell.edu"; // degrees + education (ASMS)
 const OSRA_EMAIL = "osra-operations@med.cornell.edu";
@@ -82,6 +88,8 @@ export type RouteAction = {
   note?: string;
   /** On-select footer verb. Defaults to `Email {office}`. */
   cta?: string;
+  /** Example text for the detail box; defaults to a generic prompt. */
+  placeholder?: string;
 };
 
 /** Not an error, or not fixable here — explain in place. */
@@ -100,6 +108,9 @@ export type ChangeIssue = {
   id: string;
   /** The picker option text. */
   label: string;
+  /** One line under the label, on EVERY row — what this option means, so the
+   *  scholar picks without expanding each one in turn (design pass). */
+  description?: string;
   action: ChangeAction;
 };
 
@@ -154,7 +165,19 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           office: "ITS Support",
           email: SUPPORT_EMAIL,
           sourceSystem: "primary appointment (ASMS / Enterprise Directory)",
-          note: "Your title is the title of your primary appointment, sourced from ASMS / Enterprise Directory.",
+          // #2719 — the displayed title is no longer always the primary
+          // appointment's: an ED "working title", a division-chief role or a
+          // center-head role can outrank it (lib/scholar-title.ts). WHICH of
+          // those shows is now a picker on this panel, so the honest split is:
+          // the wrong CHOICE is fixable here, a wrong SOURCE VALUE is not.
+          // Since 2026-09-23 only a superuser / comms steward picks among the
+          // listed titles, so this route carries BOTH asks: "show a different
+          // listed title" and "every listed title is wrong".
+          note:
+            "Say which title you want displayed. If it's one of the titles listed on this " +
+            "panel, name it. If none of them is right, tell us what it should be. Titles come " +
+            "from ASMS / Enterprise Directory: usually your primary appointment, though a " +
+            "working title or a leadership role can take precedence.",
         }),
       },
       {
@@ -211,11 +234,14 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       {
         id: "orcid-wrong",
         label: "My ORCID is wrong or missing",
+        // In-app since the Identifiers & Profiles tab: ReCiter Manage Profile is
+        // reachable only on the campus network. `{cwid}` keeps it right for a
+        // superuser acting on another scholar (self resolves the same page).
         action: selfService({
-          tool: "ReCiter",
-          href: ORCID_MANAGE_URL,
-          cta: "Manage in ReCiter",
-          instruction: "Manage your ORCID in ReCiter.",
+          tool: "Scholars",
+          href: ORCID_TAB_URL,
+          cta: "Open Identifiers & Profiles",
+          instruction: "Confirm or enter your ORCID iD on the Identifiers & Profiles tab.",
         }),
       },
     ],
@@ -426,7 +452,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
     issues: [
       {
         id: "publication-not-mine",
-        label: "Isn't mine / wrongly attributed",
+        label: "I didn't author it",
+        description: "Wrongly attributed. Rejecting it at the source clears it everywhere, not just here.",
         action: selfService({
           tool: "Publication Manager",
           href: PUBLICATION_MANAGER_URL,
@@ -437,7 +464,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       },
       {
         id: "publication-missing-pubmed",
-        label: "A PubMed publication of mine is missing",
+        label: "A PubMed publication is missing",
+        description: "Add it with its PMID and it appears within a day.",
         action: selfService({
           tool: "Publication Manager",
           href: PUBLICATION_MANAGER_URL,
@@ -448,32 +476,50 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
       },
       {
         id: "publication-missing-nonpubmed",
-        label: "A non-PubMed publication of mine is missing",
+        label: "A non-PubMed publication is missing",
+        description: "Books, chapters, preprints, and journals PubMed doesn't index.",
         action: explain({
           detail:
-            "Scholars and ReCiter only index PubMed publications, so this one can't be displayed here. If it's added to PubMed later, ReCiter picks it up automatically — no action needed.",
+            "A paper PubMed doesn't index can still appear on your profile: the library curation team adds it in ReCiter from Scopus or OpenAlex. Ask them to add it. If it's added to PubMed later, ReCiter picks it up automatically.",
         }),
       },
       {
         id: "publication-metadata-wrong",
         label: "Title, journal, year, or authors are wrong",
+        description: "The record itself is wrong, not who it belongs to.",
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
           cta: "Report correction",
-          sourceSystem: "ReCiter / PubMed / publisher",
+          placeholder: "e.g. the year should be 2023, not 2024",
+          // Also the "From PubMed" badge on the expanded row — keep it the name
+          // of the system a scholar can act on, not the import chain.
+          sourceSystem: "PubMed",
           note: "This data comes from PubMed, the authoritative record at NLM. We'll flag it with ITS Support, but the correction flows from the source — it can't be edited in Scholars directly.",
         }),
       },
       {
         id: "publication-duplicate",
         label: "This publication is duplicated",
+        description: "Two records on the profile for the same paper.",
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
           cta: "Flag duplicate",
           sourceSystem: "ReCiter import",
           note: "Likely an import error — include the duplicate's details so support can merge it.",
+        }),
+      },
+      {
+        // Hide is NOT an issue type here (see the header note) — this row only
+        // points at the control that already owns it, so the modal never grows
+        // a second suppress path with its own notice / confirm / reason guards.
+        id: "publication-unwanted",
+        label: "I authored it, but don't want it on my profile",
+        description: "Hiding is display-only. It stays attributed to you in WCM's records.",
+        action: explain({
+          detail:
+            "You can hide it yourself from the list: tick the publication's checkbox, then choose \"Hide from profile\" in the bar that appears. It comes off the public profile, but it stays attributed to you in ReCiter and in WCM reporting. If you didn't author it, pick \"I didn't author it\" instead — that one corrects the attribution everywhere, not just the profile.",
         }),
       },
     ],
@@ -543,7 +589,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
   },
   // Mentees are derived from MD/PhD/postdoc training records. There's no
   // deep-linkable owning tool, so corrections route to ITS Support, which fixes
-  // the source (Jenzabar or Employee Central). Hiding a mentee is the SEPARATE
+  // the source (Jenzabar, the Medical Education rosters, or Employee Central). Hiding a mentee is the SEPARATE
   // per-row control on the panel — not an issue type here.
   mentees: {
     heading: "What needs to change?",
@@ -554,8 +600,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
-          sourceSystem: "Jenzabar or Employee Central",
-          note: "Mentee relationships come from Jenzabar or Employee Central. Hiding the entry here won't correct the source — support will fix the record. (You can Hide it here in the meantime.)",
+          sourceSystem: MENTEE_SOURCE_SYSTEMS,
+          note: "Mentee relationships come from Jenzabar (PhD thesis advisees), the Medical Education rosters (MD scholarly-project, MD-PhD and early-career mentees), or Employee Central (postdocs). Hiding the entry here won't correct the source — support will fix the record. (You can Hide it here in the meantime.)",
         }),
       },
       {
@@ -564,8 +610,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
-          sourceSystem: "Jenzabar or Employee Central",
-          note: "Mentee relationships come from Jenzabar (MD/PhD trainees) or Employee Central (postdocs). Support can check why a relationship isn't appearing.",
+          sourceSystem: MENTEE_SOURCE_SYSTEMS,
+          note: "Mentee relationships come from Jenzabar (PhD thesis advisees), the Medical Education rosters (MD scholarly-project, MD-PhD and early-career mentees), or Employee Central (postdocs). Support can check why a relationship isn't appearing.",
         }),
       },
       {
@@ -574,8 +620,8 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
-          sourceSystem: "Jenzabar or Employee Central",
-          note: "These details come from Jenzabar or Employee Central and are corrected at the source.",
+          sourceSystem: MENTEE_SOURCE_SYSTEMS,
+          note: "These details come from Jenzabar (PhD thesis advisees), the Medical Education rosters (MD scholarly-project, MD-PhD and early-career mentees), or Employee Central (postdocs), and are corrected at the source.",
         }),
       },
     ],

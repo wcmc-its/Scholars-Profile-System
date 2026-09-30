@@ -86,16 +86,30 @@ describe("rankByPmidOverlap", () => {
     expect(r.ranked[0].overlap).toBe(4);
   });
 
-  it("does NOT auto-lock a sparse winner (overlap 2 < K_AUTOLOCK) but DOES suggest it", () => {
+  it("auto-locks a separated K=2 winner (K_AUTOLOCK lowered to 2)", () => {
+    // overlap 2, runner-up 0 → beats the floored runner-up (max(0,1)=1) by 2x.
     const r = rankByPmidOverlap(me, [
       cand(100, [1, 2]), // overlap 2
-      cand(200, [9, 8, 7, 6]), // overlap 0
+      cand(200, [9, 8, 7, 6]), // overlap 0 (different person)
     ]);
-    expect(r.autoLock).toBeNull();
+    expect(r.autoLock).toBe(100);
     expect(r.suggestions.map((s) => s.profileId)).toEqual([100]);
   });
 
-  it("abstains entirely on a tie (separation gate fails)", () => {
+  it("does NOT auto-lock (or suggest) a below-floor winner (overlap 1 < K_AUTOLOCK/K_SUGGEST)", () => {
+    const r = rankByPmidOverlap(me, [
+      cand(100, [1]), // overlap 1
+      cand(200, [9, 8, 7, 6]), // overlap 0
+    ]);
+    expect(r.autoLock).toBeNull();
+    expect(r.suggestions).toHaveLength(0);
+  });
+
+  it("abstains entirely on a tie at overlap=2 (separation gate fails, even though both clear K_AUTOLOCK)", () => {
+    // K_AUTOLOCK == K_SUGGEST now, so a tied pair that fails separation lands
+    // in neither tier — not autoLock, and not a suggestion/pending either
+    // (beatsRunnerUp uses the same threshold for every candidate, so if the top
+    // overlap fails it, no lower-or-equal overlap can pass it).
     const r = rankByPmidOverlap(me, [
       cand(100, [1, 2]), // overlap 2
       cand(200, [3, 4]), // overlap 2

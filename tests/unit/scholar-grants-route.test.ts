@@ -11,13 +11,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 import { GET } from "@/app/api/scholar/[cwid]/grants/route";
-import { resolveFundingConceptGrants, resolveSearchEvidenceRows } from "@/lib/api/search-flags";
+import {
+  resolveFundingConceptGrants,
+  resolveSearchEvidenceRows,
+  resolveSearchPeopleTrialEvidence,
+} from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
+import { loadConceptTrials } from "@/lib/api/search-trials";
 
 vi.mock("@/lib/api/search-flags", () => ({
   resolveSearchEvidenceRows: vi.fn(),
   resolveFundingConceptGrants: vi.fn(),
+  resolveSearchPeopleTrialEvidence: vi.fn(),
 }));
+vi.mock("@/lib/api/search-trials", () => ({ loadConceptTrials: vi.fn() }));
 vi.mock("@/lib/api/search-funding", () => ({ searchFunding: vi.fn() }));
 
 function call(cwid: string, q?: string, extra?: Record<string, string>) {
@@ -51,6 +58,8 @@ afterEach(() => {
   vi.mocked(resolveSearchEvidenceRows).mockReset();
   vi.mocked(resolveFundingConceptGrants).mockReset();
   vi.mocked(searchFunding).mockReset();
+  vi.mocked(resolveSearchPeopleTrialEvidence).mockReset();
+  vi.mocked(loadConceptTrials).mockReset();
 });
 
 describe("GET /api/scholar/[cwid]/grants", () => {
@@ -267,5 +276,47 @@ describe("GET /api/scholar/[cwid]/grants", () => {
       expect(vi.mocked(searchFunding).mock.calls[0][0]).not.toHaveProperty("meshResolution");
       expect(body.strength).toBe("mention");
     });
+  });
+});
+
+describe("GET /api/scholar/[cwid]/grants — Matcha trials (trials=1)", () => {
+  const trial = { trialId: "NCT1", nctNumber: "NCT1", title: "A trial", titleHighlight: null, status: "Recruiting", isActive: true, startYear: 2024 };
+  const on = () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    vi.mocked(searchFunding).mockResolvedValue({ hits: [], total: 0 } as never);
+  };
+
+  it("adds the concept's PI trials when asked and the trial flag is on", async () => {
+    on();
+    vi.mocked(resolveSearchPeopleTrialEvidence).mockReturnValue(true);
+    vi.mocked(loadConceptTrials).mockResolvedValue({ trials: [trial], total: 1 });
+    const body = await (
+      await call("abc1234", "myeloma", { descriptorUis: "D009101,D000001", label: "Multiple Myeloma", trials: "1" })
+    ).json();
+    expect(body.trials).toEqual([trial]);
+    // The query + concept name drive the title highlight (never admission).
+    expect(loadConceptTrials).toHaveBeenCalledWith("abc1234", ["D009101", "D000001"], "myeloma Multiple Myeloma");
+  });
+
+  it("omits trials without trials=1, with the flag off, or with no concept", async () => {
+    on();
+    vi.mocked(resolveSearchPeopleTrialEvidence).mockReturnValue(true);
+    expect((await (await call("abc1234", "myeloma", { descriptorUis: "D009101" })).json()).trials).toBeUndefined();
+    expect((await (await call("abc1234", "myeloma", { trials: "1" })).json()).trials).toBeUndefined();
+    vi.mocked(resolveSearchPeopleTrialEvidence).mockReturnValue(false);
+    expect((await (await call("abc1234", "myeloma", { descriptorUis: "D009101", trials: "1" })).json()).trials).toBeUndefined();
+    expect(loadConceptTrials).not.toHaveBeenCalled();
+  });
+
+  it("a trial lookup failure drops only the trials, never the grants", async () => {
+    on();
+    vi.mocked(resolveSearchPeopleTrialEvidence).mockReturnValue(true);
+    vi.mocked(loadConceptTrials).mockRejectedValue(new Error("boom"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await call("abc1234", "myeloma", { descriptorUis: "D009101", trials: "1" });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ grants: [], total: 0, trials: [] });
+    expect(body.error).toBeUndefined();
   });
 });

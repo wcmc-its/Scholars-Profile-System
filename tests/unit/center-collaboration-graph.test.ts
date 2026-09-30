@@ -10,6 +10,7 @@ import {
   paperInYear,
   programKey,
   yearExtent,
+  EXTENDED_GROUP_PALETTE,
   OKABE_ITO,
   UNCLASSIFIED_COLOR,
   UNCLASSIFIED_KEY,
@@ -39,6 +40,31 @@ describe("assignProgramColors", () => {
     expect(out[1].color).toBe(OKABE_ITO[1]);
     expect(out[2].color).toBe(UNCLASSIFIED_COLOR); // null does not consume a slot
     expect(out[3].color).toBe(OKABE_ITO[2]); // CT gets slot 2, unaffected by null
+  });
+
+  it("defaults to Okabe-Ito — passing OKABE_ITO explicitly is identical", () => {
+    const programs = [
+      { code: "A", label: "A" },
+      { code: null, label: "Unclassified" },
+      { code: "B", label: "B" },
+    ];
+    expect(assignProgramColors(programs, OKABE_ITO)).toEqual(assignProgramColors(programs));
+  });
+
+  it("uses a supplied palette (the department's extended palette for >6 groups)", () => {
+    const programs = Array.from({ length: 14 }, (_, i) => ({ code: `D${i}`, label: `D${i}` }));
+    const out = assignProgramColors(programs, EXTENDED_GROUP_PALETTE);
+    expect(out.map((p) => p.color)).toEqual(EXTENDED_GROUP_PALETTE.slice(0, 14));
+    expect(new Set(out.map((p) => p.color)).size).toBe(14);
+  });
+});
+
+describe("EXTENDED_GROUP_PALETTE", () => {
+  it("starts with the six core Okabe-Ito hues and never repeats or reuses the Unclassified gray", () => {
+    expect(EXTENDED_GROUP_PALETTE.slice(0, 6)).toEqual(OKABE_ITO.slice(0, 6));
+    expect(new Set(EXTENDED_GROUP_PALETTE).size).toBe(EXTENDED_GROUP_PALETTE.length);
+    expect(EXTENDED_GROUP_PALETTE).not.toContain(UNCLASSIFIED_COLOR);
+    expect(EXTENDED_GROUP_PALETTE.length).toBeGreaterThanOrEqual(14);
   });
 });
 

@@ -59,7 +59,7 @@ import {
 } from "@/lib/api/search-flags";
 import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
-import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
+import { stripDeprioritizedUnlessResolved } from "@/lib/api/deprioritized-terms";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -85,6 +85,20 @@ import {
 } from "@/lib/api/search-funding";
 import { FUNDING_ROLE_BUCKET_LABEL } from "@/lib/funding-roles";
 import { FundingResultsList } from "@/components/search/funding-results-list";
+import { TRIAL_STATUS_LABEL, TrialResultRow, studyTypeLabel } from "@/components/search/trial-result-row";
+import { ScrollActiveTab } from "@/components/search/scroll-active-tab";
+import {
+  resolveTrialsTab,
+  searchTrials,
+  type TrialAxis,
+  type TrialFilters,
+  type TrialSort,
+} from "@/lib/api/search-trials";
+import {
+  phaseLabel,
+  sponsorTypeLabel,
+  type SponsorTypeKey,
+} from "@/lib/edit/clinical-trials-report";
 import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
 import {
@@ -97,6 +111,7 @@ import { cachedReasonAgg, badgeCountKey } from "@/lib/api/reason-agg-cache";
 import { prisma } from "@/lib/db";
 import { logSearchDegraded } from "@/lib/analytics/errors";
 import { formatRoleCategory } from "@/lib/role-display";
+import { institutionDisplayName } from "@/lib/institutions";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -183,7 +198,10 @@ function SearchShellSkeleton() {
 async function SearchBody({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
-  const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
+  const rawType = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
+  // Clinical trials tab (SEARCH_TRIALS_TAB). Off ⇒ `?type=trials` falls back to people.
+  const trialsOn = resolveTrialsTab();
+  const type = rawType === "trials" && !trialsOn ? "people" : rawType;
   // Issue #1513 — the A–Z directory overflow link ("View all N scholars with
   // last name starting with X") passes a single last-name initial. Validated to
   // one A–Z letter; anything else is ignored (falls back to normal browse).
@@ -232,6 +250,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       : Promise.resolve({
           taxonomyMatch: { state: "none" as const, meshResolution: null },
           taxonomyMatchMs: null,
+          fullQueryMeshConfidence: null,
         }),
     // Perf — boot-cached classifier sets fetched in parallel with the
     // taxonomy resolver rather than sequentially after it. The two are
@@ -243,8 +262,13 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // identically to a subsequent client fetch. `removed` is empty (incl. the
   // never-strip-to-empty case) when nothing was stripped, so `genericDemote`
   // stays inert. `contentQuery` also drives the highlight/fallback fields below.
+  // A phrase whose FULL form resolved verbatim in MeSH is kept as typed (see
+  // `stripDeprioritizedUnlessResolved`), same as the route.
   const genericTermMode = resolveGenericTermMode();
-  const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
+  const { contentQuery, removed: genericRemoved } = stripDeprioritizedUnlessResolved(
+    q,
+    taxonomyResolved.fullQueryMeshConfidence,
+  );
   const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
 
   const taxonomyMatch = taxonomyResolved.taxonomyMatch;
@@ -271,6 +295,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         label: taxonomyMatch.meshResolution.name,
         descriptorUi: taxonomyMatch.meshResolution.descriptorUi,
         definition: taxonomyMatch.meshResolution.scopeNote,
+        // People tab only: the pair keys the people concentration boost and nothing
+        // else, so the other tabs must not claim to be "matching" it.
+        secondaryLabel:
+          type === "people" ? (taxonomyMatch.meshResolution.secondaryConcept?.name ?? null) : null,
       }
     : null;
   const scopeHrefs = {
@@ -338,6 +366,12 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     (Array.isArray(sp.earlyStageInvestigator)
       ? sp.earlyStageInvestigator[0]
       : sp.earlyStageInvestigator) === "true";
+  // Institution facet — repeated multi-select of `Scholar.primaryOrgCode`
+  // codes, same URL-param shape as `professorialRank`. Shared by all three tabs
+  // (people `primaryOrgCode` / pubs `wcmAuthorInstitutions` / funding lead-PI
+  // `institution`); accepted regardless of the per-tab
+  // SEARCH_*_INSTITUTION_FACET flags (each search no-ops it while off).
+  const institution = parseList(sp.institution);
 
   // Issue #233 — Principal Investigator facet. Single-select; `none` and
   // unset both mean "no filter" (URL contract). `pi_min` is meaningful only
@@ -359,6 +393,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       (s): s is FundingStatus => s === "active" || s === "ending_soon" || s === "recently_ended",
     ) as FundingStatus[] as FundingStatus[],
     department: parseList(sp.department).length > 0 ? parseList(sp.department) : undefined,
+    institution: institution.length > 0 ? institution : undefined,
     role: parseList(sp.role).filter(
       (r): r is FundingRoleBucket => r === "PI" || r === "Multi-PI" || r === "Co-I",
     ) as FundingRoleBucket[],
@@ -369,6 +404,23 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   if (fundingFilters.status && fundingFilters.status.length === 0)
     fundingFilters.status = undefined;
   if (fundingFilters.role && fundingFilters.role.length === 0) fundingFilters.role = undefined;
+  // Trials tab filters — own param names so a Funding `status` never leaks in.
+  const listParam = (k: string) => {
+    const v = sp[k];
+    const arr = (Array.isArray(v) ? v : v ? [v] : []).filter(Boolean);
+    return arr.length > 0 ? arr : undefined;
+  };
+  const trialYear = (k: string) => {
+    const n = parseOptionalInt(sp[k]);
+    return n !== undefined && n >= 1900 && n <= 2100 ? n : undefined;
+  };
+  const trialFilters: TrialFilters = {
+    ...Object.fromEntries(TRIAL_AXIS_PARAMS.map(({ axis, param }) => [axis, listParam(param)])),
+    startFrom: trialYear("startFrom"),
+    startTo: trialYear("startTo"),
+    hasResults: sp.results === "1" || undefined,
+  };
+  const trialSort: TrialSort = sort === "recent" || sort === "recruiting" ? sort : "relevance";
 
   // Pub filters.
   const yearMin = parseOptionalInt(sp.yearMin);
@@ -433,6 +485,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const peopleQueryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
+    meshConfidence: taxonomyMatch.meshResolution?.confidence ?? null,
+    meshMatchedForm: taxonomyMatch.meshResolution?.matchedForm ?? null,
     knownCwids: peopleClassifierSets.cwids,
     knownSurnames: peopleClassifierSets.surnames,
     knownDepartments: peopleClassifierSets.departments,
@@ -486,6 +540,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             isClinical: isClinical ? true : undefined,
             professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
             earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
+            institution: institution.length > 0 ? institution : undefined,
           },
           relevanceMode: peopleRelevanceMode,
           shape: peopleQueryShape,
@@ -515,6 +570,13 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           // When on and a concept resolved, the tagged reason count is served
           // from the precomputed doc field instead of the publications-index agg.
           meshDescriptorUi: meshOff ? undefined : taxonomyMatch.meshResolution?.descriptorUi,
+          meshSecondary:
+            !meshOff && taxonomyMatch.meshResolution?.secondaryConcept
+              ? {
+                  descriptorUi: taxonomyMatch.meshResolution.secondaryConcept.descriptorUi,
+                  name: taxonomyMatch.meshResolution.secondaryConcept.name,
+                }
+              : undefined,
           reasonFromDoc: resolvePeopleReasonFromDoc(),
           matchExplain: peopleMatchExplain,
           // Issue #967 — representative matching publication in the reason line.
@@ -574,6 +636,19 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           descriptorUis: meshOff
             ? []
             : (taxonomyMatch.meshResolution?.descendantUis ?? []),
+          // Two-concept pair — so the key papers under the primary lead with the ones
+          // ALSO tagged under the secondary (the row says "ranked by work also under X").
+          ...(!meshOff && taxonomyMatch.meshResolution?.secondaryConcept
+            ? {
+                secondaryDescriptorUis: taxonomyMatch.meshResolution.secondaryConcept.descendantUis,
+                secondaryConceptUi: taxonomyMatch.meshResolution.secondaryConcept.descriptorUi,
+              }
+            : {}),
+          // The root the card sends in place of the subtree list (the route rebuilds it;
+          // a 200-UI query string is 403'd by the edge WAF).
+          ...(!meshOff && taxonomyMatch.meshResolution
+            ? { conceptUi: taxonomyMatch.meshResolution.descriptorUi }
+            : {}),
           contentQuery,
           // #1351 — resolved concept name, so the key-paper title highlight can mark
           // the concept term (not just the literal query) on a tagged match.
@@ -598,6 +673,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
             wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
             department: pubDepartment.length > 0 ? pubDepartment : undefined,
+            institution: institution.length > 0 ? institution : undefined,
             meshOnly: pubMeshOnly || undefined,
             mentoringPrograms:
               mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -624,6 +700,18 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   activePeoplePromise?.catch(() => {});
   activePubsPromise?.catch(() => {});
   activeFundingPromise?.catch(() => {});
+  const activeTrialsPromise =
+    type === "trials"
+      ? searchTrials({
+          q,
+          page,
+          sort: trialSort,
+          filters: trialFilters,
+          meshResolution: effectiveMeshResolution,
+          scope,
+        })
+      : null;
+  activeTrialsPromise?.catch(() => {});
 
   // Tab badge counts for all three corpora, count-only (size:0, no aggs, no
   // hydration). The active tab's hits + facets come from the hoisted full search
@@ -632,7 +720,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // computed from the same query predicate, so these badge counts equal a full
   // search.
   const searchesStart = performance.now();
-  const [peopleResult, pubsResult, fundingResult] = await Promise.all([
+  const [peopleResult, pubsResult, fundingResult, trialsResult] = await Promise.all([
     cachedReasonAgg(badgeCountKey("people", q, scope), () =>
       searchPeople({
       q,
@@ -651,6 +739,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         isClinical: isClinical ? true : undefined,
         professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
         earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
+        institution: institution.length > 0 ? institution : undefined,
       },
       // PR-5: route the §6.1 shape templates on the SSR path too.
       relevanceMode: peopleRelevanceMode,
@@ -696,6 +785,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: pubDepartment.length > 0 ? pubDepartment : undefined,
+        institution: institution.length > 0 ? institution : undefined,
         meshOnly: pubMeshOnly || undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
@@ -738,6 +828,16 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       countOnly: true,
       }),
     ),
+    // Trials badge — uncached: a count on a few-thousand-doc index. Fails soft
+    // (no tab) so a missing `scholars-trials` index can't take down the page.
+    trialsOn
+      ? searchTrials({ q, filters: trialFilters, meshResolution: effectiveMeshResolution, scope, countOnly: true }).catch(
+          (err) => {
+            console.error(JSON.stringify({ event: "search_trials_badge_failed", error: String(err) }));
+            return null;
+          },
+        )
+      : Promise.resolve(null),
   ]).catch((err) => {
     // #668 §3 — an OpenSearch outage on the shell's badge-count fetch is logged
     // as a structured, server-side `search_degraded` event before it bubbles to
@@ -811,6 +911,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           peopleCount={peopleResult.total}
           pubCount={pubsResult.total}
           fundingCount={fundingResult.total}
+          trialsCount={trialsResult?.total ?? null}
           scope={scope}
         />
         {showAZ && azBuckets ? (
@@ -839,7 +940,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 type={
                   type === "publications"
                     ? "publications"
-                    : type === "funding"
+                    : type === "funding" || type === "trials"
                       ? "funding"
                       : "people"
                 }
@@ -858,6 +959,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 wcmAuthorRole={wcmAuthorRole}
                 wcmAuthor={wcmAuthor}
                 department={pubDepartment}
+                institution={institution}
                 meshOnly={pubMeshOnly}
                 meshOnlyFilterEnabled={meshOnlyFilterEnabled}
                 mentoringProgram={mentoringProgram}
@@ -868,6 +970,16 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
+              />
+            ) : type === "trials" ? (
+              <TrialsResults
+                q={q}
+                sort={trialSort}
+                filters={trialFilters}
+                scope={scope}
+                concept={concept}
+                scopeHrefs={scopeHrefs}
+                resultPromise={activeTrialsPromise!}
               />
             ) : type === "funding" ? (
               <FundingResults
@@ -894,6 +1006,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 isClinical={isClinical}
                 professorialRank={professorialRank}
                 earlyStageInvestigator={earlyStageInvestigator}
+                institution={institution}
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
@@ -986,6 +1099,7 @@ function ModeTabs({
   peopleCount,
   pubCount,
   fundingCount,
+  trialsCount,
   scope,
 }: {
   q: string;
@@ -993,6 +1107,8 @@ function ModeTabs({
   peopleCount: number;
   pubCount: number;
   fundingCount: number;
+  /** Null ⇒ SEARCH_TRIALS_TAB off, no tab. */
+  trialsCount: number | null;
   scope: Scope;
 }) {
   // Carry the active match-scope across tab switches (default `expanded` omitted).
@@ -1005,7 +1121,7 @@ function ModeTabs({
   const pubHref = tabHref("publications");
   const fundingHref = tabHref("funding");
   return (
-    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 overflow-x-auto border-b border-[#e3e2dd] px-6">
       <ModeTab
         href={peopleHref}
         label="Scholars"
@@ -1024,6 +1140,15 @@ function ModeTabs({
         count={fundingCount}
         active={activeType === "funding"}
       />
+      {trialsCount !== null ? (
+        <ModeTab
+          href={tabHref("trials")}
+          label="Clinical research"
+          count={trialsCount}
+          active={activeType === "trials"}
+        />
+      ) : null}
+      <ScrollActiveTab activeKey={activeType} />
     </nav>
   );
 }
@@ -1046,7 +1171,8 @@ function ModeTab({
       href={href}
       scroll={false}
       title={title}
-      className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
+      aria-current={active ? "page" : undefined}
+      className={`-mb-px inline-flex h-[42px] shrink-0 items-center gap-2 border-b-2 px-4 text-[13px] whitespace-nowrap transition-colors ${
         active
           ? "border-[#2c4f6e] font-semibold text-[#2c4f6e]"
           : "border-transparent font-medium text-[#4a4a4a] hover:text-[#1a1a1a]"
@@ -1167,6 +1293,7 @@ async function PeopleResults({
   isClinical,
   professorialRank,
   earlyStageInvestigator,
+  institution,
   scope,
   concept,
   scopeHrefs,
@@ -1196,6 +1323,9 @@ async function PeopleResults({
    *  regardless of `SEARCH_PEOPLE_ESI_FACET`; FacetSidebar hides the checkbox
    *  while the facet is absent from the response. */
   earlyStageInvestigator: boolean;
+  /** Active `institution` multi-select filter (`Scholar.primaryOrgCode` codes),
+   *  same shape as `professorialRank`. */
+  institution: string[];
   scope: Scope;
   concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
@@ -1249,6 +1379,7 @@ async function PeopleResults({
     if (isClinical) sp.set("isClinical", "true");
     for (const v of professorialRank) sp.append("professorialRank", v);
     if (earlyStageInvestigator) sp.set("earlyStageInvestigator", "true");
+    for (const v of institution) sp.append("institution", v);
     if (pi) sp.set("pi", pi);
     // `pi_min` is only meaningful for pi=multi; default value is dropped
     // from the URL to keep saved bookmarks tidy.
@@ -1365,6 +1496,14 @@ async function PeopleResults({
       removeHref: toggleBooleanHref("earlyStageInvestigator", true),
     });
   }
+  // Institution chips — codes resolved to display names (unlike professorialRank,
+  // whose values are already display strings).
+  for (const v of institution) {
+    chips.push({
+      label: institutionDisplayName(v),
+      removeHref: removeHref("institution", v),
+    });
+  }
   if (pi) {
     chips.push({
       label:
@@ -1427,6 +1566,7 @@ async function PeopleResults({
         isClinicalFacet={result.facets.isClinical}
         professorialRanks={result.facets.professorialRank}
         earlyStageInvestigatorFacet={result.facets.earlyStageInvestigator}
+        institutions={result.facets.institutions}
         activeDeptDiv={deptDiv}
         activePersonType={personType}
         activeActivity={activity}
@@ -1435,6 +1575,7 @@ async function PeopleResults({
         activeIsClinical={isClinical}
         activeProfessorialRank={professorialRank}
         activeEarlyStageInvestigator={earlyStageInvestigator}
+        activeInstitution={institution}
         toggleHref={toggleHref}
         toggleBooleanHref={toggleBooleanHref}
         setPiHref={setPiHref}
@@ -1524,6 +1665,7 @@ async function PublicationsResults({
   wcmAuthorRole,
   wcmAuthor,
   department,
+  institution,
   meshOnly,
   meshOnlyFilterEnabled,
   mentoringProgram,
@@ -1547,6 +1689,9 @@ async function PublicationsResults({
   /** Issue #837 — active WCM-author department keys (empty when the flag is
    *  off; the page drops the param in that case). */
   department: string[];
+  /** Active `institution` multi-select filter (`Scholar.primaryOrgCode` codes),
+   *  same shape as `department`. */
+  institution: string[];
   /** Issue #396 — "Show only MeSH-tagged matches" active state (true only when
    *  the flag is on AND `?searchMode=mesh-only` is present). */
   meshOnly: boolean;
@@ -1627,6 +1772,7 @@ async function PublicationsResults({
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: department.length > 0 ? department : undefined,
+        institution: institution.length > 0 ? institution : undefined,
         meshOnly: meshOnly || undefined,
         mentoringPrograms:
           mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -1693,6 +1839,7 @@ async function PublicationsResults({
     for (const v of wcmAuthorRole) sp.append("wcmAuthorRole", v);
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
     for (const v of department) sp.append("department", v);
+    for (const v of institution) sp.append("institution", v);
     for (const v of mentoringProgram) sp.append("mentoringProgram", v);
     // Issue #396 — preserve the MeSH-only filter across every facet/sort/page
     // link so toggling another filter doesn't silently drop it. The toggle's
@@ -1803,6 +1950,13 @@ async function PublicationsResults({
       removeHref: removeMulti("department", v),
     });
   }
+  // Institution chips — codes resolved to display names.
+  for (const v of institution) {
+    chips.push({
+      label: institutionDisplayName(v),
+      removeHref: removeMulti("institution", v),
+    });
+  }
   const MENTORING_PROGRAM_LABEL: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", string> = {
     md: "MD mentee",
     mdphd: "MD-PhD mentee",
@@ -1905,6 +2059,8 @@ async function PublicationsResults({
         wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
         activeWcmAuthorRole={wcmAuthorRole}
         departmentItems={departmentItems}
+        institutions={result.facets.institutions}
+        activeInstitution={institution}
         activeMentoringProgram={mentoringProgram}
         mentoringProgramCounts={result.facets.mentoringPrograms}
         toggleHref={toggleHref}
@@ -1959,6 +2115,7 @@ async function PublicationsResults({
                 wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
                 wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
                 department: department.length > 0 ? department : undefined,
+                institution: institution.length > 0 ? institution : undefined,
                 // Issue #396 — keep the export in lockstep with the displayed
                 // count: when MeSH-only is active the export carries it too, so
                 // the exported set equals the "N MeSH-tagged matches" shown.
@@ -2082,6 +2239,7 @@ async function FundingResults({
     for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
     for (const v of filters.status ?? []) sp.append("status", v);
     for (const v of filters.department ?? []) sp.append("department", v);
+    for (const v of filters.institution ?? []) sp.append("institution", v);
     for (const v of filters.role ?? []) sp.append("role", v);
     for (const v of filters.investigator ?? []) sp.append("investigator", v);
     if (scope !== "expanded") sp.set("match", scope);
@@ -2119,6 +2277,7 @@ async function FundingResults({
     filters.mechanism?.length ||
     filters.status?.length ||
     filters.department?.length ||
+    filters.institution?.length ||
     filters.role?.length ||
     filters.investigator?.length
   );
@@ -2163,6 +2322,9 @@ async function FundingResults({
   }
   for (const v of filters.department ?? []) {
     chips.push({ label: v, removeHref: removeHref("department", v) });
+  }
+  for (const v of filters.institution ?? []) {
+    chips.push({ label: institutionDisplayName(v), removeHref: removeHref("institution", v) });
   }
   for (const v of filters.role ?? []) {
     // Label only — `v` is the index/URL token and stays "Multi-PI" in the href.
@@ -2254,6 +2416,229 @@ async function FundingResults({
   );
 }
 
+/* ============================================================
+ * Clinical trials tab content (SEARCH_TRIALS_TAB)
+ * ============================================================ */
+const trialStudyTypeName = (v: string) => (v === "not_ctgov" ? "Not on ClinicalTrials.gov" : studyTypeLabel(v));
+const TRIAL_STATUS_ORDER = Object.keys(TRIAL_STATUS_LABEL);
+const statusOrder = (v: string) => (TRIAL_STATUS_ORDER.indexOf(v) + 99) % 99;
+/** Facet order per the mockup (D4). Own param names so another tab's filters never leak in. */
+const TRIAL_AXIS_PARAMS: ReadonlyArray<{
+  axis: TrialAxis;
+  param: string;
+  label: string;
+  name: (v: string) => string;
+  collapseAfter?: number;
+}> = [
+  { axis: "status", param: "trialStatus", label: "Status", name: (v) => TRIAL_STATUS_LABEL[v] ?? v },
+  { axis: "studyType", param: "studyType", label: "Study type", name: trialStudyTypeName },
+  { axis: "phase", param: "phase", label: "Phase", name: (v) => phaseLabel(v) },
+  { axis: "investigator", param: "investigator", label: "Investigator", name: (v) => v, collapseAfter: 5 },
+  { axis: "department", param: "trialDept", label: "Department", name: (v) => v, collapseAfter: 5 },
+  { axis: "condition", param: "condition", label: "Condition", name: (v) => v, collapseAfter: 5 },
+  { axis: "interventionType", param: "intervention", label: "Intervention type", name: studyTypeLabel },
+  { axis: "sponsorClass", param: "sponsor", label: "Sponsor type", name: (v) => sponsorTypeLabel(v as SponsorTypeKey) },
+];
+
+async function TrialsResults({
+  q,
+  sort,
+  filters,
+  scope,
+  concept,
+  scopeHrefs,
+  resultPromise,
+}: {
+  q: string;
+  sort: TrialSort;
+  filters: TrialFilters;
+  scope: Scope;
+  concept: ConceptInfo | null;
+  scopeHrefs: Record<Scope, string>;
+  resultPromise: ReturnType<typeof searchTrials>;
+}) {
+  const result = await resultPromise;
+  // Page is dropped on every filter change; Pagination sets it explicitly.
+  const buildUrl = (mut: (sp: URLSearchParams) => void) => {
+    const sp = new URLSearchParams({ q, type: "trials" });
+    for (const { axis, param } of TRIAL_AXIS_PARAMS) for (const v of filters[axis] ?? []) sp.append(param, v);
+    if (scope !== "expanded") sp.set("match", scope);
+    if (sort !== "relevance") sp.set("sort", sort);
+    if (filters.startFrom !== undefined) sp.set("startFrom", String(filters.startFrom));
+    if (filters.startTo !== undefined) sp.set("startTo", String(filters.startTo));
+    if (filters.hasResults) sp.set("results", "1");
+    mut(sp);
+    return `/search?${sp.toString()}`;
+  };
+  const toggleHref = (param: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(param);
+      sp.delete(param);
+      const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+      for (const v of next) sp.append(param, v);
+    });
+  const clearAllHref = buildUrl((sp) =>
+    [...TRIAL_AXIS_PARAMS.map(({ param }) => param), "startFrom", "startTo", "results"].forEach((p) => sp.delete(p)),
+  );
+  // Investigator keys are cwids; the facet buckets carry the names.
+  const bucketLabel = (axis: TrialAxis, v: string, name: (v: string) => string) =>
+    result.facets[axis].find((b) => b.value === v)?.label ?? name(v);
+  const chips = TRIAL_AXIS_PARAMS.flatMap(({ axis, param, name }) =>
+    (filters[axis] ?? []).map((v) => ({ label: bucketLabel(axis, v, name), removeHref: toggleHref(param, v) })),
+  );
+  const { startFrom, startTo } = filters;
+  if (startFrom !== undefined || startTo !== undefined) {
+    chips.push({
+      label: `Started ${startFrom ?? "…"}–${startTo ?? "…"}`,
+      removeHref: buildUrl((sp) => {
+        sp.delete("startFrom");
+        sp.delete("startTo");
+      }),
+    });
+  }
+  const resultsHref = buildUrl((sp) => (filters.hasResults ? sp.delete("results") : sp.set("results", "1")));
+  if (filters.hasResults) chips.push({ label: "Has results posted", removeHref: resultsHref });
+  // Start date form: resubmits every other param as hidden inputs (plain GET, no client JS).
+  const keep = [...new URLSearchParams(buildUrl((sp) => ["startFrom", "startTo", "page"].forEach((p) => sp.delete(p))).split("?")[1])];
+  const thisYear = new Date().getFullYear();
+  const years = Array.from({ length: thisYear + 3 - 1990 }, (_, i) => thisYear + 2 - i);
+  const sortOptions = [
+    { value: "relevance", label: "Relevance" },
+    { value: "recent", label: "Most recent" },
+    { value: "recruiting", label: "Recruiting first" },
+  ].map((o) => ({
+    ...o,
+    href: buildUrl((sp) => (o.value === "relevance" ? sp.delete("sort") : sp.set("sort", o.value))),
+  }));
+
+  return (
+    <>
+      <aside className="text-[13px]">
+        <div className="mb-4 flex items-baseline justify-between">
+          <span className="text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Filters
+          </span>
+          {chips.length > 0 ? (
+            <Link href={clearAllHref} scroll={false} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+              Clear all
+            </Link>
+          ) : null}
+        </div>
+        {TRIAL_AXIS_PARAMS.map(({ axis, param, label, name, collapseAfter }) =>
+          result.facets[axis].length > 0 ? (
+            <FacetGroup key={axis} label={label} collapseAfter={collapseAfter}>
+              {sortActiveFirst(
+                // Status in lifecycle order; "Not on ClinicalTrials.gov" trails the real study types.
+                axis === "status"
+                  ? [...result.facets.status].sort((a, b) => statusOrder(a.value) - statusOrder(b.value))
+                  : [...result.facets[axis]].sort((a, b) => Number(a.value === "not_ctgov") - Number(b.value === "not_ctgov")),
+                (b) => (filters[axis] ?? []).includes(b.value),
+              ).map((b) => (
+                <FacetCheckbox
+                  key={b.value}
+                  label={b.label ?? name(b.value)}
+                  wrap
+                  count={b.count}
+                  isActive={(filters[axis] ?? []).includes(b.value)}
+                  href={toggleHref(param, b.value)}
+                />
+              ))}
+            </FacetGroup>
+          ) : null,
+        )}
+        <FacetGroup label="Start date">
+          <form action="/search" method="get" className="flex flex-wrap items-center gap-2">
+            {keep.map(([k, v], n) => (
+              <input key={`${k}-${n}`} type="hidden" name={k} value={v} />
+            ))}
+            {(["startFrom", "startTo"] as const).map((name, n) => (
+              <React.Fragment key={name}>
+                {n === 1 ? <span className="text-muted-foreground">to</span> : null}
+                <select
+                  name={name}
+                  aria-label={n === 0 ? "Started from year" : "Started through year"}
+                  defaultValue={filters[name] ?? ""}
+                  className="min-w-0 flex-1 rounded-[5px] border border-[#dbd3cd] bg-white px-1.5 py-1 text-[13px]"
+                >
+                  <option value="">Any</option>
+                  {years.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </React.Fragment>
+            ))}
+            <button
+              type="submit"
+              className="rounded-[5px] border border-[#dbd3cd] px-2.5 py-1 text-[12.5px] font-medium text-[#2c4f6e] hover:bg-[#f4f1ed]"
+            >
+              Apply
+            </button>
+          </form>
+        </FacetGroup>
+        {result.hasResultsCount > 0 || filters.hasResults ? (
+          <ul className="m-0 list-none p-0">
+            <FacetCheckbox
+              label="Has results posted"
+              count={result.hasResultsCount}
+              isActive={!!filters.hasResults}
+              href={resultsHref}
+            />
+          </ul>
+        ) : null}
+      </aside>
+      <section className="min-w-0">
+        {concept ? (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <ScopeNote scope={scope} query={q} concept={concept} />
+            <ScopeControl active={scope} hrefs={scopeHrefs} />
+          </div>
+        ) : null}
+        {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted-foreground">
+          <span>
+            {result.total === 0
+              ? "No results"
+              : `Showing ${result.page * result.pageSize + 1}–${Math.min(
+                  (result.page + 1) * result.pageSize,
+                  result.total,
+                )} of ${result.total.toLocaleString()} ${result.total === 1 ? "study" : "studies"}`}
+          </span>
+          {result.total > 0 ? (
+            <span className="inline-flex items-center gap-2 text-[#4a4a4a]">
+              Sort:
+              <SortLinks current={sort} options={sortOptions} />
+            </span>
+          ) : null}
+        </div>
+        {result.hits.length === 0 ? (
+          <EmptyState query={q} tip="Try broadening the query or removing filters." />
+        ) : (
+          <ul>
+            {result.hits.map((hit) => (
+              <li key={hit.trialId}>
+                <TrialResultRow hit={hit} q={q} conceptLabel={concept?.label ?? null} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <Pagination
+          page={result.page}
+          total={result.total}
+          pageSize={result.pageSize}
+          buildHref={(p) =>
+            buildUrl((sp) => {
+              if (p > 0) sp.set("page", String(p));
+              else sp.delete("page");
+            })
+          }
+        />
+      </section>
+    </>
+  );
+}
+
 /** Maps F3 status enum to user-facing labels. */
 const STATUS_LABEL: Record<FundingStatus, string> = {
   active: "Active",
@@ -2306,6 +2691,7 @@ function FacetSidebarFunding({
   const activeMechanism = active.mechanism ?? [];
   const activeStatus = active.status ?? [];
   const activeDepartment = active.department ?? [];
+  const activeInstitution = active.institution ?? [];
   const activeRole = active.role ?? [];
 
   return (
@@ -2435,6 +2821,26 @@ function FacetSidebarFunding({
         </FacetGroup>
       ) : null}
 
+      {/* Institution — lead PI's `primaryOrgCode`; same shape as the People-tab
+          group. Renders only when the response carries buckets (flag off /
+          pre-reindex ⇒ no group). */}
+      {facets.institutions.length > 0 ? (
+        <FacetGroup label="Institution" collapseAfter={5}>
+          {sortActiveFirst(facets.institutions, (b) => activeInstitution.includes(b.value)).map(
+            (b) => (
+              <FacetCheckbox
+                key={b.value}
+                label={institutionDisplayName(b.value)}
+                count={b.count}
+                isActive={activeInstitution.includes(b.value)}
+                href={toggleHref("institution", b.value)}
+                wrap
+              />
+            ),
+          )}
+        </FacetGroup>
+      ) : null}
+
       <FacetGroup label="Role">
         {sortActiveFirst(roleItems, (r) => activeRole.includes(r.key)).map((r) => (
           <FacetCheckbox
@@ -2480,6 +2886,7 @@ function FundingSortLinks({
     for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
     for (const v of filters.status ?? []) sp.append("status", v);
     for (const v of filters.department ?? []) sp.append("department", v);
+    for (const v of filters.institution ?? []) sp.append("institution", v);
     for (const v of filters.role ?? []) sp.append("role", v);
     for (const v of filters.investigator ?? []) sp.append("investigator", v);
     if (scope !== "expanded") sp.set("match", scope);
@@ -2706,6 +3113,7 @@ function FacetSidebar({
   isClinicalFacet,
   professorialRanks,
   earlyStageInvestigatorFacet,
+  institutions,
   activeDeptDiv,
   activePersonType,
   activeActivity,
@@ -2714,6 +3122,7 @@ function FacetSidebar({
   activeIsClinical,
   activeProfessorialRank,
   activeEarlyStageInvestigator,
+  activeInstitution,
   toggleHref,
   toggleBooleanHref,
   setPiHref,
@@ -2737,6 +3146,11 @@ function FacetSidebar({
    *  shape/gating as `isClinicalFacet`, behind the independent
    *  `SEARCH_PEOPLE_ESI_FACET` flag. */
   earlyStageInvestigatorFacet: { true: number; false: number };
+  /** Institution facet — `primaryOrgCode` multi-select buckets (bare ED codes,
+   *  labelled here via `institutionDisplayName`), same shape as
+   *  `professorialRanks`. Empty while `SEARCH_PEOPLE_INSTITUTION_FACET` is
+   *  off / pre-reindex ⇒ the group is not rendered. */
+  institutions: SearchFacetBucket[];
   activeDeptDiv: string[];
   activePersonType: string[];
   activeActivity: ActivityFilter[];
@@ -2745,6 +3159,7 @@ function FacetSidebar({
   activeIsClinical: boolean;
   activeProfessorialRank: string[];
   activeEarlyStageInvestigator: boolean;
+  activeInstitution: string[];
   toggleHref: (axis: string, value: string) => string;
   /** #2300 / #2306 — single-boolean toggle for `isClinical` /
    *  `earlyStageInvestigator` (set-to-true / delete, not the multi-select
@@ -2844,6 +3259,27 @@ function FacetSidebar({
               wrap
             />
           ))}
+        </FacetGroup>
+      ) : null}
+
+      {/* Institution — direct copy of `Scholar.primaryOrgCode`, same multi-select
+          shape as "Professorial rank" above; `wrap` + collapseAfter like the
+          dept/division group because institution names are long. Renders only
+          when the response carries buckets (flag off / pre-reindex ⇒ no group). */}
+      {institutions.length > 0 ? (
+        <FacetGroup label="Institution" collapseAfter={5}>
+          {sortActiveFirst(institutions, (b) => activeInstitution.includes(b.value)).map(
+            (b) => (
+              <FacetCheckbox
+                key={b.value}
+                label={institutionDisplayName(b.value)}
+                count={b.count}
+                isActive={activeInstitution.includes(b.value)}
+                href={toggleHref("institution", b.value)}
+                wrap
+              />
+            ),
+          )}
         </FacetGroup>
       ) : null}
 
@@ -3011,6 +3447,8 @@ function FacetSidebarPubs({
   wcmAuthorRoleCounts,
   activeWcmAuthorRole,
   departmentItems,
+  institutions,
+  activeInstitution,
   activeMentoringProgram,
   mentoringProgramCounts,
   toggleHref,
@@ -3041,6 +3479,11 @@ function FacetSidebarPubs({
     isActive: boolean;
     href: string;
   }>;
+  /** Institution facet — `wcmAuthorInstitutions` buckets (bare ED codes,
+   *  labelled here via `institutionDisplayName`). Empty while
+   *  `SEARCH_PUB_INSTITUTION_FACET` is off / pre-reindex ⇒ no group. */
+  institutions: SearchFacetBucket[];
+  activeInstitution: string[];
   activeMentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   mentoringProgramCounts: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", number>;
   toggleHref: (axis: string, value: string) => string;
@@ -3138,6 +3581,26 @@ function FacetSidebarPubs({
               wrap
             />
           ))}
+        </FacetGroup>
+      ) : null}
+
+      {/* Institution — union of the WCM authors' `primaryOrgCode`; same shape as
+          the People-tab group. Renders only when the response carries buckets
+          (flag off / pre-reindex ⇒ no group). */}
+      {institutions.length > 0 ? (
+        <FacetGroup label="Institution" collapseAfter={5}>
+          {sortActiveFirst(institutions, (b) => activeInstitution.includes(b.value)).map(
+            (b) => (
+              <FacetCheckbox
+                key={b.value}
+                label={institutionDisplayName(b.value)}
+                count={b.count}
+                isActive={activeInstitution.includes(b.value)}
+                href={toggleHref("institution", b.value)}
+                wrap
+              />
+            ),
+          )}
         </FacetGroup>
       ) : null}
 

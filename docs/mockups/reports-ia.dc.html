@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+body{margin:0;background:#faf8f6;color:#1c1917;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+a{color:#8a1f2b} a:hover{color:#6d1822}
+input,select,button,textarea{font:inherit}
+</style>
+</helmet>
+<section style="display:flex;flex-direction:column;gap:56px;padding:32px 32px 0">
+<div id="3a" data-screen-label="Insights › Reports — limited end user" style="width:1280px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <span style="background:#1c1917;color:#ffffff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">3a</span>
+    <span style="color:#6b6560;font-size:13px">End user with per-report access — one unit, only the reports their role grants; scope stated once, no empty chrome</span>
+  </div>
+  <div style="border:1px solid #dbd3cd;border-radius:10px;overflow:hidden;background:#faf8f6">
+    <div style="background:#2a2421;color:#ffffff;padding:12px 28px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:12px">
+      <span style="background:#8a1f2b;width:28px;height:28px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:700">WCM</span>
+      Scholars Profile Console
+    </div>
+    <div style="background:#ffffff;border-bottom:1px solid #e9e3df;padding:8px 28px;display:flex;align-items:center;gap:6px;font-size:14px">
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Profiles</a>
+      <a href="#" style="color:#ffffff;background:#8a1f2b;text-decoration:none;padding:5px 11px;border-radius:6px;font-weight:500">Insights</a>
+      <span style="margin-left:auto;color:#6b6560;font-size:13.5px">Maria T. Alonso ▾</span>
+    </div>
+    <div style="max-width:1080px;margin:0 auto;padding:26px 28px 60px">
+      <h1 style="font-size:26px;margin:0;letter-spacing:-.01em">Reports</h1>
+      <p style="margin:6px 0 0;color:#6b6560;font-size:13.5px">Sandra and Edward Meyer Cancer Center · Advisory only — nothing here writes to the roster.</p>
+      <div style="border:1px solid #e9e3df;border-radius:10px;overflow:hidden;margin-top:20px">
+        <table style="width:100%;border-collapse:collapse;font-size:13.5px;background:#ffffff">
+          <thead><tr style="background:#f4f1ed">
+            <th style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600;width:240px">Report</th>
+            <th style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600">Focus</th>
+            <th style="text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600;width:150px">Last refreshed</th>
+          </tr></thead>
+          <tbody>
+            <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">1. Optimize membership</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#44403c">REMOVE / ADD membership recommendations from PubMed co-authorship and MeSH cancer-relevance signals.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 11, 2026</td></tr>
+            <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">3. Publications</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#44403c">Center-attributed publications by program, with cancer-relevance tagging.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 11, 2026</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin:10px 0 0;color:#6b6560;font-size:12.5px">You have access to 2 of this center's 5 reports. To request another, contact the center administrator, <a href="#" style="color:#1c1917" style-hover="color:#1c1917">Paul J. Albert</a>.</p>
+    </div>
+  </div>
+</div>
+<div id="2a" data-screen-label="Insights › Reports — superuser index" style="width:1280px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <span style="background:#1c1917;color:#ffffff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">2a</span>
+    <span style="color:#6b6560;font-size:13px">Superuser — one row per unit, filter rail; each row opens that unit's reports page</span>
+  </div>
+  <div style="border:1px solid #dbd3cd;border-radius:10px;overflow:hidden;background:#faf8f6">
+    <div style="background:#2a2421;color:#ffffff;padding:12px 28px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:12px">
+      <span style="background:#8a1f2b;width:28px;height:28px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:700">WCM</span>
+      Scholars Profile Console
+    </div>
+    <div style="background:#ffffff;border-bottom:1px solid #e9e3df;padding:8px 28px;display:flex;align-items:center;gap:6px;font-size:14px">
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Profiles</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Org units</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Queues</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Registries</a>
+      <a href="#" style="color:#ffffff;background:#8a1f2b;text-decoration:none;padding:5px 11px;border-radius:6px;font-weight:500">Insights</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Tools</a>
+      <span style="margin-left:auto;color:#6b6560;font-size:13.5px">Paul J. Albert ▾</span>
+    </div>
+    <div style="max-width:1180px;margin:0 auto;padding:26px 28px 60px">
+      <h1 style="font-size:26px;margin:0;letter-spacing:-.01em">Reports</h1>
+      <p style="margin:6px 0 0;color:#6b6560;font-size:13.5px">Advisory only — every report reads precomputed data; nothing here writes to the roster.</p>
+      <div style="display:grid;grid-template-columns:230px 1fr;gap:20px;align-items:start;margin-top:20px">
+        <div style="background:#ede7df;border:1px solid #dbd3cd;border-radius:10px;padding:6px">
+          <div style="padding:12px 12px 14px">
+            <h5 style="margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#6b6560;font-weight:600">Unit type</h5>
+            <label style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:13px;color:#1c1917;cursor:pointer"><input type="checkbox" defaultChecked="{{ true }}" style="margin:3px 0 0;accent-color:#8a1f2b"/> Center <span style="margin-left:auto;font-variant-numeric:tabular-nums;font-size:12px;color:#8a837d">4</span></label>
+            <label style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:13px;color:#1c1917;cursor:pointer"><input type="checkbox" defaultChecked="{{ true }}" style="margin:3px 0 0;accent-color:#8a1f2b"/> Institute <span style="margin-left:auto;font-variant-numeric:tabular-nums;font-size:12px;color:#8a837d">12</span></label>
+            <label style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:13px;color:#6b6560;cursor:pointer"><input type="checkbox" style="margin:3px 0 0;accent-color:#8a1f2b"/> Department <span style="margin-left:auto;font-variant-numeric:tabular-nums;font-size:12px;color:#8a837d">47</span></label>
+          </div>
+          <div style="padding:12px 12px 14px;border-top:1px solid #dbd3cd">
+            <h5 style="margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#6b6560;font-weight:600">Reports</h5>
+            <label style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:13px;color:#6b6560;cursor:pointer"><input type="checkbox" style="margin:3px 0 0;accent-color:#8a1f2b"/> Has live reports <span style="margin-left:auto;font-variant-numeric:tabular-nums;font-size:12px;color:#8a837d">18</span></label>
+            <label style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:13px;color:#6b6560;cursor:pointer"><input type="checkbox" style="margin:3px 0 0;accent-color:#8a1f2b"/> None yet <span style="margin-left:auto;font-variant-numeric:tabular-nums;font-size:12px;color:#8a837d">45</span></label>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <input placeholder="Filter by unit name…" style="height:34px;width:280px;background:#ffffff;border:1px solid #dbd3cd;border-radius:7px;padding:0 11px;font-size:13.5px;color:#1c1917"/>
+            <span style="color:#6b6560;font-size:13px">Sort</span>
+            <select style="height:34px;background:#ffffff;border:1px solid #dbd3cd;border-radius:7px;padding:0 8px;font-size:13.5px;color:#1c1917"><option>Unit</option><option>Live reports</option><option>Last refreshed</option></select>
+            <span style="margin-left:auto;color:#6b6560;font-size:13px">Showing 8 of 16</span>
+          </div>
+          <div style="border:1px solid #e9e3df;border-radius:10px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:13.5px;background:#ffffff">
+              <thead><tr style="background:#f4f1ed">
+                <th style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600">Unit</th>
+                <th style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600;width:110px">Type</th>
+                <th style="text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600;width:110px">Live reports</th>
+                <th style="text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600;width:140px">Last refreshed</th>
+              </tr></thead>
+              <tbody>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Sandra and Edward Meyer Cancer Center</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Center</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">2 of 5</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 11, 2026</td></tr>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Englander Institute for Precision Medicine</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Institute</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">2 of 4</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 10, 2026</td></tr>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Gale and Ira Drukier Institute for Children's Health</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Institute</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">1 of 2</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 9, 2026</td></tr>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Feil Family Brain and Mind Research Institute</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Institute</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">1 of 3</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 8, 2026</td></tr>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Cardiovascular Research Institute</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Institute</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">1 of 2</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 7, 2026</td></tr>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Helen and Robert Appel Alzheimer's Disease Research Institute</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Institute</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td></tr>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Institute for Computational Biomedicine</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Institute</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td></tr>
+                <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">Jill Roberts Institute for Research in IBD</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df">Institute</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin:10px 0 0;color:#6b6560;font-size:12.5px">Row opens the unit's reports page (the <a href="#1a">1a</a> band content for one unit). Admins with ≤3 units skip this level and land on <a href="#1a">1a</a> directly.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+<section style="display:flex;flex-direction:column;gap:56px;padding:32px">
+
+<div id="1a" data-screen-label="Insights › Reports — role-scoped index" style="width:1280px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <span style="background:#1c1917;color:#ffffff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">1a</span>
+    <span style="color:#6b6560;font-size:13px">Insights › Reports — populated by role (this admin holds two centers)</span>
+  </div>
+  <div style="border:1px solid #dbd3cd;border-radius:10px;overflow:hidden;background:#faf8f6">
+    <div style="background:#2a2421;color:#ffffff;padding:12px 28px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:12px">
+      <span style="background:#8a1f2b;width:28px;height:28px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:700">WCM</span>
+      Scholars Profile Console
+    </div>
+    <div style="background:#ffffff;border-bottom:1px solid #e9e3df;padding:8px 28px;display:flex;align-items:center;gap:6px;font-size:14px">
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Profiles</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Org units</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Queues</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Registries</a>
+      <a href="#" style="color:#ffffff;background:#8a1f2b;text-decoration:none;padding:5px 11px;border-radius:6px;font-weight:500">Insights</a>
+      <a href="#" style="color:#44403c;text-decoration:none;padding:5px 11px;border-radius:6px" style-hover="background:#f4f1ed">Tools</a>
+      <span style="margin-left:auto;color:#6b6560;font-size:13.5px">Paul J. Albert ▾</span>
+    </div>
+    <div style="max-width:1080px;margin:0 auto;padding:26px 28px 72px">
+      <h1 style="font-size:26px;margin:0;letter-spacing:-.01em">Reports</h1>
+      <p style="margin:6px 0 0;color:#6b6560;font-size:13.5px">Reports for the centers you administer.</p>
+      <sc-if value="{{ showAdvisory }}" hint-placeholder-val="{{ true }}">
+        <div style="background:#FBF1DC;border:1px solid #A67012;color:#6B4310;border-radius:8px;padding:11px 16px;margin-top:16px;font-size:13.5px">
+          <b>Advisory only</b> — every report reads precomputed data; nothing here writes to the roster.
+        </div>
+      </sc-if>
+      <div style="border:1px solid #e9e3df;border-radius:10px;overflow:hidden;margin-top:20px">
+        <table style="width:100%;border-collapse:collapse;font-size:13.5px;background:#ffffff">
+          <thead><tr style="background:#f4f1ed">
+            <th style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600;width:240px">Report</th>
+            <th style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600">Focus</th>
+            <th style="text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b6560;padding:9px 14px;font-weight:600;width:150px">Last refreshed</th>
+          </tr></thead>
+          <tbody>
+            <tr style="background:#f4f1ed"><td colspan="2" style="padding:9px 14px;border-top:1px solid #e9e3df;font-weight:600">Sandra and Edward Meyer Cancer Center <span style="color:#6b6560;font-weight:400;font-size:12.5px">· NCI-designated · 2 of 5 reports live</span></td><td style="padding:9px 14px;border-top:1px solid #e9e3df;text-align:right"><a href="#" style="color:#1c1917;font-size:12.5px;text-decoration:none;position:relative;z-index:1" style-hover="text-decoration:underline">Edit center profile</a></td></tr>
+            <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">1. Optimize membership</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#44403c">REMOVE / ADD membership recommendations from PubMed co-authorship and MeSH cancer-relevance signals.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 11, 2026</td></tr>
+            <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">2. NCI Table 2a</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#44403c">NCI CCSG Data Table 2A funding review — program-code allocation and the Cancer-Relevant Percent judgment column.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 11, 2026</td></tr>
+            <tr><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">3. Publications</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">Coming soon.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td></tr>
+            <tr><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">4. Grants</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">Coming soon.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td></tr>
+            <tr><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">5. Clinical Trials</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">Coming soon.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td></tr>
+            <tr style="background:#f4f1ed"><td colspan="2" style="padding:9px 14px;border-top:1px solid #e9e3df;font-weight:600">Gale and Ira Drukier Institute for Children's Health <span style="color:#6b6560;font-weight:400;font-size:12.5px">· 1 of 2 reports live</span></td><td style="padding:9px 14px;border-top:1px solid #e9e3df;text-align:right"><a href="#" style="color:#1c1917;font-size:12.5px;text-decoration:none;position:relative;z-index:1" style-hover="text-decoration:underline">Edit center profile</a></td></tr>
+            <tr style="position:relative" style-hover="background:#f4f1ed;cursor:pointer"><td style="padding:10px 14px;border-top:1px solid #e9e3df"><a href="#" style="color:#8a1f2b;font-weight:500;text-decoration:none" style-after="content:'';position:absolute;inset:0" style-hover="text-decoration:underline" style-focus="outline:2px solid #8a1f2b;outline-offset:-2px">1. Optimize membership</a></td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#44403c">REMOVE / ADD membership recommendations from PubMed co-authorship and relevance signals.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;font-variant-numeric:tabular-nums">Aug 9, 2026</td></tr>
+            <tr><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">2. Publications</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;color:#6b6560">Coming soon.</td><td style="padding:10px 14px;border-top:1px solid #e9e3df;text-align:right;color:#6b6560">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin:10px 0 0;color:#6b6560;font-size:12.5px">A superuser sees this same page with every center and a filter rail; a single-center admin sees one group without the band.</p>
+    </div>
+  </div>
+</div>
+
+<div id="1b" data-screen-label="Center editor — Reports link moved out of the rail" style="width:1280px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <span style="background:#1c1917;color:#ffffff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">1b</span>
+    <span style="color:#6b6560;font-size:13px">Center editor — rail is attributes only; Reports is a header link beside Preview Profile</span>
+  </div>
+  <div style="border:1px solid #dbd3cd;border-radius:10px;overflow:hidden;background:#faf8f6">
+    <div style="background:#2a2421;color:#ffffff;padding:12px 28px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:12px">
+      <span style="background:#8a1f2b;width:28px;height:28px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:700">WCM</span>
+      Scholars Profile Console
+      <span style="margin-left:auto;font-weight:400;font-size:13.5px;color:#d8d2cc">Sign out</span>
+    </div>
+    <div style="background:#ffffff;border-bottom:1px solid #e9e3df;padding:10px 28px;font-size:13.5px;display:flex;align-items:center;gap:8px">
+      <a href="#" style="color:#44403c;text-decoration:none" style-hover="text-decoration:underline">‹ Profiles</a>
+      <span style="color:#6b6560">/</span>
+      <span style="font-weight:500">Sandra and Edward Meyer Cancer Center</span>
+    </div>
+    <div style="max-width:1180px;margin:0 auto;padding:24px 28px 72px;display:grid;grid-template-columns:250px 1fr;gap:24px;align-items:start">
+      <div style="background:#ede7df;border:1px solid #dbd3cd;border-radius:10px;padding:6px">
+        <div style="padding:12px 12px 14px">
+          <h5 style="margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#6b6560;font-weight:600">Attributes</h5>
+          <div style="display:flex;flex-direction:column;gap:2px;font-size:14px">
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Name</a>
+            <a href="#" style="color:#ffffff;background:#8a1f2b;text-decoration:none;padding:7px 11px;border-radius:6px;font-weight:500;display:flex;justify-content:space-between"><span>Description</span><span>›</span></a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Website</a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Leadership</a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Members</a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Programs</a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Access</a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Profile URL</a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Center type</a>
+            <a href="#" style="color:#1c1917;text-decoration:none;padding:7px 11px;border-radius:6px" style-hover="background:#e4ddd2">Retire unit</a>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:flex-end;gap:20px;font-size:13.5px;margin-bottom:14px">
+          <a href="#" style="color:#1c1917;text-decoration:none;font-weight:500" style-hover="text-decoration:underline">View reports →</a>
+          <a href="#" style="color:#1c1917;text-decoration:none;font-weight:500" style-hover="text-decoration:underline">Preview Profile ↗</a>
+        </div>
+        <sc-if value="{{ showEditorNotice }}" hint-placeholder-val="{{ true }}">
+          <div style="background:#ffffff;border:1px solid #e9e3df;border-radius:8px;padding:12px 18px;font-size:14px;color:#44403c;margin-bottom:18px">
+            You are editing <b style="color:#1c1917">Sandra and Edward Meyer Cancer Center</b>'s profile as an administrator.
+          </div>
+        </sc-if>
+        <div style="background:#ffffff;border:1px solid #e9e3df;border-left:3px solid #8a1f2b;border-radius:8px;padding:22px 26px">
+          <h2 style="font-size:19px;margin:0;letter-spacing:-.01em">Description</h2>
+          <div style="width:44px;height:3px;background:#8a1f2b;margin:8px 0 10px"></div>
+          <p style="margin:0 0 14px;color:#6b6560;font-size:13.5px">A short blurb shown on the public center page.</p>
+          <textarea rows="3" style="width:100%;background:#ffffff;border:1px solid #dbd3cd;border-radius:7px;padding:10px 12px;font-size:14px;color:#1c1917;resize:vertical" defaultValue="NCI-designated cancer center spanning basic, translational, and clinical oncology research at WCM and NewYork-Presbyterian."></textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+            <span style="color:#6b6560;font-size:13px;font-variant-numeric:tabular-nums">123/4,000</span>
+            <button style="background:#8a1f2b;color:#ffffff;border:0;border-radius:7px;padding:8px 20px;font-size:14px;font-weight:500;cursor:pointer" style-hover="background:#6d1822" style-focus="outline:2px solid #8a1f2b;outline-offset:2px">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showAdvisory&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Reports index&quot;},&quot;showEditorNotice&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Center editor&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      showAdvisory: this.props.showAdvisory ?? true,
+      showEditorNotice: this.props.showEditorNotice ?? true
+    };
+  }
+}
+</script>
+</body>
+</html>

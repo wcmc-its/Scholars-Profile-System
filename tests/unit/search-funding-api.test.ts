@@ -969,3 +969,53 @@ describe("searchFunding — TIER 3 text-hit evidence (SEARCH_FUNDING_TEXT_EVIDEN
     expect(result.hits[0].textEvidence).toBeNull();
   });
 });
+
+describe("searchFunding: a lone initial cannot admit a grant alone (issue #2243)", () => {
+  const original = process.env.SEARCH_FUNDING_TAB_MSM;
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_TAB_MSM;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_TAB_MSM;
+    else process.env.SEARCH_FUNDING_TAB_MSM = original;
+  });
+
+  const FIELDS = ["title^4", "sponsorText^2", "peopleNames^1", "abstract^1", "keywordsText^1"];
+  const mm = (query: string) => ({ multi_match: { query, fields: FIELDS, type: "best_fields" } });
+  const mustOf = () =>
+    (lastRequest!.body.query as { bool: { must: unknown[] } }).bool.must;
+
+  it("keeps the full query as the (unchanged) scoring clause but filters admission on the multi-letter tokens", async () => {
+    await runSearch({ q: "Michael J Wolk" });
+    expect(mustOf()).toEqual([
+      { bool: { must: [mm("Michael J Wolk")], filter: [mm("Michael Wolk")] } },
+    ]);
+  });
+
+  it("treats a dotted initial the same way", async () => {
+    await runSearch({ q: "Michael J. Wolk" });
+    expect(mustOf()).toEqual([
+      { bool: { must: [mm("Michael J. Wolk")], filter: [mm("Michael Wolk")] } },
+    ]);
+  });
+
+  it("leaves a query of only multi-letter tokens byte-identical (no wrapper)", async () => {
+    await runSearch({ q: "Michael Wolk" });
+    expect(mustOf()).toEqual([mm("Michael Wolk")]);
+    await runSearch({ q: "T-cell lymphoma" });
+    expect(mustOf()).toEqual([mm("T-cell lymphoma")]);
+  });
+
+  it("leaves a query of only single-character tokens byte-identical (q=J)", async () => {
+    await runSearch({ q: "J" });
+    expect(mustOf()).toEqual([mm("J")]);
+  });
+
+  it("applies the same admission gate to the investigator grant-count agg", async () => {
+    const mod = await import("@/lib/api/search-funding");
+    await mod.investigatorGrantMatchCounts({ q: "Michael J Wolk", cwids: ["abc1234"] });
+    expect(JSON.stringify(lastRequest!.body)).toContain(
+      JSON.stringify({ bool: { must: [mm("Michael J Wolk")], filter: [mm("Michael Wolk")] } }),
+    );
+  });
+});

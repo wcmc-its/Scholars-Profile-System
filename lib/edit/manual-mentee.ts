@@ -70,7 +70,15 @@ export type ManualMentee = {
   programLabel?: string;
   /** Graduation / completion year → `MenteeChip.graduationYear`. */
   year?: number;
+  /** Degree bucket for the public Mentoring section (`MenteeChip.programType`),
+   *  in the vocabulary the sourced records use. Set by the co-authorship
+   *  suggestion accept flow (#2634) so an accepted postdoc lands under
+   *  "Postdoc mentees" rather than "other"; the hand-entry form leaves it unset. */
+  programType?: ManualMenteeProgramType;
 };
+
+export const MANUAL_MENTEE_PROGRAM_TYPES = ["AOC", "MD-PhD", "PhD", "POSTDOC"] as const;
+export type ManualMenteeProgramType = (typeof MANUAL_MENTEE_PROGRAM_TYPES)[number];
 
 export type ManualMenteesResult =
   | { ok: true; value: ManualMentee[] }
@@ -163,6 +171,16 @@ export function validateManualMentees(input: unknown): ManualMenteesResult {
         return { ok: false, error: "invalid_year" };
       }
       out.year = entry.year;
+    }
+
+    if (entry.programType !== undefined && entry.programType !== null) {
+      if (
+        typeof entry.programType !== "string" ||
+        !(MANUAL_MENTEE_PROGRAM_TYPES as readonly string[]).includes(entry.programType)
+      ) {
+        return { ok: false, error: "invalid_value" };
+      }
+      out.programType = entry.programType as ManualMenteeProgramType;
     }
 
     value.push(out);

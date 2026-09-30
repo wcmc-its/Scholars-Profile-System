@@ -37,7 +37,7 @@
  * VISUAL: skinned to `sponsor-match-scholars.html`, but to that mockup's INFORMATION design and
  * token values only — not its chrome. The mockup is drawn as the PUBLIC Scholars site (Cornell-red
  * header, serif title, a white card per candidate); this is an `/edit` console surface that sits
- * next to `/edit/find-researchers` under the Apollo bar, so it keeps the console's h1, its list
+ * next to `/edit/grant-matcha` under the Apollo bar, so it keeps the console's h1, its list
  * rows, and its two-column shell. The mockup's palette needed no translation: it was authored from
  * this app's own tokens (its `--accent #2C4F6E` IS `--color-accent-slate`, its shadow IS
  * `--apollo-shadow-card`), so the reskin adds no new CSS.
@@ -62,7 +62,7 @@
  * to skew a ranking with no way for the officer to say so.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download } from "lucide-react";
+import { Download, ExternalLink, Lock, RefreshCw, Trash2 } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -82,6 +82,7 @@ import {
 } from "@/components/ui/sheet";
 import {
   conceptCoverage,
+  assessMatchSignal,
   evidenceMatchCount,
   evidenceProvenance,
   fitTier,
@@ -106,10 +107,12 @@ import {
   type MatchaFitTier,
   type MatchaResponse,
   type MatchaPreference,
+  type MatchSignal,
   type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
 import { buildMatchaCsv } from "@/lib/edit/matcha-export";
+import type { EligibilityRequirements } from "@/lib/funding/screening";
 import {
   careerStageLabel,
   roleCategoryLabel,
@@ -170,9 +173,9 @@ const RESULT_MAX = 100;
  *  you can re-weight. The always-visible subtitle was removed in the warm-palette redesign — this
  *  copy now backs the h1's hover `ⓘ` (the "on the page" explainer; the nav-tab hover serves the
  *  "before you land" moment). Keep it verbatim: §5 of the redesign handoff quotes this exact text.
- *  ⚠ "Recommendations, not endorsements" was dropped DELIBERATELY (user, 2026-07-17), not lost. It
- *  still stands on the Funding matcher (`find-researchers.tsx`); do not re-add it here on the
- *  assumption that its absence is an oversight. */
+ *  ⚠ "Recommendations, not endorsements" was dropped DELIBERATELY (user, 2026-07-17), not lost —
+ *  do not re-add it here on the assumption that its absence is an oversight. (It last stood on the
+ *  Funding matcher, retired by the find-researchers sunset.) */
 const MATCHA_BLURB =
   "Paste any ask — a funding call, a request for collaborators, an email, a few bullet points. Matcha pulls out the topics and methods it's really asking for, weighs how much each one matters, and ranks scholars by fit across all of them. Every recommendation comes with the evidence behind it, and you can adjust the weights to re-rank on the spot.";
 
@@ -186,9 +189,28 @@ const PRIMARY_BLOCKS = 2;
 /** Three numbers, and they are three DIFFERENT things: how many rows we painted, how many the
  *  filters matched, how many are in the pool. The old header printed two of them as if they
  *  were one ("100 of 100 researchers", while the history row beside it said 430). Say all
- *  three, or say the one that is true. */
-export function resultsSummary(shown: number, matched: number, pool: number): string {
+ *  three, or say the one that is true.
+ *
+ *  `gateHidden` (Grant Matcha) is what the hard eligibility gate dropped from `matched` — and
+ *  `matched` is the POST-gate count. The header once passed the pre-gate count there, which put
+ *  two pipelines in one phrase: a postdoc-only gate over a faculty pool rendered "Top 0 of 77"
+ *  above an empty list. When the gate is hiding anyone, `matched` is named "eligible" and the
+ *  hidden count is said out loud, so every number in the phrase comes from one stage. */
+export function resultsSummary(
+  shown: number,
+  matched: number,
+  pool: number,
+  gateHidden = 0,
+): string {
   const head = shown < matched ? `Top ${shown} of ${matched}` : `${matched}`;
+  if (gateHidden > 0) {
+    // `matched + gateHidden` is the pre-gate filter-match count, so `< pool` still means "an
+    // earlier stage (the year window or the facet filters) is ALSO narrowing" — the only case
+    // that earns naming the pool.
+    const base =
+      matched + gateHidden < pool ? `${head} matching · ${pool} ranked` : `${head} eligible`;
+    return `${base} · ${gateHidden} filtered by eligibility`;
+  }
   if (matched < pool) return `${head} matching · ${pool} ranked`;
   return `${head} researcher${matched === 1 ? "" : "s"}`;
 }
@@ -196,6 +218,15 @@ export function resultsSummary(shown: number, matched: number, pool: number): st
 /** Coverage 7.17e-4 → "about 1 in 1,400 papers". Reads better than a fraction in a tooltip. */
 function oneInN(coverage: number): string {
   return `about 1 in ${Math.round(1 / coverage).toLocaleString()} Weill Cornell papers`;
+}
+
+/** Matcha Empty State redesign — "Aug 20, 2026" for a retained search's `createdAt`. Unlike
+ *  `formatDue` (lib/match-display.ts), `createdAt` is a real timestamp, not a date-only DB
+ *  column, so this renders in the viewer's local time rather than pinning UTC. */
+function formatSubmittedDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 const TIER_LABEL: Record<MatchaFitTier, string> = {
@@ -227,6 +258,32 @@ type SortKey = (typeof SORT_TABS)[number]["key"];
 /** D8 — Detailed (the full evidence card) vs Compact (one scannable row per scholar). */
 type Density = "detailed" | "compact";
 const DENSITY_KEY = "sponsor-match-density";
+
+/** Grant-path reskin (Matcha Redesign.dc.html) — the artboard's segmented pill: greige track,
+ *  white active segment with a shadow. CHROME ONLY: every control keeps its role/aria wiring,
+ *  and `/edit/matcha` (no `eligibility`) keeps its detached-pill chrome verbatim. */
+const SEG_TRACK =
+  "border-apollo-border bg-apollo-surface-2 inline-flex items-center rounded-lg border p-[3px]";
+const segClass = (active: boolean) =>
+  `rounded-md px-2.5 py-1 text-[12.5px] transition-colors ${
+    active
+      ? "bg-white font-semibold text-foreground shadow-[0_1px_2px_rgba(34,30,28,0.1)]"
+      : "text-foreground/80 hover:text-foreground"
+  }`;
+
+/** The grant table's grid — the artboard's six columns (# / Researcher / Match / Evidence /
+ *  Latest work / chevron). Shared by the header row and every compact row so they cannot
+ *  misalign. The shortlist checkbox rides a fixed cell BEFORE this grid (see `CompactRow`'s
+ *  table branch): the artboard omits it, and artboard omission is not a removal decision. */
+const GRANT_TABLE_COLUMNS = "34px minmax(200px,1fr) 120px minmax(120px,0.6fr) 90px 24px";
+
+/** Artboard match-chip tones for the grant table: green tint = strong, amber tint = good,
+ *  neutral greige = weak. Every value is a house token; borderless per the artboard. */
+const GRANT_TIER_CLASS: Record<MatchaFitTier, string> = {
+  strong: "bg-apollo-green-tint text-apollo-green-foreground",
+  good: "bg-apollo-amber-tint text-apollo-amber",
+  weak: "bg-apollo-surface-2 text-muted-foreground",
+};
 
 /** D3 — the recency dial. Stays DETACHED pills: it is a three-mode dial with a year sub-control, not
  *  a clean binary, so it does not conjoin the way the density and sort pairs now do (see the header).
@@ -311,32 +368,10 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Grant Matcha — what THIS opportunity actually requires of a researcher. Every field is
- * "absent ⇒ that axis does not render": the rail is relevance-driven, not a fixed 3-axis panel.
- *
- * `careerStages` is the load-bearing HARD axis (33.8% of mapped opportunities restrict it).
- * `esiTargeted` is SOFT by design — the extractor's `esi_targeted` is a priority, not a gate,
- * so it demotes and never hides. `usRequired` is DISPLAY-ONLY: person-level US citizenship is
- * required by only 4.2% of opportunities and SPS holds no scholar citizenship field, so a US
- * toggle would either filter nothing or imply data we do not have.
- */
-export type EligibilityRequirements = {
-  /** Stages the opportunity admits. `null` ⇒ unrestricted ⇒ no career-stage axis. */
-  careerStages: readonly CareerStage[] | null;
-  /**
-   * The sponsor's OWN eligibility wording, verbatim, so the axis can cite what produced it.
-   *
-   * 🔴 Without this the rail states "Required: Early career · Mid career · Senior · Postdoc" —
-   * SPS's internal stage vocabulary — over an opportunity whose SYNOPSIS never mentions career
-   * stage, because the eligibility text lives in a different column that nothing renders. It reads
-   * as a requirement the matcher invented. It is not: `spin:095001` carries "Physician or Medical
-   * Professional; Faculty Member; Researcher or Investigator; Postdoctoral".
-   */
-  stageSource?: string | null;
-  esiTargeted: boolean;
-  usRequired: boolean;
-};
+// `EligibilityRequirements` moved to `lib/funding/screening.ts` beside `requirementsFrom`
+// (browse data-wiring 2026-08 — the list route derives eligibility labels server-side and must
+// not import a client component). Re-exported so this panel's consumers keep importing it here.
+export type { EligibilityRequirements };
 
 /** Per-row eligibility verdict. `eligible`/`relaxed` are computed from the opportunity's stated
  *  rule; `filtered` is asserted by the eligibility floor for the rows the gate dropped. */
@@ -352,6 +387,15 @@ const ELIG_BADGE_CLASS: Record<EligBadge, string> = {
   eligible: "bg-elig-border/15 text-elig-text",
   relaxed: "bg-apollo-amber-tint text-apollo-amber border border-apollo-amber-tint-border",
   filtered: "text-muted-foreground border border-dashed border-border",
+};
+
+/** Copy for the ask card's thin-match caution, keyed on `assessMatchSignal`'s `reason` — see
+ *  `MatchSignal`'s doc comment in matcha-contract.ts for what each case means. */
+const THIN_SIGNAL_COPY: Record<Extract<MatchSignal, { thin: true }>["reason"], string> = {
+  "single-broad-concept":
+    "This match is based on a single broad concept — it may surface anyone who touches the general category, not the funder's specific target.",
+  "single-bare-method":
+    "This match is based on a single method with nothing to narrow it — it may surface anyone using that method, regardless of disease or population.",
 };
 
 /** The inline eligibility pill (mockup: badge inline, beside the fit tier). */
@@ -371,6 +415,8 @@ export function MatchaPanel({
   autoRun,
   grantMatcha = false,
   eligibility,
+  allowEditPaste = true,
+  sourceUrl,
 }: {
   /** Grant Matcha — seed the ask from an opportunity's title + synopsis so the officer lands on
    *  the extracted concepts + ranked researchers instead of a blank textarea. */
@@ -385,6 +431,17 @@ export function MatchaPanel({
    *  ask the route for signals. The rail is RELEVANCE-DRIVEN — an axis renders only when the
    *  opportunity actually carries that requirement, so most opportunities show 0–2 axes. */
   eligibility?: EligibilityRequirements;
+  /** Default true (`/edit/matcha`, search): the ask IS user-typed, so editing it back is the
+   *  point. Grant Matcha seeds the ask from the opportunity record — source-originated data,
+   *  not user input — so `grant-matcha-panel.tsx` passes `false` and drops "Edit paste"
+   *  (redesign 2026-08, owner: "editing the paste doesn't make sense" for that case).
+   *  `/edit/matcha`'s own paste-an-email flow is unaffected either way. */
+  allowEditPaste?: boolean;
+  /** Grant Matcha — the opportunity's own landing page, off the SAME detail fetch that seeds
+   *  the ask (`grant-matcha-panel.tsx`). Read ONLY by the nothing-extracted empty state (the
+   *  NIGMS RM1 case), where the FOA's full text is the recovery path and this is the link to
+   *  it. Absent — the email path, or an opportunity without one — renders exactly as before. */
+  sourceUrl?: string | null;
 } = {}) {
   const [description, setDescription] = useState(initialDescription ?? "");
   // Grant Matcha — which corpus this ask searches. "grants" POSTs `{ target: "grants" }` and
@@ -400,10 +457,19 @@ export function MatchaPanel({
   // D11 — the read-only paste clamps to ~4 lines until the officer asks for the rest. Reset per
   // search so a new paste always starts clamped.
   const [showFullText, setShowFullText] = useState(false);
+  // Grant-path reskin — the highlighted source text sits behind a collapsed-by-default
+  // disclosure ("Show source text with matched concepts"). Reset per search like the clamp
+  // above; unused (always false, nothing reads it) on `/edit/matcha`, where the paste stays
+  // inline.
+  const [showSource, setShowSource] = useState(false);
   const [history, setHistory] = useState<Submission[]>([]);
   /** Defaults to `"own"` so a response without a `scope` never renders a submitter column the
    *  server did not authorise — the same fail-closed direction the route's `where` takes. */
   const [historyScope, setHistoryScope] = useState<HistoryScope>("own");
+  // Matcha Empty State — the inline recent-searches card collapses to 7 rows; this expands it
+  // client-side, no re-fetch. Not reset per search: the officer's "show all" choice is a view
+  // preference on a list that already refreshes itself after every run.
+  const [showAllRecent, setShowAllRecent] = useState(false);
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
@@ -463,6 +529,9 @@ export function MatchaPanel({
   // The extractor's essence title (org + focus). Stable across slider/preference edits — only
   // a new search replaces it — so the header does not churn as the officer tunes the ranking.
   const [titleSummary, setTitleSummary] = useState<string | undefined>(undefined);
+  /** When the server answered from a persisted earlier run: that run's ISO timestamp. Undefined
+   *  ⇒ computed for this request. Labels the results; Re-run forces a fresh computation. */
+  const [asOf, setAsOf] = useState<string | undefined>(undefined);
   // #1654 — the sponsor's non-topical asks, and which of them the officer is honouring.
   // Keyed by label: an extractor that fires twice on the same ask would emit one entry.
   const [preferences, setPreferences] = useState<MatchaPreference[]>([]);
@@ -484,6 +553,11 @@ export function MatchaPanel({
   const pending = status.kind === "loading";
   // What this ask ranks — drives the submit/loading/empty copy so grant mode never says "researchers".
   const targetNoun = target === "grants" ? "opportunities" : "researchers";
+  // The grant-path reskin gate (Matcha Redesign.dc.html). `eligibility` presence is already this
+  // file's grant-vs-email boundary (see the prop's doc comment), so the re-chrome hangs off the
+  // same fact rather than a second flag that could drift from it. `/edit/matcha` passes no
+  // `eligibility` and must render exactly as before.
+  const grantPath = eligibility != null;
 
   // #6d — the retained searches, from the SERVER. This REPLACES the old localStorage history
   // outright rather than sitting beside it: the server list does everything the private one did
@@ -550,7 +624,7 @@ export function MatchaPanel({
    *  collapses: an already-read ask is still the officer's context, and hiding it was the gripe. */
   async function runSearch(
     text: string,
-    opts: { include?: readonly string[] } = {},
+    opts: { include?: readonly string[]; fresh?: boolean } = {},
   ) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
@@ -575,9 +649,11 @@ export function MatchaPanel({
       setCulled([]);
       setIncluded([]);
       setTitleSummary(undefined);
+      setAsOf(undefined);
       setPreferences([]);
       setActivePrefs(new Set());
       setShowFullText(false); // D11 — a new paste starts clamped
+      setShowSource(false); // grant path — a new paste starts with the source text collapsed
     }
     try {
       const r = await fetch("/api/edit/matcha", {
@@ -590,6 +666,9 @@ export function MatchaPanel({
           description: text,
           include: opts.include ?? [],
           target,
+          // Re-run: skip the persisted answer and compute now. Omitted on every other path so a
+          // replay from Recent is served from the stored run when one exists.
+          ...(opts.fresh ? { fresh: true } : {}),
           // Grant Matcha — ask the spine to hydrate `measures.esiEligible`. Sent ONLY when this
           // panel was handed an opportunity's requirements; the route re-checks GRANT_MATCHA as
           // the real boundary, and omitting the key leaves `/edit/matcha` byte-unchanged.
@@ -615,9 +694,11 @@ export function MatchaPanel({
           setCulled(data.culled ?? []);
           if (!opts.include) setIncluded([]);
           setTitleSummary(data.titleSummary);
+          setAsOf(undefined); // the grant branch never serves a stored run
           setMatchedText(text);
           setEditing(false);
           setShowFullText(false);
+          setShowSource(false);
           setRunId((n) => n + 1);
           setPreferences([]); // grant path ships none — never surface stale people prefs in the ask
           setActivePrefs(new Set());
@@ -640,9 +721,11 @@ export function MatchaPanel({
         // and the click handler already set `included` to the new set — don't clobber it.
         if (!opts.include) setIncluded([]);
         setTitleSummary(data.titleSummary);
+        setAsOf(data.asOf);
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
         setShowFullText(false); // D11 — new paste starts clamped
+        setShowSource(false); // grant path — the source-text disclosure starts collapsed
         setRecency("recent"); // D3 — the dial is per-ask; a new sponsor starts at the ranker's default
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
@@ -792,6 +875,10 @@ export function MatchaPanel({
   // the other concepts the sponsor named, not just to the other methods.
   const rare = useMemo(() => rareTerms(concepts), [concepts]);
 
+  // Self-awareness for a thin extraction — see `assessMatchSignal`'s doc comment. Render-only:
+  // the officer gets a caution up front rather than discovering the scatter in the ranking.
+  const matchSignal = useMemo(() => assessMatchSignal(concepts), [concepts]);
+
   // #1780 Phase 2 — culled chips still worth offering: the extractor's tail minus anything now in
   // the searched set (a just-added term drops off). `atCap` disables adds once the searched set
   // reaches the ceiling — the officer can add culled terms, but not without bound.
@@ -832,6 +919,82 @@ export function MatchaPanel({
   const askMarked = useMemo(() => markedConceptCount(askSegments), [askSegments]);
   // Show the read-only ask once a search has committed and the officer is not editing the paste.
   const showAskCard = !editing && matchedText.length > 0;
+
+  // The committed paste with its marks, the D11 clamp, and the honest-lower-bound explainer —
+  // ONE block with two homes: inline on `/edit/matcha`, behind the grant path's collapsed
+  // "Show source text" disclosure (Matcha Redesign.dc.html). Extracted so the two cannot drift.
+  const askQuote = (
+    <>
+      {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
+          300-char Outlook SafeLinks URL that carries no break opportunity. D11 — clamped to
+          ~4 lines until "Show full text". The marks are facet-blue: the highlights ARE the
+          provenance ("what we read"), the one place this console reaches for that accent. */}
+      <p
+        data-slot="matcha-ask-quote"
+        className={`text-muted-foreground mt-3 text-[13px] leading-[1.6] break-words whitespace-pre-wrap ${
+          showFullText ? "" : "line-clamp-4"
+        }`}
+      >
+        {askSegments.map((s, i) =>
+          s.term ? (
+            // The wrapper span is `inline-flex`, so a marked RUN can no longer break across
+            // lines — it wraps as a unit. Accepted: a mark spans one canonicalised term (a
+            // word or two), never the 300-char SafeLinks URL `break-words` above exists for.
+            // If a long term ever wraps badly here, that is this trade, not a mystery.
+            <HoverTooltip key={i} text={s.term}>
+              {/* #1780 — method marks take the rail's purple (facet-method) token, concepts
+                  the blue (facet-topic) one, so the paste read-back matches the Concept/Method
+                  rail split. */}
+              <mark
+                data-slot="matcha-ask-mark"
+                data-term={s.term}
+                data-kind={s.kind}
+                className={`rounded-[3px] px-[3px] ${
+                  s.kind === "method"
+                    ? "bg-[var(--color-facet-method-fill)] text-[var(--color-facet-method-text)]"
+                    : "bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)]"
+                }`}
+              >
+                {s.text}
+              </mark>
+            </HoverTooltip>
+          ) : (
+            <span key={i}>{s.text}</span>
+          ),
+        )}
+      </p>
+      {/* D11 — expand the clamped paste. */}
+      <div className="mt-1.5 flex items-center gap-3.5">
+        <button
+          type="button"
+          onClick={() => setShowFullText((v) => !v)}
+          className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
+        >
+          {showFullText ? "Show less ▴" : "Show full text ▾"}
+        </button>
+      </div>
+      {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
+          form not verbatim in the paste — never because it was ignored. Shown only when
+          something is actually unmarked; sits at the card foot, ruled off, per the mockup.
+          ⚠ THE SECOND SENTENCE EXISTS BECAUSE THE FIRST ANSWERS THE WRONG QUESTION. This
+          note explains why a CONCEPT is unmarked. A reader who notices unhighlighted PROSE
+          is looking at text that was never elected a concept at all, and reads this line as
+          the explanation for THAT — so "unmarked never means ignored" reassured about
+          something they had not asked. Observed live (#1780): a reader asked why "induced
+          pluripotent stem cell models" was unhighlighted; it was not a concept. Whether it
+          SHOULD have been is extractor coverage, and is not this sentence's job — but the
+          sentence must not imply the highlight is a complete account of the paste. */}
+      {concepts.length > 0 && askMarked < concepts.length ? (
+        <p className="text-muted-foreground border-border mt-3 border-t pt-2.5 text-[11px] leading-[1.5]">
+          {askMarked} of {concepts.length} concepts are highlighted — a concept goes unmarked
+          when the matcher wrote it in standard terms (an abbreviation expanded, a brand
+          resolved). Unmarked never means ignored. Highlighting marks the concepts and methods
+          above, so other wording in the paste going unmarked does not mean it was read — it
+          means it is not one of them.
+        </p>
+      ) : null}
+    </>
+  );
 
   // Facet over the POOL (see RESULT_MAX) — which under a year cutoff IS the year-restricted pool.
   // A facet offering "Neurology · 12" that filters down to 9 because 3 were hidden by the cutoff
@@ -1076,7 +1239,13 @@ export function MatchaPanel({
           profilePath(c.profileSlug),
           window.location.origin,
         ).toString(),
+        // The export deliberately carries the PRE-gate set (an officer's outreach list), so
+        // each row must say whether the page's gate shows it. `meetsStageRule` is the SAME
+        // predicate the gate and the badges use — the stated rule, not the toggle — and it is
+        // null on `/edit/matcha`, where the column (see the option below) does not exist.
+        ...(meetsStageRule ? { eligible: meetsStageRule(c) ? "Yes" : "No" } : {}),
       })),
+      { eligibility: meetsStageRule != null },
     );
     downloadCsv(filename, csv);
   }
@@ -1102,14 +1271,17 @@ export function MatchaPanel({
   }
 
   // #6d retained searches, in a right-side drawer (reused shadcn Sheet — no hand-rolled
-  // overlay/focus-trap). Declared once and rendered beside the search action in BOTH the edit
-  // form and the read-only ask, so history stays reachable in either state. The retention notice
-  // lives in the drawer header, where #6d requires it be said.
+  // overlay/focus-trap). Rendered beside the search action in the read-only ask cards (grant and
+  // email paths), where results already fill the page; the IDLE form lists the same history
+  // inline instead (`recentSearchesSection` below — Matcha Empty State redesign). The retention
+  // notice lives in the drawer header, where #6d requires it be said.
   const historyDrawer =
     history.length > 0 ? (
       <Sheet>
         <SheetTrigger asChild>
-          <Button type="button" variant="outline">
+          {/* Grant path — the artboard sits this beside the icon re-run in the summary card's
+              corner, at the small control scale. Same trigger, same drawer, either way. */}
+          <Button type="button" variant="outline" {...(grantPath ? { size: "sm" as const } : {})}>
             Recent ({history.length})
           </Button>
         </SheetTrigger>
@@ -1182,6 +1354,96 @@ export function MatchaPanel({
       </Sheet>
     ) : null;
 
+  // Matcha Empty State redesign — retained searches, inline, below the idle ask card. Replaces the
+  // drawer trigger on THAT one call site (the "Recent (N)" button below the textarea): the drawer
+  // still exists (`historyDrawer` above) and still fires from the grant-path and email-path ask
+  // cards once a search has committed, where the officer is already reading results and a full-page
+  // panel would cover them. Idle has nothing to cover, so the list is on the page instead of behind
+  // a click — same data (`history`/`historyScope`), same replay + delete handlers, no new fetch.
+  const recentSearchesSection =
+    history.length > 0 ? (
+      <div data-slot="matcha-recent" className="mt-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h2 className="text-[15px] font-semibold">
+            Recent searches <span className="font-normal text-[#8b857b]">· {history.length}</span>
+          </h2>
+          {/* §9 — this note (and the drawer's own retention notice) only needs to say WHO can see
+              the list when that list is bigger than "just you", i.e. the superuser view. */}
+          {historyScope === "all" ? (
+            <div className="text-muted-foreground flex items-center gap-1 text-[11px]">
+              <Lock className="size-[11px]" aria-hidden />
+              <span>Admin view: all users&rsquo; searches.</span>
+              <HoverTooltip
+                wide
+                text="Searches are saved, including the description pasted, so match quality can be measured against real opportunity text. Deleting a search removes its text for good."
+              >
+                <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-2">
+                  Why?
+                </span>
+              </HoverTooltip>
+            </div>
+          ) : null}
+        </div>
+        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border shadow-[var(--apollo-shadow-card)]">
+          {(showAllRecent ? history : history.slice(0, 7)).map((h) => (
+            <div key={h.id} className="group relative">
+              {/* Same replay as the drawer row: set the textarea, run it — the read-only ask
+                  card renders once the response lands (D10). */}
+              <button
+                type="button"
+                onClick={() => {
+                  setDescription(h.description);
+                  void runSearch(h.description);
+                }}
+                className="border-apollo-border hover:bg-apollo-rail block w-full border-b px-5 py-[13px] pr-10 text-left transition-colors last:border-b-0"
+              >
+                <div className="flex items-baseline gap-3">
+                  <span className="min-w-0 flex-1 text-[13.5px] font-semibold">
+                    {h.title ?? "Untitled search"}
+                  </span>
+                  <span className="text-muted-foreground shrink-0 text-[12px] whitespace-nowrap">
+                    {h.candidateCount} matched
+                  </span>
+                </div>
+                {/* §10 — SUPERUSER VIEW ONLY, same rule the drawer applies: once the list is
+                    scoped (§9) a normal user's rows are all their own, so the name is a constant
+                    repeated down the list. It earns its place only where rows differ by actor. */}
+                <div className="text-muted-foreground mt-1 text-[12px]">
+                  {formatSubmittedDate(h.createdAt)}
+                  {historyScope === "all" ? ` · ${h.submittedByName}` : null}
+                </div>
+              </button>
+              {/* Hover-revealed, and a SIBLING of the row button (not nested inside it) — a
+                  button-in-a-button is invalid HTML and would make this un-clickable in some
+                  browsers. `stopPropagation` isn't needed for that reason, only so a click here
+                  never bubbles into a parent that isn't there. */}
+              <button
+                type="button"
+                aria-label={`Delete search: ${h.title ?? h.description.slice(0, 60)}`}
+                title="Delete: removes the saved text for good"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void deleteSubmission(h.id);
+                }}
+                className="text-muted-foreground hover:bg-apollo-red-tint hover:text-apollo-maroon absolute top-2 right-2 rounded-md p-1.5 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100"
+              >
+                <Trash2 className="size-3.5" aria-hidden />
+              </button>
+            </div>
+          ))}
+          {history.length > 7 && !showAllRecent ? (
+            <button
+              type="button"
+              onClick={() => setShowAllRecent(true)}
+              className="block w-full px-5 py-2.5 text-center text-[12.5px] font-medium text-[var(--color-accent-slate)] hover:underline"
+            >
+              Show all {history.length} searches
+            </button>
+          ) : null}
+        </div>
+      </div>
+    ) : null;
+
   // D8 — a result row is the detailed card when density is Detailed OR the officer expanded it from
   // Compact; otherwise the one-line CompactRow, which expands in place on click. Used for both the
   // primary rows and the below-floor weak rows, so the floor and the density toggle compose.
@@ -1231,18 +1493,162 @@ export function MatchaPanel({
         onExpand={() => setExpanded((s) => toggled(s, c.cwid))}
         selected={shortlist.has(c.cwid)}
         onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
+        table={grantTable}
         {...(badge ? { eligBadge: badge } : {})}
       />
     );
   };
 
+  // Grant path × compact density = the artboard's results TABLE: header row + grid rows in one
+  // card. Detailed keeps its card list untouched (spec), and `/edit/matcha` keeps everything.
+  const grantTable = grantPath && density === "compact";
+
+  /** The relevance floor, in either chrome. Grant path: the artboard's full-width greige toggle
+   *  bar (label inline, slate Show/Hide right, revealed rows dimmed); email path: the dashed
+   *  divider + rounded bar, verbatim. Numbers come from what the code computes today — no
+   *  threshold or predicate moved. */
+  const weakFloorSection =
+    collapsedWeak.length > 0 ? (
+      <div data-slot="matcha-floor">
+        {grantPath ? (
+          <button
+            type="button"
+            onClick={() => setShowWeak((v) => !v)}
+            aria-expanded={showWeak}
+            className={`bg-apollo-surface-2 hover:bg-apollo-rail flex w-full items-center justify-between gap-3 px-[18px] py-[11px] text-left text-[12.5px] transition-colors ${
+              grantTable ? "border-apollo-border border-t" : "my-4 rounded-lg"
+            }`}
+          >
+            <span className="text-muted-foreground">
+              Relevance floor · {collapsedWeak.length} weaker match
+              {collapsedWeak.length === 1 ? "" : "es"}, below {Math.round(TIER_GOOD * 100)}% of
+              the top result
+            </span>
+            <span className="text-apollo-slate shrink-0 font-medium">
+              {showWeak ? "Hide" : "Show"}
+            </span>
+          </button>
+        ) : (
+          <>
+            <div className="my-4 flex items-center gap-3" aria-hidden="true">
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+              <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
+                RELEVANCE FLOOR
+              </span>
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowWeak((v) => !v)}
+              aria-expanded={showWeak}
+              className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+            >
+              <span className="text-muted-foreground">
+                {collapsedWeak.length} weaker match{collapsedWeak.length === 1 ? "" : "es"} —
+                below {Math.round(TIER_GOOD * 100)}% of the top result
+              </span>
+              <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
+                {showWeak ? "Hide ↑" : "Show ↓"}
+              </span>
+            </button>
+          </>
+        )}
+        {showWeak ? (
+          /* Artboard: revealed floor rows render dimmed — they are below the floor for a
+             reason, and 0.65 says so without hiding them. */
+          <ul className={grantPath ? (grantTable ? "opacity-65" : "mt-4 opacity-65") : "mt-4"}>
+            {collapsedWeak.map(({ c, rank }) => (
+              <li key={c.cwid}>{renderResult({ c, rank })}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    ) : null;
+
+  /** Grant Matcha — the ELIGIBILITY floor, distinct from the relevance floor above. Everyone the
+   *  hard axis dropped stays reachable behind a toggle: a matcher that silently buries a
+   *  well-matched researcher teaches the officer to distrust it. Empty (so absent) on
+   *  `/edit/matcha`, which has no hard axis — the non-grant chrome branch below survives only
+   *  for that impossibility's sake (this floor cannot render without `eligibility`). */
+  const eligFloorSection =
+    ineligibleRows.length > 0 ? (
+      <div data-slot="matcha-elig-floor">
+        {grantPath ? (
+          <button
+            type="button"
+            onClick={() => setShowIneligible((v) => !v)}
+            aria-expanded={showIneligible}
+            className={`bg-apollo-surface-2 hover:bg-apollo-rail flex w-full items-center justify-between gap-3 px-[18px] py-[11px] text-left text-[12.5px] transition-colors ${
+              grantTable ? "border-apollo-border border-t" : "my-4 rounded-lg"
+            }`}
+          >
+            <span className="text-muted-foreground">
+              Filtered by eligibility · {ineligibleRows.length} researcher
+              {ineligibleRows.length === 1 ? "" : "s"}, well-matched but ineligible
+            </span>
+            <span className="text-apollo-slate shrink-0 font-medium">
+              {showIneligible ? "Hide" : "Show"}
+            </span>
+          </button>
+        ) : (
+          <>
+            <div className="my-4 flex items-center gap-3" aria-hidden="true">
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+              <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
+                FILTERED BY ELIGIBILITY
+              </span>
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowIneligible((v) => !v)}
+              aria-expanded={showIneligible}
+              className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+            >
+              <span className="text-muted-foreground">
+                {ineligibleRows.length} researcher
+                {ineligibleRows.length === 1 ? "" : "s"} filtered out — well-matched but
+                ineligible for this opportunity
+              </span>
+              <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
+                {showIneligible ? "Hide ↑" : "Show ↓"}
+              </span>
+            </button>
+          </>
+        )}
+        {showIneligible ? (
+          <>
+            <ul className={grantPath ? (grantTable ? "opacity-65" : "mt-4 opacity-65") : "mt-4"}>
+              {ineligibleShown.map(({ c, rank }) => (
+                <li key={c.cwid}>{renderResult({ c, rank, eligBadge: "filtered" })}</li>
+              ))}
+            </ul>
+            {/* The bar counts the whole exclusion (that IS the number the officer
+                needs); the list is capped by the same render bound as the main one.
+                Say so when it bites, or the bar promises N and delivers 100. */}
+            {ineligibleRows.length > ineligibleShown.length ? (
+              <p
+                className={`text-muted-foreground text-[11px] ${
+                  grantTable ? "px-[18px] py-3" : "mt-4"
+                }`}
+              >
+                Showing the first {ineligibleShown.length} of {ineligibleRows.length} — narrow
+                the results to see the rest
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    ) : null;
+
   return (
     <div data-slot="matcha-panel">
       <div className="mb-5 flex items-center gap-2">
-        {/* The always-visible subtitle is gone (warm-palette redesign): its scope copy now rides the
-            hover `ⓘ` beside the h1 — the "on the page" explainer. The nav-tab hover (`admin-subnav`)
-            keeps the "before you land here" moment; the name is opaque until then, which is why BOTH
-            hovers exist rather than one. */}
+        {/* The SCOPE copy rides the hover `ⓘ` beside the h1 — the "on the page" explainer. The
+            nav-tab hover (`admin-subnav`) keeps the "before you land here" moment; the name is
+            opaque until then, which is why BOTH hovers exist rather than one. (The idle-only
+            subtitle below is different copy — paste-flow HOW-TO, not scope — per the Matcha
+            Empty State artboard; it disappears once a search commits, the ⓘ never does.) */}
         <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
         <HoverTooltip wide text={MATCHA_BLURB}>
           {/* tabIndex so the ⓘ is keyboard-reachable: this hover now carries the tool's scope copy
@@ -1258,6 +1664,23 @@ export function MatchaPanel({
         </HoverTooltip>
       </div>
 
+      {/* Matcha Empty State — the artboard's maroon title rule + subtitle. Idle-only (the same
+          `!showAskCard` condition the ask form below renders on): once a search commits, the
+          ask card takes over as the page's headline element and this chrome steps back. */}
+      {!showAskCard ? (
+        <>
+          <div aria-hidden="true" className="bg-apollo-maroon mt-2 mb-2.5 h-[3px] w-8 rounded-[2px]" />
+          {/* Grant Matcha's corpus toggle changes what this surface ranks, so the paste-flow /
+              researcher-ranking prose below would misdescribe it — subtitle is people-path only. */}
+          {!grantMatcha ? (
+            <p className="text-muted-foreground mb-4 max-w-[620px] text-[13.5px] leading-[1.55] text-pretty">
+              Paste an opportunity description, an email from a sponsor, or a few phrases. Matcha
+              reads it, extracts the concepts, and ranks Weill Cornell researchers against them.
+            </p>
+          ) : null}
+        </>
+      ) : null}
+
       {showAskCard ? (
         /* The mockup's "THE ASK": once a search commits, the textarea is replaced by the request
            shown READ-ONLY with its pulled-out terms highlighted, titled by the extractor's essence
@@ -1266,16 +1689,51 @@ export function MatchaPanel({
         <div className="mb-4">
             <section
               data-slot="matcha-ask-card"
-              className="border-apollo-border bg-apollo-surface rounded-xl border px-5 py-4 shadow-[var(--apollo-shadow-card)]"
+              className={`border-apollo-border bg-apollo-surface border px-5 py-4 shadow-[var(--apollo-shadow-card)] ${
+                grantPath ? "rounded-[var(--apollo-radius-card)]" : "rounded-xl"
+              }`}
             >
               {/* The mockup's header row: eyebrow + title on the left, the actions on the right —
-                  ONE continuous padded card, no rule between header and body. */}
+                  ONE continuous padded card, no rule between header and body. Grant path
+                  (Matcha Redesign.dc.html): the eyebrow names the SOURCE ("…from the opportunity
+                  text" — the ask is the opportunity's own words, not something the officer
+                  typed), the summary line is the extracted concepts, and the re-run is the
+                  circular-arrows icon. NO "parsed …/scored …" dates ride this label: no data
+                  source exists for them, and the artboard's dates are fiction. */}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="text-muted-foreground block text-[11px] tracking-[0.05em] uppercase">
-                    What we read from the ask
-                  </span>
-                  {ask ? (
+                  {grantPath ? (
+                    <span className="block text-[11px] font-semibold tracking-[0.06em] text-[#6f6a5e] uppercase">
+                      Matcha · what we read from the opportunity text
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground block text-[11px] tracking-[0.05em] uppercase">
+                      What we read from the ask
+                    </span>
+                  )}
+                  {grantPath ? (
+                    concepts.length > 0 ? (
+                      /* The artboard's 16px/600 summary: every extracted concept, joined — with
+                         the active non-topical asks as a muted suffix, live under the officer's
+                         checkboxes exactly as `ask.title` is on the email path. text-[16px], not
+                         text-base — this theme remaps text-base to 15px (globals.css --text-base)
+                         and the artboard's one exact headline value for this card is 16px. */
+                      <h2 data-slot="matcha-ask" className="mt-1 text-[16px] font-semibold">
+                        {concepts.map((c) => c.term).join(", ")}
+                        {(() => {
+                          const suffix = preferences
+                            .filter((p) => activePrefs.has(p.label))
+                            .map((p) => p.label);
+                          return suffix.length > 0 ? (
+                            <span className="font-normal text-[#8b857b]">
+                              {" · "}
+                              {suffix.join(" · ")}
+                            </span>
+                          ) : null;
+                        })()}
+                      </h2>
+                    ) : null
+                  ) : ask ? (
                     <h2
                       data-slot="matcha-ask"
                       className="mt-1 text-base font-medium"
@@ -1284,93 +1742,101 @@ export function MatchaPanel({
                     </h2>
                   ) : null}
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-1.5">
-                  <Button type="button" variant="outline" onClick={() => setEditing(true)}>
-                    Edit paste
-                  </Button>
-                  <Button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void runSearch(matchedText, { include: included })}
-                    className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
-                  >
-                    {pending ? "Ranking…" : "Re-run match"}
-                  </Button>
-                  {historyDrawer}
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                  {asOf ? (
+                    /* Served from a persisted earlier run — say so, next to the button that
+                       forces a fresh one. */
+                    <span
+                      data-slot="matcha-as-of"
+                      className="text-muted-foreground mr-1 text-[12px] whitespace-nowrap"
+                    >
+                      Results from{" "}
+                      {new Date(asOf).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  ) : null}
+                  {allowEditPaste ? (
+                    <Button type="button" variant="outline" onClick={() => setEditing(true)}>
+                      Edit paste
+                    </Button>
+                  ) : null}
+                  {grantPath ? (
+                    <>
+                      {historyDrawer}
+                      {/* The artboard's circular-arrows re-run. Same handler as "Re-run match";
+                          `title` + `aria-label` because the visible content is an icon. */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        disabled={pending}
+                        onClick={() =>
+                          void runSearch(matchedText, { include: included, fresh: true })
+                        }
+                        title="Match researchers again"
+                        aria-label="Match researchers again"
+                      >
+                        <RefreshCw className="size-4" aria-hidden />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        disabled={pending}
+                        onClick={() =>
+                          void runSearch(matchedText, { include: included, fresh: true })
+                        }
+                        className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+                      >
+                        {pending ? "Ranking…" : "Re-run match"}
+                      </Button>
+                      {historyDrawer}
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
-                  300-char Outlook SafeLinks URL that carries no break opportunity. D11 — clamped to
-                  ~4 lines until "Show full text". The marks are facet-blue: the highlights ARE the
-                  provenance ("what we read"), the one place this console reaches for that accent. */}
-              <p
-                data-slot="matcha-ask-quote"
-                className={`text-muted-foreground mt-3 text-[13px] leading-[1.6] break-words whitespace-pre-wrap ${
-                  showFullText ? "" : "line-clamp-4"
-                }`}
-              >
-                {askSegments.map((s, i) =>
-                  s.term ? (
-                    // The wrapper span is `inline-flex`, so a marked RUN can no longer break across
-                    // lines — it wraps as a unit. Accepted: a mark spans one canonicalised term (a
-                    // word or two), never the 300-char SafeLinks URL `break-words` above exists for.
-                    // If a long term ever wraps badly here, that is this trade, not a mystery.
-                    <HoverTooltip key={i} text={s.term}>
-                      {/* #1780 — method marks take the rail's purple (facet-method) token, concepts
-                          the blue (facet-topic) one, so the paste read-back matches the Concept/Method
-                          rail split. */}
-                      <mark
-                        data-slot="matcha-ask-mark"
-                        data-term={s.term}
-                        data-kind={s.kind}
-                        className={`rounded-[3px] px-[3px] ${
-                          s.kind === "method"
-                            ? "bg-[var(--color-facet-method-fill)] text-[var(--color-facet-method-text)]"
-                            : "bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)]"
-                        }`}
-                      >
-                        {s.text}
-                      </mark>
-                    </HoverTooltip>
-                  ) : (
-                    <span key={i}>{s.text}</span>
-                  ),
-                )}
-              </p>
-              {/* D11 — expand the clamped paste. */}
-              <div className="mt-1.5 flex items-center gap-3.5">
-                <button
-                  type="button"
-                  onClick={() => setShowFullText((v) => !v)}
-                  className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
+              {/* Self-awareness caveat for a thin extraction — read BEFORE the highlighted terms
+                  below, so it caveats the ask rather than trailing the ranking it explains. */}
+              {matchSignal.thin ? (
+                <div
+                  role="status"
+                  data-testid="matcha-thin-signal"
+                  className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
                 >
-                  {showFullText ? "Show less ▴" : "Show full text ▾"}
-                </button>
-              </div>
-              {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
-                  form not verbatim in the paste — never because it was ignored. Shown only when
-                  something is actually unmarked; sits at the card foot, ruled off, per the mockup.
-                  ⚠ THE SECOND SENTENCE EXISTS BECAUSE THE FIRST ANSWERS THE WRONG QUESTION. This
-                  note explains why a CONCEPT is unmarked. A reader who notices unhighlighted PROSE
-                  is looking at text that was never elected a concept at all, and reads this line as
-                  the explanation for THAT — so "unmarked never means ignored" reassured about
-                  something they had not asked. Observed live (#1780): a reader asked why "induced
-                  pluripotent stem cell models" was unhighlighted; it was not a concept. Whether it
-                  SHOULD have been is extractor coverage, and is not this sentence's job — but the
-                  sentence must not imply the highlight is a complete account of the paste. */}
-              {concepts.length > 0 && askMarked < concepts.length ? (
-                <p className="text-muted-foreground border-border mt-3 border-t pt-2.5 text-[11px] leading-[1.5]">
-                  {askMarked} of {concepts.length} concepts are highlighted — a concept goes unmarked
-                  when the matcher wrote it in standard terms (an abbreviation expanded, a brand
-                  resolved). Unmarked never means ignored. Highlighting marks the concepts and methods
-                  above, so other wording in the paste going unmarked does not mean it was read — it
-                  means it is not one of them.
-                </p>
+                  <span className="font-medium">Thin match.</span>{" "}
+                  {THIN_SIGNAL_COPY[matchSignal.reason]}
+                </div>
               ) : null}
+
+              {/* The committed paste (see `askQuote`). Grant path: collapsed behind the
+                  artboard's disclosure — the opportunity's own synopsis is already on the page
+                  above this card, so its highlighted copy is a reveal, not the headline. The
+                  existing highlight markup and its explainer render unchanged inside. */}
+              {grantPath ? (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowSource((v) => !v)}
+                    aria-expanded={showSource}
+                    className="text-xs font-medium text-[var(--apollo-slate)] underline-offset-4 hover:underline"
+                  >
+                    {showSource
+                      ? "Hide source text with matched concepts ▴"
+                      : "Show source text with matched concepts ▾"}
+                  </button>
+                  {showSource ? askQuote : null}
+                </div>
+              ) : (
+                askQuote
+              )}
             </section>
           </div>
       ) : (
+        <>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1378,76 +1844,91 @@ export function MatchaPanel({
           }}
           className="mb-4"
         >
-          {/* Grant Matcha (increment 3) — the corpus toggle, mirroring the increment-1 engine
-              toggle chrome. Switching clears results back to the editable textarea so the officer
-              re-runs the ask under the new target rather than reading a stale cross-target list. */}
-          {grantMatcha ? (
-            <div
-              role="tablist"
-              aria-label="Search target"
-              className="mb-3 inline-flex rounded-md border border-[var(--color-border)] p-0.5 text-sm"
-            >
-              {(["people", "grants"] as const).map((t) => {
-                const isActive = target === t;
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    onClick={() => {
-                      if (t === target) return;
-                      setTarget(t);
-                      setStatus({ kind: "idle" });
-                      setEditing(true);
-                    }}
-                    data-testid={`matcha-target-${t}`}
-                    className={[
-                      "rounded px-3 py-1 transition-colors",
-                      isActive
-                        ? "bg-[var(--color-accent-slate)] font-medium text-white"
-                        : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                    ].join(" ")}
-                  >
-                    {t === "people" ? "Researchers" : "Opportunities"}
-                  </button>
-                );
-              })}
+          {/* Matcha Empty State — the artboard's ask card. Wraps the whole idle ask block (label,
+              corpus toggle, textarea, footer) in the file's standard apollo card chrome; the
+              recents section below stays a SIBLING, outside this card. */}
+          <div className="border-apollo-border bg-apollo-surface rounded-xl border px-[22px] py-5 shadow-[var(--apollo-shadow-card)]">
+            <label htmlFor="matcha-description" className="mb-1.5 block text-[13px] font-semibold">
+              The ask
+            </label>
+            {/* Grant Matcha (increment 3) — the corpus toggle, mirroring the increment-1 engine
+                toggle chrome. Switching clears results back to the editable textarea so the officer
+                re-runs the ask under the new target rather than reading a stale cross-target list. */}
+            {grantMatcha ? (
+              <div
+                role="tablist"
+                aria-label="Search target"
+                className="mb-3 inline-flex rounded-md border border-[var(--color-border)] p-0.5 text-sm"
+              >
+                {(["people", "grants"] as const).map((t) => {
+                  const isActive = target === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => {
+                        if (t === target) return;
+                        setTarget(t);
+                        setStatus({ kind: "idle" });
+                        setEditing(true);
+                      }}
+                      data-testid={`matcha-target-${t}`}
+                      className={[
+                        "rounded px-3 py-1 transition-colors",
+                        isActive
+                          ? "bg-[var(--color-accent-slate)] font-medium text-white"
+                          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+                      ].join(" ")}
+                    >
+                      {t === "people" ? "Researchers" : "Opportunities"}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            <textarea
+              id="matcha-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={6}
+              placeholder={
+                target === "grants"
+                  ? "Describe the research to find matching funding opportunities…"
+                  : "Paste the opportunity's description of their interest…"
+              }
+              className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
+              spellCheck={false}
+            />
+            {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
+                opportunity intake, and the mockup) is slate. */}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+              {/* Matcha Empty State — the idle hint. Empty paste: what nothing-typed-yet means
+                  (and, since nothing is sent until submit, that nothing is retained yet either).
+                  Non-empty: a live word count, so the officer has some sense of what they pasted
+                  before running it. */}
+              <span className="text-muted-foreground text-[12px]">
+                {description.trim().length === 0
+                  ? "Paste text to enable matching. Nothing is saved until you run it"
+                  : `${description.trim().split(/\s+/).length} words read`}
+              </span>
+              <Button
+                type="submit"
+                disabled={pending || description.trim().length === 0}
+                className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+              >
+                {pending
+                  ? "Ranking…"
+                  : target === "grants"
+                    ? "Rank opportunities"
+                    : "Rank researchers"}
+              </Button>
             </div>
-          ) : null}
-          <label htmlFor="matcha-description" className="mb-1.5 block text-sm font-medium">
-            The ask
-          </label>
-          <textarea
-            id="matcha-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={6}
-            placeholder={
-              target === "grants"
-                ? "Describe the research to find matching funding opportunities…"
-                : "Paste the opportunity's description of their interest…"
-            }
-            className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
-            spellCheck={false}
-          />
-          {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
-              opportunity intake, and the mockup) is slate. */}
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <Button
-              type="submit"
-              disabled={pending || description.trim().length === 0}
-              className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
-            >
-              {pending
-                ? "Ranking…"
-                : target === "grants"
-                  ? "Rank opportunities"
-                  : "Rank researchers"}
-            </Button>
-            {historyDrawer}
           </div>
         </form>
+        {recentSearchesSection}
+        </>
       )}
 
       {status.kind === "loading" ? (
@@ -1484,10 +1965,38 @@ export function MatchaPanel({
             <div className="text-muted-foreground py-4 text-sm">
               <p>No researchers matched this description.</p>
               {concepts.length === 0 ? (
-                <p className="mt-1">
-                  Nothing was extracted to search on — the ask may describe a funding mechanism or
-                  its eligibility rules rather than a research area.
-                </p>
+                <>
+                  <p className="mt-1">
+                    Nothing was extracted to search on — the ask may describe a funding mechanism or
+                    its eligibility rules rather than a research area.
+                  </p>
+                  {/* The recovery path (grant path only — the email path's ask is already the
+                      officer's own paste): the synopsis this ask was seeded from is often pure
+                      mechanism prose, while the FOA's research-strategy section carries the
+                      science the extractor needs. The grant ask itself is READ-ONLY
+                      (allowEditPaste={false}, owner-ruled), so the paste has to happen on
+                      /edit/matcha — the copy names that page. Extraction, seeding and the
+                      auto-run are deliberately untouched — this is advice, not behavior. */}
+                  {grantPath ? (
+                    <p className="mt-1">
+                      Pasting the FOA&rsquo;s research-strategy or program-description section into
+                      a new ask on the Matcha page usually finds the research area.
+                    </p>
+                  ) : null}
+                  {/* Same idiom as the synopsis header's More-information link (grant-matcha-panel):
+                      the officer needs the FOA's full text to do the recovery above, and this is
+                      where it lives. Absent `sourceUrl` — today's render, byte-identical. */}
+                  {sourceUrl ? (
+                    <a
+                      href={sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+                    >
+                      More information <ExternalLink className="size-3.5" aria-hidden />
+                    </a>
+                  ) : null}
+                </>
               ) : (
                 <p className="mt-1">
                   Searched on {concepts.map((c) => c.term).join(", ")} — no Weill Cornell
@@ -1780,8 +2289,18 @@ export function MatchaPanel({
 
               <main className="min-w-0 flex-1">
                 <div className="mb-3 flex flex-wrap items-center gap-3">
-                  <h2 className="text-base font-semibold">
-                    {resultsSummary(visible.length, filtered.length, ranked.length)}
+                  {/* Grant path — the artboard's 15px/600 header; the email path keeps 16px. */}
+                  <h2 className={grantPath ? "text-[15px] font-semibold" : "text-base font-semibold"}>
+                    {/* `eligibleRows`, not `filtered` — the header must count the post-gate stage
+                        it paints, with the gate's own count named beside it (see resultsSummary).
+                        No gate ⇒ eligibleRows === filtered and the fourth argument is 0, so
+                        `/edit/matcha` renders byte-identically. */}
+                    {resultsSummary(
+                      visible.length,
+                      eligibleRows.length,
+                      ranked.length,
+                      ineligibleRows.length,
+                    )}
                   </h2>
                   {/* gap-4 BETWEEN groups, tighter WITHIN: three adjacent pill groups with a
                       near-equal gap read as one long undifferentiated row (the D3 dial made it
@@ -1800,31 +2319,40 @@ export function MatchaPanel({
                         never hides it (D4). */}
                     {hasRecencyData ? (
                       <div role="group" aria-label="Recency" className="flex items-center gap-1">
-                        {RECENCY_TABS.map((t) => {
-                          const active =
-                            t.key === "since" ? typeof recency === "object" : recency === t.key;
-                          return (
-                            <button
-                              key={t.key}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() =>
-                                setRecency(
-                                  t.key === "since"
-                                    ? { since: currentYear - RECENCY_SINCE_DEFAULT_AGE }
-                                    : t.key,
-                                )
-                              }
-                              className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                                active
-                                  ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-                                  : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
-                              }`}
-                            >
-                              {t.label}
-                            </button>
-                          );
-                        })}
+                        {/* Grant path — the three modes ride ONE artboard segmented pill (the
+                            year sub-control stays a detached select beside it); the email path
+                            keeps its detached pills. Same buttons, same handlers, either way. */}
+                        <div className={grantPath ? SEG_TRACK : "contents"}>
+                          {RECENCY_TABS.map((t) => {
+                            const active =
+                              t.key === "since" ? typeof recency === "object" : recency === t.key;
+                            return (
+                              <button
+                                key={t.key}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() =>
+                                  setRecency(
+                                    t.key === "since"
+                                      ? { since: currentYear - RECENCY_SINCE_DEFAULT_AGE }
+                                      : t.key,
+                                  )
+                                }
+                                className={
+                                  grantPath
+                                    ? segClass(active)
+                                    : `rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                                        active
+                                          ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                                          : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                                      }`
+                                }
+                              >
+                                {grantPath && t.key === "since" ? "Since…" : t.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                         {typeof recency === "object" ? (
                           <select
                             aria-label="Recency cutoff year"
@@ -1851,20 +2379,28 @@ export function MatchaPanel({
                         read as a control with a position, not two independent pills that happen to
                         disagree. Recency stays detached: three-mode dial + year sub-control, not a
                         clean binary. The gap-4 between the three groups still does the grouping. */}
-                    <div role="group" aria-label="Result density" className="flex items-center">
+                    <div
+                      role="group"
+                      aria-label="Result density"
+                      className={grantPath ? SEG_TRACK : "flex items-center"}
+                    >
                       {(["detailed", "compact"] as const).map((d, i, arr) => (
                         <button
                           key={d}
                           type="button"
                           aria-pressed={density === d}
                           onClick={() => setDensity(d)}
-                          className={`relative border px-2.5 py-0.5 text-xs capitalize transition-colors ${
-                            i === 0 ? "rounded-l-full" : "-ml-px"
-                          } ${i === arr.length - 1 ? "rounded-r-full" : ""} ${
-                            density === d
-                              ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-                              : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
-                          }`}
+                          className={
+                            grantPath
+                              ? `${segClass(density === d)} capitalize`
+                              : `relative border px-2.5 py-0.5 text-xs capitalize transition-colors ${
+                                  i === 0 ? "rounded-l-full" : "-ml-px"
+                                } ${i === arr.length - 1 ? "rounded-r-full" : ""} ${
+                                  density === d
+                                    ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                                    : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                                }`
+                          }
                         >
                           {d}
                         </button>
@@ -1879,20 +2415,30 @@ export function MatchaPanel({
                         groups above still does the grouping, and must stay. `-ml-px` laps the
                         second pill's border onto the first's so the seam is one line, not two;
                         `z-10` on the active pill lifts its slate edge over that seam. */}
-                    <div role="group" aria-label="Sort researchers" className="flex items-center">
+                    {/* Fit/Name is NOT on the artboard — artboard omission is not a removal
+                        decision, so it stays, restyled to the same segmented idiom. */}
+                    <div
+                      role="group"
+                      aria-label="Sort researchers"
+                      className={grantPath ? SEG_TRACK : "flex items-center"}
+                    >
                       {SORT_TABS.map((t, i) => (
                         <button
                           key={t.key}
                           type="button"
                           aria-pressed={sort === t.key}
                           onClick={() => setSort(t.key)}
-                          className={`relative border px-2.5 py-0.5 text-xs transition-colors ${
-                            i === 0 ? "rounded-l-full" : "-ml-px"
-                          } ${i === SORT_TABS.length - 1 ? "rounded-r-full" : ""} ${
-                            sort === t.key
-                              ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-                              : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
-                          }`}
+                          className={
+                            grantPath
+                              ? segClass(sort === t.key)
+                              : `relative border px-2.5 py-0.5 text-xs transition-colors ${
+                                  i === 0 ? "rounded-l-full" : "-ml-px"
+                                } ${i === SORT_TABS.length - 1 ? "rounded-r-full" : ""} ${
+                                  sort === t.key
+                                    ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                                    : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                                }`
+                          }
                         >
                           {t.label}
                         </button>
@@ -1973,103 +2519,91 @@ export function MatchaPanel({
                   </div>
                 ) : null}
 
-                {visible.length === 0 ? (
+                {visible.length === 0 && ineligibleRows.length === 0 ? (
+                  /* Genuinely empty — the facets matched nobody and the gate hid nobody. The
+                     gate-hid-everyone case is NOT this branch: it renders below, where the
+                     eligibility fold can come with it. */
                   <p className="text-muted-foreground py-4 text-sm">
                     No researchers match the selected filters.
                   </p>
                 ) : (
                   <>
-                    <ul>
-                      {primaryRows.map(({ c, rank }) => (
-                        <li key={c.cwid}>{renderResult({ c, rank })}</li>
-                      ))}
-                    </ul>
-
-                    {/* The relevance floor: everything in the weak tier collapses into one bar the
-                        officer can open — a toggle, never a silent cut. The divider names the line. */}
-                    {collapsedWeak.length > 0 ? (
-                      <div data-slot="matcha-floor">
-                        <div className="my-4 flex items-center gap-3" aria-hidden="true">
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
-                          <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
-                            RELEVANCE FLOOR
-                          </span>
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowWeak((v) => !v)}
-                          aria-expanded={showWeak}
-                          className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+                    {(() => {
+                      /* Zero-results fix (2026-08-21): when the hard career-stage gate hides
+                         EVERY match (a postdoc-only K99 against a faculty-dominant pool), the
+                         old empty-state branch swallowed the eligibility fold with the rows —
+                         "No researchers match the selected filters" over nothing, with every
+                         match one unreachable click away. Say what happened, in the rail's own
+                         vocabulary (the "Career stage" axis under "Eligibility"), and keep the
+                         fold on screen. NO predicate moved: the gate still hides exactly the
+                         same rows, and the fold's own show/hide behavior is unchanged. */
+                      const gateHidAll = visible.length === 0;
+                      const explain = gateHidAll ? (
+                        <div
+                          data-slot="matcha-gate-empty"
+                          className="text-muted-foreground py-4 text-sm"
                         >
-                          <span className="text-muted-foreground">
-                            {collapsedWeak.length} weaker match{collapsedWeak.length === 1 ? "" : "es"}{" "}
-                            — below {Math.round(TIER_GOOD * 100)}% of the top result
-                          </span>
-                          <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
-                            {showWeak ? "Hide ↑" : "Show ↓"}
-                          </span>
-                        </button>
-                        {showWeak ? (
-                          <ul className="mt-4">
-                            {collapsedWeak.map(({ c, rank }) => (
-                              <li key={c.cwid}>{renderResult({ c, rank })}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {/* Grant Matcha — the ELIGIBILITY floor, distinct from the relevance floor above.
-                        Everyone the hard axis dropped stays reachable behind a toggle: a matcher that
-                        silently buries a well-matched researcher teaches the officer to distrust it.
-                        Empty (so absent) on `/edit/matcha`, which has no hard axis. */}
-                    {ineligibleRows.length > 0 ? (
-                      <div data-slot="matcha-elig-floor">
-                        <div className="my-4 flex items-center gap-3" aria-hidden="true">
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
-                          <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
-                            FILTERED BY ELIGIBILITY
-                          </span>
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
+                          <p>
+                            All {ineligibleRows.length} matched researcher
+                            {ineligibleRows.length === 1 ? " is" : "s are"} hidden by the Career
+                            stage filter.
+                          </p>
+                          <p className="mt-1">
+                            Uncheck Career stage under Eligibility in the rail to reveal them,
+                            badged as ineligible.
+                          </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowIneligible((v) => !v)}
-                          aria-expanded={showIneligible}
-                          className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
-                        >
-                          <span className="text-muted-foreground">
-                            {ineligibleRows.length} researcher
-                            {ineligibleRows.length === 1 ? "" : "s"} filtered out — well-matched but
-                            ineligible for this opportunity
-                          </span>
-                          <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
-                            {showIneligible ? "Hide ↑" : "Show ↓"}
-                          </span>
-                        </button>
-                        {showIneligible ? (
+                      ) : null;
+                      const primaryList = gateHidAll ? null : (
+                        <ul>
+                          {primaryRows.map(({ c, rank }) => (
+                            <li key={c.cwid}>{renderResult({ c, rank })}</li>
+                          ))}
+                        </ul>
+                      );
+                      // Grant path × compact — the artboard's TABLE: one card (its own x-scroll,
+                      // so a narrow console never squeezes the grid), header row on greige, the
+                      // rows + both floor bars inside so their columns and rules line up. The
+                      // header's leading spacer mirrors the row's checkbox cell (w-[44px]).
+                      if (!grantTable) {
+                        return (
                           <>
-                            <ul className="mt-4">
-                              {ineligibleShown.map(({ c, rank }) => (
-                                <li key={c.cwid}>
-                                  {renderResult({ c, rank, eligBadge: "filtered" })}
-                                </li>
-                              ))}
-                            </ul>
-                            {/* The bar counts the whole exclusion (that IS the number the officer
-                                needs); the list is capped by the same render bound as the main one.
-                                Say so when it bites, or the bar promises N and delivers 100. */}
-                            {ineligibleRows.length > ineligibleShown.length ? (
-                              <p className="text-muted-foreground mt-4 text-[11px]">
-                                Showing the first {ineligibleShown.length} of{" "}
-                                {ineligibleRows.length} — narrow the results to see the rest
-                              </p>
-                            ) : null}
+                            {explain}
+                            {primaryList}
+                            {weakFloorSection}
+                            {eligFloorSection}
                           </>
-                        ) : null}
-                      </div>
-                    ) : null}
+                        );
+                      }
+                      return (
+                        <>
+                          {explain}
+                          <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
+                            <div className="min-w-[660px]">
+                              {/* The header row stays even when the gate hid every row — it is
+                                  what labels the columns the fold reveals. */}
+                              <div className="bg-apollo-surface-2 flex items-center text-[10.5px] font-semibold tracking-[0.06em] text-[#6f6a5e] uppercase">
+                                <span className="w-[44px] shrink-0" aria-hidden />
+                                <div
+                                  className="grid flex-1 items-center gap-3 py-[11px] pr-[18px]"
+                                  style={{ gridTemplateColumns: GRANT_TABLE_COLUMNS }}
+                                >
+                                  <span className="text-right">#</span>
+                                  <span>Researcher</span>
+                                  <span>Match</span>
+                                  <span>Evidence · concepts hit</span>
+                                  <span>Latest work</span>
+                                  <span aria-hidden />
+                                </div>
+                              </div>
+                              {primaryList}
+                              {weakFloorSection}
+                              {eligFloorSection}
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
 
                     {/* Excluded entirely (not collapsed): scholars the spine ranked but shipped no
                         research-match evidence for. A count, not names — a results view names people
@@ -2170,7 +2704,7 @@ function GrantResultCard({
         {facts.length > 0 ? `${facts.join(" · ")} · ` : ""}
         <span
           className={
-            urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined
+            urgency === "soon" ? "font-medium text-apollo-amber" : undefined
           }
         >
           {deadlineLabel(candidate.dueDate, candidate.status)}
@@ -2652,6 +3186,7 @@ function CompactRow({
   onExpand,
   selected,
   onSelect,
+  table = false,
   eligBadge,
 }: {
   candidate: MatchaCandidate;
@@ -2664,6 +3199,10 @@ function CompactRow({
   /** Shortlist membership, and its toggle. Per-ask; owned by the panel (see `shortlist`). */
   selected: boolean;
   onSelect: () => void;
+  /** Grant-path reskin — render as the artboard's TABLE row (`GRANT_TABLE_COLUMNS`) instead of
+   *  the flex row. Same checkbox, same expand button, same slots; chrome only. False on
+   *  `/edit/matcha`, whose row is untouched. */
+  table?: boolean;
   /** Grant Matcha — inline eligibility pill. Absent ⇒ no pill (the `/edit/matcha` case). */
   eligBadge?: EligBadge;
 }) {
@@ -2690,6 +3229,105 @@ function CompactRow({
   const tier = fitTier(candidate.fusedScore, topScore);
   const year = latestEvidenceYear(candidate);
   const stale = year != null && staleYear != null && year < staleYear;
+  if (table) {
+    // Grant-path reskin — the artboard's grid row. Structure is the SAME two siblings as the
+    // flex row below (checkbox cell + expand button), for the same invalid-HTML reason; the
+    // button carries the grid so its cells align under the header row, which mirrors the
+    // 44px checkbox cell with a spacer. The evidence cell swaps the segmented strip for the
+    // artboard's single fill bar (fraction = concepts hit); the per-segment detail stays one
+    // click away on the expanded card. Stale years turn amber here (the artboard's tone) but
+    // the boundary is still `staleBefore` — under "Any" nothing claims stale, exactly as the
+    // flex row behaves.
+    const hitFraction =
+      coverage.length > 0 ? Math.round((asksCovered / coverage.length) * 100) : 0;
+    return (
+      <div
+        data-slot="matcha-compact-row"
+        className="border-apollo-border hover:bg-apollo-surface-2 flex w-full items-center border-t transition-colors"
+      >
+        <span className="flex w-[44px] shrink-0 items-center justify-center">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onSelect}
+            aria-label={`Shortlist ${candidate.name}`}
+            className="size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+          />
+        </span>
+        <button
+          type="button"
+          onClick={onExpand}
+          aria-label={`Expand ${candidate.name}`}
+          className="grid min-w-0 flex-1 items-center gap-3 py-[11px] pr-[18px] text-left"
+          style={{ gridTemplateColumns: GRANT_TABLE_COLUMNS }}
+        >
+          <span className="text-muted-foreground text-right text-xs tabular-nums">{rank}</span>
+          <span className="min-w-0">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-[13.5px] font-semibold">{candidate.name}</span>
+              {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
+            </span>
+            {candidate.title ? (
+              <span className="text-muted-foreground block truncate text-xs">
+                {candidate.title}
+              </span>
+            ) : null}
+          </span>
+          <span>
+            <span
+              className={`inline-flex rounded-full px-[9px] py-[2px] text-[11.5px] font-semibold capitalize ${GRANT_TIER_CLASS[tier]}`}
+            >
+              {tier}
+            </span>
+          </span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="bg-apollo-surface-2 h-[6px] min-w-0 flex-1 overflow-hidden rounded-[3px]">
+              <span
+                aria-hidden
+                className="bg-apollo-slate block h-full rounded-[3px]"
+                style={{ width: `${hitFraction}%` }}
+              />
+            </span>
+            <HoverTooltip
+              wide
+              text={`Ranks under ${asksCovered} of the ${coverage.length} concepts this opportunity calls for — every concept the scholar ranks under, not only the ones we can show evidence for. Open the row to see which.`}
+            >
+              <span
+                className="text-muted-foreground shrink-0 text-right text-xs tabular-nums"
+                data-slot="matcha-asks-count"
+              >
+                {asksCovered}/{coverage.length}
+              </span>
+            </HoverTooltip>
+          </span>
+          {stale ? (
+            <HoverTooltip
+              wide
+              triggerClassName="justify-self-end"
+              text={`Latest evidence predates ${staleYear} — recency is down-weighting this match`}
+            >
+              <span
+                data-slot="matcha-latest-year"
+                className="text-apollo-amber text-right text-xs tabular-nums"
+              >
+                {year != null ? year : ""}
+              </span>
+            </HoverTooltip>
+          ) : (
+            <span
+              data-slot="matcha-latest-year"
+              className="text-right text-xs tabular-nums text-[#1a1a1a]"
+            >
+              {year != null ? year : ""}
+            </span>
+          )}
+          <span className="text-muted-foreground justify-self-end text-xs" aria-hidden="true">
+            ›
+          </span>
+        </button>
+      </div>
+    );
+  }
   return (
     // THE ROOT IS A DIV, AND IT HAS TO BE. It was a `<button>` — the whole row was the expand
     // target — and a checkbox cannot live inside one: interactive content nested in a button is

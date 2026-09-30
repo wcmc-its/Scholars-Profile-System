@@ -96,7 +96,7 @@ export function selectV2Cohort<T extends { cwid: string }>(
 /** A scholar can only be matched when they have ≥`min` trusted PMIDs to
  *  discriminate candidates against. `min` defaults to 1 (any PMID); raise it via
  *  REPORTER_MATCH_V2_MIN_PMIDS to trim the cohort to higher-yield scholars — the
- *  matcher needs PMIDs anyway and auto-lock needs K≥3, so very-low-PMID scholars
+ *  matcher needs PMIDs anyway and auto-lock needs K≥2, so very-low-PMID scholars
  *  rarely lock. `min` is floored at 1 so 0 trusted PMIDs always skips (§4.1,
  *  case #1). Pure. */
 export function hasDiscriminator(trustedPmidCount: number, min = 1): boolean {
@@ -140,10 +140,14 @@ export type V2WriteOutcome =
 
 /**
  * Translate a `rankByPmidOverlap` result into a write outcome (§4.4/§4.5):
- *   - autoLock set (K≥3 + separation)  → auto-lock the winner.
- *   - else a separated suggestion (K=2) → pending proposal for the top one.
+ *   - autoLock set (K≥2 + separation)  → auto-lock the winner.
+ *   - else a separated suggestion       → pending proposal for the top one.
  *   - else                              → nothing (ambiguous / recall miss).
- * Pure.
+ * K_AUTOLOCK == K_SUGGEST as of the K=2 lowering (`lib/edit/reporter-grants.ts`),
+ * so the middle branch is currently unreachable from a real `rankByPmidOverlap`
+ * call — a separated winner always clears both floors at once. It stays here
+ * because `decideWriteOutcome` is a pure mapping over any `MatchResult`, and a
+ * future K_SUGGEST < K_AUTOLOCK split would use it again. Pure.
  */
 export function decideWriteOutcome(match: MatchResult): V2WriteOutcome {
   if (match.autoLock !== null) {
@@ -187,6 +191,11 @@ export interface SampleGrant {
   title: string;
   startYear: number | null;
   endYear: number | null;
+  /** Most-recent-FY award number (e.g. "5R01CA245678-04") — the source for the
+   *  card's "funding source" column (`parseFunderEyebrow`/`parseNihAward`). */
+  awardNumber: string | null;
+  /** Most-recent-FY appl_id — keys the outbound RePORTER project-detail link. */
+  applId: number | null;
 }
 
 /** The card-summary fields persisted on a `ReporterProfileCandidate` row. */
@@ -230,6 +239,8 @@ export function summarizeCandidateGrants(
       title: g.title?.trim() || `(untitled grant ${g.coreProjectNum})`,
       startYear: yearOf(g.startDate),
       endYear: yearOf(g.endDate),
+      awardNumber: g.awardNumber,
+      applId: g.applId,
     }));
 
   return { grantCount: netNewGroups.length, candidateOrgs: orgs.join(", "), sampleGrants };

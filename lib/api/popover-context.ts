@@ -11,7 +11,13 @@
  */
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
-import { loadHiddenAuthorshipCounts } from "@/lib/api/manual-layer";
+import {
+  loadHiddenAuthorshipCounts,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
+import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
+import { loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 
 export type PopoverContextHeader = {
@@ -20,6 +26,9 @@ export type PopoverContextHeader = {
   postnominal: string | null;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  /** Bare ED primary-organization code; the card renders it through
+   *  `visibleInstitutionName` (non-WCMC only). */
+  primaryOrgCode: string | null;
   slug: string | null;
   identityImageEndpoint: string;
   totalPubCount: number;
@@ -87,6 +96,7 @@ export async function fetchPopoverHeader(
       postnominal: true,
       primaryTitle: true,
       primaryDepartment: true,
+      primaryOrgCode: true,
       slug: true,
       status: true,
       deletedAt: true,
@@ -137,6 +147,7 @@ export async function fetchPopoverHeader(
     postnominal: scholar.postnominal,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
+    primaryOrgCode: scholar.primaryOrgCode ?? null,
     slug: scholar.status === "active" ? scholar.slug : null,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     totalPubCount: Math.max(0, scholar._count.authorships - hiddenPubs),
@@ -319,8 +330,91 @@ export async function fetchTopicRank(
 }
 
 /**
+ * Taxonomy-card popover summary (topic / method pages): how many of the
+ * scholar's papers fall in the page's scope, how many of those they led
+ * (confirmed first or senior author), and their two most recent.
+ */
+export type ScopeSummary = {
+  pubCount: number;
+  leadCount: number;
+  recent: Array<RecentPub & { journal: string | null }>;
+};
+
+/** The scholar's pmids in a topic, minus their per-author hides (ADR-005) — the
+ *  same set the topic feed's `?cwid=` filter shows. */
+export async function fetchTopicScopePmids(cwid: string, topicId: string): Promise<string[]> {
+  if (!cwid || !topicId) return [];
+  const [rows, hidden] = await Promise.all([
+    prisma.publicationTopic.findMany({
+      where: { cwid, parentTopicId: topicId },
+      select: { pmid: true },
+    }),
+    loadHiddenAuthorshipPmids(cwid),
+  ]);
+  const hiddenSet = new Set(hidden);
+  return rows.map((r) => r.pmid).filter((p) => !hiddenSet.has(p));
+}
+
+/** Counts what the page's feed shows for this scholar by default: research
+ *  articles only (`FEED_EXCLUDED_TYPES`, the topic count spans every relevance
+ *  tier as the feed heading does), with taken-down / derived-dark papers dropped
+ *  (#356) — this endpoint is public, so a takedown must not leak a title. */
+export async function summarizeScope(cwid: string, pmids: string[]): Promise<ScopeSummary | null> {
+  if (!cwid || pmids.length === 0) return null;
+  const suppressions = await loadPublicationSuppressions(pmids, prisma);
+  const dark = await resolveDarkPmids(pmids, suppressions, prisma);
+  const research = await prisma.publication.findMany({
+    where: {
+      pmid: { in: pmids.filter((p) => !dark.has(p)) },
+      publicationType: { notIn: [...FEED_EXCLUDED_TYPES] },
+    },
+    orderBy: [{ year: "desc" }, { pmid: "desc" }],
+    select: { pmid: true },
+  });
+  if (research.length === 0) return null;
+  const researchPmids = research.map((r) => r.pmid);
+  const [leadRows, recent] = await Promise.all([
+    prisma.publicationAuthor.findMany({
+      where: {
+        cwid,
+        pmid: { in: researchPmids },
+        isConfirmed: true,
+        OR: [{ isFirst: true }, { isLast: true }],
+      },
+      select: { pmid: true },
+      distinct: ["pmid"],
+    }),
+    prisma.publication.findMany({
+      where: { pmid: { in: researchPmids.slice(0, 2) } },
+      orderBy: [{ year: "desc" }, { pmid: "desc" }],
+      select: { pmid: true, title: true, journal: true, year: true },
+    }),
+  ]);
+  return { pubCount: research.length, leadCount: leadRows.length, recent };
+}
+
+/**
  * Authorship role of a scholar on a specific publication. Powers the role
  * pill on pub-chip / co-author surfaces.
+ *
+ * `cwid IS NOT NULL` scopes the count to WCM authorship rows. `firstCount` /
+ * `lastCount` below count EVERY returned row and drive the "first" vs
+ * "co-first" ("senior" vs "co-senior") wording of the role pill, which is a
+ * claim about WCM co-authorship — a non-WCM byline carrying its own is_first
+ * would reword it. No deployed environment holds such a row, and the reason
+ * is structural rather than a row count: the only writer that runs deployed
+ * is `buildAuthorshipRows` (etl/reciter/index.ts), which skips every author
+ * outside `ourCwidSet` and returns an `AuthorshipRow` whose `cwid` is a
+ * non-nullable `string`, and the FK that could mint one with no writer
+ * involved (`PublicationAuthor.scholar` is `onDelete: SetNull`) never fires,
+ * because no deployed path hard-deletes a `Scholar` — only `seed/index.ts`
+ * does, and departures soft-delete via `deletedAt`. Staging was counted as a
+ * check on that argument (0 null-cwid rows of 285,587, 2026-09); other
+ * environments were not counted, and the argument covers them without it.
+ * `seed/publications.ts` is the one writer of non-WCM rows and does set
+ * is_first on them, so on a seeded dev database this filter changes the
+ * counts rather than being a no-op. Nothing under .github/workflows/ runs
+ * `npm run seed`, so no CI job exercises that difference.
  */
 export async function fetchAuthorshipOnPub(
   cwid: string,
@@ -339,6 +433,7 @@ export async function fetchAuthorshipOnPub(
       FROM publication_author
      WHERE pmid = ${pmid}
        AND is_confirmed = 1
+       AND cwid IS NOT NULL
   `.catch(() => []);
   if (rows.length === 0) return null;
   const me = rows.find((r) => r.cwid === cwid);

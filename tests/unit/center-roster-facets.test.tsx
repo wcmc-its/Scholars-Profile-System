@@ -255,3 +255,73 @@ describe("RosterFacet — a selection past the collapse cap stays visible", () =
     expect(labels.some((t) => /ELISA/.test(t))).toBe(false);
   });
 });
+
+/**
+ * Unit Page v2 — `variant="unit"` (dept / division / center rosters): each
+ * option is a DS Checkbox + <label> + count row. The accessible name joins the
+ * label and count cells; toggling fires `onToggle`; zero-count options are
+ * disabled. The default variant above (the /edit rails) is unchanged.
+ */
+describe("RosterFacet — unit variant (Unit Page v2)", () => {
+  it("renders checkbox rows named '{label} {count}' that toggle via onToggle", () => {
+    let toggled: string | null = null;
+    render(
+      <RosterFacet
+        variant="unit"
+        title="Division"
+        options={OPTS.slice(0, 3)}
+        selected={new Set(["v1::MRI"])}
+        onToggle={(v) => {
+          toggled = v;
+        }}
+      />,
+    );
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    const mri = screen.getByRole("checkbox", { name: /^MRI 9$/ });
+    expect(mri.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Sequencing 8$/ }));
+    expect(toggled).toBe("v2::Sequencing");
+  });
+
+  it("clicking the label toggles too, and a zero-count option is disabled", () => {
+    let toggled: string | null = null;
+    render(
+      <RosterFacet
+        variant="unit"
+        title="Division"
+        options={[
+          { value: "a", label: "Cardiology", count: 3 },
+          { value: "b", label: "Nephrology", count: 0 },
+        ]}
+        selected={empty}
+        onToggle={(v) => {
+          toggled = v;
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText("Cardiology"));
+    expect(toggled).toBe("a");
+    expect(
+      (screen.getByRole("checkbox", { name: /^Nephrology/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("keeps the search + collapse behavior (search input, Show all N)", () => {
+    render(
+      <RosterFacet
+        variant="unit"
+        title="Methods & tools"
+        options={OPTS}
+        selected={empty}
+        onToggle={noop}
+        collapseAfter={8}
+        searchable
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: /Search Methods/ })).toBeTruthy();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(8);
+    expect(screen.getByRole("button", { name: /Show all 10/ })).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "elisa" } });
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+  });
+});

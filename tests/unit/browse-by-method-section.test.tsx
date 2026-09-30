@@ -71,8 +71,8 @@ describe("BrowseByMethodSection", () => {
   it("shows the live family count on each card", () => {
     render(<BrowseByMethodSection data={data} />);
     // 47 appears twice (two categories); 110 once.
-    expect(screen.getAllByText("47").length).toBe(2);
-    expect(screen.getByText("110")).toBeTruthy();
+    expect(screen.getAllByText("47 families").length).toBe(2);
+    expect(screen.getByText("110 families")).toBeTruthy();
   });
 
   it("renders the representative-families scent line when present", () => {
@@ -90,7 +90,7 @@ describe("BrowseByMethodSection", () => {
       .getByText("Molecular & Biochemical Reagents")
       .closest("a")!;
     // The card text is only the label + count — no separator dot for a scent.
-    expect(card.textContent).toBe("Molecular & Biochemical Reagents110");
+    expect(card.textContent).toBe("Molecular & Biochemical Reagents110 families");
     expect(card.textContent).not.toContain("·");
   });
 
@@ -123,5 +123,12 @@ describe("BrowseByMethodSection", () => {
       />,
     );
     expect(screen.queryByRole("heading")).toBeNull();
+  });
+
+  it("sorts the Other Methods catch-all last", () => {
+    const other = { ...data.categories[0], slug: "other", label: "Other Methods" };
+    render(<BrowseByMethodSection data={{ ...data, categories: [other, ...data.categories] }} />);
+    const labels = screen.getAllByRole("link").map((a) => a.getAttribute("aria-label") ?? "").filter(Boolean);
+    expect(labels.at(-1)).toMatch(/^Other Methods,/);
   });
 });

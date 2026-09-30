@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HEADSHOT_STALE_DAYS,
   classifyHeadshotStatus,
+  headshotIndeterminateLimit,
   headshotStaleBefore,
   probeHeadshot,
 } from "@/lib/headshot-presence";
@@ -93,5 +94,17 @@ describe("headshot staleness threshold", () => {
     const now = new Date("2026-08-09T12:04:00.000Z");
     const checkedAt = new Date("2026-08-09T12:00:30.000Z");
     expect(checkedAt.getTime()).toBeGreaterThan(headshotStaleBefore(now).getTime());
+  });
+});
+
+describe("headshotIndeterminateLimit (#2264 follow-up)", () => {
+  it("is 5% of the scanned cohort, rounded up", () => {
+    expect(headshotIndeterminateLimit(9_400)).toBe(470);
+    expect(headshotIndeterminateLimit(1_001)).toBe(51);
+  });
+
+  it("never drops below 25, so a small incremental batch cannot trip on a few blips", () => {
+    expect(headshotIndeterminateLimit(0)).toBe(25);
+    expect(headshotIndeterminateLimit(100)).toBe(25);
   });
 });

@@ -19,11 +19,10 @@ export function isGrantRecsEnabled(): boolean {
 
 /**
  * The `GRANT_MATCHA` feature flag (Grant Matcha — convergence plan 2026-07-22, increment 1).
- * Off by default. When on, the `/edit/find-researchers` matched view gains a "Matcha" mode
- * that ranks researchers for the selected opportunity through the Matcha spine (extractor →
- * per-concept OpenSearch fan-out → RRF fuse) instead of the structured topic-vector matcher —
- * seeding the ask from the opportunity's title + synopsis. The existing topic-vector view stays
- * the default; this is a strict, reversible add (the retire-gate hasn't cleared).
+ * Off by default. When on, `/edit/grant-matcha` ranks researchers for the selected opportunity
+ * through the Matcha spine (extractor → per-concept OpenSearch fan-out → RRF fuse), seeding the
+ * ask from the opportunity's title + synopsis. (Its original home, a "Matcha" mode on the
+ * `/edit/find-researchers` matched view, was retired by the find-researchers sunset.)
  *
  * Depends on `MATCHA` being on in the env: the Matcha mode POSTs to `/api/edit/matcha`, which
  * `isMatchaEnabled()` gates. Wire per-env in `cdk/lib/app-stack.ts` (value "off" in both envs,
@@ -32,4 +31,16 @@ export function isGrantRecsEnabled(): boolean {
  */
 export function isGrantMatchaEnabled(): boolean {
   return process.env.GRANT_MATCHA === "on";
+}
+
+/**
+ * The `MATCHA_ADMIN` feature flag (matcha-admin plan Phase 1b). Off by default.
+ * Gates `/api/edit/opportunity-admin` — the corpus suppress/restore surface
+ * (the route 404s while off, the dark-ship posture) and, later, the admin
+ * affordances on the Browse tab. Wire per-env in `cdk/lib/app-stack.ts`
+ * (value "off" in both envs, flip staging on to activate), not just
+ * `.env.local`, so local-on / deployed-off can't ship silently (flag parity).
+ */
+export function isMatchaAdminEnabled(): boolean {
+  return process.env.MATCHA_ADMIN === "on";
 }

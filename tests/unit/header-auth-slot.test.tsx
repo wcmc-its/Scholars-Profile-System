@@ -89,7 +89,8 @@ describe("HeaderAuthSlot — signed in (server prop, cookie-forwarding surface)"
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     render(<HeaderAuthSlot isAuthenticated scholar={null} />);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // The one call is AccountMenu's own mount probe; the slot adds none.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
 

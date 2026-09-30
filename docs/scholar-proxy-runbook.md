@@ -78,7 +78,7 @@ are confirmed applied there. **Prod** has not yet had #779 deployed (prod CD is 
    `/edit/scholar/ras2022`. (A proxy serving *multiple* scholars instead lands on a picker —
    "Profiles you edit as a proxy" — and chooses one.)
 3. **Expect** an **info banner** above the cards: *"You are editing **Rahul Sharma**'s profile
-   as their designated proxy"* (visually distinct from the amber superuser banner).
+   as their designated proxy"* (same slate-tint shield notice as the superuser banner; the copy names the role).
 4. Edit the **Overview** → **Save**. **Expect 200**.
 5. Confirm the change is live on the public profile `/scholars/<sharma-slug>`.
 6. **Hide one of the scholar's own publications** (the second in-scope proxy action): on the
@@ -125,7 +125,7 @@ broader one — is what's exercised). Grant the role via the #540 Administrators
 
 1. Sign in as that **unit administrator**. Open `/edit/scholar/<member-cwid>` (a scholar in your unit).
 2. **Expect** an info banner *"You are editing **<name>**'s profile as an administrator of their
-   {department|division}, **<unit name>**"* — visually distinct from the #779 proxy + superuser
+   {department|division}, **<unit name>**"* — same notice chrome as the #779 proxy + superuser
    banners. (Live on master — P2.)
 3. Edit the **Overview** → **Save** → **Expect 200**; confirm it is live on `/scholars/<slug>`.
 4. **Hide one of the member's OWN publications** → **Expect 200**; the pub drops from their profile.

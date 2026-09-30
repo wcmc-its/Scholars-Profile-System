@@ -24,8 +24,29 @@ model Scholar {
   /// postnominal credential at render time. Null for scholars with no SOR
   /// row (postdocs, doctoral students, non-faculty).
   postnominal             String?   @db.VarChar(64)
+  /// The RESOLVED display title — what every render surface reads (search
+  /// hits, `/og` cards, popovers, result cards, the profile sidebar, `/edit`).
+  /// Written by the ED ETL's title-resolution post-pass, NOT by the scholar
+  /// upsert: the chief/center-head inputs do not exist yet at upsert time.
+  /// Precedence and the `field_override(primaryTitle)` escape hatch live in
+  /// `lib/scholar-title.ts`; the raw inputs it resolves from are the two
+  /// columns below.
   primaryTitle            String?   @map("primary_title") @db.VarChar(255)
+  /// ED `weillCornellEduPrimaryTitle`, raw (annotation-stripped only). Kept
+  /// beside the resolved value so the `/edit` picker can offer "Primary title"
+  /// as an option after a higher tier has won, without re-reading LDAP.
+  edPrimaryTitle          String?   @map("ed_primary_title") @db.VarChar(255)
+  /// ED `weillCornellEduWorkingTitle`, raw (annotation-stripped only). Probed
+  /// 2026-09-22: present on 49 of 8,769 active academic entries, single-valued,
+  /// people branch only — the faculty SOR does not carry it.
+  workingTitle            String?   @map("working_title") @db.VarChar(255)
   primaryDepartment       String?   @map("primary_department") @db.VarChar(255)
+  /// ED `weillCornellEduPrimaryOrganization` — institution code of the primary
+  /// appointment (`WCMC`, `WCMC-Q`, `HMC`, `SIDRA`, `HSS`, ...). Drives the
+  /// `institution` unit-admin axis (lib/institutions.ts): an owner/curator of
+  /// `unit_admin(institution, <code>)` proxy-edits every scholar carrying it.
+  /// NULL until the next ED ETL run.
+  primaryOrgCode          String?   @map("primary_org_code") @db.VarChar(32)
   email                   String?   @db.VarChar(255)
   /// Effective email release audience derived from the multi-valued Web Directory
   /// attribute `weillCornellEduReleaseCode;mail` (most-permissive-wins, fail-closed).
@@ -92,12 +113,24 @@ model Scholar {
   /// mentor scholar doesn't cascade-delete the postdoc.
   postdoctoralMentorCwid  String?   @map("postdoctoral_mentor_cwid") @db.VarChar(32)
   /// Issue #171 — ORCID iD (https://orcid.org/0000-0002-1825-0097 form,
-  /// stored as the bare 19-char identifier "0000-0002-1825-0097"). Sourced
-  /// from the WCM Identity DynamoDB table (etl/identity), keyed on `uid`
-  /// (= cwid). Null when the scholar has not registered an ORCID. Used by
-  /// `lib/seo/jsonld.ts` to append an `https://orcid.org/<id>` URL to the
-  /// scholar's Person.sameAs for AI/LLM crawler entity resolution.
+  /// stored as the bare 19-char identifier "0000-0002-1825-0097"). SPS's
+  /// belief about the person's iD, from either of two writers: the WCM
+  /// Identity DynamoDB table (etl/identity, keyed on `uid` = cwid) or the
+  /// person confirming it in `/edit` (which also stamps `orcidConfirmedAt`).
+  /// Whichever wrote it, `etl/orcid-push` copies it back into Identity every
+  /// night, so this column is the durable record while the Institutional
+  /// Client's rebuild still wipes `Identity.orcid` (IC #155). Null when no
+  /// iD is on file. Used by `lib/seo/jsonld.ts` to append an
+  /// `https://orcid.org/<id>` URL to the scholar's Person.sameAs for AI/LLM
+  /// crawler entity resolution.
   orcid                   String?   @db.VarChar(19)
+  /// When the PERSON (or their proxy) confirmed `orcid` in SPS via the
+  /// `/edit` confirm route. Null when the value came from Identity
+  /// (etl/identity) — provenance for `/edit/orcid-coverage`'s confirmed
+  /// split and for the identity ETL's conflict rule: when Identity holds a
+  /// DIFFERENT non-null iD than a confirmed one, Identity wins (it is the
+  /// authority) and this is cleared. Cleared with `orcid` on Remove.
+  orcidConfirmedAt        DateTime? @map("orcid_confirmed_at")
   /// Issue #742 v3.1 C3 — ReciterAI FACULTY# rollup metrics (DynamoDB), for the
   /// overview generator's faculty-scale framing. Nullable so the additive
   /// migration applies cleanly; backfilled by etl/dynamodb on next run.
@@ -132,12 +165,15 @@ model Scholar {
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
+  orcidCandidates      OrcidCandidate[]
+  orcidDismissals      OrcidDismissal[]
   reporterCandidates   ReporterProfileCandidate[]
   clinicalTrials       PersonClinicalTrial[]
   datasetDeposits      PersonDatasetDeposit[]
   overviewGenerations  OverviewGeneration[]
   biosketchGenerations BiosketchGeneration[]
   overviewProvenance   OverviewProvenance?
+  overviewVersions     OverviewVersion[]
   overviewSelection    OverviewSourceSelection?
   scholarTools         ScholarTool[]
   scholarFamilies      ScholarFamily[]
@@ -153,6 +189,7 @@ model Scholar {
   @@index([roleCategory])
   @@index([deptCode])
   @@index([divCode])
+  @@index([primaryOrgCode])
   @@index([postdoctoralMentorCwid])
   @@map("scholar")
 }
@@ -172,11 +209,21 @@ model Appointment {
   isInterim       Boolean   @default(false) @map("is_interim")
   externalId      String    @unique @map("external_id") @db.VarChar(128) // ED appointment ID; #352 reconcile key
   source          String    @default("ED") @db.VarChar(32)
-  // #1323 — historical (source "ED-HISTORICAL") appointments are hidden from the
-  // public profile until a curator or comms_steward reveals one. False for every
-  // imported historical row; irrelevant for active sources (always shown). The CV
-  // export ignores this flag (historical always exported).
-  showOnProfile   Boolean   @default(false) @map("show_on_profile")
+  // #1323 — historical (source "ED-HISTORICAL") appointments are shown on the
+  // public profile unless a curator or comms_steward hides one. True for every
+  // newly-imported historical row EXCEPT one `looksLikeArtifactAppointment`
+  // (etl/ed/index.ts, lib/appointment-artifacts.ts) — a WOOFA effective-dating
+  // artifact (an "(Interim)" title swap), not a real appointment. A
+  // "Pre-Start Academic" row is exempt from THAT check (durations run 2 to
+  // 1200+ days, too wide for a duration cutoff) and instead has its own
+  // read-time rule in lib/api/profile.ts: shown only when it's the scholar's
+  // sole appointment. (Flipped 2026-08 — hidden-by-default made faculty look
+  // newly arrived; rows from before the flip need the one-time
+  // scripts/backfill-reveal-historical-appointments.ts and
+  // scripts/suppress-artifact-historical-appointments.ts.) Irrelevant for
+  // active sources (always shown). The CV export ignores this flag
+  // (historical always exported).
+  showOnProfile   Boolean   @default(true) @map("show_on_profile")
   lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])
@@ -237,23 +284,78 @@ enum ProfileAppointmentCategory {
 /// identifier; `sourceRef` is the roster URL the row came from, kept for de-dup
 /// and audit (NULL for hand-entered rows).
 model Honor {
-  id            String        @id @default(uuid()) @db.VarChar(64)
-  cwid          String        @db.VarChar(32)
-  scholar       Scholar       @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  category      HonorCategory
-  name          String        @db.VarChar(255) // free text: "Member", "Fellow", "Lasker Award"
-  organization  String        @db.VarChar(255) // conferring body, free text
-  year          Int? // election/award year; NULL when unknown
-  status        HonorStatus   @default(published)
-  showOnProfile Boolean       @default(true) @map("show_on_profile")
-  source        String        @default("CURATOR") @db.VarChar(32) // CURATOR | SELF | <feed>
-  sourceRef     String?       @map("source_ref") @db.VarChar(512) // roster URL; de-dup + audit
-  enteredByCwid String        @map("entered_by_cwid") @db.VarChar(32)
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  id              String        @id @default(uuid()) @db.VarChar(64)
+  cwid            String        @db.VarChar(32)
+  scholar         Scholar       @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  category        HonorCategory
+  name            String        @db.VarChar(255) // free text: "Member", "Fellow", "Lasker Award"
+  organization    String        @db.VarChar(255) // conferring body, free text
+  year            Int? // election/award year; NULL when unknown
+  status          HonorStatus   @default(published)
+  showOnProfile   Boolean       @default(true) @map("show_on_profile")
+  source          String        @default("CURATOR") @db.VarChar(32) // CURATOR | SELF | <feed>
+  sourceRef       String?       @map("source_ref") @db.VarChar(512) // roster URL; de-dup + audit
+  enteredByCwid   String        @map("entered_by_cwid") @db.VarChar(32)
+  /// Who decided this row in the approval queue, and when. NULL for a row the
+  /// queue never decided (hand-entered, self-asserted, seeded straight to
+  /// published, or decided before these columns existed). The decision route's
+  /// undo only reverts a row whose `decidedAt` is set.
+  decidedByCwid   String?       @map("decided_by_cwid") @db.VarChar(32)
+  decidedAt       DateTime?     @map("decided_at")
+  /// The curator's reason for a rejection (the Rejected tab's Reason column).
+  /// NULL on an approval and on a rejection given without one.
+  rejectionReason String?       @map("rejection_reason") @db.VarChar(255)
+  /// Set when this row was auto-rejected because a competing candidate on the
+  /// same roster line was approved: that approved row's id. Undoing the approval
+  /// restores exactly these rows to pending.
+  supersededById  String?       @map("superseded_by_id") @db.VarChar(64)
+  /// What a scraped match rests on, for the queue's evidence column ("Name and
+  /// institution match: listed at …"). Written by the honors-list scraper
+  /// (etl/honors/scrape-lists.ts); NULL on seeded and hand-entered rows.
+  evidence        String?       @db.VarChar(255)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
   @@index([cwid, status, showOnProfile])
+  @@index([supersededById])
   @@map("honor")
+}
+
+/// One honors-list scrape of one list (etl/honors/scrape-lists.ts): the Sources
+/// tab's per-list "Last run". A Run now request writes the row as `queued`
+/// before the job starts; the job claims it (`running`) and finishes it as
+/// `success` | `partial` | `failed`. Counts are NULL until the run finishes.
+/// A run log, not curated data: losing it loses history, never a decision.
+model HonorListRun {
+  id              String    @id @default(uuid()) @db.VarChar(64)
+  /// `HONOR_LISTS[].id` in lib/honors/lists.ts.
+  listId          String    @map("list_id") @db.VarChar(64)
+  /// `schedule` | `manual`.
+  trigger         String    @db.VarChar(16)
+  /// Who pressed Run now (the real actor); NULL for a scheduled run.
+  requestedByCwid String?   @map("requested_by_cwid") @db.VarChar(32)
+  /// `queued` | `running` | `success` | `partial` | `failed`.
+  status          String    @db.VarChar(16)
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  /// Entries read from the roster.
+  onListTotal     Int?      @map("on_list_total")
+  /// Entries matched to at least one Weill Cornell scholar.
+  matched         Int?
+  /// New pending `honor` rows this run created.
+  newCandidates   Int?      @map("new_candidates")
+  errorMessage    String?   @map("error_message") @db.VarChar(1024)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  /// The one-in-flight-per-list lock: set to `listId` while the run is
+  /// `queued` or `running`, NULL once it ends (any end state, including a stale
+  /// row expired as "did not finish"). UNIQUE, and MySQL admits any number of
+  /// NULLs, so at most ONE active run per list can exist: a second insert gets
+  /// P2002, which Run now answers 409 and the scheduled run skips.
+  /// See `lib/honors/run-lock.ts`.
+  activeListId    String?   @unique @map("active_list_id") @db.VarChar(64)
+
+  @@index([listId, createdAt])
+  @@map("honor_list_run")
 }
 
 /// No NAMED_CHAIR member, deliberately: ED already ingests endowed titles into
@@ -346,6 +448,16 @@ model PostdocMentorRelationship {
   menteeCwid      String    @map("mentee_cwid") @db.VarChar(32)
   menteeFirstName String?   @map("mentee_first_name") @db.VarChar(64)
   menteeLastName  String?   @map("mentee_last_name") @db.VarChar(64)
+  /// The mentor (the role record's `manager`) as `ou=people` describes them
+  /// at ETL time: name, `weillCornellEduPrimaryDepartment`, and the
+  /// primary-organization CODE (`WCMC`, `NYP`, `CU`; `lib/institutions.ts`).
+  /// Read by the Mentored publications report for a manager who is not a
+  /// Scholar — a lab administrator or a departed PI (#2633) — who otherwise
+  /// shows as a bare CWID with no department or institution.
+  mentorFirstName   String? @map("mentor_first_name") @db.VarChar(64)
+  mentorLastName    String? @map("mentor_last_name") @db.VarChar(64)
+  mentorDepartment  String? @map("mentor_department") @db.VarChar(255)
+  mentorInstitution String? @map("mentor_institution") @db.VarChar(255)
   /// `weillCornellEduStartDate` on the role record (LDAP generalizedTime
   /// parsed to Date). Null when ED omits the attribute.
   startDate       DateTime? @map("start_date") @db.Date
@@ -375,6 +487,70 @@ model PostdocMentorRelationship {
   @@index([mentorCwid])
   @@index([menteeCwid])
   @@map("postdoc_mentor_relationship")
+}
+
+/// #2634 — co-authorship-derived mentee SUGGESTIONS for the mentor's /edit
+/// "Mentees › From your publications" sub-view. Built nightly by
+/// `etl/reciter/mentee-suggestions.ts` from ReCiterDB's
+/// `analysis_summary_author_list` self-join and UPSERTED by (mentor, mentee) so
+/// the dismissal columns survive the rebuild. A row is a queue item, never a
+/// relationship: nothing is public until the mentor accepts, and accepting
+/// writes the #2011 manual-mentee array, not this table.
+/// CWIDs whose ED faculty SOR holds an EXPIRED role record that still tells
+/// career stage — `FormerFacultyRole` (lib/mentee-suggestions/kind.ts):
+/// `professor` (any professor-ranked title; excluded from mentee suggestions)
+/// or `fellow` / `postdoc` (a departed trainee, suggested under that kind).
+/// One row per CWID, professor winning. Rewritten nightly by etl/ed/index.ts
+/// (the LDAP task def); read by the mentee-suggestion builder on the sources
+/// task def, which has ReCiterDB but no LDAP. Departed people carry no
+/// ReCiterDB person type at all, so this is the only career-stage signal for
+/// them. Current appointments are classified from ReCiterDB types upstream.
+model FormerFacultyRole {
+  cwid      String   @id @db.VarChar(32)
+  role      String   @db.VarChar(16)
+  title     String   @db.VarChar(255)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("former_faculty_role")
+}
+
+model MenteeSuggestion {
+  id                       Int       @id @default(autoincrement())
+  mentorCwid               String    @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid               String    @map("mentee_cwid") @db.VarChar(32)
+  /// Display metadata snapshotted from ReCiterDB `person` at build time so the
+  /// edit page needs no live LDAP. Title is the career-stage tell for staff.
+  menteeName               String    @map("mentee_name") @db.VarChar(255)
+  menteeTitle              String?   @map("mentee_title") @db.VarChar(255)
+  menteeUnit               String?   @map("mentee_unit") @db.VarChar(255)
+  /// `MenteeKind` — see lib/mentee-suggestions/kind.ts.
+  kind                     String    @db.VarChar(24)
+  /// `MenteeTier`: presumptive | ambiguous | unknown — see lib/mentee-suggestions/kind.ts.
+  tier                     String    @db.VarChar(16)
+  /// Counts over the WINDOWED shared publications (last 8 years).
+  nCoPubs                  Int       @map("n_co_pubs")
+  nMentorLastAuthor        Int       @map("n_mentor_last_author")
+  nMenteeFirstAuthor       Int       @map("n_mentee_first_author")
+  firstYear                Int?      @map("first_year")
+  lastYear                 Int?      @map("last_year")
+  /// Min articleYear across ALL the mentee's authorships (unwindowed) — the
+  /// seniority proxy shown on the row.
+  menteeFirstPublishedYear Int?      @map("mentee_first_published_year")
+  /// Top faculty co-author by last-author count with >=2 last-author co-pubs
+  /// and >=2x the runner-up (88% precision vs ED manager, issue #2634).
+  strong                   Boolean   @default(false)
+  /// Shared publications, most recent first, capped at 50:
+  /// `[{ id, year, menteeRank, mentorRank, total }]` where `id` is the SPS
+  /// `Publication.pmid` key (PubMed pmid, or the source-prefixed article_id).
+  evidence                 Json
+  computedAt               DateTime  @map("computed_at")
+  dismissedAt              DateTime? @map("dismissed_at")
+  dismissedBy              String?   @map("dismissed_by") @db.VarChar(32)
+  /// colleague | never_worked | private — see lib/mentee-suggestions/kind.ts.
+  dismissReason            String?   @map("dismiss_reason") @db.VarChar(24)
+
+  @@unique([mentorCwid, menteeCwid])
+  @@map("mentee_suggestion")
 }
 
 /// Issue #443 — Pre-computed per-(mentor, mentee) co-publication counts, bridged
@@ -419,18 +595,61 @@ model MenteeCopublication {
 /// per-pair key, so a surrogate `id` PK plus a full truncate-and-load import.
 /// No FK to Scholar — AOC students are frequently unlinked alumni (GH #181).
 model AocMentee {
-  id             Int      @id @default(autoincrement())
-  mentorCwid     String   @map("mentor_cwid") @db.VarChar(32)
-  menteeCwid     String   @map("mentee_cwid") @db.VarChar(32)
-  firstName      String?  @map("first_name") @db.VarChar(255)
-  lastName       String?  @map("last_name") @db.VarChar(255)
-  graduationYear Int?     @map("graduation_year")
-  programType    String?  @map("program_type") @db.VarChar(64)
-  refreshedAt    DateTime @default(now()) @map("refreshed_at")
+  id              Int      @id @default(autoincrement())
+  mentorCwid      String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid      String   @map("mentee_cwid") @db.VarChar(32)
+  firstName       String?  @map("first_name") @db.VarChar(255)
+  lastName        String?  @map("last_name") @db.VarChar(255)
+  graduationYear  Int?     @map("graduation_year")
+  /// Year the learner ENTERED the program (`reporting_students_mentors.
+  /// studentEntryYear`, nullable at the source). Read by the Mentored
+  /// publications report (`lib/edit/mentored-publications-report.ts`) for its
+  /// "in program window" rule; null falls back to `graduationYear - 4`.
+  entryYear       Int?     @map("entry_year")
+  programType     String?  @map("program_type") @db.VarChar(64)
+  /// The mentor's name as the Medical Education roster carries it
+  /// (`reporting_students_mentors.mentorFirstName` / `mentorLastName`). The
+  /// Mentored publications report displays a mentor who has no Scholar row
+  /// (an NYP affiliate, a departed faculty member) from these instead of the
+  /// bare CWID; a Scholar row's `preferredName` still wins when present.
+  mentorFirstName String?  @map("mentor_first_name") @db.VarChar(255)
+  mentorLastName  String?  @map("mentor_last_name") @db.VarChar(255)
+  /// The mentor's department and institution as the roster carries them
+  /// (`reporting_students_mentors.mentorDepartment` / `mentorInstitution`:
+  /// free text, mostly null). The Mentored publications report reads the
+  /// department only when the mentor has no Scholar row, and folds the
+  /// institution to WCM / MSKCC / HSS (`mentorInstitution` there).
+  mentorDepartment  String? @map("mentor_department") @db.VarChar(255)
+  mentorInstitution String? @map("mentor_institution") @db.VarChar(255)
+  refreshedAt     DateTime @default(now()) @map("refreshed_at")
 
   @@index([mentorCwid], map: "aoc_mentee_mentor_cwid_idx")
   @@index([mentorCwid, menteeCwid], map: "aoc_mentee_mentor_mentee_idx")
   @@map("aoc_mentee")
+}
+
+/// Mentored publications report (`/edit/reports/7`) — the learner's FULL
+/// publication list, not just the co-pubs with a mentor. MD-program learners
+/// are not Scholar rows in this app, so their ReCiter-attributed publications
+/// exist only in ReciterDB; this bridge mirrors them so the report's "All
+/// learner publications" mode can run in-VPC. One row per (learner, pmid);
+/// `pub` is the same `CoPublicationFull` JSON `mentee_copublication_pub`
+/// carries (the export reuses the same article/author-list builders), so the
+/// mentored set is a strict subset the report marks by pmid. Exported
+/// WCM-side (`etl:mentoring:export-copubs` → `mentoring/learner-pubs.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-learner-pubs`. No FK to
+/// Scholar/Publication (alumni learners, GH #181).
+model AocMenteePublication {
+  menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
+  /// The SPS `Publication.pmid` key (round 5): digits for PubMed, `SCOPUS:…` for Scopus-only.
+  pmid        String   @db.VarChar(32)
+  pubYear     Int?     @map("pub_year")
+  pub         Json
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@id([menteeCwid, pmid])
+  @@index([menteeCwid], map: "aoc_mentee_publication_mentee_cwid_idx")
+  @@map("aoc_mentee_publication")
 }
 
 /// Issue #928 — full mentor↔mentee co-publication list bridge. One row per
@@ -447,7 +666,8 @@ model AocMentee {
 model MenteeCopublicationPub {
   mentorCwid  String   @map("mentor_cwid") @db.VarChar(32)
   menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
-  pmid        Int
+  /// The SPS `Publication.pmid` key (round 5): digits for PubMed, `SCOPUS:…` for Scopus-only.
+  pmid        String   @db.VarChar(32)
   pubYear     Int?     @map("pub_year")
   pub         Json
   refreshedAt DateTime @default(now()) @map("refreshed_at")
@@ -549,6 +769,12 @@ model Opportunity {
   taxonomyVersion  String    @map("taxonomy_version") @db.VarChar(32)
   ingestedAt       DateTime  @map("ingested_at")
   lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")
+  /// Matcha-admin manual suppression (Phase 1b): set → hidden from browse/detail
+  /// and dropped from the search index on the next nightly rebuild; restore nulls
+  /// all three. Survives the nightly GRANT# upsert, which never names these columns.
+  suppressedAt   DateTime? @map("suppressed_at")
+  suppressedBy   String?   @map("suppressed_by") @db.VarChar(64)
+  suppressReason String?   @map("suppress_reason") @db.VarChar(255)
 
   @@index([status])
   @@index([dueDate])
@@ -605,6 +831,53 @@ model StudentPhdProgram {
 /// `principal_investigators[]` from NIH RePORTER's /projects/search and
 /// resolves each profile_id back to a WCM cwid via grant-join (primary)
 /// + fuzzy name match against scholars with NIH grants (fallback).
+/// Candidate ORCID iDs for a scholar that SPS does NOT treat as asserted, from
+/// two mirrors that each own their `source` values and full-replace them per
+/// run: `etl/orcid-candidates` (nightly, reciterdb — `rpm_inferred`: an ORCID
+/// seen on the person's PubMed author record across the articles they accepted
+/// in RPM, `articlesAccepted` / `articlesRejected` the support; `rpm_admin`:
+/// hand-entered by an RPM administrator, treated as asserted) and
+/// `etl/orcid-registry` (weekly, pub.orcid.org — `orcid_email` / `orcid_works` /
+/// `orcid_name`; `articlesAccepted` = works shared with the person's own
+/// publications). `source` is part of the key so the two mirrors never overwrite
+/// each other: the same (cwid, orcid) from RPM and from the registry is two
+/// rows, which is the "two sources agree" case `/edit/orcid-coverage` grades
+/// strong. Consumed ONLY by that page; never rendered on the public profile or
+/// JSON-LD — `scholar.orcid` (WCM Identity) stays the sole asserted source there.
+model OrcidCandidate {
+  cwid             String    @db.VarChar(32)
+  scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid            String    @db.VarChar(19)
+  source           String    @db.VarChar(32)
+  articlesAccepted Int       @default(0) @map("articles_accepted")
+  articlesRejected Int       @default(0) @map("articles_rejected")
+  /// The source row's own last-update time, so the dashboard can say how stale RPM's view is.
+  sourceUpdatedAt  DateTime? @map("source_updated_at")
+  syncedAt         DateTime  @default(now()) @map("synced_at")
+
+  @@id([cwid, orcid, source])
+  @@index([source])
+  @@map("orcid_candidate")
+}
+
+/// ORCID iDs a person said are NOT theirs: "Not me" on a suggested candidate,
+/// or Remove on the iD that was on file. One row per (cwid, orcid); written by
+/// the `/edit` dismiss route, deleted by the confirm route for the same pair.
+/// Read in two places: the Identifiers & Profiles card and `/edit/orcid-coverage`
+/// exclude a dismissed pair from suggestions (the `orcid_candidate` mirrors keep
+/// re-creating it, so the exclusion has to live here, not in that table), and
+/// `etl/orcid-push` nulls `Identity.orcid` when Identity still holds a dismissed
+/// iD, so a Remove in SPS reaches ReCiter the same way a confirm does.
+model OrcidDismissal {
+  cwid        String   @db.VarChar(32)
+  scholar     Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid       String   @db.VarChar(19)
+  dismissedAt DateTime @default(now()) @map("dismissed_at")
+
+  @@id([cwid, orcid])
+  @@map("orcid_dismissal")
+}
+
 model PersonNihProfile {
   cwid             String   @db.VarChar(32)
   scholar          Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
@@ -700,11 +973,37 @@ model ClinicalTrial {
   /// Enriched `phases` (e.g. "Phase 2/Phase 3"); null for non-NCT or N/A.
   phase            String?   @db.VarChar(64)
   principalSponsor String?   @map("principal_sponsor") @db.VarChar(255)
+  /// Sponsor type key (industry | nih | federal | wcm | academic | network | other):
+  /// CT.gov LeadSponsorClass, else a best-effort read of principalSponsor
+  /// (`lib/clinical-trial-sponsor-class.ts`). Null = unknown.
+  sponsorClass     String?   @map("sponsor_class") @db.VarChar(16)
   /// Enriched conditions, '; '-joined as stored upstream.
   conditions       String?   @db.Text
   meshTerms        String?   @map("mesh_terms") @db.Text
   briefSummary     String?   @map("brief_summary") @db.Text
   enrollment       Int?
+  /// Raw ClinicalTrials.gov `overallStatus` enum (RECRUITING, NOT_YET_RECRUITING,
+  /// ACTIVE_NOT_RECRUITING, COMPLETED, TERMINATED, WITHDRAWN, ...). Distinct
+  /// from the institutional `status`. Null when CT.gov was not read this run.
+  ctgovStatus      String?   @map("ctgov_status") @db.VarChar(32)
+  /// CT.gov start date as given: "YYYY-MM" or "YYYY-MM-DD" (month precision is
+  /// common, so a string, not DateTime).
+  startDate        String?   @map("start_date") @db.VarChar(10)
+  /// CT.gov start date type: ACTUAL | ESTIMATED.
+  startDateType    String?   @map("start_date_type") @db.VarChar(16)
+  /// CT.gov primary completion date as given ("YYYY-MM" or "YYYY-MM-DD"),
+  /// whatever its type (firstCtaDate only ever uses the ACTUAL one).
+  primaryCompletionDate     String? @map("primary_completion_date") @db.VarChar(10)
+  /// CT.gov primary completion date type: ACTUAL | ESTIMATED.
+  primaryCompletionDateType String? @map("primary_completion_date_type") @db.VarChar(16)
+  /// CT.gov top-level `hasResults`. Null = unknown (CT.gov not read this run).
+  hasResults       Boolean?  @map("has_results")
+  /// Distinct CT.gov intervention type enums, '; '-joined in first-seen order
+  /// (e.g. "DRUG; PROCEDURE").
+  interventionTypes String?  @map("intervention_types") @db.Text
+  /// Distinct CT.gov interventions as "Type: Name" with the type title-cased,
+  /// '; '-joined (e.g. "Drug: Tipifarnib; Dietary supplement: Vitamin D").
+  interventions    String?   @db.Text
   firstOtaDate     DateTime? @map("first_ota_date") @db.Date
   firstCtaDate     DateTime? @map("first_cta_date") @db.Date
   /// Where the enriched fields came from ("ClinicalTrials.gov" today; a vendor
@@ -757,6 +1056,10 @@ model DatasetDeposit {
   resourceType   String?   @map("resource_type") @db.VarChar(32)
   /// Repo-native bucket, or MeSH-derived; enrichment field, may be null.
   dataType       String?   @map("data_type") @db.VarChar(64)
+  /// '|'-delimited coarse sensitive categories (genomic|omic_other|health|biometric|geolocation), from scripts/bulk-data-rule/taxonomy.py's tag(). Null if none detected or not yet backfilled.
+  sensitiveCats      String?  @map("sensitive_cats") @db.VarChar(255)
+  /// '|'-delimited granular sub-types (e.g. "genomic:WGS/WES|omic_other:single-cell"), same taxonomy.py source. Null if none detected or not yet backfilled.
+  sensitiveSubtypes  String?  @map("sensitive_subtypes") @db.VarChar(255)
   /// 'open' | 'controlled'.
   accessModel    String?   @map("access_model") @db.VarChar(16)
   /// Repo metadata where available, else pub year.
@@ -1018,7 +1321,16 @@ model Publication {
   doi                   String?   @db.VarChar(255)
   /// PubMed Central identifier including the `PMC` prefix (e.g. "PMC11098699").
   /// Sourced from `analysis_summary_article.pmcid`. Surfaced on publication
-  /// cards alongside DOI/PMID; signals NIH public-access compliance.
+  /// cards alongside DOI/PMID. NOT a reliable NIH public-access-compliance
+  /// signal (2026-08-16 finding, traced upstream): PubMed sets this whenever
+  /// a citation cross-references any PMC record, without checking full-text
+  /// availability or embargo status. `analysis_summary_article`'s own
+  /// rebuild (`populateAnalysisSummaryTables_v2.sql`, ReCiterDB) already
+  /// carries a properly-gated sibling column, `datePublicationAddedToPMC`
+  /// (only set from PubMed's `pmc-release` date), but does not use it to
+  /// qualify `pmcid`, and SPS does not ingest that column today. See
+  /// `lib/api/data-sharing-report.ts`'s `PmcCoverageTotals` doc comment for
+  /// where this surfaces on the data-sharing dashboard.
   pmcid                 String?   @db.VarChar(32)
   /// Issue #89 — Vancouver-style citation fields. Sourced from
   /// `analysis_summary_article.{volume,issue,pages}`. Stored as varchar
@@ -1046,6 +1358,20 @@ model Publication {
   /// in reciterdb. Source: `reciterdb.person_article_keyword` joined to
   /// `reciterdb.mesh`. Keyword sets are per-PMID, not per-(person, pmid) —
   /// verified during ETL design.
+  ///
+  /// NOT raw MEDLINE MeSH — `person_article_keyword` is ReCiter's own curated
+  /// keyword list for this Topics use case, not the full `<MeshHeading>` set
+  /// PubMed efetch returns. Confirmed empirically 2026-08-13 (Bulk Data Rule /
+  /// S-Index v2 investigation): 0 of 153,791 publications with non-null
+  /// `meshTerms` carry any MEDLINE check-tag (`Humans`, `Animals`, `Male`,
+  /// `Female`, `Adult`) — check-tags are structurally absent, not merely rare.
+  /// A raw-MeSH efetch cross-check on a sample also found `person_article_keyword`
+  /// missing ~4% of category-triggering descriptors that were present in raw
+  /// MeSH. Don't assume this field has MEDLINE-complete recall or check-tag
+  /// coverage for anything that needs real MeSH semantics (human-subject
+  /// gating, full descriptor recall) — it's a curated topic list, not a MeSH
+  /// mirror. Full writeup: `~/Dropbox/Projects/Bulk Data Rule/
+  /// 2026-08-13-mesh-denominator-plan.md`.
   meshTerms             Json?     @map("mesh_terms")
   /// Plain-text article abstract from ReciterDB.reporting_abstracts.abstractVarchar
   /// (capped at 15000 chars at the source). Used by the search-index ETL to
@@ -1199,6 +1525,11 @@ model PublicationAuthor {
   isPenultimate   Boolean     @default(false) @map("is_penultimate")
   isConfirmed     Boolean     @default(true) @map("is_confirmed") // ReCiter authorship-confirmation (spec line 118)
   lastRefreshedAt DateTime    @default(now()) @map("last_refreshed_at")
+  /// #2668 -- when Scholars first linked this authorship. Set by the default on create and
+  /// never bumped (the reconcile's UPDATE path leaves it alone), unlike `lastRefreshedAt`,
+  /// the coi-gap watermark that moves on any content delta. The biosketch staleness nudge
+  /// reads this one. Pre-column rows were backfilled to their `last_refreshed_at`.
+  createdAt       DateTime    @default(now()) @map("created_at")
 
   @@index([cwid])
   @@index([pmid])
@@ -1373,7 +1704,12 @@ model MeshCuratedAlias {
 
 /// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
 /// `code` is the stable org-unit code from LDAP — joined on, never display names.
-/// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).
+/// Leadership (chair) lives solely in `OrgUnitRoleAssignment` (entityType
+/// "department"), written by the ED ETL from appointment.title LIKE 'Chairman%'
+/// (D-03); the `field_override(leaderCwid/leaderInterim)` curation layer wins
+/// on read (lib/api/unit-leader.ts). #2542 contract A retired this model's
+/// `chair_cwid` field; the DB column stays until PR-B's drop migration
+/// (three-deploy rule).
 /// `slug` is derived via deriveSlug() from `name`. ETL upsert refreshes scholarCount.
 model Department {
   code         String   @id @db.VarChar(64)
@@ -1400,7 +1736,6 @@ model Department {
   /// renders as "Basic & Clinical") lives at the UI layer.
   /// Allowed values: "clinical" | "basic" | "mixed" | "administrative".
   category     String   @default("clinical") @map("category") @db.VarChar(32)
-  chairCwid    String?  @map("chair_cwid") @db.VarChar(32)
   scholarCount Int      @default(0) @map("scholar_count")
   source       String   @default("ED") @db.VarChar(32)
   refreshedAt  DateTime @default(now()) @map("refreshed_at")
@@ -1429,7 +1764,6 @@ model Division {
   /// https-only, ≤ 512 chars, edited via the `field_override(url)` row and
   /// merged at read time; null = nothing rendered beside the division NAME.
   url          String?    @db.VarChar(512)
-  chiefCwid    String?    @map("chief_cwid") @db.VarChar(32)
   scholarCount Int        @default(0) @map("scholar_count")
   source       String     @default("ED") @db.VarChar(32)
   refreshedAt  DateTime   @default(now()) @map("refreshed_at")
@@ -1447,7 +1781,7 @@ model Division {
 /// Cross-disciplinary research centers and institutes that span departments.
 /// Faculty appointments roll up to a Department; center affiliations are
 /// layered on top (no FK from Scholar — membership lives in a separate table
-/// when sources land, e.g. reporting_cancer_center for the Meyer Cancer Center).
+/// when sources land, e.g. reporting_cancer_center for the Example Cancer Center).
 /// `code` is a stable slug-like identifier (e.g. "englander_ipm").
 model Center {
   code          String   @id @db.VarChar(64)
@@ -1471,16 +1805,24 @@ model Center {
   /// designated, larger, more endowed) get their own teal badge; centers get
   /// purple. Backfilled by name match in 20260508120000_add_center_type.
   centerType    String   @default("center") @map("center_type") @db.VarChar(16)
-  directorCwid  String?  @map("director_cwid") @db.VarChar(32)
-  /// Interim/acting qualifier for the director — renders "Interim Director".
-  /// Center-only column because the center row is manually-owned and no ETL
-  /// writes it; departments/divisions express the same qualifier as a
-  /// columnless `field_override(leaderInterim)` row instead.
-  /// Added by #540 Phase 1 (ADR-005 Amendment 1 § A1.1).
-  leaderInterim Boolean  @default(false) @map("leader_interim")
+  /// Leadership (director) lives solely in `OrgUnitRoleAssignment` (entityType
+  /// "center"), `interim` included — #2542 contract A retired this model's
+  /// `director_cwid`/`leader_interim` fields and every reader/writer of them.
+  /// NOTE: departments and divisions express the same interim qualifier via
+  /// the columnless `field_override(leaderInterim)` curation layer, a
+  /// DIFFERENT mechanism that is NOT deprecated. The DB columns here stay
+  /// until PR-B's drop migration (three-deploy rule).
   scholarCount  Int      @default(0) @map("scholar_count")
   sortOrder     Int      @default(0) @map("sort_order")
   source        String   @default("seed") @db.VarChar(32)
+  /// Auto-publish high-confidence disease inferences (Cancer Center roster).
+  /// When true, a `CancerCenterDiseaseAssignment` with `confidence = 'high'`
+  /// and no curator `CancerCenterDiseaseDecision` counts as published and
+  /// leaves the review queue; a curator can still reject or confirm it. When
+  /// false, every undecided inference waits for review. The predicate lives in
+  /// `lib/cancer-center-disease-publish.ts`; toggled via
+  /// `POST /api/edit/center/[code]/disease-auto-publish`. Default ON.
+  diseaseAutoPublish Boolean @default(true) @map("disease_auto_publish")
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
@@ -1495,8 +1837,254 @@ model Center {
   @@map("center")
 }
 
+/// The org-unit role vocabulary (#2542). ONE list per unit KIND for the whole
+/// institution — one row per (`entityType`, `key`) — not a per-unit copy.
+///
+/// WHY NOT PER-UNIT. Phase 1 keyed this `(center_code, key)` and copied the
+/// default set onto every center at creation. That makes each unit the owner of
+/// an editable copy, so the same concept can end up with a different word at
+/// every unit, and the governance layer's job becomes policing divergence.
+/// Since a superuser / comms_steward owns this vocabulary precisely SO THAT the
+/// institution speaks with one voice, per-unit copies are a drift generator.
+/// Keyed by kind, drift is not discouraged — it is unrepresentable.
+///
+/// PER-UNIT VARIATION STILL WORKS, three ways, none of which needs a local copy:
+///   1. WHO HOLDS WHAT. A role with no holders renders no section, so a generous
+///      list costs nothing. CHPC holds `core_fellow`/`affiliate_fellow`; the
+///      other centers simply hold neither.
+///   2. `interim`, on the assignment.
+///   3. Distinct entries for distinct concepts. A portfolio ("Associate Center
+///      Director, Health policy communication") is its OWN entry rather than a
+///      free-text qualifier on the assignment — decided 2026-08-30 for
+///      simplicity, which is why `qualifier` no longer exists.
+///
+/// The Chair/Chief/Director problem falls out of this: `chair` and `director`
+/// both live in the `department` list, Medicine holds `chair`, the Library holds
+/// `director`, and the `category === "administrative"` ternary duplicated across
+/// four sites has nothing left to decide.
+///
+/// `key` is STABLE and never edited: code and reporting predicates match on it.
+/// `label` is the displayed string, editable by a superuser / comms_steward ONLY
+/// (never by a unit owner or curator — that is the whole point of the tier).
+/// Keeping them separate is not tidiness — `CenterCollabCandidate`
+/// `isCurrentMember` is defined as a membership whose type is the literal
+/// `research`, so if renaming a label could change a key it would silently
+/// alter the NCI CCSG REMOVE-eligible population.
+///
+/// `entityType`/`key`/`roleGroup`/`scope` are VARCHAR with app-level closure
+/// rather than Prisma enums, matching `OrgUnitRoleAssignment.roleKey` and
+/// `CoreLeader.role`. `entityType` deliberately does NOT reuse the `EntityType`
+/// enum: it sits in this PK and in the assignment FK, so an enum would turn
+/// every future member addition into a drop-FK/drop-PK/MODIFY/add-PK/add-FK
+/// rebuild of two tables instead of a one-line `ALTER`.
+model OrgUnitRole {
+  /// `department` | `division` | `center` | `core` | `center_program`. Matches
+  /// the `EntityType` vocabulary by value, not by type — see the docblock above.
+  entityType   String   @map("entity_type") @db.VarChar(32)
+  /// Stable identifier. Never edited. Closed server-side to this KIND's
+  /// vocabulary at write time — see `lib/org-unit-roles.ts`.
+  key          String   @db.VarChar(32)
+  /// Displayed string. Curator-editable in Phase 3; renaming is display-only.
+  label        String   @db.VarChar(255)
+  /// `leadership` | `membership`. Drives placement — leadership renders at the
+  /// top of the unit page, membership below. Mapped to `role_group` because
+  /// GROUP is a MySQL reserved word.
+  roleGroup    String   @map("role_group") @db.VarChar(16)
+  /// `center` | `program`. Which tier the entry may be assigned at. `#2542`
+  /// seeds `center`; `#2558` seeds `program` for the `center_program` kind.
+  scope        String   @default("center") @db.VarChar(16)
+  /// Marks a role only one person may hold. A flag, not an enum — there are
+  /// exactly two states and no third is foreseeable. CHPC holds "Associate
+  /// Center Director" three times and "Research Director" once.
+  ///
+  /// ENFORCED as of #2542 Phase C: `POST /api/edit/center-leadership` counts
+  /// existing holders for (entityType, entityId, roleKey) before an `add` and
+  /// refuses (409) a second holder of a `singleHolder` role unless the request
+  /// is an explicit replace (vacate the incumbent, then grant, same
+  /// transaction). Before Phase C only `director` was assignable at all, and
+  /// `/api/edit/unit` held the single-holder invariant by construction (an
+  /// unconditional vacate-then-grant) rather than by checking this column —
+  /// Phase C is what made the column load-bearing.
+  singleHolder Boolean  @default(false) @map("single_holder")
+  /// Order within the group. This is what puts COE Liaisons after Leaders.
+  sortOrder    Int      @default(0) @map("sort_order")
+  /// Does holding this role show as a title on the holder's scholar profile?
+  /// Not every leadership role does — Phase 2's `coe_liaison` deliberately does
+  /// not (`lib/api/profile.ts`), which is the entire reason this column exists.
+  profileTitle Boolean  @default(true) @map("profile_title")
+  /// Optional long form for an abbreviated label, rendered as `<abbr>`. Today
+  /// hardcoded for COE in `lib/center-program-roles.ts`; Phase 2 moves it here
+  /// so folding COE Liaison in does not silently drop the a11y affordance.
+  expansion    String?  @db.VarChar(255)
+  /// Provenance, so a reseed cannot clobber a curator's edit — the lesson from
+  /// `FamilySuppressionOverlay.source`, which `FamilyTierDecision` lacks.
+  /// `seed` = written by the default set; `manual` = curator-owned.
+  source       String   @default("seed") @db.VarChar(32)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  /// Holders of a `leadership`-group entry — a person may hold more than one.
+  leadershipHolders OrgUnitRoleAssignment[]
+  /// This entry's unit allowlist (#2557 Phase E). Zero rows means unrestricted
+  /// — see `OrgUnitRoleScope`'s docblock.
+  scopeRows         OrgUnitRoleScope[]
+  /// The `membership` half (`CenterMembership.membershipRoleKey`) — #2542
+  /// contract B, once the backfill made the FK safe to add. See the note on
+  /// `CenterMembership.roleVocabulary`.
+  centerMemberships CenterMembership[]
+
+  @@id([entityType, key])
+  @@index([entityType, roleGroup, sortOrder])
+  @@map("org_unit_role")
+}
+
+/// A leadership-role assignment at a center (#2542 Phase 1). The `leadership`
+/// half of the vocabulary; `CenterMembership.membershipRoleKey` is the other.
+///
+/// A SEPARATE TABLE, not two more columns on `CenterMembership`, because a
+/// leader need not be a member — #2542 decision 7, and 9 of the Cornell Health
+/// Policy Center's 77 people are exactly that: they hold a leadership role and
+/// appear in no faculty-fellow section. `CenterMembership` is
+/// `@@id([centerCode, cwid])`, so putting leadership there would make those 9
+/// people rows in the MEMBERSHIP table, and every reader that counts center
+/// members — the hero stat, the browse card, the public roster, the members
+/// API, the people-search `center:` facet, and unit-admin proxy-edit reach —
+/// would have to learn to skip them. Here, not one of them changes.
+///
+/// Supersedes `Center.directorCwid` + `Center.leaderInterim`, which together
+/// held exactly one unlabelled leader; #2542 contract A retired both fields
+/// from this schema (DB columns stay until PR-B's drop migration).
+///
+/// A program assignment (#2558, folded in from the retired per-program leader
+/// table) is (`center_program`, "{centerCode}:{programCode}") — `entityId`
+/// already carried that shape, so the PK below admits one person leading two
+/// programs under the same `roleKey`, a collision the retired table's PK
+/// could not express. `center_program` is also an `AuditEntityType` value
+/// (`lib/edit/audit.ts`); this table needed no migration for it.
+model OrgUnitRoleAssignment {
+  /// Which kind of unit. Pairs with `OrgUnitRole.entityType` in the FK below.
+  entityType String   @map("entity_type") @db.VarChar(32)
+  /// The unit's code. NO FK — polymorphic, exactly as `UnitAdmin` is, and for
+  /// the same reason: an assignment is a fact about a unit, not a child row, and
+  /// an informal unit's synthetic code is known only to the manual layer. The
+  /// two backfills that delete centers must delete assignments first; no request
+  /// path deletes a unit.
+  entityId   String   @map("entity_id") @db.VarChar(64)
+  cwid       String   @db.VarChar(32)
+  /// The `OrgUnitRole` this assignment confers. Closed by the FK below to an
+  /// entry of THIS KIND's vocabulary; `roleGroup` is checked in app code.
+  roleKey    String   @map("role_key") @db.VarChar(32)
+  /// Interim/acting qualifier — renders "Interim Director". A modifier, not a
+  /// role of its own: folding it into the vocabulary would double every entry.
+  interim    Boolean  @default(false)
+  /// Order among multiple holders of the SAME role — how Meyer orders its
+  /// co-led program leaders (#2558).
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // NoAction because `entityType` is NOT NULL and part of a composite key, so
+  // SET NULL is invalid in Prisma and MySQL alike. Deleting a vocabulary entry
+  // that still has holders is blocked in-app.
+  //
+  // There is no `qualifier` column. A portfolio ("Associate Center Director,
+  // Health policy communication") is its own vocabulary ENTRY, decided
+  // 2026-08-30: it removes a free-text field from the write path and a
+  // formatting branch from every read, at the cost of a few more rows in a list
+  // only a superuser can edit.
+  role OrgUnitRole @relation(fields: [entityType, roleKey], references: [entityType, key], onDelete: NoAction, onUpdate: NoAction)
+
+  // `roleKey` is part of the identity: a person may hold two leadership roles at
+  // one unit. Contrast `CenterMembership`, where a person has ONE membership
+  // role and (center, cwid) is the whole key.
+  @@id([entityType, entityId, cwid, roleKey])
+  @@index([cwid])
+  @@index([entityType, entityId, roleKey, sortOrder])
+  @@map("org_unit_role_assignment")
+}
+
+/// A vocabulary entry's unit allowlist (#2557 Phase E). `research` and
+/// `clinical` are NCI CCSG vocabulary seeded into the SHARED `center`
+/// vocabulary so all 11 centers COULD use them, but only Meyer does — 298
+/// `research` rows, 54 `clinical`, all at `meyer_cancer_center` (measured prod
+/// 2026-08-31). Nothing enforced that scoping; this table is what does.
+///
+/// SEMANTICS — read this before touching either enforcement point:
+///   - ZERO rows for a (`entityType`, `roleKey`) pair means UNRESTRICTED: the
+///     role is assignable at any unit of that kind, exactly as it behaves
+///     today with no scope table at all.
+///   - ONE OR MORE rows means the role is allowed ONLY at the listed
+///     `entityId`s, and denied everywhere else.
+///
+/// This is DELIBERATELY NOT a global default-deny. A default-deny model would
+/// require a row to exist before ANY unit could assign ANY role, which means a
+/// newly created unit renders no leader until someone remembers to mint its
+/// rows — a known-broken pattern already true of `unit_admin` today: creating
+/// a center mints no `unit_admin` row, so a model requiring scope rows to
+/// pre-exist would inherit that same fail-closed hazard onto every leadership
+/// and membership role, not just the two NCI ones this table exists for. Keeping
+/// an empty table permissive means a unit can never be born unable to render a
+/// leader — only a role that OPTS IN to restriction, by gaining a row, can ever
+/// be denied anywhere. Full rationale: issue #2557.
+///
+/// A per-(unit, role) ALLOW table — the strictest reading — was rejected for
+/// the same reason: ~133 seed rows across every center, department, division
+/// and core, and every newly created unit renders no leader until its rows are
+/// minted by hand. See issue #2557.
+///
+/// A `Json?` array column on `OrgUnitRole` was also rejected: `Prisma.JsonNull`
+/// stores a JSON scalar null that PASSES `IS NOT NULL` and reports
+/// `JSON_LENGTH` = 1 — the same trap already known to produce a false
+/// "populated" reading on a nullable JSON column when the value used
+/// `Prisma.JsonNull` instead of a true SQL `NULL`. A three-column table has
+/// no such null-vs-empty ambiguity and joins cleanly.
+///
+/// Seed content on day one is two rows: (`center`, `research`,
+/// `meyer_cancer_center`) and (`center`, `clinical`, `meyer_cancer_center`) —
+/// written by a script, never by this migration (no data in a migration; see
+/// `tests/unit/migrations-empty-db-safe.test.ts`).
+///
+/// NO FK on `entityId` — polymorphic, same reason `OrgUnitRoleAssignment`
+/// gives: a scope row is a fact about a unit, not a child row, and an informal
+/// unit's synthetic code is known only to the manual layer.
+///
+/// THIS SLICE ADDS THE TABLE, A READ HELPER, AND WIRES IT INTO THE CENTER
+/// MEMBERSHIP WRITE PATH (#2557). `isRoleAllowedAtUnit` (`lib/api/org-unit-role-
+/// scope.ts`) is called from `app/api/edit/roster/route.ts`, in both
+/// `handleCenter` (an explicit `membershipType` in the body, and a `set`/`add`
+/// that defaults a new row to `member`) and `handleCornellAdd`'s hardcoded
+/// `member` write — every path that stamps a `membershipRoleKey` on a NEW or
+/// changed membership passes through the gate. Still NOT done: there is no
+/// steward UI for editing `OrgUnitRoleScope` rows (today's two Meyer rows are
+/// seeded by a script). A leadership assignment write path DOES already exist
+/// — `app/api/edit/unit/route.ts`'s director set/clear, which writes
+/// `OrgUnitRoleAssignment` rows with a hardcoded `DIRECTOR_ROLE_KEY` — and it
+/// is NOT gated by this table; the still-unbuilt Phase C leadership picker is
+/// a separate, future UI, not a precondition for that write path to exist.
+/// There is no practical hole today because `director` carries no
+/// `OrgUnitRoleScope` rows (unrestricted, like every role with none), but a
+/// future scope row on a leadership role would not be enforced until this
+/// write path is gated too.
+model OrgUnitRoleScope {
+  /// Pairs with `OrgUnitRole.entityType` in the FK below.
+  entityType String   @map("entity_type") @db.VarChar(32)
+  /// Pairs with `OrgUnitRole.key` in the FK below.
+  roleKey    String   @map("role_key") @db.VarChar(32)
+  /// The unit CODE this role is permitted at (e.g. `Center.code`). NO FK — see
+  /// the docblock above.
+  entityId   String   @map("entity_id") @db.VarChar(64)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // NoAction, mirroring `OrgUnitRoleAssignment`: `entityType` is NOT NULL and
+  // part of a composite key, so SET NULL is invalid in Prisma and MySQL alike.
+  role OrgUnitRole @relation(fields: [entityType, roleKey], references: [entityType, key], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([entityType, roleKey, entityId])
+  @@map("org_unit_role_scope")
+}
+
 /// Per-center program taxonomy (#552). Empty for centers that don't use
-/// programs (most). The Meyer Cancer Center seeds five rows (CB, CGE, CPC, CT,
+/// programs (most). The Example Cancer Center seeds five rows (CB, CGE, CPC, CT,
 /// ZY). Other centers may opt in later by inserting their own rows — no schema
 /// change. `membershipType` + `programCode` on a membership are surfaced in the
 /// roster editor ONLY for centers that have ≥1 row here (the Cancer-Center-only
@@ -1508,45 +2096,19 @@ model CenterProgram {
   sortOrder   Int     @default(0) @map("sort_order")
   /// #1105/#1117 — per-program page fields. A program's dedicated page
   /// (`/centers/[slug]/programs/[code]`, flag `CENTER_PROGRAM_PAGES`) renders a
-  /// prose `description` and its leaders (the `CenterProgramLeader` children — a
-  /// program may be co-led, #1117). `description` is manually owned (no ETL
-  /// writes it) and null by default, so the feature ships dark.
+  /// prose `description` and its leaders (0..N `OrgUnitRoleAssignment` rows,
+  /// `entityType: "center_program"`, `entityId: "{centerCode}:{code}"` — #2558
+  /// migrated these off the retired per-program leader table; a program may
+  /// be co-led, #1117). `description` is manually owned (no ETL writes it) and
+  /// null by default, so the feature ships dark.
   description String? @map("description") @db.Text
 
   center             Center                          @relation(fields: [centerCode], references: [code], onDelete: Cascade)
   members            CenterMembership[]
-  /// #1117 — the program's leaders (0..N). Replaces the single
-  /// `leaderCwid`/`leaderInterim` columns (#1105), which could carry only one.
-  leaders            CenterProgramLeader[]
   fundingAllocations CancerCenterProgramAllocation[]
 
   @@id([centerCode, code])
   @@map("center_program")
-}
-
-/// #1117 — a center program's leader. A Meyer Cancer Center program is often
-/// co-led, so leaders are rows here (0..N) rather than a single
-/// `CenterProgram.leaderCwid` column. Each `cwid` resolves to a WCM scholar
-/// (profile-linked) or the external-leader fallback (`lib/external-leaders.ts`);
-/// `interim` renders the "Interim Leader" qualifier; `sortOrder` is the display
-/// order. Manually owned (no ETL writes these), so the feature ships dark behind
-/// `CENTER_PROGRAM_PAGES`.
-model CenterProgramLeader {
-  centerCode  String  @map("center_code") @db.VarChar(64)
-  programCode String  @map("program_code") @db.VarChar(16)
-  cwid        String  @db.VarChar(32)
-  interim     Boolean @default(false)
-  /// #1570 — role within the program: "leader" (a program lead, the default) or
-  /// "coe_liaison" (the Community Outreach & Engagement liaison, rendered as a
-  /// separate "COE Liaison" card AFTER the leaders). Kept as a String (not a
-  /// Prisma enum) so the additive column is a plain default-backfilled VARCHAR.
-  role        String  @default("leader") @map("role") @db.VarChar(32)
-  sortOrder   Int     @default(0) @map("sort_order")
-
-  program CenterProgram @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: Cascade)
-
-  @@id([centerCode, programCode, cwid])
-  @@map("center_program_leader")
 }
 
 /// Research vs clinical membership flavor — a Cancer-Center concept (#552). Set
@@ -1573,12 +2135,36 @@ enum CenterMembershipType {
 model CenterMembership {
   centerCode      String                @map("center_code") @db.VarChar(64)
   cwid            String                @db.VarChar(32)
+  /// DERIVED from `membershipRoleKey` since #2542 Phase 1 — never written
+  /// independently. `research`/`clinical` role keys derive to the matching enum
+  /// value; every other key (and a null key) derives to NULL. Kept as a real
+  /// column, and kept as the thing NCI analytics read, precisely so Cancer
+  /// Center reporting never touches the curator-editable vocabulary:
+  /// `CenterCollabCandidate.isCurrentMember` matches the literal `research`.
+  /// See `deriveMembershipType` in `lib/center-roles.ts`.
   membershipType  CenterMembershipType? @map("membership_type")
   programCode     String?               @map("program_code") @db.VarChar(16)
   startDate       DateTime?             @map("start_date") @db.Date
   endDate         DateTime?             @map("end_date") @db.Date
   source          String                @default("manual") @db.VarChar(64)
   lastRefreshedAt DateTime              @default(now()) @map("last_refreshed_at")
+
+  /// #2542 Phase 1 — the `membership` half of the center's role vocabulary, and
+  /// the stored fact `membershipType` is derived from. NULL on a row that
+  /// predates the Phase 1 backfill; the backfill files every existing row as
+  /// `research` / `clinical` / `member`.
+  ///
+  /// Leadership is NOT here — it is an `OrgUnitRoleAssignment` row. A leader
+  /// need not be a member, so keeping the two apart means nothing that counts
+  /// center members has to know about leadership at all.
+  membershipRoleKey String? @map("membership_role_key") @db.VarChar(32)
+  /// Always `"center"`. Exists only so the composite FK to `OrgUnitRole` — whose
+  /// key became (`entityType`, `key`) when the vocabulary moved from per-unit to
+  /// per-kind — has a column to reference: MySQL cannot point a foreign key at a
+  /// literal. Redundant on a table that is centers by definition, and kept
+  /// anyway because that FK is what enforces, IN THE DATABASE, that a curator
+  /// can only ever assign a role a superuser put on the list.
+  roleEntityType    String  @default("center") @map("role_entity_type") @db.VarChar(32)
 
   center  Center         @relation(fields: [centerCode], references: [code], onDelete: Cascade)
   // RESTRICT (not the spec's SET NULL): the FK is composite (centerCode,
@@ -1587,6 +2173,14 @@ model CenterMembership {
   // surface in v1; a future one must clear members' programCode in-app first
   // (with audit), then delete the program. (#552 §9 row 2 deviation.)
   program CenterProgram? @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: NoAction, onUpdate: NoAction)
+
+  // NoAction for the same reason as `program` above: the FK is composite and
+  // `centerCode` is NOT NULL, so SET NULL is invalid in both Prisma and MySQL.
+  // Deleting a vocabulary entry that still has holders must be blocked in-app
+  // (with reassignment) rather than orphaning rows — see #2542 Phase 3.
+  // #2542 contract B — closure IN THE DATABASE at last: a curator can only
+  // ever stamp a role key a superuser put on the shared vocabulary.
+  roleVocabulary OrgUnitRole? @relation(fields: [roleEntityType, membershipRoleKey], references: [entityType, key], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([centerCode, cwid])
   @@index([cwid])
@@ -1771,6 +2365,12 @@ model CancerCenterFundingAward {
   /// real rubric" — see `lib/edit/cancer-center-funding-generator.ts`).
   cancerRelevantPercent       Decimal? @map("cancer_relevant_percent") @db.Decimal(5, 2)
   cancerRelevantPercentSource String   @default("llm") @map("cancer_relevant_percent_source") @db.VarChar(16)
+  /// What Bedrock proposed for `cancerRelevantPercent`, kept apart from it so a
+  /// reviewer's correction can be told from a confirmation ("Corrected · AI
+  /// said X%" vs "Confirmed"). Written by the OSRA import alongside an
+  /// llm-sourced percent, never over a human one; NULL = no AI value (not
+  /// inferred). Backfilled from `cancerRelevantPercent` where source = 'llm'.
+  cancerRelevantPercentAi     Decimal? @map("cancer_relevant_percent_ai") @db.Decimal(5, 2)
   /// The model's one-sentence rationale for `cancerRelevantPercent` — shown to
   /// the reviewer, never used as a scoring input.
   cancerRelevantRationale     String?  @map("cancer_relevant_rationale") @db.Text
@@ -1820,6 +2420,74 @@ model CancerCenterProgramAllocation {
   @@map("cancer_center_program_allocation")
 }
 
+/// A member's disease-expertise assignment for the Example Cancer Center — one
+/// row per (cwid, diseaseCode) the deterministic generator
+/// (`scripts/cancer-center-disease-assignments.ts`,
+/// `docs/cancer-center-disease-taxonomy-decisions.md`) produced, ranked by
+/// importance (`rank` 1 = headline). Full-replace on every generator run,
+/// mirroring `CancerTaxonomyDescriptor`'s full-replace + runId provenance
+/// shape: `runId` is the producing `EtlRun.id`, joined back to recover when
+/// and from what state this row was generated. `focus` (the display band)
+/// and `confidence` (evidence strength) are deliberately separate axes — see
+/// the generator's own `focusOf` doc comment — never collapse one into the
+/// other. `firstYear`/`lastYear`/`recentPubs` surface recency to a human
+/// reviewer and are NEVER folded into `score`: a scholar's uncurated-
+/// publication gap concentrates on affiliated faculty, so silently demoting
+/// on staleness would encode that curation gap as a judgment about focus.
+model CancerCenterDiseaseAssignment {
+  cwid            String @db.VarChar(32)
+  diseaseCode     String @map("disease_code") @db.VarChar(32)
+  rank            Int
+  focus           String @db.VarChar(16) // primary | secondary | peripheral
+  confidence      String @db.VarChar(16) // high | medium | low
+  leadPubs        Int    @map("lead_pubs")
+  secondPubs      Int    @map("second_pubs")
+  middlePubs      Int    @map("middle_pubs")
+  grantsLed       Int    @map("grants_led")
+  grantsSupport   Int    @map("grants_support")
+  trialsLed       Int    @map("trials_led")
+  trialsSupport   Int    @map("trials_support")
+  pubScore        Int    @map("pub_score")
+  score           Int
+  firstYear       Int?   @map("first_year")
+  lastYear        Int?   @map("last_year")
+  recentPubs      Int    @map("recent_pubs")
+  specialtyStatus String @map("specialty_status") @db.VarChar(24)
+  runId           String @map("run_id") @db.VarChar(64)
+
+  @@id([cwid, diseaseCode])
+  @@index([cwid])
+  @@map("cancer_center_disease_assignment")
+}
+
+/// A reviewer's confirm-or-reject call on one `CancerCenterDiseaseAssignment`
+/// row, made on /edit (`disease_assignment_decision` audit action,
+/// `targetEntityType='scholar'`, `targetEntityId` the cwid). Always-present
+/// decision row, mirroring `FamilyTierDecision`'s shape: one row per (cwid,
+/// diseaseCode) a human has actually decided on, not one per generator run —
+/// a later full-replace of `CancerCenterDiseaseAssignment` does not erase or
+/// require re-deciding a row someone already reviewed. `scoreAtDecision` /
+/// `confidenceAtDecision` snapshot the assignment's evidence AT the moment of
+/// decision, so a later re-run that shifts `score`/`confidence` can't
+/// silently make a stale decision look freshly reviewed. Both are NULLABLE —
+/// a curator can also manually attach a disease code the generator never
+/// suggested (no `CancerCenterDiseaseAssignment` row for the pair); that
+/// decision has no evidence to snapshot, and null represents that honestly
+/// instead of a fake sentinel score/confidence.
+model CancerCenterDiseaseDecision {
+  cwid                 String   @db.VarChar(32)
+  diseaseCode          String   @map("disease_code") @db.VarChar(32)
+  decision             String   @db.VarChar(16) // confirmed | rejected
+  decidedBy            String   @map("decided_by") @db.VarChar(32)
+  decidedAt            DateTime @map("decided_at")
+  scoreAtDecision      Int?     @map("score_at_decision")
+  confidenceAtDecision String?  @map("confidence_at_decision") @db.VarChar(16)
+
+  @@id([cwid, diseaseCode])
+  @@index([cwid])
+  @@map("cancer_center_disease_decision")
+}
+
 /// Per-scholar membership in a manually-created Division (`Division.source =
 /// 'manual'`). Mirrors `CenterMembership` exactly — added rows carry
 /// `source='manual-ui'`. No FK to `Scholar` (a roster row may exist before the
@@ -1836,6 +2504,40 @@ model DivisionMembership {
   @@id([divisionCode, cwid])
   @@index([cwid])
   @@map("division_membership")
+}
+
+/// Cornell (Ithaca) directory-member side table (#2519, PR 1 of the Cornell
+/// membership feature; `docs/2026-08-26-cornell-ithaca-membership-SPEC.md`
+/// §§ 1-3). A snapshot of a Cornell NetID's LDAP attributes, captured at the
+/// moment a unit curator adds them to a center/division roster.
+///
+/// `cuid` is the Cornell NetID — under the identity model in the spec's §1,
+/// the WCM-CWID and Cornell-NetID namespaces are asserted disjoint, so a
+/// membership row's existing `cwid` column can hold a NetID directly with no
+/// separate column and no collision guard beyond that disjointness assertion.
+/// This table does NOT mint a `Scholar` row (§2): minting one would drag
+/// Cornell people into public search, profiles, exports, and every
+/// WCM-eligibility surface, and would fight the nightly ED sync. The render
+/// union (PR 2) left-joins `CenterMembership`/`DivisionMembership` rows whose
+/// `source = 'cornell-ithaca'` against this table instead of `Scholar`.
+///
+/// `CenterMembership`/`DivisionMembership` are UNCHANGED by this feature — a
+/// Cornell member is an ordinary row with `cwid = <netid>` and the existing
+/// free-text `source` column set to `"cornell-ithaca"`.
+model ExternalMember {
+  cuid        String   @id @db.VarChar(32) // Cornell NetID (a cuid, see model doc)
+  displayName String   @map("display_name") @db.VarChar(255)
+  givenName   String?  @map("given_name") @db.VarChar(128)
+  familyName  String?  @map("family_name") @db.VarChar(128)
+  title       String?  @db.VarChar(255)
+  dept        String?  @db.VarChar(255)
+  email       String?  @db.VarChar(255)
+  affiliation String?  @db.VarChar(64) // cornelleduprimaryaffiliation, for display/filter
+  source      String   @default("cornell-ithaca") @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("external_member")
 }
 
 /// Per-unit administrator grant (ADR-005 Amendment 1 § A1.1 / #540). One row
@@ -1871,6 +2573,107 @@ model UnitAdmin {
   @@index([cwid])
   @@index([source]) // #728 — per-source reconcile + Administrators-tab provenance filter
   @@map("unit_admin")
+}
+
+/// Data-driven per-report access grant (Mentored publications report,
+/// `/edit/reports/7`). One row = (report, scope, cwid): the holder may open
+/// `reportKey` and sees the rows whose program bucket is `scopeKey` (`"*"` =
+/// every scope). No org unit, no ED group — superuser / comms_steward always
+/// pass and manage these rows from the report's own "Viewers" panel
+/// (`lib/edit/report-access.ts`, `app/api/edit/report-access`). An EMPTY table
+/// means nobody but superuser/comms_steward can open the report (fail closed;
+/// there is no env flag).
+model ReportAccess {
+  reportKey   String   @map("report_key") @db.VarChar(64)
+  scopeKey    String   @map("scope_key") @db.VarChar(64)
+  cwid        String   @db.VarChar(32)
+  grantedBy   String   @map("granted_by") @db.VarChar(32)
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  // Grantee display name as the people picker returned it AT GRANT TIME
+  // (the `UnitAdmin.granteeName` precedent): the app runtime cannot reach
+  // LDAP (#443), and the grantees this table is for hold no Scholar row, so
+  // a render-time lookup would show the bare CWID. Read back as
+  // `Scholar.preferredName ?? granteeName ?? cwid`. Null on rows granted
+  // before the column existed.
+  granteeName String?  @map("grantee_name") @db.VarChar(255)
+
+  @@id([reportKey, scopeKey, cwid])
+  @@index([cwid])
+  @@map("report_access")
+}
+
+/// Functional role assignments (`/edit/administrators` → Functional roles):
+/// access that is not tied to an org unit — External Affairs (one role; its
+/// functions "communications" / "development" are the row's scopes) and
+/// Reporting. One row = (role, cwid, source). `source` is
+/// "manual" for an assignment made on the Administrators page, or the name of
+/// the existing mechanism an import mirrored ("report_access" rows, or the
+/// comms-steward / development break-glass "allowlist"). Imported rows are
+/// read-only on the page (the source owns them) and are reconciled by the
+/// import; manual rows are created, re-scoped and revoked on the page, each
+/// write audited as `functional_role_*`. `scopes` is a JSON string array of
+/// scope keys (External Affairs: its functions; Reporting: "*", a report key
+/// or "reportKey:scope"). Gates read this table only while
+/// `FUNCTIONAL_ROLES_AUTHZ` is "on", and then only to ADD access on top of the
+/// ED groups, allowlists and `report_access`
+/// (`lib/auth/functional-role-authz.ts`).
+model FunctionalRoleGrant {
+  role        String   @db.VarChar(32)
+  cwid        String   @db.VarChar(32)
+  source      String   @default("manual") @db.VarChar(32)
+  scopes      Json
+  // Grantee display name as the people picker (or the imported source row)
+  // supplied it — the `report_access.grantee_name` precedent: the runtime
+  // cannot reach LDAP (#443). Read back as Scholar.preferredName ?? this ?? cwid.
+  granteeName String?  @map("grantee_name") @db.VarChar(255)
+  grantedBy   String   @map("granted_by") @db.VarChar(32)
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@id([role, cwid, source])
+  @@index([cwid])
+  @@map("functional_role_grant")
+}
+
+/// Editable report metadata for the `/edit/reports` console — one row per
+/// numbered report (`reportKey` '1'..'7'): the NAME shown in the index and the
+/// page `<h1>` (without its "N. " prefix), the one-line SUMMARY the index card
+/// shows, and an optional rich-text DESCRIPTION (sanitized HTML on the
+/// `overview` allowlist, `sanitizeOverview`) rendered as a closed "About this
+/// report" disclosure on the report page. Not seeded (#584: migrations never
+/// INSERT): `lib/edit/report-meta.ts` carries the former hardcoded strings as
+/// `REPORT_META_DEFAULTS`, the fallback for a report with no row; a row wins
+/// entirely once a superuser saves one. Written only by a superuser through
+/// `app/api/edit/report-meta/[n]` (`updatedBy` is the REAL actor cwid, never
+/// the impersonation target).
+model ReportMeta {
+  reportKey       String    @id @map("report_key") @db.VarChar(64)
+  slug            String    @unique @db.VarChar(64)
+  name            String    @db.VarChar(120)
+  summary         String    @db.VarChar(500)
+  descriptionHtml String?   @map("description_html") @db.Text
+  /// Request record (who asked for the report, when, and the memo), edited
+  /// in "Edit details" and shown to report editors only, never on the report.
+  requestedBy     String?   @map("requested_by") @db.VarChar(200)
+  requestedOn     DateTime? @map("requested_on") @db.Date
+  requestMemo     String?   @map("request_memo") @db.Text
+  updatedBy       String    @map("updated_by") @db.VarChar(32)
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("report_meta")
+}
+
+/// A pasted CWID list for report 8's "CWID list" filter (`list=<id>` in the
+/// report URL; `lib/edit/cwid-list.ts`). Immutable once created: the app only
+/// inserts, so a shared link keeps meaning the same people. `cwids` is a JSON
+/// array of lowercase CWIDs (deduplicated, at most `CWID_LIST_MAX`).
+model ReportCwidList {
+  id        String   @id @db.VarChar(32)
+  cwids     Json
+  createdBy String   @map("created_by") @db.VarChar(32)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("report_cwid_list")
 }
 
 /// Scholar-assigned proxy editor grant (scholar-proxy-spec.md / #779, ADR-005
@@ -1950,18 +2753,66 @@ model PublicationTopic {
 /// dictionary) and then FK-guards `publication_core.coreId` against it — the same
 /// "populate catalog, then guard usage rows" flow as Block 1 (TAXONOMY# → topic).
 model Core {
-  id          String   @id @db.VarChar(32) // dictionary core_id, e.g. "2" (Biomedical Imaging)
-  name        String   @db.VarChar(255) // "Biomedical Imaging"
-  facility    String?  @db.VarChar(255) // canonical facility name, e.g. "Citigroup Biomedical Imaging Center"
+  id                String   @id @db.VarChar(32) // dictionary core_id, e.g. "2" (Biomedical Imaging)
+  name              String   @db.VarChar(255) // "Biomedical Imaging"
+  facility          String?  @db.VarChar(255) // canonical facility name, e.g. "Citigroup Biomedical Imaging Center"
   // Ownership is NOT a column here: a core owner is modeled as a
   // UnitAdmin(entityType="core", entityId=id, role=owner) row in the existing RBAC
   // (Superuser-granted), the same machinery as department/division/center.
-  source      String   @db.VarChar(64) // "reciterai-core-dictionary"
-  refreshedAt DateTime @default(now()) @map("refreshed_at")
+  source            String   @db.VarChar(64) // "reciterai-core-dictionary"
+  refreshedAt       DateTime @default(now()) @map("refreshed_at")
+  /// Cores-as-org-units P1 (core-as-org-unit-plan.md). Manually owned (no ETL
+  /// writes these), null/default so the 13 existing cores land clean with no
+  /// backfill. `visible` is the per-core curator-facing toggle — it coexists
+  /// with the existing global `CORE_PAGES`/`CORE_PUB_MODAL` env flags; both
+  /// must be true for a core to show publicly.
+  description       String?  @db.Text
+  url               String?  @db.VarChar(512)
+  visible           Boolean  @default(false)
+  /// How many core staff the facility dictionary LISTS for this core — the
+  /// length of its `staff:` key. ETL-owned (etl/dynamodb Block 6b reads
+  /// `PK=CORE#{id}, SK=STAFF_DICT`); SPS never curates it, and it is a COUNT,
+  /// not a roster, so no staff CWID is copied into this datastore. Nullable
+  /// with NO default on purpose: NULL means "the engine has not published a
+  /// count for this core yet" and must stay distinguishable from a real 0 (a
+  /// core whose dictionary entry lists no staff at all). An absent item leaves
+  /// the column untouched — it never writes 0.
+  staffCount        Int?     @map("staff_count")
+  /// Of those listed staff, how many the co-author signal can ACTUALLY match.
+  /// This is the load-bearing number, and it is routinely smaller than
+  /// `staffCount`: pipeline_cores/signals.py `coauthorship_index` reads the
+  /// core's `tracked_staff_cwids`, not its `staff:` list, so a listed staff
+  /// member with no personIdentifier upstream is invisible to the signal. On
+  /// the live dictionary the two diverge on 9 of 14 cores, and three cores
+  /// list staff while tracking none — publishing only `staffCount` would put
+  /// "draws on N core staff" on screen for cores where the signal cannot fire
+  /// at all. Same NULL-is-not-0 rule; written in lockstep with `staffCount`.
+  staffTrackedCount Int?     @map("staff_tracked_count")
 
   publications PublicationCore[]
+  leaders      CoreLeader[]
 
   @@map("core")
+}
+
+/// Cores-as-org-units P1 (core-as-org-unit-plan.md) — a core's leader(s). A
+/// core may be co-led, so leaders are rows here (0..N) rather than a single
+/// scalar column — the same shape a program's `center_program`
+/// `OrgUnitRoleAssignment` rows use (#2558). `role` is an open string (not a
+/// Prisma enum), same pattern as that vocabulary's "leader"/"coe_liaison"
+/// `roleKey` — extensible without a future migration.
+model CoreLeader {
+  coreId    String  @map("core_id") @db.VarChar(32)
+  cwid      String  @db.VarChar(32)
+  role      String  @default("director") @map("role") @db.VarChar(32)
+  interim   Boolean @default(false)
+  sortOrder Int     @default(0) @map("sort_order")
+
+  core Core @relation(fields: [coreId], references: [id], onDelete: Cascade)
+
+  @@id([coreId, cwid])
+  @@index([coreId])
+  @@map("core_leader")
 }
 
 /// Projected (publication × core) usage candidates from ReciterAI's cores
@@ -1993,6 +2844,23 @@ model PublicationCore {
   llmScore        Int?     @map("llm_score") @db.SmallInt // signal 4: 1-10 dense triage score
   llmRationale    String?  @map("llm_rationale") @db.Text // short LLM rationale
   authorAffinity  Decimal? @map("author_affinity") @db.Decimal(5, 4) // 0-1 repeat-user prior (signal 1)
+  topicalPrior    Decimal? @map("topical_prior") @db.Decimal(5, 4) // 0-1 batch_screen prefilter_prior (signal 5): noisy-OR of author-affinity (0.6) + bare-descriptor MeSH E-tree membership (0.4)
+  /// Method-family evidence from the engine's `pipeline_cores` extractor.
+  /// `methodTier` is the family-strength band (strong | moderate | weak);
+  /// `methodEvidence` is the pre-ranked (strongest first) list behind it,
+  /// `[{ family, tool, sentence }]`. The engine writes the pair together or not
+  /// at all. `meshEvidence` is `[{ descriptor_ui, descriptor, tree_prefix }]`
+  /// and is written independently of the pair.
+  ///
+  /// All three are JSON/scalar columns rather than a child table — the same
+  /// shape `signalCoauthors` above uses, and the read path only ever wants the
+  /// whole list for one (pmid, coreId). Nullable and additive: absent on every
+  /// row scored before the engine started emitting them, and NOT a counted
+  /// claim-queue signal (`meshEvidence` in particular carries weight 0.00
+  /// upstream).
+  methodTier      String?  @map("method_tier") @db.VarChar(16)
+  methodEvidence  Json?    @map("method_evidence")
+  meshEvidence    Json?    @map("mesh_evidence")
   scoredAt        DateTime @map("scored_at") // engine `scored_at` ISO timestamp
 
   publication Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
@@ -2041,6 +2909,73 @@ model CoreClaim {
   @@unique([pmid, coreId]) // one current decision per pair
   @@index([coreId]) // per-core claim list
   @@map("core_claim")
+}
+
+/// A PMID a core owner sent to their review queue by hand ("Add PMIDs → Send to
+/// review", Core Review Queue v2 PR B). Deliberately NOT a `ClaimStatus` value
+/// (assessment decision 1, 2026-09-28): a row here only says "put this paper in
+/// front of the reviewer"; the decision itself is still a `CoreClaim`, whose
+/// semantics are untouched. The loader (`lib/api/core-queue.ts`) surfaces a
+/// queued pmid under the unscored "Added by you" rail group while it has no
+/// ACTIVE claim; once confirmed/rejected the claim wins and it files under
+/// Confirmed/Rejected like any other paper. The row is never deleted on a
+/// decision, so a later Revoke/Restore/Undo puts the paper straight back under
+/// "Added by you" instead of losing it. No FK (same ETL-immunity posture as
+/// `core_claim` — the engine never writes here).
+model CoreQueueAdd {
+  id        String   @id @default(uuid()) @db.VarChar(64)
+  coreId    String   @map("core_id") @db.VarChar(32)
+  pmid      String   @db.VarChar(32)
+  /// EFFECTIVE actor cwid — same convention as CoreClaim.claimedBy. The B03
+  /// audit row (`core_queue_add`) holds the real human.
+  addedBy   String   @map("added_by") @db.VarChar(32)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([coreId, pmid]) // a pmid is queued once per core
+  @@map("core_queue_add")
+}
+
+/// A core owner's manually-attested "known client" of a core facility — the
+/// CWID-only pass of ReciterAI #383 / SPS #2607: someone the owner knows uses
+/// the core, independent of any publication evidence. Mirrors CoreClaim's
+/// soft-remove convention (no hard delete, so the add/remove history survives):
+/// `removedAt IS NULL` is "active". No FK to core/scholar — a client CWID may
+/// precede a Scholar row (non-faculty core user) or outlive a core delete, the
+/// same ETL-immunity ADR-005 uses. `cwid` is stored lowercased/trimmed; the
+/// active list mirrors to the shared ReciterAI DynamoDB table
+/// (`lib/cores/client-writeback.ts`) so the engine can fold it into the next
+/// cores inference run as a signal, alongside the read/display join done here
+/// case-insensitively against `Scholar.cwid` (see `lib/api/core-clients.ts`).
+model CoreClient {
+  id        String    @id @default(uuid()) @db.VarChar(64)
+  coreId    String    @map("core_id") @db.VarChar(32)
+  /// NULL for a NAME-ONLY client: someone the owner knows uses the core but who
+  /// has no CWID (an outside collaborator, a departed trainee). Such a row is
+  /// roster-only — it can never flag a byline (the byline match is by CWID) and
+  /// is never mirrored to the engine (see lib/cores/client-writeback.ts).
+  ///
+  /// NOTE the @@unique below does NOT dedupe these: MySQL permits unlimited
+  /// NULLs in a unique index, so (coreId, NULL) never collides. Duplicate
+  /// name-only rows are prevented in the route by a case-insensitive
+  /// displayName check against the core's active list, not by the index.
+  cwid        String?  @db.VarChar(32)
+  /// Owner-typed display name. Set ONLY on a name-only row (where it is
+  /// required); a CWID row resolves its name from Scholar/ED at read time, so
+  /// storing one here would be a second copy free to go stale.
+  displayName String?  @map("display_name") @db.VarChar(255)
+  /// Owner-typed affiliation for a name-only client. Always optional — the
+  /// modal offers it as a disambiguator, not a required field.
+  affiliation String?  @db.VarChar(255)
+  /// EFFECTIVE actor cwid (the impersonation target while "View as" is live,
+  /// else the real user) — same convention as CoreClaim.claimedBy.
+  addedBy   String    @map("added_by") @db.VarChar(32)
+  addedAt   DateTime  @default(now()) @map("added_at")
+  removedBy String?   @map("removed_by") @db.VarChar(32)
+  removedAt DateTime? @map("removed_at") // soft-remove → "active" = removedAt IS NULL
+
+  @@unique([coreId, cwid]) // one current row per (core, cwid) pair
+  @@index([coreId]) // per-core client list
+  @@map("core_client")
 }
 
 /// ReCiterAI publication scores per scholar+pmid pair (Q6 minimal projection).
@@ -2304,6 +3239,12 @@ enum EntityType {
   // researcher's profile shouldn't suppress it for every co-author.
   // Suppression-only, like mentee — never a field_override or unit_admin target.
   dataset_deposit
+  // + institution administrators: an ED primary-organization code
+  // (`Scholar.primaryOrgCode`, e.g. `HMC`). Used ONLY as a `unit_admin` target —
+  // the proxy-edit path in lib/edit/unit-scholar-authz.ts. No unit table: the
+  // code→name map is lib/institutions.ts. Never a field_override or
+  // suppression target.
+  institution
 }
 
 /// Per-unit administrator role (ADR-005 Amendment 1 § A1.2 / #540). One row
@@ -2513,6 +3454,10 @@ model OverviewGeneration {
   // delegated draft is attributed to the human who actually ran it (audit parity).
   impersonatedCwid String?  @map("impersonated_cwid") @db.VarChar(32)
   createdAt        DateTime @default(now()) @map("created_at")
+  // History-panel label ("AI draft N" when NULL) and soft delete. A hidden draft
+  // drops out of the panel but the row stays for the audit trail.
+  name             String?   @db.VarChar(40)
+  hiddenAt         DateTime? @map("hidden_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
@@ -2566,6 +3511,9 @@ model BiosketchGeneration {
   // for a direct generation. Mirrors `manual_edit_audit.impersonated_cwid` so the history panel
   // can attribute a delegated draft to the human who actually ran it.
   impersonatedCwid String?  @map("impersonated_cwid") @db.VarChar(32)
+  // #2654 -- optional scholar-typed label (the application name) so drafts are tellable apart
+  // in the saved-drafts list. NULL for an unlabeled run; editable from the list.
+  label            String?  @db.VarChar(120)
   createdAt        DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
@@ -2593,6 +3541,26 @@ model OverviewProvenance {
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@map("overview_provenance")
+}
+
+/// One saved overview (the History panel's "Saved version" rows). Appended by
+/// `/api/edit/field` in the same transaction as the override + provenance
+/// upsert, so every publish is recoverable. `hiddenAt` soft-deletes a row from
+/// the panel; the newest row is the live text and cannot be hidden.
+model OverviewVersion {
+  id                 String    @id @default(uuid()) @db.VarChar(64)
+  cwid               String    @db.VarChar(32)
+  html               String    @db.Text
+  origin             String    @db.VarChar(24) // 'authored' | 'generated' | 'generated_edited'
+  sourceGenerationId String?   @map("source_generation_id") @db.VarChar(64)
+  savedByCwid        String    @map("saved_by_cwid") @db.VarChar(32)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  hiddenAt           DateTime? @map("hidden_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@index([cwid, createdAt(sort: Desc)])
+  @@map("overview_version")
 }
 
 /// The scholar's DURABLE source-selection deltas for the overview generator
@@ -2714,44 +3682,98 @@ model ScholarTechnology {
 ///          reviewer disambiguates by title/department and approving one rejects
 ///          its siblings.
 model NewsMention {
-  id            String            @id @default(uuid()) @db.VarChar(64)
-  cwid          String            @db.VarChar(32)
+  id             String            @id @default(uuid()) @db.VarChar(64)
+  cwid           String            @db.VarChar(32)
   /// Absolute URL of the public news article — the (cwid, url) dedup key and the
   /// contested-group key stem.
-  url           String            @db.VarChar(512)
-  title         String            @db.Text
+  url            String            @db.VarChar(512)
+  title          String            @db.Text
   /// Publication date parsed from the article detail page ("July 16, 2026").
   /// Null when the page carries no parseable date.
-  publishedAt   DateTime?         @map("published_at")
+  publishedAt    DateTime?         @map("published_at")
   /// Listing excerpt/summary as plain text. Null when the listing omits it.
-  excerpt       String?           @db.Text
+  excerpt        String?           @db.Text
   /// Absolute URL of the article thumbnail. Null when the listing omits it.
-  thumbnailUrl  String?           @map("thumbnail_url") @db.VarChar(512)
-  status        NewsMentionStatus @default(pending)
+  thumbnailUrl   String?           @map("thumbnail_url") @db.VarChar(512)
+  status         NewsMentionStatus @default(pending)
   /// How the (scholar, article) link was established: VIVO (link) | NAME (prose
   /// match) | CURATOR (manual). Governs trust/provenance, not display.
-  source        String            @default("VIVO") @db.VarChar(32)
+  source         String            @default("VIVO") @db.VarChar(32)
   /// The prose name string the ETL matched (NAME source only), shown in the
   /// review queue. Null for VIVO/CURATOR rows.
-  detectedName  String?           @map("detected_name") @db.VarChar(255)
-  /// Match confidence for a NAME row: HIGH (unique full-name match) | MEDIUM
-  /// (full name shared by >1 scholar — ambiguous). Null for VIVO/CURATOR.
-  likelihood    String?           @db.VarChar(8)
+  detectedName   String?           @map("detected_name") @db.VarChar(255)
+  /// Match confidence for a NAME row: HIGH | MEDIUM | LOW. Derived from
+  /// `matchBasis`, then capped at MEDIUM when the folded name is shared by >1
+  /// scholar (contested). Null for VIVO/CURATOR.
+  likelihood     String?           @db.VarChar(8)
+  /// WHERE the name was found, which is what decides `likelihood` (#2578):
+  /// TAG (the newsroom feed's own story tags — the strongest signal) | BODY
+  /// (article prose) | CAPTION (photo alt text only) | TITLE (prose, but every
+  /// occurrence sits inside an endowed-chair or memorial phrase, so the story is
+  /// about the chair's HOLDER, not the person it is named for). Carries the
+  /// reviewer-facing "why" that `likelihood` alone cannot, since likelihood also
+  /// folds in contested-ness. Null for VIVO/CURATOR rows.
+  matchBasis     String?           @map("match_basis") @db.VarChar(16)
   /// Contested-group key "<url>|<detectedName>" — pending rows sharing it are
   /// competing candidates for one prose mention. Null for VIVO/CURATOR rows.
-  sourceRef     String?           @map("source_ref") @db.VarChar(768)
+  sourceRef      String?           @map("source_ref") @db.VarChar(768)
+  /// ~200-300 chars of raw article text around the matched name's first prose
+  /// occurrence, word-boundary clipped, matched name intact (#2578 follow-up) —
+  /// lets a /edit/news-queue reviewer judge a candidate (e.g. an endowed-chair
+  /// false positive) without opening the article. Populated for any NAME row
+  /// whose name appears in the prose at all — including a TAG row, since the
+  /// feed tags the people a story quotes and the HIGH rows are the ones a
+  /// reviewer is actually deciding on. Null for VIVO/CURATOR rows, for a
+  /// tag-only or caption-only mention (no prose position to quote), and for a
+  /// NAME row matched before this shipped.
+  contextSnippet String?           @map("context_snippet") @db.VarChar(512)
+  /// Press outlet ("IEEE Spectrum") for a Media Highlights clip, parsed from the
+  /// External Affairs "WCM in the News" digest by etl/news/clips.ts. Non-null
+  /// marks the row as an off-site press clip: it renders in the profile's Media
+  /// Highlights section instead of News. Null for newsroom stories.
+  outlet         String?           @db.VarChar(255)
+  /// Media highlights: the id of the LEAD clip this row is another copy of (a
+  /// syndicated copy, a later digest). Null = its own story (or the lead). Always
+  /// points at the lead, never at another placement. No FK on purpose: lead and
+  /// placements share a cwid and are deleted together; a dangling id just makes
+  /// the row its own story (lib/edit/clip-repeats.ts, `groupClips`).
+  duplicateOf    String?           @map("duplicate_of") @db.VarChar(64)
+  /// Media highlights: the original publisher the digest credits for this clip
+  /// ("(This article originally appeared in KFF Health News)"); used to pick
+  /// the lead of a group. Null when the digest credits none.
+  creditedOutlet String?           @map("credited_outlet") @db.VarChar(255)
   /// Per-mention profile hide (the scholar's /edit "hide" control). A published
   /// mention renders only when this is true.
-  showOnProfile Boolean           @default(true) @map("show_on_profile")
+  showOnProfile  Boolean           @default(true) @map("show_on_profile")
   /// The actor who last changed status/visibility via /edit; null for ETL writes.
-  enteredByCwid String?           @map("entered_by_cwid") @db.VarChar(32)
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
+  enteredByCwid  String?           @map("entered_by_cwid") @db.VarChar(32)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  /// Undo for the review queues (lib/edit/news-decision.ts). The request id of
+  /// the last POST /api/edit/news-mention/decision that wrote this row; every row
+  /// one decision touched (the row, its copies, the swept siblings, a reassign's
+  /// new row) shares it. Cleared by undo, and on EVERY row of the decision by any
+  /// later /edit write to one of them, so an undo is all or nothing and never
+  /// overwrites a newer human decision. Null otherwise.
+  decisionId        String?            @map("decision_id") @db.VarChar(64)
+  /// When that decision was made; undo is refused after a short window.
+  decisionAt        DateTime?          @map("decision_at")
+  /// The row's status BEFORE that decision. Null with `decisionId` set means the
+  /// decision CREATED the row (a "wrong person" reassign), so undo deletes it.
+  prevStatus        NewsMentionStatus? @map("prev_status")
+  /// `showOnProfile` before that decision.
+  prevShowOnProfile Boolean?           @map("prev_show_on_profile")
+  /// `enteredByCwid` before that decision — restoring it hands an untouched row
+  /// back to the ETL exactly as it was.
+  prevEnteredByCwid String?            @map("prev_entered_by_cwid") @db.VarChar(32)
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@unique([cwid, url])
   @@index([cwid, status, showOnProfile])
+  @@index([duplicateOf])
+  @@index([decisionId])
   @@map("news_mention")
 }
 
@@ -3281,8 +4303,48 @@ model SponsorMatchSubmission {
   submittedBy String   @map("submitted_by") @db.VarChar(32) // actor cwid
   createdAt   DateTime @default(now()) @map("created_at")
 
+  /// The engine's answer for THIS run — `{ concepts, candidates, titleSummary, culled }` — so a
+  /// replay from Recent (or a re-run days later) is served from here instead of re-running Sonnet
+  /// and eight OpenSearch searches. The in-RAM route cache is per task and dies at 30 min, so
+  /// before this every replay on a later day was a full cold run.
+  ///
+  /// NULL when the run was not cacheable (zero candidates = a degraded/empty result the route
+  /// deliberately never memoises) and on rows written while serving a stored result (those rows
+  /// record the ask, the older row still holds the answer). `preferences` is NOT stored — it is
+  /// verbatim paste slices, recomputed per request, and pure.
+  ///
+  /// Erased with the paste: DELETE removes every row of a `descriptionHash`, results included.
+  result Json?
+
+  /// The route's FULL cache key for `result` (`sponsor:<engine>:<hash>[:inc:<hash>][:elig]`), so
+  /// an include-chip or eligibility variant never serves the base result and vice versa. Set
+  /// only alongside a non-null `result`; the lookup filters on it and needs no JSON-null test.
+  resultKey String? @map("result_key") @db.VarChar(200)
+
   @@index([createdAt]) // the list view: newest first
   @@index([submittedBy])
   @@index([descriptionHash])
   @@map("sponsor_match_submission")
+}
+
+
+/// One CTSC feed record whose CWID CTSC should fix at the source, rebuilt each
+/// night by `etl/ctsc-roster`. Shown on the CTSC center's /edit page ("Feed
+/// CWID issues") so the CTSC team can correct their system; a corrected record
+/// drops off on the next sync. `suggestedCwid` is what ED resolved from the
+/// record's emails (null when nothing resolved unambiguously).
+model CtscFeedIssue {
+  primaryKey    Int      @id @map("primary_key")
+  name          String   @db.VarChar(255)
+  institution   String?  @db.VarChar(255)
+  feedCwid      String?  @map("feed_cwid") @db.VarChar(64)
+  /// See `CtscIssueReason` in `etl/ctsc-roster/resolve.ts`.
+  reason        String   @db.VarChar(32)
+  suggestedCwid String?  @map("suggested_cwid") @db.VarChar(32)
+  suggestedName String?  @map("suggested_name") @db.VarChar(255)
+  matchedEmail  String?  @map("matched_email") @db.VarChar(255)
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  @@index([reason])
+  @@map("ctsc_feed_issue")
 }

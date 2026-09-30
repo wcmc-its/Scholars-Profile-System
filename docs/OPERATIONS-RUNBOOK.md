@@ -208,7 +208,7 @@ Nine stacks, each `Sps-{X}-${env}` (e.g. `Sps-App-prod`). Selected via `-c env=s
 
 **Live request-path** (outage = user-visible now): CloudFront+WAF, Aurora, OpenSearch, WCM SAML IdP (`/edit` login only), WCM Enterprise Directory LDAPS (live `/edit/*` authz).
 
-**ETL-path** (outage = stale data, site stays up): Enterprise Directory LDAPS (nightly → Scholar/Appointment/org units), ReciterDB MariaDB (nightly → Publications/MeSH/citations, heavy ~5 min), InfoEd MS SQL (nightly → Grant), COI Portal MySQL (nightly → CoiActivity), ASMS MS SQL (nightly → Education), Jenzabar MS SQL (weekly → PhD mentoring), ReciterAI DynamoDB+S3 (Topic/Score/Spotlight/tools), NIH RePORTER + NSF (weekly), NLM MeSH (annual). WCM-internal reachability depends on **TGW + WCM firewall owned by Central Services account `091981818184`, not SPS**.
+**ETL-path** (outage = stale data, site stays up): Enterprise Directory LDAPS (nightly → Scholar/Appointment/org units), ReciterDB MariaDB (nightly → Publications/MeSH/citations, heavy ~5 min), InfoEd MS SQL (nightly → Grant), COI Portal MySQL (nightly → CoiActivity), ASMS MS SQL (nightly → Education), Jenzabar MS SQL (weekly → PhD mentoring), ReciterAI DynamoDB+S3 (Topic/Score/Spotlight/tools), NIH RePORTER + NSF (weekly), NLM MeSH (annual), CTSC investigators-and-trainees feed HTTPS (nightly → CTSC center roster; see [CTSC roster sync](#ctsc-roster-sync)). WCM-internal reachability depends on **TGW + WCM firewall owned by Central Services account `091981818184`, not SPS**.
 
 Method/tool taxonomy and spotlight data are published by ReciterAI as **JSON on S3** (`s3://wcmc-reciterai-artifacts/tools/latest/...`, `.../spotlight/latest/spotlight.json`), **not** DynamoDB; SPS ETL ingests into Aurora.
 
@@ -390,6 +390,34 @@ Schedules (UTC): nightly `cron(0 7 * * ? *)`, weekly `cron(0 8 ? * SUN *)`, annu
 >
 > **Not freshness-tracked** (failures still caught, staleness not): `revalidate`, `reporter`, `nsf`, `gates`, `nih-profile`, `search:index`. `rows_processed = 0` is not yet flagged.
 
+### CTSC roster sync
+
+Nightly step `CtscRoster` (`npm run etl:ctsc-roster`, [`etl/ctsc-roster/index.ts`](../etl/ctsc-roster/index.ts); added by #2780) mirrors the Clinical & Translational Science Center roster into the center with **slug `ctsc`** from the CTSC investigators-and-trainees feed (the same feed the ReCiter Institutional Client reads). It runs after `EdAdmins`, `tier: "continue"`: a failed night leaves last night's roster in place and does not abort the nightly.
+
+- **Roster only.** CTSC is not a publication source; the feed's PubMed IDs are never read.
+- **Identity.** A feed CWID is trusted only after an ED lookup confirms it. A blank or bad CWID falls back to an ED email lookup, accepted only when it names exactly one person whose ED surname agrees with the feed's.
+- **Writes.** A profiled, active scholar gets a `center_membership` row with `source='ctsc-feed'`. Anyone else gets an `external_member` (`cuid` = `ctsc:<feed PrimaryKey>`, `source='ctsc-feed'`) plus a `center_membership` row with `source='ctsc-feed-external'`, shown on the roster as an unlinked plain name with the feed's institution. Suppressed or deleted scholars are skipped. Only rows carrying those sources are ever deleted; a manual row for the same person is never overwritten.
+- **Feed CWID issues.** `ctsc_feed_issue` is full-replaced each run and shown as "Feed CWID issues" on the CTSC center's `/edit` page, one row per record CTSC should fix at the source (suggested CWID and the email it matched, where ED resolved one). A corrected record drops off after the next sync.
+- **Task def and secret.** Runs on its own task def `sps-etl-ctsc-<env>`, which carries `scholars/<env>/etl/ctsc` (JSON keys `CTSC_FEED_URL`, `CTSC_FEED_TOKEN`) plus the ED bind. The feed URL is an internal hostname: it lives only in the secret, never in the repo or a ticket.
+- **Freshness.** Source `CTSC-Roster`, cadence nightly (`lib/etl/freshness-policy.ts`). Its setup ack was dropped once both envs ran green (first sync 2026-09-24). Continue-tier failures are invisible to the status alarm, so freshness is this step's only net.
+
+**Rollout, in order, per env:**
+
+1. In `/edit`, create the center with slug `ctsc` and add its leadership role vocabulary and assignments. Without it the step fails loudly (no silent no-op).
+2. `cdk deploy Sps-Secrets-<env>` creates the empty `scholars/<env>/etl/ctsc`; seed it out-of-band with `CTSC_FEED_URL` and `CTSC_FEED_TOKEN`. The new task def will not start without it; other steps are unaffected.
+3. Apply migration `20260924180000_ctsc_feed_issue`.
+4. `cdk deploy Sps-Etl-<env>` to add the step.
+
+**Guards** (all refuse to write; nothing is deleted on a refusal):
+
+| Guard | Trips when | Usual cause |
+|---|---|---|
+| `ctsc:feed` | Feed record count drops more than 20% below the memberships held from last night (skipped on the first run) | Short or partial feed read |
+| `ctsc:linked` | Profiled-scholar matches drop more than 20% below last night's `ctsc-feed` rows | Degraded ED read (empty or partial result with no error) that would demote scholars to plain names |
+| `ctsc:prune` | More than 20% of held feed memberships would be removed | Upstream roster restructure or a bad read |
+
+Verify before bypassing: confirm with CTSC that the roster really shrank (or that ED is healthy, for `ctsc:linked`). If the drop is genuine, re-run once on a one-off `run-task` of `sps-etl-ctsc-<env>` with `ETL_GUARD_BYPASS="ctsc:feed"` (or `"ctsc:linked"`, `"ctsc:prune"`, comma-separated for several) set via `containerOverrides.environment`, never permanently, then confirm the next nightly is clean. See error row 13 in [Common error messages](#4-common-error-messages--fixes).
+
 ### Where logs live
 
 | Log group | Contents | Retention |
@@ -437,9 +465,10 @@ Two operator surfaces beyond the live `sps-reliability-${env}` dashboard + alarm
 
 ⚠️ The three `sps-perf-*` queries read the **raw** `cf_access_logs` table (client IPs, unredacted paths, query strings). The workgroup is **operator-restricted — do not broaden its grants**. The 7-day bound + the workgroup's bytes-scanned cap keep scan cost and PII exposure bounded; the marketing rollup holds aggregates only (ADR-008 § PII).
 
-**2. In-app Usage dashboard — `/edit/usage`.** The viewer-friendly, no-AWS-console view of the usage aggregates above: pageviews-by-day (SVG bar graph), top profiles (linked to the live page), search terms, referrers, geo, device — last 30 days, read live from the `daily_usage` rollup and cached ~daily. Sign in (SAML) → **`https://scholars.weill.cornell.edu/edit/usage`**; also the **Usage** tab in the admin sub-nav. **Audience: a superuser OR any unit admin (owner/curator)** — global (site-wide) view for all (aggregates carry no PII; the per-URL `sps-perf-*` queries stay Athena/operator-only). Fails soft to "unavailable" on any Athena error. Two operator notes:
+**2. In-app Usage dashboard — `/edit/usage`.** The viewer-friendly, no-AWS-console view of the usage aggregates above: pageviews-by-day (SVG bar graph), top profiles (linked to the live page), search terms, referrers, geo, device — over a chosen range (header **Range** dropdown: last 7 / 30 / 90 days, since launch, or custom — a custom range is floored at 2026-05-22, the first day `daily_usage` can hold; default 30, carried in `?range=`), read live from the `daily_usage` rollup and cached ~daily per range. Sign in (SAML) → **`https://scholars.weill.cornell.edu/edit/usage`**; also the **Usage** tab in the admin sub-nav. **Audience: a superuser OR any unit admin (owner/curator)** — global (site-wide) view for all (aggregates carry no PII; the per-URL `sps-perf-*` queries stay Athena/operator-only). Fails soft to "unavailable" on any Athena error. Two operator notes:
 - **Deploy shape:** the app queries Athena at read time, so this needs a `cdk deploy` of **both** `Sps-App-${env}` (the `SPS_USAGE_*` env vars) and `Sps-Analytics-${env}` (the workgroup-scoped Athena/Glue/S3 grant on the app task role). A CD image roll alone will render it "unavailable".
 - **Profile counts** are keyed on the **root vanity slug** (`app/(public)/[slug]`, e.g. `/carl-f-nathan`), not a `/scholar/<cwid>` path (which does not exist). The `pageviews`/`profile` rollup arms exclude a reserved-route list in `cdk/lambda/cf-usage-rollup/queries.ts` — add a new top-level site section there if profile counts ever start absorbing it, then backfill (`aws lambda invoke --function-name sps-cf-usage-rollup-${env} --payload '{"backfillFrom":"YYYY-MM-DD","backfillTo":"YYYY-MM-DD"}'`).
+- **History is durable; raw logs are not.** `daily_usage` partitions live in the analytics bucket (no expiry), so the range dropdown can read back to the first rollup. The raw CloudFront logs they are built from expire after **90 days** (EdgeStack), and a re-roll purges the day's partition first, so the Lambda **skips any day older than 85 days** (`MAX_REROLL_AGE_DAYS`, logs `outcome: skipped_raw_logs_expired`) rather than replace good history with an empty re-roll. A reserved-route fix therefore only corrects the last ~85 days. To fill days the nightly run missed (while their raw logs still exist), run `npx tsx scripts/backfills/2026-09-25-usage-rollup-history.ts --env=${env} --dry-run`, then without `--dry-run`: it rolls only days that have **no** partition, never overwrites one.
 
 **3. Fleet-wide edit activity — `/edit/activity`.** Superuser-only page: edits/day, top editors, most-edited entities, and recent activity over the last 30 days across **all** profile entities (reads `scholars_audit.manual_edit_audit`). Sign in (SAML) → **`https://scholars.weill.cornell.edu/edit/activity`** (staging: same path on the staging host). **Not** linked in the admin nav — superuser URL only. Renders "unavailable" if the read role (`app_ro`) lacks SELECT on the audit DB — the same grant the per-entity `/edit/scholar/[cwid]/history` and `/edit/center/[code]/history` pages need, so if those work this does too. The per-entity history pages are the edit-scoped companion (any editor of that entity, not just superusers).
 

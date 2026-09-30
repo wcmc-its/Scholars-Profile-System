@@ -8,7 +8,12 @@
  * - **center** (Owner of the parent dept, or Superuser): name + slug + parent
  *   department + center type. An Owner's parent department is fixed (read-only,
  *   from `?dept=`) and the center type is locked to `center`; a Superuser picks
- *   the department and may choose `institute`.
+ *   the department and may choose `institute`. For a Superuser the department
+ *   can be OMITTED (#2541) — it scopes who may edit the center rather than
+ *   placing it in a hierarchy (`Center` has no parent column), so a
+ *   cross-campus center is created with none. That omission is an explicit
+ *   checkbox, never a blank field: the picker can show typed-but-unselected
+ *   text, so "blank" would be an ambiguous signal.
  * - **division** (Superuser only): a pre-registered LDAP N-code + name + slug +
  *   parent department. The form does not look the code up — that's the point
  *   (pre-registration before LDAP catches up).
@@ -19,17 +24,27 @@
  * does not accept one). Format validation reuses the server's validators
  * (`validateUnitName` / `validateSlugFormat` / `validateLdapCode`); a slug/code
  * collision is reported by the server on submit.
+ *
+ * A successful create REPLACES the form with a success panel naming the unit
+ * and linking to its editor (#2545). Previously this relied on a `router.push`
+ * redirect, which left the operator on a populated form with no signal when it
+ * failed to commit; clicking Create again returned `slug_taken`, which reads as
+ * failure and invites a DUPLICATE under a different slug.
+ *
+ * The push is now gone entirely (#2546): `dirty` is always true at submit here,
+ * so UnsavedChangesGuard's disarm cleanup fired `history.back()` and ate the
+ * navigation on every create. The panel is the landing, not a fallback.
  */
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 import { DepartmentPicker, type DepartmentOption } from "@/components/edit/department-picker";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
@@ -39,6 +54,11 @@ import {
 } from "@/lib/edit/validators";
 
 type Mode = "center" | "division";
+
+/** The post-create destination — where the success panel sends the operator. */
+function unitEditorHref(mode: Mode, code: string): string {
+  return `/edit/${mode}/${encodeURIComponent(code)}?attr=description`;
+}
 
 export type UnitCreateFormProps = {
   initialMode: Mode;
@@ -58,7 +78,6 @@ export function UnitCreateForm({
   departments,
   fixedDept,
 }: UnitCreateFormProps) {
-  const router = useRouter();
 
   const [mode, setMode] = React.useState<Mode>(initialMode);
   const [name, setName] = React.useState("");
@@ -66,12 +85,23 @@ export function UnitCreateForm({
   const [code, setCode] = React.useState("");
   const [centerType, setCenterType] = React.useState<"center" | "institute">("center");
   const [dept, setDept] = React.useState<DepartmentOption | null>(fixedDept);
+  const [noParentDept, setNoParentDept] = React.useState(false);
 
   const [submitting, setSubmitting] = React.useState(false);
   const [done, setDone] = React.useState(false);
+  /** The code the server minted — held so the success panel can build the
+   *  editor href for it (#2545). */
+  const [createdCode, setCreatedCode] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  const [cancelHref, setCancelHref] = React.useState("/edit/scholars");
+  // Move focus to the success panel when it replaces the form, so a screen
+  // reader lands on the confirmation (and its link) rather than on nothing.
+  const successRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (done) successRef.current?.focus();
+  }, [done]);
+
+  const [cancelHref, setCancelHref] = React.useState("/edit/profiles");
   React.useEffect(() => {
     const ref = document.referrer;
     if (ref && ref.startsWith(window.location.origin)) {
@@ -83,10 +113,18 @@ export function UnitCreateForm({
   // Effective parent department: the Owner's fixed dept, or the Superuser's pick.
   const effectiveDept = isSuperuser ? dept : fixedDept;
 
+  // A center's dept is only the authz key (#2541) and a Superuser needs none;
+  // a division's is a real FK, and an Owner's is what admits them — neither may
+  // opt out. The opt-out is a deliberate tick rather than an empty picker: the
+  // picker holds its typed query internally, so an empty `dept` can mean either
+  // "none" or "typed a name and never picked it".
+  const canOmitDept = mode === "center" && isSuperuser;
+  const omitDept = canOmitDept && noParentDept;
+
   const nameOk = validateUnitName(name).ok;
   const slugOk = validateSlugFormat(slug).ok;
   const codeOk = mode === "division" ? validateLdapCode(code).ok : true;
-  const deptOk = effectiveDept !== null;
+  const deptOk = omitDept || effectiveDept !== null;
   const canSubmit = !submitting && nameOk && slugOk && codeOk && deptOk;
 
   const dirty = !done && (name.length > 0 || slug.length > 0 || code.length > 0);
@@ -97,7 +135,9 @@ export function UnitCreateForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit || effectiveDept === null) return;
+    // The second clause is what `deptOk` already enforces, kept as its own gate
+    // so nothing can submit a department-less body without the explicit tick.
+    if (!canSubmit || (effectiveDept === null && !omitDept)) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -108,7 +148,9 @@ export function UnitCreateForm({
               unitType: "center",
               name: validateUnitName(name).ok ? name.trim() : name,
               slug: slug.trim(),
-              deptCode: effectiveDept.code,
+              // Explicit `null` = no parent; the endpoint reads an absent key
+              // the same way, but never accepts "".
+              deptCode: effectiveDept?.code ?? null,
               centerType,
             }
           : {
@@ -117,7 +159,7 @@ export function UnitCreateForm({
               code: code.trim().toUpperCase(),
               name: name.trim(),
               slug: slug.trim(),
-              deptCode: effectiveDept.code,
+              deptCode: effectiveDept?.code ?? null,
             };
       const res = await fetch("/api/edit/unit", {
         method: "POST",
@@ -131,15 +173,58 @@ export function UnitCreateForm({
         setError(mapErrorToMessage("error" in data ? data.error : ""));
         return;
       }
-      // Land on the new unit's editor, on the description panel (the create form
-      // has no description field — this is where the operator sets it).
+      // Deliberately NO `router.push` here (#2546). This form's `dirty` is
+      // always true at submit — a valid name is required — so
+      // UnsavedChangesGuard has always pushed its history sentinel, and its
+      // disarm cleanup fires `history.back()` the instant `done` flips. That
+      // pop raced, and reliably beat, the push: measured on staging, the
+      // redirect was eaten on every create. Rather than operate on a guard
+      // mounted by five other /edit forms to rescue a navigation nobody has
+      // ever actually received, the success panel below IS the landing.
       setDone(true);
-      router.push(`/edit/${mode}/${encodeURIComponent(data.code)}?attr=description`);
+      setCreatedCode(data.code);
     } catch {
       setError(mapErrorToMessage(""));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Success REPLACES the form (#2545). This panel is the ONLY success path —
+  // a plain statement that the unit exists plus a real link to its editor.
+  // Because the form is gone, the double-submit that produced a misleading
+  // `slug_taken` cannot happen.
+  if (done && createdCode) {
+    const unitNoun =
+      mode === "division" ? "Division" : centerType === "institute" ? "Institute" : "Center";
+    const createdName = name.trim() || slug.trim();
+    return (
+      <div
+        ref={successRef}
+        tabIndex={-1}
+        role="status"
+        aria-live="polite"
+        className="border-apollo-border-strong bg-apollo-surface flex max-w-xl flex-col gap-3 rounded-md border p-5"
+        data-testid="create-success"
+      >
+        <h2 className="text-base font-medium">{unitNoun} created</h2>
+        <p className="text-muted-foreground text-sm">
+          <span className="text-foreground font-medium">{createdName}</span> was created. Open its
+          editor to add a description and members.
+        </p>
+        {/* Deliberately a bare <a>, NOT next/link. This is the ONLY way off
+            this panel (#2548 removed the programmatic redirect), and a soft
+            nav here would run the same App Router path that UnsavedChangesGuard
+            was eating — see the hazard note in unsaved-changes-guard.tsx. */}
+        <a
+          href={unitEditorHref(mode, createdCode)}
+          className="text-apollo-slate text-sm underline"
+          data-testid="create-success-link"
+        >
+          Go to {createdName}
+        </a>
+      </div>
+    );
   }
 
   return (
@@ -153,6 +238,9 @@ export function UnitCreateForm({
             value={mode}
             onValueChange={(v) => {
               setMode(v as Mode);
+              // A division's dept is required, so the opt-out resets with the
+              // mode rather than carrying a stale tick into the other form.
+              setNoParentDept(false);
               clearError();
             }}
             className="flex gap-4"
@@ -235,12 +323,17 @@ export function UnitCreateForm({
         <label className="text-sm font-medium">Parent department</label>
         {isSuperuser ? (
           <DepartmentPicker
+            // Remounting on the opt-out clears the picker's own typed query, so
+            // a disabled field can never keep showing a name it never selected.
+            key={omitDept ? "no-parent" : "pick-parent"}
             departments={departments}
             value={dept}
             onChange={(d) => {
               setDept(d);
               clearError();
             }}
+            placeholder={omitDept ? "No parent department" : undefined}
+            disabled={omitDept}
             idPrefix="create-dept"
           />
         ) : (
@@ -256,6 +349,34 @@ export function UnitCreateForm({
               "—"
             )}
           </div>
+        )}
+        {canOmitDept && (
+          <>
+            <label className="mt-1 flex items-center gap-2 text-sm">
+              <Checkbox
+                id="create-dept-none"
+                aria-describedby="create-dept-none-note"
+                checked={noParentDept}
+                onCheckedChange={(c) => {
+                  const on = c === true;
+                  setNoParentDept(on);
+                  // The tick IS the choice — drop whatever was picked.
+                  if (on) setDept(null);
+                  clearError();
+                }}
+                data-testid="create-dept-none"
+              />
+              No parent department (cross-campus initiative)
+            </label>
+            <p
+              id="create-dept-none-note"
+              className="text-muted-foreground text-xs"
+              data-testid="create-dept-none-note"
+            >
+              Scopes who can edit this center — it is not a parent in the hierarchy (a center has no
+              parent unit). Tick the box for a cross-campus center that belongs to no department.
+            </p>
+          </>
         )}
       </div>
 

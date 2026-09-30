@@ -1,7 +1,7 @@
 /**
  * ProfileAppointmentsCard — the self-service editor for `profile_appointment`
- * rows (#1568), shown under the Appointments attribute tab beneath the
- * read-only (ETL-fed) Appointments + revealed Past Appointments cards.
+ * rows (#1568), the "Additional positions" card under `PositionsCard` on the
+ * Positions & appointments tab.
  *
  * The scholar (or a curator on their behalf) adds appointments the authoritative
  * feeds don't carry: internal WCM roles the ED feed omits (Program Director,
@@ -18,18 +18,19 @@
  * ONLY on the owner's public profile — never on a center / department /
  * division / search surface — so scholars have wide input latitude here.
  *
- * Visual design is intentionally minimal (native controls, no bespoke chrome) —
- * it needs a staging design pass.
+ * The heading row, description and empty state follow the 2026-09-21 design
+ * pass; only the add / edit form is still native controls.
  */
 "use client";
 
 import * as React from "react";
 
-import { EditPanel } from "@/components/edit/edit-panel";
+import { EditPanel, OwnedBadge } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { isCollegeProfessorialTitleBlocked } from "@/lib/edit/profile-appointment";
 import { cn } from "@/lib/utils";
 
 type Category = "WCM_LEADERSHIP" | "EXTERNAL";
@@ -89,13 +90,9 @@ const EMPTY_DRAFT: Draft = {
 
 export type ProfileAppointmentsCardProps = {
   cwid: string;
-  mode: "self" | "superuser";
-  scholarName: string;
 };
 
-export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppointmentsCardProps) {
-  const possessive = mode === "superuser" ? `${scholarName}'s` : "your";
-
+export function ProfileAppointmentsCard({ cwid }: ProfileAppointmentsCardProps) {
   const [rows, setRows] = React.useState<Row[] | null>(null);
   const [loadError, setLoadError] = React.useState(false);
   const [adding, setAdding] = React.useState(false);
@@ -173,13 +170,31 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
     }
   }
 
+  const addButton = (
+    <Button
+      type="button"
+      variant="apollo"
+      size="sm"
+      disabled={busy}
+      onClick={() => {
+        setAdding(true);
+        setEditingId(null);
+        setError(null);
+      }}
+      data-testid="profile-appointment-add"
+    >
+      Add a position
+    </Button>
+  );
+
   return (
     <EditPanel
       slot="profile-appointments-card"
       heading="Additional positions"
-      owned
-      subsection
-      description={`Add roles and appointments the WCM directory feeds don't carry — internal WCM leadership and positions at other institutions. These appear only on ${possessive} public profile, never on center, department, division, or search pages.`}
+      headerAction={<OwnedBadge />}
+      // A peer of PositionsCard's h2, which owns the `panel-heading` id.
+      headingId="profile-appointments-heading"
+      description="Roles the WCM directory feeds don't carry: internal WCM leadership, and appointments at other institutions."
     >
       {loadError ? (
         <Alert variant="destructive">
@@ -191,9 +206,30 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
 
       {rows === null ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : rows.length === 0 && !loadError ? (
+      ) : rows.length === 0 && !loadError && !adding ? (
         // Only claim the list is empty when we actually read it — see honors-card.
-        <p className="text-muted-foreground text-sm">No additional appointments added yet.</p>
+        <div
+          className="border-apollo-border-strong bg-apollo-surface-2 rounded-[9px] border border-dashed p-5"
+          data-testid="profile-appointment-empty"
+        >
+          <p className="text-[13px] font-medium text-[#3d3833]">
+            Nothing added yet. Positions like these belong here:
+          </p>
+          <ul className="mt-2.5 flex flex-col gap-[7px] text-[13px] text-[#8a8378] italic">
+            <li className="border-apollo-border-strong border-l-2 pl-[11px]">
+              Director, Englander Institute for Precision Medicine · Weill Cornell Medicine
+            </li>
+            <li className="border-apollo-border-strong border-l-2 pl-[11px]">
+              Adjunct Professor of Genetics · Icahn School of Medicine at Mount Sinai
+            </li>
+          </ul>
+          <div className="mt-[18px] flex flex-wrap items-center gap-3.5">
+            {addButton}
+            <p className="text-muted-foreground text-xs">
+              Shows on this profile only, never on center, department, division, or search pages.
+            </p>
+          </div>
+        </div>
       ) : rows.length === 0 ? null : (
         <ul className="flex flex-col gap-3" data-testid="profile-appointment-list">
           {rows.map((row) =>
@@ -271,24 +307,9 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
             setError(null);
           }}
         />
-      ) : rows !== null && !loadError ? (
+      ) : rows !== null && !loadError && rows.length > 0 ? (
         // Adding against a failed read invites a duplicate — see honors-card.
-        <div>
-          <Button
-            type="button"
-            variant="default"
-            className="bg-[var(--color-facet-topic-count)] text-white hover:bg-[var(--color-facet-topic-count)] hover:brightness-95 focus-visible:ring-[var(--color-facet-topic-count)]"
-            disabled={busy}
-            onClick={() => {
-              setAdding(true);
-              setEditingId(null);
-              setError(null);
-            }}
-            data-testid="profile-appointment-add"
-          >
-            Add a position
-          </Button>
-        </div>
+        <div>{addButton}</div>
       ) : null}
 
       {error ? (
@@ -325,7 +346,9 @@ function AppointmentForm({
   // Client mirror of the route's date-range rule (start ≤ end when both present);
   // the server re-validates regardless.
   const rangeOk = !draft.startDate || !draft.endDate || draft.startDate <= draft.endDate;
-  const canSubmit = titleOk && orgOk && rangeOk && !busy;
+  // Client mirror of the route's College-title rule (#2481); server re-validates.
+  const collegeTitleBlocked = isCollegeProfessorialTitleBlocked(draft.title, draft.organization);
+  const canSubmit = titleOk && orgOk && rangeOk && !collegeTitleBlocked && !busy;
 
   return (
     <div
@@ -370,6 +393,15 @@ function AppointmentForm({
           data-testid={`profile-appointment-organization-${idPrefix}`}
         />
       </label>
+
+      {collegeTitleBlocked ? (
+        <p className="text-destructive text-xs">
+          Faculty rank titles at Weill Cornell Medicine come from the official appointment record
+          and can&rsquo;t be added here. They&rsquo;ll appear automatically. For a Weill Cornell
+          Graduate School of Medical Sciences appointment, include &ldquo;Graduate School&rdquo; in
+          the organization field.
+        </p>
+      ) : null}
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium">
@@ -499,9 +531,11 @@ function mapErrorToMessage(code: string): string {
     case "required":
       return "Title and organization are required.";
     case "too_long":
-      return "One of the fields is too long — please shorten it.";
+      return "One of the fields is too long. Please shorten it.";
     case "invalid_category":
       return "Please choose a valid appointment type.";
+    case "college_title_blocked":
+      return "Faculty rank titles at Weill Cornell Medicine come from the official appointment record and can't be added here. For a Graduate School appointment, include \"Graduate School\" in the organization field.";
     case "invalid_date":
       return "Please enter valid dates.";
     case "invalid_date_range":
@@ -512,6 +546,6 @@ function mapErrorToMessage(code: string): string {
     case "forbidden":
       return "You no longer have access to edit this profile. Refresh the page and try again.";
     default:
-      return "Something went wrong — your changes weren’t saved. Please try again.";
+      return "Something went wrong. Your changes weren’t saved. Please try again.";
   }
 }

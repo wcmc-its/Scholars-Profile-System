@@ -68,14 +68,14 @@ const TIER_ACTIVE: Record<FamilyTier, string> = {
   suppressed:
     "bg-apollo-slate-tint text-apollo-slate ring-1 ring-inset ring-apollo-slate-tint-border",
   sensitive:
-    "bg-apollo-red-tint text-apollo-maroon ring-1 ring-inset ring-apollo-red-tint-border",
+    "bg-apollo-red-tint text-destructive ring-1 ring-inset ring-apollo-red-tint-border",
 };
 
 /** One-line legend teaching the tier colors (swatch token + plain meaning). */
 const TIER_LEGEND: ReadonlyArray<{ swatch: string; label: string }> = [
   { swatch: "bg-apollo-green-foreground", label: "Public — shown on profiles" },
   { swatch: "bg-apollo-slate", label: "Suppressed — hidden" },
-  { swatch: "bg-apollo-maroon", label: "Sensitive — internal only" },
+  { swatch: "bg-destructive", label: "Sensitive — internal only" },
 ];
 
 /** The filter-bar options (§8). `flagged` is the default (the review queue). */

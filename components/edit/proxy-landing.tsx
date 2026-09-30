@@ -7,6 +7,15 @@
  * Deliberately minimal: a picker so the proxy chooses whose profile to edit.
  * Visual/interaction polish (and a richer "scholars I serve" dashboard) is a
  * UI-SPEC deliverable; v1 is this list.
+ *
+ * Chrome: bar + warm page, no nav — deliberate, not the R14 gap Tier C
+ * decisions 2/3 fixed elsewhere (`docs/audits/apollo-v2-surface-audit-2026-08-14.md`
+ * §4b, C10). This identity is a bare non-scholar proxy — it may hold NO
+ * console-tab access at all (Profiles/Units/Reports/etc. are unit-admin or
+ * superuser surfaces this viewer was never granted); the normal `AdminSubnav`
+ * would offer tabs it can't open. A second instance of the reduced-chrome
+ * pattern `app/edit/core/[coreId]/review/page.tsx` already documents — a
+ * pre-selection chooser, not a console tab.
  */
 import Link from "next/link";
 

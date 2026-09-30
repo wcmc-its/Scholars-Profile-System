@@ -368,10 +368,11 @@ const SECTION_KEYS = [
   "hidePostdocMentor",
   "hideClinicalTrials",
   "hideMethods",
+  "showDatasets",
 ];
 
 describe("VisibilityCard — Sections panel", () => {
-  it("renders one switch per section (7) and the per-section hidden-record count", () => {
+  it("renders one switch per section (8) and the per-section hidden-record count", () => {
     render(<VisibilityCard cwid={CWID} suppression={NEITHER} sections={SECTIONS} />);
     expect(document.querySelector('[data-slot="visibility-sections"]')).toBeTruthy();
     for (const key of SECTION_KEYS) {
@@ -423,6 +424,56 @@ describe("VisibilityCard — Sections panel", () => {
     });
     // Restoration is never gated — no "Hide section" confirm button appeared.
     expect(screen.queryByRole("button", { name: "Hide section" })).toBeNull();
+  });
+
+  // showDatasets is the one inverted key (DATA_SHARING_SECTION defaults off,
+  // so it's an opt-IN): the switch's on-screen "Hidden"/"Visible" language
+  // stays identical to its siblings, but which transition needs confirmation
+  // — and the stored field value's polarity — both flip.
+  it("Datasets starts Hidden by default (no override row) and reveal (switch → off) is the gated transition", async () => {
+    const f = stubFetch({ body: { ok: true } });
+    render(<VisibilityCard cwid={CWID} suppression={NEITHER} sections={SECTIONS} />);
+    // Hidden by default (no override row) — switch checked, same "checked =
+    // hidden" convention as its siblings.
+    expect(screen.getByTestId("section-toggle-showDatasets").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByTestId("section-toggle-showDatasets"));
+    const confirm = await screen.findByRole("button", { name: "Show section" });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/field");
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "scholar",
+      entityId: CWID,
+      fieldName: "showDatasets",
+      value: "true",
+    });
+  });
+
+  it("with showDatasets already set, Datasets starts Visible; hiding it back POSTs value 'false' with NO confirm", async () => {
+    const f = stubFetch({ body: { ok: true } });
+    render(
+      <VisibilityCard
+        cwid={CWID}
+        suppression={NEITHER}
+        sections={{ ...SECTIONS, hidden: ["showDatasets"] }}
+      />,
+    );
+    expect(screen.getByTestId("section-toggle-showDatasets").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    fireEvent.click(screen.getByTestId("section-toggle-showDatasets"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "scholar",
+      entityId: CWID,
+      fieldName: "showDatasets",
+      value: "false",
+    });
+    expect(screen.queryByRole("button", { name: "Show section" })).toBeNull();
   });
 });
 

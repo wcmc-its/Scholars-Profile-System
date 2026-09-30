@@ -208,6 +208,8 @@ describe("getEditSession", () => {
       isCommsSteward: false,
       isDeveloper: false,
       isHonorsCurator: false,
+      isDataSharingViewer: false,
+      isCvGenerator: false,
     });
   });
 
@@ -220,6 +222,8 @@ describe("getEditSession", () => {
       isCommsSteward: false,
       isDeveloper: false,
       isHonorsCurator: false,
+      isDataSharingViewer: false,
+      isCvGenerator: false,
     });
   });
 });

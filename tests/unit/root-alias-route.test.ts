@@ -1,18 +1,19 @@
 /**
  * app/(public)/[slug]/page.tsx — root people-profile route (#671, #497 §5.3).
  *
- * Behavior depends on PROFILE_CANONICAL:
- *   - unset / "scholars" (default): a bare `/<slug>` 301s to the canonical
- *     `/scholars/<slug>` — the pre-#671 root-alias behavior.
- *   - "root": the route renders the profile in place; former slugs 301 to the
- *     current canonical root `/<current>`.
- * In both modes it 404s reserved route words, non-slug input, and unknown slugs.
+ * Canonical: a bare `/<slug>` renders the profile in place; former slugs 301
+ * to the current canonical root `/<current>`. This was gated by
+ * `PROFILE_CANONICAL` during the #671 soak — the pre-cutover default was a
+ * 301 alias to `/scholars/<slug>` — but the flag has since been removed
+ * (live in both envs since 2026-07-14), so root-canonical is the only mode.
+ * In all cases it 404s reserved route words, non-slug input, and unknown
+ * slugs.
  *
  * next/navigation, the URL resolver, the shared ProfileView, and the metadata
- * builder are mocked; `@/lib/slug` (reserved denylist + looksLikeSlug) and
- * `@/lib/profile-url` (the PROFILE_CANONICAL read) run for real.
+ * builder are mocked; `@/lib/slug` (reserved denylist + looksLikeSlug) runs
+ * for real.
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const { mockNotFound, mockPermanentRedirect } = vi.hoisted(() => ({
   mockNotFound: vi.fn(() => {
@@ -46,19 +47,13 @@ function call(slug: string) {
   return RootProfileRoute({ params: Promise.resolve({ slug }) });
 }
 
-const ORIGINAL_FLAG = process.env.PROFILE_CANONICAL;
 beforeEach(() => {
   mockNotFound.mockClear();
   mockPermanentRedirect.mockClear();
   mockResolve.mockReset();
-  delete process.env.PROFILE_CANONICAL; // default behavior = "scholars"
-});
-afterEach(() => {
-  if (ORIGINAL_FLAG === undefined) delete process.env.PROFILE_CANONICAL;
-  else process.env.PROFILE_CANONICAL = ORIGINAL_FLAG;
 });
 
-describe("root profile route — reserved words (both modes)", () => {
+describe("root profile route — reserved words", () => {
   it("404s a reserved route word without touching the DB", async () => {
     await expect(call("search")).rejects.toThrow("NEXT_NOT_FOUND");
     expect(mockNotFound).toHaveBeenCalled();
@@ -89,36 +84,7 @@ describe("root profile route — cheap structural reject", () => {
   });
 });
 
-describe("root profile route — alias mode (PROFILE_CANONICAL unset)", () => {
-  it("301s a live slug to /scholars/<slug>", async () => {
-    mockResolve.mockResolvedValue({ type: "found", cwid: "abc1", slug: "jane-smith" });
-    await expect(call("jane-smith")).rejects.toThrow("NEXT_REDIRECT:/scholars/jane-smith");
-    expect(mockPermanentRedirect).toHaveBeenCalledWith("/scholars/jane-smith");
-    expect(mockNotFound).not.toHaveBeenCalled();
-  });
-
-  it("301s a former slug to the current canonical /scholars/<current>", async () => {
-    mockResolve.mockResolvedValue({ type: "redirect", targetSlug: "brandon-swed" });
-    await expect(call("brandon-swed-2")).rejects.toThrow(
-      "NEXT_REDIRECT:/scholars/brandon-swed",
-    );
-    expect(mockPermanentRedirect).toHaveBeenCalledWith("/scholars/brandon-swed");
-  });
-
-  it("404s an unknown slug-shaped segment after the DB miss", async () => {
-    mockResolve.mockResolvedValue({ type: "not-found" });
-    await expect(call("nobody-here")).rejects.toThrow("NEXT_NOT_FOUND");
-    expect(mockResolve).toHaveBeenCalledWith("nobody-here");
-    expect(mockNotFound).toHaveBeenCalled();
-    expect(mockPermanentRedirect).not.toHaveBeenCalled();
-  });
-});
-
-describe("root profile route — canonical mode (PROFILE_CANONICAL=root)", () => {
-  beforeEach(() => {
-    process.env.PROFILE_CANONICAL = "root";
-  });
-
+describe("root profile route — canonical", () => {
   it("renders the profile for a live slug (no redirect, no 404)", async () => {
     mockResolve.mockResolvedValue({ type: "found", cwid: "abc1", slug: "jane-smith" });
     const result = (await call("jane-smith")) as { props: { slug: string } };

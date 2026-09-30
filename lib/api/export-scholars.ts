@@ -48,6 +48,7 @@ import {
 } from "@/lib/api/methods-overlay";
 import { getFamily, getSupercategory } from "@/lib/api/methods";
 import { getTopic } from "@/lib/api/topics";
+import { institutionDisplayName } from "@/lib/institutions";
 
 /**
  * HARD cohort cap (SPEC §B.3): the export is offered ONLY when the displayable
@@ -92,6 +93,7 @@ const COMMON_HEADERS = [
   "postnominal",
   "primary_title",
   "primary_department",
+  "primary_institution",
   "role_category",
   "profile_url",
 ] as const;
@@ -136,6 +138,7 @@ const SCHOLAR_SELECT = {
   postnominal: true,
   primaryTitle: true,
   primaryDepartment: true,
+  primaryOrgCode: true,
   roleCategory: true,
   email: true,
   emailVisibility: true,
@@ -148,6 +151,7 @@ type ScholarIdentity = {
   postnominal: string | null;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  primaryOrgCode: string | null;
   roleCategory: string | null;
   email: string | null;
   emailVisibility: string | null;
@@ -195,6 +199,9 @@ export function commonCells(row: ScholarIdentity, rank: number): Record<string, 
     postnominal: row.postnominal,
     primary_title: row.primaryTitle,
     primary_department: row.primaryDepartment,
+    // Data export: the display name for EVERY row, home institution included
+    // ("Weill Cornell Medicine"), unlike the UI which elides WCMC.
+    primary_institution: row.primaryOrgCode ? institutionDisplayName(row.primaryOrgCode) : "",
     role_category: row.roleCategory,
     // Belt-and-braces since #2272 carved the loaders: a hidden-display role
     // (#536 doctoral students / affiliate-alumni) can no longer reach this

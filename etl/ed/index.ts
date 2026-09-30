@@ -20,12 +20,11 @@
  *
  * Usage: `npm run etl:ed`
  */
-import { promises as fs } from "node:fs";
-import path from "node:path";
-
 import { db } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
+import { NON_ACADEMIC_DEPT_NAMES } from "../../lib/non-academic-units";
+import { resolveScholarTitles } from "./title-resolution";
 import {
   loadUnitOverridesForETL,
   resolveUnitLeaderForETL,
@@ -34,11 +33,21 @@ import {
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import { DEPARTMENT_NAMES } from "@/lib/department-names";
 import { deriveProfessorialRank } from "@/lib/faculty-rank";
+import { isTitleResolutionEnabled } from "@/lib/edit/title-picker";
+import { formerFacultyRole } from "@/lib/mentee-suggestions/kind";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
-import { Prisma } from "@/lib/generated/prisma/client";
+import { looksLikeArtifactAppointment, PRE_START_ACADEMIC_TITLE } from "@/lib/appointment-artifacts";
+import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
+import {
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+  departmentLeaderRoleKey,
+  orgUnitRoleSeedRows,
+} from "@/lib/org-unit-roles";
 import {
   collapseEmployeeRecordsByCwid,
   type EdFacultyAppointment,
@@ -53,7 +62,10 @@ import {
   fetchHistoricalFacultyAppointments,
   fetchAllPostdocEmploymentRecords,
   fetchDoctoralStudents,
+  fetchFacultySorDegrees,
   fetchPersonNamesByCwid,
+  labPiNameKey,
+  personNameKey,
   openLdap,
 } from "@/lib/sources/ldap";
 
@@ -85,6 +97,20 @@ export function appointmentOrganization(a: {
 }): string {
   if (a.divName && PROMOTE_LEVEL2_TO_DEPT.has(a.divName)) return a.divName;
   return a.organization ?? "Weill Cornell Medicine";
+}
+
+/**
+ * #2206 — the `Scholar.postnominal` value written for one ED entry. The
+ * people-branch `weillCornellEduDegree` wins when present; otherwise fall back
+ * to the faculty SOR parent record's degree (fetchFacultySorDegrees), the same
+ * SOR-parent source doctoral students already get theirs from. Blank → null so
+ * the profile renders a bare name rather than "Name, ".
+ */
+export function resolvePostnominal(
+  entryDegree: string | null | undefined,
+  sorDegree: string | null | undefined,
+): string | null {
+  return entryDegree?.trim() || sorDegree?.trim() || null;
 }
 
 /**
@@ -139,6 +165,95 @@ export function guardActiveLeaderCwid(
   if (!candidateCwid) return null;
   if (!guardApplied) return candidateCwid;
   return activeByCwid.get(candidateCwid.toLowerCase()) === true ? candidateCwid : null;
+}
+
+/** The Prisma surface `writeUnitLeaderAssignment` needs — base client or interactive tx. */
+type UnitLeaderAssignmentWriteClient = Pick<PrismaClient, "orgUnitRole" | "orgUnitRoleAssignment">;
+
+/**
+ * #2542 contract A — write one department/division leader onto
+ * `OrgUnitRoleAssignment`, the sole leader store (the `chairCwid` /
+ * `chiefCwid` column dual-write retired with this ticket). Override
+ * precedence needs no separate handling here: `resolveUnitLeaderForETL`
+ * resolves the value upstream (override, detection, or explicit vacancy)
+ * before any call site runs.
+ *
+ * Seeds the kind's vocabulary first (`skipDuplicates`), exactly as the three
+ * app write paths do (`app/api/edit/unit/route.ts:726-729`) — a unit
+ * predating the backfill has no vocabulary row yet, and the assignment's FK
+ * throws MySQL 1452 without it.
+ *
+ * `cwid: null` (an explicit vacancy, or no candidate detected this run)
+ * DELETES the row rather than leaving a stale holder behind — a vacancy that
+ * still renders the prior leader is exactly the silent-divergence failure
+ * this phase exists to prevent.
+ *
+ * `otherRoleKey` is department-only: it names the sibling leadership key
+ * (`chair` <-> `director`) so a `category` flip between runs removes the
+ * STALE key's row instead of leaving a department holding both. Divisions
+ * have no sibling key and omit it.
+ *
+ * Exported for unit tests (tests/unit/etl-ed-unit-leader-assignment.test.ts).
+ */
+export async function writeUnitLeaderAssignment(
+  client: UnitLeaderAssignmentWriteClient,
+  params: {
+    entityType: "department" | "division";
+    entityId: string;
+    roleKey: string;
+    otherRoleKey?: string;
+    cwid: string | null;
+  },
+): Promise<void> {
+  const { entityType, entityId, roleKey, otherRoleKey, cwid } = params;
+  await client.orgUnitRole.createMany({
+    data: orgUnitRoleSeedRows(entityType),
+    skipDuplicates: true,
+  });
+  if (otherRoleKey) {
+    await client.orgUnitRoleAssignment.deleteMany({
+      where: { entityType, entityId, roleKey: otherRoleKey },
+    });
+  }
+  await client.orgUnitRoleAssignment.deleteMany({
+    where: { entityType, entityId, roleKey },
+  });
+  if (cwid !== null) {
+    await client.orgUnitRoleAssignment.create({
+      data: { entityType, entityId, cwid, roleKey },
+    });
+  }
+}
+
+/** The Prisma surface `loadDeptLeaderMap` needs — base client or interactive tx. */
+type DeptLeaderMapReadClient = Pick<PrismaClient, "orgUnitRoleAssignment">;
+
+/**
+ * #2542 contract A — D-04 manager-graph chief detection's anchor:
+ * department code -> its leader's CWID. A department holds exactly one of
+ * the CHAIR/DIRECTOR keys (enforced by `writeUnitLeaderAssignment`'s
+ * `otherRoleKey` swap), so reading both keys here is exactly what the
+ * retired `department.chairCwid` column carried for EVERY department —
+ * including an administrative department, whose leader is stored under the
+ * DIRECTOR key, not CHAIR. Querying CHAIR alone silently drops those
+ * departments' leaders, clearing every division chief beneath them to GAP.
+ *
+ * Exported for unit tests (tests/unit/etl-ed-unit-leader-assignment.test.ts).
+ */
+export async function loadDeptLeaderMap(
+  client: DeptLeaderMapReadClient,
+): Promise<Map<string, string>> {
+  const deptChairs = new Map<string, string>();
+  for (const a of await client.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: "department",
+      roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { entityId: true, cwid: true },
+  })) {
+    deptChairs.set(a.entityId, a.cwid);
+  }
+  return deptChairs;
 }
 
 /**
@@ -378,8 +493,8 @@ async function refreshEdAppointments(
 
 /** Source tag for historical (faculty:expired) appointments. Distinct from
  *  "ED" so the active-faculty refresh (refreshEdAppointments) never touches
- *  these rows, and so the read layer can hide them from the public profile
- *  unless a curator reveals one (Appointment.showOnProfile). */
+ *  these rows, and so the read layer shows them on the public profile unless
+ *  a curator hides one (Appointment.showOnProfile). */
 const HISTORICAL_APPOINTMENT_SOURCE = "ED-HISTORICAL";
 
 /**
@@ -387,11 +502,21 @@ const HISTORICAL_APPOINTMENT_SOURCE = "ED-HISTORICAL";
  * WOOFA SOR. Mirrors refreshEdAppointments but scoped to {cwid,
  * source:"ED-HISTORICAL"} so the two populations never clobber each other.
  *
- * Curator-reveal invariant: `showOnProfile` is written ONLY on INSERT
- * (defaulted false), and is NEVER part of an UPDATE — so a row a curator
- * revealed (showOnProfile=true) stays revealed across ETL reruns. The content
- * key (appointmentContentKey) does not hash showOnProfile, so toggling reveal
- * causes no reconcile churn.
+ * Curator-hide invariant: `showOnProfile` is written ONLY on INSERT
+ * (defaulted true, EXCEPT a `looksLikeArtifactAppointment` row which defaults
+ * false — flipped 2026-08, see #1323 follow-up: hiding prior appointments by
+ * default made faculty look newly arrived, but showing WOOFA's effective-
+ * dating artifacts by default replaced that problem with a confusing one. A
+ * `PRE_START_ACADEMIC_TITLE` row is EXEMPT from that duration check and always
+ * defaults true instead — its visibility rule lives at read time in
+ * lib/api/profile.ts, see lib/appointment-artifacts.ts for why), and
+ * is NEVER part of an UPDATE — so a row a curator hid or revealed stays that
+ * way across ETL reruns. The content key (appointmentContentKey) does not
+ * hash showOnProfile, so toggling visibility causes no reconcile churn.
+ * Rows created before the 2026-08 flip need one-time backfills —
+ * scripts/backfill-reveal-historical-appointments.ts (reveal) and
+ * scripts/suppress-artifact-historical-appointments.ts (re-hide artifacts) —
+ * since only NEW inserts pick up these defaults.
  */
 async function refreshHistoricalAppointments(
   cwid: string,
@@ -424,13 +549,51 @@ async function refreshHistoricalAppointments(
     contentKey: appointmentContentKey,
   });
   if (plan.toCreate.length > 0) {
-    // showOnProfile defaults to false on INSERT only — see invariant above.
-    await db.write.appointment.createMany({
-      data: plan.toCreate.map((a) => ({ ...a, showOnProfile: false })),
+    // showOnProfile defaults to true on INSERT only, unless the row itself
+    // looks like a WOOFA artifact — see invariant above.
+    const withInsertVisibility = (a: (typeof plan.toCreate)[number]) => ({
+      ...a,
+      showOnProfile:
+        a.title === PRE_START_ACADEMIC_TITLE ||
+        !looksLikeArtifactAppointment(a.startDate, a.endDate),
     });
+    try {
+      await db.write.appointment.createMany({
+        data: plan.toCreate.map(withInsertVisibility),
+      });
+    } catch (err) {
+      // Same failure mode #1448 fixed for the active refresh: external_id is
+      // GLOBALLY unique but this reconcile is scoped to {cwid, ED-HISTORICAL},
+      // so a toCreate row can collide with the same SORID owned by another
+      // cwid — or still parked under source "ED" for a scholar this run no
+      // longer processes as active. createMany is one atomic statement
+      // (InnoDB), so nothing was inserted; fall back to per-row upsert so the
+      // row is reassigned instead of aborting the ED nightly. The update arm
+      // never touches showOnProfile, so a curator's hide survives the move.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) {
+        throw err;
+      }
+      for (const a of plan.toCreate) {
+        const clash = await db.write.appointment.findUnique({
+          where: { externalId: a.externalId },
+          select: { cwid: true, source: true },
+        });
+        if (clash && (clash.cwid !== a.cwid || clash.source !== a.source)) {
+          console.warn(
+            `[ED historical appointments] external_id ${a.externalId} reassigned ` +
+              `${clash.cwid}/${clash.source} -> ${a.cwid}/${a.source}`,
+          );
+        }
+        await db.write.appointment.upsert({
+          where: { externalId: a.externalId },
+          create: withInsertVisibility(a),
+          update: { ...a, lastRefreshedAt: new Date() },
+        });
+      }
+    }
   }
   for (const a of plan.toUpdate) {
-    // No showOnProfile key here — a curator's reveal must survive the update.
+    // No showOnProfile key here — a curator's hide must survive the update.
     await db.write.appointment.update({
       where: { externalId: a.externalId },
       data: { ...a, lastRefreshedAt: new Date() },
@@ -608,6 +771,19 @@ async function main() {
       appointmentsByCwid.set(a.cwid, arr);
     }
 
+    // #2206 — faculty degree fallback from the faculty SOR parent records.
+    // Best-effort: a failure leaves the map empty and postnominal falls back
+    // to the people-branch value alone (the pre-#2206 behaviour).
+    let facultySorDegrees = new Map<string, string>();
+    try {
+      facultySorDegrees = await fetchFacultySorDegrees(client);
+      console.log(`ED returned ${facultySorDegrees.size} faculty SOR degree strings.`);
+    } catch (err) {
+      console.warn(
+        `Faculty SOR degree fetch skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     // Issue #1323 — historical (faculty:expired) appointments. Best-effort:
     // a fetch failure must NOT abort the ETL, and an empty result from a failed
     // fetch is NOT the same as "no historical rows exist", so we only reconcile
@@ -647,13 +823,37 @@ async function main() {
         "[ED] Historical appointment refresh skipped — fetch succeeded but returned 0 rows (suspected truncated read); existing rows retained",
       );
     }
+    // former_faculty_role — every CWID whose expired SOR records still say
+    // professor / fellow / postdoc, one row per CWID with professor winning, for
+    // the mentee-suggestion builder (sources task def, no LDAP). Same gate as
+    // the per-scholar reconcile: a failed or empty fetch leaves the table.
+    if (historicalReconcileEligible) {
+      const byCwid = new Map<string, { cwid: string; role: string; title: string }>();
+      for (const a of historicalAppointments) {
+        const role = formerFacultyRole(a.title);
+        if (!role) continue;
+        const prev = byCwid.get(a.cwid);
+        if (!prev || (role === "professor" && prev.role !== "professor")) {
+          byCwid.set(a.cwid, { cwid: a.cwid, role, title: a.title });
+        }
+      }
+      const rows = [...byCwid.values()];
+      await db.write.$transaction(async (tx) => {
+        await tx.formerFacultyRole.deleteMany({});
+        for (let i = 0; i < rows.length; i += 1000) {
+          await tx.formerFacultyRole.createMany({ data: rows.slice(i, i + 1000) });
+        }
+      });
+      console.log(`former_faculty_role rewritten: ${rows.length} CWIDs.`);
+    }
 
     // Phase 4 — employee SOR for the manager graph. Used by:
     //   - postdoc mentor lookup (issue #5)
     //   - division-chief detection (issue #16, Path B)
     // Best-effort: a fetch failure should not abort the whole ETL — chief
-    // detection and the manual override pass still run, the former just
-    // skips Path B and the override file fills in.
+    // detection still runs (it just skips Path B with an empty employee
+    // map), and the `field_override(leaderCwid)` precedence consult still
+    // applies regardless (#2560).
     console.log("Fetching active employee SOR records from ou=employees SOR...");
     let employeeRecords: Awaited<ReturnType<typeof fetchActiveEmployeeRecords>> = [];
     // Tracked separately from `employeeRecords.length` so a swallowed fetch
@@ -702,6 +902,16 @@ async function main() {
     // Sort by CWID for deterministic collision ordering.
     allEntries.sort((a, b) => a.cwid.localeCompare(b.cwid));
 
+    // #2206 — postnominal coverage, so the run log shows which source fed it.
+    const withEntryDegree = allEntries.filter((f) => f.degree?.trim()).length;
+    const withPostnominal = allEntries.filter((f) =>
+      resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+    ).length;
+    console.log(
+      `[ED] postnominal: ${withPostnominal}/${allEntries.length} entries ` +
+        `(${withEntryDegree} from the entry, ${withPostnominal - withEntryDegree} from faculty SOR fallback)`,
+    );
+
     // Existing scholars and slugs from the DB.
     const existing = await db.write.scholar.findMany({
       select: { cwid: true, slug: true, deletedAt: true, createdAt: true },
@@ -713,6 +923,16 @@ async function main() {
     // A pinned scholar's slug must never be re-minted on a name change
     // (`maybeUpdatedSlug` skips them). Loaded once for the whole run, alongside
     // existingSlugs, so the per-scholar loop does no extra query.
+    // #2606 — slug_history old_slug → current owner. A slug another scholar's
+    // old URL still redirects from is NOT free, even though no live Scholar
+    // holds it; minting it would hijack that redirect. Own history stays
+    // reclaimable (matches assertSlugAvailable on the /edit path).
+    const slugHistoryOwner = new Map(
+      (
+        await db.write.slugHistory.findMany({ select: { oldSlug: true, currentCwid: true } })
+      ).map((h) => [h.oldSlug, h.currentCwid]),
+    );
+
     const pinnedSlugCwids = new Set(
       (
         await db.write.fieldOverride.findMany({
@@ -765,13 +985,10 @@ async function main() {
     }
 
     /** Org-unit names that LDAP returns as the level1 unit but which are
-     *  not academic departments (admin units, support orgs). Scholars whose
-     *  primary appointment is in one of these get null dept_code/div_code
-     *  so they don't appear under a fake dept on /browse. */
-    const EXCLUDED_DEPT_NAMES = new Set<string>([
-      "Information Technologies and Services",
-      "Administration & Finance",
-    ]);
+     *  not academic departments — see `lib/non-academic-units.ts`. Scholars
+     *  whose primary appointment is in one get null dept_code/div_code, and
+     *  the Phase 3 prune deletes the now-empty Department rows. */
+    const EXCLUDED_DEPT_NAMES = NON_ACADEMIC_DEPT_NAMES;
 
     /** Manual rename map: LDAP returns these org-unit names, but the
      *  display should reflect the WCM academic department they roll up
@@ -781,10 +998,6 @@ async function main() {
       // WCM faculty at HSS are members of the Orthopaedic Surgery dept;
       // HSS is the affiliate hospital, not an academic dept.
       "Hospital for Special Surgery": "Orthopaedic Surgery",
-      // Doctoral students' LDAP entries return the bare "Graduate School"
-      // for their level1 org unit; the official name of the unit is
-      // "Weill Cornell Graduate School" (of Medical Sciences).
-      "Graduate School": "Weill Cornell Graduate School",
     };
 
     /** Level2 org-unit names that LDAP returns under academic depts but which
@@ -796,6 +1009,13 @@ async function main() {
      *  overzealous filter silently hides real divisions. */
     const EXCLUDED_DIV_NAMES = new Set<string>([
       "Administration",
+      // 99% of "Orthopaedic Surgery" dept faculty also land in this division
+      // (LDAP level2, HSS-affiliated) — it adds no information over the dept
+      // and reads as a confusing duplicate ("Orthopedic Surgery (HSS)
+      // (Orthopaedic Surgery)" on a profile). Confirmed live string via
+      // read-only staging probe 2026-08-17; exact match required, see class
+      // comment above.
+      "Orthopedic Surgery (HSS)",
     ]);
 
     /** Resolve the (deptCode, divCode, deptName, divName) tuple a single
@@ -1042,9 +1262,19 @@ async function main() {
           data: {
             preferredName: f.preferredName,
             fullName: f.fullName,
-            postnominal: f.degree?.trim() || null,
+            postnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+            // `primaryTitle` holds the RESOLVED display title, but the chief /
+            // center-head tiers do not exist until the leader assignments are
+            // written further down this run. So write the ED value here as a SEED
+            // — identical to pre-resolution behaviour — and let
+            // `resolveScholarTitles()` at the tail overwrite it. A run that dies
+            // before the post-pass therefore degrades to today's titles rather
+            // than to a blank subtitle.
             primaryTitle: f.primaryTitle,
+            edPrimaryTitle: f.primaryTitle,
+            workingTitle: f.workingTitle,
             primaryDepartment: primaryDepartmentDisplay,
+            primaryOrgCode: f.primaryOrgCode,
             email: f.email,
             emailVisibility: f.emailVisibility,
             roleCategory,
@@ -1075,6 +1305,7 @@ async function main() {
           f.cwid,
           existingSlugs,
           pinnedSlugCwids,
+          slugHistoryOwner,
         );
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
         if (historicalReconcileEligible) {
@@ -1085,7 +1316,10 @@ async function main() {
       } else {
         // New scholar.
         const baseSlug = deriveSlug(f.preferredName) || f.cwid.toLowerCase();
-        const slug = nextAvailableSlug(baseSlug, existingSlugs);
+        const slug = nextAvailableSlug(
+          baseSlug,
+          slugTakenFor(f.cwid, existingSlugs, slugHistoryOwner),
+        );
         existingSlugs.add(slug);
 
         await db.write.scholar.create({
@@ -1093,9 +1327,19 @@ async function main() {
             cwid: f.cwid,
             preferredName: f.preferredName,
             fullName: f.fullName,
-            postnominal: f.degree?.trim() || null,
+            postnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+            // `primaryTitle` holds the RESOLVED display title, but the chief /
+            // center-head tiers do not exist until the leader assignments are
+            // written further down this run. So write the ED value here as a SEED
+            // — identical to pre-resolution behaviour — and let
+            // `resolveScholarTitles()` at the tail overwrite it. A run that dies
+            // before the post-pass therefore degrades to today's titles rather
+            // than to a blank subtitle.
             primaryTitle: f.primaryTitle,
+            edPrimaryTitle: f.primaryTitle,
+            workingTitle: f.workingTitle,
             primaryDepartment: primaryDepartmentDisplay,
+            primaryOrgCode: f.primaryOrgCode,
             email: f.email,
             emailVisibility: f.emailVisibility,
             slug,
@@ -1235,9 +1479,30 @@ async function main() {
     // resolves overrides (written immediately — a curator pin is authoritative,
     // not ED-sourced) and collects the title-matched candidates; pass 2 guards
     // the candidates against `weillCornellEduActiveMember` and writes.
-    const chairCandidates: Array<{ deptCode: string; cwid: string; title: string }> = [];
+    const chairCandidates: Array<{
+      deptCode: string;
+      cwid: string;
+      title: string;
+      roleKey: string;
+      otherRoleKey: string;
+    }> = [];
     const chairDeptsToClear: string[] = [];
     for (const dept of seenDepts.values()) {
+      // Look up category so we know whether to match "Chair of X" or
+      // "Director of X". Falls back to "clinical" for depts the seed file
+      // doesn't know about; same default the upsert step uses. Moved ahead
+      // of the override check below (#2542 Phase D) — the dual-write needs
+      // the chair/director role key on BOTH branches, not just detection.
+      const persisted = await db.write.department.findUnique({
+        where: { code: dept.code },
+        select: { category: true },
+      });
+      const category = persisted?.category ?? "clinical";
+      const roleKey = departmentLeaderRoleKey(category);
+      const otherRoleKey =
+        roleKey === DEPARTMENT_CHAIR_ROLE_KEY
+          ? DEPARTMENT_DIRECTOR_ROLE_KEY
+          : DEPARTMENT_CHAIR_ROLE_KEY;
       // #540 — a `field_override(department, code, 'leaderCwid')` row wins
       // outright. Non-empty value writes the curated CWID; `""` writes null
       // (explicit vacancy — three-state, do NOT fall through to regex).
@@ -1246,23 +1511,25 @@ async function main() {
         unitOverrides.deptLeaders,
       );
       if (leaderOverride.applied) {
-        await db.write.department.update({
-          where: { code: dept.code },
-          data: { chairCwid: leaderOverride.cwid },
+        // #2542 contract A — `OrgUnitRoleAssignment` is now the sole leader
+        // store; the `chairCwid` column write retired with the dual-write.
+        await writeUnitLeaderAssignment(db.write, {
+          entityType: "department",
+          entityId: dept.code,
+          roleKey,
+          otherRoleKey,
+          cwid: leaderOverride.cwid,
         });
         deptLeaderOverridesApplied += 1;
         if (leaderOverride.cwid) chairAssignments += 1;
         continue;
       }
-      // Look up category so we know whether to match "Chair of X" or
-      // "Director of X". Falls back to "clinical" for depts the seed file
-      // doesn't know about; same default the upsert step uses.
-      const persisted = await db.write.department.findUnique({
-        where: { code: dept.code },
-        select: { category: true },
-      });
-      const category = persisted?.category ?? "clinical";
-      const leaderWord = category === "administrative" ? "Director" : "Chair";
+      // #2542 Phase D — repointed onto `departmentLeaderRoleKey`'s `roleKey`
+      // (computed above) rather than re-deriving chair-vs-director from
+      // `category` a second time here. The display word is the capitalized
+      // vocabulary key — `DEPARTMENT_CHAIR_ROLE_KEY`/`DEPARTMENT_DIRECTOR_ROLE_KEY`
+      // are literally the lowercase English words "chair"/"director".
+      const leaderWord = roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair";
       const expected = `${leaderWord} of ${dept.name}`;
       const exclusions: { title: { contains: string } }[] = [];
       if (leaderWord === "Chair") {
@@ -1301,7 +1568,13 @@ async function main() {
         select: { cwid: true, title: true },
       });
       if (candidate) {
-        chairCandidates.push({ deptCode: dept.code, cwid: candidate.cwid, title: candidate.title });
+        chairCandidates.push({
+          deptCode: dept.code,
+          cwid: candidate.cwid,
+          title: candidate.title,
+          roleKey,
+          otherRoleKey,
+        });
       } else {
         // Always clear stale assignments — if no candidate matches this run the
         // dept gets chair_cwid=null instead of keeping a prior run's scholar.
@@ -1337,9 +1610,14 @@ async function main() {
     }
     for (const c of chairCandidates) {
       const cwidToWrite = guardActiveLeaderCwid(c.cwid, chairActive, chairGuardApplied);
-      await db.write.department.update({
-        where: { code: c.deptCode },
-        data: { chairCwid: cwidToWrite },
+      // #2542 contract A — a guard drop writes null here, deleting the
+      // assignment (writeUnitLeaderAssignment's own vacancy handling).
+      await writeUnitLeaderAssignment(db.write, {
+        entityType: "department",
+        entityId: c.deptCode,
+        roleKey: c.roleKey,
+        otherRoleKey: c.otherRoleKey,
+        cwid: cwidToWrite,
       });
       if (cwidToWrite) {
         chairTitleVariants.add(c.title);
@@ -1349,9 +1627,16 @@ async function main() {
       }
     }
     for (const deptCode of chairDeptsToClear) {
-      await db.write.department.update({
-        where: { code: deptCode },
-        data: { chairCwid: null },
+      // #2542 contract A — no candidate this run: delete BOTH leadership keys'
+      // assignment rows. Category at clear time isn't tracked through this
+      // array, and deleting a role the dept never held is a no-op, so
+      // clearing both is simpler than re-deriving which one applied.
+      await writeUnitLeaderAssignment(db.write, {
+        entityType: "department",
+        entityId: deptCode,
+        roleKey: DEPARTMENT_CHAIR_ROLE_KEY,
+        otherRoleKey: DEPARTMENT_DIRECTOR_ROLE_KEY,
+        cwid: null,
       });
     }
     console.log(
@@ -1373,17 +1658,27 @@ async function main() {
     let adminOverridesApplied = 0;
     for (const [code, cwid] of Object.entries(ADMIN_DEPT_LEADER_OVERRIDES)) {
       // #540 — a `field_override(leaderCwid)` row beats this hardcoded
-      // fallback in either direction. A non-empty override already wrote
-      // chairCwid above (`dept.chairCwid` truthy, caught below); an empty
-      // override wrote null as an explicit vacancy and MUST NOT be silently
-      // re-filled here (that would defeat the three-state model).
+      // fallback in either direction. A non-empty override already wrote an
+      // assignment above (caught by the existing-assignment check below); an
+      // empty override wrote null as an explicit vacancy and MUST NOT be
+      // silently re-filled here (that would defeat the three-state model).
       if (unitOverrides.deptLeaders.has(code)) continue;
       const dept = await db.write.department.findUnique({
         where: { code },
-        select: { code: true, category: true, chairCwid: true },
+        select: { code: true, category: true },
       });
       if (!dept || dept.category !== "administrative") continue;
-      if (dept.chairCwid) continue;
+      // #2542 contract A — `OrgUnitRoleAssignment` is the sole leader store;
+      // skip if this dept already holds either leadership key.
+      const existingLeader = await db.write.orgUnitRoleAssignment.findFirst({
+        where: {
+          entityType: "department",
+          entityId: code,
+          roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        },
+        select: { cwid: true },
+      });
+      if (existingLeader) continue;
       const scholar = await db.write.scholar.findUnique({
         where: { cwid },
         select: { cwid: true, deletedAt: true, status: true },
@@ -1394,9 +1689,14 @@ async function main() {
         );
         continue;
       }
-      await db.write.department.update({
-        where: { code },
-        data: { chairCwid: cwid },
+      // #2542 contract A — guarded above to `dept.category === "administrative"`,
+      // so the role key is always director here.
+      await writeUnitLeaderAssignment(db.write, {
+        entityType: "department",
+        entityId: code,
+        roleKey: DEPARTMENT_DIRECTOR_ROLE_KEY,
+        otherRoleKey: DEPARTMENT_CHAIR_ROLE_KEY,
+        cwid,
       });
       adminOverridesApplied += 1;
     }
@@ -1411,6 +1711,47 @@ async function main() {
     // Gated on the employee-SOR fetch actually succeeding: the fetch failure
     // above is swallowed (best-effort), and running this pass against an
     // empty managerByCwid would mass-null every mentor pointer (audit PR-3).
+    //
+    // Mentor resolution (shared with the issue-#183 pass below): the role
+    // record's `manager` DN is the PI for most postdocs, but HR points some
+    // at a lab administrator, and the PI then appears only in the level3 org
+    // unit name ("Sallie Permar Research"). When the manager isn't a known
+    // scholar, resolve that name against active full-time faculty — an
+    // unambiguous hit wins, anything else keeps the manager as-is.
+    const knownCwids = new Set(
+      (
+        await db.write.scholar.findMany({
+          where: { deletedAt: null, status: "active" },
+          select: { cwid: true },
+        })
+      ).map((s) => s.cwid),
+    );
+    // ponytail: full_time_faculty only; widen to emeritus if a named lab ever misses.
+    const facultyByNameKey = new Map<string, string | null>();
+    for (const f of await db.write.scholar.findMany({
+      where: { deletedAt: null, status: "active", roleCategory: "full_time_faculty" },
+      select: { cwid: true, preferredName: true, fullName: true },
+    })) {
+      const full = personNameKey(f.fullName).split(" ");
+      for (const key of new Set([
+        personNameKey(f.preferredName),
+        full.join(" "),
+        `${full[0]} ${full[full.length - 1]}`,
+      ])) {
+        if (key.split(" ").length < 2) continue;
+        const prev = facultyByNameKey.get(key);
+        // null = ambiguous (two faculty share the key) — never resolves.
+        facultyByNameKey.set(key, prev === undefined || prev === f.cwid ? f.cwid : null);
+      }
+    }
+    const resolveMentor = (
+      managerCwid: string | null,
+      labUnitName: string | null,
+    ): string | null => {
+      if (managerCwid && knownCwids.has(managerCwid)) return managerCwid;
+      const key = labPiNameKey(labUnitName);
+      return (key && facultyByNameKey.get(key)) || managerCwid;
+    };
     if (!employeeFetchSucceeded) {
       console.warn(
         "[ED] postdoctoral mentor pass skipped — employee SOR fetch failed; existing pointers retained",
@@ -1420,18 +1761,13 @@ async function main() {
         where: { roleCategory: "postdoc", deletedAt: null, status: "active" },
         select: { cwid: true },
       });
-      const knownCwids = new Set(
-        (
-          await db.write.scholar.findMany({
-            where: { deletedAt: null, status: "active" },
-            select: { cwid: true },
-          })
-        ).map((s) => s.cwid),
-      );
       let mentorAssignments = 0;
       let mentorOrphans = 0;
+      let mentorViaLabUnit = 0;
       for (const p of postdocs) {
-        const managerCwid = managerByCwid.get(p.cwid) ?? null;
+        const emp = employeeByCwid.get(p.cwid);
+        const managerCwid = resolveMentor(emp?.managerCwid ?? null, emp?.labUnitName ?? null);
+        if (managerCwid && managerCwid !== emp?.managerCwid) mentorViaLabUnit += 1;
         let nextMentorCwid: string | null = null;
         if (managerCwid && knownCwids.has(managerCwid)) {
           nextMentorCwid = managerCwid;
@@ -1455,7 +1791,8 @@ async function main() {
       });
       console.log(
         `[ED] postdoctoral mentor: ${mentorAssignments} assigned across ${postdocs.length} active postdocs (` +
-          `${mentorOrphans} manager DNs not in scholar table; ${cleared.count} stale pointers cleared)`,
+          `${mentorViaLabUnit} via lab-unit name; ${mentorOrphans} manager DNs not in scholar table; ` +
+          `${cleared.count} stale pointers cleared)`,
       );
     }
 
@@ -1514,9 +1851,11 @@ async function main() {
       }
 
       if (postdocRoleRecords.length > 0) {
-        // Drop rows with no manager DN — no PI = no relationship to record.
-        // Counted separately for the summary log.
-        const withMentor = postdocRoleRecords.filter((r) => r.managerCwid);
+        // Drop rows with no resolvable PI (no manager DN and no named lab
+        // unit) — nothing to record. Counted separately for the summary log.
+        const withMentor = postdocRoleRecords
+          .map((r) => ({ ...r, mentorCwid: resolveMentor(r.managerCwid, r.labUnitName) }))
+          .filter((r) => r.mentorCwid);
         const orphanRoleRecords = postdocRoleRecords.length - withMentor.length;
 
         // Name resolution. Existing Scholar rows provide names for active
@@ -1545,6 +1884,36 @@ async function main() {
             );
           }
         }
+
+        // The MENTOR side, for report 7: a manager who is not a Scholar (a lab
+        // administrator, a departed PI — #2633) otherwise reads as a bare
+        // CWID with no department or institution. One ou=people pass with
+        // name + primary department + primary-organization code, every
+        // mentor CWID (the report prefers the Scholar row when there is one).
+        // Best-effort: a failed lookup leaves the stored values untouched.
+        let mentorInfo: Awaited<ReturnType<typeof fetchPersonNamesByCwid>> | null = null;
+        try {
+          mentorInfo = await fetchPersonNamesByCwid(
+            Array.from(new Set(withMentor.map((r) => r.mentorCwid!))),
+            { org: true },
+          );
+        } catch (err) {
+          console.warn(
+            `Postdoc mentor identity lookup skipped: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+        const mentorFields = (cwid: string) => {
+          if (!mentorInfo) return {}; // lookup failed: leave the columns as they are
+          const m = mentorInfo.get(cwid.toLowerCase());
+          return {
+            mentorFirstName: m?.firstName ?? null,
+            mentorLastName: m?.lastName ?? null,
+            mentorDepartment: m?.department ?? null,
+            mentorInstitution: m?.organization ?? null,
+          };
+        };
 
         // Resolve a (first, last) pair per mentee CWID. Prefer the structured
         // ou=people lookup result; fall back to splitting Scholar.fullName
@@ -1583,7 +1952,7 @@ async function main() {
             where: { externalId },
             create: {
               externalId,
-              mentorCwid: r.managerCwid!,
+              mentorCwid: r.mentorCwid!,
               menteeCwid: r.cwid,
               menteeFirstName: name?.firstName ?? null,
               menteeLastName: name?.lastName ?? null,
@@ -1593,9 +1962,10 @@ async function main() {
               status: r.status,
               programType: "POSTDOC",
               source: "ED-EMPLOYEE-SOR",
+              ...mentorFields(r.mentorCwid!),
             },
             update: {
-              mentorCwid: r.managerCwid!,
+              mentorCwid: r.mentorCwid!,
               menteeCwid: r.cwid,
               menteeFirstName: name?.firstName ?? null,
               menteeLastName: name?.lastName ?? null,
@@ -1604,6 +1974,7 @@ async function main() {
               title: r.title,
               status: r.status,
               lastRefreshedAt: new Date(),
+              ...mentorFields(r.mentorCwid!),
             },
           });
           upserted += 1;
@@ -1643,7 +2014,8 @@ async function main() {
         console.log(
           `[ED] postdoc mentees: ${upserted} relationships upserted ` +
             `(${activeCount} active, ${expiredCount} alumni; ` +
-            `${orphanRoleRecords} role records skipped — no manager DN; ` +
+            `${withMentor.filter((r) => r.mentorCwid !== r.managerCwid).length} via lab-unit name; ` +
+            `${orphanRoleRecords} role records skipped — no manager DN or named lab unit; ` +
             `${alumniCwids.length} alumni names resolved from ou=people; ` +
             `${deleted} stale rows tombstoned)`,
         );
@@ -1670,7 +2042,9 @@ async function main() {
     //
     // Disable with SCHOLARS_DISABLE_CHIEF_DETECTION=true if the probe
     // (etl/ed/probe-chiefs.ts) shows manager-graph is too noisy at WCM.
-    // Path C (override file) still runs after, so manual entries always win.
+    // The `field_override` precedence consult below still runs in both the
+    // if- and else-branches, so manual entries always win regardless (the
+    // old file-based Path C escape hatch it superseded is retired, #2560).
     const chiefDetectionDisabled =
       process.env.SCHOLARS_DISABLE_CHIEF_DETECTION === "true";
 
@@ -1686,12 +2060,7 @@ async function main() {
     const divisionsForChief = await db.write.division.findMany({
       select: { code: true, deptCode: true },
     });
-    const deptChairs = new Map<string, string | null>();
-    for (const d of await db.write.department.findMany({
-      select: { code: true, chairCwid: true },
-    })) {
-      deptChairs.set(d.code, d.chairCwid);
-    }
+    const deptChairs = await loadDeptLeaderMap(db.write);
 
     const chiefVerdictTally: Record<ChiefVerdict, number> = {
       HIGH: 0, MEDIUM: 0, LOW: 0, NONE: 0, GAP: 0,
@@ -1707,16 +2076,20 @@ async function main() {
       const chiefDivsToClear: string[] = [];
       for (const div of divisionsForChief) {
         // #540 — a `field_override(division, code, 'leaderCwid')` row wins
-        // over Path B and Path C both. Non-empty -> that CWID; "" ->
+        // over Path B auto-detection. Non-empty -> that CWID; "" ->
         // null (explicit vacancy, no fallback).
         const leaderOverride = resolveUnitLeaderForETL(
           div.code,
           unitOverrides.divLeaders,
         );
         if (leaderOverride.applied) {
-          await db.write.division.update({
-            where: { code: div.code },
-            data: { chiefCwid: leaderOverride.cwid },
+          // #2542 contract A — `OrgUnitRoleAssignment` is now the sole leader
+          // store; the `chiefCwid` column write retired with the dual-write.
+          await writeUnitLeaderAssignment(db.write, {
+            entityType: "division",
+            entityId: div.code,
+            roleKey: DIVISION_CHIEF_ROLE_KEY,
+            cwid: leaderOverride.cwid,
           });
           divLeaderOverridesApplied += 1;
           if (leaderOverride.cwid) chiefAssignments += 1;
@@ -1733,8 +2106,10 @@ async function main() {
         });
         chiefVerdictTally[result.verdict] += 1;
         // Threshold gate: only HIGH and MEDIUM auto-write the pick.
-        // LOW/NONE/GAP all clear to null — the override file (Path C) is
-        // the escape hatch for divisions Path B can't decide on.
+        // LOW/NONE/GAP all clear to null — a curated `field_override`
+        // (via /edit) is the escape hatch for divisions Path B can't
+        // decide on. (The old file-based Path C escape hatch is retired,
+        // #2560.)
         if (result.valueToWrite) {
           chiefCandidates.push({ divCode: div.code, cwid: result.valueToWrite });
         } else {
@@ -1768,17 +2143,25 @@ async function main() {
       }
       for (const c of chiefCandidates) {
         const cwidToWrite = guardActiveLeaderCwid(c.cwid, chiefActive, chiefGuardApplied);
-        await db.write.division.update({
-          where: { code: c.divCode },
-          data: { chiefCwid: cwidToWrite },
+        // #2542 contract A — a guard drop writes null here, deleting the
+        // assignment (writeUnitLeaderAssignment's own vacancy handling).
+        await writeUnitLeaderAssignment(db.write, {
+          entityType: "division",
+          entityId: c.divCode,
+          roleKey: DIVISION_CHIEF_ROLE_KEY,
+          cwid: cwidToWrite,
         });
         if (cwidToWrite) chiefAssignments += 1;
         else chiefGuardDropped += 1;
       }
       for (const divCode of chiefDivsToClear) {
-        await db.write.division.update({
-          where: { code: divCode },
-          data: { chiefCwid: null },
+        // #2542 contract A — no candidate this run: delete the assignment row
+        // so a vacancy does not keep rendering the prior chief.
+        await writeUnitLeaderAssignment(db.write, {
+          entityType: "division",
+          entityId: divCode,
+          roleKey: DIVISION_CHIEF_ROLE_KEY,
+          cwid: null,
         });
       }
       console.log(
@@ -1812,16 +2195,24 @@ async function main() {
       // present would have taken the Path B `if`), so disabling chief detection
       // silently stopped clearing stale chiefs and applying leader overrides.
       if (chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
-        await db.write.division.updateMany({ data: { chiefCwid: null } });
+        // #2542 contract A — delete every division's chief assignment row
+        // before the override pass below re-applies any curator pins.
+        await db.write.orgUnitRoleAssignment.deleteMany({
+          where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+        });
         for (const div of divisionsForChief) {
           const leaderOverride = resolveUnitLeaderForETL(
             div.code,
             unitOverrides.divLeaders,
           );
           if (!leaderOverride.applied) continue;
-          await db.write.division.update({
-            where: { code: div.code },
-            data: { chiefCwid: leaderOverride.cwid },
+          // #2542 contract A — the bulk clear above already deleted every
+          // row, so a null override cwid is a correct create-skip.
+          await writeUnitLeaderAssignment(db.write, {
+            entityType: "division",
+            entityId: div.code,
+            roleKey: DIVISION_CHIEF_ROLE_KEY,
+            cwid: leaderOverride.cwid,
           });
           divLeaderOverridesApplied += 1;
         }
@@ -1834,78 +2225,27 @@ async function main() {
       }
     }
 
-    // Phase 4 — D-04 division chief manual overrides (Path C, always-on).
-    //
-    // Reads data/division-chiefs.txt (TSV: divCode<TAB>cwid<TAB>notes) and
-    // upserts Division.chiefCwid. A cwid of `-` clears the slot (vacancy).
-    // Overrides always win over Path B — they're the escape hatch for
-    // co-chiefs, vacancies, acting/interim cases, and any ambiguity Path B
-    // can't resolve.
-    const overridePath = path.resolve("data/division-chiefs.txt");
-    const overrideRows: Array<{ divCode: string; cwid: string | null; note: string }> = [];
-    try {
-      const content = await fs.readFile(overridePath, "utf8");
-      for (const rawLine of content.split("\n")) {
-        const line = rawLine.replace(/\r$/, "");
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const parts = line.split("\t");
-        const divCode = parts[0]?.trim();
-        const cwidRaw = parts[1]?.trim();
-        if (!divCode || !cwidRaw) continue;
-        const cwid =
-          cwidRaw === "-" ? null : cwidRaw.toLowerCase();
-        const note = parts.slice(2).join("\t").trim();
-        overrideRows.push({ divCode, cwid, note });
-      }
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.code !== "ENOENT") throw err;
-    }
-
-    if (overrideRows.length > 0) {
-      const knownDivCodes = new Set(divisionsForChief.map((d) => d.code));
-      const knownScholarCwids = new Set(
-        (await db.write.scholar.findMany({ select: { cwid: true } })).map(
-          (s) => s.cwid,
-        ),
-      );
-      let overrideApplied = 0;
-      let overrideSkipped = 0;
-      for (const row of overrideRows) {
-        if (!knownDivCodes.has(row.divCode)) {
-          console.warn(
-            `[ED] division-chiefs override skipped — division ${row.divCode} not found`,
-          );
-          overrideSkipped += 1;
-          continue;
-        }
-        // #540 — `field_override(division, code, 'leaderCwid')` is the
-        // structured successor to this file. When a row exists for this
-        // division, the override-consult above has already written the
-        // authoritative value; Path C must not stomp it (the explicit
-        // "" vacancy case in particular). Phase 9 will backfill this
-        // file's contents into `field_override` rows and retire Path C.
-        if (unitOverrides.divLeaders.has(row.divCode)) {
-          overrideSkipped += 1;
-          continue;
-        }
-        if (row.cwid && !knownScholarCwids.has(row.cwid)) {
-          console.warn(
-            `[ED] division-chiefs override skipped — cwid '${row.cwid}' not in scholar table (div ${row.divCode})`,
-          );
-          overrideSkipped += 1;
-          continue;
-        }
-        await db.write.division.update({
-          where: { code: row.divCode },
-          data: { chiefCwid: row.cwid },
-        });
-        overrideApplied += 1;
-      }
+    // Title resolution (#2719). MUST run here: two of the four tiers
+    // (division chief, center head) are the `OrgUnitRoleAssignment` rows the
+    // blocks above just finished writing, so resolving any earlier would read
+    // last night's leadership. The scholar upsert wrote the ED value as a seed
+    // and the raw tiers alongside it; this recomputes the winner for EVERY
+    // scholar and updates only where it differs, which is what makes a lost
+    // chief role or a cleared override revert without a backfill.
+    {
+      const derived = isTitleResolutionEnabled();
+      const titles = await resolveScholarTitles(db.write, { applyDerivedTiers: derived });
       console.log(
-        `[ED] Path C: applied ${overrideApplied}/${overrideRows.length} division-chiefs overrides ` +
-          `(${overrideSkipped} skipped)`,
+        `[ED] title resolution: scanned ${titles.scanned}, updated ${titles.updated} ` +
+          `(${Object.entries(titles.byTier)
+            .map(([tier, n]) => `${tier}=${n}`)
+            .join(", ")})` +
+          // Should be 0. Non-zero means active rows the ED feed did not carry
+          // this run kept their existing title rather than being blanked.
+          (titles.skippedNullResolution > 0
+            ? ` — kept ${titles.skippedNullResolution} title(s) no tier could re-derive`
+            : "") +
+          (derived ? "" : " — SCHOLAR_TITLE_RESOLUTION off, ED tiers only"),
       );
     }
 
@@ -2008,6 +2348,7 @@ export async function maybeUpdatedSlug(
   cwid: string,
   existingSlugs: Set<string>,
   pinnedSlugCwids: ReadonlySet<string>,
+  slugHistoryOwner: Map<string, string> = new Map(),
 ): Promise<void> {
   // #497 §5.2 — a pinned slug is authoritative; never re-mint it. The override
   // is the pin; Scholar.slug and slug_history stay exactly as the last set/clear
@@ -2020,7 +2361,10 @@ export async function maybeUpdatedSlug(
   const base = currentSlug.replace(/-\d+$/, "");
   if (base === newBase) return;
 
-  const newSlug = nextAvailableSlug(newBase, existingSlugs);
+  const newSlug = nextAvailableSlug(
+    newBase,
+    slugTakenFor(cwid, existingSlugs, slugHistoryOwner),
+  );
   if (newSlug === currentSlug) return;
 
   // Record the old slug in history and set the new one — shared with the
@@ -2030,6 +2374,21 @@ export async function maybeUpdatedSlug(
   await reconcileScholarSlug(db.write, cwid, newSlug);
   existingSlugs.delete(currentSlug);
   existingSlugs.add(newSlug);
+  slugHistoryOwner.set(currentSlug, cwid);
+}
+
+/**
+ * #2606 — slugs `cwid` may not take: any live Scholar.slug, plus any
+ * slug_history old_slug that redirects to a DIFFERENT scholar.
+ */
+export function slugTakenFor(
+  cwid: string,
+  existingSlugs: ReadonlySet<string>,
+  slugHistoryOwner: ReadonlyMap<string, string>,
+): Pick<ReadonlySet<string>, "has"> {
+  return {
+    has: (s) => existingSlugs.has(s) || (slugHistoryOwner.get(s) ?? cwid) !== cwid,
+  };
 }
 
 // Run the ETL only when this file is executed as a script — never when it is

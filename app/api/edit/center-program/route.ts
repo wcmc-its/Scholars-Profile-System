@@ -4,13 +4,20 @@
  *
  * Body: `{ centerCode, programCode, action, ... }`.
  *
- * A center program may be CO-LED, so leaders are rows in `CenterProgramLeader`
- * (0..N), not a single column. Actions:
+ * A center program may be CO-LED, so leaders are `OrgUnitRoleAssignment` rows
+ * (0..N; #2558 contract PR — migrated off the retired per-program leader
+ * table), keyed `(entityType: "center_program", entityId:
+ * "{centerCode}:{programCode}", cwid, roleKey)`. Actions:
  *   - `add_leader`     — insert a leader (`cwid`, optional `interim` / `role` /
- *                        `sortOrder`). No-op if the leader already exists.
+ *                        `sortOrder`). No-op if the person already holds a role
+ *                        on this program.
  *   - `remove_leader`  — delete a leader (`cwid`). No-op if absent.
  *   - `set_leader`     — update an existing leader's `interim` / `role` / `sortOrder`
- *                        (partial; absent fields unchanged). 400 if absent.
+ *                        (partial; absent fields unchanged). 400 if absent. A
+ *                        `role` change moves the assignment to the new `roleKey`
+ *                        (the role is part of the row's identity), carrying
+ *                        `interim`/`sortOrder` across unless the same request
+ *                        also changes them.
  *
  * `role` (#1570) is `"leader"` or `"coe_liaison"` — the program page renders the
  * liaisons as a separate card after the leaders. It is settable here so the
@@ -22,14 +29,14 @@
  * center, or Superuser / comms_steward — `canEditUnit`. These are CONTENT fields,
  * not structural, so they are not Superuser-only.
  *
- * Each mutation is one MySQL transaction with a B03 audit row. There is no
- * `centerProgram` member in the audit ENUM, so the row is logged against the
- * center (`targetEntityType: "center"`, `targetEntityId: "<centerCode>:<programCode>"`)
- * — `roster_change` for the leader mutations (a membership-style row changed),
- * `field_override` for the description. `before`/`after` carry the program-scoped
- * snapshot so the history is self-describing. Post-commit: `reflectUnitChange`
- * purges the center page (it lists programs) + the program page reflects on next
- * read (revalidated via the center slug).
+ * Each mutation is one MySQL transaction with a B03 audit row, `targetEntityType:
+ * "center_program"`, `targetEntityId: "<centerCode>:<programCode>"` —
+ * `roster_change` for the leader mutations (a membership-style row changed),
+ * `field_override` for the description; both EXISTING `AuditAction` values, no
+ * ENUM change needed. `before`/`after` carry the program-scoped snapshot so the
+ * history is self-describing. Post-commit: `reflectUnitChange` purges the center
+ * page (it lists programs) + the program page reflects on next read (revalidated
+ * via the center slug).
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
@@ -44,6 +51,7 @@ import {
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectUnitChange } from "@/lib/edit/revalidation";
 import { CWID_PATTERN, validateUnitDescription } from "@/lib/edit/validators";
+import { CENTER_PROGRAM_ENTITY_TYPE, orgUnitRoleSeedRows } from "@/lib/org-unit-roles";
 
 const PATH = "/api/edit/center-program";
 
@@ -60,7 +68,8 @@ function isProgramAction(value: string): value is ProgramAction {
 
 const MAX_SORT_ORDER = 9_999;
 
-/** #1570 — `CenterProgramLeader.role`. A VarChar in the schema, closed set here. */
+/** #1570 — `OrgUnitRoleAssignment.roleKey` for the `center_program` vocabulary.
+ *  A VarChar in the schema, closed set here. */
 const LEADER_ROLES = ["leader", "coe_liaison"] as const;
 type LeaderRole = (typeof LEADER_ROLES)[number];
 function isLeaderRole(value: unknown): value is LeaderRole {
@@ -164,15 +173,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   });
   if (!program) return editError(400, "invalid_program_code", "programCode");
 
-  const auditTargetId = `${centerCode}:${programCode}`;
+  const entityId = `${centerCode}:${programCode}`;
 
   // ------------------------------------------------------------------ leaders
   if (isLeaderAction) {
-    const existing = await db.read.centerProgramLeader.findUnique({
-      where: {
-        centerCode_programCode_cwid: { centerCode, programCode, cwid },
-      },
-      select: { cwid: true, interim: true, role: true, sortOrder: true },
+    // Looked up by (entityType, entityId, cwid) alone, ignoring `roleKey` — a
+    // person holds AT MOST one role on a given program, the same invariant the
+    // retired per-program leader table's PK (`[centerCode, programCode, cwid]`,
+    // no role component) enforced. `roleKey` is part of the assignment's
+    // own composite id (a person could theoretically hold two), but this write
+    // path never produces that: `set_leader`'s role change below MOVES the row
+    // rather than adding a second one.
+    const existing = await db.read.orgUnitRoleAssignment.findFirst({
+      where: { entityType: CENTER_PROGRAM_ENTITY_TYPE, entityId, cwid },
+      select: { cwid: true, interim: true, roleKey: true, sortOrder: true },
     });
 
     if (action === "add_leader" && existing) {
@@ -192,54 +206,122 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               programCode,
               cwid: existing.cwid,
               interim: existing.interim,
-              role: existing.role,
+              role: existing.roleKey,
               sortOrder: existing.sortOrder,
             }
           : null;
         let after: Record<string, unknown> | null;
 
         if (action === "remove_leader") {
-          await tx.centerProgramLeader.delete({
-            where: { centerCode_programCode_cwid: { centerCode, programCode, cwid } },
+          // `existing` is guaranteed non-null here (checked above).
+          const existingRoleKey = existing!.roleKey;
+          await tx.orgUnitRoleAssignment.delete({
+            where: {
+              entityType_entityId_cwid_roleKey: {
+                entityType: CENTER_PROGRAM_ENTITY_TYPE,
+                entityId,
+                cwid,
+                roleKey: existingRoleKey,
+              },
+            },
           });
           after = null;
         } else if (action === "add_leader") {
-          const row = await tx.centerProgramLeader.create({
-            data: { centerCode, programCode, cwid, interim, role, sortOrder },
-            select: { cwid: true, interim: true, role: true, sortOrder: true },
+          // The 11 pre-existing assignments have a vocabulary from the #2558
+          // Phase 1 backfill, but seed here too — same reasoning as the
+          // director write path (`app/api/edit/unit/route.ts`): idempotent
+          // (`skipDuplicates`), never clobbers a renamed label, and removes any
+          // ordering dependency between a deploy and a backfill.
+          await tx.orgUnitRole.createMany({
+            data: orgUnitRoleSeedRows(CENTER_PROGRAM_ENTITY_TYPE),
+            skipDuplicates: true,
+          });
+          const row = await tx.orgUnitRoleAssignment.create({
+            data: {
+              entityType: CENTER_PROGRAM_ENTITY_TYPE,
+              entityId,
+              cwid,
+              roleKey: role,
+              interim,
+              sortOrder,
+            },
+            select: { cwid: true, interim: true, roleKey: true, sortOrder: true },
           });
           after = {
             programCode,
             cwid: row.cwid,
             interim: row.interim,
-            role: row.role,
+            role: row.roleKey,
             sortOrder: row.sortOrder,
           };
         } else {
           // set_leader — update only the fields present in the body.
-          const row = await tx.centerProgramLeader.update({
-            where: { centerCode_programCode_cwid: { centerCode, programCode, cwid } },
-            data: {
-              ...(interimPresent ? { interim } : {}),
-              ...(rolePresent ? { role } : {}),
-              ...(sortOrderPresent ? { sortOrder } : {}),
-            },
-            select: { cwid: true, interim: true, role: true, sortOrder: true },
-          });
-          after = {
-            programCode,
-            cwid: row.cwid,
-            interim: row.interim,
-            role: row.role,
-            sortOrder: row.sortOrder,
-          };
+          const existingRow = existing!;
+          if (rolePresent && role !== existingRow.roleKey) {
+            // `roleKey` is part of the assignment's composite id, so changing it
+            // MOVES the row rather than updating in place: delete the old
+            // (entityType, entityId, cwid, oldRoleKey) row and create the new
+            // one, carrying over interim/sortOrder unless this same request also
+            // sets them.
+            await tx.orgUnitRoleAssignment.delete({
+              where: {
+                entityType_entityId_cwid_roleKey: {
+                  entityType: CENTER_PROGRAM_ENTITY_TYPE,
+                  entityId,
+                  cwid,
+                  roleKey: existingRow.roleKey,
+                },
+              },
+            });
+            const row = await tx.orgUnitRoleAssignment.create({
+              data: {
+                entityType: CENTER_PROGRAM_ENTITY_TYPE,
+                entityId,
+                cwid,
+                roleKey: role,
+                interim: interimPresent ? interim : existingRow.interim,
+                sortOrder: sortOrderPresent ? sortOrder : existingRow.sortOrder,
+              },
+              select: { cwid: true, interim: true, roleKey: true, sortOrder: true },
+            });
+            after = {
+              programCode,
+              cwid: row.cwid,
+              interim: row.interim,
+              role: row.roleKey,
+              sortOrder: row.sortOrder,
+            };
+          } else {
+            const row = await tx.orgUnitRoleAssignment.update({
+              where: {
+                entityType_entityId_cwid_roleKey: {
+                  entityType: CENTER_PROGRAM_ENTITY_TYPE,
+                  entityId,
+                  cwid,
+                  roleKey: existingRow.roleKey,
+                },
+              },
+              data: {
+                ...(interimPresent ? { interim } : {}),
+                ...(sortOrderPresent ? { sortOrder } : {}),
+              },
+              select: { cwid: true, interim: true, roleKey: true, sortOrder: true },
+            });
+            after = {
+              programCode,
+              cwid: row.cwid,
+              interim: row.interim,
+              role: row.roleKey,
+              sortOrder: row.sortOrder,
+            };
+          }
         }
 
         await appendAuditRow(tx, {
           actorCwid: realCwid,
           impersonatedCwid,
-          targetEntityType: "center",
-          targetEntityId: auditTargetId,
+          targetEntityType: "center_program",
+          targetEntityId: entityId,
           action: "roster_change",
           fieldsChanged: null,
           beforeValues: before,
@@ -271,8 +353,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
-        targetEntityType: "center",
-        targetEntityId: auditTargetId,
+        targetEntityType: "center_program",
+        targetEntityId: entityId,
         action: "field_override",
         fieldsChanged: ["description"],
         beforeValues: { programCode, description: program.description },

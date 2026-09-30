@@ -6,7 +6,6 @@ import {
   Building2Icon,
   ChevronDownIcon,
   ChevronLeftIcon,
-  ClipboardCheckIcon,
   EyeIcon,
   FlaskConicalIcon,
   type LucideIcon,
@@ -24,7 +23,7 @@ import { profilePath } from "@/lib/profile-url";
  * Signed-in account menu rendered in the site header (UI-SPEC § Signing in
  * and reaching `/edit`) and — the unified account-dropdown (account-dropdown-nav
  * handoff, Workstream A; its `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag was retired
- * in #1440) — in the `/edit` `AdminSubnav` strip via `context="console"`. A
+ * in #1440) — in the `/edit` `ConsoleTopBar` via `context="console"`. A
  * `Popover` opened by a context-styled trigger:
  *
  *   - With a scholar row (the common case): View my profile · Edit my profile ·
@@ -64,7 +63,6 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   methods: FlaskConicalIcon,
   units: Building2Icon,
   profiles: UsersIcon,
-  "data-quality": ClipboardCheckIcon,
 };
 
 export type AccountMenuProps = {
@@ -85,10 +83,9 @@ export type AccountMenuProps = {
    * Where the menu is mounted (account-dropdown-nav handoff, Workstream A):
    *   - `"public"` (default) — the site header. The context row is the
    *     superuser "Admin console" roster link (rendered as a normal console row).
-   *   - `"console"` — the `/edit` `AdminSubnav` strip. The context row becomes
-   *     "Back to Scholars" (→ `/`), the roster row is dropped (the Profiles tab
-   *     already covers it), and the trigger is styled for the light strip
-   *     rather than the maroon header.
+   *   - `"console"` — the `/edit` `ConsoleTopBar`. The context row becomes
+   *     "Back to Scholars" (→ `/`), and the roster row is dropped (the Profiles
+   *     tab already covers it). Trigger styled for the dark console bar.
    */
   context?: "public" | "console";
 };
@@ -101,14 +98,11 @@ export function AccountMenu({
   const isConsole = context === "console";
   // In-place sub-view of the popover: the menu rows, or the "View as" switcher.
   const [view, setView] = useState<"menu" | "switcher">("menu");
-  const [open, setOpen] = useState(false);
-  // The "View as" row only matters once the menu is open, so the public header
-  // defers the probe until then — a signed-in header render fires no
-  // /api/auth/session request. The console mount probes eagerly: it has no
-  // scholar prop, so it needs the probe's `scholar` to label the chip and build
-  // the View/Edit links (the /edit surfaces are authenticated, so the extra
-  // fetch is cheap).
-  const probe = useImpersonationProbe(open || isConsole);
+  // Probe on mount, not on open: deferring it made the console rows and
+  // "View as…" pop in a beat after the menu opened. The root-layout
+  // ImpersonationBanner already probes /api/auth/session on every page, so
+  // this adds no new kind of request, only a second one for signed-in viewers.
+  const probe = useImpersonationProbe();
   const canImpersonate = probe?.canImpersonate ?? false;
   // The role-aware console destinations the viewer may open (Manage profiles /
   // Method Families / Units you manage), computed server-side. Empty for a plain
@@ -117,7 +111,11 @@ export function AccountMenu({
   const consoleLinks = probe?.consoleLinks ?? [];
   // The signed-in scholar: the prop (public header) or the probe (console mount).
   const effectiveScholar = scholar ?? probe?.scholar ?? null;
-  const label = effectiveScholar?.preferredName ?? "Account";
+  // A profile-less comms_steward / unit admin (e.g. dwd2001) has no scholar row
+  // to name the trigger after, but the probe's `displayName` fallback
+  // (`stewardDirectory`) still gives them a real name instead of the bare
+  // "Account" default.
+  const label = effectiveScholar?.preferredName ?? probe?.displayName ?? "Account";
   // In the console the per-role roster link is replaced by "Back to Scholars",
   // so drop the manage-profiles row; any remaining role destinations (Method
   // Families / Units) stay reachable.
@@ -128,7 +126,6 @@ export function AccountMenu({
 
   // Reset to the menu whenever the popover closes so it reopens on the rows.
   function onOpenChange(next: boolean) {
-    setOpen(next);
     if (!next) setView("menu");
   }
 
@@ -154,7 +151,8 @@ export function AccountMenu({
         data-slot="account-menu-trigger"
         className={
           isConsole
-            ? "text-muted-foreground hover:text-foreground focus:text-foreground ml-auto inline-flex items-center gap-1 py-3 text-sm font-medium transition-colors focus:outline-none"
+            ? // Every console mount now sits in the dark `ConsoleTopBar`.
+              "inline-flex items-center gap-1 py-3 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
             : "inline-flex items-center gap-1 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
         }
         aria-label="Account menu"

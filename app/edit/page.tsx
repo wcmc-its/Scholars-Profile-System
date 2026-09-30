@@ -15,9 +15,11 @@ import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ProxyLanding } from "@/components/edit/proxy-landing";
 import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
-import { isSuperuser } from "@/lib/auth/superuser";
-import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
+import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
+import { isDeveloper } from "@/lib/auth/development";
+import { GLOBAL_ROLE_HOME, resolveGlobalRole } from "@/lib/auth/global-roles";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
@@ -26,10 +28,12 @@ import {
   listUnitAdminEditorsForScholar,
   type UnitAdminEditorsLookup,
 } from "@/lib/edit/unit-scholar-authz";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
+import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
+import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
+import { isProfileLinksEnabled } from "@/lib/edit/profile-links";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
-import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 import {
@@ -38,11 +42,18 @@ import {
   loadLatestSlugRequest,
 } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
+import { hasAnyReportAccess } from "@/lib/edit/report-access";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
-import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { countPendingHonors } from "@/lib/edit/honor-queue";
+import {
+  countPendingNews,
+  isMediaHighlightsQueueEnabled,
+  isNewsQueueEnabled,
+} from "@/lib/edit/news-queue";
+import { countTitlesNeedingReview } from "@/lib/edit/titles-queue";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -79,6 +90,10 @@ export default async function EditSelfPage({
   // `includeCoiGap` is true, so a false here means they are never even read.
   const genuineSelf = editCwid === session.cwid;
   const includeCoiGap = isCoiGapHintEnabled() && genuineSelf;
+  // #2634 — mentee suggestions share the COI-gap actor rule on this surface:
+  // genuine self only, never under a "View as" overlay.
+  const includeMenteeSuggestions = isMenteeSuggestionsEnabled() && genuineSelf;
+  const includeOrcidSuggestion = isOrcidSuggestionEnabled() && genuineSelf;
   // #836 — on THIS (self) surface the manual-Highlights editor loads only for a
   // genuine self viewer with the flag on — never under a "View as" overlay. A
   // superuser curating another scholar's Highlights does so on the superuser
@@ -101,6 +116,8 @@ export default async function EditSelfPage({
     includeCoiGap,
     includeHighlights,
     includeReporterProfile,
+    includeMenteeSuggestions,
+    includeOrcidSuggestion,
   });
   if (!ctx) {
     // A comms_steward with no Scholar row of their own has no self-profile to
@@ -112,6 +129,21 @@ export default async function EditSelfPage({
     // is off), so it's inert on a dark deployment.
     if (await isCommsSteward(editCwid)) {
       redirect("/edit/methods");
+    }
+    // A holder of one of the other four global LDAP-group roles
+    // (`cv_generator`/`honors_curator`/`data_sharing_viewer`/`development`,
+    // `lib/auth/global-roles.ts`) has no self-profile either — each has
+    // exactly one console entry point, none of them scholar-specific, so route
+    // there before the proxy fallback below. One `resolveGlobalRole` call
+    // checks all four in parallel (a single bounded LDAPS round trip, not a
+    // chain of four sequential ones) — the same reuse `/api/impersonation`'s
+    // POST route already makes for the identical "which global role, if any"
+    // question. Was cv_generator-only (#2482); widened 2026-08-19 after
+    // `/edit`'s own "Go to my own profile editor" link 404'd for the other
+    // three roles, the same profile-less trap #2482 had already found once.
+    const globalRole = await resolveGlobalRole(editCwid);
+    if (globalRole) {
+      redirect(GLOBAL_ROLE_HOME[globalRole].href);
     }
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
     // editor (#779) — pure administrative staff (Beth Chunn) editing on a
@@ -135,6 +167,30 @@ export default async function EditSelfPage({
       if (scholars.length > 1) {
         return <ProxyLanding scholars={scholars} />;
       }
+    }
+    // A unit Owner/Curator with no Scholar row of their own — e.g. a center's
+    // administrative staff managing its roster. Their console entry point is the
+    // unit they administer (one grant → straight there; several → the
+    // `/edit/units` index that exists for exactly them). Without this they
+    // signed in and hit a 404. Checked before `report_access`: the unit is the
+    // primary job, and its "View reports" link still reaches the reports.
+    const units = await loadManageableUnits(editCwid, db.read);
+    if (units.total > 0) {
+      const all = [
+        ...units.departments,
+        ...units.divisions,
+        ...units.centers,
+        ...units.cores,
+        ...units.institutions,
+      ];
+      redirect(all.length === 1 ? all[0].href : "/edit/units");
+    }
+    // A `report_access` holder (reports 7–9) — staff with no Scholar row, no
+    // ED-group role and no proxy grant. Their console entry point is the
+    // reports index, which lists exactly the reports they were granted
+    // (`lib/edit/report-access.ts`). An indexed row read, not a directory call.
+    if (await hasAnyReportAccess(editCwid)) {
+      redirect("/edit/reports");
     }
     notFound();
   }
@@ -201,6 +257,16 @@ export default async function EditSelfPage({
     // Datasets is valid only when the scholar has ≥1 deposit (the loader gates
     // the array on DATA_SHARING_SECTION).
     ctx.datasets.length > 0,
+    // #2634 — "Mentees › From your publications" is valid when the loader
+    // returned any row (active or dismissed), mirroring the rail rule.
+    ctx.menteeSuggestions.length > 0,
+    // Identifiers & Profiles is valid when EITHER of its cards is on: the ORCID
+    // flag (tab, write, suggestion share one kill switch) or #2699 profile links.
+    isOrcidSuggestionEnabled(),
+    isProfileLinksEnabled(),
+    // Media highlights is valid only when the scholar has ≥1 approved clip (the
+    // loader gates the array on MEDIA_HIGHLIGHTS_SECTION). Last positional arg.
+    ctx.mediaHighlights.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
@@ -243,6 +309,10 @@ export default async function EditSelfPage({
     // must hide while down-scoped under "View as". Flag-gated short-circuit (no
     // LDAP when `HONORS_CURATOR_ENABLED` is off), fail-closed.
     honorsCurator,
+    // Gap 1b — whether the EFFECTIVE viewer is a pure `development`-role member,
+    // gating the "Funding matcher"/"Matcha" tabs below (their only console entry
+    // points from this self-edit landing page). Fail-closed like the others.
+    developer,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
@@ -255,9 +325,15 @@ export default async function EditSelfPage({
     listUnitAdminEditorsForScholar(editCwid, db.read as unknown as UnitAdminEditorsLookup),
     isCommsSteward(editCwid).catch(() => false),
     isHonorsCurator(editCwid).catch(() => false),
+    isDeveloper(editCwid).catch(() => false),
   ]);
 
-  const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
+  const manageableUnits = [
+    ...units.departments,
+    ...units.divisions,
+    ...units.centers,
+    ...units.institutions,
+  ];
   const proxyEditors = proxyEditorRows.map((r) => ({
     proxyCwid: r.proxyCwid,
     grantedBy: r.grantedBy,
@@ -273,27 +349,45 @@ export default async function EditSelfPage({
   // or comms_steward sees the full role-gated `AdminSubnav` on this self-edit
   // surface (active="self"), so every admin option is reachable from here rather
   // than only after drilling into the roster. A plain scholar gets `undefined` and
-  // EditShell falls back to the minimal "My Profile" strip. The pending-request
-  // count drives the superuser "URL requests" badge only — skip the query for a
-  // steward-only viewer.
-  // Anyone who can edit an org unit also gets the console tab strip — a superuser,
-  // a comms_steward, OR a unit Owner/Curator (≥1 grant) — so the "Units" tab (and
-  // any other role-available tab) is reachable from every self-edit tab, not only
-  // via the Home-panel link. A plain scholar still falls back to the minimal strip.
+  // EditShell falls back to the minimal "My Profile" strip.
+  //
+  // `loadConsoleTabs` migration (docs/edit-console-ia-spec.md Part B §2,
+  // 2026-08-14-edit-console-ia-handoff.md decision 3) — this page used to
+  // hand-compute `showConsoleNav` and every individual AdminSubnav tab prop
+  // from `canBrowseProfiles`/`commsSteward`/`hasUnitGrants` in three different
+  // OR combinations, one of which (`showConsoleNav`) forgot `honorsCurator`
+  // entirely (Gap 1) and none of which read `isDeveloper` at all (Gap 1b). One
+  // `loadConsoleTabs` call now derives the full, correct tab set from an
+  // `EditSession` shaped from the EFFECTIVE roles already resolved above — no
+  // separate gate left to forget a role in, and `matcha`/`grantMatcha` are
+  // ordinary predicates like every other tab, reachable from this landing page
+  // like anywhere else.
   const hasUnitGrants = manageableUnits.length > 0;
-  const showConsoleNav = canBrowseProfiles || commsSteward || hasUnitGrants;
+  const effectiveSession: EditSession = {
+    cwid: editCwid,
+    isSuperuser: canBrowseProfiles,
+    isCommsSteward: commsSteward,
+    isHonorsCurator: honorsCurator,
+    isDeveloper: developer,
+  };
+  const tabs = await loadConsoleTabs(effectiveSession, db.read);
+  // Nothing to render if every predicate is false — the same "no strip at all"
+  // fallback the old `showConsoleNav` gate gave a plain scholar, now derived
+  // rather than hand-maintained.
+  const showConsoleNav = Object.values(tabs).some(Boolean);
   const pendingSlugRequests =
     canBrowseProfiles && slugRequestEnabled ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
-  // This page has no `EditSession` — it resolves each role against `editCwid`
-  // (the EFFECTIVE viewer) above, so hand the gate the same shape it expects.
-  const pendingHonors = isHonorsQueueTabVisible({
-    isSuperuser: canBrowseProfiles,
-    isHonorsCurator: honorsCurator,
-  })
-    ? await countPendingHonors(db.read)
-    : null;
+  const pendingHonors = tabs.honors ? await countPendingHonors(db.read) : null;
+  // The Titles queue pill, the same memoized fail-soft count `ConsoleShell`
+  // reads (null = no pill; the tab itself rides `tabs.titles`).
+  const pendingTitles = tabs.titles ? await countTitlesNeedingReview(db.read) : null;
+  // News / Media highlights pills, as `ConsoleShell` reads them.
+  const [pendingNews, pendingClips] = await Promise.all([
+    tabs.news && isNewsQueueEnabled() ? countPendingNews(db.read, "newsroom") : null,
+    tabs.news && isMediaHighlightsQueueEnabled() ? countPendingNews(db.read, "clips") : null,
+  ]);
 
   return (
     <EditPage
@@ -308,30 +402,23 @@ export default async function EditSelfPage({
           <AdminSubnav
             active="self"
             superuserSurfaces={canBrowseProfiles}
-            // #986 — a comms_steward is a global profile editor, so it gets the
-            // Profiles tab on EVERY console surface (matching /edit/scholars +
-            // /edit/methods). A superuser already has it via `superuserSurfaces`.
-            profilesTab={commsSteward}
-            unitsTab={canBrowseProfiles || commsSteward || hasUnitGrants}
+            profilesTab={tabs.profiles}
+            unitsTab={tabs.units || hasUnitGrants}
             pendingSlugRequests={pendingSlugRequests}
             pendingHonors={pendingHonors}
-            administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}
-            methodsTab={
-              isMethodsTabVisible({
-                isSuperuser: canBrowseProfiles,
-                isCommsSteward: commsSteward,
-              })
-                ? 0
-                : null
-            }
-            // A global editor OR a unit Owner/Curator with grants gets the Data
-            // quality tab (mirrors `unitsTab`); the latter sees it scoped to their units.
-            dataQualityTab={
-              isDataQualityDashboardEnabled() &&
-              (canBrowseProfiles || commsSteward || hasUnitGrants)
-                ? 0
-                : null
-            }
+            titlesTab={tabs.titles}
+            pendingTitles={pendingTitles}
+            administratorsTab={tabs.administrators ? 0 : null}
+            methodsTab={tabs.methods ? 0 : null}
+            roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
+            dataSharingTab={tabs.dataSharing ? 0 : null}
+            reportsTab={tabs.reports}
+            newsTab={tabs.news}
+            pendingNews={pendingNews}
+            pendingClips={pendingClips}
+            usageTab={tabs.usage}
+            coresTab={tabs.cores}
+            viewerIsDeveloper={developer}
           />
         ) : undefined
       }
@@ -339,6 +426,8 @@ export default async function EditSelfPage({
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
       reciterPendingEnabled={reciterPendingEnabled}
+      orcidTabEnabled={isOrcidSuggestionEnabled()}
+      profileLinksEnabled={isProfileLinksEnabled()}
       grantRecsEnabled={grantRecsEnabled}
       biosketchEnabled={biosketchEnabled}
       cvEnabled={cvEnabled}

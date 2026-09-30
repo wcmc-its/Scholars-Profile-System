@@ -3,7 +3,7 @@
  * (#497 PR-3c, `slug-personalization-ui-spec.md` § 3.1).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
@@ -25,29 +25,29 @@ vi.mock("@/components/site/account-menu", () => ({
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 
 describe("AdminSubnav", () => {
-  it("renders both tabs with the pending-count pill when the feature is on", () => {
+  it("puts the pending-request pill on the one Profile URLs tab when the feature is on", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={3} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
-    expect(screen.getByTestId("admin-tab-slug-requests")).toBeTruthy();
+    expect(screen.getByTestId("admin-tab-slugs").textContent).toContain("Profile URLs");
     expect(screen.getByTestId("admin-subnav-pending-count").textContent).toBe("3");
+    // The queue and the registry share one page — no separate queue tab.
+    expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
   });
 
   it("marks the active tab with aria-current and links the inactive one", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={1} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles").getAttribute("aria-current")).toBe("page");
     // The inactive tab is a link to its surface.
-    expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("href")).toBe(
-      "/edit/slug-requests",
-    );
+    expect(screen.getByTestId("admin-tab-slugs").getAttribute("href")).toBe("/edit/slugs");
   });
 
-  it("hides the URL-requests tab when the feature is off (pendingSlugRequests null)", () => {
+  it("drops the pill when the feature is off (pendingSlugRequests null)", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
-    expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
-  it("always shows the Slug-registry tab — even when the URL-requests tab is hidden", () => {
+  it("always shows the Profile URLs tab — even when the request feature is off", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     const tab = screen.getByTestId("admin-tab-slugs");
     expect(tab).toBeTruthy();
@@ -63,8 +63,8 @@ describe("AdminSubnav", () => {
   });
 
   it("omits the count pill when zero pending", () => {
-    render(<AdminSubnav active="slug-requests" pendingSlugRequests={0} pendingHonors={null} />);
-    expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("aria-current")).toBe("page");
+    render(<AdminSubnav active="slugs" pendingSlugRequests={0} pendingHonors={null} />);
+    expect(screen.getByTestId("admin-tab-slugs").getAttribute("aria-current")).toBe("page");
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
@@ -115,43 +115,11 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-tab-methods").getAttribute("aria-current")).toBe("page");
   });
 
-  it("shows the Funding matcher tab on every superuser surface (rides superuserSurfaces)", () => {
-    // Default superuserSurfaces=true (a superuser-only page like Profiles).
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
-    expect(screen.getByTestId("admin-tab-find-researchers").getAttribute("href")).toBe(
-      "/edit/find-researchers",
-    );
-  });
-
-  it("hides the Funding matcher tab for a non-superuser, non-developer (comms_steward)", () => {
-    render(
-      <AdminSubnav active="methods" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} superuserSurfaces={false} />,
-    );
-    expect(screen.queryByTestId("admin-tab-find-researchers")).toBeNull();
-  });
-
-  it("shows the Funding matcher tab to a pure dev-role viewer via viewerIsDeveloper", () => {
-    render(
-      <AdminSubnav
-        active="find-researchers"
-        pendingSlugRequests={null} pendingHonors={null}
-        superuserSurfaces={false}
-        viewerIsDeveloper
-      />,
-    );
-    const tab = screen.getByTestId("admin-tab-find-researchers");
-    expect(tab.getAttribute("aria-current")).toBe("page");
-    // the superuser-only surfaces stay hidden for a pure dev-role viewer
-    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
-    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
-  });
-
-  it("superuserSurfaces=false shows ONLY Method families (a comms_steward who is not a superuser)", () => {
+  it("superuserSurfaces=false, no administratorsTab, shows ONLY Method families (a comms_steward who is not a superuser, not a unit Owner)", () => {
     render(
       <AdminSubnav
         active="methods"
         pendingSlugRequests={3} pendingHonors={null}
-        administratorsTab={0}
         methodsTab={0}
         superuserSurfaces={false}
       />,
@@ -163,15 +131,36 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
   });
 
-  // account-dropdown-nav handoff, Workstream A (its ACCOUNT_CONSOLE_NAV_RESTRUCTURE
-  // flag was retired in #1440) — the account chip/dropdown (context="console")
-  // anchors the right end on every console surface; profile actions live in the
-  // menu, so there is no "My Profile" tab.
-  it("mounts the account menu (console context) at the right end — no My Profile tab", () => {
+  // Gap 3 fix (2026-08-14, docs/edit-console-ia-spec.md) — `administratorsTab`'s
+  // show condition used to AND `superuserSurfaces`, unlike every sibling
+  // count-vs-null-gated tab (methods/dataQuality/dataSharing below), which hid
+  // the tab from exactly the non-superuser unit Owner it exists to serve (D5).
+  // This test used to pin that bug as intentional ("superuserSurfaces=false...
+  // administratorsTab={0}... expect ... toBeNull()"); it now asserts the fix.
+  it("🔴 shows the Administrators tab to a NON-superuser unit Owner (administratorsTab=0, superuserSurfaces=false) — Gap 3 fix", () => {
+    render(
+      <AdminSubnav
+        active="administrators"
+        pendingSlugRequests={null} pendingHonors={null}
+        administratorsTab={0}
+        superuserSurfaces={false}
+      />,
+    );
+    const tab = screen.getByTestId("admin-tab-administrators");
+    expect(tab.getAttribute("aria-current")).toBe("page");
+    // The rest of the superuser-only strip stays hidden — this is an OWNER,
+    // not a superuser.
+    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
+    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
+  });
+
+  // The nav now renders INSIDE ConsoleTopBar, which owns the account menu —
+  // mounting it here too would render it twice. Profile actions live in that
+  // menu, so there is still no "My Profile" tab.
+  it("does not mount the account menu itself (the top bar does) — no My Profile tab", () => {
     render(<AdminSubnav active="self" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} />);
     expect(screen.queryByTestId("admin-subnav-self-edit")).toBeNull();
-    const stub = screen.getByTestId("account-menu-stub");
-    expect(stub.getAttribute("data-context")).toBe("console");
+    expect(screen.queryByTestId("account-menu-stub")).toBeNull();
     // The console tabs themselves are unaffected.
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
   });
@@ -185,7 +174,6 @@ describe("AdminSubnav", () => {
       const tab = screen.getByTestId(`admin-tab-${id}`);
       expect(tab.getAttribute("aria-current")).toBeNull();
     }
-    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
   it('active="self" for a steward-only viewer shows only Method families', () => {
@@ -199,79 +187,90 @@ describe("AdminSubnav", () => {
     );
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
-    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
-  // Data Quality dashboard tab (docs/data-quality-dashboard-spec.md).
-  it("hides the Data quality tab when dataQualityTab is null/omitted", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={null} />);
-    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
+  // Reports IA redesign (2026-08-14) — reverses the 2026-08-12 "exclusively via
+  // /edit/units" direction. Reports is a dedicated top-level tab, not an
+  // Insights peer (see the two-tier grouping suite below for its position),
+  // mirroring `usageTab`'s reach pattern: superusers get it via
+  // `superuserSurfaces`, everyone else needs the per-page `reportsTab` escape
+  // hatch. The center editor's header link (`EditShell`'s `reportsHref`,
+  // Phase 1 of this redesign) is a SECOND entry point, not a replacement.
+  it("shows the Reports tab (linking /edit/reports) to a superuser by default", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
-    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
+    expect(screen.getByTestId("admin-tab-reports").getAttribute("href")).toBe("/edit/reports");
   });
 
-  it("shows the Data quality tab (linking /edit/data-quality) when dataQualityTab is 0", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={0} />);
-    const tab = screen.getByTestId("admin-tab-data-quality");
-    expect(tab.getAttribute("href")).toBe("/edit/data-quality");
-    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
-  });
-
-  it("marks the Data quality tab active with aria-current", () => {
-    render(<AdminSubnav active="data-quality" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={0} />);
-    expect(screen.getByTestId("admin-tab-data-quality").getAttribute("aria-current")).toBe("page");
-  });
-
-  // A unit Owner/Curator (superuserSurfaces=false) still gets Data quality scoped
-  // to their units — the `/edit/units` page passes dataQualityTab on grants.
-  it("shows Data quality for a non-superuser when dataQualityTab is set", () => {
+  it("hides the Reports tab from a non-superuser without reportsTab", () => {
     render(
       <AdminSubnav
-        active="units"
-        pendingSlugRequests={null} pendingHonors={null}
+        active="profiles"
+        pendingSlugRequests={null}
+        pendingHonors={null}
         superuserSurfaces={false}
-        unitsTab
-        dataQualityTab={0}
       />,
     );
-    expect(screen.getByTestId("admin-tab-data-quality")).toBeTruthy();
-    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
-  });
-
-  // Reports console (Cancer Center collaboration/NCI-Table-2A, consolidated off
-  // the `/edit/center/[code]` unit editor) — same shape as the Data quality tab.
-  it("hides the Reports tab when reportsTab is null/omitted", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} reportsTab={null} />);
-    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
   });
 
-  it("shows the Reports tab (linking /edit/reports) when reportsTab is 0", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} reportsTab={0} />);
-    const tab = screen.getByTestId("admin-tab-reports");
-    expect(tab.getAttribute("href")).toBe("/edit/reports");
-    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
-  });
-
-  it("marks the Reports tab active with aria-current", () => {
-    render(<AdminSubnav active="reports" pendingSlugRequests={null} pendingHonors={null} reportsTab={0} />);
-    expect(screen.getByTestId("admin-tab-reports").getAttribute("aria-current")).toBe("page");
-  });
-
-  // A unit Owner/Curator (superuserSurfaces=false) of a center also gets Reports —
-  // the `/edit/reports/*` pages pass reportsTab once their own authz check passes.
-  it("shows Reports for a non-superuser when reportsTab is set", () => {
+  it("shows the Reports tab to a non-superuser unit admin via reportsTab", () => {
     render(
       <AdminSubnav
         active="reports"
-        pendingSlugRequests={null} pendingHonors={null}
+        pendingSlugRequests={null}
+        pendingHonors={null}
         superuserSurfaces={false}
-        reportsTab={0}
+        reportsTab
       />,
     );
     expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
-    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
+  });
+
+  // The Reports tab's "active" state spans 7 distinct routes (index + 6
+  // report detail pages), unlike every other tab where "active" means
+  // "already on this exact page" — so unlike e.g. Profiles (an inert span
+  // while active), Reports stays a real, clickable link back to its home
+  // page even while active.
+  it("keeps the Reports tab a clickable link back to /edit/reports even while active", () => {
+    render(<AdminSubnav active="reports" pendingSlugRequests={null} pendingHonors={null} />);
+    const tab = screen.getByTestId("admin-tab-reports");
+    expect(tab.tagName).toBe("A");
+    expect(tab.getAttribute("href")).toBe("/edit/reports");
+    expect(tab.getAttribute("aria-current")).toBe("page");
+  });
+
+  // COI dashboard tab — superuser + `EDIT_DATA_QUALITY_DASHBOARD` only, no
+  // grant escape hatch at all (mirrors the `coi` predicate in
+  // `lib/edit/console-tabs.server.ts`).
+  describe("the COI tab", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("shows the COI tab (linking /edit/coi) to a superuser when the flag is on", () => {
+      vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+      render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+      const tab = screen.getByTestId("admin-tab-coi");
+      expect(tab.textContent).toContain("COI");
+      expect(tab.getAttribute("href")).toBe("/edit/coi");
+    });
+
+    it("hides the COI tab from a superuser when the flag is off", () => {
+      render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+      expect(screen.queryByTestId("admin-tab-coi")).toBeNull();
+    });
+
+    it("hides the COI tab from a non-superuser regardless of the flag", () => {
+      vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+      render(
+        <AdminSubnav
+          active="profiles"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          profilesTab
+        />,
+      );
+      expect(screen.queryByTestId("admin-tab-coi")).toBeNull();
+    });
   });
 
   // comms-steward-profile-editing-spec.md §3b — a steward edits org units, so
@@ -289,6 +288,49 @@ describe("AdminSubnav", () => {
   it('marks the Units tab active with aria-current when active="units"', () => {
     render(<AdminSubnav active="units" pendingSlugRequests={null} pendingHonors={null} unitsTab />);
     expect(screen.getByTestId("admin-tab-units").getAttribute("aria-current")).toBe("page");
+  });
+
+  // Gap 2 fix (2026-08-14) — News used to piggyback on `profilesTab`, which a
+  // unit Owner/Curator also earns (`/edit/profiles`'s `unitScope !== null`
+  // override), showing a link that 404s on `isNewsQueueTabVisible`'s real
+  // isSuperuser-or-isCommsSteward gate. `newsTab` is the dedicated escape
+  // hatch now, mirroring `reportsTab`.
+  describe("the News tab (Gap 2)", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("shows the News tab to a superuser by default", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+      expect(screen.getByTestId("admin-tab-news-queue").getAttribute("href")).toBe("/edit/news-queue");
+    });
+
+    it("shows the News tab to a non-superuser comms_steward via newsTab", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(
+        <AdminSubnav
+          active="news-queue"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          newsTab
+        />,
+      );
+      expect(screen.getByTestId("admin-tab-news-queue")).toBeTruthy();
+    });
+
+    it("🔴 does NOT show News to a non-superuser with only profilesTab (e.g. a unit Owner/Curator) — the Gap 2 leak", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(
+        <AdminSubnav
+          active="profiles"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          profilesTab
+        />,
+      );
+      expect(screen.queryByTestId("admin-tab-news-queue")).toBeNull();
+    });
   });
 
   // ── The Matcha tab and its explanatory hover (round-2 §2) ───────────────────
@@ -341,25 +383,131 @@ describe("AdminSubnav", () => {
       // …and a tab that was passed no hover opens nothing. The wait is load-bearing: Radix opens
       // on a 200ms delay, so asserting absence synchronously would pass before any card COULD
       // have opened — which is exactly how the first version of this test was vacuous.
-      fireEvent.focus(screen.getByTestId("admin-tab-slug-requests"));
+      fireEvent.focus(screen.getByTestId("admin-tab-slugs"));
       await new Promise((r) => setTimeout(r, 350));
       expect(screen.getAllByText(/Paste the ask\. Get the shortlist\./)).toHaveLength(1);
+      vi.doUnmock("@/lib/api/matcha");
+    });
+
+    // The href assertion above passes on an iPhone that cannot use it: Radix's hover
+    // trigger preventDefaults `touchstart`, which cancels the click iOS would have
+    // synthesized, so the tab navigated NOWHERE on touch (#2588).
+    it("re-issues the tap as a click on touch — the hover wrap ate the href on iOS (#2588)", async () => {
+      vi.resetModules();
+      vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
+      const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
+      render(<Subnav active="profiles" pendingSlugRequests={null} pendingHonors={null} superuserSurfaces />);
+      const tab = screen.getByTestId("admin-tab-matcha");
+      const clicked: string[] = [];
+      tab.addEventListener("click", (ev) => {
+        ev.preventDefault(); // jsdom cannot navigate; the href itself is asserted above
+        clicked.push((ev.currentTarget as HTMLAnchorElement).getAttribute("href") ?? "");
+      });
+      expect(fireEvent.touchEnd(tab)).toBe(false); // our handler preventDefaulted the tap
+      expect(clicked).toEqual(["/edit/matcha"]);
       vi.doUnmock("@/lib/api/matcha");
     });
   });
 });
 
+// ── The Grant Matcha tab ────────────────────────────────────────────────────
+//
+// Same audience as Matcha (superuser or dev-role), additionally gated on
+// GRANT_MATCHA layered over MATCHA. Both flags are env reads inside the server
+// component, so they are stubbed ON here rather than left to the ambient env
+// (the lesson of the Matcha block above). Unlike Matcha it is a PLAIN link tab
+// — no Radix hover content (#1783), so no client wrapper.
+describe("AdminSubnav — the Grant Matcha tab", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const bothFlagsOn = () => {
+    vi.stubEnv("MATCHA", "on");
+    vi.stubEnv("GRANT_MATCHA", "on");
+  };
+
+  it("renders as a plain link (href /edit/grant-matcha) for a superuser when both flags are on", () => {
+    bothFlagsOn();
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    const tab = screen.getByTestId("admin-tab-grant-matcha");
+    expect(tab.tagName).toBe("A");
+    expect(tab.textContent).toContain("Grant Matcha");
+    expect(tab.getAttribute("href")).toBe("/edit/grant-matcha");
+    // …right next to the Matcha tab it layers on.
+    expect(screen.getByTestId("admin-tab-matcha")).toBeTruthy();
+  });
+
+  it('marks the tab active with aria-current for active="grant-matcha"', () => {
+    bothFlagsOn();
+    render(<AdminSubnav active="grant-matcha" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.getByTestId("admin-tab-grant-matcha").getAttribute("aria-current")).toBe(
+      "page",
+    );
+  });
+
+  it("shows the tab to a pure dev-role viewer via viewerIsDeveloper", () => {
+    bothFlagsOn();
+    render(
+      <AdminSubnav
+        active="grant-matcha"
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        superuserSurfaces={false}
+        viewerIsDeveloper
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-grant-matcha")).toBeTruthy();
+    // the superuser-only surfaces stay hidden for a pure dev-role viewer
+    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
+  });
+
+  it("hides the tab from a non-superuser, non-developer even with both flags on", () => {
+    bothFlagsOn();
+    render(
+      <AdminSubnav
+        active="profiles"
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        superuserSurfaces={false}
+        profilesTab
+      />,
+    );
+    expect(screen.queryByTestId("admin-tab-grant-matcha")).toBeNull();
+  });
+
+  it("stays hidden while GRANT_MATCHA is off, even with MATCHA on", () => {
+    vi.stubEnv("MATCHA", "on");
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.queryByTestId("admin-tab-grant-matcha")).toBeNull();
+    // Matcha itself is unaffected — GRANT_MATCHA only layers on top.
+    expect(screen.getByTestId("admin-tab-matcha")).toBeTruthy();
+  });
+
+  it("stays hidden while MATCHA is off, even with GRANT_MATCHA on — the dependency runs one way", () => {
+    vi.stubEnv("GRANT_MATCHA", "on");
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.queryByTestId("admin-tab-grant-matcha")).toBeNull();
+  });
+
+  it("lands in the Tools group menu when CONSOLE_SUBNAV_GROUPED is on", async () => {
+    bothFlagsOn();
+    vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    fireEvent.focus(screen.getByTestId("admin-group-tools"));
+    const menu = await screen.findByTestId("admin-group-menu-tools");
+    const tab = menu.querySelector('[data-testid="admin-tab-grant-matcha"]');
+    expect(tab).toBeTruthy();
+    expect(tab!.getAttribute("href")).toBe("/edit/grant-matcha");
+  });
+});
+
 describe("AdminSubnav — the Honors tab (#1762)", () => {
-  it("shows the tab without a pending-count badge (round 4)", () => {
-    // #1762 round 4: the curator asked to drop the pending count from the tab.
-    // The tab still renders (and `pendingHonors` still gates its visibility), but
-    // no count pill — so a non-null count no longer paints a number.
+  it("shows the tab with its pending count as a pill", () => {
+    // Round 4 dropped the pill; restored 2026-09-28 alongside News and Media highlights.
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={7} />);
     const tab = screen.getByTestId("admin-tab-honors-queue");
-    expect(tab).toBeTruthy();
     expect(tab.getAttribute("href")).toBe("/edit/honors-queue");
-    expect(tab.textContent).not.toContain("7");
-    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+    expect(tab.textContent).toBe("Honors7");
+    expect(tab.querySelector('[data-testid="admin-subnav-pending-count"]')?.textContent).toBe("7");
   });
 
   it("hides the tab when the count is null", () => {
@@ -411,6 +559,85 @@ describe("AdminSubnav — the Honors tab (#1762)", () => {
   });
 });
 
+describe("AdminSubnav — the Titles queue tab (formerly report 10)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("is hidden unless the caller says the viewer has it", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} pendingTitles={5} />);
+    expect(screen.queryByTestId("admin-tab-titles-queue")).toBeNull();
+  });
+
+  it("shows 'Titles' linking to /edit/titles-queue, with the Needs review count as its pill", () => {
+    render(
+      <AdminSubnav
+        active="profiles"
+        superuserSurfaces={false}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        titlesTab
+        pendingTitles={12}
+      />,
+    );
+    const tab = screen.getByTestId("admin-tab-titles-queue");
+    expect(tab.getAttribute("href")).toBe("/edit/titles-queue");
+    expect(tab.textContent).toBe("Titles12");
+    expect(tab.querySelector('[data-testid="admin-subnav-pending-count"]')?.textContent).toBe("12");
+  });
+
+  it("a failed count (null) keeps the tab and drops only the pill; zero shows no pill", () => {
+    const { unmount } = render(
+      <AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} titlesTab pendingTitles={null} />,
+    );
+    expect(screen.getByTestId("admin-tab-titles-queue").textContent).toBe("Titles");
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+    unmount();
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} titlesTab pendingTitles={0} />);
+    expect(screen.getByTestId("admin-tab-titles-queue")).toBeTruthy();
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+  });
+
+  it("News and Media highlights carry their Pending counts as pills", () => {
+    vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+    vi.stubEnv("MEDIA_HIGHLIGHTS_SECTION", "on");
+    render(
+      <AdminSubnav
+        active="profiles"
+        superuserSurfaces={false}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        newsTab
+        pendingNews={4}
+        pendingClips={null}
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-news-queue").textContent).toBe("News4");
+    // A failed count keeps the tab and drops only the pill.
+    expect(screen.getByTestId("admin-tab-media-highlights-queue").textContent).toBe("Media highlights");
+  });
+
+  it("is marked current on its own page", () => {
+    render(
+      <AdminSubnav active="titles-queue" pendingSlugRequests={null} pendingHonors={null} titlesTab pendingTitles={3} />,
+    );
+    expect(screen.getByTestId("admin-tab-titles-queue").getAttribute("aria-current")).toBe("page");
+  });
+
+  it("lands in the Queues group menu, pill included, when CONSOLE_SUBNAV_GROUPED is on", async () => {
+    vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+    vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+    render(
+      <AdminSubnav active="titles-queue" pendingSlugRequests={null} pendingHonors={0} titlesTab pendingTitles={4} />,
+    );
+    const group = screen.getByTestId("admin-group-queues");
+    expect(group.getAttribute("aria-current")).toBe("page");
+    fireEvent.focus(group);
+    const menu = await screen.findByTestId("admin-group-menu-queues");
+    const tab = menu.querySelector('[data-testid="admin-tab-titles-queue"]');
+    expect(tab?.getAttribute("href")).toBe("/edit/titles-queue");
+    expect(tab?.querySelector('[data-testid="admin-subnav-pending-count"]')?.textContent).toBe("4");
+  });
+});
+
 // ── Two-tier grouping, behind CONSOLE_SUBNAV_GROUPED ────────────────────────
 //
 // `docs/2026-07-20-console-subnav-two-tier-spec.md`. The flag defaults OFF, so
@@ -425,14 +652,12 @@ describe("AdminSubnav — the Honors tab (#1762)", () => {
 describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  /** Everything a full superuser sees: all 16 tabs visible, all four groups populated. */
+  /** Everything a full superuser sees: all 14 tabs visible, all four groups populated. */
   const allOn = {
     pendingSlugRequests: 2,
     pendingHonors: 0,
     administratorsTab: 0,
     methodsTab: 0,
-    dataQualityTab: 0,
-    reportsTab: 0,
     unitsTab: true,
   } as const;
 
@@ -441,42 +666,42 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
     vi.stubEnv("CORE_PAGES", "on");
     vi.stubEnv("MATCHA", "on");
+    vi.stubEnv("GRANT_MATCHA", "on");
   }
 
-  it("collapses 16 tabs into a 6-item tier 1", () => {
+  it("collapses 15 tabs into a 6-item tier 1", () => {
     grouped();
     render(<AdminSubnav active="profiles" {...allOn} />);
-    // Profiles + Org units stay top-level; the other fourteen become four groups.
+    // Profiles + Org units stay top-level; the other thirteen become four groups.
     for (const id of ["profiles", "units"]) expect(screen.getByTestId(`admin-tab-${id}`)).toBeTruthy();
     for (const g of ["queues", "registries", "insights", "tools"])
       expect(screen.getByTestId(`admin-group-${g}`)).toBeTruthy();
     // …and the grouped members are NOT in tier 1 — no group is active here, so
     // they are not in the DOM at all. This is the assertion that would fail if
     // grouping silently rendered both tiers flat.
-    for (const id of ["slug-requests", "slugs", "usage", "matcha", "cores", "activity", "etl-status", "reports"])
+    for (const id of ["slug-requests", "slugs", "usage", "matcha", "cores", "activity", "etl-status"])
       expect(screen.queryByTestId(`admin-tab-${id}`)).toBeNull();
   });
 
   it("links a group entry to its first visible member's existing href — no route moved", () => {
     grouped();
     render(<AdminSubnav active="profiles" {...allOn} />);
-    // Queues' first visible member is URL requests. A group entry is a plain
+    // Queues' first visible member is Honors. A group entry is a plain
     // <Link>, never a hover menu or a button (#1783).
-    expect(screen.getByTestId("admin-group-queues").getAttribute("href")).toBe("/edit/slug-requests");
+    expect(screen.getByTestId("admin-group-queues").getAttribute("href")).toBe("/edit/honors-queue");
     expect(screen.getByTestId("admin-group-registries").getAttribute("href")).toBe("/edit/slugs");
-    expect(screen.getByTestId("admin-group-insights").getAttribute("href")).toBe("/edit/data-quality");
-    expect(screen.getByTestId("admin-group-tools").getAttribute("href")).toBe("/edit/find-researchers");
+    expect(screen.getByTestId("admin-group-insights").getAttribute("href")).toBe("/edit/activity");
+    expect(screen.getByTestId("admin-group-tools").getAttribute("href")).toBe("/edit/matcha");
   });
 
   it("derives the active group correctly for every grouped id", () => {
     // The map is the whole mechanism — a mis-slotted id sends the wrong group
     // entry maroon.
     const expected: Record<string, string> = {
-      "slug-requests": "queues", "honors-queue": "queues", "news-queue": "queues", cores: "queues",
+      "honors-queue": "queues", "news-queue": "queues", "titles-queue": "queues", cores: "queues",
       slugs: "registries", administrators: "registries", methods: "registries",
-      "data-quality": "insights", activity: "insights", usage: "insights", "etl-status": "insights",
-      reports: "insights",
-      "find-researchers": "tools", matcha: "tools",
+      activity: "insights", usage: "insights", "etl-status": "insights",
+      matcha: "tools", "grant-matcha": "tools",
     };
     for (const [id, group] of Object.entries(expected)) {
       grouped();
@@ -506,6 +731,35 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(menu.querySelector('[data-testid="admin-tab-usage"]')).toBeNull();
   });
 
+  // ── Touch (#2588) ─────────────────────────────────────────────────────────
+  // Radix HoverCard is mouse-only AND hostile to touch: its trigger preventDefaults
+  // `touchstart`, which on iOS cancels the synthesized click, so a tap reached neither
+  // the menu nor the group's own href — the whole grouped nav was inert on an iPhone.
+  // The hover/focus tests above cannot see that: focus is not a tap.
+  it("opens a group menu on TOUCH — the tap used to reach nothing at all (#2588)", async () => {
+    grouped();
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    const trigger = screen.getByTestId("admin-group-registries");
+    // `false` = a handler preventDefaulted, i.e. the tap opens the menu rather than
+    // falling through to the first member's href.
+    expect(fireEvent.touchEnd(trigger)).toBe(false);
+    const menu = await screen.findByTestId("admin-group-menu-registries");
+    expect(menu.querySelector('[data-testid="admin-tab-administrators"]')).toBeTruthy();
+    // …and it toggles: a second tap closes it.
+    fireEvent.touchEnd(trigger);
+    await waitFor(() => expect(screen.queryByTestId("admin-group-menu-registries")).toBeNull());
+  });
+
+  it("opens the ACTIVE group's menu on touch too — its <span> trigger has no href to fall back on", async () => {
+    grouped();
+    render(<AdminSubnav active="slugs" {...allOn} />);
+    const trigger = screen.getByTestId("admin-group-registries");
+    expect(trigger.getAttribute("href")).toBeNull();
+    fireEvent.touchEnd(trigger);
+    const menu = await screen.findByTestId("admin-group-menu-registries");
+    expect(menu.querySelector('[data-testid="admin-tab-methods"]')).toBeTruthy();
+  });
+
   it("renders no tier-2 sub-bar in any state — the hover menu replaced it", () => {
     grouped();
     for (const active of ["profiles", "slugs", "honors-queue", "self"]) {
@@ -516,19 +770,52 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     }
   });
 
+  it("the sub-xl menu names the current tab and lists every tab under its group heading", () => {
+    grouped();
+    render(<AdminSubnav active="usage" {...allOn} />);
+    const trigger = screen.getByTestId("console-nav-sheet-trigger");
+    expect(trigger.textContent).toBe("Usage");
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    for (const h of ["Queues", "Registries", "Insights", "Tools"]) expect(dialog.textContent).toContain(h);
+    const usage = [...dialog.querySelectorAll("a")].find((a) => a.textContent === "Usage")!;
+    expect(usage.getAttribute("href")).toBe("/edit/usage");
+    expect(usage.getAttribute("aria-current")).toBe("page");
+    // Only the current page's group starts open; Queues shows its item count.
+    expect([...dialog.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/edit/slugs")).toBe(false);
+    const registries = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Registries"))!;
+    expect(registries.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(registries);
+    // Pending count carried onto the Profile URLs link.
+    const slug = [...dialog.querySelectorAll("a")].find((a) => a.getAttribute("href") === "/edit/slugs")!;
+    expect(slug.textContent).toBe("Profile URLs2");
+  });
+
+  it("the sub-xl menu's Jump to filters every item into one list, tagged with its group", () => {
+    grouped();
+    render(<AdminSubnav active="usage" {...allOn} />);
+    fireEvent.click(screen.getByTestId("console-nav-sheet-trigger"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(screen.getByLabelText("Jump to"), { target: { value: "url" } });
+    const hrefs = [...dialog.querySelectorAll("nav a")].map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("/edit/slugs");
+    expect(hrefs).not.toContain("/edit/usage");
+    fireEvent.change(screen.getByLabelText("Jump to"), { target: { value: "zzz" } });
+    expect(dialog.textContent).toContain("No pages match “zzz”");
+  });
+
   it('active="self" renders tier 1 only — no tier 2 row', () => {
     grouped();
     render(<AdminSubnav active="self" {...allOn} />);
     expect(screen.getByTestId("admin-group-queues")).toBeTruthy();
     for (const g of ["queues", "registries", "insights", "tools"])
       expect(screen.queryByTestId(`admin-subnav-tier2-${g}`)).toBeNull();
-    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
   it("omits a group entirely when all its members are hidden", () => {
     grouped();
     // A comms_steward: no superuser surfaces, no admin/data-quality props ⇒
-    // Registries loses URL registry + Administrators, Insights loses everything.
+    // Registries loses Profile URLs + Administrators, Insights loses everything.
     render(
       <AdminSubnav
         active="profiles"
@@ -540,7 +827,6 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       />,
     );
     expect(screen.queryByTestId("admin-group-insights")).toBeNull();
-    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
     expect(screen.queryByTestId("admin-tab-usage")).toBeNull();
   });
 
@@ -570,6 +856,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
           superuserSurfaces={false}
           profilesTab
           unitsTab
+          newsTab
         />,
       );
       expect(screen.getByTestId("admin-tab-news-queue").textContent).toContain("News");
@@ -594,21 +881,46 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       expect(screen.queryByTestId("admin-group-insights")).toBeNull();
     });
 
-    it("dev-role viewer → Tools={Funding matcher} promoted while MATCHA is off, grouped when on", () => {
+    // The real unit-admin shape: `usage` and `orcidCoverage` share one predicate
+    // (`viewerCanViewUsage`), so a grant holder always gets BOTH and Insights
+    // becomes a 2-member group rather than a promoted lone Usage tab.
+    it("non-superuser unit admin with both usage tabs → Insights grouped, ORCID coverage inside it", async () => {
+      grouped();
+      render(
+        <AdminSubnav
+          active="orcid-coverage"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          unitsTab
+          usageTab
+          orcidCoverageTab
+        />,
+      );
+      expect(screen.getByTestId("admin-group-insights").getAttribute("aria-current")).toBe("page");
+      fireEvent.focus(screen.getByTestId("admin-group-insights"));
+      expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
+        "admin-tab-usage",
+        "admin-tab-orcid-coverage",
+      ]);
+    });
+
+    it("dev-role viewer → Tools={Matcha} promoted while GRANT_MATCHA is off, grouped when on", () => {
       vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+      vi.stubEnv("MATCHA", "on");
       const props = {
-        active: "find-researchers",
+        active: "matcha",
         pendingSlugRequests: null,
         pendingHonors: null,
         superuserSurfaces: false,
         viewerIsDeveloper: true,
       } as const;
       const { unmount } = render(<AdminSubnav {...props} />);
-      expect(screen.getByTestId("admin-tab-find-researchers").textContent).toContain("Funding matcher");
+      expect(screen.getByTestId("admin-tab-matcha").textContent).toContain("Matcha");
       expect(screen.queryByTestId("admin-group-tools")).toBeNull();
       unmount();
-      // Flipping MATCHA on gives Tools a second member, so the group appears.
-      vi.stubEnv("MATCHA", "on");
+      // Flipping GRANT_MATCHA on gives Tools a second member, so the group appears.
+      vi.stubEnv("GRANT_MATCHA", "on");
       render(<AdminSubnav {...props} />);
       expect(screen.getByTestId("admin-group-tools").getAttribute("aria-current")).toBe("page");
       expect(screen.queryByTestId("admin-subnav-tier2-tools")).toBeNull();
@@ -630,7 +942,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     const matcha = menu.querySelector('[data-testid="admin-tab-matcha"]');
     expect(matcha).toBeTruthy();
     expect(matcha!.getAttribute("href")).toBe("/edit/matcha");
-    expect(menu.querySelector('[data-testid="admin-tab-find-researchers"]')).toBeTruthy();
+    expect(menu.querySelector('[data-testid="admin-tab-grant-matcha"]')).toBeTruthy();
   });
 
   // Order is spec-pinned twice — the tier-1 bar as `Profiles · Org units · Queues ·
@@ -654,6 +966,10 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "admin-tab-units",
       "admin-group-queues",
       "admin-group-registries",
+      // Reports IA redesign (2026-08-14) — its own single-member group, so it
+      // renders as a plain tab (not a dropdown) right where GROUP_ORDER puts
+      // it: left of Insights.
+      "admin-tab-reports",
       "admin-group-insights",
       "admin-group-tools",
     ]);
@@ -665,7 +981,6 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     render(<AdminSubnav active="profiles" {...allOn} />);
     fireEvent.focus(screen.getByTestId("admin-group-queues"));
     expect(order(await screen.findByTestId("admin-group-menu-queues"))).toEqual([
-      "admin-tab-slug-requests",
       "admin-tab-honors-queue",
       "admin-tab-news-queue",
       "admin-tab-cores",
@@ -676,27 +991,26 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "admin-tab-administrators",
       "admin-tab-methods",
     ]);
-    // Insights gained ETL status, then Reports, at the END of the group, so the
-    // surfaces that were already there keep their positions.
+    // Insights gained ETL status at the END of the group; Reports is its own
+    // single-member group now (left of Insights, not inside it — see the
+    // tier-1 order test above), so it never appears in this menu.
     fireEvent.focus(screen.getByTestId("admin-group-insights"));
     expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
-      "admin-tab-data-quality",
       "admin-tab-activity",
       "admin-tab-usage",
+      "admin-tab-orcid-coverage",
       "admin-tab-etl-status",
-      "admin-tab-reports",
     ]);
   });
 
-  it("is dark by default — the flag off reproduces the flat 16-tab strip", () => {
+  it("is dark by default — the flag off reproduces the flat tab strip", () => {
     vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
     vi.stubEnv("CORE_PAGES", "on");
     render(<AdminSubnav active="profiles" {...allOn} />);
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
-        "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
-        "administrators", "methods", "data-quality", "activity", "usage", "etl-status", "reports", "cores",
-        "find-researchers",
+        "profiles", "units", "honors-queue", "news-queue", "slugs",
+        "administrators", "methods", "reports", "activity", "usage", "orcid-coverage", "etl-status", "cores",
       ].map((id) => `admin-tab-${id}`),
     );
     for (const g of ["queues", "registries", "insights", "tools"])

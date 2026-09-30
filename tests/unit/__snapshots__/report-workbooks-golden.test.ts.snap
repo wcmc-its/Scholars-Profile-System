@@ -1,0 +1,1798 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Assumptions 1`] = `
+[
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 18,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 13,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 10,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 10,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 13,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 13,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 15,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 21,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 22,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 19,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 33,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 27,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 60,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 38,
+      },
+    ],
+    "name": "Summary",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Graduation year",
+          "Entry year",
+          "Program",
+          "CWID",
+          "First name",
+          "Last name",
+          "Mentors",
+          "Mentor CWIDs",
+          "Mentor departments",
+          "Mentor institutions",
+          "Mentorship types",
+          "Publications in program window",
+          "Publications (all years)",
+          "High-impact publications in window (Journal Impact Factor ≥ 10)",
+          "First-author publications in window",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          2025,
+          2021,
+          "MD",
+          "stu0001",
+          "Ada",
+          "Learner",
+          "Zed Mentor",
+          "men0001",
+          "Medicine",
+          "WCM",
+          "MD",
+          1,
+          1,
+          0,
+          1,
+        ],
+      },
+    ],
+    "views": [
+      {
+        "rightToLeft": false,
+        "showGridLines": true,
+        "showRowColHeaders": true,
+        "showRuler": true,
+        "state": "frozen",
+        "topLeftCell": "A2",
+        "workbookViewId": 0,
+        "xSplit": 0,
+        "ySplit": 1,
+        "zoomScale": 100,
+        "zoomScaleNormal": 100,
+      },
+    ],
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 18,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 13,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 10,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 15,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 21,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 20,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 14,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 13,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 20,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 21,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 21,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 19,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 10,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 10,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 24,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 19,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": "yyyy-mm-dd",
+        "width": 23,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 24,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 26,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 15,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 20,
+      },
+    ],
+    "name": "Raw Data",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Graduation year",
+          "Entry year",
+          "Program",
+          "Learner CWID",
+          "Learner first name",
+          "Learner last name",
+          "Mentor CWID",
+          "Mentor",
+          "Mentor department",
+          "Mentor institution",
+          "Type of mentorship",
+          "PMID / Scopus ID",
+          "Title",
+          "Journal",
+          "Journal impact factor",
+          "Publication year",
+          "Date added to PubMed",
+          "Citations (NIH iCite)",
+          "Learner author position",
+          "Author count",
+          "In program window",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          2025,
+          2021,
+          "MD",
+          "stu0001",
+          "Ada",
+          "Learner",
+          "men0001",
+          "Zed Mentor",
+          "Medicine",
+          "WCM",
+          "MD",
+          "7",
+          "A title",
+          "J Test",
+          3.1,
+          2023,
+          2023-05-01T00:00:00.000Z,
+          2,
+          1,
+          3,
+          "Yes",
+        ],
+      },
+    ],
+    "views": [
+      {
+        "rightToLeft": false,
+        "showGridLines": true,
+        "showRowColHeaders": true,
+        "showRuler": true,
+        "state": "frozen",
+        "topLeftCell": "A2",
+        "workbookViewId": 0,
+        "xSplit": 0,
+        "ySplit": 1,
+        "zoomScale": 100,
+        "zoomScaleNormal": 100,
+      },
+    ],
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 37,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 60,
+      },
+    ],
+    "name": "Query & Assumptions",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Item",
+          "Value",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Generated",
+          "2026-09-24",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Graduation years",
+          "2025",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Types of mentorship",
+          "MD",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Publication set",
+          "Mentored co-publications: every PubMed- or Scopus-indexed publication on which the learner and one of their selected mentors are both WCM-identified authors.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "In window filter (per publication)",
+          "All",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Author position filter",
+          "All",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Publication years filter",
+          "All",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Mentor filter",
+          "All",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Learners shown",
+          "All, including learners with no publications",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Learners",
+          1,
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Publication rows",
+          1,
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Window rule",
+          "In program window = entry year <= publication year <= graduation year + 1 (tail = 1 year).",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Entry year",
+          "The learner's program entry year from the AOC pairing sheet when present; otherwise graduation year - 4 (4-year MD track). 1 of 1 learner used the fallback.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Counting rule",
+          "A publication co-authored with two of a learner's mentors appears once per mentor in Raw Data but counts once in the learner's Summary counts (distinct PMIDs).",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Publication source",
+          "Every PubMed- or Scopus-indexed publication on which the learner and one of their selected mentors are both WCM-identified authors (ReCiter author graph, via the mentoring co-publication bridge or, for co-authorship inferences, the suggestion's own evidence).",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Mentor names",
+          "The mentor's name from their Scholars profile when they have one; otherwise the name on the AOC pairing sheet (or the Jenzabar record); otherwise the CWID alone.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Journal impact factor",
+          "Current-year Journal Impact Factor (Journal Citation Reports, mirrored weekly), joined on the journal's abbreviated title; blank when the journal did not match.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "High-impact rule",
+          "Journal impact factor >= 10.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Citations",
+          "NIH iCite citation count (not Scopus); blank when iCite has no record for the PMID.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Date added to PubMed",
+          "PubMed's date-added-to-Entrez for the record.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Learner author position",
+          "The learner's 1-based position on the byline when their CWID is on the author list; blank when not linked.",
+        ],
+      },
+    ],
+    "views": [
+      {
+        "rightToLeft": false,
+        "showGridLines": true,
+        "showRowColHeaders": true,
+        "showRuler": true,
+        "state": "frozen",
+        "topLeftCell": "A2",
+        "workbookViewId": 0,
+        "xSplit": 0,
+        "ySplit": 1,
+        "zoomScale": 100,
+        "zoomScaleNormal": 100,
+      },
+    ],
+  },
+]
+`;
+
+exports[`report workbooks (golden) > report 8: Counts, Criteria and Articles 1`] = `
+[
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 26,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+    ],
+    "name": "Counts",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Fiscal year (July–June)",
+          "Articles",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          2024,
+          3,
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          2025,
+          4,
+        ],
+      },
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Total",
+          7,
+        ],
+      },
+    ],
+    "views": null,
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 32,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 100,
+      },
+    ],
+    "name": "Criteria",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Criterion",
+          "Value",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Report",
+          "8. Article counts",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Generated",
+          "2026-09-24T00:00:00.000Z",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Person type",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Department / division / center / institution",
+          "Medicine",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "CWID list",
+          "None",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Article type",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Minimum Journal Impact Factor",
+          "5 or higher (articles in journals with no JIF on file are excluded)",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Author position",
+          "First author",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Year basis",
+          "Fiscal year, July 1 – June 30, named by the ending calendar year, by the date the article was added to PubMed",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Years",
+          "2024–2025",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Counting rule",
+          "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department, division (including hand-added division members), institution and center membership are the scholar's current values.",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Note",
+          "Historical numbers may change slightly over time as publication records are updated and people's person types change.",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Articles sheet",
+          "Lists each of the 7 counted articles with its matching scholars.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 14,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 90,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 30,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 18,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 14,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 28,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 60,
+      },
+    ],
+    "name": "Articles",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "PMID / ID",
+          "Citation",
+          "Journal",
+          "Fiscal year",
+          "Article type",
+          "Journal impact factor",
+          "Date added to PubMed",
+          "DOI",
+          "Matching scholars",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "100",
+          "Smith JA. A title. J Test. 2024.",
+          "J Test",
+          "FY2024",
+          "Review",
+          12.5,
+          "2024-03-05",
+          "10.1/x",
+          "Jane Smith (jas2001), Postdoc, Medicine, first author",
+        ],
+      },
+    ],
+    "views": [
+      {
+        "rightToLeft": false,
+        "showGridLines": true,
+        "showRowColHeaders": true,
+        "showRuler": true,
+        "state": "frozen",
+        "topLeftCell": "A2",
+        "workbookViewId": 0,
+        "xSplit": 0,
+        "ySplit": 1,
+        "zoomScale": 100,
+        "zoomScaleNormal": 100,
+      },
+    ],
+  },
+]
+`;
+
+exports[`report workbooks (golden) > report 8: over the list cap the Articles sheet is a note 1`] = `
+[
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 26,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+    ],
+    "name": "Counts",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Calendar year",
+          "Articles",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          2024,
+          6000,
+        ],
+      },
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Total",
+          6000,
+        ],
+      },
+    ],
+    "views": null,
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 32,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 100,
+      },
+    ],
+    "name": "Criteria",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Criterion",
+          "Value",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Report",
+          "8. Article counts",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Generated",
+          "2026-09-24T00:00:00.000Z",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Person type",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Department / division / center / institution",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "CWID list",
+          "None",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Article type",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Minimum Journal Impact Factor",
+          "None",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Author position",
+          "Any position",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Year basis",
+          "Calendar year of publication",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Years",
+          "2024–2025",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Counting rule",
+          "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department, division (including hand-added division members), institution and center membership are the scholar's current values.",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Note",
+          "Historical numbers may change slightly over time as publication records are updated and people's person types change.",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Articles sheet",
+          "Omitted: 6,000 articles exceeds the 5,000-row limit. Narrow the filters to list them.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 100,
+      },
+    ],
+    "name": "Articles",
+    "rows": [
+      {
+        "font": undefined,
+        "values": [
+          "6,000 articles exceeds the 5,000-row limit for this sheet. Narrow the filters to list them.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+]
+`;
+
+exports[`report workbooks (golden) > report 9: above SCHOLAR_EXPORT_CAP the People sheet is withheld 1`] = `
+[
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 100,
+      },
+    ],
+    "name": "People",
+    "rows": [
+      {
+        "font": undefined,
+        "values": [
+          "51 people match. The people list is only included for 50 or fewer; narrow the filters (e.g. by department) to include it. The page's Scholars tab lists everyone.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 70,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 30,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 40,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 14,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 16,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 8,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 28,
+      },
+    ],
+    "name": "Publications",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "PMID",
+          "Title",
+          "Journal",
+          "Journal impact factor",
+          "WCM first/last author(s)",
+          "Date added to PubMed",
+          "NIH citation count",
+          "Article type",
+          "Year",
+          "DOI",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "1",
+          "Title 1",
+          "N Engl J Med",
+          96.2,
+          "PPP0000 (first author); PPP0001 (last author); PPP0002 (last author); PPP0003 (last author); PPP0004 (last author); PPP0005 (last author); PPP0006 (last author); PPP0007 (last author); PPP0008 (last author); PPP0009 (last author); PPP0010 (last author); PPP0011 (last author); PPP0012 (last author); PPP0013 (last author); PPP0014 (last author); PPP0015 (last author); PPP0016 (last author); PPP0017 (last author); PPP0018 (last author); PPP0019 (last author); PPP0020 (last author); PPP0021 (last author); PPP0022 (last author); PPP0023 (last author); PPP0024 (last author); PPP0025 (last author); PPP0026 (last author); PPP0027 (last author); PPP0028 (last author); PPP0029 (last author); PPP0030 (last author); PPP0031 (last author); PPP0032 (last author); PPP0033 (last author); PPP0034 (last author); PPP0035 (last author); PPP0036 (last author); PPP0037 (last author); PPP0038 (last author); PPP0039 (last author); PPP0040 (last author); PPP0041 (last author); PPP0042 (last author); PPP0043 (last author); PPP0044 (last author); PPP0045 (last author); PPP0046 (last author); PPP0047 (last author); PPP0048 (last author); PPP0049 (last author); PPP0050 (last author)",
+          "2026-03-05",
+          4,
+          "Academic Article",
+          2026,
+          "10.1/1",
+        ],
+      },
+    ],
+    "views": [
+      {
+        "rightToLeft": false,
+        "showGridLines": true,
+        "showRowColHeaders": true,
+        "showRuler": true,
+        "state": "frozen",
+        "topLeftCell": "A2",
+        "workbookViewId": 0,
+        "xSplit": 0,
+        "ySplit": 1,
+        "zoomScale": 100,
+        "zoomScaleNormal": 100,
+      },
+    ],
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 32,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 100,
+      },
+    ],
+    "name": "Criteria",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Criterion",
+          "Value",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Report",
+          "9. Top clinical and high-impact journal publications",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Generated",
+          "2026-09-24T00:00:00.000Z",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Journals",
+          "JAMA (all JAMA journals); The Lancet; NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science; Cell",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Person type",
+          "Full-time faculty",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Department / division / center / institution",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Article type",
+          "Academic Article",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Author position",
+          "First or last author",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Year basis",
+          "Calendar year of publication",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Years",
+          "2026–2026",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Counting rule",
+          "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department, division (including hand-added division members), institution and center membership are the scholar's current values.",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Note",
+          "Historical numbers may change slightly over time as publication records are updated and people's person types change.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+]
+`;
+
+exports[`report workbooks (golden) > report 9: above the list cap People and Publications are one-line notes 1`] = `
+[
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": undefined,
+      },
+    ],
+    "name": "People",
+    "rows": [
+      {
+        "font": undefined,
+        "values": [
+          "5,001 articles exceeds the 5,000-row limit for this sheet. Narrow the filters to list them.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": undefined,
+      },
+    ],
+    "name": "Publications",
+    "rows": [
+      {
+        "font": undefined,
+        "values": [
+          "5,001 articles exceeds the 5,000-row limit for this sheet. Narrow the filters to list them.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 32,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 100,
+      },
+    ],
+    "name": "Criteria",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Criterion",
+          "Value",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Report",
+          "9. Top clinical and high-impact journal publications",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Generated",
+          "2026-09-24T00:00:00.000Z",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Journals",
+          "JAMA (all JAMA journals); The Lancet; NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science; Cell",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Person type",
+          "Full-time faculty",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Department / division / center / institution",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Article type",
+          "Academic Article",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Author position",
+          "First or last author",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Year basis",
+          "Calendar year of publication",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Years",
+          "2026–2026",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Counting rule",
+          "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department, division (including hand-added division members), institution and center membership are the scholar's current values.",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Note",
+          "Historical numbers may change slightly over time as publication records are updated and people's person types change.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+]
+`;
+
+exports[`report workbooks (golden) > report 9: all three sheets within the caps 1`] = `
+[
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 28,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 10,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 30,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 22,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 10,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 60,
+      },
+    ],
+    "name": "People",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Name",
+          "CWID",
+          "Department",
+          "Person type",
+          "Articles",
+          "As first author",
+          "As last author",
+          "NIH citations",
+          "Journals",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "BBB0002",
+          "bbb0002",
+          "Medicine",
+          "Full-time faculty",
+          2,
+          1,
+          1,
+          8,
+          "N Engl J Med",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "AAA0001",
+          "aaa0001",
+          "Medicine",
+          "Full-time faculty",
+          1,
+          1,
+          0,
+          4,
+          "N Engl J Med",
+        ],
+      },
+    ],
+    "views": [
+      {
+        "rightToLeft": false,
+        "showGridLines": true,
+        "showRowColHeaders": true,
+        "showRuler": true,
+        "state": "frozen",
+        "topLeftCell": "A2",
+        "workbookViewId": 0,
+        "xSplit": 0,
+        "ySplit": 1,
+        "zoomScale": 100,
+        "zoomScaleNormal": 100,
+      },
+    ],
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 70,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 30,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 40,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 14,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 12,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 16,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 8,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 28,
+      },
+    ],
+    "name": "Publications",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "PMID",
+          "Title",
+          "Journal",
+          "Journal impact factor",
+          "WCM first/last author(s)",
+          "Date added to PubMed",
+          "NIH citation count",
+          "Article type",
+          "Year",
+          "DOI",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "1",
+          "Title 1",
+          "N Engl J Med",
+          96.2,
+          "AAA0001 (first author); BBB0002 (last author)",
+          "2026-03-05",
+          4,
+          "Academic Article",
+          2026,
+          "10.1/1",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "2",
+          "Title 2",
+          "N Engl J Med",
+          96.2,
+          "BBB0002 (first author)",
+          "2026-03-05",
+          4,
+          "Academic Article",
+          2026,
+          "10.1/2",
+        ],
+      },
+    ],
+    "views": [
+      {
+        "rightToLeft": false,
+        "showGridLines": true,
+        "showRowColHeaders": true,
+        "showRuler": true,
+        "state": "frozen",
+        "topLeftCell": "A2",
+        "workbookViewId": 0,
+        "xSplit": 0,
+        "ySplit": 1,
+        "zoomScale": 100,
+        "zoomScaleNormal": 100,
+      },
+    ],
+  },
+  {
+    "columns": [
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 32,
+      },
+      {
+        "alignment": {
+          "vertical": "top",
+          "wrapText": true,
+        },
+        "numFmt": undefined,
+        "width": 100,
+      },
+    ],
+    "name": "Criteria",
+    "rows": [
+      {
+        "font": {
+          "bold": true,
+        },
+        "values": [
+          "Criterion",
+          "Value",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Report",
+          "9. Top clinical and high-impact journal publications",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Generated",
+          "2026-09-24T00:00:00.000Z",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Journals",
+          "JAMA (all JAMA journals); The Lancet; NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science; Cell",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Person type",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Department / division / center / institution",
+          "Medicine",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Article type",
+          "All",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Author position",
+          "Any position",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Year basis",
+          "Calendar year of publication",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Years",
+          "2022–2026",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Counting rule",
+          "Each article is counted once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; person type, department, division (including hand-added division members), institution and center membership are the scholar's current values.",
+        ],
+      },
+      {
+        "font": undefined,
+        "values": [
+          "Note",
+          "Historical numbers may change slightly over time as publication records are updated and people's person types change.",
+        ],
+      },
+    ],
+    "views": null,
+  },
+]
+`;

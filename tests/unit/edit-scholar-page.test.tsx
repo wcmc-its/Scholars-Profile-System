@@ -83,9 +83,39 @@ vi.mock("@/lib/db", () => ({
       division: { findMany: mockDivisionFindMany, findUnique: mockDivisionFindUnique },
       unitAdmin: { findMany: mockUnitAdminFindMany },
       department: { findUnique: mockDepartmentFindUnique },
+      // Console Reports-tab gate reads report_access; no grants here.
+      reportAccess: { findMany: async () => [] },
     },
     write: {},
   },
+}));
+// dwd2001 nav fix #7 — unit-admin mode now also calls `loadConsoleTabs` (for
+// the unit-admin "Profiles" breadcrumb), which fans out into FOUR grant reads
+// (`loadOwnerManagedUnitScope` / `loadManageableUnits` / `loadReportableUnitsForActor`
+// / `canViewUsage`) neither this file's raw `db.read` mock above nor the
+// unit-admin resolver it drives ever needed before. Mocked at the module
+// level rather than added to the raw db mock — same convention
+// `edit-self-page-guard.test.tsx` / `edit-units-page.test.tsx` already use for
+// every other `loadConsoleTabs`-exercising test, and it keeps these grant
+// reads decoupled from the (unrelated) `unitAdmin`/`department`/`division`
+// raw-db mocks above that drive the resolver itself.
+vi.mock("@/lib/edit/administrators", () => ({
+  isAdministratorsTabVisible: () => false,
+  loadOwnerManagedUnitScope: async () => [],
+}));
+vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: async () => false }));
+vi.mock("@/lib/edit/cancer-center-reports", () => ({
+  loadReportableUnitsForActor: async () => [],
+}));
+vi.mock("@/lib/edit/manageable-units", () => ({
+  loadManageableUnits: async () => ({
+    departments: [],
+    divisions: [],
+    centers: [],
+    cores: [],
+    total: 0,
+  }),
+  loadAllUnitsDirectory: async () => [],
 }));
 vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,
@@ -104,6 +134,7 @@ import EditScholarPage from "@/app/edit/scholar/[cwid]/page";
 
 const SELF = { cwid: "self01", isSuperuser: false };
 const ADMIN = { cwid: "adm001", isSuperuser: true };
+const CV_GENERATOR = { cwid: "cvg001", isSuperuser: false, isCvGenerator: true };
 
 const fakeCtx = (cwid: string) => ({
   scholar: { cwid, slug: cwid, preferredName: cwid, fullName: cwid, overview: "", slugOverride: null, suppression: { ownRow: null, adminRow: null } },
@@ -116,9 +147,13 @@ const fakeCtx = (cwid: string) => ({
   unmatchedPubmedCoiMentions: [],
   reporterProfileCandidates: [],
   reporterProfileConfirmed: [],
+  menteeSuggestions: [], // #2634
+  orcidVerdict: null,
+  orcidCandidates: [],
   highlights: null,
   technologies: [],
   news: [],
+  mediaHighlights: [],
   datasets: [],
 });
 
@@ -173,8 +208,13 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
   it("signed-in non-superuser on another cwid → ForbiddenEditPage + audit log line", async () => {
     mockGetEditSession.mockResolvedValue(SELF);
     const result = asElement(await EditScholarPage({ params: params("other7") }));
-    expect(result.type).toBe(mockForbiddenEditPage);
-    expect(result.props.targetCwid).toBe("other7");
+    // The denial branch is wrapped in the reduced-chrome shell (a bare div +
+    // ConsoleTopBar), so the top-level element is the div and ForbiddenEditPage
+    // is its second child, not the return value itself.
+    expect(result.type).toBe("div");
+    const forbidden = asElement((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbiddenEditPage);
+    expect(forbidden.props.targetCwid).toBe("other7");
     expect(mockLoadEditContext).not.toHaveBeenCalled();
     // The log line is emitted by requireSuperuserGet (lib/edit/authz).
     expect(console.warn).toHaveBeenCalled();
@@ -212,6 +252,16 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     const result = asElement(await EditScholarPage({ params: params("other7") }));
     expect(result.type).toBe(mockEditPage);
     expect(result.props.mode).toBe("superuser");
+    const ctx = result.props.ctx as { scholar: { cwid: string } };
+    expect(ctx.scholar.cwid).toBe("other7");
+  });
+
+  it("signed-in cv_generator on another cwid → EditPage(mode='cv-generator') (#2482, never falls to comms_steward)", async () => {
+    mockGetEditSession.mockResolvedValue(CV_GENERATOR);
+    mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
+    const result = asElement(await EditScholarPage({ params: params("other7") }));
+    expect(result.type).toBe(mockEditPage);
+    expect(result.props.mode).toBe("cv-generator");
     const ctx = result.props.ctx as { scholar: { cwid: string } };
     expect(ctx.scholar.cwid).toBe("other7");
   });
@@ -265,7 +315,8 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     // and the 403 page renders.
     mockGetEditSession.mockResolvedValue(SELF); // no longer a superuser
     const result = asElement(await EditScholarPage({ params: params("other7") }));
-    expect(result.type).toBe(mockForbiddenEditPage);
+    const forbidden = asElement((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbiddenEditPage);
   });
 
   // Amendment 4 — org-unit administrator as profile editor.
@@ -296,7 +347,8 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     mockGetEditSession.mockResolvedValue({ cwid: "uadm01", isSuperuser: false });
     // default mocks: scholar.findUnique → null ⇒ resolver null ⇒ no unit-admin.
     const result = asElement(await EditScholarPage({ params: params("sch001") }));
-    expect(result.type).toBe(mockForbiddenEditPage);
+    const forbidden = asElement((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbiddenEditPage);
     expect(mockEditPage).not.toHaveBeenCalled();
   });
 });

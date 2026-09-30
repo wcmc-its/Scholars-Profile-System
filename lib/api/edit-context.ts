@@ -31,15 +31,24 @@
 import {
   getEffectiveOverview,
   getManualMentees,
+  getProfileLinks,
   getSelectedHighlightPmids,
 } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
+import {
+  isTitleResolutionEnabled,
+  loadTitlePickerState,
+  type TitlePickerState,
+} from "@/lib/edit/title-picker";
+import type { ProfileLinks } from "@/lib/edit/profile-links";
+import type { DismissReason, MenteeKind, MenteeTier } from "@/lib/mentee-suggestions/kind";
 import { rankForSelectedHighlights } from "@/lib/ranking";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
+import { DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
 import { isRejectReason } from "@/lib/edit/reject-reason";
 import type { FeedbackReason } from "@/lib/coi-gap/feedback";
@@ -47,6 +56,13 @@ import { subjectId as deriveSubjectId } from "@/lib/coi-gap/mention";
 import type { SubjectType } from "@/lib/coi-gap/mention";
 import { relationshipKinds as deriveRelationshipKinds } from "@/lib/coi-gap/pipeline";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import {
+  orcidVerdict,
+  SUGGEST_MIN_ACCEPTED,
+  withoutDismissed,
+  type OrcidVerdict,
+} from "@/lib/edit/orcid-coverage";
+import type { OrcidEvidence } from "@/lib/edit/orcid";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
@@ -61,12 +77,20 @@ type EditContextReadClient = Pick<
   | "department"
   | "coiActivity"
   | "coiGapCandidate"
+  | "menteeSuggestion"
   | "publication"
   | "publicationConflictStatement"
   | "reporterProfileCandidate"
   | "scholarTechnology"
   | "newsMention"
   | "personDatasetDeposit"
+  | "orgUnitRoleAssignment"
+  // #2719 — the title picker resolves the chief / center-head tiers.
+  | "division"
+  | "center"
+  | "centerProgram"
+  | "orcidCandidate"
+  | "orcidDismissal"
 >;
 
 export type EditContextScholar = {
@@ -81,6 +105,9 @@ export type EditContextScholar = {
   primaryTitle: string | null;
   postnominal: string | null;
   primaryDepartment: string | null;
+  /** ED primary-organization code (`HMC`, `WCMC`, …); the panel names it via
+   *  `institutionDisplayName`. NULL until the ED ETL has written it. */
+  primaryOrgCode: string | null;
   email: string | null;
   /** Effective email release audience from the Web Directory (`email_visibility`):
    *  'public' | 'institution' | 'none'. NULL until the first ED ETL backfill;
@@ -254,6 +281,11 @@ export type EditContextNews = {
   showOnProfile: boolean;
   /** How it was attached: VIVO (article link) | NAME (queue-confirmed) | CURATOR. */
   source: string;
+  /** Press outlet for a Media highlights clip (etl/news/clips.ts); null for a
+   *  newsroom article. */
+  outlet: string | null;
+  /** Media highlights story grouping: the lead clip this row is a copy of. */
+  duplicateOf: string | null;
 };
 
 /**
@@ -264,8 +296,9 @@ export type EditContextNews = {
  * superuser may take the whole deposit down (whole-entity, drops it
  * everywhere). Unlike publications there is no ReCiter-reject equivalent —
  * datasets carry no `rejected` state, `isSoleDisplayedAuthor`, or "Not mine"
- * interstitial. Empty unless `DATA_SHARING_SECTION` is on (dark-launch,
- * mirroring `technologies`/`news`).
+ * interstitial. Empty unless `DATA_SHARING_SECTION` is on, or the scholar's
+ * own `showDatasets` opt-in is set (dark-launch, mirroring `technologies`/
+ * `news`).
  */
 export type EditContextDataset = {
   /** `DatasetDeposit.id` — deterministic (sha256 of repository|accessionOrDoi,
@@ -477,6 +510,49 @@ export type EditContextMentee = {
   suppressionId: string | null;
 };
 
+/** #2634 — one shared publication on a mentee-suggestion row. `id` is the SPS
+ *  `Publication.pmid` key (a PubMed pmid, or a source-prefixed article id). The
+ *  ranks are 1-based byline positions; `total` is the byline length. */
+export type EditContextMenteeSuggestionEvidence = {
+  id: string;
+  year: number | null;
+  title: string | null;
+  journal: string | null;
+  menteeRank: number;
+  mentorRank: number;
+  total: number;
+};
+
+/**
+ * #2634 — a co-authorship-derived mentee suggestion for the "Mentees › From your
+ * publications" sub-view (`SELF_EDIT_MENTEE_SUGGESTIONS`). Populated ONLY when
+ * `loadEditContext` is called with `opts.includeMenteeSuggestions === true`
+ * (self page: genuine self; superuser page: self or genuine superuser). Rows
+ * whose mentee is ALREADY a mentee — sourced (`mentees`) or hand-entered
+ * (`manualMentees`) — are excluded server-side, so the card never re-suggests
+ * someone the mentor has listed. Dismissed rows are included (the card renders
+ * them collapsed with Restore). Evidence is capped at 10 per row.
+ */
+export type EditContextMenteeSuggestion = {
+  id: number;
+  menteeCwid: string;
+  menteeName: string;
+  menteeTitle: string | null;
+  menteeUnit: string | null;
+  kind: MenteeKind;
+  tier: MenteeTier;
+  nCoPubs: number;
+  nMentorLastAuthor: number;
+  firstYear: number | null;
+  lastYear: number | null;
+  menteeFirstPublishedYear: number | null;
+  strong: boolean;
+  /** ISO timestamp, or null while active. */
+  dismissedAt: string | null;
+  dismissReason: DismissReason | null;
+  evidence: ReadonlyArray<EditContextMenteeSuggestionEvidence>;
+};
+
 /**
  * The Highlights-editor state (#836). Surfaced ONLY when `loadEditContext` is
  * called with `opts.includeHighlights === true`, which the self page sets behind
@@ -514,6 +590,10 @@ export type EditContextReporterSampleGrant = {
   title: string;
   startYear: number | null;
   endYear: number | null;
+  /** Most-recent-FY award number — funding-source column (`parseFunderEyebrow`). */
+  awardNumber: string | null;
+  /** Most-recent-FY appl_id — keys the outbound RePORTER project-detail link. */
+  applId: number | null;
 };
 
 /**
@@ -576,8 +656,15 @@ export type EditContextHistoricalAppointment = {
   showOnProfile: boolean;
 };
 
+/** One `orcid_candidate` row with its iD, for the per-source evidence lines. */
+export type OrcidEvidenceRow = OrcidEvidence & { orcid: string };
+
 export type EditContext = {
   scholar: EditContextScholar;
+  /** #2719 — the display-title picker's state: every tier's value, the current
+   *  pin, and any pending request. Null when `SCHOLAR_TITLE_RESOLUTION` is off
+   *  (the Title row stays a plain read-only value) or the scholar vanished. */
+  titlePicker: TitlePickerState | null;
   publications: ReadonlyArray<EditContextPublication>;
   appointments: ReadonlyArray<EditContextAppointment>;
   /** #1323 — historical appointments, reveal-to-show (curator / comms_steward). */
@@ -599,9 +686,16 @@ export type EditContext = {
    */
   news: ReadonlyArray<EditContextNews>;
   /**
+   * The scholar's PUBLISHED Media highlights clips (`outlet` set) for the /edit
+   * "Media highlights" card — the profile's split, so a clip never shows under
+   * News mentions. Empty unless `MEDIA_HIGHLIGHTS_SECTION` is on.
+   */
+  mediaHighlights: ReadonlyArray<EditContextNews>;
+  /**
    * The scholar's dataset deposits for the interactive /edit "Datasets" card
    * (data-sharing spec, #2348). All author positions (display scope). Empty
-   * unless `DATA_SHARING_SECTION` is on.
+   * unless `DATA_SHARING_SECTION` is on, or the scholar's own `showDatasets`
+   * opt-in is set.
    */
   datasets: ReadonlyArray<EditContextDataset>;
   /** Suppressible mentees (derived from training records; mentor may hide). */
@@ -614,6 +708,9 @@ export type EditContext = {
    * card round-trips this array through `POST /api/edit/field`.
    */
   manualMentees: ReadonlyArray<ManualMentee>;
+  /** #2699 — the scholar's external profile links (`field_override('profileLinks')`),
+   *  `{}` when none. The Identifiers & Profiles card round-trips this object. */
+  profileLinks: ProfileLinks;
   /**
    * #2011 follow-up — the subset of `manualMentees[].cwid` that resolves to NO
    * linkable WCM scholar, so the card can say so instead of leaving the mentor
@@ -633,6 +730,21 @@ export type EditContext = {
    * actually does.
    */
   manualMenteeUnresolvedCwids: ReadonlyArray<string>;
+  /**
+   * #2634 — co-authorship-derived mentee suggestions (active AND dismissed), the
+   * mentor's already-listed mentees excluded. Populated only with
+   * `opts.includeMenteeSuggestions === true`; empty for every other caller.
+   */
+  menteeSuggestions: ReadonlyArray<EditContextMenteeSuggestion>;
+  /** The scholar's ORCID candidate fold (`orcidVerdict` over their `orcid_candidate`
+   *  rows, minus the pairs they dismissed) — populated only when `loadEditContext` is called with
+   *  `opts.includeOrcidSuggestion === true` (`SELF_EDIT_ORCID_SUGGESTION`); null for
+   *  every other caller, in which case the ORCID row falls back to `scholar.orcid`. */
+  orcidVerdict: OrcidVerdict | null;
+  /** The raw `orcid_candidate` rows behind `orcidVerdict` (same gate), so the
+   *  Identifiers & Profiles card can say WHY an iD is suggested, per source, and
+   *  keep saying it under the iD once it is on file. `[]` when not loaded. */
+  orcidCandidates: ReadonlyArray<OrcidEvidenceRow>;
   /**
    * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
    * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
@@ -786,6 +898,8 @@ function coerceReporterSampleGrants(value: unknown): EditContextReporterSampleGr
       title: typeof g.title === "string" ? g.title : "",
       startYear: typeof g.startYear === "number" ? g.startYear : null,
       endYear: typeof g.endYear === "number" ? g.endYear : null,
+      awardNumber: typeof g.awardNumber === "string" ? g.awardNumber : null,
+      applId: typeof g.applId === "number" ? g.applId : null,
     }))
     .filter((g) => g.title.length > 0);
 }
@@ -795,7 +909,13 @@ export async function loadEditContext(
   client: EditContextReadClient,
   now: Date = new Date(),
   loadMentees: LoadMentees = defaultLoadMentees,
-  opts?: { includeCoiGap?: boolean; includeHighlights?: boolean; includeReporterProfile?: boolean },
+  opts?: {
+    includeCoiGap?: boolean;
+    includeHighlights?: boolean;
+    includeReporterProfile?: boolean;
+    includeMenteeSuggestions?: boolean;
+    includeOrcidSuggestion?: boolean;
+  },
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -807,6 +927,7 @@ export async function loadEditContext(
       primaryTitle: true,
       postnominal: true,
       primaryDepartment: true,
+      primaryOrgCode: true,
       email: true,
       emailVisibility: true,
       orcid: true,
@@ -853,6 +974,7 @@ export async function loadEditContext(
     menteeRows,
     sectionOverrideRows,
     manualMenteeRows,
+    profileLinks,
   ] = await Promise.all([
     // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
     // shows the "no override" state. The self surface does not surface this field
@@ -943,13 +1065,27 @@ export async function loadEditContext(
     // Chair lock — a current chair appointment is not hideable (the route refuses
     // it 409 before authz, for the chair AND a superuser). Mirror that exact
     // predicate: the dept the scholar chairs (0–1 rows) + a per-appointment title
-    // match (`isChairTitleFor`) — NOT a bare `chairCwid` existence check, which
+    // match (`isChairTitleFor`) — NOT a bare assignment-existence check, which
     // would over-lock the chair's other (suppressible) appointments. Keep in
-    // lockstep with `validators.isChairAppointment`.
-    client.department.findFirst({
-      where: { chairCwid: cwid },
-      select: { name: true },
-    }),
+    // lockstep with `validators.isChairAppointment` (#2542 contract A — was a
+    // `Department.chairCwid` lookup).
+    client.orgUnitRoleAssignment
+      .findFirst({
+        where: {
+          cwid,
+          entityType: "department",
+          roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        },
+        select: { entityId: true },
+      })
+      .then((assignment) =>
+        assignment
+          ? client.department.findUnique({
+              where: { code: assignment.entityId },
+              select: { name: true },
+            })
+          : null,
+      ),
     // #836 — widen the `publication` select with the ranking fields
     // (publicationType / dateAddedToEntrez / impactScore / per-scholar score)
     // only when the Highlights editor is requested.
@@ -1017,6 +1153,17 @@ export async function loadEditContext(
       );
       return [] as ManualMentee[];
     }),
+    // #2699 — same best-effort posture.
+    getProfileLinks(cwid, client).catch((err) => {
+      console.warn(
+        JSON.stringify({
+          event: "edit_context_profile_links_unavailable",
+          cwid,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return {} as ProfileLinks;
+    }),
   ]);
 
   const slugOverride = slugOverrideRow?.value ?? null;
@@ -1073,12 +1220,16 @@ export async function loadEditContext(
         }))
       : [];
 
-  // News mentions — the interactive /edit card. Loaded for every caller (public
-  // info like publications/technologies). PUBLISHED rows only (pending prose
-  // name-matches live in the comms queue, never on the profile); hidden ones
-  // included so the scholar can un-hide. Dark unless NEWS_MENTIONS_SECTION is on.
-  const news: EditContextNews[] =
-    process.env.NEWS_MENTIONS_SECTION === "on"
+  // News mentions + Media highlights — the two interactive /edit cards. Loaded
+  // for every caller (public info like publications/technologies). PUBLISHED
+  // rows only (pending rows live in the review queues, never on the profile);
+  // hidden ones included so the scholar can un-hide. One read, split on
+  // `outlet` exactly as the profile does (lib/api/profile.ts); each half is dark
+  // unless its own section flag is on.
+  const newsOn = process.env.NEWS_MENTIONS_SECTION === "on";
+  const clipsOn = process.env.MEDIA_HIGHLIGHTS_SECTION === "on";
+  const mentions: EditContextNews[] =
+    newsOn || clipsOn
       ? (
           await client.newsMention.findMany({
             where: { cwid, status: "published" },
@@ -1089,6 +1240,8 @@ export async function loadEditContext(
               publishedAt: true,
               showOnProfile: true,
               source: true,
+              outlet: true,
+              duplicateOf: true,
             },
             orderBy: [{ publishedAt: "desc" }],
           })
@@ -1099,18 +1252,25 @@ export async function loadEditContext(
           publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
           showOnProfile: n.showOnProfile,
           source: n.source,
+          outlet: n.outlet,
+          duplicateOf: n.duplicateOf,
         }))
       : [];
+  const news = newsOn ? mentions.filter((n) => n.outlet === null) : [];
+  const mediaHighlights = clipsOn ? mentions.filter((n) => n.outlet !== null) : [];
 
   // Dataset deposits — the interactive /edit "Datasets" card (data-sharing
   // spec, #2348). Loaded for every caller; only queried when
-  // DATA_SHARING_SECTION is on (else the loader returns [] and never touches
-  // this delegate) — same dark-launch precedent as technologies/news. Computed
-  // here (ABOVE the pmids/early-return branch below) and threaded into BOTH
-  // `return` statements, so a scholar with zero confirmed publications but
-  // real dataset deposits still gets the card.
+  // DATA_SHARING_SECTION is on, or the scholar has opted in via `showDatasets`
+  // (the env default flipped off 2026-08-24 — they need this card even while
+  // the public section stays dark, to curate which deposits show once they
+  // opt in) — else the loader returns [] and never touches this delegate,
+  // same dark-launch precedent as technologies/news. Computed here (ABOVE the
+  // pmids/early-return branch below) and threaded into BOTH `return`
+  // statements, so a scholar with zero confirmed publications but real
+  // dataset deposits still gets the card.
   const datasetRows =
-    process.env.DATA_SHARING_SECTION === "on"
+    process.env.DATA_SHARING_SECTION === "on" || hiddenSections.includes("showDatasets")
       ? await client.personDatasetDeposit.findMany({
           where: { cwid },
           select: {
@@ -1630,6 +1790,101 @@ export async function loadEditContext(
     };
   });
 
+  // #2634 — co-authorship-derived mentee suggestions. The opt-in IS the gate
+  // (same posture as COI-gap): only the self / superuser pages pass
+  // `includeMenteeSuggestions: true`, behind `SELF_EDIT_MENTEE_SUGGESTIONS`.
+  // Anyone already on the mentor's list — a sourced mentee (`externalId` is
+  // `{mentorCwid}:{menteeCwid}`) or a hand-entered one — is dropped here, so
+  // adding a suggestion makes it vanish on the next render. Dismissed rows are
+  // kept (the card shows them collapsed, with Restore).
+  // ORCID suggestion (`SELF_EDIT_ORCID_SUGGESTION`): the nightly `orcid_candidate`
+  // mirror folded by the same rule the coverage console uses, at the row's lower
+  // support bar (one accepted article is enough to ask; the console counts 3).
+  // Pairs the scholar dismissed (Remove on the card) are dropped first — the
+  // mirror re-creates them nightly, so this is what keeps them gone.
+  let orcidVerdictValue: OrcidVerdict | null = null;
+  let orcidCandidateRows: OrcidEvidenceRow[] = [];
+  if (opts?.includeOrcidSuggestion === true) {
+    const [candidates, dismissals] = await Promise.all([
+      client.orcidCandidate.findMany({
+        where: { cwid },
+        select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true },
+      }),
+      client.orcidDismissal.findMany({ where: { cwid }, select: { cwid: true, orcid: true } }),
+    ]);
+    const rows = withoutDismissed(candidates, dismissals);
+    orcidVerdictValue = orcidVerdict(rows, SUGGEST_MIN_ACCEPTED);
+    orcidCandidateRows = rows.map((r) => ({
+      orcid: r.orcid,
+      source: r.source,
+      accepted: r.articlesAccepted,
+      rejected: r.articlesRejected,
+    }));
+  }
+
+  const menteeSuggestions: EditContextMenteeSuggestion[] = [];
+  if (opts?.includeMenteeSuggestions === true) {
+    const listed = new Set<string>([
+      ...mentees.map((m) => m.externalId.slice(cwid.length + 1)),
+      ...manualMenteeRows.map((m) => m.cwid).filter((c): c is string => !!c),
+    ]);
+    const rows = (
+      await client.menteeSuggestion.findMany({
+        where: { mentorCwid: cwid },
+        orderBy: { menteeName: "asc" },
+      })
+    ).filter((r) => !listed.has(r.menteeCwid));
+    // Evidence is a Json column — narrow, cap at 10 per row, then join the
+    // publication for title / journal (the ETL snapshot carries only ids + ranks).
+    const evidenceOf = (v: unknown) =>
+      (Array.isArray(v) ? v : [])
+        .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
+        .filter((e) => typeof e.id === "string")
+        .slice(0, 10);
+    const evidenceIds = [...new Set(rows.flatMap((r) => evidenceOf(r.evidence).map((e) => e.id as string)))];
+    const pubs =
+      evidenceIds.length > 0
+        ? await client.publication.findMany({
+            where: { pmid: { in: evidenceIds } },
+            select: { pmid: true, title: true, journal: true, year: true },
+          })
+        : [];
+    const pubById = new Map(pubs.map((p) => [p.pmid, p]));
+    const num = (v: unknown) => (typeof v === "number" ? v : 0);
+    for (const r of rows) {
+      menteeSuggestions.push({
+        id: r.id,
+        menteeCwid: r.menteeCwid,
+        menteeName: r.menteeName,
+        menteeTitle: r.menteeTitle,
+        menteeUnit: r.menteeUnit,
+        kind: r.kind as MenteeKind,
+        tier: r.tier as MenteeTier,
+        nCoPubs: r.nCoPubs,
+        nMentorLastAuthor: r.nMentorLastAuthor,
+        firstYear: r.firstYear,
+        lastYear: r.lastYear,
+        menteeFirstPublishedYear: r.menteeFirstPublishedYear,
+        strong: r.strong,
+        dismissedAt: r.dismissedAt ? r.dismissedAt.toISOString() : null,
+        dismissReason: r.dismissReason as DismissReason | null,
+        evidence: evidenceOf(r.evidence).map((e) => {
+          const id = e.id as string;
+          const pub = pubById.get(id);
+          return {
+            id,
+            year: typeof e.year === "number" ? e.year : (pub?.year ?? null),
+            title: pub?.title ?? null,
+            journal: pub?.journal ?? null,
+            menteeRank: num(e.menteeRank),
+            mentorRank: num(e.mentorRank),
+            total: num(e.total),
+          };
+        }),
+      });
+    }
+  }
+
   // One bounded suppression query across all three entity types, keyed on the
   // stable externalId. Whole-entity only (`contributorCwid IS NULL` — PR-A/PR-B
   // reject a contributor for these). Per-request, never cached — the ADR-005
@@ -1737,6 +1992,9 @@ export async function loadEditContext(
   if (pmids.length === 0) {
     const noPubManual = includeHighlights ? await getSelectedHighlightPmids(cwid, client) : null;
     return {
+      titlePicker: isTitleResolutionEnabled()
+        ? await loadTitlePickerState(client, scholar.cwid)
+        : null,
       scholar: {
         cwid: scholar.cwid,
         slug: scholar.slug,
@@ -1745,6 +2003,7 @@ export async function loadEditContext(
         primaryTitle: scholar.primaryTitle,
         postnominal: scholar.postnominal,
         primaryDepartment: scholar.primaryDepartment,
+        primaryOrgCode: scholar.primaryOrgCode,
         email: scholar.email,
         emailVisibility: scholar.emailVisibility,
         orcid: scholar.orcid,
@@ -1767,10 +2026,15 @@ export async function loadEditContext(
       coiDisclosures,
       technologies,
       news,
+      mediaHighlights,
       datasets,
       mentees,
       manualMentees: manualMenteeRows,
+      profileLinks,
       manualMenteeUnresolvedCwids,
+      menteeSuggestions,
+      orcidVerdict: orcidVerdictValue,
+      orcidCandidates: orcidCandidateRows,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
@@ -1906,7 +2170,15 @@ export async function loadEditContext(
     ? await buildHighlightsContext(cwid, authorships, publications, client, now)
     : null;
 
+  // #2719 — dark when the flag is off: the Title row falls back to the plain
+  // read-only value and the write path rejects both field names, so nothing
+  // half-renders.
+  const titlePicker = isTitleResolutionEnabled()
+    ? await loadTitlePickerState(client, scholar.cwid)
+    : null;
+
   return {
+    titlePicker,
     scholar: {
       cwid: scholar.cwid,
       slug: scholar.slug,
@@ -1915,6 +2187,7 @@ export async function loadEditContext(
       primaryTitle: scholar.primaryTitle,
       postnominal: scholar.postnominal,
       primaryDepartment: scholar.primaryDepartment,
+      primaryOrgCode: scholar.primaryOrgCode,
       email: scholar.email,
       emailVisibility: scholar.emailVisibility,
       orcid: scholar.orcid,
@@ -1937,10 +2210,15 @@ export async function loadEditContext(
     coiDisclosures,
     technologies,
     news,
+    mediaHighlights,
     datasets,
     mentees,
     manualMentees: manualMenteeRows,
+    profileLinks,
     manualMenteeUnresolvedCwids,
+    menteeSuggestions,
+    orcidVerdict: orcidVerdictValue,
+    orcidCandidates: orcidCandidateRows,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,

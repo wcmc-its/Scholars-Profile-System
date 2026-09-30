@@ -109,4 +109,17 @@ describe("curated.csv (the real shipped file)", () => {
     expect(byAlias.get("TBI")).toBe("D000070642"); // Brain Injuries, Traumatic
     expect(byAlias.get("CKD")).toBe("D051436"); // Renal Insufficiency, Chronic
   });
+
+  // #1342 — morphological lay forms the singularizer cannot reach (it only strips a
+  // trailing s, so "alzheimer" never meets the "alzheimers" key). Asserted on the
+  // NORMALIZED key the resolver looks up, and pinned to the same UI as their sibling row.
+  it("maps the #1342 morphological lay forms to the same descriptor as their siblings", () => {
+    const byKey = new Map(rows.map((r) => [normalizeForMatch(r.alias), r.descriptorUi]));
+    expect(byKey.get("alzheimer")).toBe(byKey.get("alzheimers"));
+    expect(byKey.get("alzheimer")).toBe("D000544"); // Alzheimer Disease
+    expect(byKey.get("parkinson")).toBe(byKey.get("parkinsons"));
+    expect(byKey.get("parkinson")).toBe("D010300"); // Parkinson Disease
+    expect(byKey.get("diabetic")).toBe(byKey.get("diabetes"));
+    expect(byKey.get("diabetic")).toBe("D003920"); // Diabetes Mellitus
+  });
 });

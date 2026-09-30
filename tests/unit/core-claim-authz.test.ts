@@ -9,6 +9,8 @@ import { authorizeCoreClaim, getCoreOwnerRole, type CoreOwnerLookup } from "@/li
 const OWNER: EditSession = { cwid: "own001", isSuperuser: false, isCommsSteward: false };
 const SUPER: EditSession = { cwid: "sup001", isSuperuser: true, isCommsSteward: false };
 const NOBODY: EditSession = { cwid: "nob001", isSuperuser: false, isCommsSteward: false };
+// 2026-08-26 policy widening (decision #6) — full curator-parity on cores.
+const STEWARD: EditSession = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 function lookup(role: "owner" | "curator" | null): CoreOwnerLookup {
   return {
@@ -30,6 +32,15 @@ describe("authorizeCoreClaim", () => {
 
   it("denies a non-owner non-superuser with not_core_owner", () => {
     expect(authorizeCoreClaim(NOBODY, "none")).toEqual({ ok: false, reason: "not_core_owner" });
+  });
+
+  // 2026-08-26 policy widening (decision #6) — a comms_steward gets full
+  // curator-parity on cores regardless of any personal UnitAdmin row on the
+  // core (cores were previously "a separate domain" with no steward parity).
+  it("allows a comms_steward regardless of their own core role", () => {
+    expect(authorizeCoreClaim(STEWARD, "none").ok).toBe(true);
+    expect(authorizeCoreClaim(STEWARD, "curator").ok).toBe(true);
+    expect(authorizeCoreClaim(STEWARD, "owner").ok).toBe(true);
   });
 });
 

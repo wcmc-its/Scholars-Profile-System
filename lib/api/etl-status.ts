@@ -31,6 +31,7 @@ import {
   type TrackedSpec,
   gradeSource,
   isTrackedInEnv,
+  liveStatusWhere,
 } from "@/lib/etl/freshness-policy";
 
 /** The one Prisma model this module needs — keeps the unit-test client tiny. */
@@ -158,7 +159,7 @@ export function toSourceRow(
   lastAttempt: EtlAttemptRow | null,
   now: number,
 ): EtlSourceRow {
-  const graded = gradeSource(source, spec, freshnessAnchor(lastSuccess), now);
+  const graded = gradeSource(source, spec, freshnessAnchor(lastSuccess, spec.anchorOnRun), now);
   const running =
     lastAttempt?.status === "running" &&
     now - lastAttempt.startedAt.getTime() > RUNNING_TIMEOUT_HOURS * HOUR_MS;
@@ -221,7 +222,7 @@ export async function loadEtlStatus(
     expected.map(async ([source, spec]) => {
       const [lastSuccess, lastAttempt] = await Promise.all([
         client.etlRun.findFirst({
-          where: { source, status: "success", completedAt: { not: null } },
+          where: { source, status: liveStatusWhere(spec), completedAt: { not: null } },
           orderBy: { completedAt: "desc" },
           select: { completedAt: true, manifestGeneratedAt: true },
         }),

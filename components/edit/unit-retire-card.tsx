@@ -34,11 +34,20 @@ export type UnitRetireCardProps = {
   unitName: string;
   /** Present when the unit is already retired; drives the Restore state. */
   suppression: { id: string; suppressedAt: Date } | null;
+  /** Heading id for `aria-labelledby`, passed through to `EditPanel` — override
+   *  when this card renders as one section of the single-scroll unit editor. */
+  headingId?: string;
 };
 
 type Mode = "idle" | "confirming" | "retired";
 
-export function UnitRetireCard({ entityType, entityId, unitName, suppression }: UnitRetireCardProps) {
+export function UnitRetireCard({
+  entityType,
+  entityId,
+  unitName,
+  suppression,
+  headingId,
+}: UnitRetireCardProps) {
   const router = useRouter();
   const [mode, setMode] = React.useState<Mode>(suppression ? "retired" : "idle");
   const [suppressionId, setSuppressionId] = React.useState<string | null>(suppression?.id ?? null);
@@ -121,32 +130,31 @@ export function UnitRetireCard({ entityType, entityId, unitName, suppression }: 
   return (
     <EditPanel
       slot="unit-retire-card"
-      heading={`Retire ${entityType}`}
+      headingId={headingId}
+      heading={`Retire this ${entityType}`}
       description={
         mode === "retired"
           ? "This unit is retired. Its public page returns 404."
-          : `Retiring this ${entityType} is reversible.`
+          : // Edit Center / Edit Org Unit mockups (2026-09-25): a one-line strip
+            // with the (outline) destructive action beside it.
+            "Removes it from browse and search, and its public page returns 404. Member scholars are unaffected. Its history is kept and it can be restored."
+      }
+      headerAction={
+        mode === "idle" ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={startConfirm}
+            className="border-destructive text-destructive hover:text-destructive hover:bg-apollo-red-tint"
+            data-testid="unit-retire-start"
+          >
+            Retire {entityType}…
+          </Button>
+        ) : undefined
       }
     >
-      <div className="flex flex-col gap-4">
-        {mode === "idle" && (
-          <>
-            <p className="text-muted-foreground text-sm">
-              The {entityType} page will return 404. Member scholars are unaffected. The facet drops
-              on the next search rebuild. Retirement is reversible.
-            </p>
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={startConfirm}
-                data-testid="unit-retire-start"
-              >
-                Retire this {entityType}
-              </Button>
-            </div>
-          </>
-        )}
+      <div className="flex flex-col gap-4 empty:hidden">
+
 
         {mode === "confirming" && (
           <>

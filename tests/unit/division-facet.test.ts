@@ -20,6 +20,8 @@ const {
   mockLoadHiddenAuthorshipCounts,
   mockFacetEnabled,
   mockChipsEnabled,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockDivisionFindFirst: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -34,6 +36,8 @@ const {
   mockLoadHiddenAuthorshipCounts: vi.fn(),
   mockFacetEnabled: vi.fn(),
   mockChipsEnabled: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -51,6 +55,12 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: { groupBy: mockPubAuthorGroupBy },
     grant: { groupBy: mockGrantGroupBy },
     divisionMembership: { findMany: mockDivisionMembershipFindMany },
+    // #2542 contract A — `getDivisionFaculty`'s chief-first ordering now runs
+    // through `resolveUnitLeader` (override > assignment) unconditionally,
+    // not a gated `Division.chiefCwid` read; both queries default to "no
+    // leader" so these facet-focused tests need not care about the chief.
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
   },
 }));
 vi.mock("@/lib/api/methods-overlay", async () => {
@@ -62,7 +72,7 @@ vi.mock("@/lib/api/methods-overlay", async () => {
 vi.mock("@/lib/api/manual-layer", () => ({
   loadHiddenAuthorshipCounts: () => mockLoadHiddenAuthorshipCounts(),
   isUnitSuppressed: vi.fn(),
-  loadUnitFieldOverrides: vi.fn(),
+  loadUnitFieldOverrides: vi.fn(async () => ({})),
   mergeUnitFields: vi.fn(),
   resolveActiveGrantSuppression: vi.fn(),
   loadPublicationSuppressions: vi.fn(),
@@ -97,7 +107,9 @@ beforeEach(() => {
   mockFacetEnabled.mockReturnValue(false);
   mockLoadOverlayGate.mockResolvedValue({ suppressed: new Set(), sensitive: new Set() });
   mockLoadHiddenAuthorshipCounts.mockResolvedValue(new Map());
-  mockDivisionFindFirst.mockResolvedValue({ chiefCwid: null, source: "ED" });
+  mockDivisionFindFirst.mockResolvedValue({ source: "ED" });
+  mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
   mockScholarGroupBy.mockResolvedValue([]);
   mockPubAuthorGroupBy.mockResolvedValue([]);
   mockGrantGroupBy.mockResolvedValue([]);

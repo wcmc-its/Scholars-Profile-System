@@ -29,6 +29,7 @@ function buildEtlStack(
     vpc: network.vpc,
     ecsCluster: appStack.ecsCluster,
     etlEcrRepository: appStack.etlEcrRepository,
+    bulkDataRuleEcrRepository: appStack.bulkDataRuleEcrRepository,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -202,8 +203,8 @@ const LDAP_SECRET_ENV_VARS = [
   "SCHOLARS_LDAP_BIND_DN",
   "SCHOLARS_LDAP_BIND_PASSWORD",
 ] as const;
-// reciter-api def -- the #746 ADMIN api-key, used ONLY by the operator-run
-// etl:reciter-refresh (no cadence step), kept off every other def.
+// reciter-api def -- the #746 ADMIN api-key, carried by the operator-run
+// etl:reciter-refresh and the nightly OrcidPush step, kept off every other def.
 const RECITER_API_SECRET_ENV_VARS = [
   "RECITER_API_BASE_URL",
   "RECITER_API_KEY",
@@ -327,31 +328,42 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates six state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler), six EventBridge rules, two SNS topics", () => {
+      it("creates eight state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler + grants export + honors lists), eight EventBridge rules, two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
-        // the #353 cdn reconciler (PR-2).
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 6);
-        template.resourceCountIs("AWS::Events::Rule", 6);
-        // The heartbeat + both reconcilers reuse the cadence failure topic; PR-7
-        // adds the etl-page P1 topic, so two total: etl-failures + etl-page.
+        // the #353 cdn reconciler (PR-2) + the grants-export machine, now
+        // that grantsExportScheduleEnabled is true in prod too, + the
+        // honors-list scraper (weekly + the console's Run now).
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 8);
+        template.resourceCountIs("AWS::Events::Rule", 8);
+        // The heartbeat + both reconcilers + grants export reuse the cadence
+        // failure topic; PR-7 adds the etl-page P1 topic, so two total:
+        // etl-failures + etl-page.
         template.resourceCountIs("AWS::SNS::Topic", 2);
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-failures-prod" });
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates fourteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence)", () => {
+      it("creates eighteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status)", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
         // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
         // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
-        // + 2 cdn reconciler alarms (#353).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 14);
+        // + 2 cdn reconciler alarms (#353) + 2 grants-export alarms (status +
+        // cadence), now that grantsExportScheduleEnabled is true in prod too,
+        // + the Phase 0a opportunity-corpus-freshness alarm (custom SPS/ETL
+        // metric, not an AWS/States one).
+        // + the honors-list scraper's status alarm (its absence is graded by the
+        // freshness heartbeat, TRACKED.HonorsLists, not a cadence alarm).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 18);
       });
 
-      it("creates six ECS task definitions (4 ETL credential-split defs + lean reconciler + lean cdn reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
+      it("creates eight ECS task definitions (5 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
         // #1508 split the single ETL task def into four by credential need:
-        // base / sources / ldap / reciter-api. Plus the lean #393 reconcile
-        // task def + the lean #353 cdn reconcile task def.
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 6);
+        // base / sources / ldap / reciter-api (+ ctsc, the CTSC feed token).
+        // Plus the lean #393 reconcile
+        // task def + the lean #353 cdn reconcile task def + the standalone
+        // bulk-data-rule task def (containerization design, 2026-08-14; not
+        // a cadence step, launched only via manual run-task).
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 8);
         template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 1);
       });
 
@@ -693,10 +705,14 @@ describe("EtlStack", () => {
       it("every alarm publishes to the etl-failures-${env} SNS topic", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         // 10 cadence-machine alarms (4 status + 3 cadence + 3 duration, #2190)
-        // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353); all
-        // share the topic -- a duration alarm that routed elsewhere would be
-        // invisible, so it is covered by the same loop below.
-        expect(Object.keys(alarms)).toHaveLength(14);
+        // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353) + 2
+        // grants-export alarms (status + cadence), now that
+        // grantsExportScheduleEnabled is true in prod too, + the Phase 0a
+        // opportunity-corpus-freshness alarm + the honors-list scraper's
+        // status alarm; all share the
+        // topic -- a duration alarm that routed elsewhere would be invisible,
+        // so it is covered by the same loop below.
+        expect(Object.keys(alarms)).toHaveLength(18);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -881,6 +897,32 @@ describe("EtlStack", () => {
           .filter(([, a]) => alarmMetricShape(a.Properties).periods.length === 0)
           .map(([id, a]) => `${id}: ${a.Properties?.AlarmName}`);
         expect(unreadable).toEqual([]);
+      });
+
+      // Phase 0a -- the opportunity corpus froze upstream for 6+ weeks while
+      // every run-health alarm stayed green (a "successful" nightly re-upserts
+      // the frozen GRANT# store). This alarm watches the custom data-liveness
+      // metric the ETL now emits (SPS/ETL, not AWS/States); missing data is
+      // NOT breaching because a dead nightly already pages via the status +
+      // cadence alarms above.
+      it("the opportunity-freshness alarm watches SPS/ETL corpus age >= 21d, missing data not breaching", () => {
+        const alarm = Object.values(
+          template.findResources("AWS::CloudWatch::Alarm"),
+        ).find((a) => a.Properties?.AlarmName === "sps-etl-opportunity-freshness-prod");
+        expect(alarm).toBeDefined();
+        expect(alarm?.Properties?.Namespace).toBe("SPS/ETL");
+        expect(alarm?.Properties?.MetricName).toBe("OpportunityCorpusIngestAgeDays");
+        expect(alarm?.Properties?.Statistic).toBe("Maximum");
+        expect(alarm?.Properties?.Period).toBe(86400);
+        expect(alarm?.Properties?.EvaluationPeriods).toBe(1);
+        expect(alarm?.Properties?.Threshold).toBe(21);
+        expect(alarm?.Properties?.ComparisonOperator).toBe(
+          "GreaterThanOrEqualToThreshold",
+        );
+        expect(alarm?.Properties?.TreatMissingData).toBe("notBreaching");
+        expect(alarm?.Properties?.Dimensions).toEqual([
+          { Name: "Env", Value: "prod" },
+        ]);
       });
     });
 
@@ -1340,7 +1382,7 @@ describe("EtlStack", () => {
         expect(serialized).not.toMatch(/\*/);
       });
 
-      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight + tools + ed + mentoring + citations + clinical-trials prefixes + hierarchy bucket (no bare *, no ListBucket)", () => {
+      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight + tools + ed + mentoring + citations + clinical-trials + grants prefixes + hierarchy bucket (no bare *, no ListBucket)", () => {
         const policy = etlTaskRolePolicy();
         expect(policy).toBeDefined();
         const statements = policy?.Properties?.PolicyDocument
@@ -1362,7 +1404,14 @@ describe("EtlStack", () => {
         // dedicated hierarchy bucket. ed/* is the email-visibility bridge artifact;
         // mentoring/* is the mentee co-pub bridge (#443, etl:mentoring:import-copubs);
         // citations/* is the publication cited-by bridge (#928/#938);
-        // clinical-trials/* is the clinical-trials bridge (etl:clinical-trials:import).
+        // clinical-trials/* is the clinical-trials bridge (etl:clinical-trials:import);
+        // grants/* is the opportunities manifest etl:dynamodb reads for producer
+        // liveness (#2618) -- added after that PR shipped, because the read was
+        // written assuming the ETL "had the bucket" from tools/* when in fact
+        // every entry here is prefix-scoped, and the first nightly hit
+        // AccessDenied. THIS assertion is what makes the next such addition a
+        // deliberate one: it fails on any new prefix, which is correct, because
+        // a new prefix is a cdk deploy rather than a merge.
         // Order matches the policy.
         const resources = Array.isArray(s3Stmt?.Resource)
           ? (s3Stmt?.Resource as string[])
@@ -1374,6 +1423,7 @@ describe("EtlStack", () => {
           "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
+          "arn:aws:s3:::wcmc-reciterai-artifacts/grants/*",
           "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
         ]);
       });
@@ -1691,18 +1741,20 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("excludes etl:infoed from the staging nightly cadence (on-prem CIDR overlap; docs/etl-vpc-migration-handoff.md), while prod keeps it", () => {
-      const stagingNightly = getStateMachineDefinitionText(
-        template,
-        "scholars-nightly-staging",
+    it("starts the staging nightly 45 min after prod's, so the InfoEd steps don't overlap (#2906)", () => {
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-etl-nightly-staging",
+        ScheduleExpression: "cron(45 7 * * ? *)",
+      });
+    });
+
+    it("runs etl:infoed in BOTH nightly cadences (#2906)", () => {
+      expect(getStateMachineDefinitionText(template, "scholars-nightly-staging")).toMatch(
+        /etl:infoed/,
       );
-      expect(stagingNightly).not.toMatch(/etl:infoed/);
-      // The exclusion is staging-only — prod's nightly still runs InfoEd.
-      const prodNightly = getStateMachineDefinitionText(
-        buildEtlStack("prod").template,
-        "scholars-nightly-prod",
-      );
-      expect(prodNightly).toMatch(/etl:infoed/);
+      expect(
+        getStateMachineDefinitionText(buildEtlStack("prod").template, "scholars-nightly-prod"),
+      ).toMatch(/etl:infoed/);
     });
 
     it("includes etl:mesh-anchors in BOTH nightly cadences (#1258, promoted to prod in #2016)", () => {
@@ -1772,8 +1824,10 @@ describe("EtlStack", () => {
       // the grants bulk export rule + the #443 ED email-visibility bridge
       // rule; all enabled in staging.
       // The #1218 opportunity-projection rule was RETIRED in staging on
-      // 2026-07-20 (the nightly now covers the work), so 9 rather than 10.
-      expect(Object.keys(rules)).toHaveLength(9);
+      // 2026-07-20 (the nightly now covers the work); the honors-list scraper's
+      // weekly rule brings it to 10 (enabled after staging's clean supervised
+      // first run on 2026-09-25).
+      expect(Object.keys(rules)).toHaveLength(10);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -1895,18 +1949,36 @@ describe("EtlStack", () => {
       expect(stmt!.Principal).toEqual({ AWS: { Ref: ssmParamLogicalId } });
     });
 
-    it("prod ships the grants-export bucket (unconditional) but NO cross-account read grant while the flag is off", () => {
-      // Mirrors the opportunity-projection resurrection guard above: the
-      // bucket + write grant are unconditional in both envs (an operator can
-      // run the export by hand via run-task before go-live), but the
-      // cross-account READ policy must stay absent from prod until
-      // grantsExportScheduleEnabled flips -- an SSM param that does not exist
-      // in prod yet would otherwise fail the next `cdk deploy Sps-Etl-prod`.
+    it("prod ships the grants-export cross-account read grant now that the flag is on (staging hand-verified, Research Informatics confirmed prod-ready)", () => {
+      // grantsExportScheduleEnabled flipped true for prod -- mirrors the
+      // staging assertion above: GetObject only, scoped to the one object
+      // key, principal resolved from the PROD SSM param.
       const prodTemplate = buildEtlStack("prod").template;
-      const prodPolicies = JSON.stringify(
+      const json = prodTemplate.toJSON();
+      const params = json.Parameters as Record<string, Record<string, unknown>>;
+      const ssmParamLogicalId = Object.entries(params).find(
+        ([, p]) =>
+          p.Type === "AWS::SSM::Parameter::Value<String>" &&
+          p.Default === "/scholars/prod/grants-export/consumer-role-arn",
+      )?.[0];
+      expect(ssmParamLogicalId).toBeDefined();
+
+      const bucketPolicies = Object.values(
         prodTemplate.findResources("AWS::S3::BucketPolicy"),
+      ).map((r) => (r.Properties as Record<string, unknown>).PolicyDocument as Record<string, unknown>);
+      const grantsPolicy = bucketPolicies.find((doc) =>
+        JSON.stringify(doc).includes(ssmParamLogicalId as string),
       );
-      expect(prodPolicies).not.toMatch(/grants-export\/consumer-role-arn/);
+      expect(grantsPolicy).toBeDefined();
+      const statements = grantsPolicy?.Statement as Array<Record<string, unknown>>;
+      const stmt = statements.find((s) => s.Effect === "Allow");
+      expect(stmt).toBeDefined();
+
+      const actions = Array.isArray(stmt!.Action) ? stmt!.Action : [stmt!.Action];
+      expect(actions).toEqual(["s3:GetObject"]);
+      const resource = JSON.stringify(stmt!.Resource);
+      expect(resource).toContain("grants.ndjson");
+      expect(resource).not.toMatch(/^"\*"$/);
     });
 
     // The prod template asserts the same invariant, but staging is where the
@@ -2198,4 +2270,68 @@ describe("EtlStack", () => {
       expect(states.FailIntegrityNightly.Type).toBe("Fail");
     });
   });
+});
+
+// Honors-list scraper: its own machine so the app's Run now grant can be scoped
+// to it alone (TaskRoleHonorsRunNowPolicy in app-stack.ts builds its ARN from
+// the NAME asserted here).
+describe("EtlStack honors-list scraper (scholars-honors-<env>)", () => {
+  for (const env of ["staging", "prod"] as const) {
+    const { template } = buildEtlStack(env);
+
+    it(`${env}: a named machine running etl:honors with the input-driven env`, () => {
+      const sms = Object.values(template.findResources("AWS::StepFunctions::StateMachine"));
+      const honors = sms.find((s) => s.Properties?.StateMachineName === `scholars-honors-${env}`);
+      expect(honors).toBeDefined();
+      const def = JSON.stringify(honors?.Properties?.DefinitionString);
+      expect(def).toContain("etl:honors");
+      expect(def).toContain("HONORS_LISTS");
+      expect(def).toContain("$.lists");
+      expect(def).toContain("HONORS_TRIGGER");
+      expect(def).toContain("$.trigger");
+      // A Run now execution names the queued row it must claim; a run without
+      // one (the schedule, an operator start) gets "" via the Choice default.
+      expect(def).toContain("HONORS_RUN_ID");
+      expect(def).toContain("$.runId");
+      const parsed = JSON.parse(
+        (honors?.Properties?.DefinitionString["Fn::Join"][1] as unknown[])
+          .map((p) => (typeof p === "string" ? p : "X"))
+          .join(""),
+      );
+      expect(parsed.StartAt).toBe("HonorsHasRunId");
+      expect(parsed.States.HonorsHasRunId.Choices[0]).toMatchObject({
+        Variable: "$.runId",
+        IsPresent: true,
+        Next: "TaskHonorsLists",
+      });
+      expect(parsed.States.HonorsHasRunId.Default).toBe("HonorsDefaultRunId");
+      expect(parsed.States.HonorsDefaultRunId).toMatchObject({
+        Type: "Pass",
+        Result: "",
+        ResultPath: "$.runId",
+        Next: "TaskHonorsLists",
+      });
+    });
+
+    it(`${env}: an enabled weekly rule, sending every list`, () => {
+      const rule = Object.values(template.findResources("AWS::Events::Rule")).find(
+        (r) => r.Properties?.Name === `sps-honors-${env}`,
+      );
+      expect(rule?.Properties?.ScheduleExpression).toBe("cron(0 10 ? * MON *)");
+      // Staging's supervised first run was clean on 2026-09-25; prod was
+      // switched on 2026-09-29, its first manual run following that deploy.
+      expect(rule?.Properties?.State).toBe("ENABLED");
+      expect(rule?.Properties?.Targets).toHaveLength(1);
+      expect(JSON.parse(rule?.Properties?.Targets[0].Input)).toEqual({
+        lists: "all",
+        trigger: "schedule",
+      });
+    });
+
+    it(`${env}: a status alarm on the machine`, () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: `sps-honors-status-${env}`,
+      });
+    });
+  }
 });

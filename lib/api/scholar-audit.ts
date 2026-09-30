@@ -86,6 +86,9 @@ const ACTION_LABEL: Partial<Record<AuditAction, string>> = {
   proxy_revoke: "Revoked proxy editor",
   impersonation_start: "Started View-as session",
   impersonation_end: "Ended View-as session",
+  orcid_set: "Set ORCID iD",
+  slug_redirect_remove: "Removed old profile URL redirect",
+  disease_assignment_decision: "Reviewed disease assignment",
 };
 
 /** A few field keys that don't humanize cleanly from camelCase alone. */
@@ -152,6 +155,17 @@ export function detailForAction(action: string, before: unknown, after: unknown)
       return readStr(after, "proxy_cwid");
     case "proxy_revoke":
       return readStr(before, "proxy_cwid");
+    case "orcid_set": {
+      // A remove is the same action with `after.orcid = null`; name what went.
+      const set = readStr(after, "orcid");
+      if (set) return set;
+      const gone = readStr(before, "orcid");
+      return gone ? `Removed ${gone}` : null;
+    }
+    case "slug_redirect_remove": {
+      const gone = readStr(before, "oldSlug");
+      return gone ? `/${gone}` : null;
+    }
     case "slug_request":
     case "slug_request_approved":
       return readStr(after, "slug") ?? readStr(after, "requestedSlug");

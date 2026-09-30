@@ -18,35 +18,40 @@ describe("isCenterMembershipActive — § 3.3 predicate (#552)", () => {
   const TODAY = "2026-05-28";
 
   it("row 4 — both dates null → active forever", () => {
-    expect(isCenterMembershipActive(null, null, TODAY)).toBe(true);
+    expect(isCenterMembershipActive({ startDate: null, endDate: null, membershipRoleKey: null }, TODAY)).toBe(true);
   });
 
   it("row 5 — null start + past end → inactive", () => {
-    expect(isCenterMembershipActive(null, D("2025-01-01"), TODAY)).toBe(false);
+    expect(isCenterMembershipActive({ startDate: null, endDate: D("2025-01-01"), membershipRoleKey: null }, TODAY)).toBe(false);
   });
 
   it("row 6 — future start + null end → pending (hidden)", () => {
-    expect(isCenterMembershipActive(D("2999-01-01"), null, TODAY)).toBe(false);
+    expect(isCenterMembershipActive({ startDate: D("2999-01-01"), endDate: null, membershipRoleKey: null }, TODAY)).toBe(false);
   });
 
   it("row 7 — end = today → active (inclusive upper bound)", () => {
-    expect(isCenterMembershipActive(null, D(TODAY), TODAY)).toBe(true);
+    expect(isCenterMembershipActive({ startDate: null, endDate: D(TODAY), membershipRoleKey: null }, TODAY)).toBe(true);
   });
 
   it("start = today → active (inclusive lower bound)", () => {
-    expect(isCenterMembershipActive(D(TODAY), null, TODAY)).toBe(true);
+    expect(isCenterMembershipActive({ startDate: D(TODAY), endDate: null, membershipRoleKey: null }, TODAY)).toBe(true);
   });
 
   it("end = yesterday → inactive", () => {
-    expect(isCenterMembershipActive(null, D("2026-05-27"), TODAY)).toBe(false);
+    expect(isCenterMembershipActive({ startDate: null, endDate: D("2026-05-27"), membershipRoleKey: null }, TODAY)).toBe(false);
   });
 
   it("start = tomorrow → pending", () => {
-    expect(isCenterMembershipActive(D("2026-05-29"), null, TODAY)).toBe(false);
+    expect(isCenterMembershipActive({ startDate: D("2026-05-29"), endDate: null, membershipRoleKey: null }, TODAY)).toBe(false);
+  });
+
+  it("invited → never active, even with an open date window", () => {
+    expect(isCenterMembershipActive({ startDate: null, endDate: null, membershipRoleKey: "invited" }, TODAY)).toBe(false);
+    expect(isCenterMembershipActive({ startDate: null, endDate: null, membershipRoleKey: "research" }, TODAY)).toBe(true);
   });
 
   it("today strictly inside [start, end] → active", () => {
-    expect(isCenterMembershipActive(D("2024-07-01"), D("2027-06-30"), TODAY)).toBe(
+    expect(isCenterMembershipActive({ startDate: D("2024-07-01"), endDate: D("2027-06-30"), membershipRoleKey: null }, TODAY)).toBe(
       true,
     );
   });
@@ -76,6 +81,7 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: mockScholarFindMany },
     centerProgram: { findMany: mockCenterProgramFindMany },
     publicationTopic: { groupBy: mockPublicationTopicGroupBy },
+    publicationAuthor: { groupBy: vi.fn(async () => []) },
     grant: { findMany: mockGrantFindMany },
     suppression: { findMany: mockSuppressionFindMany },
   },
@@ -244,12 +250,15 @@ describe("getCenterMembers — active filter + grouping (#552 §6.2)", () => {
     ]);
 
     const result = await getCenterMembers("MEYER", {});
+    // #2537 — flat-mode `page` is 1-indexed (page 1 is the first page); the
+    // loader's internal `opts.page` stays 0-indexed input (unpassed here, so 0).
     expect(result).toEqual({
       mode: "flat",
       hits: [],
       total: 0,
-      page: 0,
+      page: 1,
       pageSize: 20,
+      roleCategoryCounts: {},
     });
     // short-circuits before touching Scholar
     expect(mockScholarFindMany).not.toHaveBeenCalled();

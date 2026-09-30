@@ -9,7 +9,12 @@ import {
   ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { assertIsoDate, buildRollupInsert } from "./queries.js";
+import {
+  assertIsoDate,
+  buildRollupInsert,
+  isRerollable,
+  MAX_REROLL_AGE_DAYS,
+} from "./queries.js";
 
 // CloudFront usage rollup handler. Nightly EventBridge fire (empty event)
 // defaults to a trailing 2-day UTC window so late-arriving CF logs (which can
@@ -168,7 +173,21 @@ export const handler = async (event: RollupEvent = {}): Promise<void> => {
   const resultOutput = env("RESULT_OUTPUT");
 
   const dates = resolveDates(event);
+  const today = utcDaysAgo(0);
   for (const dt of dates) {
+    // Never purge a day whose raw logs may already be gone: the durable rollup
+    // is then the only copy of that day's history (see MAX_REROLL_AGE_DAYS).
+    if (!isRerollable(dt, today)) {
+      console.log(
+        JSON.stringify({
+          event: "cf_usage_rollup",
+          dt,
+          outcome: "skipped_raw_logs_expired",
+          maxAgeDays: MAX_REROLL_AGE_DAYS,
+        }),
+      );
+      continue;
+    }
     // (i) idempotency: clear the partition, then (ii) INSERT fresh.
     await purgePartition(bucket, rollupPrefix, dt);
     const sql = buildRollupInsert({ database, rawTable, rollupTable }, dt);

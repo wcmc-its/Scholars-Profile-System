@@ -1,0 +1,41 @@
+-- Land ReciterAI's per-core staff counts on `core`, so the review queue can
+-- tell an owner what the co-author signal actually has to work with. The
+-- engine publishes one item per core in the shared `reciterai` DynamoDB table
+-- at `PK = CORE#{core_id}`, `SK = STAFF_DICT`, carrying two attributes;
+-- etl/dynamodb Block 6b projects both here.
+--
+-- TWO columns, because the two numbers differ on 9 of the 14 live cores:
+--
+--   staff_count          how many CWIDs the facility dictionary LISTS in this
+--                        core's `staff:` key.
+--   staff_tracked_count  how many of those the co-author signal can ACTUALLY
+--                        match. pipeline_cores/signals.py `coauthorship_index`
+--                        reads the core's `tracked_staff_cwids`, not its
+--                        `staff:` list, so a listed staff member with no
+--                        personIdentifier upstream is invisible to it.
+--
+-- The tracked count is the load-bearing one. Three cores list staff and track
+-- none, and core 14 — the one in the owner's mockup — lists four while
+-- tracking one; the longest roster, core 2's seven, tracks four. A UI built on
+-- the listed count alone would assert "the co-author signal draws on 4 core
+-- staff" where the signal cannot fire at all. That is the failure this repo
+-- already shipped once in `decodeTopicalPrior` — a chip asserting a mechanism
+-- that was not the one behind the number — so both counts land and the UI
+-- shows both.
+--
+-- COUNTS only, deliberately: the consumer renders integers, and mirroring the
+-- staff CWIDs into a second datastore would buy PII surface for nothing. (The
+-- sibling `SK = CLIENTS` item runs the other direction — SPS writes it, the
+-- engine reads it — and is untouched by these columns. `SK = STAFF` is left
+-- unused on purpose, reserved for a future SPS-curated staff list, which by
+-- the CLIENTS precedent would want exactly that key.)
+--
+-- Additive only, both nullable, NO default and NO backfill. NULL is a real
+-- state here: "the engine has not published counts for this core yet", which
+-- the UI renders as no chip at all. It must stay distinguishable from a
+-- genuine 0, because 0 is the single most useful thing a reviewer can learn
+-- about such a core — the co-author signal cannot fire for it. A DEFAULT 0
+-- would have collapsed those two states into one and made every unpublished
+-- core read as "no staff".
+ALTER TABLE `core` ADD COLUMN `staff_count` INTEGER NULL;
+ALTER TABLE `core` ADD COLUMN `staff_tracked_count` INTEGER NULL;

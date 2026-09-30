@@ -22,8 +22,12 @@ const {
   mockAppointmentFindMany,
   mockDepartmentFindMany,
   mockDivisionFindMany,
+  mockDeptAssignmentFindMany,
+  mockDivAssignmentFindMany,
+  mockCenterLeaderFindMany,
   mockCenterFindMany,
-  mockCenterProgramLeaderFindMany,
+  mockProgramAssignmentFindMany,
+  mockCenterProgramFindMany,
   mockFieldOverrideFindFirst,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
@@ -37,10 +41,24 @@ const {
   mockScholarFamilyFindMany: vi.fn(),
   mockFamilySuppressionFindMany: vi.fn(),
   mockAppointmentFindMany: vi.fn(),
+  // #2542 contract A — `department.findMany` / `division.findMany` now serve
+  // ONLY the batched NAME lookup (`code: { in: [...] }`) the assignment rows
+  // point at; the leadership query itself moved to `orgUnitRoleAssignment`
+  // below (`Department.chairCwid` / `Division.chiefCwid` no longer exist).
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
+  mockDeptAssignmentFindMany: vi.fn(),
+  mockDivAssignmentFindMany: vi.fn(),
+  mockCenterLeaderFindMany: vi.fn(),
   mockCenterFindMany: vi.fn(),
-  mockCenterProgramLeaderFindMany: vi.fn(),
+  // #2558 — a SEPARATE mock from `mockCenterLeaderFindMany`, even though both
+  // back `orgUnitRoleAssignment.findMany` calls: the real query is scoped by
+  // `entityType` at the DB level ("center" vs "center_program"), and a single
+  // undifferentiated mock would leak one kind's fixture rows into the other's
+  // call, producing an `entityId` with no ":" to split. The dispatcher below
+  // routes by `where.entityType`.
+  mockProgramAssignmentFindMany: vi.fn(),
+  mockCenterProgramFindMany: vi.fn(),
   mockFieldOverrideFindFirst: vi.fn(),
 }));
 
@@ -60,11 +78,30 @@ vi.mock("@/lib/db", () => ({
       familySuppressionOverlay: { findMany: mockFamilySuppressionFindMany },
       // #742 §7 — the merged "Titles & positions" candidate loader.
       appointment: { findMany: mockAppointmentFindMany },
-      // #742 §2.5 — org-unit leadership-FK title augmentation.
+      // #742 §2.5 — org-unit leadership-FK title augmentation. `department` /
+      // `division` now serve only the name lookup — see the mock declarations above.
       department: { findMany: mockDepartmentFindMany },
       division: { findMany: mockDivisionFindMany },
+      // #2542 contract A / #2558 — dispatches by `where.entityType`: "department"
+      // and "division" go to their own leadership-assignment mocks,
+      // "center_program" to its own, everything else ("center") keeps going to
+      // `mockCenterLeaderFindMany`.
+      orgUnitRoleAssignment: {
+        findMany: (args: { where?: { entityType?: string } }) => {
+          switch (args?.where?.entityType) {
+            case "department":
+              return mockDeptAssignmentFindMany(args);
+            case "division":
+              return mockDivAssignmentFindMany(args);
+            case "center_program":
+              return mockProgramAssignmentFindMany(args);
+            default:
+              return mockCenterLeaderFindMany(args);
+          }
+        },
+      },
       center: { findMany: mockCenterFindMany },
-      centerProgramLeader: { findMany: mockCenterProgramLeaderFindMany },
+      centerProgram: { findMany: mockCenterProgramFindMany },
       // #1997 — the scholar's `hideEducationYears` section-visibility override.
       fieldOverride: { findFirst: mockFieldOverrideFindFirst },
     },
@@ -206,8 +243,12 @@ beforeEach(() => {
   mockAppointmentFindMany.mockResolvedValue([]);
   mockDepartmentFindMany.mockResolvedValue([]);
   mockDivisionFindMany.mockResolvedValue([]);
+  mockDeptAssignmentFindMany.mockResolvedValue([]);
+  mockDivAssignmentFindMany.mockResolvedValue([]);
+  mockCenterLeaderFindMany.mockResolvedValue([]);
   mockCenterFindMany.mockResolvedValue([]);
-  mockCenterProgramLeaderFindMany.mockResolvedValue([]);
+  mockProgramAssignmentFindMany.mockResolvedValue([]);
+  mockCenterProgramFindMany.mockResolvedValue([]);
   mockFieldOverrideFindFirst.mockResolvedValue(null);
 });
 
@@ -308,9 +349,20 @@ describe("assembleOverviewFacts — representative publications (distilled, sele
       relativeCitationRatio: null,
       nihPercentile: null,
       citedByCount: null,
+      // #2653 v8 — no authorsString on the row → no lead author.
+      leadAuthor: null,
     });
     // The raw abstract is gone (decision 4).
     expect(pub).not.toHaveProperty("abstractExcerpt");
+  });
+
+  it("derives leadAuthor from the row's authorsString, unwrapping the WCM ((…)) marker (#2653)", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1", isFirst: true, isLast: false }]);
+    mockPublicationFindMany.mockResolvedValue([
+      { ...pubRow("1"), authorsString: "((Doe JA)), Roe B, Poe C" },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts!.representativePublications[0]!.leadAuthor).toBe("Doe");
   });
 
   it("does NOT default-select a middle-author scored pub", async () => {
@@ -857,7 +909,8 @@ describe("assembleOverviewFacts — explicit pub snapshot + title/education delt
 // the appointment-title ETL. Each query keys on the scholar, deduped against the
 // appointment + primary titles.
 describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
-  it("surfaces a department chair recorded only on Department.chairCwid", async () => {
+  it("surfaces a department chair recorded only on an OrgUnitRoleAssignment row", async () => {
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "MED", roleKey: "chair" }]);
     mockDepartmentFindMany.mockResolvedValue([{ code: "MED", name: "Medicine", officialName: null }]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles).toEqual([
@@ -865,13 +918,56 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     ]);
   });
 
+  // #58 / #2542 — an administrative department (e.g. the Library) is led by a
+  // DIRECTOR, not a Chair. The assignment's own `roleKey` carries that
+  // distinction now — no `category` read needed here.
+  it("labels an administrative department's leader 'Director', not 'Chair'", async () => {
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "LIB", roleKey: "director" }]);
+    mockDepartmentFindMany.mockResolvedValue([{ code: "LIB", name: "Library", officialName: null }]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([
+      { title: "Director, Department of Library", organization: "Weill Cornell Medicine" },
+    ]);
+  });
+
+  // The synthesized "Director, Department of X" candidate must not be
+  // dropped by the CHAIR-specific `isChairTitleFor` dedup — that predicate
+  // only recognizes "Chair of {dept}" appointment titles, a pattern a
+  // Director's real appointment title never matches.
+  it("does not dedup a Director candidate against a 'Director of X' appointment (isChairTitleFor is chair-only)", async () => {
+    mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Director of the Library")]);
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "LIB", roleKey: "director" }]);
+    mockDepartmentFindMany.mockResolvedValue([{ code: "LIB", name: "Library", officialName: null }]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles.map((t) => t.title)).toEqual([
+      "Director of the Library",
+      "Director, Department of Library",
+    ]);
+  });
+
+  it("a row whose department vanished emits no candidate (no FK to fall back on)", async () => {
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "GONE", roleKey: "chair" }]);
+    mockDepartmentFindMany.mockResolvedValue([]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([]);
+  });
+
   it("uses the curated official name and surfaces an interim center director", async () => {
+    mockCenterLeaderFindMany.mockResolvedValue([
+      {
+        entityId: "meyer",
+        roleKey: "director",
+        interim: true,
+        role: { label: "Director" },
+      },
+    ]);
+    // The center NAME comes from its own lookup now — the assignment carries no
+    // FK to `center`, so nothing can be nested on it.
     mockCenterFindMany.mockResolvedValue([
       {
         code: "meyer",
         name: "Meyer Cancer Center",
         officialName: "Sandra and Edward Meyer Cancer Center",
-        leaderInterim: true,
       },
     ]);
     const facts = await assembleOverviewFacts("self01");
@@ -883,23 +979,49 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     ]);
   });
 
-  it("surfaces a center program leader as 'Leader, <program> Program'", async () => {
-    mockCenterProgramLeaderFindMany.mockResolvedValue([
+  it("surfaces a center program leader as 'Leader, <program> Program', with the vocabulary label + interim (#2558)", async () => {
+    mockProgramAssignmentFindMany.mockResolvedValue([
+      {
+        entityId: "meyer:CB",
+        interim: true,
+        role: { label: "Leader" },
+      },
+    ]);
+    mockCenterProgramFindMany.mockResolvedValue([
       {
         centerCode: "meyer",
-        programCode: "CB",
-        interim: false,
-        program: { label: "Cancer Biology", center: { name: "Meyer Cancer Center", officialName: null } },
+        code: "CB",
+        label: "Cancer Biology",
+        center: { name: "Meyer Cancer Center", officialName: null },
       },
     ]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles).toEqual([
-      { title: "Leader, Cancer Biology Program", organization: "Meyer Cancer Center" },
+      { title: "Interim Leader, Cancer Biology Program", organization: "Meyer Cancer Center" },
     ]);
+  });
+
+  it("scopes the center_program assignment query to the scholar + kind, gated by profileTitle", async () => {
+    await assembleOverviewFacts("self01");
+    expect(mockProgramAssignmentFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      entityType: "center_program",
+      role: { roleGroup: "leadership", profileTitle: true },
+    });
+  });
+
+  it("a program whose CenterProgram row vanished emits no assignment-side title (no FK to fall back on)", async () => {
+    mockProgramAssignmentFindMany.mockResolvedValue([
+      { entityId: "meyer:GONE", interim: false, role: { label: "Leader" } },
+    ]);
+    mockCenterProgramFindMany.mockResolvedValue([]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([]);
   });
 
   it("dedups an FK chair the appointment table already confers (isChairTitleFor)", async () => {
     mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Sanford I. Weill Chair of Medicine")]);
+    mockDeptAssignmentFindMany.mockResolvedValue([{ entityId: "MED", roleKey: "chair" }]);
     mockDepartmentFindMany.mockResolvedValue([{ code: "MED", name: "Medicine", officialName: null }]);
     const facts = await assembleOverviewFacts("self01");
     // The endowed appointment chair stays; the synthesized FK chair is deduped.
@@ -908,6 +1030,7 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
 
   it("dedups an FK division chief that exactly matches an appointment title", async () => {
     mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Chief, Division of Hematology")]);
+    mockDivAssignmentFindMany.mockResolvedValue([{ entityId: "HEME" }]);
     mockDivisionFindMany.mockResolvedValue([{ code: "HEME", name: "Hematology" }]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles.map((t) => t.title)).toEqual(["Chief, Division of Hematology"]);
@@ -915,19 +1038,48 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
 
   it("scopes every leadership-FK query to the scholar (external leaders never match)", async () => {
     await assembleOverviewFacts("self01");
-    expect(mockDepartmentFindMany.mock.calls[0][0].where).toEqual({ chairCwid: "self01" });
-    expect(mockDivisionFindMany.mock.calls[0][0].where).toEqual({ chiefCwid: "self01" });
-    expect(mockCenterFindMany.mock.calls[0][0].where).toEqual({ directorCwid: "self01" });
-    // #1570 — scoped to program LEADS only; a coe_liaison row is not a title.
-    expect(mockCenterProgramLeaderFindMany.mock.calls[0][0].where).toEqual({
+    // #2542 contract A — chair/chief are `OrgUnitRoleAssignment` rows now;
+    // `Department.chairCwid` / `Division.chiefCwid` no longer exist.
+    expect(mockDeptAssignmentFindMany.mock.calls[0][0].where).toEqual({
       cwid: "self01",
-      role: "leader",
+      entityType: "department",
+      roleKey: { in: ["chair", "director"] },
+    });
+    expect(mockDivAssignmentFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      entityType: "division",
+      roleKey: "chief",
+    });
+    // #2542 — center leadership is an `OrgUnitRoleAssignment` row. The query is
+    // scoped to the KIND as well as the scholar, because one shared vocabulary
+    // now spans every unit kind; `profileTitle` is what keeps a non-title
+    // leadership role (the coe_liaison fold-in) out.
+    expect(mockCenterLeaderFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      entityType: "center",
+      role: { roleGroup: "leadership", profileTitle: true },
+    });
+    // #2558 — the center_program assignment query, `profileTitle`-gated the
+    // same way — see the dedicated "scopes the center_program assignment
+    // query" test above.
+    expect(mockProgramAssignmentFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      entityType: "center_program",
+      role: { roleGroup: "leadership", profileTitle: true },
     });
   });
 
   it("a scholar's FK roles can be vetoed and surface in the drawer candidates", async () => {
+    mockCenterLeaderFindMany.mockResolvedValue([
+      {
+        entityId: "englander",
+        roleKey: "director",
+        interim: false,
+        role: { label: "Director" },
+      },
+    ]);
     mockCenterFindMany.mockResolvedValue([
-      { code: "englander", name: "Englander Institute for Precision Medicine", officialName: null, leaderInterim: false },
+      { code: "englander", name: "Englander Institute for Precision Medicine", officialName: null },
     ]);
     // The drawer candidate carries the synthesized title, featured + non-primary.
     const opts = await loadOverviewSourceOptions("self01");

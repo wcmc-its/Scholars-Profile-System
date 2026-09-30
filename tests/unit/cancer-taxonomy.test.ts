@@ -174,3 +174,37 @@ describe("loadCancerTaxonomy", () => {
     expect(meshDb.findMany).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("loadCancerTaxonomy caching", () => {
+  it("does not cache an EMPTY lookup — a later call re-reads once the table is populated", async () => {
+    vi.resetModules();
+    const { loadCancerTaxonomy } = await import("@/lib/cancer-taxonomy");
+    const taxonomyDb = {
+      findMany: vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([{ descriptorUi: "D001943", topics: ["breast"] }]),
+    };
+    const meshDb = { findMany: vi.fn(async () => [{ descriptorUi: "D001943", name: "Breast Neoplasms" }]) };
+
+    const first = await loadCancerTaxonomy(taxonomyDb, meshDb);
+    expect(first.topicsByUi.size).toBe(0);
+
+    const second = await loadCancerTaxonomy(taxonomyDb, meshDb);
+    expect(second.topicsByUi.get("D001943")).toEqual(["breast"]);
+
+    // A populated lookup IS cached.
+    await loadCancerTaxonomy(taxonomyDb, meshDb);
+    expect(taxonomyDb.findMany).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("assertCancerTaxonomyPopulated", () => {
+  it("throws on an empty lookup and passes a populated one", async () => {
+    const { assertCancerTaxonomyPopulated } = await import("@/lib/cancer-taxonomy");
+    expect(() => assertCancerTaxonomyPopulated(lookup({}))).toThrow(
+      "cancer taxonomy is empty; run etl:cancer-taxonomy first",
+    );
+    expect(() => assertCancerTaxonomyPopulated(lookup({ D1: [] }))).not.toThrow();
+  });
+});

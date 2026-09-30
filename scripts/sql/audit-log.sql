@@ -79,7 +79,11 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- target, and the unit `code` for a department/division/center target; a
   -- per-author publication suppression carries the contributor CWID in the
   -- JSON payload.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit') NOT NULL,
+  -- #2558 -- 'center_program' is what /api/edit/center-program's leader +
+  -- description writes target, now that the route writes
+  -- `OrgUnitRoleAssignment` rows directly. Appended LAST to preserve existing
+  -- ENUM ordinals.
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role','honor_list') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -126,8 +130,22 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- `biosketch_generation_delete` (a scholar / delegate pruned one biosketch
   -- generation run from the /edit history; `target_entity_type=
   -- 'biosketch_generation'`, `target_entity_id` the row `id`) -- appended LAST
-  -- after `news_mention_update`.
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override') NOT NULL,
+  -- after `news_mention_update`. The Meyer Cancer Center disease-expertise
+  -- surface then adds `disease_assignment_decision` (a reviewer confirmed or
+  -- rejected a `cancer_center_disease_assignment` row; `target_entity_type=
+  -- 'scholar'`, `target_entity_id` the cwid) -- appended LAST after
+  -- `cancer_funding_override`. #2542 Phase 3 then adds
+  -- `role_vocabulary_create` / `role_vocabulary_update` (a superuser /
+  -- comms-steward created or edited an `OrgUnitRole` vocabulary entry on the
+  -- steward-owned role-vocabulary editor; `target_entity_type=
+  -- 'org_unit_role'`, `target_entity_id` the `entityType:key` pair) --
+  -- appended LAST after `disease_assignment_decision`. The role-vocabulary
+  -- editor's delete follow-up then adds `role_vocabulary_delete` (a
+  -- superuser/comms-steward deleted a `manual`, zero-holder `OrgUnitRole`
+  -- entry; same `target_entity_type`/`target_entity_id` shape as the other
+  -- two `role_vocabulary_*` actions) -- appended LAST after
+  -- `role_vocabulary_update`.
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update','honor_list_run','core_queue_add','disease_auto_publish_set') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -189,6 +207,8 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                        (View-as impersonation; also adds the
 --                         `impersonated_cwid` attribution column -- the
 --                         ADD COLUMN below)
+--   Identifiers & Profiles: + orcid_set  (the scholar, or an authorized editor,
+--                         set the ORCID iD; target_entity_type='scholar'). Appended LAST.
 --   #746:              + publication_reject  (self-edit "Not mine" reject routed
 --                         to ReCiter's gold standard; target_entity_id is the
 --                         pmid, target_entity_type='publication'). Appended LAST
@@ -221,6 +241,16 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         (publication, core) usage candidate; target_entity_type=
 --                         'core', target_entity_id is the "{coreId}:{pmid}" pair).
 --                         Appended LAST to preserve existing ENUM ordinals.
+--   Known clients (ReciterAI #383 / SPS #2607, CWID-only pass): +
+--                         core_client_add · core_client_remove  (a core owner /
+--                         Superuser / comms_steward added or soft-removed a CWID
+--                         from a core's "Known clients" list on
+--                         /edit/core/[coreId]/review; target_entity_type='core'
+--                         (already extended by CORE_CLAIM above — no further
+--                         target_entity_type ENUM change needed), target_entity_id
+--                         is the "{coreId}:{cwid}" pair, before/after carry
+--                         { active: boolean }). Appended LAST to preserve
+--                         existing ENUM ordinals.
 --   REPORTER_MATCH_V2: + reporter_profile_confirm | reporter_profile_reject |
 --                         reporter_profile_revoke  (a RePORTER PMID-overlap "Is
 --                         this you?" match confirmed / declined / revoked;
@@ -287,11 +317,79 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         center-nci-2a-import.ts) is machine-run and NOT
 --                         audited — same posture as every ETL ingest.
 --                         Appended LAST to preserve existing ENUM ordinals.
+--   Cancer Center disease expertise (docs/cancer-center-disease-taxonomy-
+--                       decisions.md): + disease_assignment_decision  (a
+--                         reviewer confirmed or rejected a
+--                         CancerCenterDiseaseAssignment row on /edit;
+--                         target_entity_type='scholar', target_entity_id the
+--                         cwid). The generator run that produces
+--                         CancerCenterDiseaseAssignment rows
+--                         (scripts/cancer-center-disease-assignments.ts) is
+--                         machine-run and NOT audited — same posture as every
+--                         ETL ingest. Appended LAST to preserve existing ENUM
+--                         ordinals.
+--   Role vocabulary delete (app/api/edit/roles/route.ts DELETE): +
+--                         role_vocabulary_delete  (a superuser/comms-steward
+--                         deleted a `manual`, zero-holder `OrgUnitRole` entry;
+--                         same target_entity_type/target_entity_id shape as
+--                         role_vocabulary_create/role_vocabulary_update).
+--                         Appended LAST to preserve existing ENUM ordinals.
+--   Mentored publications report (/edit/reports/7, app/api/edit/report-access):
+--                         + report_access_grant · report_access_revoke  (a
+--                         superuser/comms-steward granted / revoked a named
+--                         CWID's per-report, per-scope access row;
+--                         target_entity_type='report_access', target_entity_id
+--                         "{reportKey}:{scopeKey}:{cwid}"). Appended LAST.
+--   Profile URLs registry (POST /api/edit/slug-redirect): + slug_redirect_remove
+--                         (a superuser removed a former-URL redirect, a
+--                         `slug_history` row; target_entity_type='scholar',
+--                         target_entity_id = the cwid the old URL forwarded to,
+--                         so no target_entity_type ENUM change). Appended LAST
+--                         to preserve existing ENUM ordinals.
+--   Functional roles (/edit/administrators, app/api/edit/functional-roles):
+--                         + functional_role_grant · functional_role_scope_set ·
+--                         functional_role_revoke  (a superuser recorded,
+--                         re-scoped or revoked a manual functional role
+--                         assignment, or the functional-roles import changed an
+--                         imported row — values carry via:"import";
+--                         target_entity_type='functional_role',
+--                         target_entity_id "{role}:{cwid}:{source}"); then
+--                         functional_role_update  (the import refreshed an
+--                         imported row's granted_by / granted_at / grantee_name
+--                         with its scopes unchanged). Appended LAST.
+--   Honors Run now (app/api/edit/honor/sources/run): + honor_list_run  (an
+--                         honors curator/superuser queued a scrape of one
+--                         public honor list; target_entity_type='honor_list',
+--                         target_entity_id the list id from
+--                         lib/honors/lists.ts). Appended LAST to preserve
+--                         existing ENUM ordinals.
+--   Core Review Queue v2 PR B ("Add PMIDs → Send to review",
+--                         app/api/edit/core-queue-add): + core_queue_add  (a
+--                         core owner / Superuser / comms_steward sent a PMID to
+--                         the core's review queue by hand, a `core_queue_add`
+--                         row; target_entity_type='core' (already present — no
+--                         target_entity_type ENUM change), target_entity_id the
+--                         "{coreId}:{pmid}" pair). Appended LAST to preserve
+--                         existing ENUM ordinals.
+--   Disease auto-publish switch (POST /api/edit/center/[code]/disease-auto-
+--                         publish): + disease_auto_publish_set  (a curator /
+--                         Superuser / comms_steward turned a center's "Auto-
+--                         publish high-confidence inferences" switch on or off,
+--                         `center.disease_auto_publish`; target_entity_type=
+--                         'center' (already present — no target_entity_type
+--                         ENUM change), target_entity_id the center code).
+--                         Appended LAST to preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update','honor_list_run','core_queue_add','disease_auto_publish_set')
     NOT NULL;
 
+--   SELF_EDIT_MENTEE_SUGGESTIONS (#2634): + mentee_suggestion_dismiss ·
+--                         mentee_suggestion_restore  (a mentor, or a superuser on
+--                         their behalf, dismissed / restored a co-authorship-derived
+--                         mentee suggestion; target_entity_type='mentee_suggestion',
+--                         target_entity_id="{mentorCwid}:{menteeCwid}", after
+--                         carries { reason }). Appended LAST.
 -- target_entity_type history:
 --   #102/#354: scholar · publication · grant · education · appointment
 --   #540 Phase 1: + department · division · center
@@ -341,9 +439,40 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --                    `action` value needed — reuses suppression_create /
 --                    suppression_revoke. Appended LAST to preserve existing
 --                    ENUM ordinals.
+--   Matcha-admin Phase 1b: + opportunity  (a corpus `opportunity` row
+--                    suppressed / restored via /api/edit/opportunity-admin or
+--                    the intake suppress cascade; target_entity_id is the
+--                    `opportunity.opportunity_id`). No new `action` value
+--                    needed — reuses suppression_create / suppression_revoke
+--                    (the dataset_deposit precedent). Appended LAST to
+--                    preserve existing ENUM ordinals.
+--   #2542 Phase 3:  + org_unit_role  (an `OrgUnitRole` vocabulary entry
+--                    created or edited on the steward-owned role-vocabulary
+--                    editor; target_entity_id is the `entityType:key` pair).
+--                    Appended LAST to preserve existing ENUM ordinals.
+--   #2558:          + center_program  (a Meyer Cancer Center program
+--                    leadership/description target — /api/edit/center-program
+--                    writes `OrgUnitRoleAssignment` rows directly;
+--                    target_entity_id is the `"{centerCode}:{programCode}"`
+--                    pair — see `lib/edit/audit.ts`'s `AuditEntityType` union.
+--                    Appended LAST to preserve existing ENUM ordinals.
+--   Mentored publications report: + report_access  (a per-report access grant
+--                    row; target_entity_id is the "{reportKey}:{scopeKey}:{cwid}"
+--                    triple). Appended LAST to preserve existing ENUM ordinals.
+--   Institution administrators: + institution  (a unit_admin grant/revoke on
+--                    an ED primary-organization code — lib/institutions.ts;
+--                    target_entity_id is the code). Appended LAST to preserve
+--                    existing ENUM ordinals.
+--   Functional roles: + functional_role  (a functional_role_grant row on
+--                    /edit/administrators; target_entity_id is
+--                    "{role}:{cwid}:{source}"). Appended LAST to preserve
+--                    existing ENUM ordinals.
+--   Honors Run now: + honor_list  (a public honor list the honors scraper
+--                    reads; target_entity_id is the list id). Appended LAST to
+--                    preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role','honor_list')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for
@@ -366,6 +495,18 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 -- exists.
 --
 --   GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO '<app_user>'@'<host>';
+--   -- and explicitly NOTHING else: no UPDATE, no DELETE, no DROP, no ALTER.
+--
+-- WRITER (etl, #2556). The nightly ETL auto-confirms K=2 separated reporter
+-- matches and writes the same B03 audit row an interactive Hide/Show does
+-- (etl/reporter-grants/*, appendAuditRow), so the `etl` MySQL user needs this
+-- identical append-only grant. Unlike the app-role grant above, this one IS
+-- applied automatically -- `scripts/db-bootstrap.ts` issues and verifies it on
+-- every deploy, using the literal username `etl` (there is no ETL_DSN on the
+-- bootstrap task to resolve it from live, unlike APP_RW_DSN). No DBA step
+-- needed. Shown here only for reference; the equivalent manual statement:
+--
+--   GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO 'etl'@'<host>';
 --   -- and explicitly NOTHING else: no UPDATE, no DELETE, no DROP, no ALTER.
 --
 -- READER (#917). The /edit history pages read this table through the read-only `app_ro` role,

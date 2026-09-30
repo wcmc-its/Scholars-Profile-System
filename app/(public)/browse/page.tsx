@@ -12,6 +12,7 @@ import { BrowseHero } from "@/components/browse/browse-hero";
 import { BrowseAnchorStrip } from "@/components/browse/browse-anchor-strip";
 import { DepartmentsGrid } from "@/components/browse/departments-grid";
 import { CentersGrid } from "@/components/browse/centers-grid";
+import { CoresGrid } from "@/components/browse/cores-grid";
 
 /**
  * Departments & Centers hub.
@@ -40,17 +41,17 @@ export default async function BrowsePage() {
   // repopulate the hub on the first production render. Mirrors the guards in
   // app/sitemap.ts and app/llms.txt/route.ts.
   const data = await getBrowseData().catch(
-    (): BrowseData => ({ departments: [], centers: [] }),
+    (): BrowseData => ({ departments: [], centers: [], cores: [] }),
   );
 
   return (
-    <main className="mx-auto max-w-[1100px] px-6 py-12">
-      <Breadcrumb className="mb-4">
+    <main className="browse-page-root mx-auto max-w-[1100px] px-6 pt-12 pb-24">
+      <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink href="/">Home</BreadcrumbLink>
           </BreadcrumbItem>
-          <BreadcrumbSeparator>›</BreadcrumbSeparator>
+          <BreadcrumbSeparator className="text-xs">›</BreadcrumbSeparator>
           <BreadcrumbItem>
             <BreadcrumbPage>Departments &amp; Centers</BreadcrumbPage>
           </BreadcrumbItem>
@@ -58,9 +59,12 @@ export default async function BrowsePage() {
       </Breadcrumb>
 
       <BrowseHero />
-      <BrowseAnchorStrip />
+      <BrowseAnchorStrip showCores={data.cores.length > 0} />
       <DepartmentsGrid departments={data.departments} />
       <CentersGrid centers={data.centers} />
+      {/* Hidden (with its anchor tab) while no core is publicly visible —
+          e.g. CORE_PAGES off — instead of a "being loaded" placeholder. */}
+      {data.cores.length > 0 && <CoresGrid cores={data.cores} />}
     </main>
   );
 }

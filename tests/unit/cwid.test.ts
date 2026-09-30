@@ -16,8 +16,13 @@ describe("isCwid / CWID_PATTERN", () => {
     }
   });
 
+  it("accepts vanity CWIDs longer than 9 chars (the column is VarChar(32))", () => {
+    expect(isCwid("longvanityid")).toBe(true);
+    expect(isCwid("a".repeat(32))).toBe(true);
+  });
+
   it("rejects malformed / non-CWID tokens", () => {
-    for (const c of ["not-a-cwid", "bad-line", "", "ab", "Meyer", "1abc", "a".repeat(10)]) {
+    for (const c of ["not-a-cwid", "bad-line", "", "ab", "Meyer", "1abc", "a".repeat(33)]) {
       expect(isCwid(c)).toBe(false);
     }
   });

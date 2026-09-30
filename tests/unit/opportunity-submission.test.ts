@@ -110,8 +110,19 @@ describe("findDuplicate", () => {
     expect(result.opportunity).toEqual({
       opportunityId: "wcm_curated:hartwell-abc123",
       title: "Hartwell Award",
+      suppressedAt: null,
     });
     expect(result.submission).toBeNull();
+  });
+
+  it("carries a matched corpus row's suppressedAt through (matcha-admin Phase 1b)", () => {
+    const suppressedAt = new Date("2026-08-01T00:00:00Z");
+    const result = findDuplicate(
+      "https://www.hartwell.org/award",
+      [{ ...corpus[0], suppressedAt }],
+      [],
+    );
+    expect(result.opportunity?.suppressedAt).toBe(suppressedAt);
   });
 
   it("matches pending and processed submissions but never rejected or suppressed ones", () => {
@@ -220,6 +231,28 @@ describe("listSubmissions", () => {
     });
     // an unknown status degrades to pending rather than lying about an outcome
     expect(result[1].status).toBe("pending");
+  });
+
+  it("follows LastEvaluatedKey to read the whole partition (dedup must see old rejected items)", async () => {
+    const item = (sk: string, status: string) => ({
+      PK: SUBMISSION_PK,
+      SK: sk,
+      url: `https://x.org/${sk}`,
+      normalized_url: `https://x.org/${sk}`,
+      status,
+    });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Items: [item("b", "pending")], LastEvaluatedKey: { PK: SUBMISSION_PK, SK: "b" } })
+      .mockResolvedValueOnce({ Items: [item("a", "rejected")] });
+    const result = await listSubmissions({ ddb: { send } });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0].input.ExclusiveStartKey).toEqual({ PK: SUBMISSION_PK, SK: "b" });
+    expect(result.map((r) => [r.submissionId, r.status])).toEqual([
+      ["b", "pending"],
+      ["a", "rejected"],
+    ]);
   });
 
   it("maps the SPS-written suppressed status through", async () => {

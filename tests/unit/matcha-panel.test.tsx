@@ -23,9 +23,9 @@
  * fetch is stubbed — no route/engine involvement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { MatchaPanel } from "@/components/edit/matcha-panel";
+import { MatchaPanel, resultsSummary } from "@/components/edit/matcha-panel";
 import { conceptWeight } from "@/lib/api/matcha-contract";
 import type { ResultEvidence as ResultEvidenceT } from "@/lib/api/result-evidence";
 import type {
@@ -171,6 +171,8 @@ function stubFetch(payload: {
   preferences?: MatchaPreference[];
   /** #1780 Phase 2 — the culled tail, for the click-to-include chips. */
   culled?: CulledConcept[];
+  /** Served from a persisted earlier run — that run's ISO timestamp. */
+  asOf?: string;
   submissions?: Submission[];
   /** §9 — the SERVER's verdict on whose searches this list holds. Defaults to `"own"`, which is
    *  what every non-superuser gets and therefore the right default for a fixture. `"omit"` sends
@@ -638,7 +640,12 @@ describe("MatchaPanel", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
 
-    const bar = await screen.findByRole("button", { name: /115 researchers filtered out/ });
+    // Reskin 2026-08: the grant path's bar reads "Filtered by eligibility · N researchers,
+    // well-matched but ineligible" (the artboard's full-width toggle bar). Same count, same
+    // toggle behavior — only the chrome-level copy moved.
+    const bar = await screen.findByRole("button", {
+      name: /Filtered by eligibility · 115 researchers/,
+    });
     fireEvent.click(bar);
     const floor = document.querySelector('[data-slot="matcha-elig-floor"]')!;
     expect(floor.querySelectorAll("ul > li")).toHaveLength(100);
@@ -661,7 +668,7 @@ describe("MatchaPanel", () => {
 
     expect(await screen.findByText(/Nobody in these results is excluded by it/)).toBeTruthy();
     // …and it must NOT claim that when the gate is actually dropping people.
-    expect(screen.queryByRole("button", { name: /researchers filtered out/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Filtered by eligibility/ })).toBeNull();
   });
 
   it("says nothing about exclusions when the gate IS dropping people", async () => {
@@ -678,7 +685,7 @@ describe("MatchaPanel", () => {
     fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T collaborators" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
 
-    await screen.findByRole("button", { name: /115 researchers filtered out/ });
+    await screen.findByRole("button", { name: /Filtered by eligibility · 115 researchers/ });
     expect(screen.queryByText(/Nobody in these results is excluded by it/)).toBeNull();
   });
 
@@ -1035,6 +1042,40 @@ describe("MatchaPanel", () => {
     const paste = screen.getByLabelText(/the ask/i) as HTMLTextAreaElement;
     expect(paste.value).toBe("CAR T collaborators");
     expect(screen.getByRole("button", { name: "Rank researchers" })).toBeTruthy();
+  });
+
+  // ── Thin-match caution (assessMatchSignal) ───────────────────────────────
+  it("cautions on the ask card when the ask reduces to a single bare method", async () => {
+    stubFetch({
+      concepts: [
+        {
+          term: "CRISPR screening",
+          kind: "method",
+          members: ["CRISPR screening"],
+          centrality: 0.4,
+          weightFactor: 1.0,
+          // No `meshDescendantCount` — stays under the broad floor, so this is judged on
+          // `kind` alone: a single bare method with nothing to narrow it.
+        },
+      ],
+      candidates: [candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9 })],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CRISPR screening collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const note = screen.getByTestId("matcha-thin-signal");
+    expect(note.textContent).toMatch(
+      /Thin match\..*single method with nothing to narrow it/,
+    );
+  });
+
+  it("renders no thin-match caution once more than one concept was searched", async () => {
+    await renderAndSearch(); // CONCEPTS has 3 concepts
+    expect(screen.queryByTestId("matcha-thin-signal")).toBeNull();
   });
 
   // ── Evidence, via the SEARCH's own renderer (#1689/#1696) ───────────────────
@@ -1693,6 +1734,74 @@ describe("MatchaPanel", () => {
     // The grant leads: it renders BEFORE the paper in the block.
     const block = evidenceBlocks()[0][1];
     expect(block.indexOf("Resistance mechanisms")).toBeLessThan(block.indexOf("CAR T persistence"));
+  });
+
+  it("lists the scholar's concept-tagged PI TRIALS, linked to ClinicalTrials.gov", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.startsWith("/api/scholar/") && u.includes("/grants")) {
+        return {
+          ok: true,
+          json: async () => ({
+            trials: [
+              {
+                trialId: "NCT0000001",
+                nctNumber: "NCT0000001",
+                title: "Orca-T after reduced intensity conditioning",
+                titleHighlight: "<mark>Orca-T</mark> after reduced intensity conditioning",
+                status: "Recruiting",
+                isActive: true,
+                startYear: 2025,
+              },
+              { trialId: "19-0000001", nctNumber: null, title: "Nutrition in acute leukemia", titleHighlight: null, status: "Completed", isActive: false, startYear: 2019 },
+            ],
+            grants: [],
+            total: 0,
+          }),
+        };
+      }
+      if (u.startsWith("/api/search/key-paper"))
+        return { ok: true, json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }) };
+      if ((init?.method ?? "GET") === "GET") return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const link = await screen.findByRole("link", { name: "Orca-T after reduced intensity conditioning" });
+    expect(link.getAttribute("href")).toBe("https://clinicaltrials.gov/study/NCT0000001");
+    // The matched term gets the same pale-red pill as a PUB title.
+    const mark = link.querySelector("mark");
+    expect(mark?.textContent).toBe("Orca-T");
+    expect(mark?.className).toContain("bg-[#b31b1b]/10");
+    expect(screen.getAllByText("TRIAL")).toHaveLength(2);
+    expect(screen.getByText("Recruiting")).toBeTruthy();
+    // No NCT: plain title, labelled by the WCM protocol number.
+    expect(screen.getByText("Nutrition in acute leukemia").closest("a")).toBeNull();
+    expect(screen.getByText(/WCM protocol 19-0000001/)).toBeTruthy();
+    // Matcha asks the grants route for the concept's trials too.
+    const grantsUrl = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/grants"))!;
+    expect(grantsUrl).toMatch(/[?&]trials=1/);
+    expect(grantsUrl).toMatch(/conceptUi=|descriptorUis=/);
   });
 
   it("an expired grant reads 'expired <year>' + the scholar's role, never an active date", async () => {
@@ -2656,12 +2765,15 @@ describe("MatchaPanel", () => {
     expect(document.body.textContent).toContain("keyword only");
   });
 
-  // ── Retained searches (#6d) ────────────────────────────────────────────────
-  it("lists retained searches from the SERVER and says they are kept", async () => {
+  // ── Retained searches (#6d) — Matcha Empty State: inline on the idle form ────
+  it("lists retained searches from the SERVER, inline below the idle ask", async () => {
     // The server list replaced a localStorage history because only it can offer a delete that
     // actually erases the sponsor's words rather than clearing one browser. (It ALSO used to be
     // cross-officer, and that WAS the headline reason — §9 removed it for everyone but a
     // superuser once the audience became chairs pasting email. See the scope tests below.)
+    //
+    // Matcha Empty State redesign: the idle form no longer hides this behind a "Recent (N)"
+    // drawer trigger — it renders inline, below the ask card, from the SAME fetched `history`.
     stubFetch({
       concepts: CONCEPTS,
       candidates: THREE,
@@ -2678,16 +2790,17 @@ describe("MatchaPanel", () => {
       ],
     });
     render(<MatchaPanel />);
-    // The count rides the drawer trigger; opening it reveals the list + the retention notice.
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-    expect(await screen.findByText(/Recent searches \(1\)/)).toBeTruthy();
+    // No drawer trigger on the idle form any more.
+    expect(screen.queryByRole("button", { name: /Recent \(/ })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Recent searches · 1" })).toBeTruthy();
     expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
-    // The officer is TOLD, on the surface where it happens — not in a policy page.
-    expect(screen.getByText(/They’re saved/)).toBeTruthy();
-    expect(screen.getByText(/improve match quality/)).toBeTruthy();
+    expect(screen.getByText("12 matched")).toBeTruthy();
+    // Default (own) scope — §10 holds inline too: date only, no submitter name.
+    expect(screen.getByText("Jul 13, 2026")).toBeTruthy();
+    expect(screen.queryByText(/Dana Ellis/)).toBeNull();
   });
 
-  it("replaying a Recent opens the ask FULL, not collapsed to the pinned bar", async () => {
+  it("replaying a Recent row opens the ask FULL, not collapsed to the pinned bar", async () => {
     // The gripe: a Recent replay used to open the compact pinned bar ("already read"), hiding the
     // full "What we read from the ask" card. A replay is still the officer's context, so it now
     // opens Full exactly like a fresh paste; the scroll-tuck (D10) and manual Collapse still apply.
@@ -2707,8 +2820,8 @@ describe("MatchaPanel", () => {
       ],
     });
     render(<MatchaPanel />);
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-    fireEvent.click(await screen.findByText("cardiac fibrosis")); // replay the saved ask
+    // The inline row itself is the click target now — no drawer to open first.
+    fireEvent.click(await screen.findByRole("button", { name: /^cardiac fibrosis/ }));
 
     // Full card (its eyebrow) is present; the compact bar's "Show original ▾" is NOT.
     expect(await screen.findByText(/What we read from the ask/)).toBeTruthy();
@@ -2849,6 +2962,23 @@ describe("MatchaPanel", () => {
     expect(body.include).toEqual([]); // A's term must not ride into B's ranking
   });
 
+  it("labels a persisted answer with its date, and only Re-run asks for a fresh run", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, asOf: "2026-09-04T16:30:38Z" });
+    await renderAndSearch();
+
+    const posts = () =>
+      fetchMock.mock.calls
+        .filter((c) => (c[1] as { method?: string } | undefined)?.method === "POST")
+        .map((c) => JSON.parse(String((c[1] as { body: string }).body)));
+    // A submitted search never asks for `fresh` — a stored run is exactly what it wants.
+    expect(posts()[0].fresh).toBeUndefined();
+    expect(screen.getByText(/^Results from /).textContent).toMatch(/Results from Sep 4/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+    expect(posts()[1].fresh).toBe(true);
+  });
+
   describe("history scope (§9) and the submitter (§10)", () => {
     function submission(over: Partial<Submission> = {}): Submission {
       return {
@@ -2863,7 +2993,11 @@ describe("MatchaPanel", () => {
       };
     }
 
-    it("scope 'own': NO submitter column — every row is yours, so the name is a constant", async () => {
+    // Matcha Empty State redesign: the inline card follows the SAME §10 rule the drawer always
+    // did — the submitter name is superuser-view-only. Only the DATE half of the meta line
+    // (`{date}` alone for 'own', `{date} · {submittedByName}` for 'all') is unconditional; the
+    // name and the admin-view note (Lock icon + "Why?" tooltip) both gate on `historyScope`.
+    it("scope 'own': NO submitter name in the meta line — §10 holds inline too; no admin-view note", async () => {
       stubFetch({
         concepts: CONCEPTS,
         candidates: THREE,
@@ -2871,18 +3005,16 @@ describe("MatchaPanel", () => {
         submissions: [submission()],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-      await screen.findByText(/Recent searches \(1\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 1" });
 
       expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
-      expect(screen.queryByText("Dana Ellis")).toBeNull();
-      // And the notice must not tell a chair that the console at large reads their donor email.
-      expect(
-        screen.getByText(/Only you and console administrators can see your searches/),
-      ).toBeTruthy();
+      expect(screen.getByText("Jul 13, 2026")).toBeTruthy();
+      expect(screen.queryByText(/Dana Ellis/)).toBeNull();
+      // And the note must not tell a chair the console at large reads their donor email.
+      expect(screen.queryByText(/Admin view/)).toBeNull();
     });
 
-    it("scope 'all': the submitter's NAME renders — it is what distinguishes a superuser's rows", async () => {
+    it("scope 'all': the admin-view note renders, with a Why? tooltip on retention", async () => {
       stubFetch({
         concepts: CONCEPTS,
         candidates: THREE,
@@ -2893,12 +3025,15 @@ describe("MatchaPanel", () => {
         ],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(2\)/ }));
-      await screen.findByText(/Recent searches \(2\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 2" });
 
-      expect(screen.getByText("Dana Ellis")).toBeTruthy();
-      expect(screen.getByText("Chris Hale")).toBeTruthy();
-      expect(screen.getByText(/you are seeing every user's searches/)).toBeTruthy();
+      expect(screen.getByText(/Dana Ellis/)).toBeTruthy();
+      expect(screen.getByText(/Chris Hale/)).toBeTruthy();
+      expect(screen.getByText(/Admin view: all users. searches\./)).toBeTruthy();
+
+      const why = screen.getByText("Why?");
+      const tip = await tooltipTextOf(why);
+      expect(tip).toContain("Deleting a search removes its text for good");
     });
 
     it("renders the CWID fallback verbatim when the route could not resolve a name", async () => {
@@ -2912,13 +3047,12 @@ describe("MatchaPanel", () => {
         submissions: [submission({ submittedByName: "abc1234" })],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-      await screen.findByText(/Recent searches \(1\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 1" });
 
-      expect(screen.getByText("abc1234")).toBeTruthy();
+      expect(screen.getByText(/abc1234/)).toBeTruthy();
     });
 
-    it("FAILS CLOSED on a response with no scope — no submitter column", async () => {
+    it("FAILS CLOSED on a response with no scope — no admin-view note, no submitter name", async () => {
       // An older/partial payload must not default to the privileged rendering. `"omit"` really
       // drops the key (see stubFetch) — with `undefined` this test would pass on any code.
       stubFetch({
@@ -2928,14 +3062,14 @@ describe("MatchaPanel", () => {
         submissions: [submission()],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-      await screen.findByText(/Recent searches \(1\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 1" });
 
-      expect(screen.queryByText("Dana Ellis")).toBeNull();
+      expect(screen.queryByText(/Admin view/)).toBeNull();
+      expect(screen.queryByText(/Dana Ellis/)).toBeNull();
     });
   });
 
-  it("deletes a retained search and drops it from the list", async () => {
+  it("deletes a retained search and drops it from the inline list", async () => {
     const fetchMock = stubFetch({
       concepts: CONCEPTS,
       candidates: THREE,
@@ -2952,12 +3086,12 @@ describe("MatchaPanel", () => {
       ],
     });
     render(<MatchaPanel />);
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-    await screen.findByText(/Recent searches \(1\)/);
+    await screen.findByText("cardiac fibrosis");
 
     fireEvent.click(screen.getByRole("button", { name: /Delete search: cardiac fibrosis/ }));
-    // Last search deleted ⇒ the trigger (and the drawer) unmount; the row is gone.
+    // Last search deleted ⇒ the whole section (heading + card) unmounts; the row is gone.
     await waitFor(() => expect(screen.queryByText("cardiac fibrosis")).toBeNull());
+    expect(screen.queryByRole("heading", { name: /Recent searches/ })).toBeNull();
 
     // The row is gone from the list, and a DELETE actually went to the server — a client-only
     // hide would leave the sponsor's text sitting in the database.
@@ -2968,7 +3102,136 @@ describe("MatchaPanel", () => {
     expect(JSON.parse(String((deletes[0][1] as { body: string }).body))).toEqual({
       submissionId: "s1",
     });
-    expect(screen.queryByText("cardiac fibrosis")).toBeNull();
+    // The delete icon is a SIBLING of the row's replay button, not nested inside it — clicking it
+    // must never also fire a replay (no ranking POST at all here).
+    expect(rankCalls(fetchMock)).toBe(0);
+  });
+
+  it("a row click POSTs the row's OWN description — the replay path, verified end to end", async () => {
+    const fetchMock = stubFetch({
+      concepts: CONCEPTS,
+      candidates: THREE,
+      submissions: [
+        {
+          id: "s1",
+          description: "We fund cardiac fibrosis work.",
+          title: "cardiac fibrosis",
+          engine: "spine",
+          candidateCount: 12,
+          submittedByName: "Dana Ellis",
+          createdAt: "2026-07-13T10:00:00.000Z",
+        },
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /^cardiac fibrosis/ }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(1));
+
+    const post = fetchMock.mock.calls.find(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    )!;
+    const body = JSON.parse((post[1] as { body: string }).body) as { description: string };
+    expect(body.description).toBe("We fund cardiac fibrosis work.");
+  });
+
+  it("collapses to 7 rows with a Show-all control, which expands the full list", async () => {
+    const submissions = Array.from({ length: 9 }, (_, i) => ({
+      id: `s${i + 1}`,
+      description: `ask ${i + 1}`,
+      title: `search ${i + 1}`,
+      engine: "spine",
+      candidateCount: i + 1,
+      submittedByName: "Dana Ellis",
+      createdAt: "2026-07-13T10:00:00.000Z",
+    }));
+    stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions });
+    render(<MatchaPanel />);
+    await screen.findByRole("heading", { name: "Recent searches · 9" });
+
+    // Only the first 7 rows render, plus the Show-all control — never rows 8 and 9.
+    for (let i = 1; i <= 7; i++) expect(screen.getByText(`search ${i}`)).toBeTruthy();
+    expect(screen.queryByText("search 8")).toBeNull();
+    expect(screen.queryByText("search 9")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all 9 searches" }));
+    expect(screen.getByText("search 8")).toBeTruthy();
+    expect(screen.getByText("search 9")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+  });
+
+  it("renders NO recent-searches section when history is empty", async () => {
+    stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: [] });
+    render(<MatchaPanel />);
+    // Let the mount history GET settle before asserting its absence.
+    await screen.findByLabelText(/the ask/i);
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: /Recent searches/ })).toBeNull();
+      expect(document.querySelector('[data-slot="matcha-recent"]')).toBeNull();
+    });
+  });
+
+  // ── Idle ask-card footer hint (Matcha Empty State) ───────────────────────────
+  it("idle submit is disabled with an empty ask, and the hint swaps to a word count once typed", async () => {
+    render(<MatchaPanel />);
+    const submit = screen.getByRole("button", { name: "Rank researchers" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(
+      screen.getByText("Paste text to enable matching. Nothing is saved until you run it"),
+    ).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "glioblastoma immunotherapy trial" },
+    });
+    expect(submit.disabled).toBe(false);
+    expect(screen.getByText("3 words read")).toBeTruthy();
+    expect(
+      screen.queryByText("Paste text to enable matching. Nothing is saved until you run it"),
+    ).toBeNull();
+
+    // Whitespace-only is still an empty ask.
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "   " } });
+    expect(submit.disabled).toBe(true);
+    expect(
+      screen.getByText("Paste text to enable matching. Nothing is saved until you run it"),
+    ).toBeTruthy();
+  });
+
+  // ── Idle page chrome: maroon accent + subtitle + ask card (Matcha Empty State) ──
+  it("idle renders the maroon accent bar and the subtitle prose", async () => {
+    render(<MatchaPanel />);
+    expect(document.querySelector(".bg-apollo-maroon")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Paste an opportunity description, an email from a sponsor, or a few phrases\./,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("the accent bar and subtitle are gone once a search completes", async () => {
+    await renderAndSearch();
+    expect(document.querySelector(".bg-apollo-maroon")).toBeNull();
+    expect(
+      screen.queryByText(/Paste an opportunity description, an email from a sponsor/),
+    ).toBeNull();
+  });
+
+  it("grantMatcha idle: the accent + ask card still render, but NO subtitle", async () => {
+    // The corpus toggle changes what this surface ranks, so the people-path/paste-flow prose
+    // would misdescribe it — only the subtitle is gated on `grantMatcha`.
+    render(<MatchaPanel grantMatcha />);
+    expect(document.querySelector(".bg-apollo-maroon")).toBeTruthy();
+    expect(screen.getByTestId("matcha-target-grants")).toBeTruthy(); // the ask card still renders
+    expect(
+      screen.queryByText(/Paste an opportunity description, an email from a sponsor/),
+    ).toBeNull();
+  });
+
+  it("the textarea keeps its accessible name ('The ask') now that it's wrapped in the ask card", async () => {
+    render(<MatchaPanel />);
+    const textarea = screen.getByLabelText("The ask");
+    expect(textarea.tagName).toBe("TEXTAREA");
+    // It's actually wrapped in the new card now, not just still label-associated.
+    expect(textarea.closest(".border-apollo-border.rounded-xl")).toBeTruthy();
   });
 });
 
@@ -3082,5 +3345,192 @@ describe("MatchaPanel — #1780 Phase 2 culled chip-picker", () => {
     }) as HTMLButtonElement;
     expect(chip.disabled).toBe(true);
     expect(screen.getByText(/maximum terms reached/i)).toBeTruthy();
+  });
+});
+
+/**
+ * Grant-path reskin chrome (Matcha Redesign.dc.html) — gated on `eligibility`, the file's own
+ * grant-vs-email boundary. Two invariants ride every test here: the re-chrome is REACHABLE only
+ * on the grant path (the email surface renders exactly as before — its own suite above pins
+ * that), and re-chromed controls keep their behavior contracts (testids, toggles, counts).
+ */
+describe("MatchaPanel — grant-path reskin (Matcha Redesign.dc.html)", () => {
+  /** No hard stage gate — chrome tests should not entangle the eligibility floor. */
+  const NO_GATE = { careerStages: null, esiTargeted: false, usRequired: false } as const;
+
+  async function renderGrantAndSearch() {
+    render(<MatchaPanel grantMatcha eligibility={NO_GATE} />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CAR T collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+  }
+
+  it("summary card: opportunity-text label, concept summary line, icon re-run — no dates", async () => {
+    await renderGrantAndSearch();
+
+    expect(screen.getByText("Matcha · what we read from the opportunity text")).toBeTruthy();
+    // The 16px/600 summary line is ALL extracted concepts, joined — not the 2-concept handle.
+    expect(document.querySelector('[data-slot="matcha-ask"]')!.textContent).toBe(
+      "Immuno-oncology, Cancer Metabolism, CRISPR screening",
+    );
+    // The artboard's "parsed …/scored …" dates are fiction (no data source) and must not ship.
+    expect(screen.queryByText(/parsed|scored/i)).toBeNull();
+    // The re-run is the circular-arrows icon button; the email path's text button is gone here.
+    expect(screen.getByRole("button", { name: "Match researchers again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Re-run match" })).toBeNull();
+  });
+
+  it("source-text disclosure starts COLLAPSED and toggles the existing highlighted paste", async () => {
+    await renderGrantAndSearch();
+
+    // Collapsed by default: no highlighted paste, no marks.
+    expect(document.querySelector('[data-slot="matcha-ask-quote"]')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Show source text with matched concepts/ }),
+    );
+    // The EXISTING rendering, unchanged, now inside the disclosure: the read-only paste with
+    // its term marks (the ask "CAR T collaborators" carries no verbatim concept, so the
+    // explainer's honest lower bound shows too).
+    expect(document.querySelector('[data-slot="matcha-ask-quote"]')).not.toBeNull();
+    expect(screen.getByText(/0 of 3 concepts are highlighted/)).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Hide source text with matched concepts/ }),
+    );
+    expect(document.querySelector('[data-slot="matcha-ask-quote"]')).toBeNull();
+  });
+
+  it("compact table: header row, artboard chip tones, evidence bar — testids kept", async () => {
+    window.localStorage.clear(); // the app default IS compact — the table is the first-visit view
+    await renderGrantAndSearch();
+
+    // The artboard's uppercase header cells.
+    for (const label of ["Researcher", "Match", "Evidence · concepts hit", "Latest work"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    // Rows keep the pinned slot, and each still carries its shortlist checkbox + expand button.
+    const rows = document.querySelectorAll('[data-slot="matcha-compact-row"]');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" })).toBeTruthy();
+
+    // Chip tones: Alice tops the ranking (strong ⇒ green tint); the chip is the artboard's
+    // borderless tint, not the email path's outlined TIER_CLASS.
+    const alice = screen.getByRole("button", { name: "Expand Alice Alpha" });
+    // The tier chip is the row's one `capitalize` span (its cell wrapper carries no class).
+    const chip = alice.querySelector("span.capitalize")!;
+    expect(chip.textContent).toBe("strong");
+    expect(chip.className).toContain("bg-apollo-green-tint");
+
+    // The evidence cell keeps the pinned count beside the artboard's single fill bar.
+    expect(alice.querySelector('[data-slot="matcha-asks-count"]')!.textContent).toBe("1/3");
+  });
+
+  it("relevance floor: the artboard bar re-chromes the SAME toggle — count, Show/Hide, dimmed rows", async () => {
+    await renderGrantAndSearch(); // detailed density (suite pin) — the bar is density-agnostic
+
+    // Cara is weak-tier against Alice's top score ⇒ the floor bar, in the artboard's copy.
+    const bar = screen.getByRole("button", { name: /Relevance floor · 1 weaker match, below/ });
+    expect(screen.queryByText("Cara Gamma")).toBeNull();
+
+    fireEvent.click(bar);
+    expect(screen.getByText("Cara Gamma")).toBeTruthy();
+    // Revealed rows render dimmed (the artboard's 0.65), inside the same slot as ever.
+    const floor = document.querySelector('[data-slot="matcha-floor"]')!;
+    expect(floor.querySelector("ul")!.className).toContain("opacity-65");
+
+    fireEvent.click(screen.getByRole("button", { name: /Relevance floor/ }));
+    expect(screen.queryByText("Cara Gamma")).toBeNull();
+  });
+});
+
+describe("MatchaPanel — zero-results honesty (owner ruling 2026-08-21)", () => {
+  const NO_GATE = { careerStages: null, esiTargeted: false, usRequired: false } as const;
+
+  it("resultsSummary: every number in one phrase comes from one pipeline stage", () => {
+    // No gate — unchanged legacy shapes.
+    expect(resultsSummary(100, 120, 120)).toBe("Top 100 of 120 researchers");
+    expect(resultsSummary(1, 1, 1)).toBe("1 researcher");
+    expect(resultsSummary(5, 5, 20)).toBe("5 matching · 20 ranked");
+    // The K99 shape: the gate hid every match — never "Top 0 of 77".
+    expect(resultsSummary(0, 0, 77, 77)).toBe("0 eligible · 77 filtered by eligibility");
+    // Gate hid some; facets narrowed nothing further.
+    expect(resultsSummary(72, 72, 75, 3)).toBe("72 eligible · 3 filtered by eligibility");
+    // Facets ALSO narrowing — the pool earns naming.
+    expect(resultsSummary(10, 10, 75, 3)).toBe("10 matching · 75 ranked · 3 filtered by eligibility");
+  });
+
+  it("when the gate hides EVERYONE, the page says so and keeps the fold reachable", async () => {
+    // 133 staging opportunities reproduce this: a postdoc-only stage gate over a
+    // faculty-dominant pool. Nobody in POOL carries a stage, and absent FAILS the gate.
+    stubFetch({ concepts: CONCEPTS, candidates: POOL });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={{ careerStages: ["early"], esiTargeted: false, usRequired: false }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CAR T collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+
+    // The explanation names the axis in the rail's own vocabulary…
+    const explain = await screen.findByText(
+      /All 120 matched researchers are hidden by the Career stage filter/,
+    );
+    expect(explain.closest('[data-slot="matcha-gate-empty"]')).toBeTruthy();
+    expect(screen.getByText(/Uncheck Career stage under Eligibility/)).toBeTruthy();
+    // …the generic empty line does NOT render over a hidden-everyone state…
+    expect(screen.queryByText("No researchers match the selected filters.")).toBeNull();
+    // …the header counts one pipeline stage…
+    expect(screen.getByText(/0 eligible · 120 filtered by eligibility/)).toBeTruthy();
+    // …and the fold is on screen and opens to the hidden rows.
+    const bar = screen.getByRole("button", {
+      name: /Filtered by eligibility · 120 researchers/,
+    });
+    fireEvent.click(bar);
+    const floor = document.querySelector('[data-slot="matcha-elig-floor"]')!;
+    expect(floor.querySelectorAll("ul > li").length).toBeGreaterThan(0);
+  });
+
+  it("RM1 empty state: grant path gains the recovery sentence and a sourceUrl link", async () => {
+    stubFetch({ concepts: [], candidates: [] });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={NO_GATE}
+        initialDescription="Applications are due May 27. One per institution."
+        autoRun
+        sourceUrl="https://grants.example.org/rm1"
+      />,
+    );
+    await screen.findByText(/Nothing was extracted to search on/);
+    expect(screen.getByText(/research-strategy or program-description section/)).toBeTruthy();
+    const link = screen.getByRole("link", { name: /More information/ });
+    expect(link.getAttribute("href")).toBe("https://grants.example.org/rm1");
+  });
+
+  it("RM1 empty state: no sourceUrl → no link; email path → no recovery sentence", async () => {
+    stubFetch({ concepts: [], candidates: [] });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={NO_GATE}
+        initialDescription="Applications are due May 27."
+        autoRun
+      />,
+    );
+    await screen.findByText(/Nothing was extracted to search on/);
+    expect(screen.queryByRole("link", { name: /More information/ })).toBeNull();
+
+    cleanup();
+    // The email path's ask is the officer's own paste — no FOA to point at.
+    stubFetch({ concepts: [], candidates: [] });
+    render(<MatchaPanel initialDescription="Applications are due May 27." autoRun />);
+    await screen.findByText(/Nothing was extracted to search on/);
+    expect(screen.queryByText(/research-strategy or program-description section/)).toBeNull();
   });
 });

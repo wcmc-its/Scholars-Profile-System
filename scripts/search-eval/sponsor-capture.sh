@@ -14,9 +14,11 @@
 #   SPONSOR_COOKIE_FILE=~/.sps-sponsor-cookie DRAW=1 ./sponsor-capture.sh
 #   HOST=https://scholars-staging.weill.cornell.edu DRAW=2 ./sponsor-capture.sh   # a 2nd draw
 #
-# DRAW is only a directory label. Two draws taken <30 min apart are NOT independent — the route
-# serves cached payloads (TTL 5 min, stale-while-revalidate to 30 min), so a fast second sweep
-# re-measures the same extraction. Leave >30 min between draws that are meant to be independent.
+# DRAW is only a directory label. Every POST here sends `fresh: true`: the route persists each
+# run's answer on its retention row (no expiry) and serves it on the next identical paste, so
+# without the flag a second draw — or a post-deploy re-measure — would re-read the FIRST run's
+# stored ranking byte-for-byte. `fresh` skips the stored row; the per-task RAM cache (5 min
+# fresh, 30 min stale) still applies, so keep >30 min between draws meant to be independent.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -64,7 +66,7 @@ while IFS= read -r prompt; do
       -H 'sec-fetch-site: same-origin' \
       -H "origin: $HOST" \
       -H "cookie: $SPONSOR_COOKIE" \
-      --data "$(jq -n --arg d "$paste" '{description:$d}')")"
+      --data "$(jq -n --arg d "$paste" '{description:$d, fresh:true}')")"
     code="${resp##*$'\n'}"
     body="${resp%$'\n'*}"
     [[ "$code" == "200" ]] && break

@@ -1,14 +1,28 @@
 /**
  * `components/edit/console-shell.tsx` — the shared chrome for the /edit console
- * list/queue pages (console-shell-migration-plan.md). Asserts the shell wiring:
- * the warm-page shell, ONE console-variant top bar (no second <h1>, no in-bar
+ * list/queue pages (console-shell-migration-plan.md; `loadConsoleTabs` migration,
+ * docs/edit-console-ia-spec.md Part B §2). Asserts the shell wiring: the
+ * warm-page shell, ONE console-variant top bar (no second <h1>, no in-bar
  * account menu / Sign out), the correct AdminSubnav `active`, the `#console-main`
- * region, and the role-gated tab set for a superuser vs a comms_steward.
+ * region, and that the tab set ConsoleShell renders matches whatever
+ * `loadConsoleTabs` returns (mocked here — its own role × tab matrix is
+ * `tests/unit/console-tab-matrix.test.ts`'s job, not this file's).
+ *
+ * `ConsoleShell` is an async Server Component (it awaits `loadConsoleTabs`), so
+ * every test resolves it first (`render(await ConsoleShell({...}))`) rather than
+ * passing JSX straight to `render()` — react-dom's synchronous renderer can't
+ * mount an unresolved async component.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import type { EditSession } from "@/lib/auth/superuser";
+import type { ConsoleTabState } from "@/lib/edit/console-tabs.server";
+
+const { mockLoadConsoleTabs, mockCountTitles } = vi.hoisted(() => ({
+  mockLoadConsoleTabs: vi.fn(),
+  mockCountTitles: vi.fn(),
+}));
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
@@ -27,40 +41,67 @@ vi.mock("@/components/site/account-menu", () => ({
   ),
 }));
 
+vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+vi.mock("@/lib/edit/console-tabs.server", () => ({ loadConsoleTabs: mockLoadConsoleTabs }));
+vi.mock("@/lib/edit/titles-queue", () => ({ countTitlesNeedingReview: mockCountTitles }));
+
 import { ConsoleShell } from "@/components/edit/console-shell";
 
 function session(overrides: Partial<EditSession>): EditSession {
   return { cwid: "aaa0001", isSuperuser: false, isCommsSteward: false, ...overrides };
 }
 
-describe("ConsoleShell", () => {
-  beforeEach(() => {
-    vi.stubEnv("SELF_EDIT_ADMINISTRATORS_TAB", "on");
-    vi.stubEnv("COMMS_STEWARD_ENABLED", "on");
-    vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
-  });
-  afterEach(() => vi.unstubAllEnvs());
+const NO_TABS: ConsoleTabState = {
+  profiles: false,
+  units: false,
+  slugRequests: false,
+  honors: false,
+  news: false,
+  slugs: false,
+  administrators: false,
+  methods: false,
+  reports: false,
+  coi: false,
+  dataSharing: false,
+  activity: false,
+  usage: false,
+  orcidCoverage: false,
+  etlStatus: false,
+  cores: false,
+  matcha: false,
+  grantMatcha: false,
+  roleVocabulary: false,
+  titles: false,
+};
 
-  it("renders the shell chrome once, with the page's <h1> the only h1", () => {
+function tabs(overrides: Partial<ConsoleTabState>): ConsoleTabState {
+  return { ...NO_TABS, ...overrides };
+}
+
+describe("ConsoleShell", () => {
+  it("renders the shell chrome once, with the page's <h1> the only h1", async () => {
+    mockLoadConsoleTabs.mockResolvedValue(tabs({ activity: true }));
     const { container } = render(
-      <ConsoleShell
-        active="activity"
-        session={session({ isSuperuser: true })}
-        pendingSlugRequests={null}
-        pendingHonors={null}
-      >
-        <h1>Edit activity</h1>
-      </ConsoleShell>,
+      await ConsoleShell({
+        active: "activity",
+        session: session({ isSuperuser: true }),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        children: <h1>Edit activity</h1>,
+      }),
     );
 
     // Warm-page shell + a skip link into the main region.
     expect(container.querySelector(".bg-apollo-page")).toBeTruthy();
     expect(screen.getByText("Skip to content").getAttribute("href")).toBe("#console-main");
 
-    // The console-variant top bar: the console name is a NON-heading span, so the
-    // page's own <h1> is the ONLY h1 — no double-heading.
-    const title = screen.getByText("Scholars Profile Console");
-    expect(title.tagName).toBe("SPAN");
+    // The console-variant top bar: the console name is a NON-heading span (now
+    // wrapping a brand Link to /edit — dwd2001 nav fix), so the page's own
+    // <h1> is the ONLY h1 — no double-heading.
+    const brandLink = screen.getByRole("link", { name: /Scholars Console/ });
+    expect(brandLink.getAttribute("href")).toBe("/edit");
+    expect(brandLink.closest("span")?.tagName).toBe("SPAN");
+    expect(screen.queryByRole("heading", { name: /^Scholars Console$/ })).toBeNull();
     const h1s = container.querySelectorAll("h1");
     expect(h1s.length).toBe(1);
     expect(h1s[0].textContent).toBe("Edit activity");
@@ -75,63 +116,194 @@ describe("ConsoleShell", () => {
     expect(main?.tagName).toBe("MAIN");
   });
 
-  it("superuser sees the superuser strip (Administrators / URL registry / Activity / Usage)", () => {
+  it("renders every tab loadConsoleTabs turns on (superuser — full strip)", async () => {
+    mockLoadConsoleTabs.mockResolvedValue(
+      tabs({
+        profiles: true,
+        units: true,
+        administrators: true,
+        activity: true,
+        usage: true,
+        reports: true,
+      }),
+    );
     render(
-      <ConsoleShell
-        active="activity"
-        session={session({ isSuperuser: true })}
-        pendingSlugRequests={null}
-        pendingHonors={null}
-      >
-        <h1>Edit activity</h1>
-      </ConsoleShell>,
+      await ConsoleShell({
+        active: "activity",
+        session: session({ isSuperuser: true }),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        children: <h1>Edit activity</h1>,
+      }),
     );
     expect(screen.getByTestId("admin-tab-administrators")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-slugs")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-activity")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-usage")).toBeTruthy();
-    // Reports (Cancer Center console) — same base gate as Data quality.
-    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
+    expect(screen.getByTestId("admin-tab-reports").getAttribute("href")).toBe("/edit/reports");
+    expect(mockLoadConsoleTabs).toHaveBeenCalledWith(session({ isSuperuser: true }), {});
   });
 
-  it("comms_steward sees Profiles + Units + Methods, NOT the superuser-only surfaces", () => {
+  it("hides whatever loadConsoleTabs turns off (comms_steward — no superuser-only surfaces)", async () => {
+    mockLoadConsoleTabs.mockResolvedValue(
+      tabs({ profiles: true, units: true, methods: true, reports: true }),
+    );
     render(
-      <ConsoleShell
-        active="methods"
-        session={session({ isCommsSteward: true })}
-        pendingSlugRequests={null}
-        pendingHonors={null}
-      >
-        <h1>Method families</h1>
-      </ConsoleShell>,
+      await ConsoleShell({
+        active: "methods",
+        session: session({ isCommsSteward: true }),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        children: <h1>Method families</h1>,
+      }),
     );
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-units")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
-    // A comms_steward is a global editor, so Reports shows here too — same
-    // base gate as Data quality (deriveConsoleTabs, not a superuser-only tab).
     expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
-    // Superuser-only surfaces stay hidden.
+    // Superuser-only surfaces stay hidden — `superuserSurfaces` still comes
+    // straight from `session.isSuperuser`, independent of `loadConsoleTabs`.
     expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
     expect(screen.queryByTestId("admin-tab-activity")).toBeNull();
   });
 
-  it("a unit Owner/Curator (non-global) gets Reports only via the page's own reportsTab override", () => {
+  it("shows Usage + ORCID coverage to a non-superuser unit admin — both ride the same canViewUsage grant", async () => {
+    mockLoadConsoleTabs.mockResolvedValue(tabs({ profiles: true, units: true, usage: true, orcidCoverage: true }));
     render(
-      <ConsoleShell
-        active="reports"
-        session={session({})}
-        pendingSlugRequests={null}
-        pendingHonors={null}
-        reportsTab={0}
-      >
-        <h1>Reports</h1>
-      </ConsoleShell>,
+      await ConsoleShell({
+        active: "orcid-coverage",
+        session: session({}),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        children: <h1>ORCID coverage</h1>,
+      }),
     );
-    // The override REPLACES the derived (null) base — mirrors dataQualityTab.
-    expect(screen.getByTestId("admin-tab-reports").getAttribute("aria-current")).toBe("page");
-    // Still no other superuser/global surfaces leak in.
+    expect(screen.getByTestId("admin-tab-usage")).toBeTruthy();
+    expect(screen.getByTestId("admin-tab-orcid-coverage").getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByTestId("admin-tab-activity")).toBeNull();
+  });
+
+  it("hides the Reports tab from a plain scholar with no reportsTab override", async () => {
+    mockLoadConsoleTabs.mockResolvedValue(NO_TABS);
+    render(
+      await ConsoleShell({
+        active: "profiles",
+        session: session({}),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        children: <h1>Profiles</h1>,
+      }),
+    );
+    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
+  });
+
+  it("shows the Reports tab to a unit Owner/Curator via the page's reportsTab override, even when loadConsoleTabs itself says no", async () => {
+    // `reports: false` — this viewer doesn't earn the tab everywhere, but the
+    // page they're standing on (one of the /edit/reports/* family) forces it on
+    // unconditionally, an OR-only escape hatch that can't reintroduce a
+    // Gap-3/4b-shaped bug (see the module doc comment).
+    mockLoadConsoleTabs.mockResolvedValue(NO_TABS);
+    render(
+      await ConsoleShell({
+        active: "reports",
+        session: session({}),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        reportsTab: true,
+        children: <h1>Reports</h1>,
+      }),
+    );
+    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
+    // Neither Profiles nor the superuser strip leaks in from this override.
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
+    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
+  });
+
+  it("shows the Units tab to anyone via the page's unitsTab override, even when loadConsoleTabs itself says no", async () => {
+    // `/edit/units` has no unit-admin gate of its own — see the module doc
+    // comment — so it forces `unitsTab` on unconditionally too.
+    mockLoadConsoleTabs.mockResolvedValue(NO_TABS);
+    render(
+      await ConsoleShell({
+        active: "units",
+        session: session({}),
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        unitsTab: true,
+        children: <h1>Org units</h1>,
+      }),
+    );
+    expect(screen.getByTestId("admin-tab-units")).toBeTruthy();
+  });
+
+  describe("the Titles queue tab and its pill", () => {
+    it("reads the Needs review count itself for a viewer who has the tab — every console page, no per-page wiring", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(7);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ methods: true, titles: true }));
+      render(
+        await ConsoleShell({
+          active: "methods",
+          session: session({ isCommsSteward: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Method families</h1>,
+        }),
+      );
+      const tab = screen.getByTestId("admin-tab-titles-queue");
+      expect(tab.getAttribute("href")).toBe("/edit/titles-queue");
+      expect(tab.textContent).toBe("Titles7");
+      expect(mockCountTitles).toHaveBeenCalledTimes(1);
+    });
+
+    it("a failed count (null) shows the tab with no pill", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(null);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ titles: true }));
+      render(
+        await ConsoleShell({
+          active: "activity",
+          session: session({ isSuperuser: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Edit activity</h1>,
+        }),
+      );
+      expect(screen.getByTestId("admin-tab-titles-queue").textContent).toBe("Titles");
+    });
+
+    it("uses the page's own count when it passes one (the queue page) and reads nothing", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(99);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ titles: true }));
+      render(
+        await ConsoleShell({
+          active: "titles-queue",
+          session: session({ isSuperuser: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          pendingTitles: 3,
+          children: <h1>Titles</h1>,
+        }),
+      );
+      const tab = screen.getByTestId("admin-tab-titles-queue");
+      expect(tab.textContent).toBe("Titles3");
+      expect(tab.getAttribute("aria-current")).toBe("page");
+      expect(mockCountTitles).not.toHaveBeenCalled();
+    });
+
+    it("hides the tab, and never counts, for a viewer without it", async () => {
+      mockCountTitles.mockReset().mockResolvedValue(7);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ profiles: true, units: true }));
+      render(
+        await ConsoleShell({
+          active: "profiles",
+          session: session({}),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Profiles</h1>,
+        }),
+      );
+      expect(screen.queryByTestId("admin-tab-titles-queue")).toBeNull();
+      expect(mockCountTitles).not.toHaveBeenCalled();
+    });
   });
 });

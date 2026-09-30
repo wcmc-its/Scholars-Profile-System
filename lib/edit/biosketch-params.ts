@@ -19,6 +19,7 @@
  */
 
 import {
+  biosketchVersionUsesApplicationRole,
   defaultBiosketchPromptVersionId,
   isValidBiosketchPromptVersionId,
   type BiosketchPromptVersionId,
@@ -51,6 +52,38 @@ export const BIOSKETCH_PROJECT_TITLE_MAX = 300;
 export const BIOSKETCH_AIMS_MAX = 3_000;
 export const BIOSKETCH_INSTRUCTIONS_MAX = 500;
 export const BIOSKETCH_EMPHASIS_MAX = 200;
+/** #2653 v8 — the optional one-line "What you will do on this project" (Personal Statement). */
+export const BIOSKETCH_CONTRIBUTION_LINE_MAX = 200;
+
+/**
+ * #2653 v8 — the scholar's role ON THE APPLICATION (Personal Statement only). Distinct from
+ * v6's element (iv), which is the author role WITHIN a contribution. Each value selects one
+ * server-side prompt fragment naming the argument the statement makes and the evidence to favor.
+ * Insertion order = selector order.
+ */
+export const BIOSKETCH_APPLICATION_ROLE_LABELS = {
+  pd_pi: "PD/PI",
+  mpi: "MPI (multiple PD/PI)",
+  co_investigator: "Co-Investigator",
+  mentor_sponsor: "Mentor or Sponsor (K / F / T)",
+  collaborator_consultant: "Collaborator or Consultant",
+  core_director: "Core or Resource Director",
+  other_significant_contributor: "Other Significant Contributor",
+  candidate: "Candidate (K / F applicant)",
+} as const;
+
+export type BiosketchApplicationRole = keyof typeof BIOSKETCH_APPLICATION_ROLE_LABELS;
+
+export const BIOSKETCH_APPLICATION_ROLES = Object.keys(
+  BIOSKETCH_APPLICATION_ROLE_LABELS,
+) as BiosketchApplicationRole[];
+
+export function isBiosketchApplicationRole(value: unknown): value is BiosketchApplicationRole {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(BIOSKETCH_APPLICATION_ROLE_LABELS, value)
+  );
+}
 
 /** The steering controls a biosketch generate request carries. The Personal Statement
  *  sub-mode additionally REQUIRES `projectTitle` + `aims` (enforced at the route). */
@@ -68,6 +101,12 @@ export type BiosketchParams = {
   emphasis: string;
   /** Optional free-text steering note — UNTRUSTED; trimmed, <= BIOSKETCH_INSTRUCTIONS_MAX. */
   instructions: string;
+  /** #2653 v8, Personal Statement only: the scholar's role on the application. REQUIRED for
+   *  that mode under a version with `applicationRole` (v8); ignored by v5–v7. `null` = unset. */
+  applicationRole: BiosketchApplicationRole | null;
+  /** #2653 v8, Personal Statement only: optional "What you will do on this project" line.
+   *  UNTRUSTED; trimmed, <= BIOSKETCH_CONTRIBUTION_LINE_MAX. Ignored by v5–v7. */
+  contributionLine: string;
   /** The biosketch prompt version to generate with (#917 v6). DERIVED from
    *  `defaultBiosketchPromptVersionId()` on the default; a non-default value is honored only
    *  for a privileged actor (the route downgrades others). Persisted for A/B + restore. */
@@ -83,6 +122,8 @@ export const DEFAULT_BIOSKETCH_PARAMS: BiosketchParams = {
   aims: "",
   emphasis: "",
   instructions: "",
+  applicationRole: null,
+  contributionLine: "",
   // DERIVED, never a literal — so the cdk `BIOSKETCH_PROMPT_VERSION_DEFAULT` lever steers it.
   promptVersion: defaultBiosketchPromptVersionId(),
 };
@@ -131,6 +172,8 @@ export function normalizeBiosketchParams(raw: unknown): BiosketchParams {
     aims: clampString(obj.aims, BIOSKETCH_AIMS_MAX),
     emphasis: clampString(obj.emphasis, BIOSKETCH_EMPHASIS_MAX),
     instructions: clampString(obj.instructions, BIOSKETCH_INSTRUCTIONS_MAX),
+    applicationRole: isBiosketchApplicationRole(obj.applicationRole) ? obj.applicationRole : null,
+    contributionLine: clampString(obj.contributionLine, BIOSKETCH_CONTRIBUTION_LINE_MAX),
     // Untrusted: a non-default version posted by an unprivileged actor is downgraded at the
     // route; here we only guarantee a VALID id (unknown → the live default).
     promptVersion: isValidBiosketchPromptVersionId(obj.promptVersion)
@@ -141,14 +184,18 @@ export function normalizeBiosketchParams(raw: unknown): BiosketchParams {
 
 /**
  * The Personal Statement sub-mode REQUIRES a project title and aims — without them the
- * model cannot honestly write the "directly relevant experience" framing (spec §USER-TURN).
- * Returns the list of missing required field names (`[]` when the inputs are satisfied, or
- * when the mode is Contributions, which needs neither). The route turns a non-empty result
- * into a 400 rather than generating a degraded statement.
+ * model cannot honestly write the "directly relevant experience" framing (spec §USER-TURN) —
+ * and, under a v8 prompt, the role on the application (#2653; the role picks the argument the
+ * statement makes). Returns the list of missing required field names (`[]` when the inputs
+ * are satisfied, or when the mode is Contributions, which needs none). The route turns a
+ * non-empty result into a 400 rather than generating a degraded statement.
  */
 export function missingPersonalStatementInputs(params: BiosketchParams): string[] {
   if (params.mode !== "personal_statement") return [];
   const missing: string[] = [];
+  if (biosketchVersionUsesApplicationRole(params.promptVersion) && params.applicationRole === null) {
+    missing.push("applicationRole");
+  }
   if (params.projectTitle.length === 0) missing.push("projectTitle");
   if (params.aims.length === 0) missing.push("aims");
   return missing;

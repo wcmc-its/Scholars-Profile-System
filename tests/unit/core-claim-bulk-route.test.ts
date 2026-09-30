@@ -14,15 +14,19 @@ const {
   mockCoreFindUnique,
   mockClaimFindMany,
   mockUnitAdminFindUnique,
+  mockPublicationFindMany,
   mockTransaction,
   mockClaimUpsert,
+  mockClaimUpdate,
   mockAppendAuditRow,
   mockWriteBack,
 } = vi.hoisted(() => ({
+  mockClaimUpdate: vi.fn(),
   mockReadEditRequest: vi.fn(),
   mockCoreFindUnique: vi.fn(),
   mockClaimFindMany: vi.fn(),
   mockUnitAdminFindUnique: vi.fn(),
+  mockPublicationFindMany: vi.fn(),
   mockTransaction: vi.fn(),
   mockClaimUpsert: vi.fn(),
   mockAppendAuditRow: vi.fn(),
@@ -41,6 +45,7 @@ vi.mock("@/lib/db", () => ({
       core: { findUnique: mockCoreFindUnique },
       coreClaim: { findMany: mockClaimFindMany },
       unitAdmin: { findUnique: mockUnitAdminFindUnique },
+      publication: { findMany: mockPublicationFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -84,11 +89,19 @@ beforeEach(() => {
   mockCoreFindUnique.mockResolvedValue({ id: "2" });
   mockUnitAdminFindUnique.mockResolvedValue(null); // role none; superuser session allows
   mockClaimFindMany.mockResolvedValue([]); // no prior active claims by default
+  // Every requested pmid "exists" by default — echoes back whatever was queried,
+  // so existing tests don't need to know about this check. Override per-test to
+  // exercise notFound.
+  mockPublicationFindMany.mockImplementation(
+    async ({ where }: { where: { pmid: { in: string[] } } }) =>
+      where.pmid.in.map((pmid) => ({ pmid })),
+  );
   mockClaimUpsert.mockResolvedValue({});
   mockAppendAuditRow.mockResolvedValue(undefined);
   mockWriteBack.mockResolvedValue({ ok: true, skipped: false });
+  mockClaimUpdate.mockResolvedValue({});
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
-    cb({ coreClaim: { upsert: mockClaimUpsert } }),
+    cb({ coreClaim: { upsert: mockClaimUpsert, update: mockClaimUpdate } }),
   );
 });
 
@@ -156,6 +169,18 @@ describe("POST /api/edit/core-claim/bulk", () => {
     expect(mockClaimUpsert).toHaveBeenCalledTimes(1);
   });
 
+  // 2026-08-26 policy widening (decision #6) — full curator-parity on cores,
+  // with no UnitAdmin row of their own on this core.
+  it("allows a comms_steward with no UnitAdmin row on the core", async () => {
+    mockUnitAdminFindUnique.mockResolvedValue(null);
+    const res = await call(
+      { pmids: ["1"] },
+      { isSuperuser: false, isCommsSteward: true },
+    );
+    expect(res.status).toBe(200);
+    expect(mockClaimUpsert).toHaveBeenCalledTimes(1);
+  });
+
   it("counts only successful writebacks (best-effort; a failure never fails the claim)", async () => {
     mockWriteBack
       .mockResolvedValueOnce({ ok: true, skipped: false })
@@ -217,10 +242,11 @@ describe("POST /api/edit/core-claim/bulk", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("refuses 'revoked' as a bulk action with 400 invalid_status", async () => {
-    const res = await call({ status: "revoked" });
+  it("refuses an unknown status with 400 invalid_status", async () => {
+    const res = await call({ status: "restored" });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "invalid_status" });
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   it("404s when the core does not exist", async () => {
@@ -230,6 +256,30 @@ describe("POST /api/edit/core-claim/bulk", () => {
     expect(await res.json()).toMatchObject({ error: "core_not_found" });
   });
 
+  it("reports a pmid SPS hasn't ingested as notFound, and doesn't write it (manual PMID add)", async () => {
+    mockPublicationFindMany.mockResolvedValue([{ pmid: "1" }]); // "2" isn't in SPS
+    const res = await call({ pmids: ["1", "2"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ written: 1, skipped: 0, notFound: ["2"] });
+    expect(mockClaimUpsert).toHaveBeenCalledTimes(1);
+    expect(mockClaimUpsert.mock.calls[0][0].where).toEqual({
+      pmid_coreId: { pmid: "1", coreId: "2" },
+    });
+    expect(mockPublicationFindMany).toHaveBeenCalledWith({
+      where: { pmid: { in: ["1", "2"] } },
+      select: { pmid: true },
+    });
+  });
+
+  it("writes nothing (no transaction) when every pmid is unknown to SPS", async () => {
+    mockPublicationFindMany.mockResolvedValue([]);
+    const res = await call({ pmids: ["1", "2"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ written: 0, skipped: 0, notFound: ["1", "2"] });
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockWriteBack).not.toHaveBeenCalled();
+  });
+
   it("returns 500 write_failed when the transaction throws", async () => {
     mockTransaction.mockRejectedValue(new Error("db down"));
     const res = await call();
@@ -237,3 +287,147 @@ describe("POST /api/edit/core-claim/bulk", () => {
     expect(await res.json()).toMatchObject({ error: "write_failed" });
   });
 });
+
+describe("POST /api/edit/core-claim/bulk — dryRun", () => {
+  it("runs every check and then writes NOTHING", async () => {
+    const res = await call({ dryRun: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      dryRun: true,
+      written: 0,
+      wouldWrite: 3,
+      skipped: 0,
+      notFound: [],
+      writebackOk: 0,
+    });
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockClaimUpsert).not.toHaveBeenCalled();
+    expect(mockAppendAuditRow).not.toHaveBeenCalled();
+    expect(mockWriteBack).not.toHaveBeenCalled();
+  });
+
+  it("reports the same notFound/skipped split the real call would act on", async () => {
+    // "3" was never ingested; "1" is already claimed.
+    mockPublicationFindMany.mockResolvedValue([{ pmid: "1" }, { pmid: "2" }]);
+    mockClaimFindMany.mockResolvedValue([{ pmid: "1", coreId: "2", status: "claimed" }]);
+    const res = await call({ dryRun: true });
+    expect(await res.json()).toMatchObject({ wouldWrite: 1, skipped: 1, notFound: ["3"] });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("still enforces authorization — a dry run is not a way around the gate", async () => {
+    const res = await call({ dryRun: true }, { isSuperuser: false });
+    expect(res.status).toBe(403);
+  });
+
+  it("still rejects a malformed batch", async () => {
+    expect((await call({ dryRun: true, pmids: ["abc"] })).status).toBe(400);
+    expect((await call({ dryRun: true, pmids: [] })).status).toBe(400);
+  });
+
+  it("a NON-true truthy dryRun writes for real — a stray value must not silently no-op", async () => {
+    const res = await call({ dryRun: "yes" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ written: 3 });
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Queue v2 PR B (decision 2, 2026-09-28): bulk Revoke on the Confirmed tab and
+// bulk Restore on the Rejected tab are one server operation, the soft revoke.
+describe("POST /api/edit/core-claim/bulk — status:'revoked' (bulk Revoke / Restore)", () => {
+  it("soft-revokes every ACTIVE claim in ONE transaction, one audit row per pmid", async () => {
+    mockClaimFindMany.mockResolvedValue([
+      { pmid: "1", status: "claimed" },
+      { pmid: "2", status: "rejected" },
+      { pmid: "3", status: "claimed" },
+    ]);
+    const res = await call({ status: "revoked" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      coreId: "2",
+      status: "revoked",
+      written: 3,
+      skipped: 0,
+      notFound: [],
+    });
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockClaimUpdate).toHaveBeenCalledTimes(3);
+    expect(mockClaimUpsert).not.toHaveBeenCalled();
+    const update = mockClaimUpdate.mock.calls[1][0];
+    expect(update.where).toEqual({ pmid_coreId: { pmid: "2", coreId: "2" } });
+    expect(update.data.revokedBy).toBe(ACTOR);
+    expect(update.data.revokedAt).toBeInstanceOf(Date);
+    expect(mockAppendAuditRow).toHaveBeenCalledTimes(3);
+    const audit = mockAppendAuditRow.mock.calls[1][1];
+    // the single route's revoke shape, verbatim
+    expect(audit).toMatchObject({
+      action: "core_claim",
+      targetEntityType: "core",
+      targetEntityId: "2:2",
+      fieldsChanged: ["revoked"],
+      beforeValues: { status: "rejected", revoked: false },
+      afterValues: { revoked: true },
+      actorCwid: ACTOR,
+      requestId: "req-1",
+    });
+    // no engine writeback on a revoke (the single route sends none either)
+    expect(mockWriteBack).not.toHaveBeenCalled();
+  });
+
+  it("skips a pmid with no active claim (nothing to revoke), and never probes publication", async () => {
+    mockClaimFindMany.mockResolvedValue([{ pmid: "1", status: "claimed" }]);
+    const res = await call({ status: "revoked" });
+    expect(await res.json()).toMatchObject({ written: 1, skipped: 2 });
+    expect(mockClaimUpdate).toHaveBeenCalledTimes(1);
+    expect(mockAppendAuditRow).toHaveBeenCalledTimes(1);
+    expect(mockPublicationFindMany).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when no pmid has an active claim", async () => {
+    const res = await call({ status: "revoked" });
+    expect(await res.json()).toMatchObject({ written: 0, skipped: 3 });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("403s a non-superuser with no role on the core — same authz as the single route", async () => {
+    mockClaimFindMany.mockResolvedValue([{ pmid: "1", status: "claimed" }]);
+    const res = await call({ status: "revoked" }, { isSuperuser: false });
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockClaimUpdate).not.toHaveBeenCalled();
+  });
+
+  it("allows an owner of the core", async () => {
+    mockUnitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    mockClaimFindMany.mockResolvedValue([{ pmid: "1", status: "claimed" }]);
+    const res = await call({ status: "revoked", pmids: ["1"] }, { isSuperuser: false });
+    expect(res.status).toBe(200);
+    expect(mockClaimUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the batch cap: >500 pmids is a 400, before any read", async () => {
+    const res = await call({
+      status: "revoked",
+      pmids: Array.from({ length: 501 }, (_, i) => String(i + 1)),
+    });
+    expect(res.status).toBe(400);
+    expect(mockClaimFindMany).not.toHaveBeenCalled();
+  });
+
+  it("dryRun reports wouldWrite and writes nothing", async () => {
+    mockClaimFindMany.mockResolvedValue([{ pmid: "1", status: "claimed" }]);
+    const res = await call({ status: "revoked", dryRun: true });
+    expect(await res.json()).toMatchObject({ dryRun: true, written: 0, wouldWrite: 1, skipped: 2 });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 write_failed when the transaction throws", async () => {
+    mockClaimFindMany.mockResolvedValue([{ pmid: "1", status: "claimed" }]);
+    mockTransaction.mockRejectedValue(new Error("db down"));
+    const res = await call({ status: "revoked" });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "write_failed" });
+  });
+});
+

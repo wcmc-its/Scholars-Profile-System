@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getScholarFullProfileBySlug } from "@/lib/api/profile";
 import { canonicalProfilePath } from "@/lib/profile-url";
+import { visibleInstitutionName } from "@/lib/institutions";
 
 /**
  * Shared `generateMetadata` body for the profile routes (#671). Both the
@@ -15,7 +16,15 @@ export async function buildProfileMetadata(slug: string): Promise<Metadata> {
 
   const titleParts = [profile.publishedName];
   if (profile.primaryTitle) titleParts.push(profile.primaryTitle);
-  const description = [profile.primaryTitle, profile.primaryDepartment].filter(Boolean).join(" — ");
+  // Non-WCMC primary institution joins the department segment (absence-as-
+  // default: a WCM scholar's description is unchanged).
+  const description = [
+    profile.primaryTitle,
+    profile.primaryDepartment,
+    visibleInstitutionName(profile.primaryOrgCode),
+  ]
+    .filter(Boolean)
+    .join(" — ");
 
   const nameParts = profile.preferredName.split(" ");
   const firstName = nameParts[0] ?? profile.preferredName;

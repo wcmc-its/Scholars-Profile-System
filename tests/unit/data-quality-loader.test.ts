@@ -1,11 +1,11 @@
 /**
- * `lib/api/data-quality.ts` — the Data Quality roster query
- * (docs/data-quality-dashboard-spec.md): prominence sort, gap computation,
- * scope, filters, and pagination.
+ * `lib/api/data-quality.ts` — the Profiles roster query (formerly the Data
+ * Quality dashboard query, `docs/data-quality-dashboard-spec.md`): prominence
+ * sort, leadership, COI signal, visibility, scope, filters, and pagination.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { classifyLeadership, loadDataQualityRoster } from "@/lib/api/data-quality";
+import { classifyLeadership, loadDataQualityRoster, loadScholarCard } from "@/lib/api/data-quality";
 
 type AnyMock = ReturnType<typeof vi.fn>;
 type LoaderClient = Parameters<typeof loadDataQualityRoster>[1];
@@ -17,6 +17,7 @@ function scholarRow(over: Record<string, unknown> = {}) {
     preferredName: "X",
     primaryTitle: null,
     roleCategory: "full_time_faculty",
+    status: "active",
     overview: null,
     hIndex: null,
     scoredPubCount: null,
@@ -32,12 +33,15 @@ function scholarRow(over: Record<string, unknown> = {}) {
 function fakeClient(opts: {
   scholars?: unknown[];
   chairs?: string[];
+  /** Same shape as the real `department.findMany({ chairCwid, category })`
+   *  select — use this instead of `chairs` when a test needs to exercise the
+   *  Chair-vs-Director split (#58 / #2542 Phase D). Takes precedence over
+   *  `chairs` when both are given. */
+  chairDepartments?: Array<{ chairCwid: string; category: string }>;
   chiefs?: string[];
   pi?: Array<{ cwid: string; n: number }>;
   nihPi?: Array<{ cwid: string; n: number }>;
   coi?: Array<{ cwid: string; tier: string; n: number }>;
-  overrides?: Array<{ entityId: string; value: string }>;
-  prov?: Array<{ cwid: string; updatedAt: Date | string }>;
   /** Members returned for each requested center code (echoed back so the loader
    *  can partition scope-vs-filter centers). Active (null dates). */
   centerMembers?: string[];
@@ -49,6 +53,9 @@ function fakeClient(opts: {
     startDate?: Date | null;
     endDate?: Date | null;
   }>;
+  /** Manual DIVISION-roster rows (`DivisionMembership`) — echoed back filtered
+   *  to the requested division codes, mirroring `centerMemberRows`. */
+  divisionRosterRows?: Array<{ cwid: string; divisionCode: string }>;
 }) {
   const scholarFindMany = vi.fn().mockResolvedValue(opts.scholars ?? []);
   const grantGroupBy: AnyMock = vi.fn().mockImplementation((args: { where?: { nihIc?: unknown } }) => {
@@ -59,7 +66,10 @@ function fakeClient(opts: {
   const client = {
     scholar: { findMany: scholarFindMany },
     department: {
-      findMany: vi.fn().mockResolvedValue((opts.chairs ?? []).map((c) => ({ chairCwid: c }))),
+      findMany: vi.fn().mockResolvedValue(
+        opts.chairDepartments ??
+          (opts.chairs ?? []).map((c) => ({ chairCwid: c, category: "clinical" })),
+      ),
     },
     division: {
       findMany: vi.fn().mockResolvedValue((opts.chiefs ?? []).map((c) => ({ chiefCwid: c }))),
@@ -72,8 +82,6 @@ function fakeClient(opts: {
           (opts.coi ?? []).map((r) => ({ cwid: r.cwid, tier: r.tier, _count: { _all: r.n } })),
         ),
     },
-    fieldOverride: { findMany: vi.fn().mockResolvedValue(opts.overrides ?? []) },
-    overviewProvenance: { findMany: vi.fn().mockResolvedValue(opts.prov ?? []) },
     centerMembership: {
       findMany: vi.fn().mockImplementation((args: { where?: { centerCode?: { in?: string[] } } }) => {
         const codes = args?.where?.centerCode?.in ?? [];
@@ -99,6 +107,44 @@ function fakeClient(opts: {
         );
       }),
     },
+    divisionMembership: {
+      findMany: vi.fn().mockImplementation((args: { where?: { divisionCode?: { in?: string[] } } }) => {
+        const codes = args?.where?.divisionCode?.in ?? [];
+        return Promise.resolve(
+          (opts.divisionRosterRows ?? [])
+            .filter((r) => codes.includes(r.divisionCode))
+            .map((r) => ({ cwid: r.cwid, divisionCode: r.divisionCode })),
+        );
+      }),
+    },
+    fieldOverride: { findMany: vi.fn().mockResolvedValue([]) },
+    overviewProvenance: { findMany: vi.fn().mockResolvedValue([]) },
+    // #2542 contract A — chair/chief come from `OrgUnitRoleAssignment` only;
+    // `Department.chairCwid` / `Division.chiefCwid` no longer exist as read
+    // sources. Derived from the SAME `chairs`/`chairDepartments`/`chiefs`
+    // options every test already passes — `roleKey` is what now carries the
+    // Chair-vs-Director split (#58), computed here exactly as
+    // `departmentLeaderRoleKey` does in production.
+    orgUnitRoleAssignment: {
+      findMany: vi.fn().mockImplementation((args: { where?: { entityType?: string } }) => {
+        const entityType = args?.where?.entityType;
+        if (entityType === "department") {
+          const rows =
+            opts.chairDepartments ??
+            (opts.chairs ?? []).map((c) => ({ chairCwid: c, category: "clinical" }));
+          return Promise.resolve(
+            rows.map((d) => ({
+              cwid: d.chairCwid,
+              roleKey: d.category === "administrative" ? "director" : "chair",
+            })),
+          );
+        }
+        if (entityType === "division") {
+          return Promise.resolve((opts.chiefs ?? []).map((c) => ({ cwid: c })));
+        }
+        return Promise.resolve([]);
+      }),
+    },
   };
   return { client, scholarFindMany, grantGroupBy };
 }
@@ -106,7 +152,7 @@ const asClient = (c: ReturnType<typeof fakeClient>["client"]) => c as unknown as
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("loadDataQualityRoster — gaps + prominence", () => {
+describe("loadDataQualityRoster — leadership + COI + prominence", () => {
   const scholars = [
     scholarRow({
       cwid: "fac1",
@@ -115,8 +161,6 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
       primaryTitle: "Professor",
       scoredPubCount: 100,
       hIndex: 40,
-      overview: "A real bio.",
-      hasHeadshot: true,
       department: { name: "Medicine" },
     }),
     scholarRow({
@@ -125,8 +169,6 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
       preferredName: "Ben Chair",
       scoredPubCount: 10,
       hIndex: 5,
-      overview: null,
-      hasHeadshot: false,
       department: { name: "Medicine" },
     }),
     scholarRow({
@@ -134,8 +176,6 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
       slug: "stu-one",
       preferredName: "Cy Student",
       roleCategory: "doctoral_student",
-      overview: null,
-      hasHeadshot: null,
       department: { name: "Medicine" },
     }),
   ];
@@ -150,39 +190,62 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
         { cwid: "fac2", tier: "High", n: 2 },
         { cwid: "fac1", tier: "Medium", n: 1 },
       ],
-      overrides: [{ entityId: "stu1", value: "An overridden bio." }],
     });
 
-  it("computes each scholar's gaps correctly", async () => {
+  it("computes each scholar's chair/chief + COI signal correctly", async () => {
     const { client } = setup();
     const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
     const byCwid = Object.fromEntries(entries.map((e) => [e.cwid, e]));
 
     expect(byCwid.fac1).toMatchObject({
-      headshot: "present",
-      hasOverview: true,
       isChief: true,
       isChair: false,
       pendingCoiHigh: 0,
       pendingCoiMedium: 1,
     });
     expect(byCwid.fac2).toMatchObject({
-      headshot: "missing",
-      hasOverview: false,
       isChair: true,
       pendingCoiHigh: 2,
     });
-    // Student has no Scholar.overview but a field_override → counts as covered;
-    // never-probed headshot → "unknown" (not "missing").
-    expect(byCwid.stu1).toMatchObject({ headshot: "unknown", hasOverview: true });
     expect(byCwid.fac1.editHref).toBe("/edit/scholar/fac1");
   });
+
+  // #58 / #2542 Phase D — an administrative department (e.g. the Library) is
+  // led by a DIRECTOR, not a Chair. Before this fix, `chairs` was a plain
+  // `Set<string>` keyed only by `Department.chairCwid` membership, so this
+  // scholar's `leadership` label read "Chair" regardless of category.
+  it("labels an administrative department's leader 'Director', not 'Chair'", async () => {
+    const { client } = fakeClient({
+      scholars: [
+        scholarRow({ cwid: "dir1", preferredName: "Dee Director", department: { name: "Library" } }),
+      ],
+      chairDepartments: [{ chairCwid: "dir1", category: "administrative" }],
+    });
+    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+    expect(entries[0]).toMatchObject({ isChair: true, leadership: "Director", leadershipTier: 4 });
+  });
+
+  // The three non-administrative categories all read "Chair" — only
+  // `administrative` maps to Director (`departmentLeaderRoleKey`).
+  it.each(["clinical", "mixed", "basic"])(
+    "labels a '%s' department's leader 'Chair'",
+    async (category) => {
+      const { client } = fakeClient({
+        scholars: [scholarRow({ cwid: "ch1", preferredName: "Cee Chair" })],
+        chairDepartments: [{ chairCwid: "ch1", category }],
+      });
+      const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+      expect(entries[0]).toMatchObject({ isChair: true, leadership: "Chair", leadershipTier: 4 });
+    },
+  );
 
   it("sorts by prominence desc (chair/chief + PI/NIH + faculty all feed in)", async () => {
     const { client } = setup();
     const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(entries.map((e) => e.cwid)).toEqual(["fac1", "fac2", "stu1"]);
-    expect(entries[0].prominence).toBeGreaterThan(entries[1].prominence);
+    // Tier first: the chair (rank 4) outranks the chief (rank 6) on the EA
+    // ladder even though the chief's prominence is higher.
+    expect(entries.map((e) => e.cwid)).toEqual(["fac2", "fac1", "stu1"]);
+    expect(entries[1].prominence).toBeGreaterThan(entries[0].prominence);
     expect(entries[1].prominence).toBeGreaterThan(entries[2].prominence);
   });
 
@@ -201,7 +264,44 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
   it("reports summary counts across the in-scope set (pre gap filter)", async () => {
     const { client } = setup();
     const { counts } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(counts).toEqual({ inScope: 3, missingHeadshot: 1, missingOverview: 1, withCoi: 1 });
+    // None of this fixture's scholars set hasHeadshot/overview, so headshot is
+    // "unknown" (not "missing") for all three and hasOverview is false for all
+    // three.
+    expect(counts).toEqual({ inScope: 3, missingHeadshot: 0, missingOverview: 3, withCoi: 1 });
+  });
+});
+
+describe("loadDataQualityRoster — headshot check age (#2264)", () => {
+  it("selects headshotCheckedAt and carries it on the entry as ISO (null when never probed)", async () => {
+    const { client, scholarFindMany } = fakeClient({
+      scholars: [
+        scholarRow({ cwid: "old", hasHeadshot: true, headshotCheckedAt: new Date("2026-01-05T00:00:00Z") }),
+        scholarRow({ cwid: "never" }),
+      ],
+    });
+    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+    const byCwid = Object.fromEntries(entries.map((e) => [e.cwid, e]));
+    expect(scholarFindMany.mock.calls[0][0].select.headshotCheckedAt).toBe(true);
+    expect(byCwid.old.headshotCheckedAt).toBe("2026-01-05T00:00:00.000Z");
+    expect(byCwid.never.headshotCheckedAt).toBeNull();
+  });
+});
+
+describe("loadDataQualityRoster — visibility", () => {
+  it("computes isVisible from Scholar.status — both visible and hidden are candidates", async () => {
+    const { client } = fakeClient({
+      scholars: [
+        scholarRow({ cwid: "vis1", status: "active" }),
+        scholarRow({ cwid: "hid1", status: "suppressed" }),
+      ],
+    });
+    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+    const byCwid = Object.fromEntries(entries.map((e) => [e.cwid, e]));
+    // Neither the visible nor the hidden scholar is filtered out — unlike the
+    // old dashboard, which hard-filtered to `status: "active"` only.
+    expect(entries).toHaveLength(2);
+    expect(byCwid.vis1.isVisible).toBe(true);
+    expect(byCwid.hid1.isVisible).toBe(false);
   });
 });
 
@@ -211,18 +311,24 @@ describe("loadDataQualityRoster — filters + pagination", () => {
       cwid: `s${i}`,
       preferredName: `S${i}`,
       scoredPubCount: 100 - i * 10, // descending prominence by index
-      hasHeadshot: i % 2 === 0 ? false : true,
     }),
   );
 
-  it("gap=no-headshot keeps only missing-headshot rows; total reflects the filter", async () => {
-    const { client } = fakeClient({ scholars: many });
+  it("gap=has-coi keeps only scholars with pending High-tier COI; total reflects the filter", async () => {
+    const { client } = fakeClient({
+      scholars: many,
+      coi: [
+        { cwid: "s0", tier: "High", n: 1 },
+        { cwid: "s2", tier: "High", n: 2 },
+        { cwid: "s4", tier: "High", n: 1 },
+      ],
+    });
     const { entries, total } = await loadDataQualityRoster(
-      { scope: { all: true }, gap: "no-headshot" },
+      { scope: { all: true }, gap: "has-coi" },
       asClient(client),
     );
     expect(total).toBe(3); // s0, s2, s4
-    expect(entries.every((e) => e.headshot === "missing")).toBe(true);
+    expect(entries.every((e) => e.pendingCoiHigh > 0)).toBe(true);
   });
 
   it("paginates the prominence-sorted set", async () => {
@@ -257,6 +363,46 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     expect(where.AND).toBeUndefined();
   });
 
+  it("hiddenOnly narrows to suppressed profiles (status not active)", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster({ scope: { all: true }, hiddenOnly: true }, asClient(client));
+    expect(scholarFindMany.mock.calls[0][0].where.status).toEqual({ not: "active" });
+  });
+
+  it("rank: professorial ranks read professorialRank; instructor matches title only without a rank", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: true }, ranks: ["professor", "instructor"] },
+      asClient(client),
+    );
+    const clause = scholarFindMany.mock.calls[0][0].where.AND.at(-1);
+    expect(clause.OR[0]).toEqual({ professorialRank: "Professor" });
+    expect(clause.OR[1].professorialRank).toBeNull();
+    expect(JSON.stringify(clause.OR[1].OR)).toContain('"contains":"Instructor"');
+    expect(JSON.stringify(clause.OR[1].OR)).toContain('"contains":"Lecturer"');
+  });
+
+  it("the scholar card builds a tag-stripped overview excerpt, override winning, email via the gate", async () => {
+    const scholar = {
+      cwid: "x1", preferredName: "X One", slug: "x-one", status: "active", hasHeadshot: true,
+      email: "x1@med.cornell.edu", emailVisibility: "none", roleCategory: "full_time_faculty",
+      overview: "<p>Seed &nbsp;text</p>",
+    };
+    const client = (override: string | null) => ({
+      scholar: { findFirst: vi.fn(async () => scholar) },
+      fieldOverride: { findFirst: vi.fn(async () => (override === null ? null : { value: override })) },
+      overviewProvenance: { findUnique: vi.fn(async () => null) },
+      appointment: { findMany: vi.fn(async () => []) },
+    });
+    const gate = vi.fn((email: string | null, vis: string | null) => (vis === "none" ? null : email));
+    const seed = await loadScholarCard("x1", client(null) as never, gate);
+    expect(seed?.overviewExcerpt).toBe("Seed text");
+    expect(seed?.email).toBeNull();
+    expect(gate).toHaveBeenCalledWith("x1@med.cornell.edu", "none");
+    const edited = await loadScholarCard("x1", client("<b>Edited</b>") as never, gate);
+    expect(edited?.overviewExcerpt).toBe("Edited");
+  });
+
   it("a name/CWID search ORs preferredName/fullName/cwid as its own AND clause", async () => {
     const { client, scholarFindMany } = fakeClient({ scholars: [] });
     await loadDataQualityRoster({ scope: { all: true }, query: "  harr " }, asClient(client));
@@ -274,16 +420,12 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     });
   });
 
-  it("a unit multi-select ORs departments / divisions / center members together", async () => {
+  it("a unit multi-select ORs departments / divisions / institutions / center members together", async () => {
     const { client, scholarFindMany } = fakeClient({ scholars: [], centerMembers: ["c1", "c2"] });
     await loadDataQualityRoster(
       {
         scope: { all: true },
-        units: [
-          { kind: "department", code: "MED" },
-          { kind: "division", code: "CARD" },
-          { kind: "center", code: "MCC" },
-        ],
+        unitValues: ["dept:MED", "div:CARD", "center:MCC", "inst:HSS"],
       },
       asClient(client),
     );
@@ -292,13 +434,56 @@ describe("loadDataQualityRoster — filters + pagination", () => {
       (c: { OR?: Array<Record<string, unknown>> }) =>
         Array.isArray(c.OR) && c.OR.some((o) => "deptCode" in o),
     );
+    // An institution is a scholar column — no membership expansion, so the
+    // center-membership read is the only extra query.
     expect(unitClause).toEqual({
       OR: [
         { deptCode: { in: ["MED"] } },
         { divCode: { in: ["CARD"] } },
+        { primaryOrgCode: { in: ["HSS"] } },
         { cwid: { in: ["c1", "c2"] } },
       ],
     });
+  });
+
+  it("a division filter also matches a manual division's hand-added roster (div: = loadDivisionMemberCwids' union)", async () => {
+    const { client, scholarFindMany } = fakeClient({
+      scholars: [],
+      divisionRosterRows: [
+        { cwid: "roster-1", divisionCode: "CARD" },
+        { cwid: "roster-2", divisionCode: "LDAPDIV" },
+      ],
+    });
+    // Only CARD is a manual division; LDAPDIV's stray roster row does not count.
+    client.division.findMany.mockImplementation((async (args: { where?: { source?: string } }) =>
+      args?.where?.source === "manual" ? [{ code: "CARD" }] : []) as never);
+    await loadDataQualityRoster(
+      { scope: { all: true }, unitValues: ["div:CARD", "div:LDAPDIV"] },
+      asClient(client),
+    );
+    expect(client.division.findMany).toHaveBeenCalledWith({
+      where: { code: { in: ["CARD", "LDAPDIV"] }, source: "manual" },
+      select: { code: true },
+    });
+    expect(client.divisionMembership.findMany).toHaveBeenCalledWith({
+      where: { divisionCode: { in: ["CARD"] } },
+      select: { cwid: true },
+    });
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND).toContainEqual({
+      OR: [{ divCode: { in: ["CARD", "LDAPDIV"] } }, { cwid: { in: ["roster-1"] } }],
+    });
+  });
+
+  it("an institution-only unit filter is a bare primaryOrgCode IN, with no membership read", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: true }, unitValues: ["inst:MSKCC"] },
+      asClient(client),
+    );
+    expect(client.centerMembership.findMany).not.toHaveBeenCalled();
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND).toContainEqual({ OR: [{ primaryOrgCode: { in: ["MSKCC"] } }] });
   });
 
   it("a center filter excludes pending / expired memberships (active by date only)", async () => {
@@ -313,7 +498,7 @@ describe("loadDataQualityRoster — filters + pagination", () => {
       ],
     });
     await loadDataQualityRoster(
-      { scope: { all: true }, units: [{ kind: "center", code: "MCC" }] },
+      { scope: { all: true }, unitValues: ["center:MCC"] },
       asClient(client),
     );
     const where = scholarFindMany.mock.calls[0][0].where;
@@ -323,6 +508,14 @@ describe("loadDataQualityRoster — filters + pagination", () => {
     );
     // Only the date-active member is in the filter; expired + pending are dropped.
     expect(unitClause).toEqual({ OR: [{ cwid: { in: ["active1"] } }] });
+  });
+
+  it("unit values given but none decode → match nothing (the one shared rule), not everyone", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster({ scope: { all: true }, unitValues: ["bogus", "dept:"] }, asClient(client));
+    expect(client.centerMembership.findMany).not.toHaveBeenCalled();
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND).toContainEqual({ cwid: { in: [] } });
   });
 });
 
@@ -335,117 +528,100 @@ describe("loadDataQualityRoster — leadership tier (#1)", () => {
     scholarRow({ cwid: "plain", preferredName: "Plain Prof", primaryTitle: "Professor", scoredPubCount: 1000, hIndex: 200 }),
   ];
 
-  it("ranks THE Dean #1, deanery next, then chairs, with Emeritus demoted to prominence", async () => {
+  it("ranks THE Dean #1, then the EA ladder (Chair above Associate Dean), Emeritus demoted", async () => {
     const { client } = fakeClient({ scholars: cohort, chairs: ["chair"] });
     const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(entries.map((e) => e.cwid)).toEqual(["dean", "assoc", "chair", "plain", "emeritus"]);
+    expect(entries.map((e) => e.cwid)).toEqual(["dean", "chair", "assoc", "plain", "emeritus"]);
     expect(entries[0]).toMatchObject({ leadership: "Dean", leadershipTier: 0 });
-    expect(entries[1]).toMatchObject({ leadership: "Associate Dean", leadershipTier: 1 });
-    expect(entries[2]).toMatchObject({ leadership: "Chair", leadershipTier: 2 });
-    // Emeritus dean is NOT leadership — ranks last here despite huge prominence.
-    expect(entries[4]).toMatchObject({ cwid: "emeritus", leadership: null, leadershipTier: 3 });
+    expect(entries[1]).toMatchObject({ leadership: "Chair", leadershipTier: 4 });
+    expect(entries[2]).toMatchObject({ leadership: "Associate Dean", leadershipTier: 7 });
+    expect(entries[3]).toMatchObject({ cwid: "plain", leadershipTier: 12 });
+    // Emeritus dean holds no office — ranks last here despite huge prominence.
+    expect(entries[4]).toMatchObject({ cwid: "emeritus", leadership: null, leadershipTier: 13 });
   });
 });
 
 describe("classifyLeadership — title heuristic (#1)", () => {
   // Grounded against the live DB (the 5 "Dean" titles) + the deaneryLabel branches.
   const cases: Array<[string | null, number, string | null]> = [
-    ["Stephen and Suzanne Weiss Dean", 0, "Dean"], // rharrington → THE Dean
-    ["Associate Dean", 1, "Associate Dean"], // rbsilve
-    ["Senior Associate Dean, Education", 1, "Senior Associate Dean"], // jos9046 (precedence)
-    ["Assistant Dean", 1, "Assistant Dean"],
-    ["Affiliate Dean (NYP Queens)", 1, "Affiliate Dean"],
-    ["Vice Dean", 1, "Vice Dean"],
-    ["Deputy Dean", 1, "Vice Dean"],
+    ["Stephen and Suzanne Weiss Dean", 0, "Dean"], // THE Dean
+    // EA title ladder (2026-09-24): 1 Dean/Provost · 2 Vice Provost/Dean/President ·
+    // 3 Senior Associate Dean · 7 Associate/Assistant Dean · 8 Assoc/Asst Vice Provost.
+    ["Associate Dean", 7, "Associate Dean"],
+    ["Senior Associate Dean, Education", 3, "Senior Associate Dean"], // precedence
+    ["Assistant Dean", 7, "Assistant Dean"],
+    ["Affiliate Dean (NYP Queens)", 7, "Affiliate Dean"],
+    ["Vice Dean", 2, "Vice Dean"],
+    ["Deputy Dean", 2, "Vice Dean"],
     ["Interim Dean", 1, "Interim Dean"],
     ["Dean, Weill Cornell Graduate School of Medical Sciences", 1, "Dean"], // school-specific → not tier 0
     ["Dean, Weill Cornell Medicine-Qatar", 1, "Dean"],
     ["Provost", 1, "Provost"],
+    ["Vice Provost for Research", 2, "Vice Provost"],
+    ["Associate Vice Provost", 8, "Associate Vice Provost"],
     ["President, Cornell University", 1, "President"],
-    ["EVP for Health", 1, "EVP"],
+    ["EVP for Health", 2, "EVP"],
+    // A bare /president/ used to tag every VP "President".
+    ["Vice President and Chief Global Information Officer", 2, "Vice President"],
+    ["Senior Vice President for External Affairs", 2, "Senior Vice President"],
+    ["Executive Vice President for Health", 2, "EVP"],
     // The load-bearing demotion: Emeritus wins over the Provost/Dean branches.
-    ["Provost for Medical Affairs and Dean Emeritus", 3, null], // amg2004
-    ["Dean Emeritus", 3, null], // dalonso
-    ["Professor", 3, null],
-    [null, 3, null],
+    ["Provost for Medical Affairs and Dean Emeritus", 13, null],
+    ["Dean Emeritus", 13, null],
+    ["Professor", 12, null],
+    [null, 13, null],
   ];
   it.each(cases)("%s → tier %i / %s", (title, tier, label) => {
-    expect(classifyLeadership(title, false, false)).toEqual({ tier, label });
+    expect(classifyLeadership(title, null, false)).toEqual({ tier, label });
   });
 
-  it("a non-leader title falls back to the FK chair/chief tier", () => {
-    expect(classifyLeadership("Professor", true, false)).toEqual({ tier: 2, label: "Chair" });
-    expect(classifyLeadership("Professor", false, true)).toEqual({ tier: 2, label: "Chief" });
-  });
-
-  it("an active dean title outranks a chair FK (dean office beats chair)", () => {
-    expect(classifyLeadership("Associate Dean", true, false)).toEqual({
-      tier: 1,
-      label: "Associate Dean",
+  it("a non-leader title falls back to the FK chair/chief/center-director tier", () => {
+    expect(classifyLeadership("Professor", "Chair", false)).toEqual({ tier: 4, label: "Chair" });
+    expect(classifyLeadership("Professor", null, true)).toEqual({ tier: 6, label: "Chief" });
+    // Every tracked center is school-wide: its director is rank 5.
+    expect(classifyLeadership("Professor", null, false, true)).toEqual({
+      tier: 5,
+      label: "Center Director",
     });
   });
-});
 
-describe("loadDataQualityRoster — overview freshness (#6)", () => {
-  it("buckets never / imported / aged from OverviewProvenance and filters by it", async () => {
-    const recent = new Date(Date.now() - 30 * 24 * 3600 * 1000); // ~1 month ago
-    const old = new Date(Date.now() - 3 * 365.25 * 24 * 3600 * 1000); // ~3 years ago
-    const scholars = [
-      scholarRow({ cwid: "none", overview: null }),
-      scholarRow({ cwid: "imp", overview: "Imported VIVO bio." }),
-      scholarRow({ cwid: "fresh", overview: "Edited bio." }),
-      scholarRow({ cwid: "stale", overview: "Edited long ago." }),
-    ];
-    const prov = [
-      { cwid: "fresh", updatedAt: recent },
-      { cwid: "stale", updatedAt: old },
-    ];
-    const { client } = fakeClient({ scholars, prov });
-    const all = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    const byCwid = Object.fromEntries(all.entries.map((e) => [e.cwid, e]));
-    expect(byCwid.none.overviewState).toBe("never");
-    expect(byCwid.imp.overviewState).toBe("imported");
-    expect(byCwid.imp.overviewUpdatedAt).toBeNull();
-    expect(byCwid.fresh.overviewState).toBe("lt1yr");
-    expect(byCwid.fresh.overviewUpdatedAt).toBe(recent.toISOString());
-    expect(byCwid.stale.overviewState).toBe("gt2yr");
-
-    const importedOnly = await loadDataQualityRoster(
-      { scope: { all: true }, overviewAge: "imported" },
-      asClient(client),
-    );
-    expect(importedOnly.entries.map((e) => e.cwid)).toEqual(["imp"]);
-    expect(importedOnly.total).toBe(1);
-    // Counts stay pre-filter (the full in-scope set).
-    expect(importedOnly.counts.inScope).toBe(4);
+  it("Vice Chair sits between Assoc/Asst Vice Provost (8) and endowed (9)", () => {
+    expect(classifyLeadership("Vice Chair of Clinical Operations", null, false)).toEqual({
+      tier: 8.5,
+      label: "Vice Chair",
+    });
   });
 
-  it("buckets the 1-2yr band and composes with the gap filter", async () => {
-    const mid = new Date(Date.now() - 18 * 30 * 24 * 3600 * 1000); // ~18 months ago
-    const recent = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    const scholars = [
-      scholarRow({ cwid: "mid", overview: "Edited ~18mo ago.", hasHeadshot: false }),
-      scholarRow({ cwid: "midHas", overview: "Edited ~18mo ago.", hasHeadshot: true }),
-      scholarRow({ cwid: "fresh", overview: "Edited recently.", hasHeadshot: false }),
-    ];
-    const prov = [
-      { cwid: "mid", updatedAt: mid },
-      { cwid: "midHas", updatedAt: mid },
-      { cwid: "fresh", updatedAt: recent },
-    ];
-    const { client } = fakeClient({ scholars, prov });
-    const byBucket = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(Object.fromEntries(byBucket.entries.map((e) => [e.cwid, e.overviewState])).mid).toBe(
-      "1to2yr",
-    );
+  it("a director title naming the scholar's own department sorts as Chair (BMRI)", () => {
+    const t = "Director of the Feil Family Brain and Mind Research Institute";
+    expect(classifyLeadership(t, null, false, false, "Brain and Mind Research").tier).toBe(4);
+    expect(classifyLeadership(t, null, false, false, "Neurology").tier).toBe(10);
+  });
 
-    // gap=no-headshot AND overviewAge=1to2yr intersect (midHas has a headshot → out).
-    const both = await loadDataQualityRoster(
-      { scope: { all: true }, gap: "no-headshot", overviewAge: "1to2yr" },
-      asClient(client),
-    );
-    expect(both.entries.map((e) => e.cwid)).toEqual(["mid"]);
-    expect(both.counts.inScope).toBe(3); // counts stay pre-filter
+  it("the best of title and FK roles wins, on the EA ladder", () => {
+    // Chair (4) outranks Associate Dean (7)…
+    expect(classifyLeadership("Associate Dean", "Chair", false)).toEqual({ tier: 4, label: "Chair" });
+    // …but Senior Associate Dean (3) outranks Chair.
+    expect(classifyLeadership("Senior Associate Dean", "Chair", false)).toEqual({
+      tier: 3,
+      label: "Senior Associate Dean",
+    });
+    // A center director (5) outranks a division chief (6).
+    expect(classifyLeadership("Professor", null, true, true)).toEqual({
+      tier: 5,
+      label: "Center Director",
+    });
+  });
+
+  // #58 / #2542 Phase D — an administrative department's leader is a
+  // DIRECTOR, not a Chair. `classifyLeadership` itself is category-agnostic
+  // (it trusts whatever label the caller resolved); this just confirms the
+  // resolved label passes through as the chair-tier display label unchanged.
+  it("passes through a pre-resolved 'Director' label for an administrative department", () => {
+    expect(classifyLeadership("Professor", "Director", false)).toEqual({
+      tier: 4,
+      label: "Director",
+    });
   });
 });
 
@@ -464,6 +640,36 @@ describe("loadDataQualityRoster — scope", () => {
     expect(client.centerMembership.findMany).not.toHaveBeenCalled();
   });
 
+  it("a division scope unions in manual DivisionMembership roster cwids (Amendment 4 parity)", async () => {
+    // A scholar can be on a division's manual roster (`DivisionMembership`)
+    // without their own `divCode` column pointing at it — Amendment 4 still
+    // makes them editable by that division's admin
+    // (`lib/edit/unit-scholar-authz.ts`), so the roster that FINDS them must
+    // use the same union or it silently under-lists people the per-scholar
+    // editor still lets the admin open.
+    const { client, scholarFindMany } = fakeClient({
+      scholars: [],
+      divisionRosterRows: [{ cwid: "roster-only-1", divisionCode: "CARD" }],
+    });
+    await loadDataQualityRoster(
+      { scope: { all: false, unitCodes: ["CARD"], centerCodes: [] } },
+      asClient(client),
+    );
+    expect(client.divisionMembership.findMany).toHaveBeenCalledWith({
+      where: { divisionCode: { in: ["CARD"] } },
+      select: { cwid: true },
+    });
+    const where = scholarFindMany.mock.calls[0][0].where;
+    const scopeClause = where.AND?.[0];
+    expect(scopeClause).toEqual({
+      OR: [
+        { deptCode: { in: ["CARD"] } },
+        { divCode: { in: ["CARD"] } },
+        { cwid: { in: ["roster-only-1"] } },
+      ],
+    });
+  });
+
   it("a center scope expands to member cwids and ORs them into the where", async () => {
     const { client, scholarFindMany } = fakeClient({
       scholars: [],
@@ -475,9 +681,34 @@ describe("loadDataQualityRoster — scope", () => {
     );
     expect(client.centerMembership.findMany).toHaveBeenCalledWith({
       where: { centerCode: { in: ["CTR1"] } },
-      select: { cwid: true, centerCode: true, startDate: true, endDate: true },
+      select: { cwid: true, centerCode: true, startDate: true, endDate: true, membershipRoleKey: true },
     });
     const where = scholarFindMany.mock.calls[0][0].where;
     expect(where.AND?.[0]).toEqual({ OR: [{ cwid: { in: ["m1", "m2"] } }] });
+  });
+
+  it("an institution scope filters on Scholar.primaryOrgCode (no membership expansion)", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: false, unitCodes: [], centerCodes: [], institutionCodes: ["HMC"] } },
+      asClient(client),
+    );
+    expect(client.centerMembership.findMany).not.toHaveBeenCalled();
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND?.[0]).toEqual({ OR: [{ primaryOrgCode: { in: ["HMC"] } }] });
+  });
+
+  // Defensive-only: the route already 403s an empty scope via `isEmptyScope`
+  // before the query ever runs, but the loader itself must fail CLOSED (match
+  // nothing) rather than vacuously matching everyone, should that guard ever
+  // be bypassed. Mirrors the retired `loadEditRoster`'s equivalent case.
+  it("an empty non-global scope (no unit or center codes) matches nothing, not everything", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: false, unitCodes: [], centerCodes: [] } },
+      asClient(client),
+    );
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND?.[0]).toEqual({ cwid: { in: [] } });
   });
 });

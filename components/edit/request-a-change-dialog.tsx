@@ -24,7 +24,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Flag, Info } from "lucide-react";
+import { ArrowRight, Flag, Info, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,10 +46,11 @@ import {
   type ChangeAction,
   type RequestAttribute,
 } from "@/lib/edit/request-a-change";
+import { siteBaseUrl } from "@/lib/site-url";
 
 /** Human label per attribute — drives the email subject + "Regarding" line. */
 const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
-  "name-title": "Name & Title",
+  "name-title": "Name & title",
   photo: "Photo",
   appointments: "Positions & appointments",
   education: "Education",
@@ -57,7 +58,7 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   "funding-reporter": "Funding",
   publications: "Publications",
   "org-unit": "Org Unit",
-  coi: "Conflicts of Interest",
+  coi: "Conflicts of interest",
   mentees: "Mentees",
   "profile-url": "Profile URL",
 };
@@ -70,14 +71,23 @@ function ctaFor(action: ChangeAction, fallbackRevealed: boolean): string {
 }
 
 /**
- * The quiet caption on the SELECTED row — demotes "where this goes" to a label
- * so it never competes with the footer's single action (the mixed-signal fix).
+ * The quiet pill at the top of the EXPANDED row — where the record comes from,
+ * which answers "why can't I just edit it here" before the ask. Demoted to a
+ * label so it never competes with the footer's single action.
  */
-function captionFor(action: ChangeAction): string | null {
+function sourceBadge(action: ChangeAction): string | null {
   if (action.kind === "self-service") return `Managed in ${action.tool}`;
-  if (action.kind === "route") return `Routes to ${action.office}`;
-  return null; // explain — the body carries the explanation; no destination caption
+  if (action.kind === "route") return `From ${action.sourceSystem}`;
+  return null; // explain — the body carries the explanation; no source pill
 }
+
+/** Fallback example for a route's detail box. */
+const DETAIL_PLACEHOLDER = "What should change, and what should it say instead?";
+
+// ponytail: counts up to eight cover every configured attribute; digits past that.
+const NUMBER_WORD = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+const numberWord = (n: number) => NUMBER_WORD[n] ?? String(n);
+const sentenceCase = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
 
 /** Strip CR/LF so a value can't break out of its field (header-injection guard). */
 function sanitize(value: string): string {
@@ -87,7 +97,10 @@ function sanitize(value: string): string {
 function buildMailto(opts: {
   email: string;
   cc?: string;
+  attribute: RequestAttribute;
   attributeLabel: string;
+  cwid: string;
+  scholarName: string;
   issueLabel: string;
   itemLabel?: string;
   sourceSystem?: string;
@@ -96,14 +109,16 @@ function buildMailto(opts: {
   // Subject is derived from a fixed map (never user free text) — no injection
   // vector. URLSearchParams renders spaces as "+", which mail clients show
   // literally; RFC 6068 wants %20, so encode by hand.
-  const subject = `Scholars profile correction — ${opts.attributeLabel}`;
+  const subject = `Scholars profile correction: ${opts.attributeLabel}`;
   const lines = [
+    `Scholar: ${sanitize(opts.scholarName)} (${sanitize(opts.cwid)})`,
+    `Profile: ${siteBaseUrl()}/edit/scholar/${encodeURIComponent(opts.cwid)}?attr=${opts.attribute}`,
     `Issue: ${sanitize(opts.issueLabel)}`,
     `Item: ${opts.itemLabel ? sanitize(opts.itemLabel) : "(whole section)"}`,
   ];
   if (opts.sourceSystem) lines.push(`Source: ${sanitize(opts.sourceSystem)}`);
   lines.push("", sanitize(opts.detail) || "(no additional detail provided)", "");
-  lines.push("— Sent from the WCM Scholars profile editor.");
+  lines.push("Sent from the WCM Scholars profile editor.");
 
   const parts = [`subject=${encodeURIComponent(subject)}`];
   if (opts.cc) parts.push(`cc=${encodeURIComponent(opts.cc)}`);
@@ -113,10 +128,17 @@ function buildMailto(opts: {
 
 export type RequestAChangeDialogProps = {
   attribute: RequestAttribute;
-  /** Resolves `{cwid}` self-service links (ORCID). */
+  /** Resolves `{cwid}` self-service links (ORCID); also identifies the scholar
+   *  in the routed email so the recipient doesn't have to guess (#2480). */
   cwid: string;
+  /** The scholar's display name, echoed into the routed email (#2480). */
+  scholarName: string;
   /** The specific row's label (entity panels); absent for section-level panels. */
   itemLabel?: string;
+  /** Rendered beside the item in the header (e.g. journal · year) so two rows
+   *  sharing a title are still told apart. A node, not a string: journal text
+   *  carries sanitized PubMed HTML (#946). */
+  itemMeta?: React.ReactNode;
   /** Trigger `data-testid` (default `request-a-change-trigger`). */
   triggerTestId?: string;
   /**
@@ -137,7 +159,9 @@ export type RequestAChangeDialogProps = {
 export function RequestAChangeDialog({
   attribute,
   cwid,
+  scholarName,
   itemLabel,
+  itemMeta,
   triggerTestId,
   initialIssueId,
   trigger,
@@ -225,7 +249,10 @@ export function RequestAChangeDialog({
       return buildMailto({
         email: action.email,
         cc: action.cc,
+        attribute,
         attributeLabel,
+        cwid,
+        scholarName,
         issueLabel: issue!.label,
         itemLabel,
         sourceSystem: action.sourceSystem,
@@ -235,7 +262,10 @@ export function RequestAChangeDialog({
     if (action?.kind === "explain" && action.fallbackEmail) {
       return buildMailto({
         email: action.fallbackEmail,
+        attribute,
         attributeLabel,
+        cwid,
+        scholarName,
         issueLabel: issue!.label,
         itemLabel,
         detail,
@@ -287,14 +317,18 @@ export function RequestAChangeDialog({
   const inRouter = !(submitted && submitTarget) && !confirmDiscard;
   // The footer caption matches the single action the footer offers, so the
   // bottom of the dialog never tells a second story.
-  const footerHint =
-    inRouter && action
+  const selfServiceCount = config.issues.filter((i) => i.action.kind === "self-service").length;
+  const footerHint = !inRouter
+    ? null
+    : action
       ? showRouteBox
         ? "We’ll route this to the right team."
         : action.kind === "self-service"
           ? "Opens in a new tab."
           : null
-      : null;
+      : selfServiceCount > 0
+        ? `${sentenceCase(numberWord(config.issues.length))} reasons, ${numberWord(selfServiceCount)} of them you can fix yourself.`
+        : null;
 
   return (
     <>
@@ -331,24 +365,21 @@ export function RequestAChangeDialog({
                 {` to ${attributeLabel}${itemLabel ? `: ${itemLabel}` : ""}`}
               </span>
             </DialogTitle>
-            {itemLabel && (
-              <p className="flex items-baseline gap-2 text-sm">
-                <span className="text-muted-foreground shrink-0">Regarding</span>
-                <PubTitle
-                  value={itemLabel}
-                  title={itemLabel}
-                  className="line-clamp-1 font-medium"
-                />
-              </p>
-            )}
             {inRouter && (
-              <div className="mt-1 flex flex-col gap-1">
+              <div className="mt-1 flex flex-col gap-1.5">
+                {/* The item the scholar clicked IS the heading when there is one
+                    — a generic question above it only pushed it down. */}
                 <p id={`rac-q-${attribute}`} className="text-lg font-semibold">
-                  {config.heading}
+                  {itemLabel ? (
+                    <PubTitle value={itemLabel} title={itemLabel} className="line-clamp-2" />
+                  ) : (
+                    config.heading
+                  )}
                 </p>
                 <DialogDescription>
-                  Pick one — we&apos;ll point you to the right place, or route it to the team that
-                  owns it.
+                  {itemMeta && <>{itemMeta} &middot; </>}
+                  Pick what&apos;s wrong and we&apos;ll take you to the right place, or route it
+                  to the team that owns it.
                 </DialogDescription>
               </div>
             )}
@@ -373,7 +404,7 @@ export function RequestAChangeDialog({
                     {/* Not a success claim: the mailer is dark, so nothing was sent
                         server-side — the request only completes once the user sends
                         from their own client (vision-round T1.9). */}
-                    <p className="text-base font-medium">Almost there — finish in your email app.</p>
+                    <p className="text-base font-medium">Almost there: finish in your email app.</p>
                     <p className="text-muted-foreground text-sm">
                       We opened a pre-filled message
                       {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing opened,
@@ -406,58 +437,58 @@ export function RequestAChangeDialog({
                   const selected = i.id === issueId;
                   const a = i.action;
                   const hint = a.kind === "explain" ? null : ctaFor(a, false);
-                  const caption = captionFor(a);
+                  const badge = sourceBadge(a);
                   return (
                     <div
                       key={i.id}
                       ref={selected ? selectedRowRef : undefined}
                       data-testid={`rac-issue-${i.id}`}
                       className={cn(
-                        "overflow-hidden rounded-md border transition-colors",
+                        // The radio is visually hidden, so the ROW carries both
+                        // states: tint + maroon left bar for selected, and the
+                        // focus ring the (sr-only) radio can no longer show.
+                        // The left bar is always 4px, transparent until the row
+                        // is pointed at or picked, so nothing shifts on hover.
+                        "overflow-hidden rounded-md border border-l-4 border-l-transparent transition-colors has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50",
                         selected
-                          ? "bg-apollo-red-tint border-apollo-red-tint-border"
-                          : "border-apollo-border hover:border-apollo-border-strong hover:bg-apollo-surface-2",
+                          ? "bg-apollo-surface-2 border-apollo-border border-l-apollo-maroon-press"
+                          : "border-apollo-border hover:border-apollo-border-strong hover:border-l-apollo-maroon hover:bg-apollo-surface-2",
                       )}
                     >
                       <label
                         htmlFor={`rac-${i.id}`}
-                        className="flex cursor-pointer items-center gap-3 px-4 py-3.5"
+                        className="flex cursor-pointer flex-col gap-0.5 py-3.5 pr-4 pl-5"
                       >
-                        <RadioGroupItem
-                          id={`rac-${i.id}`}
-                          value={i.id}
-                          className={cn(
-                            "border-apollo-border-strong",
-                            selected &&
-                              "border-apollo-maroon text-apollo-maroon [&_svg]:fill-apollo-maroon",
+                        <RadioGroupItem id={`rac-${i.id}`} value={i.id} className="sr-only" />
+                        <span className="flex items-baseline justify-between gap-3">
+                          <span className="text-base font-semibold">{i.label}</span>
+                          {!selected && hint && (
+                            <span className="text-apollo-slate flex shrink-0 items-center gap-1.5 text-sm">
+                              {hint}
+                              <ArrowRight className="size-3.5" />
+                            </span>
                           )}
-                        />
-                        <span className={cn("flex-1 text-base", selected && "font-semibold")}>
-                          {i.label}
                         </span>
-                        {selected
-                          ? caption && (
-                              <span className="text-muted-foreground shrink-0 text-xs whitespace-nowrap">
-                                {caption}
-                              </span>
-                            )
-                          : hint && (
-                              <span className="text-apollo-slate flex shrink-0 items-center gap-1.5 text-sm">
-                                {hint}
-                                <ArrowRight className="size-3.5" />
-                              </span>
-                            )}
+                        {i.description && (
+                          <span className="text-muted-foreground text-sm">{i.description}</span>
+                        )}
                       </label>
 
                       {selected && (
-                        <div className="border-apollo-red-tint-border flex flex-col gap-2.5 border-t px-4 pt-3 pb-4">
+                        <div className="border-apollo-border-strong flex flex-col gap-2.5 border-t pt-3 pr-4 pb-4 pl-5">
+                          {badge && (
+                            <span className="text-muted-foreground bg-apollo-surface border-apollo-border flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
+                              <Lock className="size-3" />
+                              {badge}
+                            </span>
+                          )}
+                          {/* Body copy, not a link: slate read as clickable next
+                              to the real link above it (design pass). */}
                           {a.kind === "self-service" && (
-                            <p className="text-apollo-slate text-[13px] leading-relaxed">
-                              {a.instruction}
-                            </p>
+                            <p className="text-sm leading-relaxed">{a.instruction}</p>
                           )}
                           {a.kind === "route" && a.note && (
-                            <p className="text-apollo-slate text-[13px] leading-relaxed">{a.note}</p>
+                            <p className="text-sm leading-relaxed">{a.note}</p>
                           )}
                           {a.kind === "explain" && (
                             <>
@@ -481,28 +512,34 @@ export function RequestAChangeDialog({
                             <div className="flex flex-col gap-3">
                               <div className="flex flex-col gap-1.5">
                                 <label htmlFor="rac-detail" className="text-sm font-medium">
-                                  Add any detail (optional)
+                                  What should change, and to what? (optional)
                                 </label>
                                 <Textarea
                                   id="rac-detail"
                                   value={detail}
                                   onChange={(e) => setDetail(e.target.value)}
-                                  placeholder="What should change, and to what?"
-                                  rows={3}
+                                  placeholder={
+                                    (a.kind === "route" ? a.placeholder : null) ??
+                                    DETAIL_PLACEHOLDER
+                                  }
+                                  rows={4}
                                   className="bg-apollo-surface border-apollo-border-strong"
                                 />
                               </div>
                               <label
-                                htmlFor="rac-no-receipt"
-                                className="text-muted-foreground flex items-center gap-2.5 text-sm"
+                                htmlFor="rac-receipt"
+                                className="flex items-center gap-2.5 text-sm"
                               >
                                 <Checkbox
-                                  id="rac-no-receipt"
-                                  checked={noReceipt}
-                                  onCheckedChange={(v) => setNoReceipt(v === true)}
-                                  className="bg-apollo-surface"
+                                  id="rac-receipt"
+                                  checked={!noReceipt}
+                                  onCheckedChange={(v) => setNoReceipt(v !== true)}
+                                  // A ticked box, not a filled swatch, and not a
+                                  // black control: the row's own fill shows
+                                  // through, with a warm grey rule and tick.
+                                  className="border-apollo-done bg-transparent data-[state=checked]:border-apollo-done data-[state=checked]:bg-transparent data-[state=checked]:text-foreground/70"
                                 />
-                                Don&apos;t email me a copy
+                                Email me a copy of this request
                               </label>
                             </div>
                           )}

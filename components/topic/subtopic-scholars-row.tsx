@@ -22,6 +22,7 @@
 
 import { useEffect, useId, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { ScholarNameList } from "@/components/taxonomy/scholar-name-list";
 import { profilePath } from "@/lib/profile-url";
 import type { SubtopicScholarRowData } from "@/lib/api/topics";
 
@@ -31,10 +32,14 @@ export function SubtopicScholarsRow({
   topicSlug,
   subtopicId,
   subtopicLabel,
+  variant = "inline",
 }: {
   topicSlug: string;
   subtopicId: string;
   subtopicLabel: string | null;
+  /** TAXONOMY_SCHOLAR_CARDS — `"names"`: a "Scholars N" heading over plain
+   *  slate name links (mockup). `"inline"` (default): today's middot list. */
+  variant?: "inline" | "names";
 }) {
   const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +75,26 @@ export function SubtopicScholarsRow({
 
   const visible = expanded ? scholars : scholars.slice(0, INLINE_CAP);
   const overflow = scholars.length - visible.length;
+
+  if (variant === "names") {
+    return (
+      <ScholarNameList
+        scholars={visible}
+        countLabel={scholars.length.toLocaleString()}
+        footer={
+          overflow > 0 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="inline-flex min-h-11 items-center text-[13.5px] text-[var(--color-accent-slate)] underline-offset-4 hover:underline sm:min-h-0"
+            >
+              + {overflow} more →
+            </button>
+          ) : null
+        }
+      />
+    );
+  }
 
   return (
     <div className="mb-6">

@@ -49,6 +49,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
 import { processStartedAt } from "../../lib/etl-run";
+import { buildToolsRunRecord } from "./run-record";
 import { repairEncoding, repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
@@ -146,28 +147,31 @@ async function recordRun(args: {
   manifest?: ToolsManifest;
   errorMessage?: string;
 }): Promise<void> {
-  await db.write.etlRun.create({
-    data: {
-      source: SOURCE,
-      status: args.status,
-      startedAt: processStartedAt,
-      completedAt: new Date(),
-      rowsProcessed: args.rowsProcessed,
-      errorMessage: args.errorMessage ?? null,
-      // Store the composite signature (all object shas), not just tools.json's
-      // top-level sha — so the next run's short-circuit detects a single-object
-      // republish (e.g. tool_context.json only, ReciterAI#238). Compared, never
-      // displayed; readable provenance stays in manifestTaxonomyVersion.
-      manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
-      manifestTaxonomyVersion: args.manifest?.version ?? null,
-      // §2.1 note: Tools is deliberately NOT generated_at-anchored here. Its
-      // freshness SLA is nightly (30h — the IMPORT cadence), but the tools
-      // PRODUCER is hand-run (~weekly at best), so anchoring on generated_at
-      // would false-alarm even when healthy. Tools stays completedAt-anchored;
-      // recalibrating its SLA to the producer cadence is part of the deferred
-      // tools-cadence decision (handoff P2).
-    },
+  const record = buildToolsRunRecord({
+    source: SOURCE,
+    status: args.status,
+    startedAt: processStartedAt,
+    completedAt: new Date(),
+    rowsProcessed: args.rowsProcessed,
+    errorMessage: args.errorMessage,
+    manifest: args.manifest,
+    // The composite signature (all object shas), not just tools.json's
+    // top-level sha — so the next run's short-circuit detects a single-object
+    // republish (e.g. tool_context.json only, ReciterAI#238). Compared, never
+    // displayed; readable provenance stays in manifestTaxonomyVersion.
+    manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
+    now: Date.now(),
   });
+  // WARN when a manifest-bearing run produced no anchor, so a source whose
+  // freshness quietly fell back to completedAt is distinguishable from one that
+  // never had a manifest. See etl/tools/run-record.ts for why the anchor lives
+  // there rather than inline.
+  if (args.manifest && record.manifestGeneratedAt === null) {
+    log("manifest_generated_at_unusable", {
+      generated_at: args.manifest.generated_at ?? null,
+    });
+  }
+  await db.write.etlRun.create({ data: record });
 }
 
 // ---------------------------------------------------------------------------

@@ -24,6 +24,32 @@ export function assertIsoDate(dt: string): void {
 }
 
 /**
+ * Oldest date (in whole UTC days before today) the rollup will re-roll. The raw
+ * CloudFront logs expire 90 days after delivery (EdgeStack's
+ * `sps-cf-logs-expire-<env>` lifecycle rule), and the handler PURGES a day's
+ * rollup partition before re-inserting it. Re-rolling a day whose raw logs have
+ * expired (or partly expired) would replace a good durable rollup with an empty
+ * or short one, and the rollup is the only long-term copy of that day. 85 leaves
+ * a few days of margin for delivery lag and S3's midnight-rounded expiry. Keep
+ * it below the EdgeStack expiry if that rule ever changes.
+ */
+export const MAX_REROLL_AGE_DAYS = 85;
+
+/**
+ * True when `dt` is recent enough that its raw logs are still guaranteed to
+ * exist, so a delete-then-insert re-roll cannot shrink its durable rollup.
+ * `today` is the UTC calendar date the handler runs on (YYYY-MM-DD).
+ */
+export function isRerollable(dt: string, today: string): boolean {
+  assertIsoDate(dt);
+  assertIsoDate(today);
+  const ageDays =
+    (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${dt}T00:00:00Z`)) /
+    86_400_000;
+  return ageDays <= MAX_REROLL_AGE_DAYS;
+}
+
+/**
  * The Glue catalog coordinates the rollup INSERT runs against. Supplied to the
  * builder by the handler from the Lambda's own environment (CDK-set), never
  * from the invocation event.
@@ -56,8 +82,18 @@ const SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 399`;
  * 3xx range counted as a "profile pageview" and polluted the top-profiles list
  * (#1476). A 3xx redirect renders nothing, so it is not a view. Excludes 304
  * too -- negligible for these dynamic (no-store) profile HTML pages.
+ *
+ * Also excludes responses a CloudFront Function synthesized at the edge
+ * (`x_edge_result_type = 'FunctionGeneratedResponse'`): `/edge-ip`, the IP echo
+ * the off-network block page fetches, is a single-segment 200 that never
+ * reaches the origin, and it topped the profile list with hundreds of "views".
+ * Structural rather than a reserved-list entry so the next synthetic path
+ * cannot repeat it.
  */
-const PROFILE_SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 299`;
+const PROFILE_SUCCESS_GET = [
+  "cs_method = 'GET' AND sc_status BETWEEN 200 AND 299",
+  "    AND x_edge_result_type <> 'FunctionGeneratedResponse'",
+].join("\n");
 
 /**
  * Coarse continent from the CloudFront edge-location IATA prefix
@@ -144,6 +180,11 @@ const RESERVED_ROOT_SEGMENTS = [
   "og",
   "readiness",
   "sitemap",
+  // The CloudFront Function IP echo (cdk/lib/edge-stack.ts EDGE_IP_PATH). PROFILE_SUCCESS_GET
+  // already drops it structurally via x_edge_result_type = 'FunctionGeneratedResponse', but a
+  // client that hangs up mid-response is logged as Error/ClientCommError with sc_status 200
+  // (10 of 267 hits in prod's first 30 days), so the path needs naming too.
+  "edge-ip",
 ]
   .map((s) => `'${s}'`)
   .join(", ");
@@ -212,11 +253,21 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     "  UNION ALL",
 
     // (3) search_term -- dimension = decoded/normalized q=, cnt = searches.
+    // Counted at the results page (`/search?q=`, the router.push target of a
+    // submitted query), NOT under `/api/search%`: the browser never calls
+    // `/api/search?q=` -- the only `/api/search/*` callers are the typeahead
+    // (`/api/search/suggest`, every >=2-char keystroke) and the per-evidence
+    // key-paper fetch, so the old arm listed typing prefixes ("sch", "ma") and
+    // Matcha's internal lookups, and zero actual searches. Both the document
+    // load and the RSC soft-navigation carry q=, so both count.
+    // ponytail: pagination / tab switches re-request /search?q= and count as
+    // another search of the same term; there is no session key to dedupe on
+    // (cs_cookie is not logged). Accept the over-count.
     `  SELECT 'search_term' AS metric, ${SEARCH_TERM_EXPR} AS dimension,`,
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day}`,
-    "    AND cs_uri_stem LIKE '/api/search%'",
+    "    AND cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200",
     "    AND cs_uri_query IS NOT NULL AND cs_uri_query <> '-'",
     "    AND url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL",
     `  GROUP BY ${SEARCH_TERM_EXPR}`,

@@ -76,7 +76,7 @@ if [[ "$MODE" == "fetch" ]]; then
         -H 'sec-fetch-site: same-origin' \
         -H "origin: $HOST" \
         ${SPONSOR_COOKIE:+-H "cookie: $SPONSOR_COOKIE"} \
-        --data "$(jq -n --arg d "$1" '{description:$d}')")"
+        --data "$(jq -n --arg d "$1" '{description:$d, fresh:true}')")"
       code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
       [[ "$code" == "200" ]] && break
       # 401/403 are terminal (bad cookie / CSRF) — retrying cannot help. 5xx is the breaker.

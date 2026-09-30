@@ -38,29 +38,27 @@ The left rail has four groups: **Yours to edit** (fully yours), **From WCM recor
 
 ## Add an Honor or Distinction
 
-**`/edit` → Honors & Distinctions.** For academy memberships, investigatorships, and prizes — nothing WCM's feeds carry. Click **Add an honor**, fill in the award and year; these show only on your public profile.
+**`/edit` → Honors & distinctions.** For academy memberships, investigatorships, and prizes — nothing WCM's feeds carry. Click **Add an honor**, fill in the award and year; these show only on your public profile.
 
-![Honors and Distinctions list with an existing entry and an Add an honor button](images/scholar-honors.png)
+![Honors and distinctions list with an existing entry and an Add an honor button](images/scholar-honors.png)
 
 ## Publications: hide one, or flag it as not yours
 
 **`/edit` → Publications.** Every paper ReCiter attributes to you, sourced from PubMed/Scopus/OpenAlex.
 
-- **Hide** removes it from your public profile only — it doesn't touch PubMed, ReCiter, or internal reports.
-- **Not mine?** tells ReCiter's attribution model it got this one wrong. Only use this for papers that genuinely aren't yours — marking your own work "not mine" feeds a false signal back into the algorithm. If a paper *is* yours but you'd rather not show it, use Hide instead.
+- **Hide** removes a paper from your public profile only — it doesn't touch PubMed, ReCiter, or internal reports. Hiding works the same way on every `/edit` tab that offers it (Positions, Publications, Education, Funding, Mentees): **tick the rows you want gone, then choose "Hide from profile"** in the bar that appears at the bottom of the screen. On a date-ordered list that bar also offers **"Also select the N older …"** to sweep up everything below your first tick. Hiding is reversible — a hidden row keeps a **Hidden** pill and a **Show** button.
+- **Not mine?** stays a per-row link on Publications, one paper at a time. It tells ReCiter's attribution model it got this one wrong. Only use this for papers that genuinely aren't yours — marking your own work "not mine" feeds a false signal back into the algorithm. If a paper *is* yours but you'd rather not show it, use Hide instead.
 
-![Publications list with Hide and "Not mine?" actions on each row](images/scholar-publications.png)
+![Publications list with a select checkbox on each row, a per-row "Not mine?" link, and the "Hide from profile" bar over the selection](images/scholar-publications.png)
 
 ## Positions, education, and funding: hide a row, or request a source fix
 
-**`/edit` → Positions & appointments / Education / Funding.** Each of these is **Locked — managed at its source**, with two independent controls:
+**`/edit` → Positions & appointments / Education / Funding.** Each of these is managed at its source (Positions carries a **Managed at its source** pill), with two independent controls:
 
-- **Hide** — display-only, removes the entry from your public profile without touching the underlying record.
+- **Hide** — display-only, removes the entry from your public profile without touching the underlying record. Same tick-the-rows-then-**Hide from profile** bar described above. A primary appointment or a department chair role can't be hidden, so those rows carry no checkbox.
 - **Request a change** — routes the correction to the office that owns it (see below).
 
-Historical (past) appointments are hidden by default; a **Show on profile** button reveals one. Additional positions the directory feed doesn't carry (internal leadership roles, appointments at other institutions) can be added by hand under **Additional positions** — these show only on your public profile, never in center/department rollups or search.
-
-![Positions & appointments screen: current appointment with Hide + Request a change, a historical appointment with Show on profile, and an Add a position form](images/scholar-appointments.png)
+Earlier ranks (past appointments) are grouped by rank, one row per rank across every department it was held in, and hide/show the same way. Additional positions the directory feed doesn't carry (internal leadership roles, appointments at other institutions) can be added by hand under **Additional positions** — these show only on your public profile, never in center/department rollups or search.
 
 Funding works the same way — hide your row on a grant (it doesn't affect the award's other investigators, and can take up to a day to clear search) or request a change if the record itself is wrong.
 
@@ -68,9 +66,9 @@ Funding works the same way — hide your row on a grant (it doesn't affect the a
 
 ## Clinical research and trials
 
-If you run or participate in clinical trials, they appear in a **Clinical research** section on your public profile — one line per trial, with your role (PI, Co-I, Sub-I), title, phase, sponsor, and current accrual status; a linked NCT number goes straight to its `clinicaltrials.gov` listing, and completed/closed trials collapse under a separate count so open studies aren't buried. This is sourced entirely from **OnCore** (WCM's clinical trial management system), refreshed nightly — not from ReCiter, so it doesn't go through publication attribution at all.
+If you run or participate in clinical trials, they appear in a **Clinical research** section on your public profile — one line per trial you lead as principal investigator (co-investigator roles aren't included yet), with title, phase, sponsor, and current accrual status; a linked NCT number goes straight to its `clinicaltrials.gov` listing, and completed/closed trials collapse under a separate count so open studies aren't buried. Suspended trials aren't shown. Trials come from **OnCore** (WCM's clinical trial management system), covering studies opened to accrual since April 2019, with trial details from `clinicaltrials.gov`; the profile refreshes weekly — not from ReCiter, so it doesn't go through publication attribution at all.
 
-**There's no hide/edit control for this in `/edit`.** A wrong or missing trial is corrected directly at the OnCore source, not routed through Request a change. Contact your OnCore study team or research administration.
+**You can hide the whole Clinical research section** from the section visibility controls in `/edit`, but individual trials can't be hidden or edited there. A wrong or missing trial is corrected directly at the OnCore source, not routed through Request a change. Contact your OnCore study team or research administration.
 
 If you're WCM clinical faculty, you may also see a separate **Clinical profile →** link in your profile sidebar, pointing to `weillcornell.org` — that's the patient-facing physician directory (POPS), a different system entirely from Scholars.
 

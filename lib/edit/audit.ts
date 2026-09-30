@@ -43,12 +43,38 @@ export type AuditAction =
   | "unit_create"
   /** a CenterMembership / DivisionMembership row was added or removed (#540 Phase 1) */
   | "roster_change"
+  /** a reviewer confirmed or rejected a `CancerCenterDiseaseAssignment` row on
+   *  /edit; `targetEntityType='scholar'`, `targetEntityId` is the cwid;
+   *  before/after carry the `CancerCenterDiseaseDecision` snapshot
+   *  (score/confidence at decision time). Requires the `scholars_audit`
+   *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "disease_assignment_decision"
+  /** a curator turned a center's "Auto-publish high-confidence inferences"
+   *  switch on or off (`POST /api/edit/center/[code]/disease-auto-publish`,
+   *  `Center.diseaseAutoPublish`); `targetEntityType='center'`,
+   *  `targetEntityId` is the center code; before/after carry
+   *  `{ diseaseAutoPublish: boolean }`. Requires the `scholars_audit` action
+   *  ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "disease_auto_publish_set"
   /** a UnitAdmin row was inserted or hard-deleted (#540 Phase 1) */
   | "grant_change"
   /** a superuser began a "View as" impersonation session (#637 R5 — enter) */
   | "impersonation_start"
   /** a superuser ended (or expired out of) a "View as" session (#637 R5 — exit) */
   | "impersonation_end"
+  /** Identifiers & Profiles — the scholar (or an authorized editor) set the
+   *  ORCID iD. `targetEntityType='scholar'`, `targetEntityId` is the cwid;
+   *  before/after carry the old and new iD and, when the value came from the
+   *  "Is this your ORCID iD?" suggestion, `confirmed_suggestion: true`. */
+  | "orcid_set"
+  /** a superuser removed a former-URL redirect (a `slug_history` row) from the
+   *  Profile URLs registry (`POST /api/edit/slug-redirect`); the old URL stops
+   *  redirecting and 404s. `targetEntityType='scholar'`, `targetEntityId` is
+   *  the cwid the old URL forwarded to; `beforeValues` carries
+   *  `{ oldSlug, currentSlug, recordedAt }`, `afterValues` is `null`. Requires
+   *  the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "slug_redirect_remove"
   /** a scholar rejected a publication as not theirs via /edit → ReCiter gold
    *  standard (#746); `targetEntityId` is the pmid, `afterValues` carries the
    *  suppression + pending-refresh ids and the rejected contributor cwid */
@@ -95,6 +121,26 @@ export type AuditAction =
    *  inference); `targetEntityType='core'`, `targetEntityId` is the
    *  `"{coreId}:{pmid}"` pair, before/after carry the claim status transition. */
   | "core_claim"
+  /** a core owner (or Superuser/comms_steward) added a CWID to a core's
+   *  "Known clients" list on `/edit/core/[coreId]/review` (ReciterAI #383 /
+   *  SPS #2607, CWID-only pass); `targetEntityType='core'`, `targetEntityId`
+   *  is the `"{coreId}:{cwid}"` pair; before/after carry `{ active: boolean }`.
+   *  Requires the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "core_client_add"
+  /** the inverse of `core_client_add` — a known-client CWID soft-removed from
+   *  a core's list. Same `targetEntityType`/`targetEntityId` shape; before/
+   *  after carry `{ active: boolean }`. Requires the `scholars_audit` action
+   *  ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "core_client_remove"
+  /** #2634 — a mentor (or a superuser on their behalf) dismissed a
+   *  co-authorship-derived mentee suggestion on /edit "Mentees › From your
+   *  publications"; `targetEntityId` is the `"{mentorCwid}:{menteeCwid}"` pair,
+   *  after carries `{ reason }` (colleague | never_worked | private). Requires
+   *  the `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
+  | "mentee_suggestion_dismiss"
+  /** #2634 — reverses `mentee_suggestion_dismiss`. */
+  | "mentee_suggestion_restore"
   /** a scholar (or a genuine superuser on their behalf) confirmed a RePORTER
    *  PMID-overlap "Is this you?" match (`REPORTER_MATCH_V2`); writes the
    *  `person_nih_profile` row whose grants materialize next nightly.
@@ -118,7 +164,8 @@ export type AuditAction =
    *  (`source = "ED-HISTORICAL"`) appointment's public visibility via /edit
    *  (#1323); `targetEntityType='appointment'`, `targetEntityId` is the
    *  appointment `externalId`, `afterValues` carries `show_on_profile` (+ the
-   *  conferring unit on a unit-admin reveal). Requires the `scholars_audit`
+   *  superuser's `reason` on a hide, + the conferring unit on a unit-admin
+   *  reveal). Requires the `scholars_audit`
    *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
   | "appointment_visibility_set"
   /** a scholar (or a curator on their behalf) added / edited / removed a
@@ -182,7 +229,78 @@ export type AuditAction =
    *  touched field(s) `source: "human"` — a later cycle re-import must never
    *  overwrite them. Requires the `scholars_audit` action ENUM be extended —
    *  see `scripts/sql/audit-log.sql`. */
-  | "cancer_funding_override";
+  | "cancer_funding_override"
+  /** a superuser/comms-steward created a new `OrgUnitRole` vocabulary entry
+   *  via the steward-owned role-vocabulary editor (#2542 Phase 3);
+   *  `targetEntityType='org_unit_role'`, `targetEntityId` is the
+   *  `entityType:key` pair; `afterValues` carries the created row. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "role_vocabulary_create"
+  /** a superuser/comms-steward edited an existing `OrgUnitRole` entry's
+   *  `label` / `sortOrder` / `profileTitle` (#2542 Phase 3) — never `key`,
+   *  which NCI reporting predicates match on. `targetEntityType=
+   *  'org_unit_role'`, `targetEntityId` is the `entityType:key` pair;
+   *  before/after carry whichever of the three fields changed. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "role_vocabulary_update"
+  /** a superuser/comms-steward deleted a `manual`, zero-holder `OrgUnitRole`
+   *  entry via the steward-owned role-vocabulary editor (a `seed` entry, or
+   *  one with a live `OrgUnitRoleAssignment` / `CenterMembership` holder,
+   *  refuses instead — see `app/api/edit/roles/route.ts`'s DELETE docblock).
+   *  `targetEntityType='org_unit_role'`, `targetEntityId` is the
+   *  `entityType:key` pair; `beforeValues` carries the deleted row's
+   *  label/roleGroup/scope plus the count of `OrgUnitRoleScope` allowlist
+   *  rows removed with it; `afterValues` is `null`. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "role_vocabulary_delete"
+  /** a superuser/comms-steward granted a named CWID access to a program
+   *  report (`report_access` row created — Mentored publications,
+   *  `/edit/reports/7`); `targetEntityType='report_access'`, `targetEntityId`
+   *  is the `"{reportKey}:{scopeKey}:{cwid}"` triple; `afterValues` carries
+   *  the row. Requires the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "report_access_grant"
+  /** the matching revoke (`report_access` row deleted); same target shape,
+   *  `beforeValues` carries the deleted row. */
+  | "report_access_revoke"
+  /** a superuser recorded a functional role assignment on
+   *  `/edit/administrators` (`functional_role_grant` row created, source
+   *  `manual`), or the functional-roles import added an imported row
+   *  (`afterValues.via = "import"`). `targetEntityType='functional_role'`,
+   *  `targetEntityId` is `"{role}:{cwid}:{source}"`. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "functional_role_grant"
+  /** a functional role assignment's scopes replaced ("Edit scope", or the
+   *  import re-scoping an imported row); before/after carry `{ scopes }`. */
+  | "functional_role_scope_set"
+  /** the functional-roles import refreshed an imported row's provenance
+   *  (`granted_by` / `granted_at` / `grantee_name`) with its scopes unchanged,
+   *  e.g. after the earliest `report_access` grant it mirrored was revoked;
+   *  `fieldsChanged` names the fields, before/after carry them plus
+   *  `via: "import"`. Appended LAST to the ENUM. */
+  | "functional_role_update"
+  /** a functional role assignment deleted (a manual revoke, or the import
+   *  dropping an imported row its source no longer lists); `beforeValues`
+   *  carries the deleted row. */
+  | "functional_role_revoke"
+  /** an honors curator (or superuser) pressed Run now on the honors queue's
+   *  Sources tab (`POST /api/edit/honor/sources/run`, `HONORS_RUN_NOW`), which
+   *  queued a scrape of one public honor list. `targetEntityType='honor_list'`,
+   *  `targetEntityId` is the list id (`lib/honors/lists.ts`); `afterValues`
+   *  carries `{ runId, listId, status: "queued", trigger }`. The scrape itself
+   *  is machine-run and NOT audited (same posture as every ETL ingest); what it
+   *  proposes lands as `pending`, and each curator decision on it is audited as
+   *  `honor_update`. Requires the `scholars_audit` ENUMs be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "honor_list_run"
+  /** a core owner (or Superuser/comms_steward) sent a PMID to the core's review
+   *  queue by hand ("Add PMIDs → Send to review", Core Review Queue v2 PR B;
+   *  `POST /api/edit/core-queue-add`), writing a `core_queue_add` row. One row
+   *  per PMID. `targetEntityType='core'`, `targetEntityId` is the
+   *  `"{coreId}:{pmid}"` pair (the `core_claim` shape); before is null, after
+   *  carries `{ queued: true }`. Requires the `scholars_audit` action ENUM be
+   *  extended — see `scripts/sql/audit-log.sql`. */
+  | "core_queue_add";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -239,7 +357,47 @@ export type AuditEntityType =
   /** a data-sharing suppression (Phase 2, S-Index spec) — per-contributor hide
    *  or superuser whole-entity takedown of a `dataset_deposit` row via
    *  `/api/edit/suppress`; `targetEntityId` is the `dataset_deposit.id`. */
-  | "dataset_deposit";
+  | "dataset_deposit"
+  /** a corpus `opportunity` row suppressed / restored via
+   *  `/api/edit/opportunity-admin` (matcha-admin Phase 1b) or the intake
+   *  suppress cascade; `targetEntityId` is the `opportunity.opportunityId`.
+   *  Reuses `suppression_create` / `suppression_revoke` (the `dataset_deposit`
+   *  precedent) — no new action value. Requires the `scholars_audit`
+   *  target_entity_type ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "opportunity"
+  /** an `OrgUnitRole` vocabulary entry created or edited on the steward-owned
+   *  role-vocabulary editor (#2542 Phase 3); `targetEntityId` is the
+   *  `entityType:key` pair. */
+  | "org_unit_role"
+  /** a Meyer Cancer Center program leadership/description target (#2558) —
+   *  `/api/edit/center-program` writes `OrgUnitRoleAssignment` rows
+   *  (`entityType: "center_program"`) and in-row `CenterProgram.description`
+   *  updates; `targetEntityId` is the `"{centerCode}:{programCode}"` pair.
+   *  Requires the `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "center_program"
+  /** #2634 — a `mentee_suggestion` queue row; `targetEntityId` is the
+   *  `"{mentorCwid}:{menteeCwid}"` pair. Requires the `scholars_audit`
+   *  target_entity_type ENUM be extended, see `scripts/sql/audit-log.sql`. */
+  | "mentee_suggestion"
+  /** a per-report access grant row (`report_access`, Mentored publications
+   *  report); `targetEntityId` is the `"{reportKey}:{scopeKey}:{cwid}"`
+   *  triple. Requires the `scholars_audit` target_entity_type ENUM be
+   *  extended, see `scripts/sql/audit-log.sql`. */
+  | "report_access"
+  /** a `unit_admin` grant/revoke on an institution (an ED primary-organization
+   *  code, lib/institutions.ts); `targetEntityId` is the code. Requires the
+   *  `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "institution"
+  /** a `functional_role_grant` row (Administrators → Functional roles);
+   *  `targetEntityId` is `"{role}:{cwid}:{source}"`. Requires the
+   *  `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "functional_role"
+  /** a public honor list the honors-list scraper reads (`lib/honors/lists.ts`);
+   *  `targetEntityId` is the list id. Only `honor_list_run` uses it. */
+  | "honor_list";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

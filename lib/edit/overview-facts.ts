@@ -25,7 +25,17 @@
  * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
+import {
+  CENTER_ENTITY_TYPE,
+  CENTER_PROGRAM_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  formatLeadershipTitle,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
+import { leadAuthorSurname } from "@/lib/edit/biosketch-references";
 import { scoreFundingImportance } from "@/lib/edit/funding-importance";
 import { isChairTitleFor } from "@/lib/leadership";
 import {
@@ -98,6 +108,10 @@ export type OverviewFacts = {
     nihPercentile?: number | null;
     /** NIH iCite cumulative citation count. #917 v6 — biosketch-only. */
     citedByCount?: number | null;
+    /** Lead (first-listed) author's surname from `Publication.authorsString`. #2653 v8 —
+     *  the NIH lead-author-and-year reference form; biosketch v8 only (neither model
+     *  projection carries it; the reference list reads it). Optional for older fixtures. */
+    leadAuthor?: string | null;
   }[];
   /** Distinct confirmed-authorship pmid count (the whole corpus, not just scored). */
   publicationCount: number;
@@ -358,6 +372,7 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
     relativeCitationRatio: number | null;
     nihPercentile: number | null;
     citedByCount: number | null;
+    leadAuthor: string | null;
     authorPosition: OverviewAuthorPosition | null;
     isFirstOrLast: boolean;
   }[]
@@ -393,6 +408,8 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
       relativeCitationRatio: true,
       nihPercentile: true,
       citedByCount: true,
+      // #2653 v8 -- the lead author for the NIH reference form; biosketch v8 only.
+      authorsString: true,
     },
   });
 
@@ -410,6 +427,7 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
       relativeCitationRatio: decimalToNumber(r.relativeCitationRatio),
       nihPercentile: decimalToNumber(r.nihPercentile),
       citedByCount: r.citedByCount ?? null,
+      leadAuthor: leadAuthorSurname(r.authorsString),
       authorPosition: position,
       isFirstOrLast: position === "first" || position === "last",
     };
@@ -763,6 +781,7 @@ export async function assembleOverviewFacts(
       relativeCitationRatio: p.relativeCitationRatio,
       nihPercentile: p.nihPercentile,
       citedByCount: p.citedByCount,
+      leadAuthor: p.leadAuthor,
     }));
 
   const activeGrants = funding
@@ -988,8 +1007,8 @@ function asProgramName(label: string): string {
 /** One synthesized FK-leadership title plus the unit context the dedup needs. */
 type FkLeadershipCandidate = {
   candidate: OverviewSourceTitle;
-  /** A dept-chair role — gets the role-aware `isChairTitleFor` dedup (the ETL sets
-   *  `chairCwid` from a "Chairman …" appointment whose string won't match exactly). */
+  /** A dept-chair role — gets the role-aware `isChairTitleFor` dedup (the ETL derives
+   *  the chair assignment from a "Chairman …" appointment whose string won't match exactly). */
   isDeptChair: boolean;
   /** The unit name, for the chair dedup against appointment titles. */
   unitName: string;
@@ -1022,80 +1041,206 @@ function fkLeadershipCandidate(
 
 /**
  * #742 §2.5 — leadership roles recorded on the org-unit FK tables, not (or not
- * yet) in the appointment table: a department `chairCwid`, a division `chiefCwid`,
- * a center `directorCwid` (+ interim), and `CenterProgramLeader` rows. These catch
- * leadership set via `field_override` or missed by the appointment-title ETL (the
- * Stewart case). Each query keys on the leader being THIS scholar, so an external
- * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized
- * titles are deduped against the appointment titles + primary title by the caller.
+ * yet) in the appointment table: department chair/director, division chief,
+ * center leadership, and a `center_program` `OrgUnitRoleAssignment` row
+ * (#2558; was a retired per-program leader table). Sole source for every kind
+ * is `OrgUnitRoleAssignment` (#2542 contract A — `Department.chairCwid` /
+ * `Division.chiefCwid` / `Center.directorCwid` / `Center.leaderInterim` no
+ * longer exist as read sources). These catch leadership set via
+ * `field_override` or missed by the appointment-title ETL (the Stewart
+ * case). Each query keys on the leader being THIS scholar, so an external
+ * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The
+ * synthesized titles are deduped against the appointment titles + primary
+ * title by the caller.
  *
- * NOTE: program leaders live in `CenterProgramLeader` (#1117 replaced the single
- * `CenterProgram.leaderCwid` column), so a co-led program surfaces every leader.
+ * NOTE: program leaders live in `OrgUnitRoleAssignment` (#1117 replaced the
+ * single `CenterProgram.leaderCwid` column with a 0..N table, #2558 migrated
+ * that table onto the shared assignment table), so a co-led program surfaces
+ * every leader.
  */
 async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCandidate[]> {
-  const [departments, divisions, centers, programLeaders] = await Promise.all([
-    db.read.department.findMany({
-      where: { chairCwid: cwid },
-      select: { code: true, name: true, officialName: true },
+  const [deptAssignments, divAssignments, centers, programAssignments] = await Promise.all([
+    // `roleKey` itself distinguishes Chair vs. Director (#58 / #2542) — see
+    // the loop below.
+    db.read.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid,
+        entityType: "department",
+        roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+      },
+      select: { entityId: true, roleKey: true },
     }),
-    db.read.division.findMany({
-      where: { chiefCwid: cwid },
-      select: { code: true, name: true },
+    db.read.orgUnitRoleAssignment.findMany({
+      where: { cwid, entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+      select: { entityId: true },
     }),
-    db.read.center.findMany({
-      where: { directorCwid: cwid },
-      select: { code: true, name: true, officialName: true, leaderInterim: true },
-    }),
-    db.read.centerProgramLeader.findMany({
-      // #1570 — a `coe_liaison` row is not a leadership title; only program
-      // LEADS synthesize a "Leader, {program}" candidate here.
-      where: { cwid, role: "leader" },
+    // #2542 — center leadership is an `OrgUnitRoleAssignment` row.
+    // `profileTitle` gates it for the same reason `role: "leader"` gates program
+    // leaders below: not every leadership role is a title on a person. The
+    // center's NAME is resolved separately — the assignment is polymorphic on
+    // (entityType, entityId) with no FK to `center`.
+    db.read.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid,
+        entityType: CENTER_ENTITY_TYPE,
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
       select: {
-        centerCode: true,
-        programCode: true,
+        entityId: true,
+        roleKey: true,
         interim: true,
-        program: { select: { label: true, center: { select: { name: true, officialName: true } } } },
+        role: { select: { label: true } },
+      },
+    }),
+    // #2558 — program leadership is an `OrgUnitRoleAssignment` row too
+    // (`entityType: "center_program"`, `entityId`
+    // `"{centerCode}:{programCode}"`). `profileTitle` gates it the same way
+    // it does above — `coe_liaison` seeds `profileTitle: false`, so this only
+    // ever surfaces `leader` rows. No FK to `CenterProgram`, so the program's
+    // label/center name are resolved separately, below.
+    db.read.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid,
+        entityType: CENTER_PROGRAM_ENTITY_TYPE,
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
+      select: {
+        entityId: true,
+        interim: true,
+        role: { select: { label: true } },
       },
     }),
   ]);
 
+  // One batched name lookup for the departments/divisions/centers the
+  // assignments point at — none of the three carries an FK to its target
+  // (polymorphic on `entityId`).
+  const [deptNameRows, divNameRows, centerNameRows] = await Promise.all([
+    deptAssignments.length
+      ? db.read.department.findMany({
+          where: { code: { in: deptAssignments.map((a) => a.entityId) } },
+          select: { code: true, name: true, officialName: true },
+        })
+      : Promise.resolve([]),
+    divAssignments.length
+      ? db.read.division.findMany({
+          where: { code: { in: divAssignments.map((a) => a.entityId) } },
+          select: { code: true, name: true },
+        })
+      : Promise.resolve([]),
+    centers.length
+      ? db.read.center.findMany({
+          where: { code: { in: centers.map((c) => c.entityId) } },
+          select: { code: true, name: true, officialName: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const deptNameById = new Map(deptNameRows.map((d) => [d.code, d.officialName ?? d.name]));
+  const divNameById = new Map(divNameRows.map((d) => [d.code, d.name]));
+  const centerNameById = new Map(
+    centerNameRows.map((c) => [c.code, c.officialName ?? c.name]),
+  );
+  // #2558 Phase 1 — batched (label, center name) lookup for the programs
+  // `programAssignments` points at. Parsed back apart from `entityId`
+  // (`"{centerCode}:{programCode}"`) since the assignment carries no FK to
+  // `CenterProgram`.
+  const programAssignmentInfo = new Map<string, { label: string; centerName: string }>();
+  if (programAssignments.length > 0) {
+    const pairs = programAssignments.map((a) => {
+      const [centerCode, programCode] = a.entityId.split(":");
+      return { centerCode: centerCode ?? "", programCode: programCode ?? "" };
+    });
+    const programRows = await db.read.centerProgram.findMany({
+      where: { OR: pairs.map((p) => ({ centerCode: p.centerCode, code: p.programCode })) },
+      select: {
+        centerCode: true,
+        code: true,
+        label: true,
+        center: { select: { name: true, officialName: true } },
+      },
+    });
+    for (const p of programRows) {
+      programAssignmentInfo.set(`${p.centerCode}:${p.code}`, {
+        label: p.label,
+        centerName: p.center.officialName ?? p.center.name,
+      });
+    }
+  }
+
   const out: FkLeadershipCandidate[] = [];
-  for (const d of departments) {
-    const name = d.officialName ?? d.name;
+  for (const a of deptAssignments) {
+    const name = deptNameById.get(a.entityId);
+    // A row whose department vanished emits no candidate rather than a
+    // half-rendered one — the assignment carries no FK to `department`.
+    if (name === undefined) continue;
+    // #58 / #2542 — an administrative department's leader is a DIRECTOR, not
+    // a Chair; the assignment's own `roleKey` already carries that
+    // distinction (it was written from `departmentLeaderRoleKey(category)`).
+    // `isDeptChair` gates the role-aware `isChairTitleFor` dedup below, which
+    // matches "Chair of {dept}" appointment titles only — it must not fire
+    // for a Director, whose real appointment title is "Director of {dept}",
+    // a different pattern that predicate does not recognize.
+    const isDirector = a.roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY;
     out.push(
       fkLeadershipCandidate(
-        `fk:dept:${d.code}`,
-        `Chair, ${withUnitNoun("Department of", name)}`,
+        `fk:dept:${a.entityId}`,
+        `${isDirector ? "Director" : "Chair"}, ${withUnitNoun("Department of", name)}`,
         WCM_ORG,
         false,
-        { isDeptChair: true, unitName: name },
+        { isDeptChair: !isDirector, unitName: name },
       ),
     );
   }
-  for (const v of divisions) {
+  for (const a of divAssignments) {
+    const name = divNameById.get(a.entityId);
+    // A row whose division vanished emits no candidate rather than a
+    // half-rendered one.
+    if (name === undefined) continue;
     out.push(
-      fkLeadershipCandidate(`fk:div:${v.code}`, `Chief, ${withUnitNoun("Division of", v.name)}`, WCM_ORG, false),
+      fkLeadershipCandidate(`fk:div:${a.entityId}`, `Chief, ${withUnitNoun("Division of", name)}`, WCM_ORG, false),
     );
   }
   for (const c of centers) {
-    const name = c.officialName ?? c.name;
+    const name = centerNameById.get(c.entityId);
+    // A row whose center vanished emits no candidate rather than a half-rendered
+    // one — the assignment carries no FK to `center`.
+    if (name === undefined) continue;
+    // The candidate id is PERSISTED in `overview_source_selection.deltas`, so a
+    // curator's dismissal of "Director, X" must keep matching. `fk:center:{code}`
+    // stays byte-identical for the director role — the only role that existed
+    // before #2542 — and only additional roles take a suffixed id. Re-keying the
+    // vocabulary by unit kind does not touch either: both interpolate the
+    // ASSIGNMENT's own `entity_id` and `role_key`, never the vocabulary's PK.
+    const id =
+      c.roleKey === DIRECTOR_ROLE_KEY
+        ? `fk:center:${c.entityId}`
+        : `fk:center:${c.entityId}:${c.roleKey}`;
     out.push(
       fkLeadershipCandidate(
-        `fk:center:${c.code}`,
-        `${c.leaderInterim ? "Interim " : ""}Director, ${name}`,
+        id,
+        `${formatLeadershipTitle(c.role.label, c.interim)}, ${name}`,
         WCM_ORG,
-        c.leaderInterim,
+        c.interim,
       ),
     );
   }
-  for (const p of programLeaders) {
-    const centerName = p.program.center.officialName ?? p.program.center.name;
+  // #2558 Phase 1 — programs already covered by an assignment row. The
+  // candidate id interpolates the assignment's own `entityId`
+  // (`"{centerCode}:{programCode}"`), byte-identical to the legacy id below,
+  // so a curator's prior dismissal keeps matching regardless of which source
+  // produced the row — same invariant the center block's id computation
+  // documents above.
+  for (const a of programAssignments) {
+    const info = programAssignmentInfo.get(a.entityId);
+    // A row whose program vanished emits no candidate rather than a
+    // half-rendered one — the assignment carries no FK to `CenterProgram`.
+    if (!info) continue;
     out.push(
       fkLeadershipCandidate(
-        `fk:program:${p.centerCode}:${p.programCode}`,
-        `${p.interim ? "Interim " : ""}Leader, ${asProgramName(p.program.label)}`,
-        centerName,
-        p.interim,
+        `fk:program:${a.entityId}`,
+        `${formatLeadershipTitle(a.role.label, a.interim)}, ${asProgramName(info.label)}`,
+        info.centerName,
+        a.interim,
       ),
     );
   }
@@ -1157,8 +1302,8 @@ async function loadOverviewTitleCandidates(cwid: string): Promise<OverviewSource
   // §2.5 dedup — drop an FK-leadership title the appointments (or the primary title)
   // already carry, so a chair recorded in BOTH places doesn't double. Exact
   // normalized match covers the general case; a dept chair additionally gets the
-  // role-aware `isChairTitleFor` check, because `chairCwid` is derived from a
-  // "Chairman …" appointment whose text won't match the synthesized "Chair, …".
+  // role-aware `isChairTitleFor` check, because the chair assignment is derived
+  // from a "Chairman …" appointment whose text won't match the synthesized "Chair, …".
   const apptTitles = appointments.map((a) => a.title);
   const primaryTitle = scholar?.primaryTitle ?? null;
   const takenNorm = new Set(apptTitles.map((t) => normalizeTitleForDedup(t)));

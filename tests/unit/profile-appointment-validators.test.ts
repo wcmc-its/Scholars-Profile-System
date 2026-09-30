@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PROFILE_APPOINTMENT_TEXT_MAX,
+  isCollegeProfessorialTitleBlocked,
   isProfileAppointmentCategory,
   validateProfileAppointmentInput,
 } from "@/lib/edit/profile-appointment";
@@ -198,5 +199,41 @@ describe("validateProfileAppointmentInput — rejections", () => {
       error: "invalid_value",
       field: "showOnProfile",
     });
+  });
+
+  it("rejects a self-entered College professorial title at Weill (#2481)", () => {
+    expect(
+      validateProfileAppointmentInput(
+        base({ title: "Professor of Medicine", organization: "Weill Cornell Medicine" }),
+      ),
+    ).toEqual({ ok: false, error: "college_title_blocked", field: "title" });
+    expect(
+      validateProfileAppointmentInput(base({ title: "Associate Professor", organization: "Weill" })),
+    ).toEqual({ ok: false, error: "college_title_blocked", field: "title" });
+  });
+});
+
+describe("isCollegeProfessorialTitleBlocked (#2481)", () => {
+  it("blocks a professorial title at the College", () => {
+    expect(isCollegeProfessorialTitleBlocked("Professor", "Weill Cornell Medicine")).toBe(true);
+    expect(isCollegeProfessorialTitleBlocked("Clinical Professor", "Weill Cornell Medicine")).toBe(
+      true,
+    );
+  });
+
+  it("exempts the Graduate School", () => {
+    expect(
+      isCollegeProfessorialTitleBlocked(
+        "Professor",
+        "Weill Cornell Graduate School of Medical Sciences",
+      ),
+    ).toBe(false);
+  });
+
+  it("allows a non-professorial title, or a non-Weill organization", () => {
+    expect(isCollegeProfessorialTitleBlocked("Program Director", "Weill Cornell Medicine")).toBe(
+      false,
+    );
+    expect(isCollegeProfessorialTitleBlocked("Professor", "Harvard Medical School")).toBe(false);
   });
 });

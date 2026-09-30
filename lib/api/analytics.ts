@@ -29,7 +29,11 @@
  *    firing rate can be observed and NAV_WATCHDOG_MS tuned.
  *  - search_mesh_restrict: the #396 Publications-tab "Show only MeSH-tagged
  *    matches" facet toggle was turned ON. Carries `q` so the engage rate can be
- *    observed per query. Emitted only on turn-ON, never on turn-OFF. */
+ *    observed per query. Emitted only on turn-ON, never on turn-OFF.
+ *  - biosketch_worksheet_copy: a Copy on the SciENcv worksheet (#2652). Carries
+ *    `surface` (which block was copied) and `cwid` (the scholar the worksheet is
+ *    for). Distinct (cwid, day) is the "completed worksheet" denominator — the
+ *    feature's only adoption signal. */
 export const VALID_EVENTS = new Set<string>([
   "search_click",
   "mentoring_copubs_open",
@@ -43,6 +47,7 @@ export const VALID_EVENTS = new Set<string>([
   "home_methods_explore_all_click",
   "search_nav_watchdog",
   "search_mesh_restrict",
+  "biosketch_worksheet_copy",
 ]);
 
 /** Max logged length for any user-controlled string field. The beacon is

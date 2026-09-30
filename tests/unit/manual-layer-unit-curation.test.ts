@@ -147,9 +147,11 @@ describe("mergeUnitFields", () => {
     expect(mergeUnitFields({ description: null, leaderCwid: null }, {}).leaderInterim).toBe(false);
   });
 
-  it("leaderInterim respects the in-row column for a center (no override needed)", () => {
-    // Centers carry `leader_interim` as a real column; the merge picks it up
-    // when no override exists.
+  it("leaderInterim respects the row value fed in for a center (no override needed)", () => {
+    // A center's `leaderInterim` is not a column — it comes from that
+    // center's `OrgUnitRoleAssignment.interim` row, fed into `row` by
+    // `lib/api/unit-edit-context.ts` (#2542 contract A). This merge just
+    // picks it up when no override exists.
     expect(
       mergeUnitFields({ description: null, leaderCwid: null, leaderInterim: true }, {}).leaderInterim,
     ).toBe(true);

@@ -17,6 +17,12 @@ export type ConceptInfo = {
   /** The MeSH scope note (the descriptor's definition). Null for the ~0.5% of
    *  descriptors with no scope note; the card then omits the definition line. */
   definition: string | null;
+  /** Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`): the second descriptor's
+   *  name when the query's leftover tokens resolved on their own ("pancreatic cancer
+   *  immunotherapy" → Pancreatic Neoplasms + Immunotherapy). Rendered as plain text
+   *  after the primary term ("…, ranked by work also under X."); no card — ponytail:
+   *  add one when someone asks. */
+  secondaryLabel?: string | null;
 };
 
 /**
@@ -179,7 +185,19 @@ export function ScopeNote({
         ) : scope === "concept" ? (
           <>Matching the {term} concept only.</>
         ) : (
-          <>Also matching the related concept {term}.</>
+          <>
+            {/* Two-concept: the two are NOT peers — the primary admits (and is what every
+                count on the page is keyed to), the secondary only reorders — so the note
+                says the roles rather than "A and B". */}
+            Also matching the related concept {term}
+            {concept.secondaryLabel ? (
+              <>
+                , ranked by work also under{" "}
+                <span className="font-semibold text-foreground">{concept.secondaryLabel}</span>
+              </>
+            ) : null}
+            .
+          </>
         )}
       </span>
     </div>

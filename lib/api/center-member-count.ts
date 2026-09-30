@@ -16,6 +16,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { publicRoleWhere } from "@/lib/eligibility";
+import { INVITED_ROLE_KEY } from "@/lib/org-unit-roles";
 
 /**
  * #552 § 3.3 — the load-bearing membership active predicate. A membership is
@@ -24,14 +25,18 @@ import { publicRoleWhere } from "@/lib/eligibility";
  * (`components/edit/center-roster-card.tsx`) exactly: `today` is a `YYYY-MM-DD`
  * string and the `@db.Date` bounds are compared as their UTC date strings, so
  * the date-only columns never get mis-compared against a time-carrying instant.
+ *
+ * An `invited` row (`INVITED_ROLE_KEY`) is never active, whatever its dates:
+ * invitees are backend-only until promoted to a real membership role. Takes
+ * the row rather than loose dates so a caller cannot forget the role key.
  */
 export function isCenterMembershipActive(
-  startDate: Date | null,
-  endDate: Date | null,
+  row: { startDate: Date | null; endDate: Date | null; membershipRoleKey: string | null },
   today: string,
 ): boolean {
-  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
-  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
+  if (row.membershipRoleKey === INVITED_ROLE_KEY) return false;
+  const start = row.startDate ? row.startDate.toISOString().slice(0, 10) : null;
+  const end = row.endDate ? row.endDate.toISOString().slice(0, 10) : null;
   if (start && start > today) return false; // pending
   if (end && end < today) return false; // inactive
   return true;
@@ -84,14 +89,15 @@ export async function countActiveCenterMembersByCode(
   const today = todayIso();
   const rows = (await client.centerMembership.findMany({
     where: { centerCode: { in: centerCodes } },
-    select: { centerCode: true, cwid: true, startDate: true, endDate: true },
+    select: { centerCode: true, cwid: true, startDate: true, endDate: true, membershipRoleKey: true },
   })) as Array<{
     centerCode: string;
     cwid: string;
     startDate: Date | null;
     endDate: Date | null;
+    membershipRoleKey: string | null;
   }>;
-  const active = rows.filter((r) => isCenterMembershipActive(r.startDate, r.endDate, today));
+  const active = rows.filter((r) => isCenterMembershipActive(r, today));
   if (active.length === 0) return counts;
 
   const scholars = await client.scholar.findMany({

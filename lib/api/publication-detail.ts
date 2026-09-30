@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
+import { fetchWcmAuthorsForPmids, type WcmAuthorChip } from "@/lib/api/topics";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 import {
   isMethodsLensPubModalEnabled,
@@ -149,6 +150,9 @@ export type PublicationDetailPayload = {
     synopsis: string | null;
   };
   topics: PublicationDetailTopic[];
+  /** Confirmed WCM authors, suppression-filtered by the same resolver the search
+   *  and topic-feed chips use. The modal renders them as pills in the byline. */
+  wcmAuthors: WcmAuthorChip[];
   /** #917 — method families attributed to this pmid (de-duped across WCM
    *  authors), gated + suppression-filtered. Empty when the Methods lens is off
    *  or the paper has no surfaced family; the modal omits the section then. */
@@ -382,24 +386,50 @@ async function resolvePublicationCores(
 ): Promise<PublicationDetailCore[]> {
   if (!isCorePubModalEnabled()) return [];
 
-  const rows = await prisma.publicationCore.findMany({
-    where: { pmid },
-    select: {
-      coreId: true,
-      status: true,
-      core: { select: { name: true, facility: true } },
-    },
-  });
-  if (rows.length === 0) return [];
+  const [rows, claimedCoreIds] = await Promise.all([
+    prisma.publicationCore.findMany({
+      where: { pmid },
+      select: {
+        coreId: true,
+        status: true,
+        core: { select: { name: true, facility: true } },
+      },
+    }),
+    // Manual PMID add: CLAIMED core_claim rows for this pmid — includes cores the
+    // engine never scored it against at all (no publicationCore row above).
+    prisma.coreClaim.findMany({
+      where: { pmid, revokedAt: null, status: "claimed" },
+      select: { coreId: true },
+    }),
+  ]);
+
+  const projectedCoreIds = new Set(rows.map((r) => r.coreId));
+  const manualCoreIds = claimedCoreIds
+    .map((c) => c.coreId)
+    .filter((coreId) => !projectedCoreIds.has(coreId));
+  if (rows.length === 0 && manualCoreIds.length === 0) return [];
+
+  const manualCores =
+    manualCoreIds.length === 0
+      ? []
+      : await prisma.core.findMany({
+          where: { id: { in: manualCoreIds } },
+          select: { id: true, name: true, facility: true },
+        });
 
   const claims = await loadActiveCoreClaimsForPmids([pmid]);
   return buildPublicationCores(
-    rows.map((r) => ({
-      coreId: r.coreId,
-      status: r.status,
-      name: r.core.name,
-      facility: r.core.facility,
-    })),
+    [
+      ...rows.map((r) => ({
+        coreId: r.coreId,
+        status: r.status,
+        name: r.core.name,
+        facility: r.core.facility,
+      })),
+      // status is a placeholder — buildPublicationCores resolves purely off the
+      // active claim (isEffectiveConfirmed short-circuits before reading it).
+      ...manualCores.map((c) => ({ coreId: c.id, status: "confirmed", name: c.name, facility: c.facility })),
+    ],
     (coreId) => claims.get(claimKey(pmid, coreId)) ?? null,
     isCorePagesEnabled(),
   );
@@ -607,9 +637,10 @@ export async function getPublicationDetail(
   // #917 — method families for this pmid (gated; [] when the lens is off), and
   // the core facilities for this pmid (gated; [] when CORE_PUB_MODAL is off).
   // Independent reads — run concurrently.
-  const [methodFamilies, cores] = await Promise.all([
+  const [methodFamilies, cores, wcmAuthorsByPmid] = await Promise.all([
     resolveMethodFamilies(pmid),
     resolvePublicationCores(pmid),
+    fetchWcmAuthorsForPmids([pmid]),
   ]);
 
   // Citing publications. With PUBLICATION_CITING_BRIDGE=on the in-VPC app serves
@@ -691,6 +722,7 @@ export async function getPublicationDetail(
       synopsis: pub.synopsis && pub.synopsis.length > 0 ? pub.synopsis : null,
     },
     topics,
+    wcmAuthors: wcmAuthorsByPmid.get(pmid) ?? [],
     methodFamilies,
     cores,
     citingPubs,

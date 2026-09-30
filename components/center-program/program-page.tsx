@@ -86,18 +86,14 @@ export async function CenterProgramPage({
         )}
 
         {detail.leaders.map((leader) => (
+          // #2558 — `roleLabel` (already Interim-formatted) and `expansion`
+          // come from the vocabulary (`getCenterProgram`), not a hardcoded
+          // ternary here.
           <LeaderCard
             key={leader.cwid}
             leader={leader}
-            role={
-              // #1570 — COE liaisons (ordered after the Leaders by the loader)
-              // carry a distinct "COE Liaison" label.
-              leader.role === "coe_liaison"
-                ? "COE Liaison"
-                : leader.isInterim
-                  ? "Interim Leader"
-                  : "Leader"
-            }
+            role={leader.roleLabel}
+            expansion={leader.expansion}
           />
         ))}
 
@@ -139,6 +135,7 @@ export async function CenterProgramPage({
               total: detail.members.length,
             }}
             centerSlug={detail.center.slug}
+            centerCode={detail.center.code}
             singleProgram
           />
         )}

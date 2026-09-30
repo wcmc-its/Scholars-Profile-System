@@ -7,16 +7,18 @@ import { cn, initials } from "@/lib/utils";
 
 type HeadshotState = "loading" | "image" | "fallback";
 
-const SIZE_CLASS: Record<"sm" | "md" | "lg", string> = {
+const SIZE_CLASS: Record<"sm" | "md" | "lg" | "roster", string> = {
   sm: "size-6",
   md: "h-12 w-12",
   lg: "h-24 w-24 sm:h-28 sm:w-28",
+  roster: "h-10 w-10",
 };
 
-const FALLBACK_TEXT_CLASS: Record<"sm" | "md" | "lg", string> = {
+const FALLBACK_TEXT_CLASS: Record<"sm" | "md" | "lg" | "roster", string> = {
   sm: "text-xs",
   md: "text-sm",
   lg: "text-xl",
+  roster: "text-sm",
 };
 
 // Deterministic warm two-tone gradient from a name string.
@@ -44,6 +46,7 @@ export function HeadshotAvatar({
   identityImageEndpoint,
   size,
   className,
+  fallbackTone = "gradient",
 }: {
   cwid: string;
   preferredName: string;
@@ -51,8 +54,12 @@ export function HeadshotAvatar({
    *  payload, and this component rebuilds it from `cwid`. `??` (not `||`) so an
    *  explicit `""` still forces the fallback, preserving existing callers. */
   identityImageEndpoint?: string;
-  size: "sm" | "md" | "lg";
+  size: "sm" | "md" | "lg" | "roster";
   className?: string;
+  /** No-photo fallback. "gradient" (default): the name-seeded colour circle.
+   *  "rail": the taxonomy scholar-card mockup's beige `--apollo-rail` circle
+   *  with serif initials in `--apollo-bar`. */
+  fallbackTone?: "gradient" | "rail";
 }) {
   const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">(
     "loading"
@@ -98,8 +105,17 @@ export function HeadshotAvatar({
         />
       )}
       <AvatarFallback
-        className={FALLBACK_TEXT_CLASS[size]}
-        style={{ background: nameGradient(preferredName), color: "rgba(255,255,255,0.92)" }}
+        className={
+          fallbackTone === "rail"
+            ? "bg-apollo-rail text-apollo-bar font-serif text-[17px]"
+            : FALLBACK_TEXT_CLASS[size]
+        }
+        style={
+          fallbackTone === "rail"
+            ? undefined
+            : { background: nameGradient(preferredName), color: "rgba(255,255,255,0.92)" }
+        }
+        data-fallback-tone={fallbackTone}
       >
         {initials(preferredName)}
       </AvatarFallback>

@@ -31,6 +31,7 @@ import Link from "next/link";
 import { Shapes, Users, ArrowUpRight, Wrench } from "lucide-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import type { TaxonomyMatch, TaxonomyMatchResult } from "@/lib/api/search-taxonomy";
+import { searchHref } from "@/lib/search/query-url";
 
 /** Chips shown when layout can't be measured (SSR + jsdom). On a real client the
  *  count is measured to fill exactly one line (see {@link MeasuredChipRow}). */
@@ -221,7 +222,7 @@ function MeasuredChipRow({
 
       {expanded && browseQuery && beyond > 0 ? (
         <Link
-          href={`/search?q=${encodeURIComponent(browseQuery)}`}
+          href={searchHref(browseQuery)}
           className={`shrink-0 rounded px-1 text-[13px] text-[#1f51a8] no-underline hover:underline ${FOCUS_RING}`}
         >
           +{beyond} more in Browse →

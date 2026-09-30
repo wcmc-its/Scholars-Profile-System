@@ -90,7 +90,8 @@ const QUERY_KEYED_PATTERNS: ReadonlySet<string> = new Set([
 
 // The exact query-string allow-list on the custom cache policy: the union of
 // params the Group B pages read (/scholars/* -> mentees-sort; dept/center/
-// division -> page/tab/sort; topics/*/scholars -> q/role/page).
+// division -> page/tab/sort; topics/*/scholars -> q/role/sub/letter;
+// methods/*/*/scholars -> q/role/page).
 const QUERY_KEYED_ALLOWLIST = [
   "mentees-sort",
   "page",
@@ -98,6 +99,8 @@ const QUERY_KEYED_ALLOWLIST = [
   "sort",
   "q",
   "role",
+  "sub",
+  "letter",
 ] as const;
 
 /** Map an app route file to its URL path: drop the route-group `(...)` segments
@@ -160,11 +163,17 @@ function findServerMutatingRoutes(dir: string): string[] {
   return [...new Set(out)];
 }
 
-/** A CloudFront PathPattern (exact, or trailing-`*` prefix glob) covers a route. */
+/** A CloudFront PathPattern covers a route. CloudFront's `*` matches any run
+ *  of characters (slashes included) anywhere in the pattern, so the family
+ *  feed's mid-pattern glob (`/api/methods/<*>/<*>/publications`) also covers a
+ *  static segment in that position (`/api/methods/<*>/all/publications`). A
+ *  route's own `*` (a dynamic segment) is tested as one opaque sample value,
+ *  which a pattern can only match through a `*` of its own, never a literal. */
 function behaviorCovers(pattern: string, route: string): boolean {
-  return pattern.endsWith("*")
-    ? route.startsWith(pattern.slice(0, -1))
-    : route === pattern;
+  const re = new RegExp(
+    "^" + pattern.split("*").map((lit) => lit.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$",
+  );
+  return re.test(route.replace(/\*/g, "\u0000dynamic\u0000"));
 }
 
 describe("EdgeStack", () => {
@@ -269,7 +278,7 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus thirty-three additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus thirty-four additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -283,8 +292,10 @@ describe("EdgeStack", () => {
         // + the two GrantRecs Phase 2 matcher routes
         // (/api/scholars/*/opportunities, /api/opportunities/*/researchers)
         // + the GrantRecs slice-3 browse list (/api/opportunities)
-        // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher.
-        expect(cacheBehaviors).toHaveLength(34);
+        // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher
+        // + `/edge-ip`, the off-network block page's IP echo (CloudFront
+        // Function only, never reaches the origin).
+        expect(cacheBehaviors).toHaveLength(35);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -295,6 +306,8 @@ describe("EdgeStack", () => {
         expect(paths).toEqual([
           // -- Immutable build assets (long-cache, CachingOptimized) ------
           "/_next/static/*",
+          // -- Off-network block page IP echo (CloudFront Function only) ---
+          "/edge-ip",
           // -- Uncacheable (CachingDisabled + AllViewer) ------------------
           "/api/edit*",
           "/api/impersonation*",
@@ -458,9 +471,16 @@ describe("EdgeStack", () => {
         ]);
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
-          if (path === "/_next/static/*" || QUERY_KEYED_PATTERNS.has(path)) {
+          if (
+            path === "/_next/static/*" ||
+            path === "/edge-ip" ||
+            QUERY_KEYED_PATTERNS.has(path)
+          ) {
             // `/_next/static/*` (immutable assets) and Group B (highest-traffic
             // pages) must NOT forward cookies -- it would fragment the cache.
+            // `/edge-ip` never issues an origin request at all: its
+            // viewer-request function returns a synthetic response, so an
+            // origin request policy would be dead configuration.
             expect(behavior.OriginRequestPolicyId).toBeUndefined();
           } else if (INTERNAL_VIEWER_ORP_PATHS.has(path)) {
             // #866 internal-viewer ORP (forwards CloudFront-Viewer-Address) -- a Ref.
@@ -477,12 +497,14 @@ describe("EdgeStack", () => {
       });
 
       it("default behavior forwards NO cookies and NO query strings to the origin (acceptance #5 -- prevents cookie leak)", () => {
-        // Previously asserted `OriginRequestPolicyId === undefined`, i.e. no
-        // policy at all. #1930 has to attach one to forward the viewer Host
-        // (without it, middleware redirects on the legacy VIVO paths point at
-        // the origin hostname), so this now pins acceptance #5's actual
-        // intent -- nothing cookie- or query-bearing reaches the origin on the
-        // cached HTML path -- rather than the proxy of "no policy".
+        // #1930/#1931 briefly attached an origin request policy here (to
+        // forward the viewer Host for middleware redirects); #1944 retired it
+        // once #1935 moved that redirect logic onto the configured SITE_URL,
+        // so `OriginRequestPolicyId === undefined` (no policy at all) is the
+        // expected shape again. This assertion tolerates either shape so it
+        // keeps pinning acceptance #5's actual intent -- nothing cookie- or
+        // query-bearing reaches the origin on the cached HTML path -- rather
+        // than the proxy of "no policy".
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -754,6 +776,36 @@ describe("EdgeStack", () => {
         expect(items).toEqual([...QUERY_KEYED_ALLOWLIST].sort());
       });
 
+      it("every `sp.<param>` a query-keyed page reads is on the allow-list (a missing one is silently stripped)", () => {
+        // The behavior-coverage guard above only proves SOME behavior forwards
+        // the query string. A param missing from the allow-list still reaches
+        // the page as undefined: `?sub=`/`?letter=` on /topics/*/scholars shipped
+        // that way and every filter link rendered the unfiltered page.
+        // ponytail: matches the `sp.<name>` / `sp["name"]` convention these pages
+        // all use; a page that reads its params another way is not scanned.
+        const allowed = new Set<string>(QUERY_KEYED_ALLOWLIST);
+        const missing: string[] = [];
+        const walk = (d: string) => {
+          for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+            const p = path.join(d, ent.name);
+            if (ent.isDirectory()) {
+              walk(p);
+              continue;
+            }
+            if (!/^page\.(t|j)sx?$/.test(ent.name)) continue;
+            const route = routePatternFor(p);
+            if (![...QUERY_KEYED_PATTERNS].some((pat) => behaviorCovers(pat, route))) continue;
+            const src = fs.readFileSync(p, "utf8");
+            for (const m of src.matchAll(/\bsp(?:\.([A-Za-z_]\w*)|\[["']([\w-]+)["']\])/g)) {
+              const name = m[1] ?? m[2];
+              if (!allowed.has(name)) missing.push(`${route} reads ?${name}`);
+            }
+          }
+        };
+        walk(APP_DIR);
+        expect([...new Set(missing)]).toEqual([]);
+      });
+
       it("does NOT key on cookies; keys on the RSC headers (soft-nav) only", () => {
         const cfg = policyConfig();
         const params = cfg.ParametersInCacheKeyAndForwardedToOrigin as Record<
@@ -935,42 +987,24 @@ describe("EdgeStack", () => {
       });
     });
 
-    describe("#1930 legacy VIVO redirects need the viewer Host on the default behavior", () => {
-      // middleware.ts absoluteLocation() builds redirect Locations from the
-      // Host header. CloudFront sends the ORIGIN's hostname as Host unless the
-      // behavior forwards the viewer's, so a redirect emitted from a behavior
-      // without Host forwarding points at an unreachable host. The legacy VIVO
-      // paths (/display, /individual, /profile) match no additional behavior,
-      // so they are served by the DEFAULT behavior -- these two assertions pin
-      // both halves of that invariant.
-      it("the default behavior forwards the viewer Host and nothing else", () => {
-        const orpLogicalId = Object.entries(
+    describe("#1944 viewerHostOrp retired -- legacy VIVO redirects now come from SITE_URL, not the viewer Host", () => {
+      // middleware.ts absoluteLocation() used to build redirect Locations from
+      // the Host header, which needed #1930/#1931's viewerHostOrp forwarding
+      // the viewer's Host onto the default (cached) behavior. #1935 moved that
+      // logic onto the configured SITE_URL instead, so nothing on the default
+      // behavior reads a forwarded Host any more; #1944 removed the now-unused
+      // policy once #1935 was confirmed running in both envs.
+      it("the default behavior carries no origin request policy (Host forwarding is gone, not just unused)", () => {
+        const stillExists = Object.values(
           template.findResources("AWS::CloudFront::OriginRequestPolicy"),
-        ).find(
-          ([, r]) =>
+        ).some(
+          (r) =>
             (
               (r.Properties as Record<string, unknown>)
                 .OriginRequestPolicyConfig as Record<string, unknown>
             ).Name === "sps-viewer-host-prod",
-        )?.[0];
-        expect(orpLogicalId).toBeDefined();
-
-        template.hasResourceProperties(
-          "AWS::CloudFront::OriginRequestPolicy",
-          {
-            OriginRequestPolicyConfig: Match.objectLike({
-              Name: "sps-viewer-host-prod",
-              HeadersConfig: {
-                HeaderBehavior: "whitelist",
-                Headers: ["Host"],
-              },
-              // The default behavior's cache policy sets both to `none` on
-              // purpose; this policy must not widen what reaches the origin.
-              CookiesConfig: { CookieBehavior: "none" },
-              QueryStringsConfig: { QueryStringBehavior: "none" },
-            }),
-          },
         );
+        expect(stillExists).toBe(false);
 
         const dist = Object.values(
           template.findResources("AWS::CloudFront::Distribution"),
@@ -980,11 +1014,13 @@ describe("EdgeStack", () => {
           string,
           unknown
         >;
-        expect(defaultBehavior.OriginRequestPolicyId).toEqual({
-          Ref: orpLogicalId,
-        });
+        expect(defaultBehavior.OriginRequestPolicyId).toBeUndefined();
       });
 
+      // The legacy VIVO paths (/display, /individual, /profile) still match no
+      // additional behavior, so they still fall through to the (now
+      // policy-less) default behavior and still redirect correctly via
+      // SITE_URL -- this pins that nothing has claimed them since.
       it("no additional behavior intercepts the legacy VIVO paths (they must fall through to the default)", () => {
         const dist = Object.values(
           template.findResources("AWS::CloudFront::Distribution"),
@@ -1307,6 +1343,167 @@ describe("EdgeStack", () => {
         const stmt = JSON.stringify(block?.Statement);
         expect(stmt).toContain("NotStatement");
         expect(stmt).toContain("IPSetReferenceStatement");
+      });
+
+      it("serves the branded off-network page and exempts /edge-ip from the block", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const block = rules.find((r) => r.Name === "block-non-wcm");
+        const action = block?.Action as {
+          Block?: { CustomResponse?: Record<string, unknown> };
+        };
+        expect(action.Block?.CustomResponse?.ResponseCode).toBe(403);
+        expect(action.Block?.CustomResponse?.CustomResponseBodyKey).toBe(
+          "offNetwork",
+        );
+
+        const bodies = acl.CustomResponseBodies as Record<
+          string,
+          { ContentType: string; Content: string }
+        >;
+        expect(bodies.offNetwork.ContentType).toBe("TEXT_HTML");
+
+        // A single WAF custom response body is capped at 4 KB by a FIXED,
+        // non-adjustable service quota. The WAFv2 API string validator accepts
+        // 10240, so neither `cdk synth` nor CFN catches an overflow -- only the
+        // deploy does. If this fails, tighten the HTML; the limit cannot move.
+        const bytes = Buffer.byteLength(bodies.offNetwork.Content, "utf8");
+        expect(bytes).toBeLessThanOrEqual(4096);
+
+        // The page fetches its IP from /edge-ip. WAF runs before CloudFront
+        // matches a cache behavior, so without this carve-out the viewer-request
+        // function never runs for the very clients that see the page.
+        expect(bodies.offNetwork.Content).toContain('fetch("/edge-ip")');
+        const stmt = JSON.stringify(block?.Statement);
+        expect(stmt).toContain("AndStatement");
+        expect(stmt).toContain('"SearchString":"/edge-ip"');
+
+        // Nothing in the body may reach off-box: a blocked client cannot load
+        // a font, stylesheet, image, or script from anywhere.
+        expect(bodies.offNetwork.Content).not.toMatch(/https?:\/\//);
+      });
+
+      it("serves a DIFFERENT branded body on the rate-limit rule, with 429 not 403", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const rl = rules.find((r) => r.Name === "rate-limit");
+        const action = rl?.Action as {
+          Block?: { CustomResponse?: Record<string, unknown> };
+        };
+
+        // 429, not 403: whoever trips this is INSIDE the allowlist, so the
+        // request is throttled rather than forbidden, and only 429 tells a
+        // client to retry later.
+        expect(action.Block?.CustomResponse?.ResponseCode).toBe(429);
+        expect(action.Block?.CustomResponse?.CustomResponseBodyKey).toBe(
+          "rateLimited",
+        );
+
+        const bodies = acl.CustomResponseBodies as Record<
+          string,
+          { ContentType: string; Content: string }
+        >;
+        expect(bodies.rateLimited.ContentType).toBe("TEXT_HTML");
+        expect(
+          Buffer.byteLength(bodies.rateLimited.Content, "utf8"),
+        ).toBeLessThanOrEqual(4096);
+        expect(bodies.rateLimited.Content).not.toMatch(/https?:\/\//);
+
+        // The two bodies must NOT be interchangeable. Someone who tripped the
+        // per-IP cap is on the WCM network, so the off-network copy would be a
+        // lie -- this is the whole reason there is a second body.
+        expect(bodies.rateLimited.Content).not.toBe(bodies.offNetwork.Content);
+        expect(bodies.rateLimited.Content).not.toContain("Coming soon");
+        expect(bodies.rateLimited.Content).not.toContain("only to visitors on");
+        // ...and it must not echo an IP: /edge-ip has exactly one caller.
+        expect(bodies.rateLimited.Content).not.toContain("/edge-ip");
+
+        // Shared chrome: both pages must still read as the same site.
+        expect(bodies.rateLimited.Content).toContain(
+          '<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>',
+        );
+        expect(bodies.rateLimited.Content).toContain("#B31B1B");
+
+        // Combined size across every body on one WebACL is capped at 50 KB.
+        const total = Object.values(bodies).reduce(
+          (n, b) => n + Buffer.byteLength(b.Content, "utf8"),
+          0,
+        );
+        expect(total).toBeLessThanOrEqual(51200);
+      });
+
+      it("matches the /edge-ip carve-out CASE-SENSITIVELY, exactly as wide as the CloudFront behavior", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const block = rules.find((r) => r.Name === "block-non-wcm");
+        const byteMatch = (
+          block?.Statement as {
+            AndStatement: {
+              Statements: Array<{
+                NotStatement?: {
+                  Statement?: {
+                    ByteMatchStatement?: {
+                      SearchString?: string;
+                      PositionalConstraint?: string;
+                      TextTransformations?: Array<{
+                        Priority: number;
+                        Type: string;
+                      }>;
+                    };
+                  };
+                };
+              }>;
+            };
+          }
+        ).AndStatement.Statements.map(
+          (s) => s.NotStatement?.Statement?.ByteMatchStatement,
+        ).find((b) => b?.SearchString === "/edge-ip");
+
+        // MUST stay NONE. CloudFront path patterns are case-sensitive, so only
+        // the literal `/edge-ip` selects the echo behavior; a LOWERCASE (or
+        // any normalizing) transform would exempt all 128 case variants from
+        // block-non-wcm, the WebACL's default ALLOW would pass them, and
+        // CloudFront -- matching no additional behavior -- would send them to
+        // the DEFAULT behavior and the ALB origin. That is an off-network
+        // origin path, which this rule exists to make impossible.
+        expect(byteMatch?.TextTransformations).toEqual([
+          { Priority: 0, Type: "NONE" },
+        ]);
+        expect(byteMatch?.PositionalConstraint ?? "EXACTLY").toBe("EXACTLY");
+      });
+
+      it("ships the off-network page in its FAILURE state so a dead echo never contradicts the copy", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const html = (
+          acl.CustomResponseBodies as Record<string, { Content: string }>
+        ).offNetwork.Content;
+
+        // Static markup == the JS-off / terminal-failure state: an
+        // "Unavailable" address must never sit above "send the address above".
+        expect(html).toContain(
+          '<dd id="i" aria-live="polite" aria-label="Your IP address">Unavailable</dd>',
+        );
+        expect(html).toContain("We could not detect your address.");
+        // The "send the address above" copy is script-written on success only.
+        const staticMarkup = html.slice(0, html.indexOf("<script>"));
+        expect(staticMarkup).not.toContain("Send the address above");
+
+        // The echo body is untrusted: a TLS-inspecting proxy answers 200 with
+        // its own HTML block page, which must not be painted as an IP.
+        expect(html).toContain("/^[0-9a-fA-F.:]{3,45}$/.test(t)");
+        // Non-2xx is routed to the failure copy, not silently swallowed.
+        expect(html).toContain("Promise.reject");
+        // In-flight is a distinct, neutral state, and it is bounded.
+        expect(html).toContain('d.textContent="Checking..."');
+        expect(html).toContain('bad("timeout")');
       });
 
       it("ENFORCES the SQLi/known-bad/common managed groups, keeping only SizeRestrictions_BODY in count (#1434)", () => {

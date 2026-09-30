@@ -48,10 +48,12 @@ import {
   singularizeForMatch,
 } from "@/lib/api/normalize";
 import { dedupeFirstByKey } from "@/lib/api/search-ranking";
+import meshRedirects from "@/data/search/mesh-redirects.json";
 import {
   resolveSearchSuggestMeshConcept,
   resolveMeshResolutionFallbackEnabled,
   resolveMeshTokenCoverageEnabled,
+  resolveMeshSecondaryConceptEnabled,
   resolveMeshQueryNormalizationEnabled,
   resolveAcronymSenseGuardEnabled,
   resolveGenericTermMode,
@@ -222,6 +224,24 @@ export type MeshResolution = {
    * the resolver always populates it.
    */
   ambiguous?: boolean;
+  /**
+   * Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`). Set ONLY when this
+   * resolution is `partial` — the fallback matched a word-window — and the tokens the
+   * window did NOT cover resolve, as a whole, to a second descriptor through the
+   * verbatim path (name / entry term / curated alias / singularize; never another
+   * window guess, never a deprioritized filler word like `biology` or `medicine`).
+   * `pancreatic cancer immunotherapy` → primary Pancreatic Neoplasms, secondaryConcept
+   * Immunotherapy. Named to stay clear of `TaxonomyMatchResult.secondary` (callout rows). Consumed by `resolveAreaConcentration` to key the concentration
+   * boost on publications tagged in BOTH subtrees (reorder-only). Absent = one concept.
+   * ponytail: exactly two concepts; every measured prod case is two-concept.
+   */
+  secondaryConcept?: {
+    descriptorUi: string;
+    name: string;
+    matchedForm: string;
+    confidence: "exact" | "entry-term";
+    descendantUis: string[];
+  };
 };
 
 export type TaxonomyMatchResult =
@@ -886,7 +906,14 @@ export async function matchQueryToTaxonomy(
  */
 export async function resolveQueryTaxonomy(
   q: string,
-): Promise<{ taxonomyMatch: TaxonomyMatchResult; taxonomyMatchMs: number }> {
+): Promise<{
+  taxonomyMatch: TaxonomyMatchResult;
+  taxonomyMatchMs: number;
+  /** MeSH confidence of the UNSTRIPPED query's own resolution (before any #692
+   *  retry could replace it). Consumers pass it to `stripDeprioritizedUnlessResolved`
+   *  so a phrase that resolved verbatim is searched as typed, not as a fragment. */
+  fullQueryMeshConfidence: MeshResolution["confidence"] | null;
+}> {
   const start = Date.now();
   // Issue #692 — generic-term demotion. Strip deprioritized filler tokens once
   // up front; `removed` is empty when nothing was stripped (incl. the
@@ -904,6 +931,7 @@ export async function resolveQueryTaxonomy(
   );
 
   let taxonomyMatch = await matchQueryToTaxonomy(q);
+  const fullQueryMeshConfidence = taxonomyMatch.meshResolution?.confidence ?? null;
   // Issue #692 §4.1 — full query first; only on a weak MeSH resolution retry against
   // the stripped content query. Full-first protects descriptors built from filler
   // ("gene therapy", "clinical trial") — those resolve on the first call and never
@@ -967,7 +995,7 @@ export async function resolveQueryTaxonomy(
       taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
     }
   }
-  return { taxonomyMatch, taxonomyMatchMs: Date.now() - start };
+  return { taxonomyMatch, taxonomyMatchMs: Date.now() - start, fullQueryMeshConfidence };
 }
 
 /**
@@ -1444,7 +1472,29 @@ const HARD_OVERRIDE_BY_FORM: ReadonlyMap<
   [
     { matchedForm: "functional mri", descriptorUi: "D059907" },
     { matchedForm: "fmri", descriptorUi: "D059907" },
+    // Bare `CRISPR` is an NLM entry term of D064112 "Clustered Regularly Interspaced
+    // Short Palindromic Repeats" — the DNA element — not of D064113 "CRISPR-Cas
+    // Systems", the technique the word means on a medical-center search. Local
+    // coverage D064113 0.00028 vs D064112 0.00009; on staging `crispr` put a CRISPR
+    // lab (Dow) at 4 of 103 tagged. Every route in (query, window, residual) hits
+    // this key, so the pair label reads "CRISPR-Cas Systems" too.
+    { matchedForm: "CRISPR", descriptorUi: "D064113" },
   ].map((e) => [normalizeForMatch(e.matchedForm), e]),
+);
+
+/**
+ * Descriptor-level redirects for NEW MeSH descriptors with ~no local tags — the
+ * older literature is indexed under the tree parent and NLM never re-tags, so
+ * `uveal melanoma` resolved to Uveal Melanoma (1 local pub) while the 141 uveal
+ * pubs sit under Uveal Neoplasms. Keyed on the RESOLVED UI, not the surface form,
+ * so every route in (name, entry term, singular, window residual) is covered.
+ * `confidence` and `matchedForm` stay those of the row the query actually hit;
+ * only `row` is swapped. Data: `data/search/mesh-redirects.json` (each `to` is a
+ * tree parent whose pool is clinically the same thing). A missing `to` (MeSH
+ * full-replace) leaves the original row — never throws.
+ */
+const REDIRECT_BY_UI: ReadonlyMap<string, string> = new Map(
+  meshRedirects.redirects.map((r) => [r.from, r.to]),
 );
 
 /**
@@ -1524,7 +1574,16 @@ function rankedDescriptorCandidates(
     return a.row.descriptorUi.localeCompare(b.row.descriptorUi);
   });
 
-  return candidates;
+  // New-descriptor redirect (see REDIRECT_BY_UI): swap the row, keep how it was hit.
+  // Dedupe in rank order so two forms redirected to one parent yield one candidate.
+  const seen = new Set<string>();
+  return candidates.flatMap((c) => {
+    const to = REDIRECT_BY_UI.get(c.row.descriptorUi);
+    const row = (to && map.byUi.get(to)) || c.row;
+    if (seen.has(row.descriptorUi)) return [];
+    seen.add(row.descriptorUi);
+    return [row === c.row ? c : { ...c, row }];
+  });
 }
 
 /**
@@ -1584,9 +1643,15 @@ export async function resolveMeshDescriptor(
     // The whole query matched nothing. When the fallback flag is on, retry against
     // the query's contiguous word-windows (decompose-and-resolve). Off ⇒ null, exactly
     // as before.
-    return resolveMeshResolutionFallbackEnabled()
-      ? resolveByWindowFallback(map, query)
-      : null;
+    if (!resolveMeshResolutionFallbackEnabled()) return null;
+    const compound = resolveByCompoundForm(map, query);
+    if (compound) return compound;
+    const primary = resolveByWindowFallback(map, query);
+    if (primary && resolveMeshSecondaryConceptEnabled()) {
+      const secondary = resolveSecondaryConcept(map, query, primary);
+      if (secondary) primary.secondaryConcept = secondary;
+    }
+    return primary;
   }
 
   const winner = candidates[0];
@@ -1596,21 +1661,31 @@ export async function resolveMeshDescriptor(
   // medical-center search. Returning null degrades to BM25, like 2-char acronyms.
   // Internal-caps acronym entry terms (COPD/EHR) and exact NAME matches (DNA/RNA,
   // confidence `exact`) are kept. Flag-off ⇒ byte-identical.
-  const rawQuery = query.trim();
-  if (
-    resolveAcronymSenseGuardEnabled() &&
-    winner.confidence === "entry-term" &&
-    /^[A-Z]{3,5}$/.test(rawQuery) &&
-    !/[A-Z]/.test(winner.matchedForm.trim().slice(1))
-  ) {
-    return null;
-  }
+  if (acronymSenseGuardRejects(query, winner)) return null;
   return buildMeshResolution(map, winner, {
     matchedForm: winner.matchedForm,
     confidence: winner.confidence,
     // #726 — more than one candidate descriptor normalized to this query key.
     ambiguous: candidates.length > 1,
   });
+}
+
+/**
+ * #1346 — the acronym wrong-sense predicate, shared by the primary resolver and the
+ * two-concept residual path so a short all-caps token (CAR / PET) that resolves ONLY
+ * via a plain Title-case entry term (Car → Automobiles, Pet → Pets) is refused in
+ * both places. Flag-off ⇒ never rejects.
+ */
+function acronymSenseGuardRejects(
+  raw: string,
+  cand: { confidence: string; matchedForm: string },
+): boolean {
+  return (
+    resolveAcronymSenseGuardEnabled() &&
+    cand.confidence === "entry-term" &&
+    /^[A-Z]{3,5}$/.test(raw.trim()) &&
+    !/[A-Z]/.test(cand.matchedForm.trim().slice(1))
+  );
 }
 
 /** Assemble a `MeshResolution` from a ranked candidate, with overridable
@@ -1731,6 +1806,149 @@ function queryConjuncts(query: string): string[][] {
     .split(/\s*(?:[&/,]|\band\b)\s*/)
     .map((seg) => seg.split(/[^a-z0-9]+/).filter(Boolean))
     .filter((seg) => seg.length > 0);
+}
+
+/**
+ * Two-concept resolution — resolve what the `partial` window LEFT OVER.
+ *
+ * Residual = the query's tokens (case preserved) minus the matched window's tokens
+ * (first occurrence, so `cancer immunotherapy` → window `immunotherapy` → residual
+ * `cancer`), joined back into one string and pushed through the verbatim resolver
+ * only: whole-form name / entry-term / curated-alias lookup, then the #1342
+ * singularize retry — first as typed, then with deprioritized filler stripped if the
+ * whole form missed (`immunotherapy research` → `immunotherapy`). NOT the window fallback again — a guess on top of a guess is how
+ * `crispr base editing liver` would come back as `Liver`. The measured prod residuals
+ * are single words or short phrases that resolve at name/entry-term (`immunotherapy`,
+ * `diabetes`, `crispr`, `gene therapy`, `innate immunity`, `interferon`), so that is
+ * the only tier needed.
+ *
+ * Refused, in order: a lone filler word (`biology`, `medicine`, `research` — 29 of
+ * those are exact MeSH names and every one is a wrong second concept); a one-word residual on the #1348 generic list (`blood`, `disease` —
+ * accepted by the verbatim path but rejected as a window, and the window is the
+ * stricter judgement for a lone common word); the #1346 acronym wrong-sense case
+ * (`lymphoma CAR` must not pair with Automobiles); and a secondary that is the
+ * primary itself or its ancestor/descendant by tree number (`lung cancer tumors` →
+ * Neoplasms is not a second concept, it is the first one's parent — and its 200-capped
+ * subtree would make the "co-occurrence" an arbitrary prefix of C04).
+ */
+const RESIDUAL_STOPWORDS = new Set(["a", "an", "the", "in", "of", "on", "for", "to", "with", "by"]);
+
+function resolveSecondaryConcept(
+  map: MeshMap,
+  query: string,
+  primary: MeshResolution,
+): MeshResolution["secondaryConcept"] | undefined {
+  // Case-preserving tokenization (same delimiters as `queryConjuncts`) so the
+  // acronym guard below can still see `CAR` / `PET`.
+  // Function words are dropped before anything is counted: `crispr in organoids`
+  // left `crispr in`, which is tried whole (miss) and then filler-stripped — but
+  // `in`/`of`/`the` are not filler in `deprioritized-terms.json`, so the strip was a
+  // no-op and the pair never fired, while `crispr organoids` paired. Not applied to
+  // the primary window scan, which keys on the user's contiguous words on purpose.
+  const residual = query
+    .split(/\s*(?:[&/,]|\band\b)\s*/i)
+    .flatMap((seg) => seg.split(/[^A-Za-z0-9]+/))
+    .filter((t) => t && !RESIDUAL_STOPWORDS.has(t.toLowerCase()));
+  const total = residual.length;
+  for (const w of queryConjuncts(primary.matchedForm).flat()) {
+    const i = residual.findIndex((r) => r.toLowerCase() === w);
+    if (i >= 0) residual.splice(i, 1);
+  }
+  if (residual.length === 0 || residual.length === total) return undefined;
+  // `stripDeprioritized` keeps an ALL-filler query intact (never strips to empty),
+  // so the all-filler case has to be refused explicitly first.
+  const joined = residual.join(" ");
+  // A LONE filler word is never a second concept even when it is an exact MeSH name
+  // (`stem cell biology` → Biology; 29 such). A multi-word residual is tried WHOLE
+  // first and filler-stripped only on a miss: stripping first gutted the measured
+  // prod residuals whose filler word is part of the descriptor's own form —
+  // `radiation therapy` → `radiation` → Radiation (G01, not Radiotherapy), `gene
+  // therapy` (both words filler) → refused, `regenerative medicine` → `regenerative`
+  // → nothing. The strip still earns `thrombectomy outcomes` → Thrombectomy.
+  if (!/\s/.test(joined) && isAllDeprioritized(joined)) return undefined;
+  const stripped = stripDeprioritized(joined).contentQuery.trim();
+  let surface = joined;
+  let cands: ReturnType<typeof rankedDescriptorCandidates> = [];
+  for (const s of stripped === joined ? [joined] : [joined, stripped]) {
+    const normalized = normalizeForMatch(s);
+    if (normalized.length < MIN_QUERY_LEN) continue;
+    if (!/\s/.test(s) && GENERIC_DESCRIPTOR_NAMES.has(normalized)) continue;
+    cands = rankedDescriptorCandidates(map, normalized);
+    if (cands.length === 0 && resolveMeshQueryNormalizationEnabled()) {
+      const singular = singularizeForMatch(normalized);
+      if (singular !== normalized) cands = rankedDescriptorCandidates(map, singular);
+    }
+    if (cands.length > 0) {
+      surface = s;
+      break;
+    }
+  }
+  const top = cands[0];
+  if (!top || top.row.descriptorUi === primary.descriptorUi) return undefined;
+  if (acronymSenseGuardRejects(surface, top)) return undefined;
+  const primaryTrees = map.byUi.get(primary.descriptorUi)?.treeNumbers ?? [];
+  const primaryAncestors = new Set(primary.ancestorTreeNumbers ?? []);
+  const related = top.row.treeNumbers.some(
+    (tn) => primaryAncestors.has(tn) || primaryTrees.some((p) => tn.startsWith(p + ".")),
+  );
+  if (related) return undefined;
+  return {
+    descriptorUi: top.row.descriptorUi,
+    name: top.row.name,
+    matchedForm: top.matchedForm,
+    confidence: top.confidence,
+    descendantUis: getOrComputeDescendants(map, top.row.descriptorUi),
+  };
+}
+
+/**
+ * Compound-form retry — `covid vaccines` → COVID-19 Vaccines.
+ *
+ * MeSH names a compound descriptor by its parent's OWN name (`COVID-19 Vaccines`,
+ * `COVID-19 Testing`), so a query that spells the parent by an entry term (`covid`)
+ * misses verbatim; the window fallback then latches onto the OTHER word (`vaccines` →
+ * Vaccines, 95 descendants) and the specific descriptor carrying the scholar's own tags
+ * is never named — the row read "26 of 190 tagged under Vaccines" for a COVID-vaccine
+ * epidemiologist. Runs before the window fallback: for each proper sub-window that
+ * resolves to some descriptor D, splice D's name and each entry term in for the window
+ * and look the whole compound up verbatim (then singularized, as #1342). A hit is a
+ * verbatim resolution of the WHOLE query, so it carries the hit's confidence and, being
+ * >= MESH_RANK_VERBATIM, also suppresses the #692 strip retry that shrank `covid
+ * testing` to COVID-19.
+ *
+ * Bounded: windows × (1 + entryTerms) Map gets. No descendant guard on purpose: the
+ * compound must be a real MeSH form with the user's remaining tokens in place, which is
+ * the stronger constraint (COVID-19 Testing is not under COVID-19 by tree number and
+ * would have been refused). The 35-query pair eval was byte-identical with this on.
+ */
+function resolveByCompoundForm(map: MeshMap, query: string): MeshResolution | null {
+  const tokens = queryConjuncts(query).flat();
+  if (tokens.length < 2) return null;
+  for (let size = tokens.length - 1; size >= 1; size--) {
+    for (let i = 0; i + size <= tokens.length; i++) {
+      const key = normalizeForMatch(tokens.slice(i, i + size).join(" "));
+      if (key.length < MIN_QUERY_LEN) continue;
+      const win = rankedDescriptorCandidates(map, key)[0];
+      if (!win) continue;
+      for (const form of [win.row.name, ...win.row.entryTerms]) {
+        const joined = normalizeForMatch(
+          [...tokens.slice(0, i), form, ...tokens.slice(i + size)].join(" "),
+        );
+        let cands = rankedDescriptorCandidates(map, joined);
+        if (cands.length === 0 && resolveMeshQueryNormalizationEnabled()) {
+          const singular = singularizeForMatch(joined);
+          if (singular !== joined) cands = rankedDescriptorCandidates(map, singular);
+        }
+        if (cands.length === 0) continue;
+        return buildMeshResolution(map, cands[0], {
+          matchedForm: cands[0].matchedForm,
+          confidence: cands[0].confidence,
+          ambiguous: cands.length > 1,
+        });
+      }
+    }
+  }
+  return null;
 }
 
 function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
@@ -1996,6 +2214,29 @@ export async function descriptorLabelsForUis(
     if (row) out.set(ui, row.name);
   }
   return out;
+}
+
+/**
+ * A resolved concept's `descendantUis`, rebuilt from its root UI. Same map, same
+ * `getOrComputeDescendants` call as `buildMeshResolution` (invariant: element 0 is the
+ * root), so the list is identical to the one the page resolved. Lets the search card
+ * send ONE UI instead of up to DESCENDANT_HARD_CAP of them: 200 UIs is a ~2.1 KB query
+ * string, which the edge WAF's `SizeRestrictions_QUERYSTRING` (2048 B) answers with a
+ * 403. Fails closed (`[]`) on a map-load error or a malformed UI.
+ */
+export async function conceptSubtreeUis(ui: string): Promise<string[]> {
+  if (!/^D\d{6,9}$/.test(ui)) return [];
+  try {
+    return getOrComputeDescendants(await getMeshMap(), ui);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "mesh_map_load_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return [];
+  }
 }
 
 /** @internal — test-only hook. Resets the module-level MeSH cache. */

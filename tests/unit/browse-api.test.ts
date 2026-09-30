@@ -6,22 +6,28 @@
  *
  * RED while lib/api/browse.ts does not exist; turns GREEN in Plan 02.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const {
   mockDepartmentFindMany,
   mockScholarFindMany,
   mockDivisionFindMany,
   mockCenterFindMany,
+  mockCoreFindMany,
   mockTopicFindMany,
   mockQueryRawUnsafe,
+  mockOrgUnitRoleFindMany,
+  mockOrgUnitRoleAssignmentFindMany,
 } = vi.hoisted(() => ({
   mockDepartmentFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockCenterFindMany: vi.fn(),
+  mockCoreFindMany: vi.fn(),
   mockTopicFindMany: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
+  mockOrgUnitRoleFindMany: vi.fn(),
+  mockOrgUnitRoleAssignmentFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -30,7 +36,10 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: mockScholarFindMany },
     division: { findMany: mockDivisionFindMany },
     center: { findMany: mockCenterFindMany },
+    core: { findMany: mockCoreFindMany },
     topic: { findMany: mockTopicFindMany },
+    orgUnitRole: { findMany: mockOrgUnitRoleFindMany },
+    orgUnitRoleAssignment: { findMany: mockOrgUnitRoleAssignmentFindMany },
     $queryRawUnsafe: mockQueryRawUnsafe,
   },
 }));
@@ -39,6 +48,7 @@ import {
   getDepartmentsList,
   getAZBuckets,
   getBrowseData,
+  getCoresList,
 } from "@/lib/api/browse";
 
 describe("getDepartmentsList", () => {
@@ -47,8 +57,11 @@ describe("getDepartmentsList", () => {
     mockScholarFindMany.mockReset();
     mockDivisionFindMany.mockReset().mockResolvedValue([]);
     mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleFindMany.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleAssignmentFindMany.mockReset().mockResolvedValue([]);
   });
 
   it("returns empty array when no departments", async () => {
@@ -60,8 +73,9 @@ describe("getDepartmentsList", () => {
 
   it("maps chair name + slug from batch-fetched scholars", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", slug: "medicine", scholarCount: 312, chairCwid: "abc1234" },
+      { code: "MED", name: "Medicine", slug: "medicine", scholarCount: 312 },
     ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "MED", cwid: "abc1234" }]);
     mockScholarFindMany.mockResolvedValue([
       { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
     ]);
@@ -87,8 +101,10 @@ describe("getDepartmentsList", () => {
         name: "Rehabilitation Medicine",
         slug: "rehabilitation-medicine",
         scholarCount: 123,
-        chairCwid: "jos7021",
       },
+    ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([
+      { entityId: "N1540", cwid: "jos7021" },
     ]);
     mockScholarFindMany.mockResolvedValue([]); // jos7021 is not a scholar
     const result = await getDepartmentsList();
@@ -96,9 +112,80 @@ describe("getDepartmentsList", () => {
     expect(result[0].chairSlug).toBeNull();
   });
 
-  it("returns chairName: null when chairCwid is null (absence-as-default)", async () => {
+  // #2542 Phase D — MUST DO #6/#3: the browse card gets the same
+  // assignment-then-column dual-read `getCentersList` already has, plus a
+  // vocabulary-resolved `chairLabel` so `departments-grid.tsx` no longer
+  // re-derives "Chair"/"Director" from `category` itself.
+  it("chairLabel defaults to 'Chair' for a non-administrative dept with no vocabulary row seeded yet", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80, chairCwid: null },
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312 },
+    ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "MED", cwid: "abc1234" }]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBe("Chair");
+  });
+
+  it("chairLabel defaults to 'Director' for an administrative dept with no vocabulary row seeded yet", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "LIB", name: "Library", slug: "library", category: "administrative", scholarCount: 5 },
+    ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "LIB", cwid: "dir1234" }]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "dir1234", preferredName: "Dir Person", slug: "dir-person" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBe("Director");
+  });
+
+  it("chairLabel is null exactly when chairName is null", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "PED", name: "Pediatrics", slug: "pediatrics", category: "clinical", scholarCount: 80 },
+    ]);
+    mockScholarFindMany.mockResolvedValue([]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBeNull();
+  });
+
+  it("uses the vocabulary label over the category default when a steward has renamed the role", async () => {
+    mockOrgUnitRoleFindMany.mockResolvedValue([
+      { key: "chair", label: "Chairperson" },
+    ]);
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312 },
+    ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "MED", cwid: "abc1234" }]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBe("Chairperson");
+  });
+
+  // #2542 contract A — `Department.chairCwid` no longer exists as a read
+  // source; `OrgUnitRoleAssignment` is the sole source now.
+  it("resolves the chair from the OrgUnitRoleAssignment row", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312 },
+    ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([
+      { entityId: "MED", cwid: "assigned001" },
+    ]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "assigned001", preferredName: "Assignment Chair", slug: "assignment-chair" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairName).toBe("Assignment Chair");
+    expect(mockScholarFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: { in: ["assigned001"] } } }),
+    );
+  });
+
+  it("returns chairName: null when there is no assignment (absence-as-default)", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80 },
     ]);
     mockScholarFindMany.mockResolvedValue([]);
     const result = await getDepartmentsList();
@@ -108,7 +195,7 @@ describe("getDepartmentsList", () => {
 
   it("does not query scholars when no chair cwids present", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80, chairCwid: null },
+      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80 },
     ]);
     const result = await getDepartmentsList();
     expect(result).toHaveLength(1);
@@ -122,14 +209,17 @@ describe("getAZBuckets", () => {
     mockScholarFindMany.mockReset();
     mockDivisionFindMany.mockReset().mockResolvedValue([]);
     mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleFindMany.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleAssignmentFindMany.mockReset().mockResolvedValue([]);
   });
 
   it("groups scholars by last-name initial (last token of preferredName)", async () => {
     mockScholarFindMany.mockResolvedValue([
-      { preferredName: "David Aaronson", slug: "david-aaronson", primaryDepartment: "Cardiology" },
-      { preferredName: "Fatima Abbas", slug: "fatima-abbas", primaryDepartment: "Oncology" },
+      { preferredName: "David Aaronson", slug: "david-aaronson", primaryDepartment: "Cardiology", primaryOrgCode: "HSS" },
+      { preferredName: "Fatima Abbas", slug: "fatima-abbas", primaryDepartment: "Oncology", primaryOrgCode: "WCMC" },
       { preferredName: "John Brown", slug: "john-brown", primaryDepartment: "Surgery" },
     ]);
     const buckets = await getAZBuckets();
@@ -140,8 +230,13 @@ describe("getAZBuckets", () => {
     expect(a!.scholars).toHaveLength(2);
     expect(a!.scholars[0].name).toBe("Aaronson, David");
     expect(a!.scholars[0].department).toBe("Cardiology");
+    // Non-WCMC primary institution resolved for the " · <institution>" suffix;
+    // WCMC and unset resolve to null (absence-as-default).
+    expect(a!.scholars[0].institution).toBe("Hospital for Special Surgery");
+    expect(a!.scholars[1].institution).toBeNull();
     expect(b).toBeDefined();
     expect(b!.count).toBe(1);
+    expect(b!.scholars[0].institution).toBeNull();
   });
 
   it("caps scholars list at 10 per letter; count reflects full total", async () => {
@@ -165,25 +260,87 @@ describe("getAZBuckets", () => {
   });
 });
 
+describe("getCoresList", () => {
+  beforeEach(() => {
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("returns [] without querying the DB when CORE_PAGES is off", async () => {
+    // CORE_PAGES unstubbed here => isCorePagesEnabled() reads the real
+    // (unset) process.env, i.e. the default-off posture.
+    const result = await getCoresList();
+    expect(result).toEqual([]);
+    expect(mockCoreFindMany).not.toHaveBeenCalled();
+  });
+
+  it("selects only visible:true cores when CORE_PAGES is on", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    mockCoreFindMany.mockResolvedValue([
+      { id: "2", name: "Biomedical Imaging", facility: "Citigroup Biomedical Imaging Center", description: null },
+    ]);
+    const result = await getCoresList();
+    expect(result).toEqual([
+      { id: "2", name: "Biomedical Imaging", facility: "Citigroup Biomedical Imaging Center", description: null },
+    ]);
+    expect(mockCoreFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { visible: true } }),
+    );
+  });
+
+  it("does NOT filter on confirmed-publication-count (directory, not evidence surface)", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    mockCoreFindMany.mockResolvedValue([
+      { id: "3", name: "Flow Cytometry", facility: null, description: null },
+    ]);
+    const result = await getCoresList();
+    expect(result).toHaveLength(1);
+    const [call] = mockCoreFindMany.mock.calls[0];
+    expect(call.where).toEqual({ visible: true });
+    expect(call.select).not.toHaveProperty("publications");
+  });
+});
+
 describe("getBrowseData", () => {
   beforeEach(() => {
     mockDepartmentFindMany.mockReset();
     mockScholarFindMany.mockReset();
     mockDivisionFindMany.mockReset().mockResolvedValue([]);
     mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleFindMany.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleAssignmentFindMany.mockReset().mockResolvedValue([]);
   });
+  afterEach(() => vi.unstubAllEnvs());
 
-  it("returns composite { departments, centers }", async () => {
+  it("returns composite { departments, centers, cores }", async () => {
     mockDepartmentFindMany.mockResolvedValue([]);
     mockScholarFindMany.mockResolvedValue([]);
     const data = await getBrowseData();
     expect(data).toHaveProperty("departments");
     expect(data).toHaveProperty("centers");
+    expect(data).toHaveProperty("cores");
     expect(data).not.toHaveProperty("departmentsByCategory");
     expect(data).not.toHaveProperty("azBuckets");
     expect(data.centers).toEqual([]);
+    // CORE_PAGES unstubbed (default off) => cores is [] without a DB call.
+    expect(data.cores).toEqual([]);
+    expect(mockCoreFindMany).not.toHaveBeenCalled();
     expect(Array.isArray(data.departments)).toBe(true);
+  });
+
+  it("includes cores from getCoresList when CORE_PAGES is on", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    mockDepartmentFindMany.mockResolvedValue([]);
+    mockScholarFindMany.mockResolvedValue([]);
+    mockCoreFindMany.mockResolvedValue([
+      { id: "2", name: "Biomedical Imaging", facility: null, description: null },
+    ]);
+    const data = await getBrowseData();
+    expect(data.cores).toEqual([
+      { id: "2", name: "Biomedical Imaging", facility: null, description: null },
+    ]);
   });
 });

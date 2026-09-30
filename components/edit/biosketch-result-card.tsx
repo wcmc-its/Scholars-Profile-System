@@ -18,7 +18,8 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy, Download, TriangleAlert } from "lucide-react";
+import Link from "next/link";
+import { Check, ClipboardList, Copy, Download, TriangleAlert } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,9 @@ export type BiosketchGenerateResult = {
   /** #917 v6 follow-up — per-contribution source PMIDs, or null. */
   sources: BiosketchContributionSources[] | null;
   generationId: string | null;
+  /** Set when the card shows a SAVED draft opened from the drafts list (not a fresh run):
+   *  the label (or null) and the formatted generation date, so the header says which one. */
+  viewing?: { label: string | null; generatedOn: string };
 };
 
 /** Format a product / suggested pub as a single export/display line: "title · venue · year".
@@ -142,25 +146,50 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-0.5">
-          <h2 className="text-foreground text-base font-semibold">
+          {/* The heading is the focus target when a saved draft is opened from the list above
+              (`View draft` in the tool): the card mounts below the form, out of view, so the
+              tool focuses this — which scrolls it in — instead of leaving the reader to hunt. */}
+          <h2
+            id="biosketch-result-heading"
+            tabIndex={-1}
+            className="text-foreground scroll-mt-20 text-base font-semibold outline-none"
+          >
             {isContributions ? "Contributions to Science" : "Personal Statement"}
           </h2>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-xs" data-testid="biosketch-result-context">
+            {result.viewing
+              ? `Saved draft${result.viewing.label ? ` “${result.viewing.label}”` : ""}, generated ${result.viewing.generatedOn}. `
+              : ""}
             Copy these into your grant application. Nothing here is saved to your profile.
           </p>
         </div>
-        {result.entries.length > 0 && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={downloadAll}
-            data-testid="biosketch-download-all"
-          >
-            <Download className="size-4" />
-            Download all (.txt)
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {/* #2652 — the SciENcv worksheet is per SAVED generation, so the link needs the id;
+              a run that failed to persist (generationId null) has no worksheet. */}
+          {result.generationId && (
+            <Button asChild variant="outline" size="sm">
+              <Link
+                href={`/edit/biosketch/worksheet?id=${encodeURIComponent(result.generationId)}`}
+                data-testid="biosketch-open-worksheet"
+              >
+                <ClipboardList className="size-4" />
+                Open SciENcv worksheet
+              </Link>
+            </Button>
+          )}
+          {result.entries.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={downloadAll}
+              data-testid="biosketch-download-all"
+            >
+              <Download className="size-4" />
+              Download all (.txt)
+            </Button>
+          )}
+        </div>
       </div>
 
       {result.removedCount > 0 && (
@@ -188,8 +217,10 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
         })}
       </ol>
 
-      {isContributions && result.products && (
-        <BiosketchProductsSection products={result.products} />
+      {result.products && (
+        // #2653 v8 — a Personal Statement carries (unmapped) products too: the ones its
+        // parenthetical references point at. v5–v7 statements have `products: null`.
+        <BiosketchProductsSection products={result.products} isContributions={isContributions} />
       )}
     </div>
   );
@@ -231,7 +262,7 @@ function productsToText(products: BiosketchProducts): string {
           : "  Not mapped to a contribution:";
       lines.push(head);
       for (const p of g.items) {
-        lines.push(`    - ${productLine(p)}`);
+        lines.push(`    - ${productLine(p)} · PMID ${p.pmid}`);
         if (p.why) lines.push(`        ${p.why}`);
       }
     }
@@ -247,23 +278,48 @@ function productsToText(products: BiosketchProducts): string {
   return lines.join("\n").trimEnd();
 }
 
-function ProductBucket({ title, items }: { title: string; items: BiosketchProduct[] }) {
+function ProductBucket({
+  title,
+  items,
+  showMapping,
+}: {
+  title: string;
+  items: BiosketchProduct[];
+  /** Contributions mode: label each group by the contribution it maps to. A Personal
+   *  Statement's products are unmapped by design, so the label is omitted. */
+  showMapping: boolean;
+}) {
   if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-2" data-testid="biosketch-product-bucket">
       <h4 className="text-foreground text-sm font-semibold">{title}</h4>
       {groupByContribution(items).map((g) => (
         <div key={g.contributionIndex ?? "none"} className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs font-medium">
-            {g.contributionIndex != null
-              ? `Contribution ${g.contributionIndex}`
-              : "Not mapped to a contribution"}
-          </span>
+          {showMapping && (
+            <span className="text-muted-foreground text-xs font-medium">
+              {g.contributionIndex != null
+                ? `Contribution ${g.contributionIndex}`
+                : "Not mapped to a contribution"}
+            </span>
+          )}
           <ul className="flex flex-col gap-1.5">
             {g.items.map((p) => (
               <li key={p.pmid} className="text-sm" data-testid={`biosketch-product-${p.pmid}`}>
                 <span className="text-foreground">{productLine(p)}</span>
-                {p.why && <span className="text-muted-foreground block text-xs">{p.why}</span>}
+                {/* Every citation carries its PMID — the identifier is what travels into My
+                    Bibliography / SciENcv; a title alone can't be pasted anywhere. */}
+                <span className="text-muted-foreground block text-xs">
+                  {p.why && <>{p.why} · </>}
+                  <a
+                    href={pubmedUrl(p.pmid)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-apollo-maroon hover:underline"
+                    data-testid={`biosketch-product-pmid-${p.pmid}`}
+                  >
+                    PMID {p.pmid}
+                  </a>
+                </span>
               </li>
             ))}
           </ul>
@@ -276,7 +332,13 @@ function ProductBucket({ title, items }: { title: string; items: BiosketchProduc
 /** #917 v6 — the Products list: up to 5 related + 5 other significant publications, grouped
  *  by the contribution each was mapped to. A copy/export aid for the Common Form Products
  *  section; the pmids are grounded (deterministically selected), the mapping is the model's. */
-function BiosketchProductsSection({ products }: { products: BiosketchProducts }) {
+function BiosketchProductsSection({
+  products,
+  isContributions,
+}: {
+  products: BiosketchProducts;
+  isContributions: boolean;
+}) {
   const hasAny = products.related.length > 0 || products.otherSignificant.length > 0;
   if (!hasAny) return null;
   return (
@@ -288,8 +350,9 @@ function BiosketchProductsSection({ products }: { products: BiosketchProducts })
       <div className="flex flex-col gap-0.5">
         <h3 className="text-foreground text-sm font-semibold">Products</h3>
         <p className="text-muted-foreground text-xs">
-          Suggested products for the Common Form, mapped to your contributions. Review and place
-          them yourself; up to four peer-reviewed products per contribution is the NIH norm.
+          {isContributions
+            ? "Suggested products for the Common Form, mapped to your contributions. Review and place them yourself; up to four peer-reviewed products per contribution is the NIH norm."
+            : "Suggested products for the Common Form. A parenthetical reference in the statement (lead author and year, or PMID) points at one of these; NIH allows references to the listed products only."}
         </p>
       </div>
       <ProductBucket
@@ -299,8 +362,13 @@ function BiosketchProductsSection({ products }: { products: BiosketchProducts })
             : "Most significant"
         }
         items={products.related}
+        showMapping={isContributions}
       />
-      <ProductBucket title="Other significant products" items={products.otherSignificant} />
+      <ProductBucket
+        title="Other significant products"
+        items={products.otherSignificant}
+        showMapping={isContributions}
+      />
     </div>
   );
 }
@@ -434,18 +502,45 @@ function suggestedPubMeta(p: SuggestedPub): string {
  * AI-drafted; the statement is the user's own words and every pmid is grounded in their record.
  */
 export function BiosketchSuggestedPubsCard({ pubs }: { pubs: SuggestedPub[] }) {
+  // The list exists to be carried into My Bibliography / SciENcv, so the PMIDs are the payload:
+  // one plain-text "Copy PMIDs" (comma-separated, the form a PubMed search accepts) plus a PMID
+  // link on every row. Session-local tick, same contract as the worksheet's Copy.
+  const [copied, setCopied] = React.useState(false);
+  const pmids = pubs.map((p) => p.pmid).filter(Boolean);
+  const copyPmids = () => {
+    navigator.clipboard
+      .writeText(pmids.join(", "))
+      .then(() => setCopied(true))
+      .catch(() => {
+        // Clipboard can reject (permissions / insecure context); no tick for a copy that didn't happen.
+      });
+  };
   return (
     <div
       className="border-apollo-border bg-apollo-surface flex flex-col gap-4 rounded-lg border p-4"
       data-slot="biosketch-suggested-pubs-card"
       data-testid="biosketch-suggested-pubs"
     >
-      <div className="flex flex-col gap-0.5">
-        <h2 className="text-foreground text-base font-semibold">Suggested publications</h2>
-        <p className="text-muted-foreground text-xs">
-          Your indexed publications ranked by overlap with your statement. Grounded from your
-          Scholars record — nothing here was AI-generated.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-foreground text-base font-semibold">Suggested publications</h2>
+          <p className="text-muted-foreground text-xs">
+            Your indexed publications ranked by overlap with your statement. Grounded from your
+            Scholars record — nothing here was AI-generated.
+          </p>
+        </div>
+        {pmids.length > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={copyPmids}
+            aria-live="polite"
+            data-testid="biosketch-suggested-pubs-copy-pmids"
+          >
+            {copied ? "Copied" : "Copy PMIDs"}
+          </Button>
+        )}
       </div>
       {pubs.length === 0 ? (
         <p className="text-muted-foreground text-sm" data-testid="biosketch-suggested-pubs-empty">
@@ -463,7 +558,18 @@ export function BiosketchSuggestedPubsCard({ pubs }: { pubs: SuggestedPub[] }) {
                 data-testid={`biosketch-suggested-pub-${p.pmid}`}
               >
                 <span className="text-foreground">{productLine(p)}</span>
-                {meta && <span className="text-muted-foreground block text-xs">{meta}</span>}
+                <span className="text-muted-foreground block text-xs">
+                  {meta && <>{meta} · </>}
+                  <a
+                    href={pubmedUrl(p.pmid)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-apollo-maroon hover:underline"
+                    data-testid={`biosketch-suggested-pub-pmid-${p.pmid}`}
+                  >
+                    PMID {p.pmid}
+                  </a>
+                </span>
               </li>
             );
           })}

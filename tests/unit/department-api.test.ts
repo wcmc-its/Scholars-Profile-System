@@ -2,7 +2,7 @@
  * Tests for lib/api/departments.ts — getDepartment + getDepartmentFaculty.
  *
  * Spec gates exercised:
- *   - D-01/D-03 — department row + chair resolution (chairCwid → Scholar + Appointment)
+ *   - D-01/D-03 — department row + chair resolution (OrgUnitRoleAssignment → Scholar + Appointment)
  *   - D-10 — distinct scholar count for topic (via lib/api/topics.ts; separate test)
  *   - D-12 — faculty list with optional division filter + chief-first ordering
  *   - Pagination: 20 per page, page param respected
@@ -19,7 +19,10 @@ const {
   mockScholarGroupBy,
   mockAppointmentFindFirst,
   mockPublicationTopicGroupBy,
-  mockPublicationTopicCount,
+  mockPublicationAuthorGroupBy,
+  mockTopAreasQueryRaw,
+  mockPubCountQueryRaw,
+  mockPublicationAuthorFindMany,
   mockTopicFindMany,
   mockDivisionFindMany,
   mockDivisionFindFirst,
@@ -34,7 +37,12 @@ const {
   mockLoadOverlayGate,
   mockChipsEnabled,
   mockFacetEnabled,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
+  mockDivChiefAssignmentFindFirst,
+  mockMeshSearch,
 } = vi.hoisted(() => ({
+  mockMeshSearch: vi.fn(),
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockScholarFindFirst: vi.fn(),
@@ -43,7 +51,10 @@ const {
   mockScholarGroupBy: vi.fn(),
   mockAppointmentFindFirst: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
-  mockPublicationTopicCount: vi.fn(),
+  mockPublicationAuthorGroupBy: vi.fn(),
+  mockTopAreasQueryRaw: vi.fn(),
+  mockPubCountQueryRaw: vi.fn(),
+  mockPublicationAuthorFindMany: vi.fn(),
   mockTopicFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockDivisionFindFirst: vi.fn(),
@@ -58,6 +69,9 @@ const {
   mockLoadOverlayGate: vi.fn(),
   mockChipsEnabled: vi.fn(),
   mockFacetEnabled: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
+  mockDivChiefAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -75,9 +89,10 @@ vi.mock("@/lib/db", () => ({
       findMany: mockScholarFamilyFindMany,
     },
     appointment: { findFirst: mockAppointmentFindFirst },
-    publicationTopic: {
-      groupBy: mockPublicationTopicGroupBy,
-      count: mockPublicationTopicCount,
+    publicationTopic: { groupBy: mockPublicationTopicGroupBy },
+    publicationAuthor: {
+      groupBy: mockPublicationAuthorGroupBy,
+      findMany: mockPublicationAuthorFindMany,
     },
     topic: { findMany: mockTopicFindMany },
     division: {
@@ -90,9 +105,35 @@ vi.mock("@/lib/db", () => ({
       findMany: mockGrantFindMany,
     },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
+    // Two raw reads: the hero publications stat (COUNT DISTINCT pa.pmid) and
+    // the top research areas (COUNT DISTINCT pt.pmid). Routed by SQL text.
+    $queryRaw: (q: { sql: string }) =>
+      q.sql.includes("COUNT(DISTINCT pa.pmid)")
+        ? mockPubCountQueryRaw(q)
+        : mockTopAreasQueryRaw(q),
     suppression: {
       findFirst: mockSuppressionFindFirst,
       findMany: mockSuppressionFindMany,
+    },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    // #2542 contract A — `resolveUnitLeader` calls this once for the
+    // department's own chair/director AND once per division (the department
+    // page's division-summary chief + the faculty list's chief-first
+    // ordering), so the dispatcher routes by `where.entityType`.
+    orgUnitRoleAssignment: {
+      findFirst: (args: { where?: { entityType?: string } }) =>
+        args?.where?.entityType === "division"
+          ? mockDivChiefAssignmentFindFirst(args)
+          : mockOrgUnitRoleAssignmentFindFirst(args),
+      // The department page's division list resolves every chief in ONE
+      // batched read (`resolveUnitLeaderCwids`); it serves each requested
+      // division the row `mockDivChiefAssignmentFindFirst` would have.
+      findMany: async (args: { where: { entityId: { in: string[] } } }) => {
+        const row = await mockDivChiefAssignmentFindFirst(args);
+        return row
+          ? args.where.entityId.in.map((entityId) => ({ entityId, cwid: row.cwid }))
+          : [];
+      },
     },
   },
 }));
@@ -112,6 +153,13 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodsLensSensitiveGateOn: () => false,
 }));
 
+// Unit Page v2 TOPICS chips — the roster wrapper reads `topMeshTerms` from the
+// people index; mock the search client (no OpenSearch in unit tests).
+vi.mock("@/lib/search", () => ({
+  PEOPLE_INDEX: "scholars-people",
+  searchClient: () => ({ search: mockMeshSearch }),
+}));
+
 import { getDepartment, getDepartmentFaculty } from "@/lib/api/departments";
 
 const DEPT = {
@@ -119,7 +167,6 @@ const DEPT = {
   name: "Department of Medicine",
   slug: "medicine",
   description: "The department of medicine.",
-  chairCwid: "chair001",
   scholarCount: 200,
   source: "ED",
   refreshedAt: new Date("2026-01-01"),
@@ -143,7 +190,6 @@ const DIVISION_A = {
   name: "Cardiology",
   slug: "cardiology",
   description: "Heart stuff.",
-  chiefCwid: "chief001",
   scholarCount: 50,
   source: "ED",
   refreshedAt: new Date("2026-01-01"),
@@ -164,9 +210,9 @@ function mockDefaultDeptSetup() {
   // #540 — manual-layer reads default to no overrides + not suppressed.
   mockFieldOverrideFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
-  mockPublicationTopicGroupBy.mockResolvedValue([
-    { parentTopicId: "cancer_genomics", _count: { pmid: 42 } },
-    { parentTopicId: "cardiovascular_disease", _count: { pmid: 38 } },
+  mockTopAreasQueryRaw.mockResolvedValue([
+    { parentTopicId: "cancer_genomics", pubCount: BigInt(42) },
+    { parentTopicId: "cardiovascular_disease", pubCount: 38 },
   ]);
   mockTopicFindMany.mockResolvedValue([
     { id: "cancer_genomics", label: "Cancer Genomics" },
@@ -176,7 +222,8 @@ function mockDefaultDeptSetup() {
   mockScholarFindMany.mockResolvedValue([CHIEF_SCHOLAR]);
   mockScholarCount.mockResolvedValue(200);
   mockScholarGroupBy.mockResolvedValue([]);
-  mockPublicationTopicCount.mockResolvedValue(1500);
+  mockPubCountQueryRaw.mockResolvedValue([{ n: BigInt(1500) }]);
+  mockPublicationAuthorFindMany.mockResolvedValue([]);
   mockGrantCount.mockResolvedValue(25);
   // #481(b)/#2066 — activeGrants derives from grant.findMany + #160 suppression,
   // then groups by funding PROJECT (`coreProjectNum ?? accountNumber`) via the
@@ -186,6 +233,21 @@ function mockDefaultDeptSetup() {
     Array.from({ length: 25 }, (_, i) => grantRow(i)),
   );
   mockSuppressionFindMany.mockResolvedValue([]);
+  // #2542 contract A — no vocabulary row by default; the department's own
+  // chair/director + the division's chief both resolve through the
+  // `OrgUnitRoleAssignment` row now (`Department.chairCwid` /
+  // `Division.chiefCwid` no longer exist as read sources).
+  mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+    cwid: "chair001",
+    interim: false,
+    role: { label: "Chair" },
+  });
+  mockDivChiefAssignmentFindFirst.mockResolvedValue({
+    cwid: "chief001",
+    interim: false,
+    role: { label: "Chief" },
+  });
 }
 
 /** One active grant row shaped like `UNIT_GRANT_SELECT`. `i` gives it its own
@@ -218,7 +280,7 @@ describe("getDepartment", () => {
     expect(mockScholarFindUnique).not.toHaveBeenCalled();
   });
 
-  it("returns department with chairCwid populated when chair appointment exists", async () => {
+  it("returns department with the chair assignment resolved when chair appointment exists", async () => {
     mockDefaultDeptSetup();
     const result = await getDepartment("medicine");
 
@@ -240,24 +302,47 @@ describe("getDepartment", () => {
     expect(result!.chair!.chairTitle).toBe("Chair");
   });
 
-  it("returns null chair when chairCwid is null in dept row", async () => {
-    mockDepartmentFindUnique.mockResolvedValue({ ...DEPT, chairCwid: null });
+  it("returns null chair when there is no override and no assignment", async () => {
+    mockDepartmentFindUnique.mockResolvedValue({ ...DEPT });
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockTopicFindMany.mockResolvedValue([]);
     mockDivisionFindMany.mockResolvedValue([]);
     mockScholarFindMany.mockResolvedValue([]);
     mockScholarCount.mockResolvedValue(100);
-    mockPublicationTopicCount.mockResolvedValue(500);
+    mockPubCountQueryRaw.mockResolvedValue([{ n: 500 }]);
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
     mockGrantCount.mockResolvedValue(10);
     mockGrantFindMany.mockResolvedValue([]);
     mockFieldOverrideFindMany.mockResolvedValue([]);
     mockSuppressionFindFirst.mockResolvedValue(null);
     mockSuppressionFindMany.mockResolvedValue([]);
+    mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
 
     const result = await getDepartment("medicine");
     expect(result).not.toBeNull();
     expect(result!.chair).toBeNull();
     expect(mockScholarFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("drops the chair card for a hidden identity class (#2260)", async () => {
+    mockDefaultDeptSetup();
+    mockScholarFindUnique.mockResolvedValue({
+      ...CHAIR_SCHOLAR,
+      roleCategory: "doctoral_student_phd",
+    });
+    const result = await getDepartment("medicine");
+    expect(result!.chair).toBeNull();
+  });
+
+  it.each([
+    ["soft-deleted", { deletedAt: new Date("2026-01-01") }],
+    ["non-active", { status: "suppressed" }],
+  ])("drops the chair card for a %s leader (#2260)", async (_label, extra) => {
+    mockDefaultDeptSetup();
+    mockScholarFindUnique.mockResolvedValue({ ...CHAIR_SCHOLAR, ...extra });
+    const result = await getDepartment("medicine");
+    expect(result!.chair).toBeNull();
   });
 
   it("includes top research areas (top 8-10 parent topics by pub count)", async () => {
@@ -273,16 +358,22 @@ describe("getDepartment", () => {
     expect(result!.topResearchAreas[1].pubCount).toBe(38);
   });
 
-  it("groupBy for top research areas uses deptCode WHERE clause", async () => {
+  it("top research areas count DISTINCT pmids for active dept scholars, top 10", async () => {
     mockDefaultDeptSetup();
     await getDepartment("medicine");
 
-    expect(mockPublicationTopicGroupBy).toHaveBeenCalled();
-    const call = mockPublicationTopicGroupBy.mock.calls[0][0];
-    expect(call.where.scholar.deptCode).toBe("MED");
-    expect(call.where.scholar.deletedAt).toBeNull();
-    expect(call.where.scholar.status).toBe("active");
-    expect(call.take).toBe(10);
+    // A paper with several department authors has several publication_topic
+    // rows (PK pmid, cwid, parent_topic_id); a row count would count it once
+    // per author. The ranking must count it once.
+    expect(mockTopAreasQueryRaw).toHaveBeenCalledTimes(1);
+    const sql = mockTopAreasQueryRaw.mock.calls[0][0] as { sql: string; values: unknown[] };
+    const text = sql.sql.replace(/\s+/g, " ");
+    expect(text).toContain("COUNT(DISTINCT pt.pmid)");
+    expect(text).toContain("s.dept_code = ?");
+    expect(text).toContain("s.deleted_at IS NULL");
+    expect(text).toContain("s.status = 'active'");
+    expect(text).toContain("LIMIT 10");
+    expect(sql.values).toEqual(["MED"]);
   });
 
   it("returns divisions sorted by scholarCount desc, with chief name resolved", async () => {
@@ -309,6 +400,28 @@ describe("getDepartment", () => {
     expect(result!.stats.activeGrants).toBe(25);
   });
 
+  it("publications stat counts DISTINCT confirmed pmids of active dept scholars, minus unit-dark pmids", async () => {
+    mockDefaultDeptSetup();
+    // One whole-paper takedown (contributorCwid null) on a paper a dept
+    // scholar authored: the stat must exclude it, as the Publications tab does.
+    mockSuppressionFindMany.mockResolvedValue([
+      { entityId: "900001", contributorCwid: null },
+    ]);
+    mockPublicationAuthorFindMany.mockResolvedValue([{ pmid: "900001" }]);
+    await getDepartment("medicine");
+
+    expect(mockPubCountQueryRaw).toHaveBeenCalledTimes(1);
+    const sql = mockPubCountQueryRaw.mock.calls[0][0] as { sql: string; values: unknown[] };
+    const text = sql.sql.replace(/\s+/g, " ");
+    expect(text).toContain("COUNT(DISTINCT pa.pmid)");
+    expect(text).toContain("pa.is_confirmed = 1");
+    expect(text).toContain("s.dept_code = ?");
+    expect(text).toContain("s.deleted_at IS NULL");
+    expect(text).toContain("s.status = 'active'");
+    expect(text).toContain("pa.pmid NOT IN (?)");
+    expect(sql.values).toEqual(["MED", "900001"]);
+  });
+
   it("returns dept shape with code, name, slug, description", async () => {
     mockDefaultDeptSetup();
     const result = await getDepartment("medicine");
@@ -332,8 +445,12 @@ describe("getDepartment", () => {
 
     expect(result!.stats.activeGrants).toBe(3);
     // the suppression lookup is scoped to active (non-revoked) grant suppressions
-    const supCall = mockSuppressionFindMany.mock.calls[0][0];
-    expect(supCall.where.entityType).toBe("grant");
+    // The publications stat also reads suppressions (entityType "publication");
+    // pick out the grant read.
+    const supCall = mockSuppressionFindMany.mock.calls
+      .map((c) => c[0])
+      .find((a) => a.where.entityType === "grant");
+    expect(supCall).toBeDefined();
     expect(supCall.where.revokedAt).toBeNull();
   });
 
@@ -365,9 +482,11 @@ function makeScholarRow(overrides: {
   divisionName?: string | null;
   departmentName?: string;
   primaryDepartment?: string | null;
+  divCode?: string | null;
 }) {
   return {
     cwid: overrides.cwid,
+    divCode: overrides.divCode ?? null,
     preferredName: overrides.preferredName ?? `Scholar ${overrides.cwid}`,
     slug: overrides.slug ?? `scholar-${overrides.cwid}`,
     primaryTitle: overrides.primaryTitle ?? "Professor",
@@ -388,10 +507,33 @@ describe("getDepartmentFaculty", () => {
     mockChipsEnabled.mockReturnValue(false);
     mockFacetEnabled.mockReturnValue(false);
     mockLoadOverlayGate.mockResolvedValue({ suppressed: new Set(), sensitive: new Set() });
+    // #2542 contract A — the divCode-scoped chief-first ordering resolves the
+    // chief via `resolveUnitLeader` (override > assignment) now, not a direct
+    // `Division.chiefCwid` column read. No-op for tests that pass no divCode.
+    mockFieldOverrideFindMany.mockResolvedValue([]);
+    mockDivChiefAssignmentFindFirst.mockResolvedValue(null);
+    mockMeshSearch.mockResolvedValue({ body: { hits: { hits: [] } } });
+    // Roster pub counts: confirmed authorships minus #356 per-author hides.
+    mockPublicationAuthorGroupBy.mockResolvedValue([]);
+    mockSuppressionFindMany.mockResolvedValue([]);
   });
 
+  // Unit Page v2 — the roster ranks from the index (a `select` findMany over the
+  // whole carved dept) and hydrates one page (an `include` findMany over that
+  // page's cwids). Route the mock by `include` so each call sees the right rows.
+  function routeScholarFindMany(rows: ReturnType<typeof makeScholarRow>[]) {
+    mockScholarFindMany.mockImplementation(
+      (args: { include?: unknown; where: { cwid?: { in: string[] } } }) =>
+        Promise.resolve(
+          "include" in args && args.where.cwid
+            ? rows.filter((r) => args.where.cwid!.in.includes(r.cwid))
+            : rows,
+        ),
+    );
+  }
+
   it("returns empty result when deptCode has no scholars", async () => {
-    mockScholarCount.mockResolvedValue(0);
+    mockScholarFindMany.mockResolvedValue([]);
 
     const result = await getDepartmentFaculty("UNKNOWN", {});
     expect(result.hits).toEqual([]);
@@ -400,10 +542,45 @@ describe("getDepartmentFaculty", () => {
     expect(result.pageSize).toBe(20);
   });
 
-  it("filters faculty by deptCode", async () => {
-    mockScholarCount.mockResolvedValue(2);
-    mockDivisionFindFirst.mockResolvedValue(null); // no divCode filter
-    mockScholarFindMany.mockResolvedValue([
+  it("Unit Page v2 — attaches TOPICS `topMesh` after the roster read, in ONE lookup", async () => {
+    routeScholarFindMany([
+      makeScholarRow({ cwid: "s1111111" }),
+      makeScholarRow({ cwid: "s2222222" }),
+    ]);
+    mockPublicationTopicGroupBy.mockResolvedValue([]);
+    mockGrantGroupBy.mockResolvedValue([]);
+    mockMeshSearch.mockResolvedValue({
+      body: {
+        hits: {
+          hits: [
+            { _id: "s1111111", _source: { topMeshTerms: [{ ui: "D000001", label: "Alpha" }] } },
+          ],
+        },
+      },
+    });
+
+    const result = await getDepartmentFaculty("MED", {});
+    expect(mockMeshSearch).toHaveBeenCalledTimes(1);
+    const byCwid = new Map(result.hits.map((h) => [h.cwid, h]));
+    expect(byCwid.get("s1111111")?.topMesh).toEqual([{ ui: "D000001", label: "Alpha" }]);
+    expect(byCwid.get("s2222222")).not.toHaveProperty("topMesh");
+  });
+
+  it("Unit Page v2 — an OpenSearch failure still returns the roster, without chips", async () => {
+    routeScholarFindMany([makeScholarRow({ cwid: "s1111111" })]);
+    mockPublicationTopicGroupBy.mockResolvedValue([]);
+    mockGrantGroupBy.mockResolvedValue([]);
+    mockMeshSearch.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await getDepartmentFaculty("MED", {});
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]).not.toHaveProperty("topMesh");
+    warn.mockRestore();
+  });
+
+  it("filters faculty by deptCode, carving the member query", async () => {
+    routeScholarFindMany([
       makeScholarRow({ cwid: "s1111111" }),
       makeScholarRow({ cwid: "s2222222" }),
     ]);
@@ -413,76 +590,125 @@ describe("getDepartmentFaculty", () => {
     const result = await getDepartmentFaculty("MED", {});
     expect(result.total).toBe(2);
     expect(result.hits).toHaveLength(2);
-    // Verify deptCode was passed in the where clause
-    const whereArg = mockScholarCount.mock.calls[0][0].where;
-    expect(whereArg.deptCode).toBe("MED");
-    expect(whereArg.deletedAt).toBeNull();
-    expect(whereArg.status).toBe("active");
+    // The index (member) query carries the dept + the active/not-deleted carve.
+    const indexCall = mockScholarFindMany.mock.calls.find((c) => !("include" in c[0]))![0];
+    expect(indexCall.where.deptCode).toBe("MED");
+    expect(indexCall.where.deletedAt).toBeNull();
+    expect(indexCall.where.status).toBe("active");
   });
 
   it("optionally filters by divCode when provided", async () => {
-    mockScholarCount.mockResolvedValue(5);
-    mockDivisionFindFirst.mockResolvedValue({ chiefCwid: null });
-    mockScholarFindMany.mockResolvedValue([makeScholarRow({ cwid: "div00001" })]);
+    routeScholarFindMany([
+      makeScholarRow({ cwid: "div00001", divCode: "CARDIO" }),
+      makeScholarRow({ cwid: "div00002", divCode: "CARDIO" }),
+      makeScholarRow({ cwid: "oth00001", divCode: "ONCO" }),
+    ]);
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockGrantGroupBy.mockResolvedValue([]);
 
-    await getDepartmentFaculty("MED", { divCode: "CARDIO" });
-
-    const whereArg = mockScholarCount.mock.calls[0][0].where;
-    expect(whereArg.divCode).toBe("CARDIO");
+    const result = await getDepartmentFaculty("MED", { divCode: "CARDIO" });
+    expect(result.total).toBe(2);
+    expect(result.hits.map((h) => h.cwid).sort()).toEqual(["div00001", "div00002"]);
   });
 
-  it("paginates 20 per page", async () => {
-    mockScholarCount.mockResolvedValue(100);
-    mockDivisionFindFirst.mockResolvedValue(null);
-    const rows = Array.from({ length: 20 }, (_, i) =>
-      makeScholarRow({ cwid: `pg${String(i).padStart(6, "0")}` }),
+  it("paginates 20 per page in SURNAME order across the page boundary (Unit Page v2 default)", async () => {
+    // 25 scholars; "Given<i> Surname<letter>" — first names sort the opposite way.
+    const rows = Array.from({ length: 25 }, (_, i) =>
+      makeScholarRow({
+        cwid: `pg${String(i).padStart(6, "0")}`,
+        preferredName: `${String.fromCharCode(90 - i)}given ${String.fromCharCode(65 + i)}surname`,
+      }),
     );
-    mockScholarFindMany.mockResolvedValue(rows);
+    routeScholarFindMany([...rows].reverse());
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockGrantGroupBy.mockResolvedValue([]);
 
-    const result = await getDepartmentFaculty("MED", { page: 1 });
-    expect(result.pageSize).toBe(20);
-    expect(result.page).toBe(1);
-    expect(result.total).toBe(100);
-
-    // Verify skip was applied for page 1
-    const findManyCall = mockScholarFindMany.mock.calls[0][0];
-    expect(findManyCall.skip).toBe(20);
-    expect(findManyCall.take).toBe(20);
+    const p0 = await getDepartmentFaculty("MED", { page: 0 });
+    const p1 = await getDepartmentFaculty("MED", { page: 1 });
+    expect(p0.total).toBe(25);
+    expect(p1.page).toBe(1);
+    expect(p0.hits).toHaveLength(20);
+    expect(p1.hits).toHaveLength(5);
+    const order = [...p0.hits, ...p1.hits].map((h) => h.cwid);
+    expect(order).toEqual(rows.map((r) => r.cwid));
+    // Only the page's cwids are hydrated.
+    const hydrate = mockScholarFindMany.mock.calls.filter((c) => "include" in c[0]).at(-1)![0];
+    expect(hydrate.where.cwid.in).toEqual(rows.slice(20).map((r) => r.cwid));
   });
 
-  it("places chief-of-division first when divCode provided and chief is in page 0", async () => {
-    mockScholarCount.mockResolvedValue(3);
-    mockDivisionFindFirst.mockResolvedValue({ chiefCwid: "chief001" });
+  it("sort=pubs ranks by the displayed pub count, surname tiebreak", async () => {
+    routeScholarFindMany([
+      makeScholarRow({ cwid: "a0000001", preferredName: "Amy Adams" }),
+      makeScholarRow({ cwid: "b0000001", preferredName: "Bob Baker" }),
+      makeScholarRow({ cwid: "c0000001", preferredName: "Cy Clark" }),
+    ]);
+    mockPublicationAuthorGroupBy.mockResolvedValue([
+      { cwid: "b0000001", _count: { _all: 9 } },
+      { cwid: "c0000001", _count: { _all: 9 } },
+      { cwid: "a0000001", _count: { _all: 2 } },
+    ]);
+    mockGrantGroupBy.mockResolvedValue([]);
 
-    const chiefRow = makeScholarRow({
+    const result = await getDepartmentFaculty("MED", { sort: "pubs" });
+    expect(result.hits.map((h) => h.cwid)).toEqual(["b0000001", "c0000001", "a0000001"]);
+    expect(result.hits.map((h) => h.pubCount)).toEqual([9, 9, 2]);
+  });
+
+  it("sort=pubs counts each paper once: confirmed authorships minus hides, never publication_topic rows", async () => {
+    routeScholarFindMany([
+      makeScholarRow({ cwid: "a0000001", preferredName: "Amy Adams" }),
+      makeScholarRow({ cwid: "b0000001", preferredName: "Bob Baker" }),
+    ]);
+    // publication_topic is keyed (pmid, cwid, parentTopicId): one paper on two
+    // parent topics is two rows. If the roster counted these rows, Amy would
+    // rank first with 2 "papers" — she has 1.
+    mockPublicationTopicGroupBy.mockResolvedValue([
+      { cwid: "a0000001", _count: { pmid: 2 } },
+    ]);
+    mockPublicationAuthorGroupBy.mockResolvedValue([
+      { cwid: "a0000001", _count: { _all: 1 } },
+      { cwid: "b0000001", _count: { _all: 3 } },
+    ]);
+    // Bob hid one of his three authorships (#356).
+    mockSuppressionFindMany.mockResolvedValue([{ contributorCwid: "b0000001" }]);
+    mockGrantGroupBy.mockResolvedValue([]);
+
+    const result = await getDepartmentFaculty("MED", { sort: "pubs" });
+    expect(result.hits.map((h) => [h.cwid, h.pubCount])).toEqual([
+      ["b0000001", 2],
+      ["a0000001", 1],
+    ]);
+    expect(mockPublicationTopicGroupBy).not.toHaveBeenCalled();
+    expect(mockPublicationAuthorGroupBy.mock.calls[0][0].where).toMatchObject({ isConfirmed: true });
+  });
+
+  it("places chief-of-division first when divCode provided (surname sort only)", async () => {
+    mockDivChiefAssignmentFindFirst.mockResolvedValue({
       cwid: "chief001",
-      preferredName: "Dr. Chief",
-      divisionName: "Cardiology",
+      interim: false,
+      role: { label: "Chief" },
     });
-    const otherRow1 = makeScholarRow({ cwid: "other001", preferredName: "A Scholar" });
-    const otherRow2 = makeScholarRow({ cwid: "other002", preferredName: "B Scholar" });
-
-    // findFirst is called for the chief row; findMany for the rest
-    mockScholarFindFirst.mockResolvedValue(chiefRow);
-    mockScholarFindMany.mockResolvedValue([otherRow1, otherRow2]);
+    routeScholarFindMany([
+      makeScholarRow({ cwid: "chief001", preferredName: "Dr. Zed", divCode: "CARDIO", divisionName: "Cardiology" }),
+      makeScholarRow({ cwid: "other001", preferredName: "A Scholar", divCode: "CARDIO" }),
+      makeScholarRow({ cwid: "other002", preferredName: "B Scholar", divCode: "CARDIO" }),
+    ]);
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockGrantGroupBy.mockResolvedValue([]);
 
     const result = await getDepartmentFaculty("MED", { divCode: "CARDIO", page: 0 });
     expect(result.hits[0].cwid).toBe("chief001");
-    expect(result.hits[0].preferredName).toBe("Dr. Chief");
-    // Other rows follow
+    expect(result.hits[0].preferredName).toBe("Dr. Zed");
+    // Other rows follow in surname order ("scholar" ties → preferredName).
     expect(result.hits[1].cwid).toBe("other001");
     expect(result.hits[2].cwid).toBe("other002");
+
+    // A count sort is an explicit ranking — no pin.
+    const byGrants = await getDepartmentFaculty("MED", { divCode: "CARDIO", sort: "grants" });
+    expect(byGrants.hits[0].cwid).toBe("other001");
   });
 
   it("each hit contains the expected fields including identityImageEndpoint", async () => {
-    mockScholarCount.mockResolvedValue(1);
-    mockDivisionFindFirst.mockResolvedValue(null);
     mockScholarFindMany.mockResolvedValue([
       makeScholarRow({
         cwid: "abc12345",
@@ -493,7 +719,7 @@ describe("getDepartmentFaculty", () => {
         departmentName: "Department of Medicine",
       }),
     ]);
-    mockPublicationTopicGroupBy.mockResolvedValue([{ cwid: "abc12345", _count: { pmid: 15 } }]);
+    mockPublicationAuthorGroupBy.mockResolvedValue([{ cwid: "abc12345", _count: { _all: 15 } }]);
     mockGrantGroupBy.mockResolvedValue([{ cwid: "abc12345", _count: { _all: 3 } }]);
 
     const result = await getDepartmentFaculty("MED", {});
@@ -523,15 +749,16 @@ describe("getDepartmentFaculty", () => {
     expect(result.methodFacet).toBeUndefined();
     expect(JSON.stringify(result)).not.toContain("methodFacet");
     expect(mockScholarFamilyGroupBy).not.toHaveBeenCalled();
-    // Only the paginated page query ran — no extra full-member-cwid findMany.
-    expect(mockScholarFindMany).toHaveBeenCalledTimes(1);
+    // Only the index select + the page hydration ran — no extra
+    // full-member-cwid findMany for the facet.
+    expect(mockScholarFindMany).toHaveBeenCalledTimes(2);
   });
 
   it("#974 — facet flag ON: methodFacet populated from a PUBLIC-only aggregation", async () => {
     mockFacetEnabled.mockReturnValue(true);
     mockScholarCount.mockResolvedValue(2);
     mockDivisionFindFirst.mockResolvedValue(null);
-    // page-query rows (call 1) then the full-member-cwid select (call 2).
+    // index member select (call 1) then the page hydration (call 2).
     mockScholarFindMany
       .mockResolvedValueOnce([
         makeScholarRow({ cwid: "on000001" }),
@@ -553,7 +780,7 @@ describe("getDepartmentFaculty", () => {
     const result = await getDepartmentFaculty("MED", {});
 
     expect(mockScholarFamilyGroupBy).toHaveBeenCalledTimes(1);
-    // The extra full-member-cwid select ran (page query + member select = 2 calls).
+    // The facet reuses the index's member set — still just index + hydration.
     expect(mockScholarFindMany).toHaveBeenCalledTimes(2);
     expect(result.methodFacet).toEqual([
       { value: "imaging_x::Deep learning", label: "Deep learning", count: 7 },

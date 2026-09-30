@@ -1,20 +1,31 @@
 /**
- * lib/edit/unit-roster-export — status derivation, CSV builder, row counting,
- * and the flag gate (#1102). The `status` column must match the Members-tab
+ * lib/edit/unit-roster-export — status derivation, the row projection, row
+ * counting, and the flag gate (#1102); lib/edit/unit-roster-xlsx — the .xlsx
+ * workbook the route sends. The `status` column must match the Members-tab
  * `statusOf` in `center-roster-card.tsx`.
+ *
+ * The projection assertions read the rows through `toCsv` (header + rows,
+ * comma-joined) so a whole row can be matched as one string.
  */
+import ExcelJS from "exceljs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { toCsv } from "@/lib/csv";
 import {
-  buildUnitRosterCsv,
-  countRosterCsvRows,
+  buildUnitRosterRows,
+  countRosterExportRows,
   isUnitRosterExportEnabled,
   loadRosterFacultyMeta,
   rosterStatusOf,
-  ROSTER_CSV_HEADERS,
+  ROSTER_EXPORT_HEADERS,
+  type BuildRosterExportOptions,
   type RosterFacultyMeta,
 } from "@/lib/edit/unit-roster-export";
+import { buildUnitRosterXlsx } from "@/lib/edit/unit-roster-xlsx";
 import type { UnitEditContext } from "@/lib/api/unit-edit-context";
+
+const buildUnitRosterCsv = (c: UnitEditContext, o: BuildRosterExportOptions) =>
+  toCsv(ROSTER_EXPORT_HEADERS, buildUnitRosterRows(c, o));
 
 const TODAY = "2026-06-18";
 
@@ -38,6 +49,25 @@ describe("rosterStatusOf (mirrors center-roster-card statusOf)", () => {
   it("active on the inclusive boundaries", () => {
     expect(rosterStatusOf({ startDate: TODAY, endDate: TODAY }, TODAY)).toBe("active");
   });
+  it("invited for the #2779 Invited role, whatever its dates (matches the card badge)", () => {
+    expect(
+      rosterStatusOf({ startDate: null, endDate: null, membershipRoleKey: "invited" }, TODAY),
+    ).toBe("invited");
+    expect(
+      rosterStatusOf(
+        { startDate: "2999-01-01", endDate: "2000-01-01", membershipRoleKey: "invited" },
+        TODAY,
+      ),
+    ).toBe("invited");
+  });
+  it("a non-invited role key (or a division's null key) keeps date-derived status", () => {
+    expect(
+      rosterStatusOf({ startDate: null, endDate: null, membershipRoleKey: "member" }, TODAY),
+    ).toBe("active");
+    expect(
+      rosterStatusOf({ startDate: null, endDate: "2000-01-01", membershipRoleKey: null }, TODAY),
+    ).toBe("inactive");
+  });
   it("pending wins over inactive when both apply (matches UI precedence)", () => {
     expect(rosterStatusOf({ startDate: "2999-01-01", endDate: "2000-01-01" }, TODAY)).toBe(
       "pending",
@@ -45,7 +75,7 @@ describe("rosterStatusOf (mirrors center-roster-card statusOf)", () => {
   });
 });
 
-describe("buildUnitRosterCsv", () => {
+describe("buildUnitRosterRows", () => {
   const roster = [
     {
       cwid: "a1",
@@ -77,21 +107,23 @@ describe("buildUnitRosterCsv", () => {
   it("emits the header order, now including the faculty block", () => {
     const csv = buildUnitRosterCsv(ctx(roster, programs), { today: TODAY });
     const header = csv.split("\r\n")[0];
-    expect(header).toBe(ROSTER_CSV_HEADERS.join(","));
+    expect(header).toBe(ROSTER_EXPORT_HEADERS.join(","));
     expect(header).toContain("email,role_category,department,division");
+    // Appended LAST (after scholar_state) so consumer indices did not shift.
+    expect(header.endsWith(",scholar_state,institution")).toBe(true);
   });
 
   it("omitting facultyByCwid keeps the header stable and the block empty", () => {
     const csv = buildUnitRosterCsv(ctx(roster, programs), { today: TODAY });
-    expect(csv.split("\r\n")[0]).toBe(ROSTER_CSV_HEADERS.join(","));
+    expect(csv.split("\r\n")[0]).toBe(ROSTER_EXPORT_HEADERS.join(","));
     // 4 trailing empties — column indices never shift under a consumer.
     expect(csv).toContain("active,manual,,,,");
   });
 
-  it("resolves program_label from the taxonomy and quotes commas in names", () => {
-    const csv = buildUnitRosterCsv(ctx(roster, programs), { today: TODAY });
-    expect(csv).toContain('"Comma, Person"');
-    expect(csv).toContain("CPC,Cancer Prevention & Control");
+  it("resolves program_label from the taxonomy and keeps a comma'd name in one cell", () => {
+    const rows = buildUnitRosterRows(ctx(roster, programs), { today: TODAY });
+    expect(rows[0].slice(0, 6)).toEqual(["a1", "Comma, Person", "Prof", "research", "CPC", "Cancer Prevention & Control"]);
+    expect(rows.every((r) => r.length === ROSTER_EXPORT_HEADERS.length)).toBe(true);
   });
 
   it("includes pending + inactive by default", () => {
@@ -99,6 +131,22 @@ describe("buildUnitRosterCsv", () => {
     const lines = csv.trim().split("\r\n");
     expect(lines).toHaveLength(3); // header + 2 members
     expect(csv).toContain(",pending,ED");
+  });
+
+  it("an invitee's status cell is `invited` (the card badge) and activeOnly drops it", () => {
+    const invitee = {
+      ...roster[0],
+      cwid: "i1",
+      name: "Invitee",
+      membershipRoleKey: "invited",
+    };
+    const c = ctx([...roster, invitee], programs);
+    const statusIdx = ROSTER_EXPORT_HEADERS.indexOf("status");
+    const rows = buildUnitRosterRows(c, { today: TODAY });
+    expect(rows.find((r) => r[0] === "i1")?.[statusIdx]).toBe("invited");
+    const active = buildUnitRosterRows(c, { today: TODAY, activeOnly: true });
+    expect(active.map((r) => r[0])).toEqual(["a1"]);
+    expect(countRosterExportRows(c, { today: TODAY, activeOnly: true })).toBe(1);
   });
 
   it("activeOnly drops non-active rows", () => {
@@ -157,9 +205,10 @@ describe("buildUnitRosterCsv", () => {
       },
     ];
     const csv = buildUnitRosterCsv(ctx(mixed, []), { today: TODAY });
-    expect(csv.split("\r\n")[0].endsWith(",scholar_state")).toBe(true);
-    expect(csv).toContain("active,manual,,,,,departed");
-    expect(csv).toContain("active,manual,,,,,unknown");
+    expect(csv.split("\r\n")[0]).toContain(",scholar_state,");
+    // scholar_state is populated with no facultyByCwid; institution (last) is not.
+    expect(csv).toContain("active,manual,,,,,departed,");
+    expect(csv).toContain("active,manual,,,,,unknown,");
   });
 
   it("handles a null roster (no members) → header only", () => {
@@ -200,6 +249,7 @@ describe("email column gating", () => {
     roleCategory: "full_time_faculty",
     departmentName: "Medicine",
     divisionName: "Cardiology",
+    institution: "Hospital for Special Surgery",
     ...over,
   });
 
@@ -208,7 +258,17 @@ describe("email column gating", () => {
       today: TODAY,
       facultyByCwid: new Map([["a1", meta()]]),
     });
-    expect(csv).toContain("who@med.cornell.edu,full_time_faculty,Medicine,Cardiology");
+    expect(csv).toContain(
+      "who@med.cornell.edu,full_time_faculty,Medicine,Cardiology,active,Hospital for Special Surgery",
+    );
+  });
+
+  it("a member with no primary institution on file exports an empty institution cell", () => {
+    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map([["a1", meta({ institution: null })]]),
+    });
+    expect(csv).toContain("Medicine,Cardiology,active,\r\n");
   });
 
   it("the release-code gate does NOT reach this surface, in EITHER position", () => {
@@ -293,32 +353,85 @@ describe("loadRosterFacultyMeta", () => {
               roleCategory: "full_time_faculty",
               department: { name: "Medicine" },
               division: null,
+              primaryOrgCode: "WCMC",
             },
           ];
         },
       },
     };
     const map = await loadRosterFacultyMeta(["a1", "a1", ""], client);
-    expect((seen as { where: { cwid: { in: string[] } } }).where.cwid.in).toEqual(["a1"]);
+    const args = seen as { where: { cwid: { in: string[] } }; select: Record<string, unknown> };
+    expect(args.where.cwid.in).toEqual(["a1"]);
+    // The code must be SELECTED, or every row exports an empty institution.
+    expect(args.select.primaryOrgCode).toBe(true);
     expect(map.get("a1")).toEqual({
       email: "a1@med.cornell.edu",
       roleCategory: "full_time_faculty",
       departmentName: "Medicine",
       divisionName: null,
+      // The home code is named, never echoed bare.
+      institution: "Weill Cornell Medicine",
     });
   });
 });
 
-describe("countRosterCsvRows", () => {
+describe("countRosterExportRows", () => {
   const roster = [
     { cwid: "a", name: "A", title: null, source: "manual", membershipType: null, programCode: null, startDate: null, endDate: null, scholarState: "active" as const },
     { cwid: "p", name: "P", title: null, source: "manual", membershipType: null, programCode: null, startDate: "2999-01-01", endDate: null, scholarState: "active" as const },
   ];
   it("counts all rows by default", () => {
-    expect(countRosterCsvRows(ctx(roster), { today: TODAY })).toBe(2);
+    expect(countRosterExportRows(ctx(roster), { today: TODAY })).toBe(2);
   });
   it("counts only active under activeOnly", () => {
-    expect(countRosterCsvRows(ctx(roster), { today: TODAY, activeOnly: true })).toBe(1);
+    expect(countRosterExportRows(ctx(roster), { today: TODAY, activeOnly: true })).toBe(1);
+  });
+});
+
+describe("buildUnitRosterXlsx", () => {
+  const roster = [
+    { cwid: "a1", name: "Comma, Person", title: "Prof", source: "manual", membershipType: "research" as const, programCode: "CPC", startDate: "2020-01-01", endDate: null, scholarState: "active" as const },
+    { cwid: "p1", name: "Pending", title: null, source: "ED", membershipType: null, programCode: null, startDate: "2999-01-01", endDate: null, scholarState: "departed" as const },
+  ];
+  const programs = [
+    { code: "CPC", label: "Cancer Prevention & Control", sortOrder: 0, description: null, leaders: [] },
+  ];
+
+  async function read(buf: Buffer) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    return wb;
+  }
+
+  const values = (ws: ExcelJS.Worksheet, r: number) =>
+    (ws.getRow(r).values as unknown[]).slice(1).map((v) => (v == null ? "" : String(v)));
+
+  it("one Roster sheet: the bold header row, then exactly the projected rows (same columns as the CSV)", async () => {
+    const opts = { today: TODAY, facultyByCwid: new Map<string, RosterFacultyMeta>() };
+    const wb = await read(await buildUnitRosterXlsx(ctx(roster, programs), opts));
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Roster"]);
+    const ws = wb.getWorksheet("Roster")!;
+    expect(values(ws, 1)).toEqual([...ROSTER_EXPORT_HEADERS]);
+    expect(ws.getRow(1).font?.bold).toBe(true);
+    expect(ws.rowCount).toBe(3);
+    const expected = buildUnitRosterRows(ctx(roster, programs), opts);
+    // Trailing empty cells don't round-trip, so compare up to each row's length.
+    expect(values(ws, 2)).toEqual(expected[0].slice(0, values(ws, 2).length));
+    expect(values(ws, 2).slice(0, 9)).toEqual(["a1", "Comma, Person", "Prof", "research", "CPC", "Cancer Prevention & Control", "2020-01-01", "", "active"]);
+    expect(values(ws, 3)[8]).toBe("pending");
+    expect(values(ws, 3)[14]).toBe("departed");
+  });
+
+  it("activeOnly narrows the workbook the same way", async () => {
+    const wb = await read(await buildUnitRosterXlsx(ctx(roster, programs), { today: TODAY, activeOnly: true }));
+    const ws = wb.getWorksheet("Roster")!;
+    expect(ws.rowCount).toBe(2);
+    expect(values(ws, 2)[0]).toBe("a1");
+  });
+
+  it("an empty roster is the header row alone", async () => {
+    const wb = await read(await buildUnitRosterXlsx(ctx(null, null), { today: TODAY }));
+    expect(wb.getWorksheet("Roster")!.rowCount).toBe(1);
   });
 });
 

@@ -55,7 +55,7 @@ describe("isEditableField", () => {
 // ---------------------------------------------------------------------------
 
 describe("section visibility", () => {
-  it("SECTION_VISIBILITY_FIELDS lists the ten hideable sections + hideEducationYears", () => {
+  it("SECTION_VISIBILITY_FIELDS lists the ten hideable sections + hideEducationYears + showDatasets", () => {
     expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
       "hideMentoring",
       "hideEducation",
@@ -70,6 +70,10 @@ describe("section visibility", () => {
       "hideTechnologies",
       "hideNews",
       "hideDatasets",
+      // Inverted opt-in — DATA_SHARING_SECTION defaults off, so "true" SHOWS
+      // the section instead of hiding it (see the SECTION_VISIBILITY_FIELDS
+      // doc comment).
+      "showDatasets",
     ]);
   });
 
@@ -419,9 +423,16 @@ describe("findSuppressibleEntityOwner (#160)", () => {
 
 type ChairClient = Parameters<typeof isChairAppointment>[2];
 
+// #2542 contract A — `isChairAppointment` resolves the department's
+// chair/director `OrgUnitRoleAssignment` row first, then the department's
+// name via `findUnique` keyed on the assignment's `entityId`
+// (`Department.chairCwid` no longer exists as a read source).
 function chairClient(dept: { name: string } | null): ChairClient {
   return {
-    department: { findFirst: vi.fn().mockResolvedValue(dept) },
+    orgUnitRoleAssignment: {
+      findFirst: vi.fn().mockResolvedValue(dept ? { entityId: "MED" } : null),
+    },
+    department: { findUnique: vi.fn().mockResolvedValue(dept) },
   } as unknown as ChairClient;
 }
 

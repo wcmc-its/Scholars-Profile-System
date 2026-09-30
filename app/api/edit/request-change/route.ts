@@ -114,6 +114,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // --- look up the target scholar's name server-side (never client-supplied —
+  //     a spoofed name in the office-bound email would be a social-engineering
+  //     vector) so the recipient can identify whose profile this is about. ---
+  const targetScholar = await db.read.scholar.findUnique({
+    where: { cwid: target },
+    select: { preferredName: true },
+  });
+
   // --- send (the request fails only if the send itself fails) ---
   let messageId: string;
   try {
@@ -122,12 +130,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       cc: resolved.cc,
       subject: subjectFor(resolved.attributeLabel),
       text: composeBody({
+        attribute,
+        targetCwid: target,
+        targetName: targetScholar?.preferredName ?? null,
         issueLabel: resolved.issueLabel,
         itemLabel: typeof itemId === "string" ? itemId : undefined,
         sourceSystem: resolved.sourceSystem,
         detail: typeof detail === "string" ? detail : undefined,
         actorCwid: session.cwid,
-        targetCwid: target,
       }),
     });
     messageId = sent.messageId;

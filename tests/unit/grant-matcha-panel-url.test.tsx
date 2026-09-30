@@ -1,8 +1,8 @@
 /**
  * `/edit/grant-matcha` — the opportunity selection lives in the URL, not component state.
  *
- * Two things are load-bearing: with no `?opp=` the page is the SAME browse table
- * `/edit/find-researchers` renders (not a second bespoke picker), and with `?opp=<id>` the panel
+ * Two things are load-bearing: with no `?opp=` the page is the shared `BrowseList`
+ * table from `opportunity-browse.tsx` (not a second bespoke picker), and with `?opp=<id>` the panel
  * seeds Matcha from the DETAIL route — the only route that carries `synopsis`. Both are pinned
  * here because a regression to component state would still "work" by clicking while silently
  * breaking the deep link the officer is meant to paste into Teams.
@@ -19,10 +19,27 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParams.value,
 }));
 
-vi.mock("@/components/edit/find-researchers", () => ({
-  BrowseList: ({ hrefFor }: { hrefFor: (id: string) => string }) => (
-    <a href={hrefFor("wcm_curated:abc")}>browse table</a>
-  ),
+/** Props each BrowseList mount received — pins the Phase 1b freshness/admin threading. */
+const browseListProps: Array<{ freshness?: boolean; admin?: boolean }> = [];
+
+vi.mock("@/components/edit/opportunity-browse", () => ({
+  BrowseList: ({
+    hrefFor,
+    freshness,
+    admin,
+  }: {
+    hrefFor: (id: string) => string;
+    freshness?: boolean;
+    admin?: boolean;
+  }) => {
+    browseListProps.push({ freshness, admin });
+    return <a href={hrefFor("wcm_curated:abc")}>browse table</a>;
+  },
+  // Phase 3b siblings the selected view renders — real behavior is pinned in
+  // grant-matcha-opportunity-frame.test.tsx; here they just need to exist.
+  ClampedText: ({ text }: { text: string }) => <p>{text}</p>,
+  SourceBadge: () => null,
+  OpportunityFactsLine: () => null,
 }));
 
 /**
@@ -49,6 +66,7 @@ describe("GrantMatchaPanel — ?opp= URL state", () => {
   beforeEach(() => {
     searchParams.value = new URLSearchParams("");
     mounted.length = 0;
+    browseListProps.length = 0;
     vi.unstubAllGlobals();
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -59,6 +77,14 @@ describe("GrantMatchaPanel — ?opp= URL state", () => {
     // The row href is what makes the selection deep-linkable.
     expect(link.getAttribute("href")).toBe("/edit/grant-matcha?opp=wcm_curated%3Aabc");
     expect(screen.queryByTestId("matcha-panel")).toBeNull();
+    // Phase 1b: the freshness strip is unconditional on this surface; the
+    // suppress/restore controls stay off until the server passes adminEnabled.
+    expect(browseListProps).toEqual([{ freshness: true, admin: false }]);
+  });
+
+  it("threads adminEnabled through to the browse table's admin prop", () => {
+    render(<GrantMatchaPanel adminEnabled />);
+    expect(browseListProps).toEqual([{ freshness: true, admin: true }]);
   });
 
   it("fetches the detail route for ?opp= and seeds Matcha from title + synopsis", async () => {
@@ -91,6 +117,31 @@ describe("GrantMatchaPanel — ?opp= URL state", () => {
       "Outstanding New Environmental Scientist\n\nSupports early-stage investigators studying environmental exposures.",
     );
     expect(screen.queryByRole("link", { name: "browse table" })).toBeNull();
+    // No appealByStage on this payload — no badge.
+    expect(screen.queryByTestId("matcha-appeal-badge")).toBeNull();
+  });
+
+  it("surfaces appealByStage as a badge when the opportunity carries it", async () => {
+    searchParams.value = new URLSearchParams("opp=abc");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          title: "Harry Weaver Neuroscience Scholar Award",
+          sponsor: "National MS Society",
+          synopsis: "Supports early-career neuroscience investigators.",
+          eligibilityFlags: ["faculty_eligible"],
+          eligibility: {},
+          appealByStage: { early: 0.9, senior: 0.1 },
+        }),
+      })),
+    );
+
+    render(<GrantMatchaPanel />);
+    await waitFor(() => expect(screen.getByTestId("matcha-appeal-badge")).toBeTruthy());
+    expect(screen.getByTestId("matcha-appeal-badge").textContent).toBe("Best fit: Early career");
   });
 
   it("never mounts Matcha with the previous opportunity's seed when ?opp= changes", async () => {

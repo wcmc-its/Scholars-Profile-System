@@ -36,7 +36,10 @@ const {
   mockPublicationAuthorFindMany,
   mockPublicationCount,
   mockQueryRawUnsafe,
+  mockQueryRaw,
   mockFieldOverrideFindMany,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockGrantFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -55,7 +58,10 @@ const {
   mockPublicationAuthorFindMany: vi.fn(),
   mockPublicationCount: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
+  mockQueryRaw: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -82,7 +88,11 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     publication: { count: mockPublicationCount },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
     $queryRawUnsafe: mockQueryRawUnsafe,
+    // `getDepartment`'s top-research-areas COUNT(DISTINCT pmid) query.
+    $queryRaw: mockQueryRaw,
   },
 }));
 
@@ -356,14 +366,22 @@ describe("groupUnitGrantsByProject (#2066)", () => {
     });
   });
 
-  it("keys sortKey on endDate under the end_date sort", () => {
+  it("sorts end_date SOONEST-ending first, matching funding search (#2082)", () => {
+    // /search?type=funding "End date (soonest)" sorts `{ endDate: "asc" }`; the
+    // unit Grants tabs must not return the grant FURTHEST from expiring first.
+    // Input order is deliberately the reverse of the expected output.
     const rows = [
-      row({ cwid: "a", externalId: "INFOED-A1-a", awardNumber: "1R01CA000001-01", endDate: new Date("2026-01-01") }),
       row({ cwid: "b", externalId: "INFOED-A2-b", awardNumber: "1R01CA000002-01", endDate: new Date("2031-01-01") }),
+      row({ cwid: "c", externalId: "INFOED-A3-c", awardNumber: "1R01CA000003-01", endDate: new Date("2028-01-01") }),
+      row({ cwid: "a", externalId: "INFOED-A1-a", awardNumber: "1R01CA000001-01", endDate: new Date("2026-01-01") }),
     ];
-    expect(
-      groupUnitGrantsByProject(rows, NONE, "end_date").map((g) => g.projectKey),
-    ).toEqual(["R01CA000002", "R01CA000001"]);
+    const groups = groupUnitGrantsByProject(rows, NONE, "end_date");
+    expect(groups.map((g) => g.projectKey)).toEqual([
+      "R01CA000001",
+      "R01CA000003",
+      "R01CA000002",
+    ]);
+    expect(groups.map((g) => g.sortKey)).toEqual(groups.map((g) => g.endDate.getTime()));
   });
 
   it("sorts BOTH ways on the date the card DISPLAYS, not a second extremum", () => {
@@ -415,7 +433,9 @@ describe("groupUnitGrantsByProject (#2066)", () => {
     // group's MIN end (2027) or the representative's own end (also 2027) fails
     // here instead of coinciding with the answer.
     const byEnd = groupUnitGrantsByProject(rows, NONE, "end_date");
-    expect(byEnd.map((g) => g.projectKey)).toEqual(["R01CA333333", "R01CA999999"]);
+    // ASC (#2082): the solo's 2029 end precedes the chain's MAX end of 2030; a
+    // MIN-end (2027) key would put the chain first instead.
+    expect(byEnd.map((g) => g.projectKey)).toEqual(["R01CA999999", "R01CA333333"]);
     expect(byEnd.map((g) => g.sortKey)).toEqual(byEnd.map((g) => g.endDate.getTime()));
   });
 });
@@ -458,7 +478,7 @@ const scholarChip = (cwid: string) => ({
   cwid,
   preferredName: cwid.toUpperCase(),
   slug: cwid,
-  roleCategory: "faculty",
+  roleCategory: "full_time_faculty",
 });
 
 /**
@@ -494,6 +514,7 @@ describe("hero stat and Grants-tab total agree by construction (#2066)", () => {
     mockAppointmentFindFirst.mockResolvedValue(null);
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockPublicationTopicCount.mockResolvedValue(0);
+    mockQueryRaw.mockResolvedValue([]);
     mockTopicFindMany.mockResolvedValue([]);
     mockDivisionFindMany.mockResolvedValue([]);
     mockScholarCount.mockResolvedValue(10);
@@ -697,6 +718,37 @@ describe("division hero stat and Grants-tab total agree by construction (#2066)"
     expect(tab.hits).toHaveLength(1);
     expect(tab.hits[0].pis.map((p) => p.cwid)).toEqual(["mpi001", "mpi002"]);
     expect(tab.hits[0].isMultiPi).toBe(true);
+  });
+
+  it("keeps a hidden-identity PI's grant but strips the chip's link + headshot (#536)", async () => {
+    // A synthetic doctoral-student PI (an F31, say). The chip lookup is only
+    // `deletedAt: null` — the grant must stay in the list and the total (#718) —
+    // so the builder itself is the link gate.
+    mockScholarFindMany.mockImplementation(
+      (args?: { where?: { divCode?: string; cwid?: { in?: string[] } } }) =>
+        Promise.resolve(
+          args?.where?.divCode
+            ? PARITY_CWIDS.map((cwid) => ({ cwid }))
+            : (args?.where?.cwid?.in ?? []).map((cwid) =>
+                cwid === "sol001"
+                  ? { ...scholarChip(cwid), roleCategory: "doctoral_student_phd" }
+                  : scholarChip(cwid),
+              ),
+        ),
+    );
+    const tab = await getDivisionGrantsList("CARDIO", { page: 0 });
+    expect(tab.total).toBe(3);
+    const hidden = tab.hits
+      .flatMap((h) => h.pis)
+      .find((p) => p.cwid === "sol001");
+    expect(hidden, "hidden PI lost its chip entirely").toBeDefined();
+    expect(hidden!.name).toBe("SOL001");
+    expect(hidden!.slug).toBeNull();
+    expect(hidden!.identityImageEndpoint).toBeNull();
+    // A public PI on the same page keeps both.
+    const shown = tab.hits.flatMap((h) => h.pis).find((p) => p.cwid === "mpi001")!;
+    expect(shown.slug).toBe("mpi001");
+    expect(shown.identityImageEndpoint).toBeTruthy();
   });
 
   it("does not give a soft-deleted scholar a chip", async () => {

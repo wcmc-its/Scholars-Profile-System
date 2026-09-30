@@ -24,6 +24,7 @@ import { PublicationMeta } from "@/components/publication/publication-meta";
 import { pubTitleProps } from "@/components/publication/pub-html";
 import { sanitizePubTitle } from "@/lib/utils";
 import { formatPublishedName } from "@/lib/postnominal";
+import { citationIdentifier } from "@/lib/citation";
 import { profilePath } from "@/lib/profile-url";
 
 export const revalidate = 86400;
@@ -53,11 +54,17 @@ async function resolveMentor(slug: string) {
   return mentor && isPubliclyDisplayed(mentor.roleCategory) ? mentor : null;
 }
 
+// #2599 — `roleCategory` is already selected by `resolveMentor` (it feeds the
+// fail-closed `isPubliclyDisplayed` link gate above), and it is the only shape
+// this wrapper is ever called with. Threading it through keeps the enrolled-student
+// postnominal suppression on this anonymous surface, where the mentor's name is
+// published in `<title>`, the meta description and the `<h1>`.
 function publishedName(s: {
   preferredName: string;
   postnominal: string | null;
+  roleCategory: string | null;
 }): string {
-  return formatPublishedName(s.preferredName, s.postnominal);
+  return formatPublishedName(s.preferredName, s.postnominal, s.roleCategory);
 }
 
 export async function generateMetadata({
@@ -166,7 +173,7 @@ export default async function MentorCoPubsRollupPage({
               <ul className="space-y-5">
                 {g.entries.map((e, idx) => (
                   <li
-                    key={`${e.mentee.cwid}-${e.publication.pmid}-${idx}`}
+                    key={`${e.mentee.cwid}-${e.publication.id ?? e.publication.pmid}-${idx}`}
                     className="border-b border-border pb-5 last:border-b-0"
                   >
                     <CoPubCitation
@@ -189,7 +196,15 @@ export default async function MentorCoPubsRollupPage({
 function EmptyState({
   mentor,
 }: {
-  mentor: { slug: string; preferredName: string; postnominal: string | null };
+  // #2599 — `roleCategory` is part of the name shape now, not an extra: it is what
+  // suppresses an enrolled student's programme-of-study postnominal. The one caller
+  // passes `resolveMentor`'s row, which already selects it.
+  mentor: {
+    slug: string;
+    preferredName: string;
+    postnominal: string | null;
+    roleCategory: string | null;
+  };
 }) {
   return (
     <div className="rounded-md border border-border bg-zinc-50 px-4 py-6 text-sm dark:bg-zinc-900/40">
@@ -246,7 +261,10 @@ function CoPubCitation({
   }
 
   const titleHtml = sanitizePubTitle(pub.title);
-  const pubmedUrl = `https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`;
+  // The SPS key (`id`, round 5): a PubMed link only for a PubMed record; a
+  // Scopus-only row (`pmid` is ReciterDB's synthetic negative) gets none.
+  const pubId = pub.id ?? String(pub.pmid);
+  const pubmedUrl = citationIdentifier(pubId).href;
   const pinnedCwids = [mentorCwid, entry.mentee.cwid];
 
   // Meta line: "With <Mentee Name> · <Program label> · Class of YYYY"
@@ -259,12 +277,16 @@ function CoPubCitation({
   return (
     <div>
       <div className="text-base font-semibold leading-snug">
-        <a
-          href={pubmedUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          {...pubTitleProps(titleHtml, "hover:text-[var(--color-accent-slate)] hover:underline")}
-        />
+        {pubmedUrl ? (
+          <a
+            href={pubmedUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            {...pubTitleProps(titleHtml, "hover:text-[var(--color-accent-slate)] hover:underline")}
+          />
+        ) : (
+          <span {...pubTitleProps(titleHtml)} />
+        )}
       </div>
       {(pub.journal || pub.year) && (
         <div className="mt-1 text-sm leading-snug text-zinc-700 dark:text-zinc-300">
@@ -280,12 +302,12 @@ function CoPubCitation({
       <AuthorChipRow
         authors={authorChips}
         pinnedCwids={pinnedCwids}
-        pmid={String(pub.pmid)}
+        pmid={pubId}
         currentProfileCwid={mentorCwid}
       />
       <PublicationMeta
         citationCount={pub.citationCount}
-        pmid={String(pub.pmid)}
+        pmid={pubId}
         pmcid={pub.pmcid}
         doi={pub.doi}
         abstract={pub.abstract}

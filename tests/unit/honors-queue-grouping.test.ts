@@ -28,7 +28,11 @@ function mkRow(over: Partial<HonorQueueRow>): HonorQueueRow {
     sourceRef: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     decidedAt: "2026-01-01T00:00:00.000Z",
+    decidedByName: null,
+    rejectionReason: null,
+    superseded: false,
     competingCwids: [],
+    evidence: null,
     ...over,
   };
 }

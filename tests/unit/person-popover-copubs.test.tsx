@@ -68,6 +68,30 @@ function mockFetch(p: ApiPayload) {
 beforeEach(() => vi.restoreAllMocks());
 afterEach(() => vi.restoreAllMocks());
 
+describe("PersonPopover — primary institution line (non-WCMC only)", () => {
+  it("names an HSS scholar's institution under the department, and nothing for WCMC", async () => {
+    mockFetch(payload({ header: { ...payload().header, primaryOrgCode: "HSS" } }));
+    const { unmount } = render(
+      <PersonPopover cwid="mentee1" surface="facet">
+        <a href="#">Sam</a>
+      </PersonPopover>,
+    );
+    fireEvent.click(screen.getByTestId("hovercard"));
+    expect(await screen.findByText("Hospital for Special Surgery")).toBeTruthy();
+    unmount();
+
+    mockFetch(payload({ header: { ...payload().header, primaryOrgCode: "WCMC" } }));
+    render(
+      <PersonPopover cwid="mentee1" surface="facet">
+        <a href="#">Sam</a>
+      </PersonPopover>,
+    );
+    fireEvent.click(screen.getByTestId("hovercard"));
+    expect(await screen.findByText("Medicine")).toBeTruthy();
+    expect(screen.queryByText(/Weill Cornell Medicine/)).toBeNull();
+  });
+});
+
 describe("PersonPopover — mentee co-pubs jump", () => {
   it("mentee surface links to /scholars/{mentorSlug}/co-pubs/{menteeCwid}", async () => {
     mockFetch(payload());

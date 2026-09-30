@@ -25,6 +25,15 @@ describe("freshnessAnchor", () => {
   });
 });
 
+describe("freshnessAnchor — anchorOnRun", () => {
+  it("grades on the loader's completedAt, ignoring an old manifest", () => {
+    const completedAt = new Date("2026-09-27T10:00:00Z");
+    const row = { completedAt, manifestGeneratedAt: new Date("2026-08-07T10:00:00Z") };
+    expect(freshnessAnchor(row, true)).toEqual(completedAt);
+    expect(freshnessAnchor(row)).toEqual(row.manifestGeneratedAt);
+  });
+});
+
 describe("parseManifestGeneratedAt", () => {
   const now = Date.parse("2026-07-17T12:00:00Z");
 

@@ -55,11 +55,13 @@ const PUB_FIELDS = ["title", "journal", "abstract"];
  *  - `dangerouslySetInnerHTML` — the only render verb the sanitizer feeds.
  *  - `PubTitle` / `PubJournal` / `PubAbstract` / `PubHtml` — the sanctioned component.
  *  - `titleHtml` / `highlightedTitleHtml` — precomputed-sanitized title locals.
- *  - `stripTags` / `htmlToPlainText` — explicit plain-text downgrades (no markup leak).
+ *  - `stripTags` / `htmlToPlainText` / `pubTitleAccessibleName` — explicit
+ *    plain-text downgrades (no markup leak); the last is pub-html's own
+ *    guaranteed-non-empty accessible-name helper (#2209).
  *  - `formatCitationContext` — the modal's plain-text citation builder.
  */
 const SANCTION =
-  /sanitizePubmedHtml|sanitizePubTitle|dangerouslySetInnerHTML|PubTitle|PubJournal|PubAbstract|PubHtml|titleHtml|highlightedTitleHtml|stripTags|htmlToPlainText|formatCitationContext/;
+  /sanitizePubmedHtml|sanitizePubTitle|dangerouslySetInnerHTML|PubTitle|PubJournal|PubAbstract|PubHtml|titleHtml|highlightedTitleHtml|stripTags|htmlToPlainText|pubTitleAccessibleName|formatCitationContext/;
 
 const ALLOWLIST_MARKER = /pub-html-ok:\s*(.+)$/;
 

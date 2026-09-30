@@ -17,6 +17,7 @@ import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
+import { CLIPS_PREFIX, FUNDING_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
 
 /** Props for {@link EtlStack}. */
 export interface EtlStackProps extends StackProps {
@@ -32,6 +33,14 @@ export interface EtlStackProps extends StackProps {
    * the `scholars-etl-*` image, not the standalone app image (#454).
    */
   readonly etlEcrRepository: ecr.IRepository;
+  /**
+   * ECR repo holding the `scripts/bulk-data-rule/` Python pipeline image
+   * (from AppStack). Separate from `etlEcrRepository` -- this pipeline is
+   * Python (pandas/sqlalchemy/pymysql), not `tsx`, and runs as a manually
+   * triggered one-off `run-task`, never a Step Functions step
+   * (containerization design, 2026-08-14).
+   */
+  readonly bulkDataRuleEcrRepository: ecr.IRepository;
 }
 
 /**
@@ -115,6 +124,12 @@ export class EtlStack extends Stack {
   public readonly pageTopic: sns.Topic;
   /** Fargate task family every state-machine step launches. */
   public readonly etlTaskDefinition: ecs.FargateTaskDefinition;
+  /**
+   * One-off `scripts/bulk-data-rule/` pipeline task family. No cadence step
+   * launches this -- an operator does, via `aws ecs run-task` (containerization
+   * design, 2026-08-14). Not part of any state machine below.
+   */
+  public readonly bulkDataRuleTaskDefinition: ecs.FargateTaskDefinition;
   /** Three cadence state machines: nightly, weekly, annual. */
   public readonly nightlyStateMachine: sfn.StateMachine;
   public readonly weeklyStateMachine: sfn.StateMachine;
@@ -125,11 +140,13 @@ export class EtlStack extends Stack {
   public readonly reconcileStateMachine: sfn.StateMachine;
   /** #353 durable CloudFront-invalidation reconciler (ADR-005 layer 3), ~5 min cadence. */
   public readonly cdnReconcileStateMachine: sfn.StateMachine;
+  /** Honors-list scraper, `scholars-honors-<env>`: weekly + the console's Run now. */
+  public readonly honorsStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
 
-    const { envConfig, ecsCluster, etlEcrRepository } = props;
+    const { envConfig, ecsCluster, etlEcrRepository, bulkDataRuleEcrRepository } = props;
     // Item-3 pass 2a: import the ETL SG by id from the SSM param NetworkStack
     // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
     // export that would lock the useSharedVpc flip. Used only as `.securityGroupId`
@@ -201,6 +218,20 @@ export class EtlStack extends Stack {
       this,
       "EtlDbSecret",
       `scholars/${env}/db/etl`,
+    );
+    // Dedicated reciterdb credential for scripts/bulk-data-rule/ (containerization
+    // design, 2026-08-14). Deliberately its own secret, not a share of the
+    // per-source EtlReciter secret below (SOURCES_SECRET_IDS) -- that secret's
+    // keys are SCHOLARS_RECITERDB_* (the TS loader's env names); the Python
+    // scripts read plain DB_HOST/DB_USERNAME/DB_PASSWORD/DB_NAME
+    // (scripts/bulk-data-rule/attribute.py), so reusing it would need either an
+    // entrypoint remap or edits across all 8 scripts. Also narrower than
+    // SOURCES_SECRET_IDS's group: this pipeline never touches Asms/Infoed/
+    // Coi/Jenzabar, so it gets its own role below, not a seat on that task.
+    const bulkDataRuleSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "BulkDataRuleSecret",
+      `scholars/${env}/etl/bulk-data-rule`,
     );
     // Read-only app DSN — injected ONLY into the main `sps-etl-${env}` task def
     // (below) as DATABASE_URL_RO, so `scripts/run-staging-probe.sh` runs its
@@ -308,6 +339,15 @@ export class EtlStack extends Stack {
         secretName: `scholars/${env}/reciter-api`,
         keys: ["RECITER_API_BASE_URL", "RECITER_API_KEY"],
       },
+      {
+        // etl:ctsc-roster — the CTSC investigators-and-trainees feed (the one
+        // the ReCiter Institutional Client reads). The URL is an internal
+        // hostname, so it travels in the secret with the token rather than in
+        // this public repo.
+        constructId: "EtlSecretCtsc",
+        secretName: `scholars/${env}/etl/ctsc`,
+        keys: ["CTSC_FEED_URL", "CTSC_FEED_TOKEN"],
+      },
     ];
     const perSourceSecrets = credentialedSources.map((src) =>
       secretsmanager.Secret.fromSecretNameV2(this, src.constructId, src.secretName),
@@ -336,6 +376,9 @@ export class EtlStack extends Stack {
     ];
     const LDAP_SECRET_IDS = ["EtlSecretEd"];
     const RECITER_API_SECRET_IDS = ["EtlSecretReciterApi"];
+    // CTSC roster: the feed token plus the ED bind (it resolves CWIDs/emails in
+    // ED). Its own def so the feed token rides no other step.
+    const CTSC_SECRET_IDS = ["EtlSecretEd", "EtlSecretCtsc"];
     const secretArnsFor = (ids: string[]): string[] =>
       ids.map((id) => {
         const e = perSourceByConstructId.get(id);
@@ -444,6 +487,7 @@ export class EtlStack extends Stack {
     //   etl:scholar-tool (nightly) s3:GetObject   wcmc-reciterai-artifacts/tools/*
     //   etl:hierarchy    (annual)  s3:GetObject   wcmc-reciterai-hierarchy/*
     //   etl:ed:import-email-visibility (bridge) s3:GetObject wcmc-reciterai-artifacts/ed/*
+    //   etl:dynamodb     (nightly) s3:GetObject   wcmc-reciterai-artifacts/grants/*
     //
     // Read-only: the steps Scan the table and GetObject the artifacts; they
     // never write back to ReciterAI's (account-shared) stores. The bucket
@@ -493,8 +537,64 @@ export class EtlStack extends Stack {
             // NDJSON (reciterdb exported from a reachable client) from here (#443
             // workaround, same shape as the ed/ and mentoring/ bridges).
             "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
+            // #2618 — etl:dynamodb reads grants/latest/manifest.json for its
+            // `generated_at`, which is the only liveness trace
+            // reciterai-grants-daily leaves (that pipeline writes no STAGE#
+            // ledger row, unlike the six stages mirrored alongside it).
+            //
+            // Added AFTER #2618 shipped, and the miss is worth recording: the
+            // grants read was written on the assumption that the ETL already
+            // "had the bucket" because etl:scholar-tool reads tools/ from it.
+            // It does not. EVERY entry in this list is PREFIX-scoped on
+            // purpose, so the first nightly logged AccessDenied and the
+            // ReciterAI-grants row read `never-ran` in both envs. The read is
+            // fail-soft, so the cost was one false red row rather than the
+            // nightly -- but a new prefix here is a cdk deploy, never just a
+            // merge, and #2618's claim of "no new IAM" was only true of the
+            // DynamoDB-sourced tiers.
+            "arn:aws:s3:::wcmc-reciterai-artifacts/grants/*",
             "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
           ],
+        }),
+      ],
+    });
+
+    // Inbound mail — etl:news-clips (clips/) and etl:funding-digest (funding/)
+    // list + read the raw emails SES drops into the account-wide inbound-mail
+    // bucket (cdk/lib/inbound-mail-stack.ts, prod-app singleton), and the
+    // funding digest writes to the ReciterAI SUBMISSION queue. Its own policy,
+    // not the ReciterAI one: listing and a queue write are needed here, and that
+    // policy is pinned Scan/GetObject-only. Every statement is prefix-scoped.
+    new iam.Policy(this, "EtlTaskRoleInboundMailPolicy", {
+      policyName: `sps-etl-task-${env}-inbound-mail`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:GetObject"],
+          resources: [
+            `arn:aws:s3:::${inboundMailBucketName(this.account)}/${CLIPS_PREFIX}*`,
+            `arn:aws:s3:::${inboundMailBucketName(this.account)}/${FUNDING_PREFIX}*`,
+          ],
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:ListBucket"],
+          resources: [`arn:aws:s3:::${inboundMailBucketName(this.account)}`],
+          conditions: { StringLike: { "s3:prefix": [`${CLIPS_PREFIX}*`, `${FUNDING_PREFIX}*`] } },
+        }),
+        // etl:funding-digest submits new digest links to the SAME queue the
+        // /edit/grant-matcha intake panel writes: PutItem + Query (the dedup
+        // read), pinned to the SUBMISSION partition exactly as the app role's
+        // TaskRoleOpportunitySubmissionPolicy is. No Delete/Update: the ETL
+        // never retracts. Prod-only at runtime (shared table), not here.
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["dynamodb:PutItem", "dynamodb:Query"],
+          resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
+          conditions: {
+            "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["SUBMISSION"] },
+          },
         }),
       ],
     });
@@ -539,6 +639,30 @@ export class EtlStack extends Stack {
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
             "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
           ],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
+    // Custom-metric grant (Phase 0a opportunity corpus freshness).
+    //
+    // etl:dynamodb Block 7 emits `SPS/ETL` / `OpportunityCorpusIngestAgeDays`
+    // (per-source MAX(ingested_at) age) right after the GRANT# -> opportunity
+    // projection — see etl/dynamodb/grant-opportunity-etl.ts. The freshness
+    // alarm below watches that metric. `cloudwatch:PutMetricData` supports no
+    // resource-level scoping (the resource must be `*`); the condition key
+    // confines the grant to this app's custom namespace, so the role still
+    // cannot write into `AWS/*` or any other namespace.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "EtlTaskRoleCloudWatchMetricPolicy", {
+      policyName: `sps-etl-task-${env}-cloudwatch-metrics`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["cloudwatch:PutMetricData"],
+          resources: ["*"],
+          conditions: { StringEquals: { "cloudwatch:namespace": "SPS/ETL" } },
         }),
       ],
     });
@@ -679,7 +803,7 @@ export class EtlStack extends Stack {
       NODE_ENV: "production",
       // Deployment env name for steps whose behavior is env-scoped —
       // etl:freshness skips SLA entries for sources a given env's cadence
-      // deliberately omits (InfoEd on staging, MeshAnchor on prod).
+      // deliberately omits (none today; InfoEd was the last, until #2906).
       SCHOLARS_ENV: env,
       // #485 — the search:index build holds the full corpus graph in memory
       // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
@@ -691,6 +815,10 @@ export class EtlStack extends Stack {
       SCHOLARS_IDENTITY_TABLE: "Identity",
       ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
       ARTIFACT_PREFIX: "spotlight",
+      // Media Highlights — etl:news-clips (ClipsNightly) reads SES-delivered mail.
+      // Media Highlights + funding digest read SES-delivered mail from here.
+      INBOUND_MAIL_BUCKET: inboundMailBucketName(this.account),
+      CLIPS_PREFIX,
       HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
       // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
       // artifacts bucket as spotlight, under the tools/ prefix.
@@ -709,11 +837,11 @@ export class EtlStack extends Stack {
       // Resolves lateral recruits with no person_nih_profile row (name →
       // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
       // per-run scholar cap (REPORTER_MATCH_V2_MAX_PER_RUN, code default 500)
-      // bounds the nightly RePORTER call volume; tune it once the staging cohort
-      // is sized. STAGING-FIRST: "on" in staging now, prod stays "off" until the
-      // staging soak signs off. Applied via cdk deploy --exclusively
-      // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
-      REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
+      // bounds the nightly RePORTER call volume; tune it once the prod cohort
+      // is sized. Prod flipped 2026-08-17 (#1468, staging match-quality soak
+      // signed off). Applied via cdk deploy --exclusively Sps-Etl-<env> (CD
+      // only rolls the image, never deploys infra).
+      REPORTER_MATCH_V2: "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
@@ -765,6 +893,10 @@ export class EtlStack extends Stack {
       // app-stack copy (app-stack.ts, "off") is documentation-only — no app
       // runtime code reads it — and is deliberately left untouched here.
       SELF_EDIT_ED_ADMINS_IMPORT: "on",
+      // SCHOLAR_TITLE_RESOLUTION (#2719) — read by etl/ed/index.ts's
+      // title-resolution post-pass. Matches the app-stack.ts copy. Turning it
+      // off returns every title to override ?? ED primary on the next nightly.
+      SCHOLAR_TITLE_RESOLUTION: "on",
       // #718 -- publications-index exclusion of pubs with zero displayable WCM
       // authors (isRequireDisplayableAuthorEnabled, lib/search-index-docs.ts),
       // read by the search:index build (SearchIndexNightly / SearchIndexWeekly
@@ -872,12 +1004,149 @@ export class EtlStack extends Stack {
     };
     const sourcesUnit = makeEtlTaskUnit("Sources", "sources", SOURCES_SECRET_IDS);
     const ldapUnit = makeEtlTaskUnit("Ldap", "ldap", LDAP_SECRET_IDS);
-    // reciter-api def: no cadence step runs on it -- the ReCiter admin key
-    // (#746) is used only by the operator-run `etl:reciter-refresh`, which the
-    // operator launches via `run-task --task-definition sps-etl-reciter-api-<env>`
-    // (see OPERATIONS-RUNBOOK). Isolating it here keeps the admin key off every
-    // cadence step. Created for its side effect (the task def + role).
-    makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+    // reciter-api def: the ReCiter ADMIN api-key (#746). Two scripts run on it:
+    // the operator-run `etl:reciter-refresh` (launched via `run-task
+    // --task-definition sps-etl-reciter-api-<env>`, see OPERATIONS-RUNBOOK) and
+    // the nightly `etl:orcid-push` (the OrcidPush step, routed here by
+    // RECITER_API_SCRIPTS below). Isolating the key on its own def keeps it off
+    // every other cadence step and off the web tier.
+    const reciterApiUnit = makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+    const ctscUnit = makeEtlTaskUnit("Ctsc", "ctsc", CTSC_SECRET_IDS);
+    // Both envs' reciter-api secrets point at the SAME ReCiter, so one Identity
+    // table: a live staging OrcidPush would write staging's (test-edited)
+    // scholar.orcid into it, and prod's Identity pull would import it. Staging
+    // runs the step GET-only (still proves reachability); prod alone writes.
+    reciterApiUnit.container.addEnvironment(
+      "ORCID_PUSH_DRY_RUN",
+      envConfig.envName === "prod" ? "0" : "1",
+    );
+
+    // ------------------------------------------------------------------
+    // scripts/bulk-data-rule/ pipeline — dedicated one-off task def
+    // (containerization design, 2026-08-14). NOT built on makeEtlTaskUnit
+    // above: that helper is wired to the `tsx`-based etlEcrRepository image,
+    // the shared `taskRole`, and the SCHOLARS_* secret fan-out -- none of
+    // which fit a standalone Python image with its own narrow secret. Not
+    // part of any cadence state machine below either: this pipeline stays
+    // manually triggered (`aws ecs run-task --task-definition
+    // sps-bulk-data-rule-<env>`), never a Step Functions step -- the
+    // human-curated taxonomy and live uncached full-text scan both want a
+    // person reviewing a run's output before it's trusted. No alarm, no
+    // schedule, by design (see doc's Non-goals).
+    //
+    // Narrow-scoped on purpose: reusing sourcesUnit's role would mean this
+    // pipeline's third-party Python packages and live external-service
+    // fetches -- a materially larger supply-chain/injection surface than the
+    // TS loaders that role was scoped for -- sit alongside Asms/Infoed/Coi
+    // credentials this pipeline never touches. Same VPC/subnet/SG as every
+    // other step above (etlTaskSubnets/etlSecurityGroup); only the role and
+    // secret are new.
+    // ------------------------------------------------------------------
+    const bulkDataRuleLogGroup = new logs.LogGroup(this, "BulkDataRuleLogGroup", {
+      logGroupName: `/aws/ecs/sps-bulk-data-rule-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    const bulkDataRuleTaskExecutionRole = new iam.Role(this, "BulkDataRuleTaskExecutionRole", {
+      roleName: `sps-bulk-data-rule-task-exec-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS bulk-data-rule ECS task-execution role (${env}). Pulls the dedicated Python image, injects only the bulk-data-rule secret, writes logs.`,
+    });
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecr:GetAuthorizationToken"],
+        resources: ["*"],
+      }),
+    );
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ],
+        resources: [bulkDataRuleEcrRepository.repositoryArn],
+      }),
+    );
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: [bulkDataRuleSecret.secretArn],
+      }),
+    );
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        resources: [bulkDataRuleLogGroup.logGroupArn, `${bulkDataRuleLogGroup.logGroupArn}:*`],
+      }),
+    );
+
+    const bulkDataRuleTaskRole = new iam.Role(this, "BulkDataRuleTaskRole", {
+      roleName: `sps-bulk-data-rule-task-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS bulk-data-rule ECS task role (${env}). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), nothing else.`,
+    });
+    // Provenance sync target (design decision #1): the entrypoint `aws s3
+    // sync`s its working dir (intermediate CSVs + a run-manifest: image
+    // digest, git SHA, row counts, timestamp) here at the end of every run.
+    // Reuses curationBackupBucket under its own prefix rather than standing
+    // up a second bucket -- same reasoning as that bucket's scratch-input
+    // grant above. This is the audit trail for what a run wrote, not a
+    // deliverable channel -- .xlsx reports stay analyst-local against
+    // downloaded row data (design decision #1).
+    curationBackupBucket.grantPut(bulkDataRuleTaskRole, "bulk-data-rule/*");
+    // `grantPut` alone 403s the entrypoint's `aws s3 sync` at the ListBucket call sync makes
+    // first to compare local vs. remote before uploading -- PutObject on the prefix isn't
+    // enough (caught this session: first real containerized run wrote its 377 dataset_deposit
+    // rows fine, then failed at the sync step). Same prefix-scoped ListBucket pattern as
+    // analytics-stack.ts's rollup Lambda.
+    bulkDataRuleTaskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:ListBucket"],
+        resources: [curationBackupBucket.bucketArn],
+        conditions: { StringLike: { "s3:prefix": ["bulk-data-rule/*"] } },
+      }),
+    );
+
+    this.bulkDataRuleTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "BulkDataRuleTaskDefinition",
+      {
+        family: `sps-bulk-data-rule-${env}`,
+        // Lean, not the 8 GB ETL sizing: pandas over a five-figure PMID
+        // corpus, not the full-cohort ETL. Bump if a real run OOMs.
+        cpu: 1024,
+        memoryLimitMiB: 2048,
+        executionRole: bulkDataRuleTaskExecutionRole,
+        taskRole: bulkDataRuleTaskRole,
+      },
+    );
+    this.bulkDataRuleTaskDefinition.addContainer("bulk-data-rule", {
+      image: ecs.ContainerImage.fromEcrRepository(bulkDataRuleEcrRepository, "latest"),
+      containerName: "bulk-data-rule",
+      essential: true,
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: bulkDataRuleLogGroup,
+        streamPrefix: "bulk-data-rule",
+      }),
+      environment: {
+        CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
+        CURATION_BACKUP_PREFIX: "bulk-data-rule",
+      },
+      secrets: {
+        DB_HOST: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_HOST"),
+        DB_USERNAME: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_USERNAME"),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_PASSWORD"),
+        DB_NAME: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_NAME"),
+      },
+    });
+
     // Route each step's npm script to the task def whose secrets it needs;
     // everything not listed runs on the base def (base secrets only).
     const LDAP_SCRIPTS = new Set([
@@ -892,6 +1161,7 @@ export class EtlStack extends Stack {
     const SOURCES_SCRIPTS = new Set([
       "etl:reciter",
       "etl:reciter:coi-statements",
+      "etl:orcid-candidates",
       "etl:asms",
       "etl:infoed",
       "etl:coi",
@@ -901,6 +1171,11 @@ export class EtlStack extends Stack {
       "etl:data-sharing",
       "etl:journal-impact-factor",
     ]);
+    // The ReCiter ADMIN key: only the scripts that call the engine's HTTP API.
+    // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
+    // it is not listed; listing it would change nothing.
+    const RECITER_API_SCRIPTS = new Set(["etl:orcid-push"]);
+    const CTSC_SCRIPTS = new Set(["etl:ctsc-roster"]);
     const taskUnitFor = (
       npmScript: string,
     ): { taskDefinition: ecs.FargateTaskDefinition; container: ecs.ContainerDefinition } =>
@@ -908,7 +1183,11 @@ export class EtlStack extends Stack {
         ? ldapUnit
         : SOURCES_SCRIPTS.has(npmScript)
           ? sourcesUnit
-          : baseUnit;
+          : RECITER_API_SCRIPTS.has(npmScript)
+            ? reciterApiUnit
+            : CTSC_SCRIPTS.has(npmScript)
+              ? ctscUnit
+              : baseUnit;
 
     // ------------------------------------------------------------------
     // SNS topic. No subscriptions in this PR; B23 wires PagerDuty.
@@ -1209,6 +1488,10 @@ export class EtlStack extends Stack {
       // it must NOT abort the nightly. Writes are enabled by
       // SELF_EDIT_ED_ADMINS_IMPORT="on" in baseEnvironment (else dry-run).
       { id: "EdAdmins", npmScript: "etl:ed:admins", external: true, tier: "continue" },
+      // CTSC roster → the `ctsc` center (etl/ctsc-roster). After Ed so the
+      // scholar set it links against is tonight's. tier:"continue": a missed
+      // night leaves last night's roster, and the step refuses a short feed.
+      { id: "CtscRoster", npmScript: "etl:ctsc-roster", external: true, tier: "continue" },
       // #1679 — tier:"continue", NOT "abort". etl:reciter's source-volume guard
       // (lib/etl-guard.ts) REFUSES to write on a >20% source-row drop, so a
       // guard refusal leaves the publication table at its last-good rows —
@@ -1228,26 +1511,23 @@ export class EtlStack extends Stack {
         external: true,
         tier: "continue",
       },
+      // RPM ORCID candidates (inferred + admin-entered) → orcid_candidate, read by
+      // /edit/orcid-coverage only. Same ReciterDB path as Reciter, so external:true
+      // and placed with it; tier:"continue" — a missed night just leaves last
+      // night's mirror, and the step refuses to write on an empty read.
+      { id: "OrcidCandidates", npmScript: "etl:orcid-candidates", external: true, tier: "continue" },
       { id: "Asms", npmScript: "etl:asms", external: true, tier: "continue" },
-      // etl:infoed is EXCLUDED from the STAGING cadence (Paul, 2026-06-22).
-      // InfoEd's on-prem address sits in a range that overlaps the Sps VPC's
-      // own CIDR, so once the cadence relocates + peers, scholars-dev routes
-      // that address into the Sps VPC (where InfoEd isn't) and blackholes it;
-      // its Catch→Fail would then abort the whole nightly. The Sps VPC can't
-      // reach it today either (on-prem, not TGW-attached), so dropping it on
-      // staging is safe now and necessary post-relocation. Prod keeps the step.
-      // Re-add once WCM re-IPs / NATs InfoEd out of the overlapping range
-      // (addresses + ranges in docs/etl-vpc-migration-handoff.md).
-      ...(env === "staging"
-        ? []
-        : [
-            { id: "Infoed", npmScript: "etl:infoed", external: true, tier: "continue" } as StepSpec,
-          ]),
+      // #2906 — InfoEd runs in BOTH envs. It was excluded from staging on
+      // 2026-06-22 for a CIDR overlap that only bit the per-env scholars-dev
+      // peering design; the 06-30 shared-VPC decision replaced that design, and
+      // staging's sources tasks now run in the same subnets as prod's, with the
+      // same all-egress SG shape and the same InfoEd secret names.
+      { id: "Infoed", npmScript: "etl:infoed", external: true, tier: "continue" },
       { id: "Coi", npmScript: "etl:coi", external: true, tier: "continue" },
-      // COI-gap recommendations — reads SPS-DB only (disclosed COI from the Coi
-      // step + the PubMed statements above), so external:false. Computes whatever
-      // its inputs hold; zero candidates until the WCM statement path is flowing.
-      { id: "CoiGap", npmScript: "etl:coi-gap", external: false, tier: "continue" },
+      // COI-gap recommendations moved to the weekly machine (Paul, 2026-08-16,
+      // see CoiGapWeekly below) — it reads SPS-DB only and computes against
+      // whatever the Coi/ReciterCoiStatements steps above have already
+      // written, so it never needed same-night freshness.
       // #608 mentoring source — moved from the weekly machine to nightly (operator
       // request) so grad-school mentoring chips refresh within a day. Reads its own
       // MSSQL credential (etl/jenzabar), external:true. Chips are ISR-only (not
@@ -1257,11 +1537,30 @@ export class EtlStack extends Stack {
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true, tier: "abort" },
+      // scholar.orcid → WCM Identity through the ReCiter engine API. After
+      // Dynamodb (scholar rows exist) and BEFORE Identity, on purpose: the pull
+      // below applies "Identity wins" to any confirmed iD that differs from the
+      // record, and Identity carries no write timestamp, so pull-then-push would
+      // read SPS's OWN previous night's push as a foreign change and revert a
+      // confirmation the person made in /edit that day (Y → X, confirmation
+      // cleared, Y never reaches Identity). Push-then-pull writes Y first, the
+      // pull then reads `unchanged`, and `conflict` fires only when someone
+      // else changed Identity between the two steps — the one case where
+      // "Identity wins" means anything. On the reciter-api def
+      // (RECITER_API_SCRIPTS) because it needs the ADMIN key, which no other
+      // cadence step carries. Compare-then-write is what makes it safe to run
+      // forever: the Institutional Client's rebuild still nulls Identity.orcid
+      // nightly (IC #155), so this re-heals the wipe each morning until that fix
+      // ships, then reads `equal`. tier:"continue" — a missed night leaves
+      // Identity as the IC left it; the step itself throws on a dead API, so the
+      // freshness row stays honest.
+      { id: "OrcidPush", npmScript: "etl:orcid-push", external: true, tier: "continue" },
       // #918 — populate Scholar.orcid from the WCM Identity table (DynamoDB
       // Scan, external:true). After Dynamodb (scholars exist; both are DynamoDB
-      // scans); ORCID feeds the profile JSON-LD `sameAs`, not the search index,
-      // so there's no SearchIndex ordering dependency. Never NULLs an existing
-      // orcid — Identity may lag ED — so re-running nightly only self-heals.
+      // scans) and after OrcidPush (see above); ORCID feeds the profile JSON-LD
+      // `sameAs`, not the search index, so there's no SearchIndex ordering
+      // dependency. Never NULLs an existing orcid — Identity may lag ED — so
+      // re-running nightly only self-heals.
       { id: "Identity", npmScript: "etl:identity", external: true, tier: "continue" },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
@@ -1351,6 +1650,12 @@ export class EtlStack extends Stack {
         external: false,
         tier: "continue",
       },
+      // Media Highlights — parses the External Affairs "WCM in the News" digests
+      // SES delivered to S3 (etl/news/clips.ts) into PENDING news_mention rows
+      // for /edit/news-queue. external:false (S3 + SPS DB, no WCM secret);
+      // continue-tier so a bad digest alarms this step, never the chain. Before
+      // Sps-InboundMail is deployed (or any mail arrives) the run is a 0-row success.
+      { id: "ClipsNightly", npmScript: "etl:news-clips", external: false, tier: "continue" },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Reliability-audit PR-5 — terminal volume gate. Reads etl_run
@@ -1370,8 +1675,8 @@ export class EtlStack extends Stack {
       // Reads the directory over NAT egress with no credential (like etl:nsf), so
       // external:false; mutates SPS-DB only. Weekly cadence is plenty for a slow-
       // changing signal; incremental by default (re-probes never-checked + rows
-      // older than HEADSHOT_STALE_DAYS = 6, `lib/headshot-presence.ts`). That
-      // threshold is pinned UNDER this rule's 7-day period on purpose (#2210):
+      // older than HEADSHOT_STALE_DAYS = 13, `lib/headshot-presence.ts`). That
+      // threshold is pinned ABOVE this rule's 7-day period on purpose (#2210):
       // at the previous 30 days each row was only re-probed every 30-37 days, so
       // a scholar who gained a photo stayed listed as missing for five weeks.
       // Measured cost of a full wave in prod (2026-07-06): 9,389 probes in 3m21s.
@@ -1383,6 +1688,22 @@ export class EtlStack extends Stack {
       // dependency), so external:false. `continue` — this is advisory data
       // for a review tab, not on the critical path any other step depends on.
       { id: "CancerCenterCollabReport", npmScript: "etl:cancer-center-collab-report", external: false, tier: "continue" },
+      // Cancer Center disease-assignment curator UI (`CancerCenterDiseaseAssignment`,
+      // #edit surfaces `CancerCenterDiseaseDecision` on top of it). Same shape as
+      // CancerCenterCollabReport above: Aurora-only (reads cancer_taxonomy_descriptor
+      // + the person rollup, no LDAP/WCM network dependency), so external:false.
+      // Weekly matches this feature's current maturity -- no public consumer yet to
+      // demand tighter freshness -- and `continue` so a failure here (or an unseeded
+      // cancer_taxonomy_descriptor) never aborts the rest of the weekly chain.
+      { id: "CancerCenterDiseaseAssignmentsWeekly", npmScript: "etl:cancer-center-disease-assignments", external: false, tier: "continue" },
+      // COI-gap recommendations (Paul, 2026-08-16; was CoiGap on the nightly
+      // machine — see the nightlySteps comment above). Aurora-only (disclosed
+      // COI from the Coi step + PubMed statements from ReciterCoiStatements,
+      // both nightly), so external:false. Computes against whatever the most
+      // recent nightly already wrote; same-night freshness was never
+      // load-bearing, so weekly is plenty. `continue` — zero candidates until
+      // the WCM statement path is flowing must not abort the weekly chain.
+      { id: "CoiGapWeekly", npmScript: "etl:coi-gap", external: false, tier: "continue" },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true, tier: "continue" },
       // Grant-enrichment sources (#608). They key off the `grant` table that
       // etl:infoed refreshes nightly; neither needs 24h freshness, so they batch
@@ -1403,10 +1724,21 @@ export class EtlStack extends Stack {
       // are indexed; nih-profile feeds profile/grant deep-links, not the index.
       { id: "GatesWeekly", npmScript: "etl:gates", external: false, tier: "continue" },
       { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false, tier: "continue" },
+      // ORCID registry sweep (etl/orcid-registry) -> orcid_candidate. Reads the PUBLIC
+      // pub.orcid.org API over NAT egress with no credential today (an ORCID client
+      // token is optional and read from env when present), so external: false like
+      // NSF/Gates; writes Aurora only (same mirror contract as etl:orcid-candidates,
+      // which stays on the nightly + sources family for its reciterdb read). Weekly
+      // because the registry moves slowly; `continue` because the only consumer is
+      // the advisory /edit/orcid-coverage dashboard, never the public profile.
+      { id: "OrcidRegistryWeekly", npmScript: "etl:orcid-registry", external: false, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public
       // directory (no secret); reporter-grants + clinical-trials read ReciterDB
       // (external). Their entrypoints record etl_run via withEtlRun (freshness).
+      // (reporter-grants rows only reach the funding index since #2285; before
+      // that the funding build dropped every `reporter:` id, so this ordering
+      // bought nothing for that source.)
       { id: "PopsWeekly", npmScript: "etl:pops", external: false, tier: "continue" },
       {
         id: "ReporterGrantsWeekly",
@@ -1464,6 +1796,11 @@ export class EtlStack extends Stack {
       // Incremental by default (upserts new articles, preserves the review queue);
       // a full backfill is an operator run with NEWS_BACKFILL=1.
       { id: "NewsWeekly", npmScript: "etl:news", external: false, tier: "continue" },
+      // Research Dean funding digest — submits new digest links to the ReciterAI
+      // SUBMISSION queue (etl/opportunities/funding-digest.ts); ReciterAI's daily
+      // drain scores them. Prod submits; staging is a logged dry run (the queue
+      // table is shared). external:false (S3 + DynamoDB), continue-tier.
+      { id: "FundingDigestWeekly", npmScript: "etl:funding-digest", external: false, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
@@ -1580,7 +1917,12 @@ export class EtlStack extends Stack {
     buildSchedule(
       "NightlyScheduleRule",
       "nightly",
-      events.Schedule.expression("cron(0 7 * * ? *)"),
+      // Staging starts 45 min after prod so the two InfoEd steps (~30 min into
+      // each run, ~5-8 min long) never query the same InfoEd server at once
+      // (#2906). Still >4h clear of the Sunday 12:00 weekly (see below).
+      events.Schedule.expression(
+        envConfig.envName === "staging" ? "cron(45 7 * * ? *)" : "cron(0 7 * * ? *)",
+      ),
       this.nightlyStateMachine,
     );
     buildSchedule(
@@ -1868,6 +2210,45 @@ export class EtlStack extends Stack {
         cadenceAlarm.addAlarmAction(alarmAction);
       }
     }
+
+    // ------------------------------------------------------------------
+    // Phase 0a -- opportunity corpus freshness (upstream data-liveness, not
+    // run health). Every alarm above watches whether a RUN succeeded; none of
+    // them can see a corpus that froze UPSTREAM: nightly Block 7 re-upserts
+    // whatever the GRANT# store holds and "succeeds" even when nothing new
+    // has been ingested for weeks (observed: 6+ weeks frozen, zero alarms).
+    // etl:dynamodb now emits `SPS/ETL` / `OpportunityCorpusIngestAgeDays`
+    // (dims {Env}) after the projection -- corpus-wide age in days of the
+    // newest `ingested_at` across all sources (the per-{Env,Source} series is
+    // for dashboards only; no alarm per source). >=21 days means three weeks
+    // with no new opportunity anywhere: upstream producer is stuck.
+    //
+    // NOTE: this alarm is expected to be BORN RED on first deploy -- the
+    // corpus is already >21d stale, which is exactly the incident it exists
+    // to surface, not a misconfiguration.
+    //
+    // TreatMissingData NOT_BREACHING on purpose: if the nightly stops running
+    // (so no datapoints arrive), the nightly status/cadence alarms above
+    // already page -- missing data here must not double-page the same outage.
+    // 1 * 86400s <= 604800s, so the deploy-only evaluation-window constraint
+    // above holds.
+    // ------------------------------------------------------------------
+    const opportunityFreshnessAlarm = new cloudwatch.Alarm(this, "OpportunityFreshnessAlarm", {
+      alarmName: `sps-etl-opportunity-freshness-${env}`,
+      alarmDescription: `SPS opportunity corpus (${env}) -- no source has ingested a new funding opportunity in >=21 days. Nothing crashed: the nightly ETL is still projecting the GRANT# store, but the store itself has stopped receiving fresh opportunities upstream. Next: check the upstream pipeline_grants producer and its sources; re-running the SPS ETL changes nothing, it will re-project the same frozen corpus. The per-source series (SPS/ETL OpportunityCorpusIngestAgeDays, dims Env+Source) shows which sources are stale.`,
+      metric: new cloudwatch.Metric({
+        namespace: "SPS/ETL",
+        metricName: "OpportunityCorpusIngestAgeDays",
+        statistic: cloudwatch.Stats.MAXIMUM,
+        period: Duration.days(1),
+        dimensionsMap: { Env: env },
+      }),
+      evaluationPeriods: 1,
+      threshold: 21,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    opportunityFreshnessAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
     // #393 PR-2 -- suppression search-index reconciler (ADR-005 layer 3).
@@ -2573,6 +2954,156 @@ export class EtlStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // Honors-list scraper -- `scholars-honors-<env>`.
+    //
+    // A one-shot `etl:honors` run (etl/honors/scrape-lists.ts) on the base ETL
+    // task def: it reads the public honor rosters in lib/honors/lists.ts and
+    // proposes each new Weill Cornell match as a PENDING honor for the curator
+    // queue. Nothing it writes can reach a profile without a human approving it.
+    //
+    // Its OWN machine rather than a WeeklyStateMachine step, because the console
+    // starts it too: the honors queue's Run now (POST /api/edit/honor/sources/run,
+    // behind HONORS_RUN_NOW) calls states:StartExecution on exactly this machine,
+    // and the app task role's grant is scoped to it by NAME
+    // (TaskRoleHonorsRunNowPolicy in app-stack.ts builds the same ARN). Granting
+    // StartExecution on the weekly machine instead would let the app start the
+    // whole weekly chain.
+    //
+    // Input -> container env: { "lists": "all" | "<id>[,<id>]",
+    // "trigger": "schedule" | "manual", "runId"?: "<honor_list_run.id>" }.
+    // `lists` and `trigger` are REQUIRED (JsonPath fails on a missing one).
+    // `runId` is optional: the HonorsHasRunId Choice defaults it to "" so the
+    // weekly rule and an operator's hand-typed StartExecution need not send it.
+    // Run now sends one list plus the id of the queued row it wrote, which the
+    // job claims (HONORS_RUN_ID); a run without one inserts its own row and
+    // never takes over a Run now's row (lib/honors/run-lock.ts).
+    //
+    // ETL code ships on the ECR push, so a parser fix needs no cdk deploy; this
+    // block (the machine, rule and alarm) does, once.
+    //
+    // No task retry: a failed list is recorded on its honor_list_run row and the
+    // next weekly run (or a Run now) is the retry. The run is idempotent (an
+    // existing honor row is never re-proposed) but re-fetching every roster on a
+    // transient failure is not worth the load on sites we do not own.
+    // ------------------------------------------------------------------
+    const honorsUnit = taskUnitFor("etl:honors"); // base (no source creds)
+    const honorsTask = new tasks.EcsRunTask(this, "TaskHonorsLists", {
+      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+      cluster: ecsCluster,
+      taskDefinition: honorsUnit.taskDefinition,
+      launchTarget: new tasks.EcsFargateLaunchTarget({
+        platformVersion: ecs.FargatePlatformVersion.LATEST,
+      }),
+      assignPublicIp: false,
+      subnets: etlTaskSubnets,
+      securityGroups: [etlSecurityGroup],
+      containerOverrides: [
+        {
+          containerDefinition: honorsUnit.container,
+          command: ["npm", "run", "etl:honors"],
+          environment: [
+            { name: "HONORS_LISTS", value: sfn.JsonPath.stringAt("$.lists") },
+            { name: "HONORS_TRIGGER", value: sfn.JsonPath.stringAt("$.trigger") },
+            { name: "HONORS_RUN_ID", value: sfn.JsonPath.stringAt("$.runId") },
+          ],
+        },
+      ],
+      // A few roster pages per list; 45 min is ample over cold start and well
+      // inside the app's 3h "did not finish" window (HONOR_LIST_RUN_STALE_MS).
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(45)),
+    });
+    honorsTask.addCatch(
+      new tasks.SnsPublish(this, "NotifyHonorsLists", {
+        topic: this.failureTopic,
+        subject: `SPS honors-list scrape ${env} -- run failed`,
+        message: sfn.TaskInput.fromObject({
+          env,
+          step: "HonorsLists",
+          stateMachine: sfn.JsonPath.stateMachineName,
+          execution: sfn.JsonPath.executionName,
+          error: sfn.JsonPath.stringAt("$.error"),
+        }),
+      }).next(new sfn.Fail(this, "FailHonorsLists", { cause: "honors-list scrape failed" })),
+      { errors: ["States.ALL"], resultPath: "$.error" },
+    );
+
+    const honorsSmLogGroup = new logs.LogGroup(this, "HonorsSmLogGroup", {
+      logGroupName: `/aws/states/honors-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.honorsStateMachine = new sfn.StateMachine(this, "HonorsStateMachine", {
+      stateMachineName: `scholars-honors-${env}`,
+      stateMachineType: sfn.StateMachineType.STANDARD,
+      definitionBody: sfn.DefinitionBody.fromChainable(
+        new sfn.Choice(this, "HonorsHasRunId")
+          .when(sfn.Condition.isPresent("$.runId"), honorsTask)
+          .otherwise(
+            new sfn.Pass(this, "HonorsDefaultRunId", {
+              result: sfn.Result.fromString(""),
+              resultPath: "$.runId",
+            }).next(honorsTask),
+          ),
+      ),
+      // Over the 45 min task timeout so the task's own timeout (which the Catch
+      // sees and pages on) always fires first; a machine TIMED_OUT runs no Catch.
+      timeout: Duration.minutes(60),
+      logs: {
+        destination: honorsSmLogGroup,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
+      },
+      tracingEnabled: true,
+    });
+
+    // Weekly, Monday 10:00 UTC: clear of the Sunday 12:00 weekly chain and the
+    // 07:00 nightly.
+    //
+    // DISABLED in both envs on first deploy. The machine deploys and can be
+    // started by hand (or by Run now) either way; only the schedule waits. The
+    // first run in each env is a supervised manual StartExecution, checked for
+    // candidates that duplicate the seed import (a scraped honor name that
+    // differs from the seed's would re-propose already-decided honors). Once
+    // staging's first run is clean, flip staging's branch to `true`, then
+    // prod's, each with a snapshot update and a `cdk deploy Sps-Etl-<env>`.
+    // Staging: first run 2026-09-25 was clean (8 matches, all already
+    // published from the seed under the same strings; 0 duplicates) -> on.
+    // Prod: on 2026-09-29. The prod machine did not exist yet, so the deploy
+    // that ships this creates it; the supervised manual first run follows that
+    // deploy, before the first scheduled Monday tick.
+    const honorsScheduleEnabled = true;
+    const honorsRule = new events.Rule(this, "HonorsScheduleRule", {
+      ruleName: `sps-honors-${env}`,
+      description: `SPS honors-list scrape -- weekly Mon 10:00 UTC (${env}).`,
+      schedule: events.Schedule.cron({ minute: "0", hour: "10", weekDay: "MON" }),
+      enabled: honorsScheduleEnabled,
+    });
+    honorsRule.addTarget(
+      new eventsTargets.SfnStateMachine(this.honorsStateMachine, {
+        input: events.RuleTargetInput.fromObject({ lists: "all", trigger: "schedule" }),
+        retryAttempts: 0,
+      }),
+    );
+
+    // Status alarm: failed, timed out or aborted. Absence (the schedule dying)
+    // is the freshness heartbeat's job -- TRACKED.HonorsLists (weekly) in
+    // lib/etl/freshness-policy.ts -- rather than a 7-day cadence alarm sitting
+    // exactly on CloudWatch's 604800s evaluation ceiling.
+    const honorsStatusAlarm = new cloudwatch.Alarm(this, "HonorsStatusAlarm", {
+      alarmName: `sps-honors-status-${env}`,
+      alarmDescription: `SPS honors-list scrape (${env}) -- a run did not finish successfully: every requested list failed, it ran out of time, or it was stopped. Candidates already in the queue are unaffected; no new ones arrived. Next: open the Step Functions execution for scholars-honors-${env}, read the task log, and check each list's error on the honors queue's Sources tab. A roster that changed layout needs a parser fix in etl/honors/lists/.`,
+      metric: unsuccessfulMetric(
+        { StateMachineArn: this.honorsStateMachine.stateMachineArn },
+        Duration.days(1),
+      ),
+      evaluationPeriods: 1,
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    honorsStatusAlarm.addAlarmAction(alarmAction);
+
+    // ------------------------------------------------------------------
     // Grants bulk-export schedule -- nightly all-scholars `export:grants-bulk`
     // NDJSON dump (see GrantsExportBucket above) for the Research Informatics
     // cross-account consumer. Structurally mirrors the curated-tables backup
@@ -3166,6 +3697,11 @@ export class EtlStack extends Stack {
       value: this.etlTaskDefinition.family,
       description: "SPS ETL Fargate task family.",
     });
+    new CfnOutput(this, "BulkDataRuleTaskFamily", {
+      value: this.bulkDataRuleTaskDefinition.family,
+      description:
+        "SPS bulk-data-rule pipeline Fargate task family — manually triggered via run-task, no cadence step launches it.",
+    });
     new CfnOutput(this, "CurationBackupBucketName", {
       value: curationBackupBucket.bucketName,
       description: "SPS curated-tables logical-backup bucket (backup:curated uploads here).",
@@ -3178,6 +3714,10 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "NightlyStateMachineArn", {
       value: this.nightlyStateMachine.stateMachineArn,
       description: "SPS nightly ETL state machine ARN.",
+    });
+    new CfnOutput(this, "HonorsStateMachineArn", {
+      value: this.honorsStateMachine.stateMachineArn,
+      description: "SPS honors-list scrape state machine ARN (weekly + honors Run now).",
     });
     new CfnOutput(this, "WeeklyStateMachineArn", {
       value: this.weeklyStateMachine.stateMachineArn,

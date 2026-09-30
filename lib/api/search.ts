@@ -100,6 +100,8 @@ import {
   resolvePeopleConceptPrecount,
   resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
+  resolveSearchPeopleTrialEvidence,
+  resolveSearchPeopleTrialMeshWeight,
   resolvePeopleMethodFamilyTier,
   resolvePeopleMethodContextBoost,
   resolvePubFacetSplit,
@@ -116,6 +118,8 @@ import {
   resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
   resolveSearchPeopleEsiFacet,
+  resolveSearchPeopleInstitutionFacet,
+  resolveSearchPubInstitutionFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
   resolveSearchResultEvidence,
@@ -141,6 +145,7 @@ import {
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
 // to keep both names unambiguous within this module.
 import type { PeopleQueryShape as PeopleQueryClassification } from "@/lib/api/people-query-shape";
+import { searchHref } from "@/lib/search/query-url";
 
 const PAGE_SIZE = 20;
 
@@ -251,6 +256,14 @@ export type PeopleFilters = {
    * the flag, but a no-op (no clause, no facet) while it's off / pre-reindex.
    */
   earlyStageInvestigator?: boolean;
+  /**
+   * Institution facet — direct copy of `Scholar.primaryOrgCode` (ED
+   * `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, ...).
+   * Multi-select keyword facet, same shape as `professorialRank`. Gated behind
+   * `SEARCH_PEOPLE_INSTITUTION_FACET`: accepted regardless of the flag, but a
+   * no-op (no clause, no facet) while it's off / pre-reindex.
+   */
+  institution?: string[];
   /** Issue #233 — Principal Investigator facet. Absent = "no filter". */
   pi?: PiFilter;
   /** Issue #233 — threshold for `pi=multi`. Clamped to [PI_MIN_FLOOR,
@@ -284,6 +297,11 @@ export type PublicationsFilters = {
    *  `name:${deptName}` long-tail key for scholars without an FK code.
    *  Only honored when `SEARCH_PUB_DEPARTMENT_FILTER` is on. */
   department?: string[];
+  /** Institution facet — multi-select on `wcmAuthorInstitutions` (union of the
+   *  displayable WCM authors' `Scholar.primaryOrgCode`: WCMC, HSS, MSKCC, ...).
+   *  Accepted regardless of `SEARCH_PUB_INSTITUTION_FACET`; a no-op (no clause,
+   *  no facet) while it's off / pre-reindex. */
+  institution?: string[];
   /** Mentoring activity facet. Multi-select on the mentee's program at time
    *  of mentorship: 'md' (AOC + AOC-2025), 'mdphd' (MD-PhD), 'ecr' (Early
    *  Career Researcher). Selecting one or more buckets restricts results to
@@ -316,6 +334,9 @@ export type PeopleHit = {
   /** FK-resolved department name (preferred) or free-text fallback. */
   deptName: string | null;
   divisionName: string | null;
+  /** `Scholar.primaryOrgCode` (bare ED code; omit-on-empty in the doc). The
+   *  result card prints the non-WCMC institution after the department line. */
+  primaryOrgCode?: string | null;
   roleCategory: string | null;
   pubCount: number;
   /** The scholar's method-INDEXED publication count — the union of the publicly-visible
@@ -330,6 +351,9 @@ export type PeopleHit = {
    *  never fall back to `pubCount`: an under-counted denominator inflates the percentage,
    *  and that is a worse claim than no percentage. */
   methodPubCount?: number;
+  /** Clinical research — how many of the scholar's PI trials are tagged within the
+   *  resolved MeSH concept (SEARCH_PEOPLE_TRIAL_EVIDENCE). Absent when none. */
+  trialMatchCount?: number;
   /** D1 (sponsor recency) — the scholar's most-recent publication YEAR, from the precomputed
    *  `mostRecentPubDate`. Present only under `includeMostRecentPub` (the sponsor recency path);
    *  absent for every other caller, so the hit shape is unchanged. Feeds `recencyWeight` and D8's
@@ -699,6 +723,13 @@ const KEY_PAPER_RECENCY_WEIGHT = 0.4;
 const KEY_PAPER_RECENCY_HALF_LIFE_YEARS = 8; // a paper N years old scores 0.5^(N/8) on recency
 const KEY_PAPER_IMPACT_MIN_CITATIONS = 50;
 const KEY_PAPER_IMPACT_BOOST = 0.05;
+// Two-concept pair — a `should` boost on the SECONDARY concept's subtree so papers tagged
+// under both concepts fill the pool and lead the blend. A `terms` clause scores 1×boost
+// (constant); 100 dwarfs any BM25 title score, so `rel` ≈ 1 for a co-tagged paper and
+// ≈ 0 for the rest — and 0.6·rel beats 0.4·recency, so a co-tagged 2015 paper still
+// outranks an untagged 2026 one. Ordering only, never admission: a scholar with zero
+// co-tagged papers gets the same list as before.
+const KEY_PAPER_SECONDARY_BOOST = 100;
 /** How many keyword-ranked candidates to pull before the app-side blend re-rank. */
 const KEY_PAPER_CANDIDATE_POOL = 50;
 
@@ -766,6 +797,9 @@ export async function fetchKeyPaper(args: {
    *  the QUERY level (`must_not`) so this line pulls its top-N from the NON-claimed
    *  pool, instead of fetching then post-filtering (which could empty the panel). */
   exclude?: string[];
+  /** Two-concept pair — the SECONDARY concept's descendant UIs. Papers tagged under both
+   *  concepts rank first (`KEY_PAPER_SECONDARY_BOOST`); admission is unchanged. */
+  secondaryDescriptorUis?: string[];
 }): Promise<RepresentativePub[]> {
   const cwid = args.cwid?.trim();
   const contentQuery = args.contentQuery?.trim() ?? "";
@@ -773,6 +807,7 @@ export async function fetchKeyPaper(args: {
   const glossTerms = args.glossTerms?.trim() ?? "";
   const descriptorUis = args.descriptorUis ?? [];
   const exclude = args.exclude ?? [];
+  const secondaryUis = descriptorUis.length > 0 ? (args.secondaryDescriptorUis ?? []) : [];
   if (!cwid) return [];
   // Need at least one way to identify a relevant pub: a resolved concept subtree
   // OR a literal query to scan. Neither ⇒ nothing to fetch.
@@ -804,6 +839,8 @@ export async function fetchKeyPaper(args: {
     // literal pre-change key (the array gained an element), but the cache is a process-local Map
     // that starts empty every deploy, so the miss costs one cold fetch and nothing else.
     glossTerms.length > 0 ? `g:${glossTerms}` : null,
+    // The pair reorders the result, so it buckets the cache too (trailing `null` when absent).
+    secondaryUis.length > 0 ? [...secondaryUis].sort() : null,
   ]);
 
   // The admitted SET is the bool `filter` (author + concept/free-text) — UNCHANGED
@@ -816,16 +853,23 @@ export async function fetchKeyPaper(args: {
       // #1366 — exclude the sibling-claimed pmids from the candidate pool itself, so
       // the panel under-fills from the remaining pool rather than resolving empty.
       ...(exclude.length > 0 ? { must_not: [{ terms: { pmid: exclude } }] } : {}),
-      ...(contentQuery.length > 0
+      ...(contentQuery.length > 0 || secondaryUis.length > 0
         ? {
             should: [
-              {
-                multi_match: {
-                  query: contentQuery,
-                  fields: ["title^2", "abstract"],
-                  operator: "or" as const,
-                },
-              },
+              ...(contentQuery.length > 0
+                ? [
+                    {
+                      multi_match: {
+                        query: contentQuery,
+                        fields: ["title^2", "abstract"],
+                        operator: "or" as const,
+                      },
+                    },
+                  ]
+                : []),
+              ...(secondaryUis.length > 0
+                ? [{ terms: { meshDescriptorUi: secondaryUis, boost: KEY_PAPER_SECONDARY_BOOST } }]
+                : []),
             ],
           }
         : {}),
@@ -1140,6 +1184,13 @@ export type PeopleSearchResult = {
      * `SEARCH_PEOPLE_ESI_FACET` is off (or pre-reindex).
      */
     earlyStageInvestigator: { true: number; false: number };
+    /**
+     * Institution facet — `primaryOrgCode` multi-select buckets (bare ED codes;
+     * the page resolves labels via `institutionDisplayName`), same shape as
+     * `professorialRank`. Empty while `SEARCH_PEOPLE_INSTITUTION_FACET` is off
+     * (or pre-reindex) — never omitted.
+     */
+    institutions: SearchFacetBucket[];
   };
 };
 
@@ -1204,6 +1255,10 @@ export type PublicationsSearchResult = {
      *  `SEARCH_PUB_DEPARTMENT_FILTER` is off. The /search page resolves each
      *  `value` key to a display label via `resolveDeptDivLabels()`. */
     departments: SearchFacetBucket[];
+    /** Institution facet — `wcmAuthorInstitutions` buckets (bare ED codes; the
+     *  page labels them via `institutionDisplayName`). Empty while
+     *  `SEARCH_PUB_INSTITUTION_FACET` is off (or pre-reindex) — never omitted. */
+    institutions: SearchFacetBucket[];
   };
 };
 
@@ -1561,6 +1616,14 @@ function buildGradedAreaBoostFunctions(
 export async function getConceptScholarConcentration(
   descendantUis: string[],
   limit: number,
+  /**
+   * Two-concept queries (`SEARCH_MESH_SECONDARY_CONCEPT`): when given, the on-topic
+   * count is publications tagged in THIS subtree AND `descendantUis` — true
+   * co-occurrence, one extra `terms` filter on the same agg. The denominator
+   * (author total) and the concentration formula are unchanged, so a scholar
+   * is tiered by how much of their output sits at the intersection.
+   */
+  secondaryDescendantUis: string[] = [],
 ): Promise<{ cwid: string; total: number }[]> {
   if (descendantUis.length === 0 || limit <= 0) return [];
   // ADR-011 B1 — resolved OUTSIDE the cached closure and folded into the cache
@@ -1568,8 +1631,16 @@ export async function getConceptScholarConcentration(
   // so two requests for the same descendant set at different alpha values
   // must not collide on one cached score list.
   const alpha = resolveConceptConcentrationAlpha();
+  const onTopicFilter = [
+    { terms: { meshDescriptorUi: descendantUis } },
+    ...(secondaryDescendantUis.length > 0
+      ? [{ terms: { meshDescriptorUi: secondaryDescendantUis } }]
+      : []),
+  ];
+  const secondaryKey =
+    secondaryDescendantUis.length > 0 ? `+${[...secondaryDescendantUis].sort().join(",")}` : "";
   return cachedReasonAgg<{ cwid: string; total: number }[]>(
-    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}:${alpha}`,
+    `concept-concentration:${[...descendantUis].sort().join(",")}${secondaryKey}:${limit}:${alpha}`,
     async () => {
       const authorBuckets = (resp: unknown): { key: string; doc_count: number }[] =>
         (
@@ -1584,7 +1655,7 @@ export async function getConceptScholarConcentration(
         index: PUBLICATIONS_INDEX,
         body: {
           size: 0,
-          query: { bool: { filter: [{ terms: { meshDescriptorUi: descendantUis } }] } },
+          query: { bool: { filter: onTopicFilter } },
           aggs: { byAuthor: { terms: { field: "wcmAuthorCwids", size: limit } } },
         } as object,
       });
@@ -1764,6 +1835,16 @@ export async function searchPeople(opts: {
    * never iterated at query time.
    */
   meshDescriptorUi?: string;
+  /**
+   * Two-concept resolution (`SEARCH_MESH_SECONDARY_CONCEPT`) — the second descriptor
+   * (`meshResolution.secondaryConcept`), so the tagged evidence line can add the
+   * scholar's own count under it ("· 41 under COVID-19"), read O(1) from the same
+   * `_source.meshSubtreeCounts` map as the primary. Per-descriptor, NOT co-occurrence:
+   * the pair count that drives the concentration boost is not on the people doc.
+   * ponytail: thread the pair agg's per-cwid `n` if the eval says "on both" matters.
+   * Reason-from-doc path only; absent ⇒ the line is byte-identical.
+   */
+  meshSecondary?: { descriptorUi: string; name: string };
   /**
    * Search reason-from-doc — `SEARCH_PEOPLE_REASON_FROM_DOC` resolved by the
    * route. When true (and `matchExplain` is on and a concept resolved), the tagged
@@ -2126,6 +2207,7 @@ export async function searchPeople(opts: {
           isClinical: { true: 0, false: 0 },
           professorialRank: [],
           earlyStageInvestigator: { true: 0, false: 0 },
+          institutions: [],
         },
       };
     }
@@ -2211,9 +2293,23 @@ export async function searchPeople(opts: {
   // empty ⇒ the clinical clause stays byte-identical to today's literal-name path.
   const clinicalMeshOn = clinicalReasonOn && resolveSearchPeopleClinicalMeshAnchor();
   const clinicalMeshClosure = clinicalMeshOn ? (opts.clinicalMeshTreeClosure ?? []) : [];
+  // Clinical trials as evidence (SEARCH_PEOPLE_TRIAL_EVIDENCE): trial text joins
+  // the topic ladder at a low boost; `conceptUiClause` lets a trial-tagged scholar
+  // satisfy the concept attribution boost and the concept-scope gate.
+  const trialEvidenceOn = resolveSearchPeopleTrialEvidence();
+  const conceptUiClause = (uis: string[]): Record<string, unknown> =>
+    trialEvidenceOn
+      ? {
+          bool: {
+            should: [{ terms: { publicationMeshUi: uis } }, { terms: { trialMeshUi: uis } }],
+            minimum_should_match: 1,
+          },
+        }
+      : { terms: { publicationMeshUi: uis } };
   const peopleTopicFields = (): string[] => [
     ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
     ...(methodBoostOn ? ["methodFamily^4"] : []),
+    ...(trialEvidenceOn ? ["trialText^1"] : []),
   ];
   const peopleDefaultFields = (): string[] => [
     ...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
@@ -2499,6 +2595,14 @@ export async function searchPeople(opts: {
     resolveSearchPeopleEsiFacet() && filters.earlyStageInvestigator === true
       ? { term: { esiEligible: true } }
       : null;
+  // Institution clause, gated behind `SEARCH_PEOPLE_INSTITUTION_FACET`. Same
+  // multi-select `terms` shape and accept-but-no-op-while-off posture as
+  // `professorialRankClause`.
+  const institutionFacetOn = resolveSearchPeopleInstitutionFacet();
+  const institutionClause =
+    institutionFacetOn && filters.institution && filters.institution.length > 0
+      ? { terms: { primaryOrgCode: filters.institution } }
+      : null;
   const sparseClause = applySparseFilter ? { term: { isComplete: true } } : null;
   const topicClause = topicCwidFilter && topicCwidFilter.length > 0
     ? { terms: { cwid: topicCwidFilter } }
@@ -2556,13 +2660,13 @@ export async function searchPeople(opts: {
         ? {
             bool: {
               should: [
-                { terms: { publicationMeshUi: meshDescendantUis } },
+                conceptUiClause(meshDescendantUis),
                 { terms: { cwid: grantMatchedCwids } },
               ],
               minimum_should_match: 1,
             },
           }
-        : { terms: { publicationMeshUi: meshDescendantUis } },
+        : conceptUiClause(meshDescendantUis),
     );
   }
 
@@ -2818,6 +2922,7 @@ export async function searchPeople(opts: {
         isClinical: { true: 0, false: 0 },
         professorialRank: [],
         earlyStageInvestigator: { true: 0, false: 0 },
+        institutions: [],
       },
     };
   }
@@ -2830,6 +2935,7 @@ export async function searchPeople(opts: {
   if (isClinicalClause) userAxisFilters.push(isClinicalClause);
   if (professorialRankClause) userAxisFilters.push(professorialRankClause);
   if (earlyStageInvestigatorClause) userAxisFilters.push(earlyStageInvestigatorClause);
+  if (institutionClause) userAxisFilters.push(institutionClause);
 
   // Helper: user-axis filters with one axis omitted, for that axis's
   // excluding-self aggregation. Always-on filters are inherited from the
@@ -2842,7 +2948,8 @@ export async function searchPeople(opts: {
       | "pi"
       | "isClinical"
       | "professorialRank"
-      | "earlyStageInvestigator",
+      | "earlyStageInvestigator"
+      | "institution",
   ) => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "deptDiv" && deptDivClause) out.push(deptDivClause);
@@ -2853,6 +2960,7 @@ export async function searchPeople(opts: {
     if (axis !== "professorialRank" && professorialRankClause) out.push(professorialRankClause);
     if (axis !== "earlyStageInvestigator" && earlyStageInvestigatorClause)
       out.push(earlyStageInvestigatorClause);
+    if (axis !== "institution" && institutionClause) out.push(institutionClause);
     return out;
   };
 
@@ -3002,6 +3110,18 @@ export async function searchPeople(opts: {
           },
         }
       : {}),
+    // Institution facet agg, attached ONLY when `SEARCH_PEOPLE_INSTITUTION_FACET`
+    // is on — same absent-key-while-off posture as `professorialRanks` above.
+    ...(institutionFacetOn
+      ? {
+          // Multi-select keyword buckets, same `terms` shape as `personTypes`.
+          // size 50 gives headroom past the ~30 codes in `lib/institutions.ts`.
+          institutions: {
+            filter: { bool: { filter: filtersExcept("institution") } },
+            aggs: { keys: { terms: { field: "primaryOrgCode", size: 50 } } },
+          },
+        }
+      : {}),
     // Issue #310 / SPEC §9 — `attributionBoostFired` telemetry. Counts docs in
     // the scored set (must + always-on filters, i.e. the function_score scope,
     // before post_filter) that ALSO carry a descendant UI. `doc_count > 0`
@@ -3050,12 +3170,18 @@ export async function searchPeople(opts: {
   if (applyTopicTemplate) {
     if (meshDescendantUis.length > 0) {
       scoreFunctions.push({
-        filter: { terms: { publicationMeshUi: meshDescendantUis } },
+        filter: conceptUiClause(meshDescendantUis),
         // Issue #726 — graduate the former flat ×1.5 by match-type trust
         // (exact 1.5 / anchored-entry 1.3 / entry 1.15). Always-on when a
         // descriptor resolved, independent of the escalation gate above.
         weight: MESH_ATTRIBUTION_WEIGHT[meshTier],
       });
+      // Clinical research: a PI trial tagged in the concept earns its own multiplier on top
+      // (SEARCH_PEOPLE_TRIAL_MESH_WEIGHT; 1 ⇒ nothing pushed, body unchanged).
+      const trialMeshWeight = trialEvidenceOn ? resolveSearchPeopleTrialMeshWeight() : 1;
+      if (trialMeshWeight > 1) {
+        scoreFunctions.push({ filter: { terms: { trialMeshUi: meshDescendantUis } }, weight: trialMeshWeight });
+      }
     }
     // #1269 — explicit method-tag tier. A scholar whose `methodFamily` rollup
     // contains the resolved family label (`match_phrase`, same `scholar_text`
@@ -3319,6 +3445,21 @@ export async function searchPeople(opts: {
       }
     : innerScoringQuery;
 
+  // #1351 — the resolved MeSH descriptor name, highlighted in the bio snippet
+  // (see `highlight` below). Topic template only, and only for a resolution the
+  // concept machinery would admit (unambiguous, matched form long enough). Not
+  // under `exact` scope (#1951: a MeSH label is the concept, not the wording).
+  // Empty ⇒ the highlight body is unchanged.
+  const descriptorName = (opts.meshDescriptorName ?? "").trim();
+  const bioConceptTerm =
+    descriptorName &&
+    applyTopicTemplate &&
+    opts.scope !== "exact" &&
+    !opts.meshAmbiguous &&
+    (opts.meshMatchedFormLength ?? 0) >= MESH_MIN_MATCHED_FORM_LEN
+      ? descriptorName
+      : "";
+
   const body = {
     from: page * effectivePageSize,
     size: effectivePageSize,
@@ -3335,6 +3476,8 @@ export async function searchPeople(opts: {
       "primaryDepartment",
       "deptName",
       "divisionName",
+      // Non-WCMC institution on the result card (#2713) — omit-on-empty in the doc.
+      "primaryOrgCode",
       "personType",
       "publicationCount",
       "grantCount",
@@ -3386,6 +3529,8 @@ export async function searchPeople(opts: {
       // either the exact-match or the mesh-match clinical path can use them) so
       // the off path keeps today's `_source` shape. DISPLAY-ONLY.
       ...(clinicalReasonOn ? ["clinicalOnTopicCounts", "meshTaggedPubCount"] : []),
+      // Per-trial MeSH sets for the card's "Clinical research · N trials" chip.
+      ...(trialEvidenceOn ? ["trialMesh"] : []),
       // D1 (sponsor recency) — the scholar's most-recent pub date, requested ONLY when the
       // sponsor recency path asks for it, so every other caller keeps today's `_source` shape.
       // Already stored + used for the recentPub sort/filter; this only projects it back.
@@ -3484,20 +3629,30 @@ export async function searchPeople(opts: {
       // so stripped generics ("Research") are never <mark>-ed. Without this the
       // discount clause's full query would still drive highlights. Omitted when
       // not demoting, so the default-off highlight body is unchanged.
-      ...(demoteGeneric
+      //
+      // #1351 — when the query resolved to a MeSH descriptor, ALSO mark the concept
+      // term in the bio, so a bio carrying "Pharmacogenetics" verbatim is marked on
+      // a "pharmacogenomics" search. Highlight-only: `body.query` / rank unchanged.
+      // The literal clause is the same multi_match the #692 path uses.
+      ...(demoteGeneric || bioConceptTerm.length > 0
         ? {
-            highlight_query: {
-              multi_match: {
-                query: contentQuery,
-                // Mirror the `fields` set above — drop areasOfInterest when the
-                // match-aware snippet replaces it with humanized areas (#824).
-                fields: matchAwareContext
-                  ? ["preferredName", "overview"]
-                  : ["preferredName", "areasOfInterest", "overview"],
-                type: "best_fields",
-                operator: "or",
-              },
-            },
+            highlight_query: (() => {
+              const literal = {
+                multi_match: {
+                  query: contentQuery,
+                  // Mirror the `fields` set above — drop areasOfInterest when the
+                  // match-aware snippet replaces it with humanized areas (#824).
+                  fields: matchAwareContext
+                    ? ["preferredName", "overview"]
+                    : ["preferredName", "areasOfInterest", "overview"],
+                  type: "best_fields",
+                  operator: "or",
+                },
+              };
+              return bioConceptTerm.length > 0
+                ? { bool: { should: [literal, { match_phrase: { overview: bioConceptTerm } }] } }
+                : literal;
+            })(),
           }
         : {}),
       pre_tags: ["<mark>"],
@@ -3538,6 +3693,7 @@ export async function searchPeople(opts: {
       primaryDepartment: string | null;
       deptName: string | null;
       divisionName: string | null;
+      primaryOrgCode?: string;
       personType: string | null;
       publicationCount: number;
       grantCount: number;
@@ -3576,6 +3732,7 @@ export async function searchPeople(opts: {
       // sibling this used to sit beside (`areaCounts`) is gone from this type —
       // #2071 (E1b) replaced it with the query-time `areaCountsByCwid`.
       methodFamilyCounts?: Record<string, number>;
+      trialMesh?: Array<{ ui: string[] }>;
       // POPS clinical specialty set + board-cert-only subset (omit-on-empty in
       // the ETL). Present only when SEARCH_PEOPLE_CLINICAL_FN is on (added to
       // `_source` above); feed `clinicalExactMatch` for the `clinical:exact`
@@ -3632,6 +3789,8 @@ export async function searchPeople(opts: {
       // #2306 — present only when SEARCH_PEOPLE_ESI_FACET is on.
       earlyStageInvestigatorTrue?: { doc_count: number };
       earlyStageInvestigatorFalse?: { doc_count: number };
+      // Present only when SEARCH_PEOPLE_INSTITUTION_FACET is on.
+      institutions?: { keys: { buckets: Bucket[] } };
       attributionMatch?: { doc_count: number };
     };
   };
@@ -3692,7 +3851,14 @@ export async function searchPeople(opts: {
   // reads it for ranking.
   const reasonCounts = new Map<
     string,
-    { tagged: number; mention: number; taggedLatest?: number; mentionLatest?: number }
+    {
+      tagged: number;
+      mention: number;
+      taggedLatest?: number;
+      mentionLatest?: number;
+      /** Two-concept: the scholar's count under the SECONDARY descriptor (doc path only). */
+      taggedSecondary?: number;
+    }
   >();
   // Issue #967 / rep-papers disclosure — representative pubs per cwid, keyed by
   // which reason branch they belong to (tagged vs mention), up to 3 each.
@@ -3819,9 +3985,13 @@ export async function searchPeople(opts: {
     // into `meshSubtreeCounts` — a reindex, deliberately out of scope here.
     // 1) Doc-sourced tagged counts. Cap is applied in `composeMatchReason`.
     for (const h of r.hits.hits) {
+      const taggedSecondary = opts.meshSecondary
+        ? taggedCountFromDoc(h._source.meshSubtreeCounts, opts.meshSecondary.descriptorUi)
+        : 0;
       reasonCounts.set(h._source.cwid, {
         tagged: taggedCountFromDoc(h._source.meshSubtreeCounts, resolvedConceptUi),
         mention: 0,
+        ...(taggedSecondary > 0 ? { taggedSecondary } : {}),
       });
     }
     // 2) Mention-only fallback. The literal-query title/abstract scan can't be
@@ -4252,6 +4422,16 @@ export async function searchPeople(opts: {
         // #2094 — year of the most recent COUNTED publication. Absent ⇒ unknown.
         ...(counts.taggedLatest != null ? { latestYear: counts.taggedLatest } : {}),
         ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
+        // Two-concept: the scholar's own count under the second descriptor, so the line
+        // names both concepts the ScopeNote says the query matched. Omitted at 0.
+        ...(opts.meshSecondary && counts.taggedSecondary
+          ? {
+              secondary: {
+                term: opts.meshSecondary.name,
+                count: Math.min(counts.taggedSecondary, pubCount),
+              },
+            }
+          : {}),
       };
     if (counts && counts.mention > 0)
       pub.mention = {
@@ -4422,6 +4602,7 @@ export async function searchPeople(opts: {
         primaryDepartment: h._source.primaryDepartment,
         deptName: h._source.deptName ?? h._source.primaryDepartment,
         divisionName: h._source.divisionName,
+        primaryOrgCode: h._source.primaryOrgCode ?? null,
         roleCategory: h._source.personType,
         pubCount: h._source.publicationCount,
         // The method line's honest denominator. Emitted ONLY when the union was
@@ -4431,6 +4612,14 @@ export async function searchPeople(opts: {
         ...(() => {
           const n = methodPubCountByCwid.get(h._source.cwid);
           return n != null ? { methodPubCount: n } : {};
+        })(),
+        // Clinical research — the scholar's PI trials tagged within the resolved concept
+        // (SEARCH_PEOPLE_TRIAL_EVIDENCE). Omitted when zero or no concept resolved.
+        ...(() => {
+          if (!trialEvidenceOn || meshDescendantUis.length === 0) return {};
+          const want = new Set(meshDescendantUis);
+          const n = (h._source.trialMesh ?? []).filter((t) => t.ui.some((u) => want.has(u))).length;
+          return n > 0 ? { trialMatchCount: n } : {};
         })(),
         grantCount: h._source.grantCount,
         hasActiveGrants: h._source.hasActiveGrants,
@@ -4547,6 +4736,12 @@ export async function searchPeople(opts: {
         true: r.aggregations?.earlyStageInvestigatorTrue?.doc_count ?? 0,
         false: r.aggregations?.earlyStageInvestigatorFalse?.doc_count ?? 0,
       },
+      // Institution facet — `[]` (never omitted) while
+      // SEARCH_PEOPLE_INSTITUTION_FACET is off / pre-reindex (agg absent).
+      institutions: (r.aggregations?.institutions?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
     },
   };
 }
@@ -4962,6 +5157,13 @@ export async function searchPublications(opts: {
     useDepartmentFilter && filters.department && filters.department.length > 0
       ? { terms: { wcmAuthorDepartments: filters.department } }
       : null;
+  // Institution facet — same flag-gated, accept-but-no-op-while-off shape as
+  // `departmentClause` (`SEARCH_PUB_INSTITUTION_FACET`).
+  const institutionFacetOn = resolveSearchPubInstitutionFacet();
+  const institutionClause =
+    institutionFacetOn && filters.institution && filters.institution.length > 0
+      ? { terms: { wcmAuthorInstitutions: filters.institution } }
+      : null;
   // Mentoring activity facet — union the precomputed pmid sets for the
   // selected program buckets. Empty union (e.g. all programs empty) becomes
   // a match_none clause so a stale-cache state returns zero rows rather
@@ -5022,6 +5224,7 @@ export async function searchPublications(opts: {
   if (wcmRoleClause) userAxisFilters.push(wcmRoleClause);
   if (wcmAuthorClause) userAxisFilters.push(wcmAuthorClause);
   if (departmentClause) userAxisFilters.push(departmentClause);
+  if (institutionClause) userAxisFilters.push(institutionClause);
   if (mentoringClause) userAxisFilters.push(mentoringClause);
 
   const filtersExcept = (
@@ -5032,6 +5235,7 @@ export async function searchPublications(opts: {
       | "wcmAuthorRole"
       | "wcmAuthor"
       | "department"
+      | "institution"
       | "mentoring",
   ) => {
     const out: Record<string, unknown>[] = [];
@@ -5041,6 +5245,7 @@ export async function searchPublications(opts: {
     if (axis !== "wcmAuthorRole" && wcmRoleClause) out.push(wcmRoleClause);
     if (axis !== "wcmAuthor" && wcmAuthorClause) out.push(wcmAuthorClause);
     if (axis !== "department" && departmentClause) out.push(departmentClause);
+    if (axis !== "institution" && institutionClause) out.push(institutionClause);
     if (axis !== "mentoring" && mentoringClause) out.push(mentoringClause);
     return out;
   };
@@ -5143,6 +5348,7 @@ export async function searchPublications(opts: {
         wcmAuthorsTotal: 0,
         mentoringPrograms: { md: 0, mdphd: 0, phd: 0, postdoc: 0, ecr: 0 },
         departments: [],
+        institutions: [],
       },
     };
   }
@@ -5351,6 +5557,17 @@ export async function searchPublications(opts: {
             },
           }
         : {}),
+      // Institution facet agg, attached ONLY when `SEARCH_PUB_INSTITUTION_FACET`
+      // is on (same absent-key-while-off posture as `departments`). size 50
+      // gives headroom past the ~30 codes in `lib/institutions.ts`.
+      ...(institutionFacetOn
+        ? {
+            institutions: {
+              filter: aggBoolFor(filtersExcept("institution")),
+              aggs: { keys: { terms: { field: "wcmAuthorInstitutions", size: 50 } } },
+            },
+          }
+        : {}),
       // Mentoring activity facet — contextual counts per program bucket.
       // One named filters-of-filters agg with 5 sub-buckets, each scoped to
       // the bucket's pmids + filtersExcept("mentoring") + the q-bound must.
@@ -5430,6 +5647,8 @@ export async function searchPublications(opts: {
     };
     // Issue #837 — present only when SEARCH_PUB_DEPARTMENT_FILTER is on.
     departments?: { keys: { buckets: Bucket[] } };
+    // Present only when SEARCH_PUB_INSTITUTION_FACET is on.
+    institutions?: { keys: { buckets: Bucket[] } };
     mentoringPrograms?: {
       buckets: Record<MentoringProgramKey, { doc_count: number }>;
     };
@@ -5762,6 +5981,11 @@ export async function searchPublications(opts: {
         value: b.key,
         count: b.doc_count,
       })),
+      // Institution facet — `[]` (never omitted) while the flag is off / pre-reindex.
+      institutions: (r.aggregations?.institutions?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
     },
   };
 }
@@ -5769,6 +5993,25 @@ export async function searchPublications(opts: {
 /**
  * Autocomplete suggestions (spec line 184: fires on 2 chars).
  * Returns up to `size` distinct suggestions from the people index.
+ *
+ * #2484 — `skip_duplicates: true` DOES NOT WORK on this cluster and must stay
+ * off. `buildPeopleDoc` (lib/search-index-docs.ts) indexes a last-name-only
+ * `nameSuggest` input (weight 95) whose surface text is just the surname, so
+ * scholars sharing a surname tie on identical text. `skip_duplicates: true`
+ * was meant to collapse that tie to one survivor per distinct text while
+ * still falling through to each scholar's other, lower-weight inputs — but
+ * measured directly against staging's live OpenSearch (raw `client.search`,
+ * bypassing this function), it instead drops the other ties ENTIRELY and
+ * never backfills, at ANY `completion.size` (confirmed identical at size 5
+ * and size 25 — this is not a fetch-depth/windowing problem, an earlier
+ * version of this fix wrongly assumed it was and shipped an over-fetch that
+ * measurably changed nothing). With `skip_duplicates: false` on the same
+ * query, all tied scholars come back correctly, pre-sorted by weight
+ * descending. So: leave `skip_duplicates` off, and do the DEDUPE OURSELVES
+ * by `_id` (cwid) below — a single scholar can legitimately supply multiple
+ * matching options for one prefix (e.g. both their "Bender" and
+ * "Bender, Heidi Bender" inputs), which our own first-seen-wins loop
+ * collapses correctly.
  */
 export async function suggestNames(prefix: string, size = 5): Promise<
   Array<{
@@ -5785,6 +6028,13 @@ export async function suggestNames(prefix: string, size = 5): Promise<
   const trimmed = prefix.trim();
   if (trimmed.length < 2) return [];
 
+  // Over-fetch: a scholar can match more than once for a given prefix (their
+  // surname-only input AND their "Last, Full Name" input), and our own dedupe
+  // below collapses those — request some headroom so `size` distinct people
+  // still fit after that collapse. `skip_duplicates` stays OFF; see #2484 doc
+  // comment above for why it can't be relied on here.
+  const completionSize = size * 5;
+
   const resp = await searchClient().search({
     index: PEOPLE_INDEX,
     body: {
@@ -5792,7 +6042,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       suggest: {
         scholar: {
           prefix: trimmed,
-          completion: { field: "nameSuggest", size, skip_duplicates: true },
+          completion: { field: "nameSuggest", size: completionSize, skip_duplicates: false },
         },
       },
       _source: false,
@@ -5801,10 +6051,26 @@ export async function suggestNames(prefix: string, size = 5): Promise<
 
   type SuggestOption = { text: string; _index: string; _id: string };
   type SuggestEntry = { options: SuggestOption[] };
-  const suggestPayload = (resp.body as unknown as { suggest?: { scholar?: SuggestEntry[] } })
+  const rawOptions = (resp.body as unknown as { suggest?: { scholar?: SuggestEntry[] } })
     .suggest?.scholar?.[0]?.options ?? [];
 
-  if (suggestPayload.length === 0) return [];
+  if (rawOptions.length === 0) return [];
+
+  // Dedupe by cwid (`_id`) — a single scholar can supply multiple surviving
+  // options (e.g. both the surname-only and "Last, Full Name" inputs). Options
+  // arrive pre-sorted by weight descending, so first-seen = highest-weight
+  // match for that person. Then truncate to the caller-facing `size` so the
+  // mget below — and this function's external contract — are unaffected by
+  // the larger internal fetch.
+  const seenCwids = new Set<string>();
+  const suggestPayload: SuggestOption[] = [];
+  for (const o of rawOptions) {
+    if (seenCwids.has(o._id)) continue;
+    seenCwids.add(o._id);
+    suggestPayload.push(o);
+    if (suggestPayload.length >= size) break;
+  }
+
   const cwids = suggestPayload.map((o) => o._id);
   // Perf (#1881) — restrict the mget to the 7 scalars the mapper below reads.
   // Without this the autocomplete endpoint (fires per keystroke) ships each
@@ -5985,6 +6251,85 @@ export async function loadMethodFamilyCandidates(
       scholarCount: g._count.cwid,
     });
     if (out.length >= fetchN) break;
+  }
+  return out;
+}
+
+const FINDER_SUBAREA_CAP = 3;
+const FINDER_TOTAL_CAP = 6;
+
+/**
+ * The home page's "Find a method" typeahead: subareas first, then method
+ * families, each prefix-matches-first. Separate from `suggestEntities` so the
+ * hero autocomplete's ranking (#231) and telemetry stay untouched. Subarea rows
+ * read "Area · N scholars" like the family rows; N is distinct active scholars
+ * over `publication_topic` (2020+ only by construction), omitted when the pair
+ * has no row (#2218 — missing is not zero).
+ */
+export async function suggestMethodFinder(prefix: string): Promise<EntitySuggestion[]> {
+  const q = prefix.trim();
+  if (q.length < 2) return [];
+  const lower = q.toLowerCase();
+  const rank = (s: string) => {
+    const i = s.toLowerCase().indexOf(lower);
+    return i === 0 ? 0 : i > 0 ? 1 : 2; // 2 = matched via a member tool name
+  };
+
+  const [subsR, famsR] = await Promise.allSettled([
+    prisma.subtopic.findMany({
+      where: { label: { contains: q } }, // label, not displayName — see suggestEntities (D-19)
+      orderBy: { label: "asc" },
+      take: FINDER_SUBAREA_CAP * 2,
+      select: { id: true, label: true, displayName: true, parentTopicId: true, parentTopic: { select: { label: true } } },
+    }),
+    loadMethodFamilyCandidates(q, FINDER_TOTAL_CAP),
+  ]);
+  const subs = dedupeFirstByKey(subsR.status === "fulfilled" ? subsR.value : [], (s) =>
+    (s.displayName?.trim() || s.label).toLowerCase(),
+  )
+    .map((s) => ({ ...s, title: s.displayName?.trim() || s.label }))
+    .sort((a, b) => rank(a.title) - rank(b.title))
+    .slice(0, FINDER_SUBAREA_CAP);
+  const fams = (famsR.status === "fulfilled" ? famsR.value : []).sort(
+    (a, b) => rank(a.familyLabel) - rank(b.familyLabel) || b.scholarCount - a.scholarCount,
+  );
+
+  const scholars = new Map<string, number>();
+  if (subs.length > 0) {
+    const rows = (await prisma
+      .$queryRawUnsafe(
+        `SELECT pt.parent_topic_id AS p, pt.primary_subtopic_id AS s, COUNT(DISTINCT pt.cwid) AS n
+           FROM publication_topic pt
+           JOIN scholar sc ON sc.cwid = pt.cwid
+          WHERE sc.deleted_at IS NULL AND sc.status = 'active'
+            AND (${subs.map(() => "(pt.parent_topic_id = ? AND pt.primary_subtopic_id = ?)").join(" OR ")})
+          GROUP BY pt.parent_topic_id, pt.primary_subtopic_id`,
+        ...subs.flatMap((s) => [s.parentTopicId, s.id]),
+      )
+      .catch(() => [])) as Array<{ p: string; s: string; n: number | bigint }>;
+    for (const r of rows) scholars.set(`${r.p}::${r.s}`, Number(r.n));
+  }
+
+  const plural = (n: number) => `${n.toLocaleString()} ${n === 1 ? "scholar" : "scholars"}`;
+  const out: EntitySuggestion[] = subs.map((s) => {
+    const n = scholars.get(`${s.parentTopicId}::${s.id}`);
+    const area = s.parentTopic?.label ?? "Subarea";
+    return {
+      kind: "subtopic",
+      title: s.title,
+      subtitle: n ? `${area} · ${plural(n)}` : area,
+      href: `/topics/${s.parentTopicId}?subtopic=${encodeURIComponent(s.id)}#publications`,
+    };
+  });
+  for (const m of fams) {
+    if (out.length >= FINDER_TOTAL_CAP) break;
+    const sc = supercategoryLabel(m.supercategory);
+    out.push({
+      kind: "method",
+      title: m.familyLabel,
+      subtitle: m.scholarCount ? `${sc} · ${plural(m.scholarCount)}` : sc,
+      href: methodFamilyPath(m.supercategory, m.familyId, m.familyLabel),
+    });
   }
   return out;
 }
@@ -6249,7 +6594,7 @@ export async function suggestEntities(
       c.confidence === "entry-term"
         ? `MeSH concept · via "${c.matchedForm}"`
         : "MeSH concept",
-    href: `/search?q=${encodeURIComponent(c.name)}`,
+    href: searchHref(c.name),
   });
 
   if (!useV2) {

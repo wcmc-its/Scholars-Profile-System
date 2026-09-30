@@ -52,6 +52,20 @@ export type EvidencePub = {
 
 /** A bounded representative grant for the "Key funding" disclosure — the funding
  *  analogue of {@link EvidencePub}. Lazily loaded by `/api/scholar/[cwid]/grants`. */
+/** A PI trial tagged under the concept, for a Matcha evidence block
+ *  (`/api/scholar/[cwid]/trials`, SEARCH_PEOPLE_TRIAL_EVIDENCE). */
+export type EvidenceTrial = {
+  trialId: string;
+  nctNumber: string | null;
+  title: string;
+  /** `title` with the matched terms in `<mark>` (text HTML-escaped); null when none matched. */
+  titleHighlight: string | null;
+  /** Display label ("Recruiting", "Completed", …); null when unknown. */
+  status: string | null;
+  isActive: boolean;
+  startYear: number | null;
+};
+
 export type EvidenceGrant = {
   /** Account_Number dedupe key from the funding index (FundingHit.projectId). */
   projectId: string;
@@ -186,6 +200,10 @@ export type ResultEvidence =
       latestYear?: number;
       pubs?: EvidencePub[];
       count?: number;
+      /** Two-concept resolution — the scholar's count under the SECOND resolved
+       *  descriptor, rendered after the primary term as "· N under {term}". Its own
+       *  per-descriptor count, not co-occurrence with the primary. `tagged` only. */
+      secondary?: { term: string; count: number };
     }
   /** A genuine sentence from the scholar's overview (matched term bold). */
   | { kind: "selfDescription"; html: string }
@@ -454,6 +472,8 @@ export type SelectEvidenceInput = {
        *  same field on {@link ResultEvidence}. Forwarded verbatim, never derived. */
       latestYear?: number;
       pubs?: EvidencePub[];
+      /** Two-concept — forwarded verbatim; see the same field on {@link ResultEvidence}. */
+      secondary?: { term: string; count: number };
     };
     mention?: {
       text: string;
@@ -690,6 +710,7 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
         : {}),
       ...(input.pub.tagged.latestYear != null ? { latestYear: input.pub.tagged.latestYear } : {}),
       ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
+      ...(input.pub.tagged.secondary ? { secondary: input.pub.tagged.secondary } : {}),
       count: input.pub.tagged.count,
     };
   // 5 — publications:concept (MeSH-expansion text variant; below clinical:exact)
@@ -809,6 +830,7 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
         ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0
           ? { pubs: input.pub.tagged.pubs }
           : {}),
+        ...(input.pub.tagged.secondary ? { secondary: input.pub.tagged.secondary } : {}),
         count: input.pub.tagged.count,
       }
     : undefined;

@@ -1,6 +1,6 @@
 /**
  * HonorsCard — the curation editor for `honor` rows (#1760), rendered on its OWN
- * `Honors & Distinctions` attribute tab (a sibling of Appointments, not a card
+ * `Honors & distinctions` attribute tab (a sibling of Appointments, not a card
  * inside it — an honor is not an appointment and has its own profile section).
  *
  * Honors are the distinctions no WCM feed carries: academy memberships, named

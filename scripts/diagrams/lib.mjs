@@ -96,7 +96,7 @@ function defsMarkup() {
 function groupRect(g) {
   const k = KIND[g.kind] || KIND.net;
   const dash = g.dash ? ` stroke-dasharray="7 5"` : "";
-  return `<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="14" fill="${k.fill}" fill-opacity="${g.fo ?? 0.16}" stroke="${k.stroke}" stroke-width="1.4"${dash}/>`;
+  return `<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="14" fill="${k.fill}" fill-opacity="${g.fo ?? 0.16}" stroke="${k.stroke}" stroke-width="1.4"${dash}><title>${esc(g.title)}</title></rect>`;
 }
 function groupTitle(g) {
   const k = KIND[g.kind] || KIND.net;
@@ -114,7 +114,9 @@ function nodeEl(n) {
   const sub = n.sub || [];
   const dash = k.dash ? ` stroke-dasharray="6 4"` : "";
   const card = `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="10" fill="${k.fill}" stroke="${k.stroke}" stroke-width="1.6"${dash} filter="url(#sh)"/>`;
-  let s = `<g>`;
+  // Accessible name + native hover tooltip for the node, as the group's first child.
+  const a11yName = n.title + (sub.length ? " — " + sub.join("; ") : "");
+  let s = `<g><title>${esc(a11yName)}</title>`;
   if (n.badge) {
     // Top accent stripe = owning CDK stack. Clipped to the rounded card so it
     // follows the corner radius; collision-proof (unlike an in-box text badge).
@@ -156,8 +158,12 @@ function edgeEl(e, mode = "both") {
   return s;
 }
 
-/** Render a spec to a complete, self-contained `<svg>` string. */
-export function renderSVG(spec) {
+/**
+ * Render a spec to a complete, self-contained `<svg>` string.
+ * `a11y` (optional): { title, desc } become the SVG's accessible name/description
+ * (role="img" + aria-labelledby), read by screen readers as the diagram's "alt text".
+ */
+export function renderSVG(spec, a11y = {}) {
   // Strict layering so nothing with text is ever crossed by a line:
   // group backgrounds < edge lines < edge labels < group titles < decos < nodes.
   let body = "";
@@ -168,8 +174,13 @@ export function renderSVG(spec) {
   for (const d of spec.decos || []) body += d;                   // annotations above lines
   for (const n of Object.values(spec.nodes || {})) body += nodeEl(n); // nodes on top of all
   const [w, h] = spec.vb;
+  const tId = `t-${spec.id}`, dId = `d-${spec.id}`;
+  const aTitle = esc(a11y.title || spec.id);
+  const aDesc = esc(a11y.desc || `Architecture diagram: ${spec.id}.`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" ` +
+    `role="img" aria-labelledby="${tId} ${dId}" ` +
     `font-family="Inter,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">` +
+    `<title id="${tId}">${aTitle}</title><desc id="${dId}">${aDesc}</desc>` +
     `<rect width="100%" height="100%" fill="#fbfcfe"/><defs>${defsMarkup()}</defs>${body}</svg>`;
 }
 

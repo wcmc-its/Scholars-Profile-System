@@ -8,12 +8,14 @@
  * Which attributes appear (and whether editable) is the only thing that differs
  * by actor; the data contract and write calls are layout-independent.
  */
-import { AppointmentsCard } from "@/components/edit/appointments-card";
-import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
+import Link from "next/link";
+
+import { PositionsCard } from "@/components/edit/positions-card";
 import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
 import { HonorsCard } from "@/components/edit/honors-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
+import { MenteeSuggestionsCard } from "@/components/edit/mentee-suggestions-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -23,7 +25,11 @@ import { FundingCard } from "@/components/edit/funding-card";
 import { HighlightsCard } from "@/components/edit/highlights-card";
 import { ManualMenteesCard } from "@/components/edit/manual-mentees-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
-import { HomePanel } from "@/components/edit/home-panel";
+import { HomePanel, type OrcidRowState } from "@/components/edit/home-panel";
+import { orcidVerdict, SUGGEST_MIN_ACCEPTED } from "@/lib/edit/orcid-coverage";
+import { ORCID_MANAGE_URL, resolveSelfServiceHref } from "@/lib/edit/request-a-change";
+import { OrcidCard } from "@/components/edit/orcid-card";
+import { ProfileLinksCard } from "@/components/edit/profile-links-card";
 import { OverviewCard } from "@/components/edit/overview-card";
 import {
   ProxyEditorCard,
@@ -32,6 +38,7 @@ import {
 } from "@/components/edit/proxy-editor-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
+import { TitleField } from "@/components/edit/title-field";
 import { TechnologyEditCard } from "@/components/edit/technology-edit-card";
 import { NewsEditCard } from "@/components/edit/news-edit-card";
 import { DatasetsCard } from "@/components/edit/datasets-card";
@@ -44,6 +51,8 @@ import type { RailItem, RailKind } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
 import type { ManageableUnit } from "@/lib/edit/manageable-units";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { institutionDisplayName } from "@/lib/institutions";
+import { formatPublishedName } from "@/lib/postnominal";
 import { profilePath } from "@/lib/profile-url";
 import {
   isOverviewGenerateEnabled,
@@ -80,17 +89,20 @@ type AttrKey =
   | "funding"
   | "technologies"
   | "news"
+  | "media-highlights"
   | "datasets"
   | "grant-recs"
   | "biosketch"
   | "cv"
   | "appointments"
   | "honors"
+  | "identifiers-profiles"
   | "education"
   | "coi"
   | "coi-gap"
   | "reporter-profile"
   | "mentees"
+  | "mentee-suggestions"
   | "profile-url"
   | "proxy-editors";
 
@@ -106,7 +118,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // Task-first landing (vision-round T3.4). Shared with superusers, where it
   // reads as a read-only profile-completeness overview of the target scholar.
   { key: "home", label: "Home", modes: ["self", "superuser"] },
-  { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
+  { key: "name-title", label: "Name & title", readonly: true, modes: ["self", "superuser"] },
   // Email + its Web Directory release audience — read-only (email-visibility
   // SPEC § C). The release code is owned by the Web Directory SOR; this panel
   // only shows the imported state and links out, so it carries no write control.
@@ -131,11 +143,21 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // read-only; appears only when the scholar has ≥1 invention (the loader gates
   // it on AVAILABLE_TECHNOLOGIES_SECTION, so the array is empty otherwise). Public
   // info like publications/coi, so it stays visible to proxy / unit-admin too.
-  { key: "technologies", label: "Available technologies", readonly: true, modes: ["self", "superuser"] },
+  {
+    key: "technologies",
+    label: "Available technologies",
+    readonly: true,
+    modes: ["self", "superuser"],
+  },
   // News mentions (NEWS_MENTIONS_SECTION) — WCM newsroom articles that mention the
   // scholar, scraped by etl/news. Interactive (hide / "Not me"), like publications;
   // appears only when the scholar has ≥1 published mention (loader-gated).
   { key: "news", label: "News mentions", modes: ["self", "superuser"] },
+  // Media highlights (MEDIA_HIGHLIGHTS_SECTION) — press clips from the External
+  // Affairs digest (etl/news/clips.ts), approved in /edit/media-highlights-queue.
+  // Same hide / "Not me" card as News mentions; appears only when the scholar
+  // has ≥1 approved clip (loader-gated).
+  { key: "media-highlights", label: "Media highlights", modes: ["self", "superuser"] },
   // Datasets (data-sharing spec, DATA_SHARING_SECTION, #2348) — dataset deposits
   // sourced from public repositories by etl/data-sharing. Interactive (hide/show),
   // like publications; appears only when the scholar has ≥1 deposit (loader-gated).
@@ -162,19 +184,33 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // Honors & distinctions (#1760) — a sibling of Appointments, NOT a sub-card of it.
   // An honor is its own content type with its own profile section; it is not an
   // appointment, and burying it under Appointments made it undiscoverable.
-  { key: "honors", label: "Honors & Distinctions", modes: ["self", "superuser"] },
+  { key: "honors", label: "Honors & distinctions", modes: ["self", "superuser"] },
+  // Identifiers & Profiles — ORCID iD today (confirm the inferred one, or enter it);
+  // eRA Commons, Scopus Author ID, and profile links are later cards on the same
+  // tab. Owned: the scholar asserts these; no WCM feed does.
+  { key: "identifiers-profiles", label: "Identifiers & profiles", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
   { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
+  // Mentees › From your publications (#2634, SELF_EDIT_MENTEE_SUGGESTIONS) —
+  // co-authors who hold a trainee-type appointment, offered for the mentor to
+  // add (or dismiss). Self OR superuser; never a proxy / unit-admin (excluded in
+  // `attrsForMode`). The rail item appears only when the loader returned rows.
+  { key: "mentee-suggestions", label: "From your publications", modes: ["self", "superuser"] },
   // Conflicts of interest — read-only; managed in the Weill Research Gateway.
-  { key: "coi", label: "Conflicts of Interest", readonly: true, modes: ["self", "superuser"] },
+  { key: "coi", label: "Conflicts of interest", readonly: true, modes: ["self", "superuser"] },
   // From your publications (#SELF_EDIT_COI_GAP_HINT) — a sensitive advisory:
   // relationships named in the scholar's own PubMed competing-interest statements,
   // never a compliance verdict. Originally self-only; now also visible to a
   // superuser (operator decision — trusted, with a UI nag before any action), but
   // NOT to a proxy / unit-admin (excluded in `attrsForMode`). The rail item
   // appears only when there are candidates AND the flag is on.
-  { key: "coi-gap", label: "Disclosed in publications", readonly: true, modes: ["self", "superuser"] },
+  {
+    key: "coi-gap",
+    label: "Disclosed in publications",
+    readonly: true,
+    modes: ["self", "superuser"],
+  },
   // RePORTER "Is this you?" (REPORTER_MATCH_V2) — K=2 PMID-overlap matches the
   // scholar confirms/rejects, plus a revocable confirmed-match history. Self OR a
   // genuine superuser (on their behalf); never a proxy / unit-admin (excluded in
@@ -199,6 +235,7 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
   proxy: "home",
   "unit-admin": "home",
   comms_steward: "home",
+  "cv-generator": "home",
 };
 
 /** The actor surfaces. `proxy` (#779) is a scholar-assigned designee, and
@@ -209,14 +246,43 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
  *  `comms_steward` (comms-steward-profile-editing-spec.md §3b) edits any scholar
  *  at SUPERUSER parity MINUS slug + proxy delegation. Visual/interaction polish
  *  is a UI-SPEC deliverable. */
-type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward";
+type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward" | "cv-generator";
 
 /** Whether a mode renders with SUPERUSER editability (overview editable,
  *  publications hideable, generate enabled): the superuser surface itself, and
  *  the `comms_steward` profile editor, which is superuser parity minus slug +
- *  proxy-editors. The child cards collapse to this (`childMode` below). */
+ *  proxy-editors. The child cards collapse to this (`childMode` below).
+ *  `cv-generator` (#2482) is included here too — it sees the same full content
+ *  as a superuser, but `EditShell` wraps it `inert` (see `isContentInert`), so
+ *  none of that editability is actually reachable — except the one export
+ *  action that role exists for (`isContentInert`'s "cv" exception). */
 function isSuperuserLike(mode: EditMode): boolean {
-  return mode === "superuser" || mode === "comms_steward";
+  return mode === "superuser" || mode === "comms_steward" || mode === "cv-generator";
+}
+
+/** `cv_generator` (#2482): read-only on every panel — drives `EditShell`'s
+ *  banner copy ("viewing … read-only"). True regardless of which attr is
+ *  active; see `isContentInert` for the one exception to the `inert` wrap
+ *  that backs this up. */
+function isReadOnlyMode(mode: EditMode): boolean {
+  return mode === "cv-generator";
+}
+
+/**
+ * `cv_generator` (#2482): whether the panel content should be native `inert`
+ * (unfocusable/unclickable, still fully visible). ONE exception to
+ * `isReadOnlyMode`: the "cv" attr (`CV (WCM format)`), whose "Download CV"
+ * button never writes anything (`authorizeCvExport`,
+ * `lib/edit/overview-authz.ts` — "nothing is saved to the profile, no version
+ * row is persisted") and is the role's named purpose ("generate CVs"). `inert`
+ * cascades to every descendant with no way for a nested element to opt back
+ * in, so the only way to keep that one button clickable is to not wrap the
+ * "cv" panel in `inert` at all — there is nothing else on that panel to
+ * protect. The banner still reads "read-only" there (`isReadOnlyMode` above),
+ * since downloading a CV doesn't change the profile either.
+ */
+function isContentInert(mode: EditMode, activeKey: AttrKey): boolean {
+  return mode === "cv-generator" && activeKey !== "cv";
 }
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
@@ -234,6 +300,7 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.key !== "profile-url" &&
         a.key !== "coi-gap" &&
         a.key !== "reporter-profile" && // self/superuser-only advisory, like coi-gap
+        a.key !== "mentee-suggestions" && // #2634 — self/superuser-only, like coi-gap
         a.key !== "proxy-editors", // a proxy / unit admin can never manage the proxy list (CD-2)
     );
   }
@@ -244,6 +311,13 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.key !== "profile-url" && // slug — out of the steward's scope (§3b)
         a.key !== "proxy-editors", // delegation — out of the steward's scope (§3b)
     );
+  }
+  // `cv_generator` (#2482) sees the FULL superuser attribute set, unfiltered —
+  // "see all the other content" (issue body) — since every write affordance is
+  // `inert` regardless of which panel it's on, there is no per-attribute reason
+  // to hold anything back the way comms_steward's narrower scope does.
+  if (mode === "cv-generator") {
+    return ATTRIBUTES.filter((a) => a.modes.includes("superuser"));
   }
   return ATTRIBUTES.filter((a) => a.modes.includes(mode));
 }
@@ -273,6 +347,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "photo",
   "appointments",
   "honors",
+  "identifiers-profiles",
   "education",
   "publications",
   "funding",
@@ -282,8 +357,10 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // them, so that sub-view keeps nesting under Funding, not under this flat item.
   "technologies",
   "news",
+  "media-highlights",
   "datasets",
   "mentees",
+  "mentee-suggestions",
   "coi",
   "coi-gap",
   // "Services" group — owner-facing tools (#917 v5/v6), rendered LAST per operator
@@ -308,6 +385,7 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   // "sourced": WCM feed populates it, but the scholar can curate (hide / "Not me"),
   // exactly like publications/funding — not "readonly" (CTL) or "owned" (honors).
   news: "sourced",
+  "media-highlights": "sourced",
   // "sourced": etl/data-sharing feeds it, scholar can hide own row — like publications/news.
   datasets: "sourced",
   "reporter-profile": "readonly",
@@ -320,8 +398,10 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   // row is entered by the scholar or a curator on /edit. (Appointments is
   // "sourced" because ED feeds that tab; honors has no such feed.)
   honors: "owned",
+  "identifiers-profiles": "owned",
   education: "sourced",
   mentees: "sourced",
+  "mentee-suggestions": "sourced",
   "name-title": "readonly",
   email: "readonly",
   photo: "readonly",
@@ -358,6 +438,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "photo",
   "appointments",
   "honors",
+  "identifiers-profiles",
   "education",
   "publications",
   "funding",
@@ -366,8 +447,10 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   // and its nested "reporter-profile" sub-view so that nesting survives.
   "technologies",
   "news",
+  "media-highlights",
   "datasets",
   "mentees",
+  "mentee-suggestions",
   "coi",
   "coi-gap",
   "biosketch",
@@ -389,14 +472,17 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   // "Yours to edit", not the WCM group — no feed carries honors; the whole point
   // of the table is the distinctions WCM does not publish.
   honors: { group: "Yours to edit" },
+  "identifiers-profiles": { group: "Yours to edit" },
   education: { group: RAIL_V2_WCM_GROUP },
   publications: { group: RAIL_V2_WCM_GROUP },
   funding: { group: RAIL_V2_WCM_GROUP },
   technologies: { group: RAIL_V2_WCM_GROUP },
   news: { group: RAIL_V2_WCM_GROUP },
+  "media-highlights": { group: RAIL_V2_WCM_GROUP },
   datasets: { group: RAIL_V2_WCM_GROUP },
   "reporter-profile": { group: RAIL_V2_WCM_GROUP },
   mentees: { group: RAIL_V2_WCM_GROUP },
+  "mentee-suggestions": { group: RAIL_V2_WCM_GROUP },
   coi: { group: RAIL_V2_WCM_GROUP },
   "coi-gap": { group: RAIL_V2_WCM_GROUP },
   biosketch: { group: "Tools" },
@@ -411,10 +497,13 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
 // info button beside the group header (see attribute-rail.tsx / group-info-button.tsx).
 // "Yours to edit" and its third-person "Profile content" reframe are
 // self-explanatory and carry no note.
-const RAIL_V2_GROUP_META: Record<string, { description?: string }> = {
+const RAIL_V2_GROUP_META: Record<string, { description?: string; locked?: boolean }> = {
   [RAIL_V2_WCM_GROUP]: {
     description:
       "Sourced from WCM. Show, hide, or flag here — corrections happen in the source system.",
+    // Everything under this header is managed at its source: the rail says so with a lock
+    // beside the label, rather than leaving it to be inferred from which group an item is in.
+    locked: true,
   },
   Tools: { description: "Generators that produce an artifact to use elsewhere." },
   Settings: { description: "Profile administration." },
@@ -446,17 +535,21 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // sub-view) so that sub-view keeps nesting under Funding.
   "technologies",
   "news",
+  "media-highlights",
   "datasets",
   "grant-recs",
   "biosketch",
   "cv",
   "appointments",
   "honors",
+  "identifiers-profiles",
   "education",
   // Publications — now a superuser surface too (#836 follow-on); the scholar's
   // authorships with hide/show + reject, acted on the scholar's behalf.
   "publications",
   "mentees",
+  // #2634 — nested under Mentees; present only when the loader returned rows.
+  "mentee-suggestions",
   "coi",
   // COI-gap advisory — superuser-visible too (operator decision), with a UI nag.
   // Present only when there are candidates AND the flag is on.
@@ -480,6 +573,16 @@ export type EditPageProps = {
   /** Self mode only: the viewer is a superuser, so the shell shows a link
    *  across to the Profiles roster. Forwarded to `EditShell`. */
   canBrowseProfiles?: boolean;
+  /** Unit-admin mode only (dwd2001 bug #7): whether the org-unit administrator
+   *  editing this scholar satisfies the profiles-tab predicate
+   *  (`TAB_PREDICATES.profiles`, `lib/edit/console-tabs.server.ts`) — gates
+   *  the same navigable "Profiles / {name}" breadcrumb superuser mode always
+   *  gets, in place of the flat, non-navigable label a unit admin got before.
+   *  The server page computes this via `loadConsoleTabs(session, db.read)`
+   *  and forwards it verbatim to `EditShell`'s `profilesNavVisible`. Default
+   *  `false` keeps the flat label for any other mode (proxy has no roster to
+   *  return to at all, and self/superuser never read this prop). */
+  profilesNavVisible?: boolean;
   /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
    *  for a superuser / comms_steward, rendered by `EditShell` in place of the
    *  minimal self-edit sub-nav. Built by the `/edit` page (which holds the
@@ -500,12 +603,23 @@ export type EditPageProps = {
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, for the "via {unit} administrator" banner.
    *  `null`/absent in every other mode. */
-  unitAdminBanner?: { unitKind: "department" | "division" | "center"; unitName: string } | null;
+  unitAdminBanner?: {
+    unitKind: "department" | "division" | "center" | "institution";
+    unitName: string;
+  } | null;
   /** Self mode only: whether to mount the live ReCiter pending-articles nudge
    *  (`SELF_EDIT_RECITER_PENDING_HINT`). True only for a genuine, non-impersonating
    *  self viewer with the flag on; when true the Publications card + Home teaser
    *  lazily client-fetch `/api/edit/reciter-pending`. Off (default) ⇒ no fetch. */
   reciterPendingEnabled?: boolean;
+  /** `SELF_EDIT_ORCID_SUGGESTION`: the Identifiers & Profiles tab is in the rail and
+   *  the home row / Name & Title point into it; off → both hand off to ReCiter
+   *  Manage Profile as before and the tab is absent. */
+  orcidTabEnabled?: boolean;
+  /** `SELF_EDIT_PROFILE_LINKS` (#2699): the External Profiles card is on the
+   *  Identifiers & Profiles tab, and the tab is in the rail on this flag alone
+   *  (independent of the ORCID kill switch). */
+  profileLinksEnabled?: boolean;
   /** GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`): whether the "Grants for me"
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like the other feature gates; self + superuser only. */
@@ -548,6 +662,11 @@ export function visibleAttrKeys(
   hasTechnologies = false,
   hasNews = false,
   hasDatasets = false,
+  hasMenteeSuggestions = false,
+  orcidTabEnabled = false,
+  profileLinksEnabled = false,
+  // Last on purpose: callers and tests pass these positionally.
+  hasMediaHighlights = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -596,10 +715,18 @@ export function visibleAttrKeys(
       // (loader-gated on NEWS_MENTIONS_SECTION). Empty ⇒ dropped from the rail and
       // the valid-attr set, so `?attr=news` canonicalizes away.
       .filter((a) => a.key !== "news" || hasNews)
+      // Media highlights — same rule, on approved clips (MEDIA_HIGHLIGHTS_SECTION).
+      .filter((a) => a.key !== "media-highlights" || hasMediaHighlights)
       // Datasets appear only when the scholar has ≥1 deposit (loader-gated on
-      // DATA_SHARING_SECTION). Empty ⇒ dropped from the rail and the valid-attr
-      // set, so `?attr=datasets` canonicalizes away.
+      // DATA_SHARING_SECTION or the scholar's showDatasets opt-in). Empty ⇒
+      // dropped from the rail and the valid-attr set, so `?attr=datasets`
+      // canonicalizes away.
       .filter((a) => a.key !== "datasets" || hasDatasets)
+      // #2634 — "Mentees › From your publications" exists only when the loader
+      // returned rows (flag on + self/superuser); `?attr=mentee-suggestions`
+      // with none canonicalizes away.
+      .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
+      .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled || profileLinksEnabled)
       .map((a) => a.key)
   );
 }
@@ -611,12 +738,15 @@ export function EditPage({
   slugRequestEnabled = false,
   latestSlugRequest = null,
   canBrowseProfiles = false,
+  profilesNavVisible = false,
   consoleNav,
   manageableUnits = [],
   proxyEditors = null,
   unitAdminEditors = null,
   unitAdminBanner = null,
   reciterPendingEnabled = false,
+  orcidTabEnabled = false,
+  profileLinksEnabled = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
   cvEnabled = false,
@@ -646,6 +776,13 @@ export function EditPage({
   const hasReporterProfile =
     (mode === "self" || isSuperuserLike(mode)) &&
     (ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0);
+  // #2634 — "Mentees › From your publications" is present for self OR superuser
+  // when the loader returned ANY row (active or dismissed — a dismissed-only
+  // history still surfaces the item, to restore). The rail badge and the
+  // Mentees-tab pointer count only ACTIVE (non-dismissed) rows.
+  const hasMenteeSuggestions =
+    (mode === "self" || isSuperuserLike(mode)) && ctx.menteeSuggestions.length > 0;
+  const activeMenteeSuggestions = activeMenteeSuggestionCount(ctx);
   // Available technologies — CTL is the SOR and the row is public info (visible to
   // every edit mode, like publications/coi), so the ONLY gate is "has ≥1 invention".
   // The loader already gates the array on AVAILABLE_TECHNOLOGIES_SECTION, so a
@@ -654,8 +791,10 @@ export function EditPage({
   // News mentions — same gate: the loader populates `ctx.news` only when
   // NEWS_MENTIONS_SECTION is on AND there is ≥1 published mention.
   const hasNews = ctx.news.length > 0;
+  const hasMediaHighlights = ctx.mediaHighlights.length > 0;
   // Datasets — same gate: the loader populates `ctx.datasets` only when
-  // DATA_SHARING_SECTION is on AND there is ≥1 deposit.
+  // (DATA_SHARING_SECTION is on OR the scholar's own showDatasets opt-in is
+  // set) AND there is ≥1 deposit.
   const hasDatasets = ctx.datasets.length > 0;
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
   // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
@@ -676,12 +815,15 @@ export function EditPage({
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
+    .filter((a) => a.key !== "mentee-suggestions" || hasMenteeSuggestions)
+    .filter((a) => a.key !== "identifiers-profiles" || orcidTabEnabled || profileLinksEnabled)
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
     .filter((a) => a.key !== "cv" || showCv)
     .filter((a) => a.key !== "technologies" || hasTechnologies)
     .filter((a) => a.key !== "news" || hasNews)
+    .filter((a) => a.key !== "media-highlights" || hasMediaHighlights)
     .filter((a) => a.key !== "datasets" || hasDatasets);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
@@ -703,6 +845,7 @@ export function EditPage({
   const railCount = (k: AttrKey): number | undefined => {
     if (k === "coi-gap") return ctx.unmatchedPubmedCoi.length || undefined;
     if (k === "reporter-profile") return ctx.reporterProfileCandidates.length || undefined;
+    if (k === "mentee-suggestions") return activeMenteeSuggestions || undefined;
     return undefined;
   };
 
@@ -710,7 +853,8 @@ export function EditPage({
   // rather than reading as flat siblings: "From your publications" under
   // Conflicts of Interest, and "Is this you?" under Funding. Each immediately
   // follows its parent in every *_RAIL_ORDER and shares its rail group.
-  const isNestedSubview = (k: AttrKey) => k === "coi-gap" || k === "reporter-profile";
+  const isNestedSubview = (k: AttrKey) =>
+    k === "coi-gap" || k === "reporter-profile" || k === "mentee-suggestions";
 
   const railItems: RailItem[] = railRestructureEnabled
     ? RAIL_V2_ORDER.flatMap((k) => {
@@ -805,11 +949,15 @@ export function EditPage({
 
   return (
     <EditShell
-      // The shell chrome (breadcrumb back to Profiles + the "editing … as an
-      // administrator" banner) is the same a superuser sees — a comms_steward
-      // reaches this editor from the same roster and edits in an administrative
-      // capacity, so reuse it rather than add bespoke chrome.
-      mode={mode === "comms_steward" ? "superuser" : mode}
+      // The shell chrome (breadcrumb back to Profiles + the superuser banner) is
+      // the same a superuser sees — a comms_steward reaches this editor from the
+      // same roster and edits in an administrative capacity, and cv_generator
+      // (#2482) reads the same content read-only, so both reuse superuser chrome
+      // rather than add bespoke chrome. `readOnly` (below) is what actually
+      // makes cv_generator's copy of that chrome non-editable.
+      mode={mode === "comms_steward" || mode === "cv-generator" ? "superuser" : mode}
+      readOnly={isReadOnlyMode(mode)}
+      contentInert={isContentInert(mode, active.key)}
       scholarName={scholarName}
       railItems={railItems}
       activeAttr={active.key}
@@ -820,8 +968,19 @@ export function EditPage({
       // route is always `/edit/scholar/[cwid]/history` (self resolves via the
       // gate's isSelf branch), never the bare `/edit`. (#955)
       historyHref={`/edit/scholar/${ctx.scholar.cwid}/history`}
+      // Identity header (design round 3): the shell renders it for edit-for-others
+      // only (self mode ignores it). Same name builder as the public profile h1.
+      identity={{
+        cwid: ctx.scholar.cwid,
+        name: formatPublishedName(scholarName, ctx.scholar.postnominal, ctx.scholar.roleCategory),
+        title: ctx.scholar.primaryTitle,
+        institution: ctx.scholar.primaryOrgCode
+          ? institutionDisplayName(ctx.scholar.primaryOrgCode)
+          : null,
+      }}
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
+      profilesNavVisible={profilesNavVisible}
       consoleNav={consoleNav}
       unitAdmin={unitAdminBanner ?? undefined}
     >
@@ -837,9 +996,70 @@ export function EditPage({
         proxyEditors,
         unitAdminEditors,
         reciterPendingEnabled,
+        orcidTabEnabled,
+        profileLinksEnabled,
       )}
     </EditShell>
   );
+}
+
+/** The ORCID row's inputs. `scholar.orcid` (WCM Identity) is on file; with
+ *  `SELF_EDIT_ORCID_SUGGESTION` on, an RPM-admin iD counts as on file too and a sole
+ *  strong-inferred iD becomes the "Is this yours?" suggestion. */
+function orcidRowState(ctx: EditContext): OrcidRowState {
+  const v = ctx.orcidVerdict;
+  const onFile = ctx.scholar.orcid ?? (v?.tier === "asserted" ? v.orcid : null);
+  const evidenceFor = (id: string) =>
+    ctx.orcidCandidates
+      .filter((c) => c.orcid === id)
+      .map(({ source, accepted, rejected }) => ({ source, accepted, rejected }));
+  // The verdict folds an `rpm_admin` row to "asserted" and never suggests past
+  // it, and the on-file iD's own rows can out-vote a rival; with an iD on file,
+  // re-fold every row about OTHER iDs so a strong candidate that DISAGREES with
+  // the on-file iD still surfaces ("we also found").
+  let suggested = v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null;
+  if ((!suggested || suggested.orcid === onFile) && onFile && ctx.orcidCandidates.length > 0) {
+    const inferred = orcidVerdict(
+      ctx.orcidCandidates
+        .filter((c) => c.orcid !== onFile)
+        .map((c) => ({
+          cwid: ctx.scholar.cwid,
+          orcid: c.orcid,
+          source: c.source,
+          articlesAccepted: c.accepted,
+          articlesRejected: c.rejected,
+        })),
+      SUGGEST_MIN_ACCEPTED,
+    );
+    suggested =
+      inferred.tier === "strong" && inferred.orcid
+        ? { orcid: inferred.orcid, accepted: inferred.accepted }
+        : null;
+  }
+  if (suggested && suggested.orcid === onFile) suggested = null;
+  return {
+    onFile,
+    onFileEvidence: onFile ? evidenceFor(onFile) : [],
+    suggested: suggested ? { ...suggested, evidence: evidenceFor(suggested.orcid) } : null,
+  };
+}
+
+/** Where "Add" / "Confirm" / "Edit" for the ORCID iD goes: the Identifiers &
+ *  Profiles tab when the flag is on, else ReCiter Manage Profile (campus-only). */
+function orcidEditHref(orcidTabEnabled: boolean, detailBase: string, cwid: string): string {
+  return orcidTabEnabled
+    ? `${detailBase}?attr=identifiers-profiles`
+    : resolveSelfServiceHref(ORCID_MANAGE_URL, cwid);
+}
+
+/** #2634 — non-dismissed suggestion rows: the rail badge + Mentees pointer count. */
+function activeMenteeSuggestionCount(ctx: EditContext): number {
+  return ctx.menteeSuggestions.filter((s) => s.dismissedAt === null).length;
+}
+
+/** "3 co-authors look like trainees" / "1 co-author looks like a trainee". */
+function menteeSuggestionPointer(n: number): string {
+  return n === 1 ? "1 co-author looks like a trainee" : `${n} co-authors look like trainees`;
 }
 
 function renderPanel(
@@ -854,6 +1074,8 @@ function renderPanel(
   proxyEditors: ProxyRow[] | null,
   unitAdminEditors: UnitAdminEditorRow[] | null,
   reciterPendingEnabled: boolean,
+  orcidTabEnabled: boolean,
+  profileLinksEnabled: boolean,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -933,6 +1155,7 @@ function renderPanel(
           // shown only to a genuine self viewer, never a superuser or a proxy.
           manageableUnits={mode === "self" ? manageableUnits : []}
           isSuperuser={mode === "self" ? isSuperuser : false}
+          orcid={{ ...orcidRowState(ctx), editHref: orcidEditHref(orcidTabEnabled, detailBase, cwid) }}
           // ReCiter pending suggestions are surfaced for the scholar themselves OR
           // a superuser viewing the target (parity with the COI-gap hint). The page
           // computes `reciterPendingEnabled` = flag on AND (self OR superuser); the
@@ -949,14 +1172,63 @@ function renderPanel(
         <ReadonlyAttributePanel
           attribute="name-title"
           cwid={cwid}
-          heading="Name & Title"
-          description="Name, title, degrees, department, and ORCID come from the WCM directory and faculty records."
+          scholarName={scholarName}
+          heading="Name & title"
+          description={
+            // The second sentence only where there IS a choice: the picker
+            // renders with 2+ applicable titles (TitleField collapses otherwise).
+            // Only a superuser / comms steward picks (Paul, 2026-09-23); everyone
+            // else gets the recorded titles read-only plus a pointer to Request a
+            // change, so the sentence about choosing is theirs alone.
+            isSuperuserLike(mode) &&
+            ctx.titlePicker &&
+            ctx.titlePicker.options.filter((o) => o.value !== null).length > 1
+              ? "Name, degrees, department and institution come from WCM records. You can choose which recorded title is displayed."
+              : "Name, title, degrees, department and institution come from WCM records."
+          }
           fields={[
-            { label: "Name", value: ctx.scholar.fullName },
-            { label: "Title", value: ctx.scholar.primaryTitle },
-            { label: "Degrees", value: ctx.scholar.postnominal },
-            { label: "Department", value: ctx.scholar.primaryDepartment },
-            { label: "ORCID", value: ctx.scholar.orcid },
+            { label: "Name", value: ctx.scholar.fullName, issueId: "name-wrong" },
+            {
+              label: "Title",
+              issueId: "title-wrong",
+              alignTop: !!ctx.titlePicker,
+              // #2719 — the one editable row on an otherwise read-only panel.
+              // Operators (superuser / comms_steward / unit admin) pick; the
+              // scholar and their proxy request. Null picker state = flag off,
+              // and the row falls back to the plain sourced value.
+              value: ctx.titlePicker ? (
+                <TitleField
+                  cwid={cwid}
+                  options={ctx.titlePicker.options}
+                  current={ctx.titlePicker.current}
+                  hasOverride={
+                    ctx.titlePicker.override !== null && ctx.titlePicker.override !== ""
+                  }
+                  pending={ctx.titlePicker.pending}
+                  canSet={isSuperuserLike(mode)}
+                  // The ladder lives on the Titles queue, which only a
+                  // superuser / comms steward can open — so only they get the link.
+                  // `isSuperuser` is the self-mode superuser tell (own profile).
+                  rubricHref={
+                    mode === "superuser" ||
+                    mode === "comms_steward" ||
+                    (mode === "self" && isSuperuser)
+                      ? "/edit/titles-queue#rubric"
+                      : undefined
+                  }
+                />
+              ) : (
+                ctx.scholar.primaryTitle
+              ),
+            },
+            { label: "Degrees", value: ctx.scholar.postnominal, issueId: "degrees-wrong" },
+            { label: "Department", value: ctx.scholar.primaryDepartment, issueId: "department-wrong" },
+            {
+              label: "Institution",
+              value: ctx.scholar.primaryOrgCode
+                ? institutionDisplayName(ctx.scholar.primaryOrgCode)
+                : null,
+            },
           ]}
         />
       );
@@ -967,8 +1239,6 @@ function renderPanel(
       // context is internal); the visibility value is informational.
       return (
         <EmailCard
-          mode={voiceMode}
-          scholarName={scholarName}
           email={ctx.scholar.email}
           emailVisibility={ctx.scholar.emailVisibility}
         />
@@ -978,16 +1248,23 @@ function renderPanel(
         <ReadonlyAttributePanel
           attribute="photo"
           cwid={cwid}
+          scholarName={scholarName}
           heading="Photo"
-          description="Your profile photo comes from the WCM directory."
-          media={
-            <HeadshotAvatar
-              cwid={cwid}
-              preferredName={scholarName}
-              identityImageEndpoint={identityImageEndpoint(cwid)}
-              size="lg"
-            />
-          }
+          description="The profile photo comes from the WCM directory."
+          fields={[
+            {
+              label: "Photo",
+              alignTop: true,
+              value: (
+                <HeadshotAvatar
+                  cwid={cwid}
+                  preferredName={scholarName}
+                  identityImageEndpoint={identityImageEndpoint(cwid)}
+                  size="lg"
+                />
+              ),
+            },
+          ]}
         />
       );
     case "overview":
@@ -1032,6 +1309,7 @@ function renderPanel(
           // Stream the generate response (progress bar + CDN idle-timeout protection) only
           // where the sub-flag is on (staging-first); off ⇒ the buffered path, unchanged.
           streamEnabled={isOverviewGenerateStreamEnabled()}
+          scholarName={mode === "self" ? undefined : scholarName}
         />
       );
     case "highlights":
@@ -1122,55 +1400,54 @@ function renderPanel(
       return (
         <NewsEditCard cwid={cwid} mode={voiceMode} scholarName={scholarName} news={ctx.news} />
       );
+    case "media-highlights":
+      // Approved press clips — the same card, clip copy and outlet shown.
+      return (
+        <NewsEditCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          news={ctx.mediaHighlights}
+          variant="clips"
+        />
+      );
     case "datasets":
       // Interactive "Datasets" — the loader populates `ctx.datasets` only when
-      // DATA_SHARING_SECTION is on AND the scholar has ≥1 deposit, and the rail
-      // item is dropped when the array is empty. `voiceMode` reframes the intro
-      // copy for a third-person editor.
+      // (DATA_SHARING_SECTION is on OR the scholar's showDatasets opt-in is
+      // set) AND the scholar has ≥1 deposit, and the rail item is dropped when
+      // the array is empty. `voiceMode` reframes the intro copy for a
+      // third-person editor.
       return (
-        <DatasetsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} datasets={ctx.datasets} />
+        <DatasetsCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          datasets={ctx.datasets}
+        />
       );
-    case "appointments":
+    case "appointments": {
+      // #1323 / #1568 — the Earlier ranks section and the self-service
+      // "Additional positions" card show to every editor the write routes
+      // authorize: the scholar themselves (self, self-serve), a superuser /
+      // comms_steward, a granted proxy, or a unit-admin curator — the SAME set
+      // `authorizeOverviewWrite` authorizes, so the surface never drifts from
+      // the write gate. A self-actor only ever sees + toggles their OWN history
+      // (the loader is per-scholar; the routes key authz on the row's owner).
+      const canEditPositions =
+        mode === "self" || isSuperuserLike(mode) || mode === "unit-admin" || mode === "proxy";
       return (
-        <div className="flex flex-col gap-8">
-          <AppointmentsCard
+        <div className="flex flex-col gap-11">
+          <PositionsCard
             cwid={cwid}
             mode={voiceMode}
             scholarName={scholarName}
             appointments={ctx.appointments}
+            historicalAppointments={canEditPositions ? ctx.historicalAppointments : []}
           />
-          {/* #1323 — reveal-to-show historical appointments. Every reveal-capable
-              editor sees the control: the scholar themselves (self, self-serve),
-              a superuser / comms_steward, a granted proxy, or a unit-admin curator
-              — the SAME set `authorizeOverviewWrite` authorizes at the route, so
-              the surface never drifts from the write gate. A self-actor only ever
-              sees + toggles their OWN history (the loader is per-scholar and the
-              route keys authz on the appointment's owner). */}
-          {(mode === "self" ||
-            isSuperuserLike(mode) ||
-            mode === "unit-admin" ||
-            mode === "proxy") &&
-            ctx.historicalAppointments.length > 0 && (
-              <HistoricalAppointmentsCard
-                scholarName={scholarName}
-                appointments={ctx.historicalAppointments}
-              />
-            )}
-          {/* #1568 — self-service editor for self-asserted appointments (internal
-              WCM roles the ED feed omits + prior/other-institution positions).
-              Shown to every actor the write route authorizes (self, superuser /
-              comms_steward, unit-admin, proxy — the SAME set as the historical
-              reveal above); the card fetches its own rows and each write is
-              re-authorized server-side. These render ONLY on the owner's profile,
-              never on a center / department / division / search surface. */}
-          {(mode === "self" ||
-            isSuperuserLike(mode) ||
-            mode === "unit-admin" ||
-            mode === "proxy") && (
-            <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
-          )}
+          {canEditPositions && <ProfileAppointmentsCard cwid={cwid} />}
         </div>
       );
+    }
     case "honors":
       // #1760 — curation editor for honors and distinctions (academy memberships,
       // investigatorships, prizes) that no WCM feed carries. Its OWN attribute,
@@ -1188,6 +1465,37 @@ function renderPanel(
           )}
         </div>
       );
+    case "identifiers-profiles": {
+      // Every EditMode may reach this panel; each write re-authorizes server-side
+      // (`authorizeOverviewWrite`), and the shell makes cv-generator inert. The
+      // two cards are independently flagged (the tab shows when either is on);
+      // whichever renders first owns the `panel-heading` id. They have separate
+      // saves, so a rule (not just a gap) separates them.
+      const row = orcidRowState(ctx);
+      return (
+        <div className="flex flex-col gap-10 [&>*+*]:border-t [&>*+*]:pt-10">
+          {orcidTabEnabled && (
+            <OrcidCard
+              cwid={cwid}
+              mode={voiceMode}
+              scholarName={scholarName}
+              onFile={row.onFile}
+              onFileEvidence={row.onFileEvidence}
+              suggested={row.suggested}
+            />
+          )}
+          {profileLinksEnabled && (
+            <ProfileLinksCard
+              cwid={cwid}
+              mode={voiceMode}
+              scholarName={scholarName}
+              initial={ctx.profileLinks}
+              subsection={orcidTabEnabled}
+            />
+          )}
+        </div>
+      );
+    }
     case "education":
       return (
         <EducationCard
@@ -1217,6 +1525,20 @@ function renderPanel(
             initial={ctx.manualMentees}
             unresolvedCwids={ctx.manualMenteeUnresolvedCwids}
           />
+          {/* #2634 — one muted pointer to the nested sub-view when there are
+              active suggestions; the loader only populates the array for an
+              allowed actor behind the flag, so a count here implies both. */}
+          {activeMenteeSuggestionCount(ctx) > 0 && (
+            <p className="text-muted-foreground text-sm" data-testid="mentee-suggestions-pointer">
+              {menteeSuggestionPointer(activeMenteeSuggestionCount(ctx))} &mdash; review them under{" "}
+              <Link
+                href={`${detailBase}?attr=mentee-suggestions`}
+                className="text-apollo-slate font-medium hover:underline"
+              >
+                Mentees &rsaquo; From your publications
+              </Link>
+            </p>
+          )}
           <MenteesCard
             cwid={cwid}
             mode={voiceMode}
@@ -1224,6 +1546,18 @@ function renderPanel(
             mentees={ctx.mentees}
           />
         </div>
+      );
+    case "mentee-suggestions":
+      // #2634 — self or superuser; the loader populates the array only for an
+      // allowed actor behind the flag, and the rail item is dropped when empty.
+      return (
+        <MenteeSuggestionsCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          suggestions={ctx.menteeSuggestions}
+          manualMentees={ctx.manualMentees}
+        />
       );
     case "coi":
       return (
@@ -1286,7 +1620,9 @@ function renderPanel(
         );
       }
       if (!slugRequestEnabled) {
-        return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} cwid={cwid} />;
+        return (
+          <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} cwid={cwid} scholarName={scholarName} />
+        );
       }
       return (
         <SlugRequestCard
@@ -1314,7 +1650,15 @@ function renderPanel(
 /** The read-only Profile URL panel shown to scholars while `SELF_EDIT_SLUG_REQUEST`
  *  is off (T3.6): their live URL, plus an honest note that custom URLs aren't
  *  self-serve yet. No input, no request form, no unsaved-changes guard. */
-function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string }) {
+function ProfileUrlReadonlyPanel({
+  slug,
+  cwid,
+  scholarName,
+}: {
+  slug: string;
+  cwid: string;
+  scholarName: string;
+}) {
   const currentUrl = `${publicProfileHost()}/${slug}`;
   return (
     <EditPanel
@@ -1325,7 +1669,7 @@ function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string })
       <p className="flex flex-wrap items-center gap-2.5 text-sm">
         <span className="text-muted-foreground">Your current URL: </span>
         <code
-          className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs"
+          className="bg-apollo-surface-2 border-apollo-border-strong rounded border px-2.5 py-1 font-mono text-xs"
           data-testid="profile-url-readonly-value"
         >
           {currentUrl}
@@ -1333,19 +1677,20 @@ function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string })
       </p>
       <div className="text-muted-foreground flex flex-col gap-2 text-sm">
         <p>
-          Personalized URLs aren&rsquo;t self-service, but you can request one &mdash; a Scholars
+          Personalized URLs aren&rsquo;t self-service, but you can request one: a Scholars
           administrator reviews every request.
         </p>
         <p>
-          A personalized URL must be a variation of your own first and last name &mdash; optionally
-          with a middle initial or fuller form &mdash; not a research area or other handle, using
-          lowercase letters, numbers, and hyphens only. The older{" "}
+          A personalized URL must be a variation of your own first and last name (optionally with a
+          middle initial or fuller form), not a research area or other handle, using lowercase
+          letters, numbers, and hyphens only. The older{" "}
           <code className="font-mono">/scholars/{slug}</code> address still redirects here.
         </p>
       </div>
       <RequestAChangeDialog
         attribute="profile-url"
         cwid={cwid}
+        scholarName={scholarName}
         triggerTestId="profile-url-request-change"
       />
     </EditPanel>

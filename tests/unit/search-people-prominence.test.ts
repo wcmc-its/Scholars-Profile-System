@@ -481,7 +481,11 @@ describe("pubcount-prominence lever — the third prior", () => {
     capturedBodies.length = 0;
     groupByMock.mockResolvedValue([]);
   });
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    // No-op unless a test froze Date (the byte-identical one does); restores even on failure.
+    vi.useRealTimers();
+  });
 
   it("pubcountProminence:false drops the outer ln1p term (faculty + grant intact)", async () => {
     await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", pubcountProminence: false });
@@ -539,6 +543,9 @@ describe("pubcount-prominence lever — the third prior", () => {
    * a spot check — a spot check cannot see a field this lever moved by accident.
    */
   it("omitting the option is byte-identical to before the lever existed", async () => {
+    // Freeze Date (only Date — real timers keep the awaited fetches live): both calls derive a
+    // recency `gte` from `new Date()`, and a millisecond tick between them fails the deep-equal.
+    vi.useFakeTimers({ toFake: ["Date"] });
     await searchPeople({
       q: "ras signaling pancreatic cancer",
       relevanceMode: "v3",
@@ -621,6 +628,29 @@ describe("getConceptScholarConcentration — #1343 concept-axis source", () => {
       aggs: { byAuthor: { terms: { include: string[] } } };
     };
     expect(total.aggs.byAuthor.terms.include).toEqual(["a"]);
+  });
+
+  it("two-concept query: a second `terms` filter makes the on-topic agg a co-occurrence count", async () => {
+    conceptBuckets = [{ key: "a", doc_count: 6 }];
+    totalBuckets = [{ key: "a", doc_count: 12 }];
+    const pair = await getConceptScholarConcentration(["D1"], 200, ["D9", "D8"]);
+    expect(pair.map((o) => o.cwid)).toEqual(["a"]);
+    const onTopic = capturedBodies[0] as {
+      query: { bool: { filter: { terms: Record<string, string[]> }[] } };
+    };
+    expect(onTopic.query.bool.filter).toEqual([
+      { terms: { meshDescriptorUi: ["D1"] } },
+      { terms: { meshDescriptorUi: ["D9", "D8"] } },
+    ]);
+    // The same primary WITHOUT the secondary still builds the single-filter body.
+    // (The cache key also differs — `+<secondary uis>` — but `cachedReasonAgg` is
+    // bypassed under vitest, so that is asserted by reading the key builder, not here.)
+    capturedBodies.length = 0;
+    await getConceptScholarConcentration(["D1"], 200);
+    const single = capturedBodies[0] as {
+      query: { bool: { filter: { terms: Record<string, string[]> }[] } };
+    };
+    expect(single.query.bool.filter).toEqual([{ terms: { meshDescriptorUi: ["D1"] } }]);
   });
 
   it("all authors floored → [] and no total-pub round-trip", async () => {

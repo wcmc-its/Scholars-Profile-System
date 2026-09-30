@@ -136,7 +136,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set<string>([
  *   nextAvailableSlug("jane-smith", new Set(["jane-smith", "jane-smith-2"])) -> "jane-smith-3"
  *   nextAvailableSlug("about", new Set()) -> "about-2"
  */
-export function nextAvailableSlug(base: string, taken: Set<string> | ReadonlySet<string>): string {
+export function nextAvailableSlug(base: string, taken: Pick<ReadonlySet<string>, "has">): string {
   if (!taken.has(base) && !RESERVED_SLUGS.has(base)) return base;
   let n = 2;
   while (taken.has(`${base}-${n}`)) n++;

@@ -19,6 +19,9 @@ import type { EditSession } from "@/lib/auth/superuser";
 
 const ACTOR: EditSession = { cwid: "act001", isSuperuser: false, isCommsSteward: false };
 const SUPER: EditSession = { cwid: "sup001", isSuperuser: true, isCommsSteward: false };
+// 2026-08-26 policy widening (decision #3) — a comms_steward gets FULL
+// access-management parity on every org unit, modeled on the Superuser branch.
+const STEWARD: EditSession = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 type Row = { entityType: "department" | "division" | "center"; entityId: string; role: "owner" | "curator" };
 
@@ -176,6 +179,15 @@ describe("canManageAccess", () => {
   it("denies an actor with no role with reason `not_unit_owner`", () => {
     expect(canManageAccess(ACTOR, "none")).toEqual({ ok: false, reason: "not_unit_owner" });
   });
+
+  // 2026-08-26 policy widening (decision #3) — full parity, uniform across
+  // every effective role, i.e. NOT kind-specific and NOT gated on the
+  // steward personally holding any unit_admin row.
+  it("allows a comms_steward regardless of their own effective role on the unit", () => {
+    expect(canManageAccess(STEWARD, "none")).toEqual({ ok: true });
+    expect(canManageAccess(STEWARD, "curator")).toEqual({ ok: true });
+    expect(canManageAccess(STEWARD, "owner")).toEqual({ ok: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -210,6 +222,16 @@ describe("canGrant", () => {
   it("denies an actor outside the subtree with reason `scope_violation` (T2)", () => {
     expect(canGrant(ACTOR, "none", "curator")).toEqual({ ok: false, reason: "scope_violation" });
     expect(canGrant(ACTOR, "none", "owner")).toEqual({ ok: false, reason: "scope_violation" });
+  });
+
+  // 2026-08-26 policy widening (decision #3) — modeled on the Superuser
+  // branch: a comms_steward grants either role anywhere, even with NO
+  // unit_admin row of their own (effectiveRole "none").
+  it("allows a comms_steward to grant any role regardless of their own effective role", () => {
+    expect(canGrant(STEWARD, "none", "owner")).toEqual({ ok: true });
+    expect(canGrant(STEWARD, "none", "curator")).toEqual({ ok: true });
+    expect(canGrant(STEWARD, "curator", "owner")).toEqual({ ok: true });
+    expect(canGrant(STEWARD, "owner", "curator")).toEqual({ ok: true });
   });
 });
 

@@ -60,6 +60,19 @@ export function headshotStaleBefore(now: Date = new Date()): Date {
 }
 
 /**
+ * #2264 follow-up — how many indeterminate probes (5xx / 403 / timeout) one run
+ * may see before etl:headshot fails the step. An indeterminate probe leaves the
+ * old verdict AND its checked-at untouched, so a directory that keeps erroring
+ * freezes verdicts at their last value with nothing visible to stewards. Failing
+ * the (tier:"continue") step publishes to `etl-failures-<env>` instead.
+ * 5% of the scanned cohort, min 25 so a few transient blips in a small
+ * incremental batch never trip it.
+ */
+export function headshotIndeterminateLimit(scanned: number): number {
+  return Math.max(25, Math.ceil(scanned * 0.05));
+}
+
+/**
  * Map an HTTP status from the directory headshot endpoint to a presence verdict.
  * 200/206 → present; 404 → absent; anything else → indeterminate (`null`), so a
  * transient directory problem never flips a known value to a wrong one.

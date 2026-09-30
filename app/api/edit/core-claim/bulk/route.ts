@@ -2,21 +2,48 @@
  * POST /api/edit/core-claim/bulk — a core owner (or Superuser) claims or rejects
  * MANY (publication, core) candidates in one request.
  *
- * Body: `{ coreId, pmids: string[], status: "claimed" | "rejected" }`.
+ * Body: `{ coreId, pmids: string[], status: "claimed" | "rejected" | "revoked", dryRun?: true }`.
+ *
+ * `dryRun: true` runs every check — shape, core existence, authorization, the
+ * `publication` existence probe and the already-at-this-status comparison — and
+ * then returns WITHOUT opening the write transaction. It is what the queue's
+ * "Check PMIDs" step calls so the modal can show a reviewer exactly what a
+ * claim would do before they commit it. It is a real check, not a client-side
+ * guess: the same route, the same authorization, the same reads. `written` is
+ * reported as `0` and `wouldWrite` carries the count the real call would write.
  *
  * The scale companion to `POST /api/edit/core-claim`: the single route is fanned
- * out client-side one request per PMID, which is fine for a typical high-confidence
+ * out client-side one request per PMID, which is fine for a typical hand-picked
  * band but means N round-trips / N transactions / N partial-failure modes once a
  * band runs to many hundreds. This loops the SAME upsert + B03 audit over every
  * pmid in ONE MySQL transaction (auth/audit/writeback all reused verbatim), then
  * best-effort mirrors each decision to the engine's DynamoDB after the commit.
  *
- * `revoked` is intentionally NOT a bulk action — undo is always a deliberate
- * single-row gesture, so it stays on the single-claim route.
+ * `revoked` IS a bulk action since Queue v2 PR B. It used to be refused here
+ * ("undo is always a deliberate single-row gesture"); the owner reversed that on
+ * 2026-09-28 (core-queue-v2 assessment, decision 2: bulk Revoke on the Confirmed
+ * tab and bulk Restore on the Rejected tab are allowed, each behind the same
+ * inline confirm as "Reject all N…"). It is the single route's soft-revoke run
+ * over many pmids: every ACTIVE claim in the batch gets `revokedBy`/`revokedAt`
+ * and its own audit row (the single route's before/after shape), so the pair
+ * reverts to its engine status. A pmid with no active claim has nothing to
+ * revoke and is `skipped`, not an error — the same no-op the single route
+ * answers with `unchanged`. No publication-existence probe (a claim can be
+ * revoked whether or not SPS still holds the paper) and no engine writeback
+ * (the single route sends none on revoke either; the nightly run re-derives).
+ * Restore on the Rejected tab IS this soft revoke of a `rejected` claim — the
+ * two gestures are one server operation.
+ *
+ * A pmid SPS hasn't ingested is reported back as `notFound`, not written —
+ * this also doubles as the manual "claim a block of known PMIDs" entry point
+ * (the same endpoint the queue's hand-picked selection bar
+ * uses; every pmid there already has a `publication` row, so this check is a
+ * no-op for that caller).
  *
  * Authorization (403): owner OR curator of THIS core
- * (`UnitAdmin(entityType="core", entityId=coreId)`), or a Superuser — resolved
- * ONCE (the core dimension is identical for every pmid in the batch).
+ * (`UnitAdmin(entityType="core", entityId=coreId)`), a Superuser, or (2026-08-26
+ * policy widening, decision #6) a comms_steward — resolved ONCE (the core
+ * dimension is identical for every pmid in the batch).
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
@@ -35,13 +62,14 @@ import { writeBackCoreClaim } from "@/lib/cores/claim-writeback";
 const PATH = "/api/edit/core-claim/bulk";
 /** A PMID is a non-empty run of digits, no leading zero (PubMed never mints one). */
 const PMID_PATTERN = /^[1-9][0-9]*$/;
-/** Cap the batch — generous for any real high-confidence band, but a guard so a
+/** Cap the batch — generous for any real hand-picked selection, but a guard so a
  *  pathological body is a 400, not an unbounded transaction. */
 const MAX_BULK_PMIDS = 500;
 
-/** A bulk decision is `claimed` or `rejected` (never `revoked` — see file header). */
-function isBulkClaimStatus(value: unknown): value is "claimed" | "rejected" {
-  return value === "claimed" || value === "rejected";
+/** A bulk decision (`claimed`/`rejected`) or the soft `revoked` undo — see the
+ *  file header for why `revoked` is allowed here since 2026-09-28. */
+function isBulkClaimStatus(value: unknown): value is "claimed" | "rejected" | "revoked" {
+  return value === "claimed" || value === "rejected" || value === "revoked";
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -50,7 +78,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { session, realCwid, impersonatedCwid, requestId, body } = req.ctx;
 
   // --- body shape ---
-  const { coreId, pmids, status } = body;
+  const { coreId, pmids, status, dryRun } = body;
+  // Strictly `true` — a truthy-but-not-true value (a stray string) must not
+  // silently turn a real claim into a no-op the caller thinks succeeded.
+  const isDryRun = dryRun === true;
   if (typeof coreId !== "string" || coreId.length === 0 || coreId.length > 32) {
     return editError(400, "invalid_core_id", "coreId");
   }
@@ -86,11 +117,50 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
-  // Prior ACTIVE claims for this core, keyed by pmid — drives idempotent skips
-  // (a pmid already at the target status needs no re-write) + audit before-values.
-  const active = await loadActiveCoreClaimsByCore(coreId, db.read);
-  const toWrite = targetPmids.filter((p) => active.get(p) !== status);
-  const skipped = targetPmids.length - toWrite.length;
+  // Prior ACTIVE claims for this core (idempotent-skip source), and which of the
+  // requested pmids SPS actually knows about. `core_claim` is FK-less (see route
+  // header) — nothing at the DB layer stops a claim for a pmid SPS never ingested,
+  // but every read path is publication_core-first, so such a claim would write
+  // successfully and then surface nowhere. Reject it here instead, explicitly, so
+  // a manual "paste a block of PMIDs" caller finds out immediately.
+  if (status === "revoked") {
+    return bulkRevoke({
+      coreId,
+      targetPmids,
+      isDryRun,
+      cwid: session.cwid,
+      realCwid,
+      impersonatedCwid,
+      requestId,
+    });
+  }
+
+  const [active, knownPublications] = await Promise.all([
+    loadActiveCoreClaimsByCore(coreId, db.read),
+    db.read.publication.findMany({
+      where: { pmid: { in: targetPmids } },
+      select: { pmid: true },
+    }),
+  ]);
+  const knownPmids = new Set(knownPublications.map((p) => p.pmid));
+  const notFound = targetPmids.filter((p) => !knownPmids.has(p));
+  const known = targetPmids.filter((p) => knownPmids.has(p));
+  const toWrite = known.filter((p) => active.get(p) !== status);
+  const skipped = known.length - toWrite.length;
+
+  // Every check above has run; a dry run stops here, before the transaction.
+  if (isDryRun) {
+    return editOk({
+      coreId,
+      status,
+      dryRun: true,
+      written: 0,
+      wouldWrite: toWrite.length,
+      skipped,
+      notFound,
+      writebackOk: 0,
+    });
+  }
 
   if (toWrite.length > 0) {
     const now = new Date();
@@ -151,6 +221,88 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     status,
     written: toWrite.length,
     skipped,
+    notFound,
     writebackOk,
+  });
+}
+
+/**
+ * The bulk soft-revoke (Revoke on the Confirmed tab, Restore on the Rejected
+ * tab). Runs after the shape, core and authorization checks in `POST`. Only an
+ * ACTIVE claim can be revoked, so the active-claim map is the whole plan: every
+ * requested pmid in it is written, every other one is `skipped`. One
+ * transaction, one `update` + one audit row per pmid — the single route's
+ * revoke, looped.
+ */
+async function bulkRevoke({
+  coreId,
+  targetPmids,
+  isDryRun,
+  cwid,
+  realCwid,
+  impersonatedCwid,
+  requestId,
+}: {
+  coreId: string;
+  targetPmids: string[];
+  isDryRun: boolean;
+  cwid: string;
+  realCwid: string;
+  impersonatedCwid: string | null;
+  requestId: string;
+}): Promise<NextResponse> {
+  const active = await loadActiveCoreClaimsByCore(coreId, db.read);
+  const toWrite = targetPmids.filter((p) => active.has(p));
+  const skipped = targetPmids.length - toWrite.length;
+
+  if (isDryRun) {
+    return editOk({
+      coreId,
+      status: "revoked",
+      dryRun: true,
+      written: 0,
+      wouldWrite: toWrite.length,
+      skipped,
+      notFound: [],
+      writebackOk: 0,
+    });
+  }
+
+  if (toWrite.length > 0) {
+    const ts = new Date();
+    try {
+      await db.write.$transaction(async (tx) => {
+        for (const pmid of toWrite) {
+          await tx.coreClaim.update({
+            where: { pmid_coreId: { pmid, coreId } },
+            data: { revokedBy: cwid, revokedAt: ts },
+          });
+          await appendAuditRow(tx, {
+            actorCwid: realCwid,
+            impersonatedCwid,
+            targetEntityType: "core",
+            targetEntityId: `${coreId}:${pmid}`,
+            action: "core_claim",
+            fieldsChanged: ["revoked"],
+            beforeValues: { status: active.get(pmid), revoked: false },
+            afterValues: { revoked: true },
+            ts,
+            requestId,
+          });
+        }
+      });
+    } catch (err) {
+      logEditFailure(`${PATH}#revoke`, err);
+      return editError(500, "write_failed");
+    }
+  }
+
+  return editOk({
+    coreId,
+    status: "revoked",
+    written: toWrite.length,
+    skipped,
+    notFound: [],
+    writebackOk: 0,
   });
 }

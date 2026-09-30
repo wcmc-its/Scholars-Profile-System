@@ -9,6 +9,7 @@ import type { EntityKind } from "@/lib/api/search";
 import { EntityBadge } from "@/components/ui/entity-badge";
 import { reportNavWatchdog, type NavWatchdogSurface } from "@/lib/analytics/nav-watchdog";
 import { formatRoleCategory } from "@/lib/role-display";
+import { searchHref } from "@/lib/search/query-url";
 
 type Suggestion = {
   kind: EntityKind;
@@ -210,7 +211,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     abortRef.current?.abort();
     setSuggestions([]);
     setOpen(false);
-    let href = `/search?q=${encodeURIComponent(value.trim())}`;
+    let href = searchHref(value.trim());
     // Preserve the active result tab on a new search instead of bouncing to the
     // Scholars default. Read at submit time (always client) so the header avoids
     // useSearchParams; a fresh query still resets facets/sort/page.
@@ -229,7 +230,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     : "relative w-full max-w-xl";
 
   const inputBoxClass = isHero
-    ? "flex items-center gap-1 rounded-md border border-zinc-300 bg-white p-1 shadow-sm transition-all focus-within:border-[var(--color-accent-slate)] focus-within:ring-2 focus-within:ring-[var(--color-accent-slate)]/20"
+    ? "flex items-center gap-1 rounded-[10px] border border-apollo-border-strong bg-apollo-surface p-1.5 shadow-[var(--apollo-shadow-card)] transition-all focus-within:border-[var(--color-accent-slate)] focus-within:ring-2 focus-within:ring-[var(--color-accent-slate)]/20"
     : "text-muted-foreground flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm focus-within:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900";
 
   // `min-w-0`: a flex item defaults to `min-width: auto`, so the input refuses

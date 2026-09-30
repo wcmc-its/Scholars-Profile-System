@@ -295,18 +295,6 @@ export interface SpsEnvConfig {
    */
   readonly grantMatcherSubtopicGrain: boolean;
   /**
-   * Absolute-fit abstention floor for the reverse matcher, surfaced as
-   * `GRANT_MATCHER_ABSTAIN_FLOOR`. When a grant's top-8 mean pool-normalized
-   * relevance (`meanTopRel` ∈ [0,1]) falls below this, the result is flagged
-   * `abstain` ("no strong WCM match") instead of returning a tangential top-8.
-   * Only meaningful with subtopic-grain on (the topic-vector path has no
-   * per-pub relevance → meanTopRel 0 → everything abstains): keep this 0 wherever
-   * grantMatcherSubtopicGrain is false. `0` disables. Offline prior 0.10
-   * (match_v9b); staging-first so the floor can be re-validated before prod.
-   * See ReciterAI #287, docs/grant-eval-harness-handoff.md §5.1.
-   */
-  readonly grantMatcherAbstainFloor: number;
-  /**
    * The externally-created, TGW-attached VPC that on-prem-reachable ETL tasks
    * run in — specifically the ED LDAP → S3 email-visibility export (#443).
    * Created out-of-band by WCM networking (NOT by our CDK): staging →
@@ -702,10 +690,6 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // grant→researcher matcher: subtopic-grain path ON in staging (corpus
     // backfilled + reprojected). Self-gates on per-opportunity match_dsl.
     grantMatcherSubtopicGrain: true,
-    // abstention floor ON in staging (0.10, match_v9b offline prior). Safe only
-    // because subtopic-grain is on here; re-validate on the broken-tail grants
-    // (angelman/progeria/msts) before promoting to prod.
-    grantMatcherAbstainFloor: 0.1,
     // #443 — staging runs the ED email-visibility bridge in scholars-dev, whose
     // on-prem LDAP reach is proven (2026-06-18: in-VPC LDAPS bind + 2440-unit
     // search). Only the two private `app` subnets (TGW + NAT routes) are listed.
@@ -862,10 +846,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // prod (deploy + first verify run) then flip this to true. See
     // docs/curation-backup-runbook.md § Prod.
     curationBackupScheduleEnabled: false,
-    // Nightly grants bulk export NOT YET ACTIVATED on prod — staging-first
-    // rollout, per flag JSDoc. Flip once staging is hand-verified and Research
-    // Informatics' role is ready for prod read access.
-    grantsExportScheduleEnabled: false,
+    // Nightly grants bulk export — staging hand-verified 2026-08-11 (13,266
+    // rows, correct NDJSON schema, both an ECS RunTask and a real Step
+    // Functions execution). Research Informatics confirmed prod read access
+    // is ready on their end (arch-staging-ai-role's identity policy). Flipped
+    // to true (#2359 follow-up) — SSM param + `cdk deploy Sps-Etl-prod` still
+    // needed to actually create the prod bucket/policy/schedule.
+    grantsExportScheduleEnabled: true,
     // #1218 — standalone DynamoDB projection ships disabled on prod: the prod
     // opportunity corpus isn't published yet and the matcher is dark there. Flip
     // when the prod corpus lands (or leave off once #443 unblocks the nightly).
@@ -873,9 +860,6 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // grant→researcher matcher: subtopic-grain path OFF in prod until the prod
     // corpus carries match_dsl/match_query and staging soaks clean.
     grantMatcherSubtopicGrain: false,
-    // abstention floor OFF in prod (must stay 0 while subtopic-grain is off, or
-    // meanTopRel=0 would abstain every grant). Enable with grantMatcherSubtopicGrain.
-    grantMatcherAbstainFloor: 0,
     // #443 — prod's on-prem-reachable VPC is scholars-prod. Wired but NOT yet
     // activated: edEmailVisibilityBridgeEnabled stays false until the
     // scholars-prod path is verified end-to-end (the same in-VPC bind probe as

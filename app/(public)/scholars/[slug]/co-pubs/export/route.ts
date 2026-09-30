@@ -33,10 +33,10 @@ import {
   copubId,
   menteeProgramLabel,
   getAllMentorCoPublications,
-  type CoPublicationAuthor,
   type CoPublicationFull,
   type MenteeCoPubGroup,
 } from "@/lib/api/mentoring";
+import { citationIdentifier, formatVolIssuePages, vancouverAuthorToken } from "@/lib/citation";
 import { toCsv } from "@/lib/csv";
 import { htmlToPlainText } from "@/lib/utils";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
@@ -71,7 +71,11 @@ export async function GET(
     return NextResponse.json({ error: "mentor not found" }, { status: 404 });
   }
 
-  const mentorName = formatPublishedName(mentor.preferredName, mentor.postnominal);
+  const mentorName = formatPublishedName(
+    mentor.preferredName,
+    mentor.postnominal,
+    mentor.roleCategory,
+  );
 
   const rollup = await getAllMentorCoPublications(mentor.cwid);
   const filename = `co-pubs_${mentor.cwid}_all.${format}`;
@@ -120,13 +124,13 @@ function renderCsv(groups: MenteeCoPubGroup[]): string {
   for (const g of groups) {
     for (const e of g.entries) {
       rows.push([
-        String(e.publication.pmid),
+        e.publication.id ?? String(e.publication.pmid),
         e.publication.year,
         e.publication.journal ?? "",
         // PubMed titles carry inline HTML (`<i>`, `<sup>`); strip for CSV
         // so spreadsheets don't show literal `<sup>+</sup>` (#331).
         htmlToPlainText(e.publication.title, Number.POSITIVE_INFINITY),
-        e.publication.authors.map(authorToVancouverToken).join("; "),
+        e.publication.authors.map(vancouverAuthorToken).join("; "),
         e.mentee.fullName,
         g.programLabel,
         copubId(e.publication),
@@ -134,18 +138,6 @@ function renderCsv(groups: MenteeCoPubGroup[]): string {
     }
   }
   return toCsv([...CSV_HEADERS], rows);
-}
-
-/** Vancouver token: "Lastname Initials" (e.g. "Smith JA"). Initials are
- *  the first letter of each whitespace-separated first/middle name with
- *  no periods. */
-function authorToVancouverToken(a: CoPublicationAuthor): string {
-  const initials = (a.firstName ?? "")
-    .split(/\s+/)
-    .map((p) => p.charAt(0).toUpperCase())
-    .filter(Boolean)
-    .join("");
-  return initials ? `${a.lastName} ${initials}` : a.lastName;
 }
 
 const HANGING_INDENT_TWIPS = 360;
@@ -269,7 +261,7 @@ function buildCitationParagraph(
   const authorRuns: TextRun[] = [];
   pub.authors.forEach((a, i) => {
     if (i > 0) authorRuns.push(new TextRun({ text: ", " }));
-    const token = authorToVancouverToken(a);
+    const token = vancouverAuthorToken(a);
     const bold = a.personIdentifier !== null && boldCwids.has(a.personIdentifier);
     authorRuns.push(new TextRun({ text: token, bold }));
   });
@@ -279,14 +271,24 @@ function buildCitationParagraph(
   // `H<sub>2</sub>O` render with real subscript runs (#331).
   const titleRuns = buildPubmedRuns(titleClean);
   const journal = pub.journal ?? "";
+  // #2580 — the shared formatter treats a literal "NULL" volume/issue/pages as
+  // absent; the local copy printed `2024;NULL(NULL):NULL.` into the .docx.
   const volIssuePages = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
 
+  // #2580 — `CoPublicationFull.pmid` is a number, but ReciterDB assigns external
+  // (non-PubMed) records a synthetic NEGATIVE pmid, which this used to label
+  // `PMID:` and link as `pubmed.ncbi.nlm.nih.gov/-3/` — dead in the reader's
+  // Word document. The shared helper labels such a row "Source: External" and
+  // returns no href.
+  const id = citationIdentifier(pub.id ?? pub.pmid);
   const idRuns: (TextRun | ExternalHyperlink)[] = [
-    new TextRun({ text: "PMID: " }),
-    new ExternalHyperlink({
-      link: `https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`,
-      children: [new TextRun({ text: String(pub.pmid), style: "Hyperlink" })],
-    }),
+    new TextRun({ text: `${id.label}: ` }),
+    id.href
+      ? new ExternalHyperlink({
+          link: id.href,
+          children: [new TextRun({ text: id.value, style: "Hyperlink" })],
+        })
+      : new TextRun({ text: id.value }),
   ];
   if (pub.pmcid) {
     idRuns.push(new TextRun({ text: "; PMCID: " }));
@@ -327,19 +329,6 @@ function buildCitationParagraph(
     indent: { left: HANGING_INDENT_TWIPS, hanging: HANGING_INDENT_TWIPS },
     spacing: { after: 60 },
   });
-}
-
-function formatVolIssuePages(
-  volume: string | null,
-  issue: string | null,
-  pages: string | null,
-): string {
-  if (!volume && !issue && !pages) return "";
-  let s = "";
-  if (volume) s += volume;
-  if (issue) s += `(${issue})`;
-  if (pages) s += `:${pages}`;
-  return s;
 }
 
 function pageNumberFooter(): Footer {

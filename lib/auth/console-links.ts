@@ -18,17 +18,28 @@
  * `isMethodsTabVisible` / `superuserSurfaces` discipline in `AdminSubnav`).
  *
  * Policy (one entry per privileged role-entry-point, deduped):
- *   - **Superuser** → "Manage profiles" (`/edit/scholars`) only. The in-console
+ *   - **Superuser** → "Admin console" (`/edit/profiles`) only. The in-console
  *     `AdminSubnav` fans out from the roster to every other surface (URL requests /
  *     URL registry / Administrators / Method Families / Funding matcher), so the
  *     dropdown stays short — it routes them to the console, not to every tab.
- *   - **comms_steward** (not a superuser) → "Method Families" (`/edit/methods`).
- *   - **Unit Owner / Curator** (not a superuser) → "Profiles" (`/edit/scholars`,
- *     scope-filtered to their units — B3), then "Data quality"
- *     (`/edit/data-quality`, the same people through a gap lens), then "Org
- *     units" (`/edit/units`). People first: the roster is what they sign in to
- *     do, and it was previously not linked at all — `/edit/scholars` was
- *     superuser-gated, so their only door was "Org units".
+ *   - **comms_steward** (not a superuser) → also "Admin console"
+ *     (`/edit/profiles`), same collapse as a superuser. A steward's own
+ *     `AdminSubnav` fans out too — Profiles, Org units, Methods, News,
+ *     Reports, Data quality, Data sharing all admit stewards per
+ *     `TAB_PREDICATES` in `lib/edit/console-tabs.server.ts` — so a dedicated
+ *     "Method Families" dropdown row would be a redundant second door to a
+ *     surface their own console nav already reaches.
+ *     This union is deliberately checked before `managesUnits` below: gaining a
+ *     unit grant must never remove this row (I3-style monotonicity, mirroring
+ *     `console-tabs.server.ts`'s own invariant).
+ *   - **Unit Owner / Curator** (not a superuser, not a steward) → "Profiles"
+ *     (`/edit/profiles`, scope-filtered to their units — B3), then "Org units"
+ *     (`/edit/units`).
+ *     People first: the roster is what they sign in to do, and it was
+ *     previously not linked at all — `/edit/profiles` was superuser-gated, so
+ *     their only door was "Org units". (The roster's own COI-review column is
+ *     superuser-only, so it earns no separate link here — see
+ *     `lib/edit/data-quality.ts`.)
  *
  * A viewer holding several non-superuser roles gets several links. The list is
  * profile-independent: a steward or unit admin with no `Scholar` row still gets
@@ -38,7 +49,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units" | "profiles" | "data-quality";
+  id: "manage-profiles" | "methods" | "units" | "profiles";
   label: string;
   href: string;
 };
@@ -50,18 +61,15 @@ export type ConsoleLink = {
  */
 export type ConsoleLinkVerdicts = {
   isSuperuser: boolean;
-  /** `isMethodsTabVisible(session)` — `COMMS_STEWARD_ENABLED` on AND the viewer
-   *  is a steward or superuser. The superuser branch returns early, so for the
-   *  non-superuser path this reduces to "flag on AND a steward". */
-  canManageMethods: boolean;
+  /** `isCommsSteward(cwid)` — a live LDAPS group check already gated by its
+   *  own `COMMS_STEWARD_ENABLED` kill switch (`lib/auth/comms-steward.ts`):
+   *  `false` for everyone, with no directory call, when the flag is off. A
+   *  `true` here collapses the dropdown to "Admin console", the same as a
+   *  superuser — see the module doc comment. */
+  isCommsSteward: boolean;
   /** The viewer holds ≥1 direct `unit_admin` grant
    *  (`loadManageableUnits(...).total > 0`). */
   managesUnits: boolean;
-  /** `EDIT_DATA_QUALITY_DASHBOARD` on AND the viewer holds ≥1 `unit_admin`
-   *  grant — i.e. `/edit/data-quality` will render them a scoped gap report
-   *  rather than 404. The flag is folded in by the caller (this module stays
-   *  env-free), exactly as `canManageMethods` folds in COMMS_STEWARD. */
-  canBrowseDataQuality: boolean;
 };
 
 /**
@@ -71,38 +79,35 @@ export type ConsoleLinkVerdicts = {
  *
  * The superuser roster row is labeled "Admin console" (account-dropdown-nav
  * handoff, Workstream B; the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag that gated
- * the relabel was retired in #1440). The GrantRecs "Funding matcher" is no
- * longer a dropdown row — it lives in the in-console `AdminSubnav`
- * (`/edit/find-researchers`).
+ * the relabel was retired in #1440). The GrantRecs matcher tools are not
+ * dropdown rows — they live in the in-console `AdminSubnav`
+ * (`/edit/grant-matcha`, `/edit/matcha`).
  */
 export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   const links: ConsoleLink[] = [];
 
-  // A superuser collapses to the Profiles roster — its AdminSubnav already fans
-  // out to the rest, so a superuser who also happens to be a steward / unit
-  // admin gets no redundant rows for surfaces the roster already reaches.
-  if (v.isSuperuser) {
+  // A superuser OR a comms_steward collapses to the Profiles roster — each has
+  // an AdminSubnav that already fans out to whatever else they can reach (the
+  // full surface set for a superuser; a broad steward set — Profiles, Org
+  // units, Methods, News, Reports, Data quality, Data sharing — per
+  // `TAB_PREDICATES`), so neither needs a second, redundant dropdown row for
+  // a surface their own console nav already reaches. Checked BEFORE `managesUnits` on purpose: a
+  // steward who later also picks up a unit grant must keep this row, never
+  // fall back to the narrower Profiles/Org-units pair below.
+  if (v.isSuperuser || v.isCommsSteward) {
     links.push({
       id: "manage-profiles",
       label: "Admin console",
-      href: "/edit/scholars",
+      href: "/edit/profiles",
     });
   } else {
-    if (v.canManageMethods) {
-      links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
-    }
     // PEOPLE BEFORE UNITS. A unit Owner/Curator's own words for what they came
     // to do are "the people I edit", not "the org unit I administer" — and until
     // this row existed their only door was "Org units". Same destination and
     // same NAME every other role uses for it, so the surface reads identically
     // whoever opens it; the roster itself is scope-filtered server-side (B3).
     if (v.managesUnits) {
-      links.push({ id: "profiles", label: "Profiles", href: "/edit/scholars" });
-    }
-    // The gap report is a SECOND, narrower view of the same people — kept as its
-    // own row under its own name rather than masquerading as the roster.
-    if (v.canBrowseDataQuality) {
-      links.push({ id: "data-quality", label: "Data quality", href: "/edit/data-quality" });
+      links.push({ id: "profiles", label: "Profiles", href: "/edit/profiles" });
     }
     if (v.managesUnits) {
       links.push({ id: "units", label: "Org units", href: "/edit/units" });

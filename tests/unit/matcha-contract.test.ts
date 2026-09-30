@@ -30,6 +30,7 @@ import {
   rareTerms,
   rerankCandidates,
   askTitleFrom,
+  assessMatchSignal,
   sanitizeIncludeTerms,
   INCLUDE_MAX,
   INCLUDE_TERM_MAXLEN,
@@ -508,6 +509,57 @@ describe("askTitleFrom", () => {
     );
     // The bespoke path has no title; but if a summary is present with no concepts, name it.
     expect(askTitleFrom([], [], "Acme Bio — rare disease")?.title).toBe("Acme Bio — rare disease");
+  });
+});
+
+/**
+ * `assessMatchSignal` — self-awareness for a thin extraction.
+ *
+ * Fixtures are the real staging opportunities that motivated this (2026-08-19/20 sweep,
+ * `docs/grant-matcha-challenging-cases.md`): a single "neoplasms" concept (200 descendants,
+ * hit the cap) produced a scattered top-8; a single "drug discovery" concept (4 descendants —
+ * genuinely narrow, NOT broad) also produced a scattered top-8, because it's a bare method
+ * with nothing to narrow it; a single "colorectal cancer" (10 descendants, concept-kind) did
+ * NOT show the same scatter — it's a real, specific single-concept match and must NOT be
+ * flagged. The rule has to clear that bar, not just react to "one concept".
+ */
+describe("assessMatchSignal", () => {
+  it("flags a single concept whose MeSH scope hit the descendant cap", () => {
+    const signal = assessMatchSignal([
+      { term: "neoplasms", kind: "concept", members: ["neoplasms"], centrality: 1, weightFactor: 1, meshDescendantCount: 200 },
+    ]);
+    expect(signal).toEqual({ thin: true, reason: "single-broad-concept" });
+  });
+
+  it("flags a single bare METHOD even when its MeSH scope is narrow", () => {
+    const signal = assessMatchSignal([
+      { term: "drug discovery", kind: "method", members: ["drug discovery"], centrality: 1, weightFactor: 1, meshDescendantCount: 4 },
+    ]);
+    expect(signal).toEqual({ thin: true, reason: "single-bare-method" });
+  });
+
+  it("does NOT flag a single, specific, narrow concept — the false-positive guard", () => {
+    const signal = assessMatchSignal([
+      { term: "colorectal cancer", kind: "concept", members: ["colorectal cancer"], centrality: 1, weightFactor: 1, meshDescendantCount: 10 },
+    ]);
+    expect(signal).toEqual({ thin: false });
+  });
+
+  it("does not flag a broad concept once a second concept is present — the others narrow it", () => {
+    const signal = assessMatchSignal([
+      concept("neoplasms", 1, 1),
+      concept("cancer prevention", 0.5, 1),
+    ]);
+    expect(signal).toEqual({ thin: false });
+  });
+
+  it("treats an absent meshDescendantCount as 0, not broad — no MeSH resolution is not evidence of breadth", () => {
+    const signal = assessMatchSignal([concept("some rare term", 1, 1)]);
+    expect(signal).toEqual({ thin: false });
+  });
+
+  it("does not flag zero concepts — that's the separate empty-state case, not a thin match", () => {
+    expect(assessMatchSignal([])).toEqual({ thin: false });
   });
 });
 

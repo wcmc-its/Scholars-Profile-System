@@ -46,6 +46,9 @@ describe("Opportunity model — codegen", () => {
       taxonomyVersion: "taxonomy_v2",
       ingestedAt: new Date(),
       lastRefreshedAt: new Date(),
+      suppressedAt: null,
+      suppressedBy: null,
+      suppressReason: null,
     };
 
     expect(row.opportunityId).toBe("grants_gov:359855");

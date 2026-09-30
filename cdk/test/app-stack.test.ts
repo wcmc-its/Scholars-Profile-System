@@ -242,9 +242,10 @@ describe("AppStack", () => {
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
-      it("creates exactly two ECR repositories (app + ETL), one ECS cluster, five task definitions, one ECS service", () => {
-        // App image repo + the dedicated ETL batch-image repo (#454).
-        template.resourceCountIs("AWS::ECR::Repository", 2);
+      it("creates exactly three ECR repositories (app + ETL + bulk-data-rule), one ECS cluster, five task definitions, one ECS service", () => {
+        // App image repo + the dedicated ETL batch-image repo (#454) + the
+        // bulk-data-rule pipeline image repo (containerization design, 2026-08-14).
+        template.resourceCountIs("AWS::ECR::Repository", 3);
         template.resourceCountIs("AWS::ECS::Cluster", 1);
         // app + migrate + db-bootstrap (#493) + verify-grants (ADR-009) +
         // search-eval canary (#1444).
@@ -837,19 +838,22 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the app task-execution role policy lists exactly the eleven app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
+      it("the app task-execution role policy lists exactly the twelve app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // The twelve ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
         // revalidate-token, session-cookie-key, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
         // saml/idp-cert (the IdP signing-cert trust anchor, #466),
         // saml-sp/prod/cert (the SP public cert for metadata, #466),
         // newrelic-license-key (the New Relic ingest key for the ADOT
-        // collector's otlphttp/newrelic exporter, B24), and etl/ed (the
+        // collector's otlphttp/newrelic exporter, B24), etl/ed (the
         // read-only WCM Enterprise Directory bind the app injects as
         // SCHOLARS_LDAP_* for the SSO-gated /api/directory/people route,
-        // #1592/#1595). ADR-009 moved db/bootstrap to the deploy execution role
-        // and keeps db/migrate off this role entirely (req 4).
+        // #1592/#1595), and directory/cornell-ithaca-ldap (the read-only
+        // Cornell (Ithaca) LDAP bind the app injects as SCHOLARS_CORNELL_LDAP_*
+        // for the dark Cornell directory surfaces, #2519 PR 3). ADR-009 moved
+        // db/bootstrap to the deploy execution role and keeps db/migrate off
+        // this role entirely (req 4).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -872,7 +876,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(11);
+        expect(resourceList).toHaveLength(12);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -1853,6 +1857,14 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
       });
 
+      it("activates the ORCID surface in prod (SELF_EDIT_ORCID_SUGGESTION: suggestion + Identifiers & Profiles tab + write; flipped 2026-09-22)", () => {
+        expect(appContainerEnv().get("SELF_EDIT_ORCID_SUGGESTION")).toBe("on");
+      });
+
+      it("activates external profile links in prod (SELF_EDIT_PROFILE_LINKS: External Profiles card + profileLinks write + sameAs render; flipped 2026-09-22)", () => {
+        expect(appContainerEnv().get("SELF_EDIT_PROFILE_LINKS")).toBe("on");
+      });
+
       it("activates the ReCiter 'Not mine' reject in prod (RECITER_REJECT_SEND, launch batch 2, #746/#506)", () => {
         // Prod flipped 2026-07-05: staging soak complete + the item-3 VPC
         // consolidation gave prod ReCiter connectivity. Best-effort writeback;
@@ -1877,23 +1889,11 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("off");
       });
 
-      it("keeps the abstention floor off in prod (GRANT_MATCHER_ABSTAIN_FLOOR=0, #287)", () => {
-        // Must stay 0 while subtopic-grain is off: meanTopRel is 0 on the
-        // topic-vector path, so any positive floor would abstain every grant.
-        expect(appContainerEnv().get("GRANT_MATCHER_ABSTAIN_FLOOR")).toBe("0");
-      });
-
       it("activates the family click-to-filter in prod (METHODS_LENS_FAMILY_FILTER, #819/#962 go-live)", () => {
         // Prod go-live 2026-07-05 with the sibling Methods-lens flags: the
         // pmids-bearing scholar_family rollup is loaded (#1481) and the staging soak is done.
         expect(appContainerEnv().get("METHODS_LENS_FAMILY_FILTER")).toBe("on");
         expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("on"); // #824 armed both envs (now live in prod with ENABLED on)
-      });
-
-      it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
-        // Both envs are cut over to root; the flag stays set explicitly as the
-        // soak rollback lever (set back to "scholars" + redeploy to revert).
-        expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("root");
       });
 
       it("enables the slug-request lifecycle in prod (#497, on in both envs)", () => {
@@ -1918,14 +1918,14 @@ describe("AppStack", () => {
         expect(env.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
       });
 
-      it("activates the #917 biosketch generator in prod (EDIT_BIOSKETCH_GENERATE=on, launch batch 2; faithfulness pass ON; default version v7)", () => {
+      it("activates the #917 biosketch generator in prod (EDIT_BIOSKETCH_GENERATE=on, launch batch 2; faithfulness pass ON; default version v8)", () => {
         // Prod flipped 2026-07-05 (#506): staging soak complete. The #917
         // faithfulness pass stays ON in both envs (grant document); the default
         // prompt version is v7 in both envs.
         const env = appContainerEnv();
         expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
         expect(env.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
-        expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v7");
+        expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v8");
       });
 
       it("sources the superuser tier from the ED group with the allowlist emptied", () => {
@@ -2250,25 +2250,6 @@ describe("AppStack", () => {
       });
     });
 
-    it("flips staging to the root /{slug} canonical profile URL (PROFILE_CANONICAL=root, #671 soak-first)", () => {
-      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
-      const appTaskDef = Object.values(taskDefs).find(
-        (r) => r.Properties?.Family === "sps-app-staging",
-      );
-      const appContainer = (
-        appTaskDef?.Properties?.ContainerDefinitions as
-          | Array<{
-              Name?: string;
-              Environment?: Array<{ Name?: string; Value?: string }>;
-            }>
-          | undefined
-      )?.find((c) => c.Name === "app");
-      const envByName = new Map(
-        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
-      );
-      expect(envByName.get("PROFILE_CANONICAL")).toBe("root");
-    });
-
     it("activates the ReCiter 'Not mine' reject in staging first (RECITER_REJECT_SEND=on, #746)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
@@ -2324,9 +2305,6 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("on");
-      // #287 abstention floor: staging-first at the match_v9b offline prior (0.1),
-      // safe here because subtopic-grain is on.
-      expect(envByName.get("GRANT_MATCHER_ABSTAIN_FLOOR")).toBe("0.1");
     });
 
     it("enables the center collaboration network in staging first (CENTER_COLLABORATION_NETWORK=on, #1137)", () => {
@@ -2432,7 +2410,7 @@ describe("AppStack", () => {
       expect(envByName.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
     });
 
-    it("enables the #917 v6 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass on; default version v6)", () => {
+    it("enables the #917 v6 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass on; default version v8)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appContainer = (
         Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
@@ -2446,7 +2424,7 @@ describe("AppStack", () => {
       expect(envByName.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
       // #917 v7 — faithfulness pass ON in both envs (grant document); default prompt version v7.
       expect(envByName.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
-      expect(envByName.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v7");
+      expect(envByName.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v8");
     });
 
     it("ships the ReCiter pending-suggestions nudge ON in staging (SELF_EDIT_RECITER_PENDING_HINT — live DynamoDB read for the soak)", () => {
@@ -2461,6 +2439,20 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
+    });
+
+    it("ships the ORCID suggestion row ON in staging (SELF_EDIT_ORCID_SUGGESTION)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("SELF_EDIT_ORCID_SUGGESTION")).toBe("on");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {
@@ -2620,4 +2612,26 @@ describe("AppStack", () => {
       t.resourceCountIs("AWS::ApplicationAutoScaling::ScalingPolicy", 0);
     });
   });
+});
+
+// Honors queue Run now: ONE action on ONE machine, and the flag ships dark.
+describe("AppStack honors Run now", () => {
+  for (const env of ["staging", "prod"] as const) {
+    it(`${env}: grants states:StartExecution on scholars-honors-${env} only, flag off`, () => {
+      const { template } = buildAppStack(env);
+      const policies = Object.values(template.findResources("AWS::IAM::Policy")).filter(
+        (p) => p.Properties?.PolicyName === `sps-task-${env}-honors-run-now`,
+      );
+      expect(policies).toHaveLength(1);
+      const statements = policies[0].Properties.PolicyDocument.Statement;
+      expect(statements).toHaveLength(1);
+      expect(statements[0].Action).toBe("states:StartExecution");
+      expect(JSON.stringify(statements[0].Resource)).toContain(
+        `:stateMachine:scholars-honors-${env}`,
+      );
+      const json = JSON.stringify(template.toJSON());
+      expect(json).toContain('"Name":"HONORS_RUN_NOW","Value":"off"');
+      expect(json).toContain('"Name":"HONORS_STATE_MACHINE_ARN"');
+    });
+  }
 });

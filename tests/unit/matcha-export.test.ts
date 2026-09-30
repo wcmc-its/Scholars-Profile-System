@@ -90,4 +90,34 @@ describe("buildMatchaCsv", () => {
   it("returns just the header for an empty result set", () => {
     expect(buildMatchaCsv([]).trim()).toBe(HEADER);
   });
+
+  // ── Grant Matcha — the Eligible column (zero-results fix 3) ────────────────
+  // The export deliberately carries the PRE-gate set (the officer's outreach list), so each
+  // row must say whether the page's gate shows it — otherwise the CSV silently contradicts
+  // the page it came from ("Top 0" on screen, 77 unmarked rows in the file).
+  it("appends the Eligible column with per-row Yes/No when the build asks for it", () => {
+    const lines = buildMatchaCsv(
+      [
+        { ...ROW, eligible: "Yes" },
+        { ...ROW, cwid: "bbb2002", name: "Bob Beta", eligible: "No" },
+      ],
+      { eligibility: true },
+    ).split("\r\n");
+    expect(lines[0]).toBe(`${HEADER},Eligible`);
+    expect(lines[1]).toBe(
+      "1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,2,https://example.org/alice-alpha,Yes",
+    );
+    expect(lines[2].endsWith(",No")).toBe(true);
+  });
+
+  it("an empty grant-path export still writes the Eligible header — an option, not row-inferred", () => {
+    expect(buildMatchaCsv([], { eligibility: true }).trim()).toBe(`${HEADER},Eligible`);
+  });
+
+  it("without the option the file is unchanged — `/edit/matcha` states no rule, so no column", () => {
+    // A stray `eligible` value must not smuggle a 13th cell into a 12-column file either.
+    const lines = buildMatchaCsv([{ ...ROW, eligible: "Yes" }]).split("\r\n");
+    expect(lines[0]).toBe(HEADER);
+    expect(lines[1].split(",")).toHaveLength(12);
+  });
 });

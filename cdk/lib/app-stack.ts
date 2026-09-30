@@ -4,6 +4,7 @@ import {
   CfnOutput,
   Duration,
   Fn,
+  Lazy,
   RemovalPolicy,
   SecretValue,
   Stack,
@@ -145,6 +146,13 @@ export class AppStack extends Stack {
    * collision; EtlStack pulls from here (#454).
    */
   public readonly etlEcrRepository: ecr.Repository;
+  /**
+   * ECR repository for the `scripts/bulk-data-rule/` pipeline image. Python
+   * (pandas/sqlalchemy/pymysql), not the app's or ETL's Node/`tsx` runtime,
+   * so it gets its own repo rather than riding either (containerization
+   * design, 2026-08-14).
+   */
+  public readonly bulkDataRuleEcrRepository: ecr.Repository;
   /** ECS Fargate cluster the app + migration tasks run in. */
   public readonly ecsCluster: ecs.Cluster;
   /** ECS service for the SPS application. */
@@ -182,6 +190,9 @@ export class AppStack extends Stack {
 
     const { envConfig, vpc } = props;
     const env = envConfig.envName;
+    // `scholars-honors-<env>` (EtlStack HonorsStateMachine), by name -- see
+    // TaskRoleHonorsRunNowPolicy below.
+    const honorsStateMachineArn = `arn:aws:states:${this.region}:${this.account}:stateMachine:scholars-honors-${env}`;
     // Item-3 pass 2a: import the app/etl/alb SGs by id from the SSM params
     // NetworkStack publishes (pass 1) instead of the cross-stack handles — severs
     // the SG `Ref` exports that would lock the useSharedVpc flip (the SGs replace
@@ -356,6 +367,37 @@ export class AppStack extends Stack {
       "AppEtlEdSecret",
       `scholars/${env}/etl/ed`,
     );
+    // Read-only Cornell (Ithaca) LDAP bind (#2519 PR 3). Consumed by
+    // lib/sources/cornell-ldap.ts for the flag-gated Cornell (Ithaca)
+    // unit-member surfaces: `GET /api/directory/people?source=cornell` and
+    // the `source:"cornell"` branch of `POST /api/edit/roster`'s `add`
+    // action. Read-only bind, no DDL -- same class as edSecret above.
+    //
+    // Name is "cornell-ithaca-ldap", not the spec'd "cornell-ithaca": an
+    // earlier out-of-band secret used the latter, and its "-ithaca" tail (a
+    // 6-char token) collides with the Secrets Manager random-suffix
+    // heuristic, so the suffix-less partial ARN fromSecretNameV2 injects did
+    // NOT resolve -- proven deterministically: GetSecretValue on the partial
+    // ARN returned ResourceNotFoundException. App tasks would have failed at
+    // startup. The "-ldap" tail (4 chars) is clear of the gotcha -- same
+    // pattern as sessionCookieSecret's "-key" tail, newRelicLicenseKeySecret's
+    // "-key" tail, and edSecret's "/ed" tail above.
+    //
+    // Created out-of-band in BOTH envs (like edSecret's sibling
+    // scholars/*/etl/bulk-data-rule): SecretsStack is deliberately NOT
+    // touched here, since `Sps-Secrets-prod` cannot be cdk-deployed today
+    // (pre-existing CloudFormation import blocker on
+    // scholars/prod/research-informatics-token). Fold this into SecretsStack
+    // if that import puzzle is ever solved.
+    //
+    // PR 3 of #2519 wires the secret only -- dark until CORNELL_DIRECTORY_MEMBERS
+    // flips (see the flag block below), which will not happen before FERPA
+    // sign-off.
+    const cornellLdapSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "CornellLdapSecret",
+      `scholars/${env}/directory/cornell-ithaca-ldap`,
+    );
 
     // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
     //
@@ -391,6 +433,11 @@ export class AppStack extends Stack {
       // (ADR-009: still no migrate, no bootstrap). Lands on the EXECUTION role
       // only; the task role keeps zero secretsmanager:* (asserted in tests).
       edSecret.secretArn,
+      // Read-only Cornell (Ithaca) LDAP bind (#2519 PR 3): the app
+      // task-execution role must GetSecretValue on this secret to inject
+      // SCHOLARS_CORNELL_LDAP_* into the app container. Same ADR-009 class
+      // as edSecret above -- no migrate, no bootstrap.
+      cornellLdapSecret.secretArn,
     ];
     // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
     // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
@@ -436,6 +483,30 @@ export class AppStack extends Stack {
     // pulls from here; the deploy workflow builds `--target etl` and pushes.
     this.etlEcrRepository = new ecr.Repository(this, "EtlEcrRepository", {
       repositoryName: `scholars-etl-${env}`,
+      imageScanOnPush: true,
+      lifecycleRules: [
+        {
+          description: "Keep the last 30 tagged images",
+          tagStatus: ecr.TagStatus.TAGGED,
+          tagPatternList: ["*"],
+          maxImageCount: 30,
+        },
+        {
+          description: "Expire untagged images after 7 days",
+          tagStatus: ecr.TagStatus.UNTAGGED,
+          maxImageAge: Duration.days(7),
+        },
+      ],
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // Dedicated bulk-data-rule pipeline image repo (containerization design,
+    // 2026-08-14). scripts/bulk-data-rule/ is a standalone Python pipeline --
+    // no runtime overlap with the app or the tsx-based ETL image, so it gets
+    // its own repo rather than a seat on either. Same scan + lifecycle
+    // posture as the other two.
+    this.bulkDataRuleEcrRepository = new ecr.Repository(this, "BulkDataRuleEcrRepository", {
+      repositoryName: `scholars-bulk-data-rule-${env}`,
       imageScanOnPush: true,
       lifecycleRules: [
         {
@@ -527,9 +598,11 @@ export class AppStack extends Stack {
     // - **Task-execution role** (`taskExecutionRole`) is the role ECS assumes
     //   for the 24/7 APP task to pull the image, inject secrets, and write log
     //   streams. Tightly scoped: ECR auth + Batch* on the app repo only;
-    //   secrets:GetSecretValue on the eleven app consumer ARNs only (ADR-009: no
+    //   secrets:GetSecretValue on the twelve app consumer ARNs only (ADR-009: no
     //   migrate, no bootstrap) -- the eleventh is the read-only ED bind secret
-    //   (#1592) the app injects for the SSO-gated /api/directory/people route;
+    //   (#1592) the app injects for the SSO-gated /api/directory/people route,
+    //   and the twelfth is the read-only Cornell (Ithaca) LDAP bind secret
+    //   (#2519 PR 3) the app injects for the dark Cornell directory surfaces;
     //   logs on the app + ADOT-sidecar groups only.
     // - **Deploy execution role** (`deployTaskExecutionRole`, ADR-009) is the
     //   parallel role for the short-lived deploy-time tasks (migrate,
@@ -571,7 +644,7 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets -- exactly the eleven app consumer ARNs (ADR-009 split: no migrate,
+    // Secrets -- exactly the twelve app consumer ARNs (ADR-009 split: no migrate,
     // no bootstrap). Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
@@ -1040,6 +1113,67 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // Service-health section (/edit/usage) -- read-only CloudWatch grant.
+    //
+    // lib/api/service-health.ts reads the public ALB's AWS/ApplicationELB
+    // metrics (RequestCount / HTTPCode_ELB_5XX_Count / HTTPCode_Target_5XX_Count)
+    // for the uptime tile + monthly trend, and the `sps-app-unavailable-${env}`
+    // composite alarm's state-transition history for the alarm-firings tile.
+    // Both env-var identifiers are wired above (SPS_PUBLIC_ALB_FULL_NAME /
+    // SPS_APP_UNAVAILABLE_ALARM); this is the matching IAM grant. Read-only,
+    // two actions, both scoped to `*` -- neither can be scoped tighter:
+    //   - cloudwatch:GetMetricData grants NO resource-level permissions at all
+    //     (confirmed against the CloudWatch IAM action reference) -- every
+    //     caller of this action uses `*`.
+    //   - cloudwatch:DescribeAlarmHistory DOES support scoping to an
+    //     `arn:aws:cloudwatch:region:account:alarm:name` resource for a metric
+    //     alarm, but `sps-app-unavailable-${env}` is a COMPOSITE alarm, and AWS
+    //     documents that composite-alarm history is only returned when the
+    //     caller's DescribeAlarmHistory permission has the `*` resource scope --
+    //     a narrower ARN-scoped grant silently omits composite alarms from the
+    //     response. Scoping this to the one alarm ARN would look tighter and
+    //     break the alarm-firings tile.
+    // No cloudwatch:DescribeAlarms -- the loader never calls it (alarm STATE is
+    // not read, only history).
+    // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Honors queue Run now -- start the honors-list scrape.
+    //
+    // POST /api/edit/honor/sources/run (lib/honors/run-now.ts) calls
+    // states:StartExecution on `scholars-honors-<env>` (EtlStack
+    // HonorsStateMachine) and nothing else: one action, one machine. Not
+    // DescribeExecution/StopExecution -- the Sources tab reads run state from
+    // `honor_list_run`, which the job itself writes. The ARN is built from the
+    // machine NAME so this stack does not depend on EtlStack (which is deployed
+    // separately); a rename there must be mirrored here. Gated in code by
+    // HONORS_RUN_NOW (off in both envs); the grant lands first so the flip is
+    // the only step.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleHonorsRunNowPolicy", {
+      policyName: `sps-task-${env}-honors-run-now`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["states:StartExecution"],
+          resources: [honorsStateMachineArn],
+        }),
+      ],
+    });
+
+    new iam.Policy(this, "TaskRoleCloudWatchReadPolicy", {
+      policyName: `sps-task-${env}-cloudwatch-read`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["cloudwatch:GetMetricData", "cloudwatch:DescribeAlarmHistory"],
+          resources: ["*"],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
@@ -1204,9 +1338,6 @@ export class AppStack extends Stack {
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
         // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
         GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain ? "on" : "off",
-        // Abstention floor for the reverse matcher (0 = off). Staging-first; must
-        // stay 0 wherever subtopic-grain is off. See config.ts grantMatcherAbstainFloor.
-        GRANT_MATCHER_ABSTAIN_FLOOR: String(envConfig.grantMatcherAbstainFloor),
         // OpenSearch domain endpoint (https://...). Default: a plaintext env
         // baked from the DataStack cross-stack export. When
         // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
@@ -1284,6 +1415,14 @@ export class AppStack extends Stack {
         // headshot column is populated by the weekly etl:headshot step (EtlStack);
         // until its first run, headshot cells render "— (not checked)".
         EDIT_DATA_QUALITY_DASHBOARD: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
+        // Data Sharing dashboard (`/edit/data-sharing`, S-Index Phase 1 admin/CTSA
+        // reporting, `Data Sharing in Scholars Profile System - SPEC.md` "Admin
+        // and CTSA reporting"): read-only rollup of the DatasetDeposit/
+        // PersonDatasetDeposit bridge — datasets by department, by repository, and
+        // by named faculty (no lock, no redaction — decided 2026-08-12). Read via
+        // isDataSharingDashboardEnabled() (=== "on"); when off the route 404s and
+        // the sub-nav tab is hidden — ships dark. App-only, no reindex, no writes.
+        EDIT_DATA_SHARING_DASHBOARD: "on", // Prod flipped 2026-08-12 (#2383, staging-soaked same day, render-only).
         // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
         // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
         // soak completes (prod flips in a follow-up). While off, "Not mine?"
@@ -1316,6 +1455,13 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
+        // SELF_EDIT_MENTEE_SUGGESTIONS (#2634) — the "Mentees › From your
+        // publications" rail sub-view: co-authorship-derived mentee suggestions
+        // (ReCiterDB analysis_summary_author_list self-join, built nightly by
+        // etl:reciter into `mentee_suggestion`) with Add / Not-a-mentee. Read via
+        // isMenteeSuggestionsEnabled() (=== "on"). Staging eyeballed 2026-09-14;
+        // prod ON the same day (approval-gated `cdk deploy Sps-App-prod`).
+        SELF_EDIT_MENTEE_SUGGESTIONS: "on",
         // SELF_EDIT_GRANT_RECS (GrantRecs Phase 3) — the owner-facing "Grants for
         // me" rail item + panel on /edit (self) and /edit/scholar/[cwid]
         // (superuser), surfacing the Phase-2 forward matcher
@@ -1338,7 +1484,7 @@ export class AppStack extends Stack {
         // #1102/#1103/#1104/#1105 — Cancer-Center / org-unit features (merged
         // 2026-06-18, PRs #1108/#1109/#1110/#1111). Staging-on for soak;
         // prod-off/armed (flip on the next approval-gated Sps-App-prod deploy):
-        //   EDIT_UNIT_ROSTER_EXPORT    (#1102) center roster CSV on the /edit Members tab
+        //   EDIT_UNIT_ROSTER_EXPORT    (#1102) center roster .xlsx on the /edit Members tab
         //   PROFILE_CENTER_AFFILIATION (#1103) "Centers" card on the scholar profile
         //                              (center name renders now; program label/type
         //                              fill in once #906's classification load runs)
@@ -1368,6 +1514,24 @@ export class AppStack extends Stack {
         // (CENTER_COLLABORATION_NETWORK) is already prod-on; inert unless a center
         // has a CenterProgram taxonomy (Meyer today).
         CENTER_COLLABORATION_GRANT_AXIS: "on",
+        // CENTER_DISEASE_FACET — the public center page's curated disease
+        // layer: a "Disease focus" facet on the Scholars tab plus a DISEASES
+        // row above TOPICS on each member card (D1, decided 2026-09-30 via the
+        // Meyer mockup; diseases sit BESIDE topics, never replace them). Read
+        // via isCenterDiseaseFacetEnabled() (=== "on"); when off the roster
+        // loader queries nothing and the payload is byte-identical. Only
+        // published diseases (human-confirmed, or center auto-publish of high
+        // confidence) render. Data-gated on a CenterProgram taxonomy (Meyer
+        // today). App-only, no reindex, no migration. Staging-on for soak;
+        // prod-off until sign-off.
+        CENTER_DISEASE_FACET: env === "staging" ? "on" : "off",
+        // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
+        // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
+        // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
+        // and its /api/edit/roles endpoints 404 and the admin sub-nav tab stays
+        // hidden. App-only, no reindex, no migration. Soaked on staging, then
+        // signed off for prod 2026-09-01 — on in both envs.
+        ORG_UNIT_ROLE_CONSOLE: "on",
         // CLINICAL_TRIALS_SECTION — the profile "Clinical trials" section
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after
@@ -1379,9 +1543,19 @@ export class AppStack extends Stack {
         // no deposits), so this is safe to leave off even after the
         // etl:data-sharing backfill lands — it also produces no real rows yet
         // (the reciterdb-side dataset_deposit table is a separate, not-yet-built
-        // prerequisite). Dark-launched staging-first, same precedent as
-        // CLINICAL_TRIALS_SECTION and NEWS_MENTIONS_SECTION.
-        DATA_SHARING_SECTION: env === "staging" ? "on" : "off",
+        // prerequisite). Off by default both envs (flipped back off 2026-08-24 —
+        // was staging-on for soak; no per-user override, this is a blanket gate).
+        DATA_SHARING_SECTION: "off",
+        // CORNELL_DIRECTORY_MEMBERS (#2519 PR 1) — the dark Cornell (Ithaca)
+        // directory-members surface: `GET /api/directory/people?source=cornell`
+        // and the `source:"cornell"` branch of `POST /api/edit/roster`'s `add`
+        // action. Both 404/no-op when off. PR 3 wired the Cornell LDAP secret
+        // (scholars/<env>/directory/cornell-ithaca-ldap) into `secrets:` above,
+        // so the vars are present at task start. ON in both envs since
+        // 2026-08-27 (owner-approved go-live). Note prod's IMAGE must also be
+        // current for the surfaces to exist -- the flag gates code that only
+        // ships with a pipeline prod deploy.
+        CORNELL_DIRECTORY_MEMBERS: "on",
         // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
         // section, sourced from the CTL portfolio via `npm run etl:technologies`.
         // The profile payload returns [] when off, and the section is
@@ -1409,6 +1583,13 @@ export class AppStack extends Stack {
         // left 483 NAME-matched mentions pending, so the queue opens with real triage
         // work rather than empty. Without it those 483 have no path to publication.
         NEWS_APPROVAL_QUEUE: "on",
+        // MEDIA_HIGHLIGHTS_SECTION — the profile "Media Highlights" section: press
+        // clips parsed from the External Affairs "WCM in the News" digest by
+        // etl:news-clips, published only after /edit/media-highlights-queue review.
+        // ON in both envs (prod 2026-09-24): an unreviewed clip never renders, so the
+        // section stays empty until clips are approved. Clip rows never reach the
+        // News section either way.
+        MEDIA_HIGHLIGHTS_SECTION: "on",
         // CONSOLE_SUBNAV_GROUPED — collapses the /edit console sub-nav's 14
         // role-gated tabs into two tiers: Profiles · Org units · Queues ·
         // Registries · Insights · Tools, with the active group's members on a
@@ -1453,14 +1634,18 @@ export class AppStack extends Stack {
         // by BM25(gloss). A RANKING change ⇒ eval-gated. The 2026-07-22 in-VPC λ-sweep cleared the
         // gate on the eval-fair metric: graded-only nDCG@20 rose 0.872→0.894 (λ=1.0), monotonic,
         // ~2.8× the 0.0074 noise floor; λ=0.5 = 0.890 (within 0.004 of peak, gentler displacement);
-        // graded-relevant retention rose 232→234 (zero experts lost). STAGING-ON at λ=0.5; prod held
-        // OFF pending an eyeball → deliberate prod flip. NOTE: the rescore is NOT recall-neutral on a
-        // multi-shard index (per-shard rescore-then-merge churns the ungraded deep tail, fused rank
-        // ≥66) — the win rests on the graded metric, not on recall-invariance. See
+        // graded-relevant retention rose 232→234 (zero experts lost). Was STAGING-ON pending the
+        // eyeball caveat 3 asked for; that eyeball (PR #2048, 2026-07-29) found it thinner than the
+        // aggregate metric suggests — top-10 is a near coin-flip (4 fixtures better / 3 worse), with
+        // reproducible 5/5-draw regressions on heme-malignancy and single-cell-genomics (a graded
+        // relevant result pushed out, a not-relevant one promoted in). Held OFF everywhere pending a
+        // domain-expert read of those two fixtures — see #2048. NOTE: the rescore is NOT recall-
+        // neutral on a multi-shard index (per-shard rescore-then-merge churns the ungraded deep tail,
+        // fused rank ≥66) — the win rests on the graded metric, not on recall-invariance. See
         // docs/2026-07-22-gloss-rerank-eval-result-and-fix-handoff.md.
-        MATCHA_GLOSS_RERANK: env === "staging" ? "on" : "off",
-        // λ = rescore_query_weight, wired per-env (was eval-only, set per-arm in the sweep). 0.5 is
-        // the picked value; inert in prod while the flag is off, so a plain literal is fine.
+        MATCHA_GLOSS_RERANK: "off",
+        // λ = rescore_query_weight (was eval-only, set per-arm in the sweep). 0.5 is the picked
+        // value; inert while the flag is off everywhere, so a plain literal is fine.
         MATCHA_GLOSS_RERANK_LAMBDA: "0.5",
         // MATCHA_GLOSS_INWORDS — the "in their words" evidence line: highlight the gloss's distinctive
         // terms (the sponsor's sense words that diverge from the MeSH canonical) in each candidate's
@@ -1471,11 +1656,11 @@ export class AppStack extends Stack {
         // docs/2026-07-22-gloss-mechanism-cognitive-probe-and-inwords-evidence-handoff.md §5). Flip
         // staging on via a deliberate cdk deploy once that measurement clears.
         MATCHA_GLOSS_INWORDS: "off",
-        // GRANT_MATCHA — the Grant Matcha convergence surfaces: the /edit/find-researchers "Matcha"
-        // mode (opportunity → researchers via the spine, #1866) AND the /edit/matcha people|grants
-        // target toggle + query→grants result cards (#1867 route + #1870 UI). Read via
-        // isGrantMatchaEnabled() (=== "on"); a strict, reversible add — flag-off keeps the existing
-        // topic-vector view as the only engine, and the surface stays admin-only regardless.
+        // GRANT_MATCHA — the Grant Matcha convergence surfaces: /edit/grant-matcha (opportunity →
+        // researchers via the spine, #1866; the find-researchers sunset made it the only mount) AND
+        // the /edit/matcha people|grants target toggle + query→grants result cards (#1867 route + #1870 UI). Read via
+        // isGrantMatchaEnabled() (=== "on"); a strict, reversible add — flag-off darkens
+        // /edit/grant-matcha, and the surface stays admin-only regardless.
         // DEPENDS ON MATCHA (on in both envs): the modes POST to /api/edit/matcha, which 404s when
         // MATCHA is off. Staging-soaked since 2026-07-22 (#1872), owner-approved on the eyeball
         // 2026-07-24 (#1906).
@@ -1483,9 +1668,20 @@ export class AppStack extends Stack {
         // hold was STALE — measured that day, `opportunity` holds 1,122 rows in prod vs 1,151 in
         // staging (97.5% parity), so the picker is data-backed in both envs. Blast radius stays
         // small regardless: the page gate is isMatchaEnabled() && isGrantMatchaEnabled() &&
-        // (superuser||developer), and there is still no nav tab — /edit/grant-matcha is URL-only.
+        // (superuser||developer), with a Tools nav tab for exactly that audience.
         // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
+        // ⚠ Since the find-researchers sunset (Phase 3c), /edit/grant-matcha is the development
+        // role's ONLY console page and their GLOBAL_ROLE_HOME landing. Flipping this (or MATCHA)
+        // off no longer degrades to an older surface — it 404s that role's entire console entry.
         GRANT_MATCHA: "on",
+        // MATCHA_ADMIN — the Grant Matcha corpus-admin surface (matcha-admin plan Phase 1b):
+        // /api/edit/opportunity-admin suppress/restore on `opportunity` rows + the Browse-tab
+        // admin affordances. Read via isMatchaAdminEnabled() (=== "on"); the route 404s while
+        // off. ON in staging (Phase 1b rollout); OFF in prod (armed — flips on a deliberate
+        // Sps-App-prod deploy after the staging soak). Suppression is data-only (nullable
+        // columns), so flag-off leaves any already-suppressed rows suppressed in reads — the
+        // flag gates the WRITE surface, not the read filters.
+        MATCHA_ADMIN: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
@@ -1497,6 +1693,48 @@ export class AppStack extends Stack {
         // approval-gated Sps-App-prod deploy after the staging soak). The nudge only
         // renders for a genuine (non-impersonating) self viewer with this flag on.
         SELF_EDIT_RECITER_PENDING_HINT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
+        // SELF_EDIT_ORCID_SUGGESTION — one kill switch for the ORCID surface: the
+        // home board's inferred-iD suggestion from the nightly `orcid_candidate`
+        // mirror, the Identifiers & Profiles tab, and `POST /api/edit/orcid`, which
+        // writes SPS tables only (`scholar.orcid` + `orcid_confirmed_at`, and
+        // `orcid_dismissal` on Remove / a rejected suggestion); the nightly
+        // `etl:orcid-push` carries the result to WCM Identity. Off → the row still
+        // renders from `scholar.orcid`, its CTA hands off to ReCiter Manage Profile
+        // (campus-only), the tab is absent, the route 404s. ON in both envs since
+        // 2026-09-22 (staging soak, then the prod flip; the `pubsource_orcid_person`
+        // refresh it waited on landed 2026-09-21). Kept as a flag: it is the single
+        // kill switch for the ORCID tab, its write and the suggestion.
+        SELF_EDIT_ORCID_SUGGESTION: "on",
+        // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
+        // (LinkedIn, X, Bluesky, Google Scholar, ResearchGate): the External
+        // Profiles card on the Identifiers & Profiles tab, the `profileLinks`
+        // branch of `POST /api/edit/field`, and the Contact-card + JSON-LD
+        // `sameAs` render. Independent of the ORCID kill switch above (the tab
+        // shows when either is on). ON in both envs since 2026-09-22.
+        SELF_EDIT_PROFILE_LINKS: "on",
+        // SCHOLAR_TITLE_RESOLUTION (#2719) — the display-title picker on the
+        // /edit Name & title panel, its scholar-facing request path, and the ED
+        // ETL's title-resolution post-pass. Read by BOTH the app and the ETL, so
+        // it is wired in etl-stack.ts's baseEnvironment too (same dual-wiring as
+        // SELF_EDIT_ED_ADMINS_IMPORT). flag-parity checks wiring, not agreement.
+        //
+        // OFF ⇒ dark: the picker does not render, `POST /api/edit/field` rejects
+        // both `primaryTitle` and `primaryTitleRequest` as unknown fields, and
+        // the ETL resolves from the operator override + ED primary title only —
+        // i.e. today's titles. Because the post-pass recomputes EVERY scholar
+        // rather than only the ones it changed, flipping this back off
+        // self-heals on the next nightly instead of stranding 43 scholars on a
+        // title nobody can reach.
+        //
+        // DATA PREREQ (migrate-then-run-then-flip): the migration adds
+        // `scholar.ed_primary_title` / `scholar.working_title`, which stay NULL
+        // until an ED ETL run populates them. Flip only AFTER a run, or the
+        // picker has nothing to offer.
+        //
+        // Prod rolled out as a split flip: app first, so operators could pin the
+        // ED primary for the 8 derived titles that read worse than today's
+        // (2026-09-23), then the ETL copy. Both on in both envs since then.
+        SCHOLAR_TITLE_RESOLUTION: "on",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in
@@ -1588,6 +1826,53 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         HONORS_CURATOR_ENABLED: "on",
         SCHOLARS_HONORS_CURATOR_GROUP_CN: "ITS:Library:Scholars/honors-curator-role",
+        // Honors queue Sources tab -- Run now. When "on", a superuser or
+        // honors_curator can start the honors-list scrape for one list
+        // (POST /api/edit/honor/sources/run -> states:StartExecution on
+        // scholars-honors-<env>, EtlStack HonorsStateMachine). Off ⇒ the button
+        // is hidden and the route 404s; the weekly schedule (EtlStack
+        // sps-honors-<env>, itself disabled until enabled per env) is separate.
+        // The grant below (TaskRoleHonorsRunNowPolicy) and the ARN ship with
+        // this deploy, so flipping the flag is the only step left. OFF in both
+        // envs until the first supervised run has been checked on staging;
+        // flip staging's branch first.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        HONORS_RUN_NOW: envConfig.envName === "staging" ? "off" : "off",
+        // The machine Run now starts. Built from the name, not imported from
+        // EtlStack, so the app stack takes no cross-stack dependency on it.
+        HONORS_STATE_MACHINE_ARN: honorsStateMachineArn,
+        // `data_sharing_viewer` role (2026-08-15 -- data-sharing dashboard
+        // handoff). Unlocks ONLY /edit/data-sharing for the dashboard's
+        // reframed standing audience (research leadership, compliance/grant
+        // reporting, library/RDM) who are neither superuser nor comms_steward
+        // -- both of which already pass this guard.
+        //   DATA_SHARING_VIEWER_ENABLED -- master kill switch, same shape as
+        //     HONORS_CURATOR_ENABLED above. While not "on", isDataSharingViewer()
+        //     short-circuits to false before any directory work.
+        //   SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN -- the ED group whose
+        //     membership confers the role. Created 2026-08-15, structurally
+        //     identical to its siblings (groupOfURLs under `ou=application
+        //     security`); dhd2002 and aeo2003 are its initial members
+        //     (employee-exempt memberURL filter, matching the superuser /
+        //     comms-steward groups' pattern for staff members).
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        DATA_SHARING_VIEWER_ENABLED: "on",
+        SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
+        // `cv_generator` role (#2482) -- read-only access to every scholar's
+        // /edit/scholar/[cwid] (superuser-parity content, EditShell renders it
+        // `inert`) and the /edit/profiles roster. For Faculty Affairs staff who
+        // need to browse profiles to assemble CVs, and more broadly to open the
+        // tool to people who shouldn't get write rights ("socialize the app").
+        //   CV_GENERATOR_ENABLED -- master kill switch, same shape as
+        //     DATA_SHARING_VIEWER_ENABLED above. While not "on", isCvGenerator()
+        //     short-circuits to false before any directory work -- safe to
+        //     enable ahead of the ED group existing (fails closed, not broken).
+        //   SCHOLARS_CV_GENERATOR_GROUP_CN -- the ED group whose membership
+        //     confers the role. Same shape as its siblings (groupOfURLs under
+        //     `ou=application security`); see the LDIF handoff for creation.
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        CV_GENERATOR_ENABLED: "on",
+        SCHOLARS_CV_GENERATOR_GROUP_CN: "ITS:Library:Scholars/cv-generator-role",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"
@@ -1628,9 +1913,8 @@ export class AppStack extends Stack {
         // REPORTER_MATCH_V2 -- the RePORTER PMID-overlap "Is this you?" card on the
         // /edit surface (the app side of the flag; the ETL side is set in
         // etl-stack.ts). Gates the EditContext load, the rail item, and the
-        // confirm/reject/revoke routes. NEW surface: staging-first, prod-dark until
-        // an approval-gated `cdk deploy --exclusively Sps-App-<env>`. No new IAM.
-        REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
+        // confirm/reject/revoke routes.
+        REPORTER_MATCH_V2: "on", // Prod flipped 2026-08-17 (#1468, staging match-quality soak signed off).
         // POPS physician-directory base (clinical CV enrichment, zero-persist, over
         // NAT egress -- the public WCM physician-directory host, reachable from the
         // Sps VPC unlike the 10.x internal sources).
@@ -1650,15 +1934,17 @@ export class AppStack extends Stack {
         // `cdk deploy --exclusively Sps-App-<env>`.
         BIOSKETCH_FAITHFULNESS_PASS: "on",
         // #917 v7 -- the LIVE default biosketch prompt VERSION (its own namespace,
-        // NOT the overview v2/v3/v4). "v7" is v6 + a short subject heading on each
-        // contribution (the NIH "Contributions to Science" heading format) and the new
-        // default in both envs. No-image-roll ROLLBACK lever: set "v6" + a manual
-        // `cdk deploy --exclusively Sps-App-<env>` to revert to the (byte-pinned)
-        // title-less prompt. An invalid / unset value falls back to the registry default
-        // (v7), so a typo never breaks the generator (defaultBiosketchPromptVersionId,
+        // NOT the overview v2/v3/v4). "v8" (#2653) is v7 + the role-on-the-application
+        // selector for the Personal Statement and keyed product references, the default in
+        // both envs since 2026-09-18. No-image-roll ROLLBACK lever: set "v7" + a manual
+        // `cdk deploy --exclusively Sps-App-<env>` to revert to the (sha-pinned) v7 prompt.
+        // An invalid / unset value falls back to the registry default (v8), so a typo never
+        // breaks the generator (defaultBiosketchPromptVersionId,
         // lib/edit/biosketch-prompt-versions.ts). Superuser / curator can still pick any
-        // version per-generate regardless of this default.
-        BIOSKETCH_PROMPT_VERSION_DEFAULT: "v7",
+        // version per-generate regardless of this default. Keep this and the compiled
+        // default in step: the client bundle reads the compiled one to decide whether to
+        // show the role selector, the route reads this one.
+        BIOSKETCH_PROMPT_VERSION_DEFAULT: "v8",
         // #742 -- the LIVE default prompt VERSION (overview-prompt-versioning-spec.md).
         // "v3" is the keyword-rich narrative prompt and the new default for all
         // generations in both envs. This env is the no-image-roll ROLLBACK lever:
@@ -1709,6 +1995,20 @@ export class AppStack extends Stack {
         SPS_USAGE_WORKGROUP: `sps-usage-app-${env}`,
         SPS_USAGE_DATABASE: `sps_usage_${env}`,
         SPS_USAGE_REGION: this.region,
+        // Service-health section (/edit/usage) -- lib/api/service-health.ts reads
+        // these two identifiers at runtime (never baked into the image) to query
+        // CloudWatch directly: the public ALB's dimension name for the
+        // AWS/ApplicationELB RequestCount/5XX metrics, and the composite alarm
+        // this env pages on for the alarm-firings tile (built in
+        // ObservabilityStack as `sps-app-unavailable-${env}` -- see
+        // observability-stack.ts AppUnavailableAlarm; composed here from the same
+        // literal template rather than a cross-stack ref, since this stack has no
+        // other dependency on ObservabilityStack). `Lazy.string` because
+        // `this.publicAlb` is not constructed until further down this file --
+        // CDK resolves the token once the whole tree is built, at synth time.
+        // The matching read-only grant is TaskRoleCloudWatchReadPolicy below.
+        SPS_PUBLIC_ALB_FULL_NAME: Lazy.string({ produce: () => this.publicAlb.loadBalancerFullName }),
+        SPS_APP_UNAVAILABLE_ALARM: `sps-app-unavailable-${env}`,
         // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
         // DEFAULT ON: the header reads `=== "off"` (isBetaBadgeEnabled), so the
         // badge shows in both envs while we're in beta. Wired here explicitly so
@@ -1893,6 +2193,23 @@ export class AppStack extends Stack {
         // gets its own lever.
         SEARCH_PEOPLE_CLINICAL_RANK_FACETS: "on",
         SEARCH_PEOPLE_ESI_FACET: "on",
+        // People-search "Institution" facet (direct copy of Scholar.primaryOrgCode,
+        // ED weillCornellEduPrimaryOrganization). Same reindex-then-flip shape as
+        // the pair above: DARK until the first nightly people-alias rebuild after
+        // the ETL image ships carries the new `primaryOrgCode` keyword; while the
+        // field is UNMAPPED the agg matches nothing and no group renders. Flip
+        // (cdk deploy) only AFTER that rebuild: an /edit single-doc reindex in
+        // between dynamically maps the field as text, and a terms agg on text is
+        // a 500. Prod ON 2026-09-22 after the prod people-alias rebuild.
+        SEARCH_PEOPLE_INSTITUTION_FACET: "on",
+        // Publications-tab / Funding-tab "Institution" facets (pub doc
+        // `wcmAuthorInstitutions` = union of the WCM authors' primaryOrgCode;
+        // funding doc `institution` = lead PI's primaryOrgCode). Same
+        // reindex-then-flip trap as the people flag above: DARK until the
+        // nightly alias rebuild carries the keyword mappings; flip only AFTER.
+        // Prod ON 2026-09-22 after the prod pub + funding alias rebuilds.
+        SEARCH_PUB_INSTITUTION_FACET: "on",
+        SEARCH_FUNDING_INSTITUTION_FACET: "on",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
@@ -1926,6 +2243,19 @@ export class AppStack extends Stack {
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
         SEARCH_PEOPLE_AREA_BOOST: "on", // Prod flipped 2026-07-07 (reorder-only, no reindex).
+        // Clinical trials as People-search evidence: trialText in the topic ladder,
+        // trialMeshUi in the concept boost + concept-scope gate. Needs the nightly
+        // reindex that writes the fields; before it, the clauses match nothing.
+        // resolveSearchPeopleTrialEvidence reads === "on". Staging-first.
+        SEARCH_PEOPLE_TRIAL_EVIDENCE: env === "staging" ? "on" : "off",
+        // Multiplier for a PI trial MeSH-tagged in the searched concept, stacked on the
+        // concept attribution boost. resolveSearchPeopleTrialMeshWeight: 1 = off, (1, 3].
+        // Staging-first for the A/B; prod inert (trial evidence is off there).
+        SEARCH_PEOPLE_TRIAL_MESH_WEIGHT: env === "staging" ? "1.2" : "1",
+        // Clinical trials search tab over the scholars-trials index (built nightly by
+        // search:index). resolveTrialsTab reads === "on". Staging-first; a missing
+        // index hides the tab rather than erroring the page.
+        SEARCH_TRIALS_TAB: env === "staging" ? "on" : "off",
         // #2018 -- concept-arm precedence for the concentration boost above. That boost has
         //   two arms: a CURATED one keyed on taxonomyMatch.areas[0] (area membership) and a
         //   CONCEPT one keyed on the resolved MeSH descendantUis (the query). On master the
@@ -2211,6 +2541,13 @@ export class AppStack extends Stack {
         //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //   Sps-App-<env> -- the flag-parity rule.
         SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: "off",
+        // Two-concept resolution (term-resolution-gap spec, 2026-09-14). A `partial`
+        //   primary's residual tokens are resolved once more; a hit becomes
+        //   `MeshResolution.secondaryConcept`, and the concept-concentration boost is keyed on
+        //   pubs tagged in BOTH subtrees. Reorder-only, no admission change. Staging eval
+        //   read 2026-09-14/15 (Projects probe-secondary-concept-eval.py: 27/35 paired, 11
+        //   reordered, none demoted); PROD ON 2026-09-15 alongside #2645-#2648.
+        SEARCH_MESH_SECONDARY_CONCEPT: "on",
         // SEARCH_MESH_ENTRY_TIER_PARITY -- entry-term tier parity. When ON, meshMatchTier
         //   promotes an entry-term resolution to the `exact` tier IF the user's WHOLE
         //   query is the entry term that matched. Same descriptor => same tier => same
@@ -2328,19 +2665,6 @@ export class AppStack extends Stack {
         // on the live superuser-role LDAP check (R1); enabling the flag does
         // not by itself grant anyone impersonation.
         IMPERSONATION_ENABLED: "true",
-        // #671 -- people profile canonical URL. "root" serves /{slug} as the
-        // canonical profile URL (and /scholars/{slug} 301s to it); "scholars"
-        // (or unset) keeps the legacy /scholars/{slug}. Both envs cut over to
-        // "root" (staging flipped first for verification; prod followed). Kept
-        // as an explicit flag -- not yet removed -- so it stays the rollback
-        // lever during the soak (set back to "scholars" + redeploy to revert).
-        // Unlike IMPERSONATION above, this needs NO EdgeStack behavior: a root
-        // single-segment profile falls to the cacheable default behavior
-        // (force-dynamic, path-cached, no cookie/query dependence) -- the same
-        // edge treatment the legacy route got. The app reads PROFILE_CANONICAL
-        // in lib/profile-url.ts. Deployed manually (cdk deploy --exclusively
-        // Sps-App-<env>); the CD pipeline only re-rolls the image.
-        PROFILE_CANONICAL: "root",
         // #799/#800/#801 -- family-primary "Methods & tools" lens. Two flags,
         // STAGING-FIRST (both ON in staging, OFF in prod until the staging soak
         // completes and the prod data steps are done):
@@ -2539,7 +2863,7 @@ export class AppStack extends Stack {
         CORE_PAGES: "on",
         CORE_CLAIM_WRITEBACK: "on",
         // Opportunity URL intake (docs/opportunity-url-intake-spec.md). Gates
-        // the submit-a-URL panel on /edit/find-researchers + both
+        // the submit-a-URL panel on /edit/grant-matcha + both
         // /api/edit/opportunity-intake verbs (they 404 while off). The writes
         // go to the SUBMISSION partition of the shared reciterai table
         // (TaskRoleOpportunitySubmissionPolicy above -- grant + flag deploy
@@ -2670,16 +2994,14 @@ export class AppStack extends Stack {
         COMMS_STEWARD_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_COMMS_STEWARD_GROUP_CN: "ITS:Library:Scholars/comms-steward-role",
         SCHOLARS_COMMS_STEWARD_ALLOWLIST: "",
-        // `development` role (GrantRecs Phase 4 — the /edit/find-researchers
-        // reverse-matcher admin surface). The page + its data route admit
-        // `isSuperuser || isDeveloper`, so superusers always retain access; the
-        // dev role adds a non-superuser operator tier.
+        // `development` role (GrantRecs Phase 4; its landing is /edit/grant-matcha
+        // since the find-researchers sunset). The matcher pages + their data routes
+        // admit `isSuperuser || isDeveloper`, so superusers always retain access;
+        // the dev role adds a non-superuser operator tier.
         //   DEVELOPMENT_ENABLED -- master kill switch. While not "on",
         //     isDeveloper() short-circuits to false BEFORE any directory work.
         //     ENABLED for staging + prod. Prod was validated on staging first
-        //     and promoted via a reviewer-gated `cdk deploy Sps-App-prod`; note
-        //     the flag is inert until the prod image carries the find-researchers
-        //     feature (#1185), so it ships with the next full prod release.
+        //     and promoted via a reviewer-gated `cdk deploy Sps-App-prod` (#1185).
         //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose membership
         //     confers the role: ITS:Library:Scholars/development-role, now the
         //     source of truth. isDeveloper() (lib/auth/development.ts) is called
@@ -2696,6 +3018,39 @@ export class AppStack extends Stack {
         DEVELOPMENT_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
         SCHOLARS_DEVELOPMENT_ALLOWLIST: "",
+        // Functional roles authorization cutover (/edit/administrators →
+        // Functional roles, `functional_role_grant`). When "on", the gates ALSO
+        // admit registry grants -- ADDITIVE only, nobody loses access:
+        // isCommsSteward admits an External Affairs grant with the
+        // Communications function, isDeveloper one with Development, and the
+        // report gate admits Reporting grants per scope
+        // (lib/auth/functional-role-authz.ts). The kill switches above still
+        // win. Before a flip, check the tab's parity line (or
+        // `npx tsx scripts/functional-roles-parity.ts` on the ETL task family)
+        // and run "Import from sources". Kept as a per-env ternary so either
+        // env can be turned back off with a one-word change + `cdk deploy`.
+        // ON in both envs (2026-09-25): additive, so the parity gaps (imported
+        // or allowlist-only holders) keep their existing access either way.
+        FUNCTIONAL_ROLES_AUTHZ: env === "staging" ? "on" : "on",
+        // Topic / method page phase 3 (lib/taxonomy-flags.ts). When "on": the
+        // portrait scholar card grid (top 6 with area bullets) replaces the top
+        // scholars chip row on topic, method family and method category pages,
+        // the selected rail item's scholars show as plain name links, and both
+        // publication routes honor a validated `?cwid=` (hidden identities
+        // refused). Off = the pre-flag pages and routes.
+        // ON in both envs (2026-09-26), signed off on staging.
+        TAXONOMY_SCHOLAR_CARDS: env === "staging" ? "on" : "on",
+        // Topic / method page phase 4 (lib/taxonomy-flags.ts). When "on": the
+        // topic, method family and method category publication feeds page with
+        // "Show 20 more · 40 of 279" (Load more) instead of numbered pages, keep
+        // `?shown=N` in the URL so Back restores the rows (the routes accept a
+        // validated `limit`, whole 20-row chunks up to 200), topics show ONE
+        // "All relevant" list, rows carry "· {subarea}" / "· {family}" when no
+        // rail item is selected, and the category page's "All families" panel
+        // becomes the paged feed at /api/methods/[sc]/all/publications (404
+        // while off). Off = the pre-flag feeds.
+        // ON in both envs (2026-09-26), signed off on staging.
+        TAXONOMY_FEED_LOAD_MORE: env === "staging" ? "on" : "on",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the
@@ -2778,6 +3133,22 @@ export class AppStack extends Stack {
         SCHOLARS_LDAP_BIND_PASSWORD: ecs.Secret.fromSecretsManager(
           edSecret,
           "SCHOLARS_LDAP_BIND_PASSWORD",
+        ),
+        // Read-only Cornell (Ithaca) LDAP bind (#2519 PR 3). Same pattern as
+        // the WCM ED bind above; the env-var name == the secret's JSON key.
+        // Consumed by lib/sources/cornell-ldap.ts once CORNELL_DIRECTORY_MEMBERS
+        // flips on -- dark until then (still "off" both envs below).
+        SCHOLARS_CORNELL_LDAP_URL: ecs.Secret.fromSecretsManager(
+          cornellLdapSecret,
+          "SCHOLARS_CORNELL_LDAP_URL",
+        ),
+        SCHOLARS_CORNELL_LDAP_BIND_DN: ecs.Secret.fromSecretsManager(
+          cornellLdapSecret,
+          "SCHOLARS_CORNELL_LDAP_BIND_DN",
+        ),
+        SCHOLARS_CORNELL_LDAP_BIND_PASSWORD: ecs.Secret.fromSecretsManager(
+          cornellLdapSecret,
+          "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
         ),
       },
     });
@@ -3657,6 +4028,10 @@ export class AppStack extends Stack {
     new CfnOutput(this, "EtlEcrRepoUri", {
       value: this.etlEcrRepository.repositoryUri,
       description: "SPS ETL batch-image ECR repository URI (#454)",
+    });
+    new CfnOutput(this, "BulkDataRuleEcrRepoUri", {
+      value: this.bulkDataRuleEcrRepository.repositoryUri,
+      description: "SPS bulk-data-rule pipeline image ECR repository URI (containerization design, 2026-08-14)",
     });
     new CfnOutput(this, "EcsClusterName", {
       value: this.ecsCluster.clusterName,

@@ -45,6 +45,8 @@ export function ManageableUnitsIndex({
           <UnitGroup title="Departments" units={units.departments} showAddCenter={!isSuperuser} />
           <UnitGroup title="Divisions" units={units.divisions} showAddCenter={false} />
           <UnitGroup title="Centers" units={units.centers} showAddCenter={false} />
+          <UnitGroup title="Cores" units={units.cores} showAddCenter={false} />
+          <UnitGroup title="Institutions" units={units.institutions} showAddCenter={false} />
         </>
       ) : (
         !canFindAnyUnit && <EmptyState />

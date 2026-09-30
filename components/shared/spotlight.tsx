@@ -9,6 +9,19 @@
  * and a "View all N publications →" link. Renders nothing when given zero
  * cards (per spec: omit the surface entirely, no empty state).
  *
+ * `variant="unit"` (department / center / division pages only — Unit Page
+ * v2): warm surface-2 panel, auto-fit grid (min 260px), a 1px left rule on
+ * every card, trailing-period tidy + full-title tooltip, the venue line
+ * pinned to the card bottom, and the 28px spotlight author chips. Topic and
+ * methods pages pass no variant and keep the original rendering.
+ *
+ * `paged` (topic page only): the pool may hold up to 9 cards, shown 3 at a
+ * time with an "n of m" position and round ‹ › buttons (wrap-around) in the
+ * header. With 3 or fewer cards the controls do not render and the surface is
+ * identical to the unpaged one. Paging swaps content with no animation, so
+ * reduced-motion needs nothing extra; the position text is a polite live
+ * region so a page change is announced.
+ *
  * Visual contract: `.planning/source-docs/spotlight-departments-and-friends.html`.
  * Data contract: `SpotlightData` from `lib/api/spotlight.ts`.
  *
@@ -16,29 +29,102 @@
  * division. The home-page Spotlight (eight-subtopic carousel) is a
  * different surface and is not affected.
  */
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { pubTitleProps } from "@/components/publication/pub-html";
-import { sanitizePubTitle } from "@/lib/utils";
+import { htmlToPlainText, sanitizePubTitle } from "@/lib/utils";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import type { SpotlightData, SpotlightCard } from "@/lib/api/spotlight";
 
-export function Spotlight({ data }: { data: SpotlightData | null }) {
-  if (!data || data.cards.length === 0) return null;
-  const { cards, totalCount, viewAllHref } = data;
+/** Unit Page v2 `tidy()` — drop a title's trailing period, including one that
+ *  sits before closing inline tags (e.g. `…in the <i>gut</i>.`). */
+function stripTrailingPeriod(html: string): string {
+  return html.replace(/\.(\s*(?:<\/[a-z]+>\s*)*)$/i, "$1");
+}
 
+export type SpotlightVariant = "default" | "unit";
+
+/** Cards per page when `paged`. */
+export const SPOTLIGHT_PAGE_SIZE = 3;
+
+export function Spotlight({
+  data,
+  variant = "default",
+  paged = false,
+}: {
+  data: SpotlightData | null;
+  variant?: SpotlightVariant;
+  /** Page the pool 3 at a time with prev/next controls (default variant only). */
+  paged?: boolean;
+}) {
+  if (!data || data.cards.length === 0) return null;
+  return <SpotlightInner data={data} variant={variant} paged={paged && variant !== "unit"} />;
+}
+
+function SpotlightInner({
+  data,
+  variant,
+  paged,
+}: {
+  data: SpotlightData;
+  variant: SpotlightVariant;
+  paged: boolean;
+}) {
+  const [pageIdx, setPageIdx] = useState(0);
+  const { totalCount, viewAllHref } = data;
+  const unit = variant === "unit";
+  const pageCount = paged ? Math.ceil(data.cards.length / SPOTLIGHT_PAGE_SIZE) : 1;
+  const cycling = pageCount > 1;
+  // Wrap-around; also clamps if a smaller pool arrives on re-render.
+  const current = ((pageIdx % pageCount) + pageCount) % pageCount;
+  const cards = cycling
+    ? data.cards.slice(current * SPOTLIGHT_PAGE_SIZE, (current + 1) * SPOTLIGHT_PAGE_SIZE)
+    : data.cards;
+
+  // While paging, hold the mockup's fixed 3-column grid so a short last page
+  // (e.g. 1 card of 7) keeps its column width instead of re-flowing.
   const gridClass =
-    cards.length === 3
+    cycling || cards.length === 3
       ? "md:grid-cols-3"
       : cards.length === 2
         ? "md:grid-cols-2"
         : "md:grid-cols-1 md:max-w-[600px]";
 
+  const viewAll = (
+    <Link
+      href={viewAllHref as never}
+      className={
+        unit
+          ? "mt-7 inline-block text-[14px] text-foreground underline decoration-apollo-border-strong underline-offset-[3px] hover:text-apollo-slate"
+          : "border-b-[0.5px] border-black/25 pb-px text-[13px] text-[var(--color-text-secondary)] no-underline hover:text-foreground"
+      }
+    >
+      View all {totalCount.toLocaleString()} publications →
+    </Link>
+  );
+
+  // Unit variant: cards flow in an auto-fit grid (min 260px) and every card
+  // carries a left rule (the card's -1px overlap keeps adjacent rules
+  // single-width).
   return (
-    <section className="my-8 rounded-[14px] bg-[#f5f3ee] px-[26px] pb-6 pt-[22px]">
-      <header className="mb-[22px]">
-        <h2 className="m-0 inline-flex items-center gap-2 text-[22px] font-medium leading-[1.15] tracking-[-0.01em]">
+    <section
+      className={
+        unit
+          ? "my-8 rounded-[13px] bg-apollo-surface-2 px-[26px] pb-7 pt-[26px]"
+          : "my-8 rounded-[14px] bg-[#f5f3ee] px-[26px] pb-6 pt-[22px]"
+      }
+    >
+      <header className={unit ? "mb-5" : "mb-[22px] flex flex-wrap items-center gap-x-2 gap-y-2"}>
+        <h2
+          className={
+            unit
+              ? "m-0 inline-flex items-center gap-2 text-[22px] font-medium leading-[28px]"
+              : "m-0 inline-flex items-center gap-2 text-[22px] font-medium leading-[1.15] tracking-[-0.01em]"
+          }
+        >
           Spotlight
           <SectionInfoButton label="Spotlight" anchor="spotlight">
             Spotlight rotates publications with the strongest recent activity
@@ -46,23 +132,95 @@ export function Spotlight({ data }: { data: SpotlightData | null }) {
             Refreshes weekly.
           </SectionInfoButton>
         </h2>
+        {cycling && (
+          <div className="ml-auto flex items-center gap-2.5" data-testid="spotlight-pager">
+            <span
+              className="text-muted-foreground text-[13px] tabular-nums"
+              aria-live="polite"
+              aria-atomic="true"
+              data-testid="spotlight-position"
+            >
+              <span className="sr-only">Spotlight page </span>
+              {current + 1} of {pageCount}
+            </span>
+            <SpotlightPagerButton
+              label="Previous"
+              onClick={() => setPageIdx(current - 1)}
+              icon={<ChevronLeft className="size-3.5" strokeWidth={2.2} aria-hidden />}
+            />
+            <SpotlightPagerButton
+              label="Next"
+              onClick={() => setPageIdx(current + 1)}
+              icon={<ChevronRight className="size-3.5" strokeWidth={2.2} aria-hidden />}
+            />
+          </div>
+        )}
       </header>
 
-      <div className={`grid grid-cols-1 ${gridClass}`}>
-        {cards.map((card, i) => (
-          <SpotlightPubCard key={card.pmid} card={card} index={i} total={cards.length} />
-        ))}
+      <div
+        className={
+          unit
+            ? "grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-x-0 gap-y-6"
+            : `grid grid-cols-1 ${gridClass}`
+        }
+      >
+        {cards.map((card, i) =>
+          unit ? (
+            <UnitSpotlightPubCard key={card.pmid} card={card} />
+          ) : (
+            <SpotlightPubCard key={card.pmid} card={card} index={i} total={cards.length} />
+          ),
+        )}
       </div>
 
-      <div className="mt-[22px]">
-        <Link
-          href={viewAllHref as never}
-          className="border-b-[0.5px] border-black/25 pb-px text-[13px] text-[var(--color-text-secondary)] no-underline hover:text-foreground"
-        >
-          View all {totalCount.toLocaleString()} publications →
-        </Link>
-      </div>
+      {unit ? viewAll : <div className="mt-[22px]">{viewAll}</div>}
     </section>
+  );
+}
+
+function SpotlightPagerButton({
+  label,
+  onClick,
+  icon,
+}: {
+  label: string;
+  onClick: () => void;
+  icon: ReactNode;
+}) {
+  // 34px visual per the mockup; a coarse pointer gets the 44px target.
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="border-apollo-border-strong bg-background text-foreground inline-flex size-[34px] items-center justify-center rounded-full border transition-colors hover:border-[var(--color-accent-slate)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)] pointer-coarse:size-11"
+    >
+      {icon}
+    </button>
+  );
+}
+
+/* line-clamp lives on the click target, not the <h3>: clamping it keeps its
+   bounding box equal to the visible 3 lines. With the clamp on the h3
+   instead, the inner target's box spanned the full (un-clamped) title and
+   overlapped the author-chip row below it, tripping axe target-size (WCAG
+   2.5.8) even though the layout looked fine (#586). Same visual result,
+   target box now matches the clamp. Opens the shared publication modal on
+   click, same as every other publication surface (profile, topic-feed,
+   search) — previously linked straight to PubMed/DOI, inconsistent with the
+   rest of the site. Applies to both card variants below. */
+
+function SpotlightVenue({ card, className }: { card: SpotlightCard; className: string }) {
+  return (
+    <div className={className}>
+      {card.journal ? (
+        <span
+          dangerouslySetInnerHTML={{ __html: sanitizePubTitle(card.journal) }}
+        />
+      ) : null}
+      {card.journal && card.year !== null ? " · " : null}
+      {card.year !== null ? String(card.year) : null}
+    </div>
   );
 }
 
@@ -100,16 +258,6 @@ function SpotlightPubCard({
           {card.kicker}
         </span>
       )}
-      {/* line-clamp lives on the click target, not the <h3>: clamping it
-          keeps its bounding box equal to the visible 3 lines. With the
-          clamp on the h3 instead, the inner target's box spanned the full
-          (un-clamped) title and overlapped the author-chip row below it,
-          tripping axe target-size (WCAG 2.5.8) even though the layout
-          looked fine (#586). Same visual result, target box now matches
-          the clamp. Opens the shared publication modal on click, same as
-          every other publication surface (profile, topic-feed, search) —
-          previously linked straight to PubMed/DOI, inconsistent with the
-          rest of the site. */}
       <h3 className="m-0 text-[15px] font-medium leading-[1.35] tracking-[-0.005em] text-foreground">
         <button
           type="button"
@@ -119,15 +267,47 @@ function SpotlightPubCard({
         />
       </h3>
       <AuthorChipRow authors={card.authors} pmid={card.pmid} />
-      <div className="text-[12px] italic leading-[1.4] text-[var(--color-text-tertiary)]">
-        {card.journal ? (
-          <span
-            dangerouslySetInnerHTML={{ __html: sanitizePubTitle(card.journal) }}
-          />
-        ) : null}
-        {card.journal && card.year !== null ? " · " : null}
-        {card.year !== null ? String(card.year) : null}
-      </div>
+      <SpotlightVenue
+        card={card}
+        className="text-[12px] italic leading-[1.4] text-[var(--color-text-tertiary)]"
+      />
+    </article>
+  );
+}
+
+function UnitSpotlightPubCard({ card }: { card: SpotlightCard }) {
+  const { open } = usePublicationModal();
+  const titleHtml = stripTrailingPeriod(sanitizePubTitle(card.title));
+  const fullTitle = htmlToPlainText(card.title, Number.POSITIVE_INFINITY);
+  const kickerClass =
+    "line-clamp-2 min-h-[30px] text-[11px] font-semibold uppercase leading-[15px] tracking-[0.1em] text-[var(--color-primary-cornell-red)]";
+
+  return (
+    <article className="-ml-px flex flex-col gap-3 border-l border-apollo-border-strong px-[22px]">
+      {card.kickerHref ? (
+        <Link
+          href={card.kickerHref as never}
+          className={`${kickerClass} no-underline hover:underline`}
+        >
+          {card.kicker}
+        </Link>
+      ) : (
+        <span className={kickerClass}>{card.kicker}</span>
+      )}
+      <h3 className="m-0 text-[15.5px] font-medium leading-[21px] text-foreground">
+        <button
+          type="button"
+          onClick={() => open(card.pmid)}
+          aria-haspopup="dialog"
+          title={fullTitle || undefined}
+          {...pubTitleProps(
+            titleHtml,
+            "line-clamp-3 text-pretty text-left text-foreground underline-offset-[3px] transition-colors duration-[120ms] ease-out hover:text-apollo-slate hover:underline",
+          )}
+        />
+      </h3>
+      <AuthorChipRow authors={card.authors} pmid={card.pmid} variant="spotlight" />
+      <SpotlightVenue card={card} className="mt-auto text-[13px] italic text-muted-foreground" />
     </article>
   );
 }

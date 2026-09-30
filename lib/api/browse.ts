@@ -5,17 +5,33 @@
  *   - getDepartmentsList():   one BrowseDepartment per dept, with category,
  *                             division chip-row, and top topic chips.
  *   - getCentersList():       one BrowseCenter per row in `center`.
+ *   - getCoresList():         one BrowseCore per publicly-visible row in
+ *                             `core` (cores-as-org-units P4). Gated on
+ *                             isCorePagesEnabled() AND Core.visible — NOT on
+ *                             confirmed-publication-count (that's /cores'
+ *                             stricter, evidence-surface gate; a browse
+ *                             listing is a directory, per
+ *                             core-as-org-unit-plan.md P4).
  *   - getAZBuckets():         A-Z directory buckets, capped at 10 names per
  *                             letter. Consumed by /search empty-People state
  *                             (relocated from /browse per docs/browse-vs-search.md).
- *   - getBrowseData():        composite for /browse — runs departments and
- *                             centers in parallel.
+ *   - getBrowseData():        composite for /browse — runs departments,
+ *                             centers, and cores in parallel.
  *
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
+import {
+  CENTER_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  departmentLeaderRoleKey,
+} from "@/lib/org-unit-roles";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { visibleInstitutionName } from "@/lib/institutions";
+import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import type {
   DepartmentCategory,
@@ -43,6 +59,9 @@ export type BrowseDepartment = {
   scholarCount: number;
   chairName: string | null;
   chairSlug: string | null;
+  /** "Chair" or "Director" (or a steward-renamed label), vocabulary-resolved.
+   *  Null exactly when `chairName` is null. */
+  chairLabel: string | null;
   divisions: BrowseDepartmentDivisionChip[];
   topResearchAreas: BrowseDepartmentTopicChip[];
 };
@@ -58,11 +77,21 @@ export type BrowseCenter = {
   sortOrder: number;
 };
 
+export type BrowseCore = {
+  id: string;
+  name: string;
+  facility: string | null;
+  description: string | null;
+};
+
 export type AZScholar = {
   /** "{Last}, {First}" — last token of preferredName treated as surname. */
   name: string;
   slug: string;
   department: string;
+  /** `visibleInstitutionName` of the primary org — null for WCMC / unset, so
+   *  only a non-WCMC scholar gets the " · <institution>" suffix. */
+  institution: string | null;
 };
 
 export type AZBucket = {
@@ -74,6 +103,7 @@ export type AZBucket = {
 export type BrowseData = {
   departments: BrowseDepartment[];
   centers: BrowseCenter[];
+  cores: BrowseCore[];
 };
 
 type DeptRow = {
@@ -84,7 +114,6 @@ type DeptRow = {
   slug: string;
   category: string;
   scholarCount: number;
-  chairCwid: string | null;
 };
 
 type ChairRow = {
@@ -98,6 +127,7 @@ type ScholarAZRow = {
   slug: string;
   primaryDepartment: string | null;
   roleCategory: string | null;
+  primaryOrgCode?: string | null;
 };
 
 const TOPIC_CHIP_LIMIT = 2;
@@ -113,13 +143,42 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
       slug: true,
       category: true,
       scholarCount: true,
-      chairCwid: true,
     },
   })) as DeptRow[];
 
   // --- Chairs ---
+  // #2542 contract A — chair/director comes from `OrgUnitRoleAssignment`
+  // only; `Department.chairCwid` no longer exists as a read source. NOTE:
+  // unlike `departments.ts` (the department PAGE), this list does NOT merge
+  // `field_override` — it never has (pre-existing; out of scope for this
+  // repoint) — so a curator's `leaderCwid` override is reflected on the
+  // department's own page but not yet on this browse card.
+  const roleRows = await prisma.orgUnitRole.findMany({
+    where: {
+      entityType: "department",
+      key: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { key: true, label: true },
+  });
+  const roleLabelByKey = new Map(roleRows.map((r) => [r.key, r.label]));
+
+  const assignments = await prisma.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: "department",
+      entityId: { in: depts.map((d) => d.code) },
+      roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { entityId: true, cwid: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  const assignedChair = new Map<string, string>();
+  for (const a of assignments) {
+    if (!assignedChair.has(a.entityId)) assignedChair.set(a.entityId, a.cwid);
+  }
+  const chairCwidOf = (d: DeptRow): string | null => assignedChair.get(d.code) ?? null;
+
   const chairCwids = depts
-    .map((d) => d.chairCwid)
+    .map(chairCwidOf)
     .filter((c): c is string => c !== null);
   const chairs: ChairRow[] =
     chairCwids.length > 0
@@ -199,6 +258,7 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
 
   return depts.map<BrowseDepartment>((d) => {
     const cat = (d.category as DepartmentCategory) ?? "clinical";
+    const chairCwid = chairCwidOf(d);
     return {
       code: d.code,
       name: d.name,
@@ -207,7 +267,7 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
       slug: d.slug,
       category: cat,
       scholarCount: d.scholarCount,
-      chairName: d.chairCwid
+      chairName: chairCwid
         ? // External leader (not a WCM scholar, e.g. Joel Stein / Rehab Med):
           // the scholar lookup misses, so fall back to the curated name so the
           // chair still shows on browse. Rendered as plain text (no link), so
@@ -215,13 +275,17 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
           // fallback on the external leader's cwid MATCHING the current chairCwid
           // (mirroring departments.ts), so a stale EXTERNAL_LEADERS entry can't
           // surface the wrong name if the chair changes to another unresolved cwid.
-          (chairMap.get(d.chairCwid)?.preferredName ??
-          (EXTERNAL_LEADERS[d.code]?.cwid === d.chairCwid
+          (chairMap.get(chairCwid)?.preferredName ??
+          (EXTERNAL_LEADERS[d.code]?.cwid === chairCwid
             ? (EXTERNAL_LEADERS[d.code]?.name ?? null)
             : null))
         : null,
-      chairSlug: d.chairCwid
-        ? (chairMap.get(d.chairCwid)?.slug ?? null)
+      chairSlug: chairCwid
+        ? (chairMap.get(chairCwid)?.slug ?? null)
+        : null,
+      chairLabel: chairCwid
+        ? (roleLabelByKey.get(departmentLeaderRoleKey(cat)) ??
+          (cat === "administrative" ? "Director" : "Chair"))
         : null,
       // Administrative cards are lean: no division chips, no topic chips.
       divisions: cat === "administrative" ? [] : (divsByDept.get(d.code) ?? []),
@@ -241,7 +305,6 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
       name: true,
       slug: true,
       description: true,
-      directorCwid: true,
       // NB: `scholarCount` is deliberately NOT selected — the column is never
       // maintained for centers. Counted live below.
       sortOrder: true,
@@ -257,8 +320,30 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
     { publicOnly: true },
   );
 
+  // #2542 contract A — the director is an `OrgUnitRoleAssignment` row only;
+  // `Center.directorCwid` no longer exists as a read source. ONE batched
+  // query for the whole list rather than one per center: the assignment is
+  // polymorphic on (entityType, entityId) with no FK to `center`, so it cannot
+  // be nested on the `findMany` above. Ordered by `sortOrder` so the first row
+  // seen per center wins, matching the old `take: 1`.
+  const assignments = await prisma.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: CENTER_ENTITY_TYPE,
+      entityId: { in: centers.map((c) => c.code) },
+      roleKey: DIRECTOR_ROLE_KEY,
+    },
+    select: { entityId: true, cwid: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  const assignedDirector = new Map<string, string>();
+  for (const a of assignments) {
+    if (!assignedDirector.has(a.entityId)) assignedDirector.set(a.entityId, a.cwid);
+  }
+
+  const directorCwidOf = (c: (typeof centers)[number]): string | null =>
+    assignedDirector.get(c.code) ?? null;
   const directorCwids = centers
-    .map((c) => c.directorCwid)
+    .map(directorCwidOf)
     .filter((c): c is string => c !== null);
   const directors =
     directorCwids.length === 0
@@ -274,15 +359,32 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
     name: c.name,
     slug: c.slug,
     description: c.description,
-    directorName: c.directorCwid
-      ? (directorMap.get(c.directorCwid)?.preferredName ?? null)
+    directorName: directorCwidOf(c)
+      ? (directorMap.get(directorCwidOf(c)!)?.preferredName ?? null)
       : null,
-    directorSlug: c.directorCwid
-      ? (directorMap.get(c.directorCwid)?.slug ?? null)
+    directorSlug: directorCwidOf(c)
+      ? (directorMap.get(directorCwidOf(c)!)?.slug ?? null)
       : null,
     scholarCount: centerCounts.get(c.code) ?? 0,
     sortOrder: c.sortOrder,
   }));
+}
+
+/**
+ * Cores-as-org-units P4 (core-as-org-unit-plan.md). Publicly-visible cores for
+ * the /browse peer section, gated on isCorePagesEnabled() AND Core.visible —
+ * deliberately NOT also filtered to hasConfirmedPublications like /cores'
+ * index: a browse listing is a directory, not an evidence surface, and
+ * getCorePage already renders a working (if empty) page for a zero-pub core.
+ * Off (flag disabled) returns [] so BrowsePage never needs its own flag check.
+ */
+export async function getCoresList(): Promise<BrowseCore[]> {
+  if (!isCorePagesEnabled()) return [];
+  return prisma.core.findMany({
+    where: { visible: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, facility: true, description: true },
+  });
 }
 
 export async function getAZBuckets(): Promise<AZBucket[]> {
@@ -293,6 +395,7 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
       slug: true,
       primaryDepartment: true,
       roleCategory: true,
+      primaryOrgCode: true,
     },
     orderBy: { preferredName: "asc" },
   })) as ScholarAZRow[];
@@ -313,6 +416,7 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
       name: givenName ? `${lastName}, ${givenName}` : lastName,
       slug: s.slug,
       department: s.primaryDepartment ?? "",
+      institution: visibleInstitutionName(s.primaryOrgCode),
     });
   }
 
@@ -329,9 +433,10 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
 }
 
 export async function getBrowseData(): Promise<BrowseData> {
-  const [departments, centers] = await Promise.all([
+  const [departments, centers, cores] = await Promise.all([
     getDepartmentsList(),
     getCentersList(),
+    getCoresList(),
   ]);
-  return { departments, centers };
+  return { departments, centers, cores };
 }

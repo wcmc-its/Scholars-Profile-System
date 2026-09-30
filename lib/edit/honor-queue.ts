@@ -23,6 +23,12 @@
  * (#1762 — the Research Dean's office self-serves; see `lib/auth/honors-curator.ts`).
  */
 import { toCsv } from "@/lib/csv";
+import {
+  HONOR_LIST_SCHEDULE_LABEL,
+  HONOR_LISTS,
+  honorListHost,
+  isHonorListRunActive,
+} from "@/lib/honors/lists";
 import { formatPublishedName } from "@/lib/postnominal";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -60,12 +66,27 @@ export type HonorQueueRow = {
   source: string;
   sourceRef: string | null;
   createdAt: string;
-  /** When the row was decided (approve/reject) — its `updatedAt`. Meaningful
-   *  only on the Approved/Rejected views; on Pending it equals the seed time. */
+  /** When the row was decided (approve/reject): the recorded `decidedAt`, else
+   *  (a row decided before that column existed, or never queue-decided) its
+   *  `updatedAt`. Meaningful only on the Known/Rejected views. */
   decidedAt: string;
+  /** Who decided it in the queue, as a display name (the curator's published
+   *  name when they have a scholar row, else their CWID). Null when the queue
+   *  never recorded a decider. */
+  decidedByName: string | null;
+  /** Why it was rejected, for the Rejected tab's Reason column: the curator's
+   *  stated reason, or a fixed line for a sibling an approval auto-rejected.
+   *  Null when no reason was recorded. */
+  rejectionReason: string | null;
+  /** True when the row was auto-rejected by an approval of a competing
+   *  candidate on its roster line. Such a row is undone via that approval. */
+  superseded: boolean;
   /** Competing claims on the same roster line — see the module note. Empty for
    *  an ordinary unambiguous row. */
   competingCwids: string[];
+  /** What a scraped match rests on ("Name and institution match: listed at …"),
+   *  for the candidate's evidence column. Null on seeded and hand-entered rows. */
+  evidence: string | null;
 };
 
 /** One roster line's worth of candidates. A group of 1 is the normal case. */
@@ -126,6 +147,18 @@ export const HONOR_PRESTIGE: Readonly<Record<string, number>> = {
   "Burroughs Wellcome Fund": 48, // Career Award (early-career, ~Damon Runyon tier)
   "Damon Runyon Cancer Research Foundation": 46,
 };
+
+/** The Reason shown for a row an approval auto-rejected (no curator reason). */
+export const SUPERSEDED_REASON = "Another candidate was approved";
+
+/** Preset rejection reasons offered next to Reject. Free text is accepted by the
+ *  route too; these are the common cases, not a closed vocabulary. */
+export const REJECTION_REASONS = [
+  "Different person",
+  "Name collision",
+  "Not on the source list",
+  "Duplicate of an existing honor",
+] as const;
 
 export function honorPrestige(organization: string): number {
   return HONOR_PRESTIGE[organization.trim()] ?? 0;
@@ -229,7 +262,11 @@ export async function loadHonorQueue(
   const rows = await client.honor.findMany({
     where: {
       status,
-      ...(opts.self === true ? { source: "SELF" } : opts.self === false ? { source: { not: "SELF" } } : {}),
+      ...(opts.self === true
+        ? { source: "SELF" }
+        : opts.self === false
+          ? { source: { not: "SELF" } }
+          : {}),
     },
     orderBy: { createdAt: "asc" },
     select: {
@@ -243,6 +280,11 @@ export async function loadHonorQueue(
       sourceRef: true,
       createdAt: true,
       updatedAt: true,
+      decidedByCwid: true,
+      decidedAt: true,
+      rejectionReason: true,
+      supersededById: true,
+      evidence: true,
     },
   });
   if (rows.length === 0) return [];
@@ -250,8 +292,12 @@ export async function loadHonorQueue(
   // One query for every scholar, not one per row: this queue is ~250 rows on day
   // one and an N+1 here would be 250 round trips. (slug-request's loader does
   // per-row lookups, but its queue is a handful of rows.)
+  // Deciders ride the same query: a curator is usually a scholar too, and when
+  // they are not, the CWID stands in.
+  const cwidsToLoad = new Set(rows.map((r) => r.cwid));
+  for (const r of rows) if (r.decidedByCwid) cwidsToLoad.add(r.decidedByCwid);
   const scholars = await client.scholar.findMany({
-    where: { cwid: { in: [...new Set(rows.map((r) => r.cwid))] } },
+    where: { cwid: { in: [...cwidsToLoad] } },
     select: {
       cwid: true,
       slug: true,
@@ -264,6 +310,11 @@ export async function loadHonorQueue(
     },
   });
   const byCwid = new Map(scholars.map((s) => [s.cwid, s]));
+  const deciderName = (cwid: string | null): string | null => {
+    if (!cwid) return null;
+    const s = byCwid.get(cwid);
+    return s ? (s.preferredName ?? s.fullName ?? cwid) : cwid;
+  };
 
   // Group by roster line. A NULL sourceRef cannot be linked to anything, so it is
   // its own group keyed by id — never lumped with other NULLs, which would
@@ -291,7 +342,11 @@ export async function loadHonorQueue(
           id: r.id,
           cwid: r.cwid,
           slug: s?.slug ?? null,
-          scholarName: formatPublishedName(preferred, s?.postnominal ?? null),
+          scholarName: formatPublishedName(
+            preferred,
+            s?.postnominal ?? null,
+            s?.roleCategory ?? null,
+          ),
           roleLabel: formatRoleCategory(s?.roleCategory ?? null),
           roleCategory: s?.roleCategory ?? null,
           title: s?.primaryTitle ?? null,
@@ -304,8 +359,12 @@ export async function loadHonorQueue(
           source: r.source,
           sourceRef: r.sourceRef,
           createdAt: r.createdAt.toISOString(),
-          decidedAt: r.updatedAt.toISOString(),
+          decidedAt: (r.decidedAt ?? r.updatedAt).toISOString(),
+          decidedByName: deciderName(r.decidedByCwid),
+          rejectionReason: r.rejectionReason ?? (r.supersededById ? SUPERSEDED_REASON : null),
+          superseded: Boolean(r.supersededById),
           competingCwids: contested ? cwids.filter((c) => c !== r.cwid) : [],
+          evidence: r.evidence ?? null,
         };
       }),
     });
@@ -374,9 +433,7 @@ export function yearPlausibilityNote(
 }
 
 /** Count pending honors — the admin sub-nav's pending-count pill (#1762). */
-export function countPendingHonors(
-  client: Pick<PrismaClient, "honor">,
-): Promise<number> {
+export function countPendingHonors(client: Pick<PrismaClient, "honor">): Promise<number> {
   return client.honor.count({ where: { status: "pending" } });
 }
 
@@ -413,7 +470,11 @@ export async function loadHonorExport(
   ]);
   const flat = (groups: HonorQueueGroup[], status: HonorStatus) =>
     groups.flatMap((g) => g.rows.map((r) => ({ ...r, status })));
-  return [...flat(pending, "pending"), ...flat(published, "published"), ...flat(rejected, "rejected")];
+  return [
+    ...flat(pending, "pending"),
+    ...flat(published, "published"),
+    ...flat(rejected, "rejected"),
+  ];
 }
 
 /** Serialize honor export rows to a CSV report (RFC-4180 via `lib/csv`, which also
@@ -434,4 +495,267 @@ export function buildHonorCsv(rows: ReadonlyArray<HonorQueueRow & { status: stri
     r.decidedAt.slice(0, 10),
   ]);
   return toCsv(HONOR_CSV_HEADERS, body);
+}
+
+/**
+ * `etl_run.source` values that load honor rosters into `honor` start with this:
+ * the operator-run seed import (`HonorsSeed-Import`) and the scheduled
+ * honors-list scraper's all-lists run (`HonorsLists`). Per-list scraper runs
+ * are in `honor_list_run` (see `HonorListStatus`).
+ */
+const HONOR_RUN_SOURCE_PREFIX = "Honors";
+
+export type HonorSourceRun = {
+  source: string;
+  startedAt: string;
+  completedAt: string | null;
+  /** 'running' | 'success' | 'failed' — `etl_run.status` as written. */
+  status: string;
+  rowsProcessed: number;
+  errorMessage: string | null;
+};
+
+/** One honor list (roster) the queue's rows came from. */
+export type HonorSource = {
+  /** The roster identity: the first `|` segment of `sourceRef`, else the
+   *  `sourceRef` minus any `#fragment`. */
+  key: string;
+  /** The honor and conferring body most rows from this roster carry. */
+  name: string;
+  organization: string;
+  /** The roster as a link when it is an http(s) URL. */
+  url: string | null;
+  host: string | null;
+  /** Distinct roster lines matched to at least one scholar. */
+  lines: number;
+  /** Lines still waiting in Possible (any candidate pending). */
+  pendingLines: number;
+  /** Rows approved — WCM scholars credited from this list. */
+  approved: number;
+  /** Rows rejected. */
+  rejected: number;
+};
+
+/** One `honor_list_run` row as the Sources tab shows it. */
+export type HonorListRunView = {
+  id: string;
+  /** The stored status, except a queued/running row past the stale window reads
+   *  `stalled` (the job never started or died without finishing). */
+  status: "queued" | "running" | "success" | "partial" | "failed" | "stalled";
+  trigger: string;
+  createdAt: string;
+  finishedAt: string | null;
+  onListTotal: number | null;
+  matched: number | null;
+  newCandidates: number | null;
+  errorMessage: string | null;
+};
+
+/** A list the scheduled scraper reads (`lib/honors/lists.ts`) and its runs. */
+export type HonorListStatus = {
+  id: string;
+  honorName: string;
+  organization: string;
+  rosterUrl: string;
+  host: string;
+  schedule: string;
+  /** The most recent run in any state, or null when the list has never run. */
+  latest: HonorListRunView | null;
+  /** The most recent FINISHED run — its counts stay on screen while a new run
+   *  is queued or running. Null when none has finished. */
+  lastFinished: HonorListRunView | null;
+  /** A run is queued or running now: Run now is disabled. */
+  active: boolean;
+};
+
+export type HonorSourcesSummary = {
+  sources: HonorSource[];
+  /** Newest first; at most 10. Empty when no honors load has been recorded. */
+  runs: HonorSourceRun[];
+  /** Every scraped list, in registry order, with its latest runs. */
+  lists: HonorListStatus[];
+};
+
+/** Run rows read for the Sources tab: plenty for a few lists' latest runs. */
+const LIST_RUNS_READ = 200;
+
+type ListRunRow = {
+  id: string;
+  listId: string;
+  trigger: string;
+  status: string;
+  createdAt: Date;
+  finishedAt: Date | null;
+  onListTotal: number | null;
+  matched: number | null;
+  newCandidates: number | null;
+  errorMessage: string | null;
+};
+
+function listRunView(r: ListRunRow, now: number): HonorListRunView {
+  const stored = r.status as HonorListRunView["status"];
+  const status =
+    (stored === "queued" || stored === "running") && !isHonorListRunActive(r, now)
+      ? "stalled"
+      : stored;
+  return {
+    id: r.id,
+    status,
+    trigger: r.trigger,
+    createdAt: r.createdAt.toISOString(),
+    finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+    onListTotal: r.onListTotal,
+    matched: r.matched,
+    newCandidates: r.newCandidates,
+    errorMessage: r.errorMessage,
+  };
+}
+
+/** Each registry list with its latest and last-finished run (runs newest first). */
+export function buildListStatuses(
+  runs: readonly ListRunRow[],
+  now: number = Date.now(),
+): HonorListStatus[] {
+  return HONOR_LISTS.map((l) => {
+    const mine = runs.filter((r) => r.listId === l.id);
+    const latest = mine[0] ?? null;
+    const finished =
+      mine.find((r) => r.status === "success" || r.status === "partial" || r.status === "failed") ??
+      null;
+    return {
+      id: l.id,
+      honorName: l.honorName,
+      organization: l.organization,
+      rosterUrl: l.rosterUrl,
+      host: honorListHost(l),
+      schedule: HONOR_LIST_SCHEDULE_LABEL,
+      latest: latest ? listRunView(latest, now) : null,
+      lastFinished: finished ? listRunView(finished, now) : null,
+      active: latest ? isHonorListRunActive(latest, now) : false,
+    };
+  });
+}
+
+/** The roster a `sourceRef` belongs to — see `HonorSource.key`. */
+export function rosterKey(sourceRef: string): string {
+  const parts = sourceRef.split("|");
+  const head = (parts.length === 3 ? parts[0] : sourceRef).trim();
+  const hash = head.indexOf("#");
+  return hash > 0 ? head.slice(0, hash) : head;
+}
+
+function rosterHost(key: string): string | null {
+  if (!/^https?:\/\//i.test(key)) return null;
+  try {
+    return new URL(key).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Sources tab: every honor list the queue's fed rows came from, with how
+ * many lines each matched and where those stand, plus the recorded honors-load
+ * runs, plus each scraped list's latest runs. Hand-entered
+ * (`CURATOR`) and self-asserted (`SELF`) rows carry no roster and are excluded.
+ */
+export async function loadHonorSources(
+  client: Pick<PrismaClient, "honor" | "etlRun" | "honorListRun">,
+): Promise<HonorSourcesSummary> {
+  const [rows, runs, listRuns] = await Promise.all([
+    client.honor.findMany({
+      where: { sourceRef: { not: null }, source: { notIn: ["CURATOR", "SELF"] } },
+      select: { name: true, organization: true, status: true, sourceRef: true },
+    }),
+    client.etlRun.findMany({
+      where: { source: { startsWith: HONOR_RUN_SOURCE_PREFIX } },
+      orderBy: { startedAt: "desc" },
+      take: 10,
+      select: {
+        source: true,
+        startedAt: true,
+        completedAt: true,
+        status: true,
+        rowsProcessed: true,
+        errorMessage: true,
+      },
+    }),
+    client.honorListRun.findMany({
+      orderBy: { createdAt: "desc" },
+      take: LIST_RUNS_READ,
+      select: {
+        id: true,
+        listId: true,
+        trigger: true,
+        status: true,
+        createdAt: true,
+        finishedAt: true,
+        onListTotal: true,
+        matched: true,
+        newCandidates: true,
+        errorMessage: true,
+      },
+    }),
+  ]);
+
+  type Acc = {
+    labels: Map<string, { name: string; organization: string; n: number }>;
+    lines: Map<string, Set<string>>;
+    approved: number;
+    rejected: number;
+  };
+  const byRoster = new Map<string, Acc>();
+  for (const r of rows) {
+    if (!r.sourceRef) continue;
+    const key = rosterKey(r.sourceRef);
+    let acc = byRoster.get(key);
+    if (!acc) {
+      acc = { labels: new Map(), lines: new Map(), approved: 0, rejected: 0 };
+      byRoster.set(key, acc);
+    }
+    const labelKey = `${r.name}\u0000${r.organization}`;
+    const label = acc.labels.get(labelKey);
+    if (label) label.n += 1;
+    else acc.labels.set(labelKey, { name: r.name, organization: r.organization, n: 1 });
+    const statuses = acc.lines.get(r.sourceRef) ?? new Set<string>();
+    statuses.add(r.status);
+    acc.lines.set(r.sourceRef, statuses);
+    if (r.status === "published") acc.approved += 1;
+    if (r.status === "rejected") acc.rejected += 1;
+  }
+
+  const sources: HonorSource[] = [...byRoster].map(([key, acc]) => {
+    const top = [...acc.labels.values()].sort((a, b) => b.n - a.n)[0];
+    const host = rosterHost(key);
+    return {
+      key,
+      name: top.name,
+      organization: top.organization,
+      url: host ? key : null,
+      host,
+      lines: acc.lines.size,
+      pendingLines: [...acc.lines.values()].filter((st) => st.has("pending")).length,
+      approved: acc.approved,
+      rejected: acc.rejected,
+    };
+  });
+  sources.sort(
+    (a, b) =>
+      honorPrestige(b.organization) - honorPrestige(a.organization) ||
+      a.organization.localeCompare(b.organization) ||
+      a.name.localeCompare(b.name),
+  );
+
+  return {
+    sources,
+    runs: runs.map((r) => ({
+      source: r.source,
+      startedAt: r.startedAt.toISOString(),
+      completedAt: r.completedAt ? r.completedAt.toISOString() : null,
+      status: r.status,
+      rowsProcessed: r.rowsProcessed,
+      errorMessage: r.errorMessage,
+    })),
+    lists: buildListStatuses(listRuns),
+  };
 }

@@ -7,6 +7,7 @@
 import { prisma } from "@/lib/db";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { institutionDisplayName } from "@/lib/institutions";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 
@@ -18,6 +19,13 @@ export type ScholarPayload = {
   fullName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  /** Bare ED primary-organization code (`WCMC`, `HSS`, …); null until the ED
+   *  ETL writes it. DATA, not a label — WCMC is included here. */
+  primaryOrgCode: string | null;
+  /** `institutionDisplayName(primaryOrgCode)` ("Weill Cornell Medicine",
+   *  "Hospital for Special Surgery", or the bare code when unmapped); null
+   *  when the code is. */
+  primaryInstitution: string | null;
   email: string | null;
   overview: string | null;
   identityImageEndpoint: string;
@@ -76,6 +84,10 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
+    primaryOrgCode: scholar.primaryOrgCode ?? null,
+    primaryInstitution: scholar.primaryOrgCode
+      ? institutionDisplayName(scholar.primaryOrgCode)
+      : null,
     // email-visibility-spec § A + Cache-safety. This anonymous-facing endpoint is
     // CloudFront-cacheable by path and is NOT in the #866 origin-request policy
     // (no viewer-address forwarded), so it bakes only the viewer-independent
