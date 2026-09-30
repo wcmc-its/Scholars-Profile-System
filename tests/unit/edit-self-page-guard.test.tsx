@@ -168,6 +168,7 @@ function fakeCtx(cwid: string, roleCategory: string | null) {
     reporterProfileCandidates: [],
     reporterProfileConfirmed: [],
     menteeSuggestions: [], // #2634
+    frtMentees: [],
     orcidVerdict: null,
     highlights: null,
     technologies: [],

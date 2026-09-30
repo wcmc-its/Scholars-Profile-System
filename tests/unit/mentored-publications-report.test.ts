@@ -53,6 +53,7 @@ const hoisted = vi.hoisted(() => ({
   mockPostdocFindMany: vi.fn(),
   mockSuggestionFindMany: vi.fn(),
   mockOverrideFindMany: vi.fn(),
+  mockFrtFindMany: vi.fn(),
   mockAuthorFindMany: vi.fn(),
 }));
 
@@ -72,6 +73,7 @@ vi.mock("@/lib/db", () => ({
       postdocMentorRelationship: { findMany: hoisted.mockPostdocFindMany },
       menteeSuggestion: { findMany: hoisted.mockSuggestionFindMany },
       fieldOverride: { findMany: hoisted.mockOverrideFindMany },
+      frtMentee: { findMany: hoisted.mockFrtFindMany },
       publicationAuthor: { findMany: hoisted.mockAuthorFindMany },
     },
     write: {},
@@ -181,6 +183,7 @@ beforeEach(() => {
   hoisted.mockPostdocFindMany.mockResolvedValue([]);
   hoisted.mockSuggestionFindMany.mockResolvedValue([]);
   hoisted.mockOverrideFindMany.mockResolvedValue([]);
+  hoisted.mockFrtFindMany.mockResolvedValue([]);
   hoisted.mockAuthorFindMany.mockResolvedValue([]);
 });
 
@@ -1517,6 +1520,47 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
     expect(hoisted.mockOverrideFindMany).not.toHaveBeenCalled();
     expect(await loadMentoredGradYears(["*"], ["aoc", "faculty"])).toEqual([2025, 2019, null]);
     expect(await loadMentoredGradYears(["md"], ["faculty"])).toEqual([2019, null]);
+  });
+});
+
+describe("Faculty Review Tool mentees (`frt_mentee`)", () => {
+  it("only rows with a CWID are read; they land as confirmed `frt` pairs with pubs from the publication_author intersection", async () => {
+    hoisted.mockFrtFindMany.mockResolvedValue([
+      { mentorCwid: "men0001", menteeCwid: "stu0009", menteeName: "Mia Mentee" },
+    ]);
+    hoisted.mockAuthorFindMany.mockResolvedValue([
+      { cwid: "men0001", pmid: "501", position: 4 },
+      { cwid: "stu0009", pmid: "501", position: 1 },
+      { cwid: "stu0009", pmid: "502", position: 1 }, // mentee only
+    ]);
+    hoisted.mockPubFindMany.mockImplementation(
+      async ({ where }: { where: { pmid: { in: string[] } } }) =>
+        where.pmid.in.map((pmid) => ({
+          pmid,
+          title: `Local ${pmid}`,
+          journal: "J Local",
+          year: 2024,
+          volume: null,
+          issue: null,
+          pages: null,
+          authorsString: "Mentee M, Mentor Z",
+          fullAuthorsString: null,
+          journalAbbrev: null,
+          dateAddedToEntrez: null,
+          citedByCount: null,
+        })),
+    );
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"], types: ["frt"] });
+    expect(hoisted.mockFrtFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { menteeCwid: { not: null } } }),
+    );
+    expect(report.summary[0]).toMatchObject({ cwid: "stu0009", pubsAllTime: 1 });
+    expect(report.detail.map((d) => [d.pmid, d.mentorCwid])).toEqual([["501", "men0001"]]);
+  });
+
+  it("not read unless 'frt' is selected", async () => {
+    await loadMentoredPublicationsReport({ scopes: ["*"], types: ["faculty"] });
+    expect(hoisted.mockFrtFindMany).not.toHaveBeenCalled();
   });
 });
 

@@ -137,6 +137,7 @@ const ctx: EditContext = {
   // #2634 — empty by default (loader returns [] unless SELF_EDIT_MENTEE_SUGGESTIONS
   // is on for a genuine self/superuser viewer); a describe block below populates it.
   menteeSuggestions: [],
+  frtMentees: [],
   orcidVerdict: null,
   orcidCandidates: [],
   // SELF_EDIT_COI_GAP_HINT — empty by default (loader returns [] unless the
@@ -856,7 +857,7 @@ describe("EditPage router — mentee-suggestions rail + Mentees pointer (#2634)"
   it("rows → nested child right after Mentees, badge = ACTIVE (non-dismissed) count", () => {
     render(<EditPage ctx={withSugg} mode="self" />);
     const item = screen.getByTestId("rail-mentee-suggestions");
-    expect(item.textContent).toContain("From your publications");
+    expect(item.textContent).toContain("Suggested mentees");
     expect(item.className).toContain("pl-7");
     expect(item.querySelector('[aria-label="2 to review"]')?.textContent).toBe("2");
     // Immediately follows Mentees in the rail (it nests under the preceding item).
@@ -878,7 +879,7 @@ describe("EditPage router — mentee-suggestions rail + Mentees pointer (#2634)"
   it("Mentees tab shows one pointer line linking to the sub-view on the ACTIVE surface", () => {
     render(<EditPage ctx={withSugg} mode="self" attr="mentees" />);
     const p = screen.getByTestId("mentee-suggestions-pointer");
-    expect(p.textContent).toContain("2 co-authors look like trainees");
+    expect(p.textContent).toContain("2 suggested mentees");
     expect(p.querySelector("a")?.getAttribute("href")).toBe("/edit?attr=mentee-suggestions");
   });
 

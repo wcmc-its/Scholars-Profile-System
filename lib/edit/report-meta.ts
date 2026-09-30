@@ -84,8 +84,8 @@ const MENTORED_PUBS_DESCRIPTION_HTML = [
   "<li><strong>Likely mentee (from co-authorship)</strong> — Not on any roster: a trainee-type co-author who publishes repeatedly with this faculty member. Inferred, unconfirmed.</li>",
   "<li><strong>Possible mentee (from co-authorship)</strong> — The same inference for research staff or MD alumni, who may be peers rather than trainees. Off by default.</li>",
   "<li><strong>Faculty-asserted</strong> — Added by the mentor on their Scholars profile, or confirmed there from a co-authorship suggestion.</li>",
+  "<li><strong>Self-reported (Faculty Review)</strong> — Mentees the faculty member listed in the annual Faculty Review Tool, whether or not they added them to their profile. Counted only when linked to a WCM person (matched by name, or linked by the mentor in Scholars); no year.</li>",
   "</ul>",
-  "<p>Not yet a source: the Faculty Review Tool's self-reported mentees — the mentoring extract from that system has not been provided.</p>",
 ].join("\n");
 
 /** The hardcoded defaults — the strings `app/edit/reports/page.tsx` and the

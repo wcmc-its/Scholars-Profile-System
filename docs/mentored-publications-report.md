@@ -103,13 +103,15 @@ suggestion's `evidence` JSON (last 8 years, capped at 50 per pair), each resolve
 `publication` row; an evidence id with no local row is skipped and counted in `droppedUnresolved`,
 which the page names in one sentence. A faculty-asserted pair is not in the bridge: it reads the
 pair's suggestion evidence when a `mentee_suggestion` row exists (whatever its tier or dismissal),
-else the intersection of both people's confirmed `publication_author` rows.
+else the intersection of both people's confirmed `publication_author` rows. A Faculty Review Tool
+pair (`frt_mentee`, loaded weekly by `etl:frt`) takes the same intersection. Only FRT rows with a
+`mentee_cwid` count: the name match, or the CWID the mentor linked on /edit Mentees. Accepted or not,
+dismissed or not, since the faculty member reported the mentee in their review. It carries no year,
+so it needs "No grad year" when a year filter is on, and it ranks below faculty-asserted and above
+the co-author inferences.
 
 The bridge is refreshed by the mentoring bridge refresh script (export / import `<env>`), which lives
 in the private pubs skill, not in this repo. The nightly does not refresh it.
-
-Not yet a source: the Faculty Review Tool's self-reported mentees. The mentoring extract from that
-system has not been provided (the #1855 handoff).
 
 ## Filter contract
 
@@ -225,5 +227,5 @@ download route can never disagree. Malformed input: the route 400s, the page fal
 - Jenzabar carries a conferral year but no start year, so a thesis-advisor pair has no window
   unless another source supplies an entry year.
 - Roughly 14% of ED postdoc managers on record are lab administrators rather than the PI (#2633).
-- The Faculty Review Tool's mentoring extract (self-reported mentees) has not been provided
-  (#1855 handoff); until it is, it is named in the Sources disclosure as not yet a source.
+- Faculty Review Tool mentees are free-text names. About 30% of internal ones match a WCM person
+  by name; the rest count only once the mentor links them on /edit Mentees.

@@ -518,8 +518,9 @@ model FormerFacultyRole {
 /// mentees in free text with no CWID; `menteeCwid` is set only on a unique
 /// first+last match (lib/frt/mentee-name.ts) for an internal mentee. One row per
 /// (mentor, name key) across every review year. Shown to the mentor as a
-/// suggestion on /edit (accept appends to manualMentees); counted in report 7
-/// whether accepted or not. Dismissals are carried across the weekly rebuild.
+/// suggestion on /edit (accept appends to manualMentees; the mentor can assign
+/// or correct the CWID); counted in report 7 when it has a CWID, whether
+/// accepted or not. Dismissals and assignments survive the weekly rebuild.
 model FrtMentee {
   id              Int       @id @default(autoincrement())
   mentorCwid      String    @map("mentor_cwid") @db.VarChar(32)
@@ -535,6 +536,11 @@ model FrtMentee {
   refreshedAt     DateTime  @map("refreshed_at")
   dismissedAt     DateTime? @map("dismissed_at")
   dismissedBy     String?   @map("dismissed_by") @db.VarChar(32)
+  /// Set when the mentor (or a superuser) picked the CWID on /edit. From then
+  /// on `menteeCwid` is theirs (null = "no WCM person"), kept across rebuilds
+  /// and never overwritten by the name match.
+  cwidAssignedAt  DateTime? @map("cwid_assigned_at")
+  cwidAssignedBy  String?   @map("cwid_assigned_by") @db.VarChar(32)
 
   @@unique([mentorCwid, nameKey])
   @@index([menteeCwid])
