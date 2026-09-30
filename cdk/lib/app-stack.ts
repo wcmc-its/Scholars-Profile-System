@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+  Annotations,
   CfnOutput,
   Duration,
   Fn,
@@ -1265,8 +1266,30 @@ export class AppStack extends Stack {
     // to avoid the 15-min wait for a guaranteed-failing pull; the
     // account holder pushes the bootstrap image manually, then re-runs
     // `cdk deploy` with appDesiredCount back to the env default.
+    //
+    // #2343 -- digest pin for the app image (sps-app + sps-migrate). deploy.yml
+    // registers every revision as `<repo>@sha256:...` (#2121) so the circuit
+    // breaker rolls back to an immutable image. A bare `cdk deploy` used to
+    // re-register the family on mutable `:latest`, throwing that pin away: any
+    // task launched under it (scale-out, crash restart, AZ rebalance) pulled
+    // whatever `:latest` pointed at that moment. Pass the digest the service is
+    // RUNNING as context and the CDK-registered revision stays pinned to it:
+    //   -c appImageDigest=$(../scripts/release/running-app-digest.sh <env>)
+    // Prod refuses to synth/diff/deploy Sps-App-prod without it (an error
+    // annotation, which fails synth under annotationsInValidationReport). The
+    // guard only arms when the CLI has selected this stack (Stack.bundlingRequired
+    // reads the CLI's aws:cdk:bundling-stacks), so
+    // `cdk deploy --exclusively Sps-Edge-prod` etc. are unaffected; a deploy of
+    // another prod stack WITHOUT --exclusively also deploys Sps-App-prod as an
+    // upstream dependency, so it is correctly gated too. Opt out explicitly with
+    // -c allowLatestAppImage=true (bootstrap with an empty ECR repo; CI synth).
+    // Staging is not gated -- deploy.yml re-pins it on every master push -- but
+    // honours the same context when given. The ETL-image families below stay
+    // on `:latest`: deploy.yml registers a digest-pinned revision of each
+    // right before it run-tasks it, and none backs a long-running service.
     // ------------------------------------------------------------------
-    const containerImage = ecs.ContainerImage.fromEcrRepository(this.ecrRepository, "latest");
+    const appImageRef = resolveAppImageRef(this, env);
+    const containerImage = ecs.ContainerImage.fromEcrRepository(this.ecrRepository, appImageRef);
     // The ETL batch image (#454) — the only image with `tsx` + the source tree +
     // the `mariadb` client, so it is what runs the tsx-based db-bootstrap script
     // (#493). The standalone app image has none of those.
@@ -1522,9 +1545,9 @@ export class AppStack extends Stack {
         // loader queries nothing and the payload is byte-identical. Only
         // published diseases (human-confirmed, or center auto-publish of high
         // confidence) render. Data-gated on a CenterProgram taxonomy (Meyer
-        // today). App-only, no reindex, no migration. Staging-on for soak;
-        // prod-off until sign-off.
-        CENTER_DISEASE_FACET: env === "staging" ? "on" : "off",
+        // today). App-only, no reindex, no migration. Prod-on 2026-09-30 after
+        // the staging soak was signed off.
+        CENTER_DISEASE_FACET: "on",
         // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
@@ -4139,4 +4162,37 @@ export class AppStack extends Stack {
       description: "SPS GitHub Actions deploy role ARN",
     });
   }
+}
+
+/** `sha256:` + 64 lowercase hex -- the only shape ECR accepts as an image digest. */
+const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+
+/**
+ * #2343 -- the tag-or-digest the app (and migrate) container image resolves
+ * to. `-c appImageDigest=sha256:...` pins it; otherwise `latest`. For prod, an
+ * unpinned synth of this stack (when the CLI selected it) is an ERROR
+ * annotation unless `-c allowLatestAppImage=true` is passed.
+ */
+function resolveAppImageRef(scope: Stack, env: string): string {
+  const raw = scope.node.tryGetContext("appImageDigest") as string | undefined;
+  const digest = raw === undefined || raw === null ? "" : String(raw).trim();
+  if (digest !== "") {
+    if (!IMAGE_DIGEST_RE.test(digest)) {
+      throw new Error(
+        `appImageDigest must be sha256:<64 hex> (got "${digest}"). ` +
+          "Get it with scripts/release/running-app-digest.sh <env>.",
+      );
+    }
+    return digest;
+  }
+  const allowLatest = `${scope.node.tryGetContext("allowLatestAppImage")}` === "true";
+  if (env === "prod" && !allowLatest && scope.bundlingRequired) {
+    Annotations.of(scope).addError(
+      "Sps-App-prod would register sps-app-prod/sps-migrate-prod on mutable :latest, " +
+        "discarding the pipeline's digest pin (#2343). Pass " +
+        "-c appImageDigest=$(../scripts/release/running-app-digest.sh prod) " +
+        "(or -c allowLatestAppImage=true for a bootstrap deploy with an empty ECR repo).",
+    );
+  }
+  return "latest";
 }

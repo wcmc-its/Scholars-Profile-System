@@ -240,7 +240,7 @@ gh workflow run deploy.yml --ref master -f env=prod
 Or UI: `Actions → Deploy → Run workflow`, branch **`master`**, env **`prod`** → run lands in *Awaiting approval* → required reviewer (`paulalbert1`) clicks *Approve and deploy*. Three controls gate prod: the `prod` GitHub Environment (master-only + required reviewer), the workflow's "refuse prod from non-master ref" step, and the OIDC sub-claim (`...:environment:prod`).
 
 **Pre-deploy checklist (prod)** — all must hold:
-- `cd cdk && npx cdk diff --exclusively Sps-App-prod -c env=prod` is clean (the workflow does **not** run `cdk diff`).
+- `cd cdk && npx cdk diff --exclusively Sps-App-prod -c env=prod -c appImageDigest=$(../scripts/release/running-app-digest.sh prod)` is clean (the workflow does **not** run `cdk diff`).
 - Same commit SHA deployed to staging within last 72 h.
 - No un-previewed Prisma migrations in the diff.
 - On-call coverage for next 30 min.
@@ -250,9 +250,11 @@ Or UI: `Actions → Deploy → Run workflow`, branch **`master`**, env **`prod`*
 
 ```sh
 cd cdk
-npx cdk diff   --exclusively Sps-App-<env> -c env=<env>   # confirm delta is intended
-npx cdk deploy --exclusively Sps-App-<env> -c env=<env>
+digest=$(../scripts/release/running-app-digest.sh <env>)   # keep the running image pinned (#2343)
+npx cdk diff   --exclusively Sps-App-<env> -c env=<env> -c appImageDigest="$digest"   # confirm delta is intended
+npx cdk deploy --exclusively Sps-App-<env> -c env=<env> -c appImageDigest="$digest"
 ```
+Without `appImageDigest` the revision registers on mutable `:latest`; for prod the synth refuses (see `DEPLOY-RUNBOOK.md` § "Manual `cdk deploy Sps-App-<env>` keeps the digest pin").
 Adding a new flag to `app-stack.ts` also requires regenerating the snapshot or the `cdk` CI gate fails:
 ```sh
 cd cdk && npm ci && npm test -- -u   # commit only the .snap

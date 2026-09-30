@@ -325,8 +325,9 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
       kind: string;
       reports: Array<{ n: number; accessText: string }>;
     }>;
-    // Pseudo-units lead the list (Institution-wide, then Mentoring programs).
-    expect(units.map((u) => u.kind)).toEqual(["program", "center", "center"]);
+    // Pseudo-units lead the list (Institution-wide, then Mentoring programs);
+    // the two centers are one "Centers" group (#2856).
+    expect(units.map((u) => u.kind)).toEqual(["program", "center"]);
     expect(units[1].reports.map((r) => r.accessText)).toEqual(Array(6).fill("Unit owners and curators"));
     expect(units[0].reports[0].accessText).toBe("Superusers and comms stewards + 1 other");
   });

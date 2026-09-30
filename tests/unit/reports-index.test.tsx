@@ -452,7 +452,7 @@ describe("ReportsIndex — the Cores group's Viewing picker", () => {
     kind: "core",
     name: "Cores",
     reports: CORE_REPORTS,
-    coreOptions: OPTIONS,
+    unitOptions: OPTIONS,
   });
   const select = (c: HTMLElement) =>
     within(c).getByTestId("reports-index-core-select") as HTMLSelectElement;
@@ -523,7 +523,7 @@ describe("ReportsIndex — the Cores group's Viewing picker", () => {
       ...OPTIONS[0],
       kind: "core",
       reports: CORE_REPORTS,
-      coreOptions: [OPTIONS[0]],
+      unitOptions: [OPTIONS[0]],
     };
     const { container } = render(<ReportsIndex units={[only]} />);
     expect(groupNames(container)).toEqual(["Alpha Imaging Core"]);
@@ -541,7 +541,7 @@ describe("ReportsIndex — the Cores group's Viewing picker", () => {
       perReport: [{ n: 11 as const, live: true, lastRefreshedAt: null }],
       onlyReports: [11, 12, 13] as const,
     };
-    const unit: ReportsIndexUnit = { ...cores(), coreOptions: [ALL, ...OPTIONS] };
+    const unit: ReportsIndexUnit = { ...cores(), unitOptions: [ALL, ...OPTIONS] };
     const { container } = render(<ReportsIndex units={[unit]} />);
     const c = within(container);
     expect(Array.from(select(container).options).map((o) => o.textContent)).toEqual([
@@ -572,6 +572,147 @@ describe("ReportsIndex — the Cores group's Viewing picker", () => {
       target: { value: "alpha imaging" },
     });
     expect(groupNames(container)).toEqual(["Cores"]);
+  });
+});
+
+describe.each([
+  ["department", "Departments"],
+  ["division", "Divisions"],
+  ["center", "Centers"],
+] as const)("ReportsIndex — the %s group's Viewing picker (#2856)", (kind, heading) => {
+  const REPORTS = [
+    report(3, "Publications", "Publications by current members."),
+    report(6, "NIH-funded pubs", "NIH-linked."),
+  ];
+  const option = (code: string, name: string, live6: boolean) => ({
+    code,
+    name,
+    editHref: `/edit/${kind}/${code}`,
+    perReport: [
+      { n: 3 as const, live: true, lastRefreshedAt: null },
+      { n: 6 as const, live: live6, lastRefreshedAt: null },
+    ],
+  });
+  const OPTIONS = [
+    option("u-a", "Anesthesiology", true),
+    option("u-b", "Biochemistry", false),
+    option("u-c", "Cardiology", true),
+  ];
+  const group = (selected = OPTIONS[0]): ReportsIndexUnit => ({
+    ...selected,
+    kind,
+    name: heading,
+    reports: REPORTS,
+    unitOptions: OPTIONS,
+  });
+  const testId = `reports-index-${kind}-select`;
+  const select = (c: HTMLElement) => within(c).getByTestId(testId) as HTMLSelectElement;
+  // Centers carry no `&kind=` on report links (bookmark compatibility).
+  const href = (slug: string, code: string) =>
+    kind === "center"
+      ? `/edit/reports/${slug}?center=${code}`
+      : `/edit/reports/${slug}?center=${code}&kind=${kind}`;
+
+  it(`N units render as ONE group with a Viewing select listing every unit`, () => {
+    const { container } = render(<ReportsIndex units={[INSTITUTION, group()]} />);
+    expect(groupNames(container)).toEqual(["Institution-wide", heading]);
+    const sections = container.querySelectorAll(`[data-testid='reports-index-group-${kind}s']`);
+    expect(sections).toHaveLength(1);
+    expect(within(sections[0] as HTMLElement).getByLabelText("Viewing")).toBe(select(container));
+    expect(Array.from(select(container).options).map((o) => o.textContent)).toEqual([
+      "Anesthesiology",
+      "Biochemistry",
+      "Cardiology",
+    ]);
+    expect(rowIds(container)).toEqual([
+      "reports-index-row-institution-8",
+      "reports-index-row-u-a-3",
+      "reports-index-row-u-a-6",
+    ]);
+  });
+
+  it("picking a unit rewrites the row hrefs, the Edit profile link, liveness and the URL", () => {
+    const { container } = render(<ReportsIndex units={[group()]} />);
+    const c = within(container);
+    fireEvent.change(select(container), { target: { value: "u-c" } });
+    expect(c.getByTestId("reports-index-row-u-c-3").getAttribute("href")).toBe(
+      href("publications", "u-c"),
+    );
+    expect(c.getByTestId("reports-index-edit-u-c").getAttribute("href")).toBe(`/edit/${kind}/u-c`);
+    expect(c.getByTestId("reports-index-edit-u-c").textContent).toBe(`Edit ${kind} profile`);
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", `?center=u-c&kind=${kind}`);
+    // Biochemistry has no NIH-funded data yet: that row goes muted.
+    fireEvent.change(select(container), { target: { value: "u-b" } });
+    expect(c.getByTestId("reports-index-row-u-b-6").tagName).toBe("DIV");
+    expect(c.queryByTestId("reports-index-row-u-c-3")).toBeNull();
+  });
+
+  it("opens on the unit the page preselected; the default leaves a bare URL alone", () => {
+    const { container, unmount } = render(<ReportsIndex units={[group(OPTIONS[2])]} />);
+    expect(select(container).value).toBe("u-c");
+    expect(within(container).getByTestId("reports-index-row-u-c-6").getAttribute("href")).toBe(
+      href("nih-funded-pubs", "u-c"),
+    );
+    unmount();
+    replaceState.mockClear();
+    render(<ReportsIndex units={[group()]} />);
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "/edit/reports");
+  });
+
+  it("the no-JS form GETs ?center=<code>&kind=<kind>", () => {
+    const { container } = render(<ReportsIndex units={[group()]} />);
+    const form = select(container).closest("form")!;
+    expect(form.getAttribute("method")).toBe("get");
+    expect(form.getAttribute("action")).toBe("/edit/reports");
+    expect(select(container).getAttribute("name")).toBe("center");
+    expect((form.querySelector("input[name='kind']") as HTMLInputElement).value).toBe(kind);
+  });
+
+  it("a viewer with one unit of the kind sees its name and no select", () => {
+    const only: ReportsIndexUnit = {
+      ...OPTIONS[0],
+      kind,
+      reports: REPORTS,
+      unitOptions: [OPTIONS[0]],
+    };
+    const { container } = render(<ReportsIndex units={[only]} />);
+    expect(groupNames(container)).toEqual(["Anesthesiology"]);
+    expect(within(container).queryByTestId(testId)).toBeNull();
+    expect(within(container).getByTestId("reports-index-edit-u-a").textContent).toBe(
+      `Edit ${kind} profile`,
+    );
+  });
+});
+
+describe("ReportsIndex — several per-kind pickers", () => {
+  const unitOf = (kind: "department" | "division", code: string, name: string) => ({
+    code,
+    name,
+    editHref: `/edit/${kind}/${code}`,
+    perReport: [{ n: 3 as const, live: true, lastRefreshedAt: null }],
+  });
+  const REPORTS = [report(3, "Publications", "Publications by current members.")];
+  const DEPTS = [unitOf("department", "d-1", "Dept One"), unitOf("department", "d-2", "Dept Two")];
+  const DIVS = [unitOf("division", "v-1", "Div One"), unitOf("division", "v-2", "Div Two")];
+  const units: ReportsIndexUnit[] = [
+    { ...DEPTS[0], kind: "department", name: "Departments", reports: REPORTS, unitOptions: DEPTS },
+    { ...DIVS[0], kind: "division", name: "Divisions", reports: REPORTS, unitOptions: DIVS },
+  ];
+
+  it("each group picks independently; the URL names the last pick", () => {
+    const { container } = render(<ReportsIndex units={units} />);
+    const c = within(container);
+    fireEvent.change(c.getByTestId("reports-index-department-select"), {
+      target: { value: "d-2" },
+    });
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "?center=d-2&kind=department");
+    fireEvent.change(c.getByTestId("reports-index-division-select"), {
+      target: { value: "v-2" },
+    });
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "?center=v-2&kind=division");
+    // The department pick stays put.
+    expect(c.getByTestId("reports-index-row-d-2-3")).toBeTruthy();
+    expect(c.getByTestId("reports-index-row-v-2-3")).toBeTruthy();
   });
 });
 

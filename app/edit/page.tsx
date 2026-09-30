@@ -93,7 +93,10 @@ export default async function EditSelfPage({
   // #2634 — mentee suggestions share the COI-gap actor rule on this surface:
   // genuine self only, never under a "View as" overlay.
   const includeMenteeSuggestions = isMenteeSuggestionsEnabled() && genuineSelf;
-  const includeOrcidSuggestion = isOrcidSuggestionEnabled() && genuineSelf;
+  // NOT genuine-self gated: "View as" exists to check what the scholar sees, and
+  // the ORCID write already authorizes a superuser under the overlay (logged to
+  // them), so hiding only the suggestion made the view lie without protecting anything.
+  const includeOrcidSuggestion = isOrcidSuggestionEnabled();
   // #836 — on THIS (self) surface the manual-Highlights editor loads only for a
   // genuine self viewer with the flag on — never under a "View as" overlay. A
   // superuser curating another scholar's Highlights does so on the superuser

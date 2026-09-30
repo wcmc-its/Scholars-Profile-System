@@ -25,7 +25,7 @@
  */
 import Link from "next/link";
 
-import type { CorePickerOption } from "@/components/edit/reports/core-picker";
+import type { UnitPickerOption } from "@/components/edit/reports/unit-picker";
 import { CoreReportPicker } from "@/components/edit/reports/core-report-picker";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +42,7 @@ export function CoreReportsHeader({
   coreId: string;
   coreName: string;
   /** The cores this viewer can report on, A–Z. */
-  options: ReadonlyArray<CorePickerOption>;
+  options: ReadonlyArray<UnitPickerOption>;
   /** The core's reports, in report-number order. */
   tabs: ReadonlyArray<CoreReportTab>;
   /** The report on screen (`report_meta.report_key`). */
