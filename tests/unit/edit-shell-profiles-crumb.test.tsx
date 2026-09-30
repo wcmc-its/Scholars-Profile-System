@@ -14,6 +14,11 @@
  * go FROM a unit page, so `canBrowseProfiles` no longer factors into this
  * branch at all; it stays self-mode-only for the "All profiles" link).
  *
+ * Header redesign (2026-09-30): the entity name moved out of the crumb into
+ * the page `<h1>`; the crumb is now "‹ Profiles" (scholar) or "Org units /
+ * {Kind plural}" (unit), and a proxy / non-navigable unit admin has no
+ * breadcrumb line at all.
+ *
  * `AccountMenu` is a client component that fires an impersonation-probe fetch
  * on mount, so it's mocked out — this suite only exercises the shell's crumb.
  */
@@ -46,10 +51,13 @@ describe("EditShell — Profiles crumb gating (superuser mode)", () => {
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     const link = within(crumb).getByTestId("edit-subnav-profiles");
     expect(link.getAttribute("href")).toBe("/edit/profiles");
-    expect(within(crumb).getByText("Jane Doe").textContent).toBe("Jane Doe");
+    expect(link.textContent).toBe("Profiles");
+    // The name moved out of the crumb into the h1.
+    expect(within(crumb).queryByText("Jane Doe")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Jane Doe");
   });
 
-  it("unit editor (isProfileEntity=false): flat label, no link", () => {
+  it("unit editor (isProfileEntity=false): no Profiles crumb; the unit name is the h1", () => {
     render(
       <EditShell {...base} isProfileEntity={false}>
         <div>panel</div>
@@ -57,10 +65,11 @@ describe("EditShell — Profiles crumb gating (superuser mode)", () => {
     );
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
-    expect(within(crumb).getByText("Epigenomics").textContent).toBe("Epigenomics");
+    expect(within(crumb).queryByRole("link")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Epigenomics");
   });
 
-  it("unit editor stays flat even for a real superuser — canBrowseProfiles no longer overrides page identity", () => {
+  it("unit editor never gets Profiles even for a real superuser — canBrowseProfiles no longer overrides page identity", () => {
     render(
       <EditShell {...base} isProfileEntity={false} canBrowseProfiles={true}>
         <div>panel</div>
@@ -68,7 +77,6 @@ describe("EditShell — Profiles crumb gating (superuser mode)", () => {
     );
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
-    expect(within(crumb).getByText("Epigenomics").textContent).toBe("Epigenomics");
   });
 });
 
@@ -93,7 +101,6 @@ describe("EditShell — Org units crumb gating (unit editor pages)", () => {
     const link = within(crumb).getByTestId("edit-subnav-units");
     expect(link.getAttribute("href")).toBe("/edit/units");
     expect(link.textContent).toContain("Org units");
-    expect(within(crumb).getByText("Epigenomics").textContent).toBe("Epigenomics");
   });
 
   it("a comms_steward's units-tab grant (same orgUnitsNavVisible=true the caller computes) also renders the link", () => {
@@ -110,16 +117,55 @@ describe("EditShell — Org units crumb gating (unit editor pages)", () => {
     expect(within(crumb).getByTestId("edit-subnav-units").getAttribute("href")).toBe("/edit/units");
   });
 
-  it("orgUnitsNavVisible=false (or omitted) keeps the flat label — no link, no history.back", () => {
+  it("orgUnitsNavVisible=false (or omitted) keeps 'Org units' / kind as plain text — no link, no history.back", () => {
     render(
-      <EditShell {...base} isProfileEntity={false} orgUnitsNavVisible={false}>
+      <EditShell {...base} isProfileEntity={false} unitKind="core" orgUnitsNavVisible={false}>
         <div>panel</div>
       </EditShell>,
     );
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(crumb).queryByTestId("edit-subnav-units")).toBeNull();
     expect(within(crumb).queryByRole("link")).toBeNull();
-    expect(within(crumb).getByText("Epigenomics").textContent).toBe("Epigenomics");
+    expect(within(crumb).getByText("Org units")).toBeTruthy();
+    expect(within(crumb).getByText("Cores")).toBeTruthy();
+  });
+
+  it.each([
+    ["department", "Departments"],
+    ["division", "Divisions"],
+    ["center", "Centers"],
+    ["core", "Cores"],
+  ] as const)("unitKind=%s adds a '%s' crumb linking to /edit/units?kind=", (kind, plural) => {
+    render(
+      <EditShell {...base} isProfileEntity={false} unitKind={kind} orgUnitsNavVisible>
+        <div>panel</div>
+      </EditShell>,
+    );
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const kindCrumb = within(crumb).getByTestId("edit-subnav-unit-kind");
+    expect(kindCrumb.textContent).toBe(plural);
+    expect(kindCrumb.getAttribute("href")).toBe(`/edit/units?kind=${kind}`);
+    // No third crumb on the main (rail) page.
+    expect(within(crumb).queryByTestId("edit-rail-back")).toBeNull();
+  });
+
+  it("a hideRail sub-page appends a third crumb naming the unit, linking to backHref", () => {
+    render(
+      <EditShell
+        {...base}
+        isProfileEntity={false}
+        unitKind="center"
+        orgUnitsNavVisible
+        hideRail
+        backHref="/edit/center/C1"
+      >
+        <div>panel</div>
+      </EditShell>,
+    );
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const links = within(crumb).getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["Org units", "Centers", "Epigenomics"]);
+    expect(within(crumb).getByTestId("edit-rail-back").getAttribute("href")).toBe("/edit/center/C1");
   });
 
   it("a scholar profile page (isProfileEntity=true) ignores orgUnitsNavVisible entirely", () => {
@@ -161,28 +207,25 @@ describe("EditShell — Profiles crumb gating (unit-admin mode)", () => {
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     const link = within(crumb).getByTestId("edit-subnav-profiles");
     expect(link.getAttribute("href")).toBe("/edit/profiles");
-    expect(within(crumb).getByText("Alex Rivera").textContent).toBe("Alex Rivera");
   });
 
-  it("profilesNavVisible=false (or omitted) keeps the unit-admin flat label", () => {
+  it("profilesNavVisible=false (or omitted) omits the breadcrumb line for a unit admin", () => {
     render(
       <EditShell {...unitAdminBase} profilesNavVisible={false}>
         <div>panel</div>
       </EditShell>,
     );
-    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
-    expect(within(crumb).getByTestId("edit-subnav-unit-admin").textContent).toBe("Alex Rivera");
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Alex Rivera");
   });
 
-  it("a proxy editor stays flat even with profilesNavVisible=true — a proxy grant names no roster", () => {
+  it("a proxy editor gets no breadcrumb even with profilesNavVisible=true — a proxy grant names no roster", () => {
     render(
       <EditShell {...unitAdminBase} mode="proxy" profilesNavVisible={true}>
         <div>panel</div>
       </EditShell>,
     );
-    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
-    expect(within(crumb).getByTestId("edit-subnav-proxy").textContent).toBe("Alex Rivera");
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+    expect(screen.queryByTestId("edit-subnav-profiles")).toBeNull();
   });
 });

@@ -66,14 +66,14 @@ beforeEach(() => {
 describe("/edit/units — ConsoleShell wiring", () => {
   it("signed-out → SAML redirect", async () => {
     mockGetEditSession.mockResolvedValue(null);
-    await expect(EditUnitsPage()).rejects.toThrow(
+    await expect(EditUnitsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
       "__REDIRECT__:/api/auth/saml/login?return=/edit/units",
     );
   });
 
   it("passes the EFFECTIVE session through to ConsoleShell — loadConsoleTabs derives every grant-based tab from it", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     expect(result.props.session).toBe(OWNER);
     // The bare escape hatch stays — this page has no unit-admin gate of its
     // own, unlike every other console page (docs/edit-console-ia-spec.md
@@ -83,7 +83,7 @@ describe("/edit/units — ConsoleShell wiring", () => {
 
   it("no longer hand-computes dataQualityTab/usageTab/reportsTab — ConsoleShell derives them from session now", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     expect(result.props.dataQualityTab).toBeUndefined();
     expect(result.props.usageTab).toBeUndefined();
     expect(result.props.reportsTab).toBeUndefined();
@@ -114,7 +114,7 @@ describe("/edit/units — page header", () => {
       isSuperuser: true,
       isCommsSteward: false,
     });
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     const create = findAll(result, (el) => el.props["data-testid"] === "all-units-create");
     expect(create).toHaveLength(1);
     expect(create[0].props.href).toBe("/edit/unit/new");
@@ -128,7 +128,7 @@ describe("/edit/units — page header", () => {
       isSuperuser: false,
       isCommsSteward: true,
     });
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     expect(findAll(result, (el) => el.props["data-testid"] === "all-units-create")).toHaveLength(0);
     const p = findAll(result, (el) => el.type === "p")[0];
     expect(textOf(p)).toContain("Every department, division, center and core.");
@@ -136,9 +136,96 @@ describe("/edit/units — page header", () => {
 
   it("unit owner: keeps the 'you can edit' copy and gets no directory", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    const result = asEl(await EditUnitsPage());
+    const result = asEl(await EditUnitsPage({ searchParams: Promise.resolve({}) }));
     const p = findAll(result, (el) => el.type === "p")[0];
     expect(textOf(p)).toContain("you can edit");
     expect(findAll(result, (el) => el.type === "section")).toHaveLength(0);
+  });
+});
+
+describe("/edit/units — ?kind= filter (unit editor kind crumb)", () => {
+  const unit = (kind: string, code: string) => ({
+    kind,
+    code,
+    name: `Unit ${code}`,
+    role: "owner",
+    href: `/edit/${kind}/${code}`,
+  });
+  const GRANTS = {
+    departments: [unit("department", "D1")],
+    divisions: [],
+    centers: [unit("center", "C1")],
+    cores: [],
+    institutions: [],
+    total: 2,
+  };
+  const DIRECTORY = [
+    { kind: "department", code: "D1" },
+    { kind: "center", code: "C1" },
+    { kind: "center", code: "C2" },
+    { kind: "core", code: "7" },
+  ];
+  const props = (kind?: string | string[]) => ({
+    searchParams: Promise.resolve(kind === undefined ? {} : { kind }),
+  });
+  const indexUnits = (result: El) =>
+    findAll(result, (el) => "units" in el.props && "isSuperuser" in el.props)[0]?.props.units as
+      | typeof GRANTS
+      | undefined;
+  const directoryUnits = (result: El) =>
+    findAll(result, (el) => Array.isArray(el.props.units) && !("isSuperuser" in el.props))[0]
+      ?.props.units as Array<{ kind: string }> | undefined;
+  const byTestId = (result: El, id: string) =>
+    findAll(result, (el) => el.props["data-testid"] === id);
+
+  it("kind=center narrows the manageable index to centers, with a 'Show all' clear link", async () => {
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadManageableUnits.mockResolvedValue(GRANTS);
+    const result = asEl(await EditUnitsPage(props("center")));
+    const units = indexUnits(result)!;
+    expect(units.centers).toHaveLength(1);
+    expect(units.departments).toHaveLength(0);
+    expect(units.total).toBe(1);
+    const clear = byTestId(result, "units-kind-filter-clear");
+    expect(clear).toHaveLength(1);
+    expect(clear[0].props.href).toBe("/edit/units");
+    const line = byTestId(result, "units-kind-filter")[0];
+    const showing = findAll(line, (el) => el.type === "span")[0];
+    expect((showing.props.children as unknown[]).join("")).toBe("Showing centers");
+  });
+
+  it("kind=center seeds the superuser all-units directory's Kind facet (rows unfiltered)", async () => {
+    mockGetEditSession.mockResolvedValue({ cwid: "su01", isSuperuser: true, isCommsSteward: false });
+    mockLoadAllUnitsDirectory.mockResolvedValue(DIRECTORY);
+    const result = asEl(await EditUnitsPage(props("center")));
+    const dir = findAll(
+      result,
+      (el) => Array.isArray(el.props.units) && !("isSuperuser" in el.props),
+    )[0];
+    // Full rows so the facet keeps its real per-kind counts; the kind is the
+    // facet's initial selection instead.
+    expect(dir.props.units).toHaveLength(4);
+    expect(dir.props.initialKind).toBe("center");
+  });
+
+  it.each([["bogus"], [["center", "core"]], [undefined]])(
+    "ignores an unknown / repeated / absent kind (%j) — full lists, no filter line",
+    async (kind) => {
+      mockGetEditSession.mockResolvedValue({ cwid: "su01", isSuperuser: true, isCommsSteward: false });
+      mockLoadManageableUnits.mockResolvedValue(GRANTS);
+      mockLoadAllUnitsDirectory.mockResolvedValue(DIRECTORY);
+      const result = asEl(await EditUnitsPage(props(kind)));
+      expect(indexUnits(result)!.total).toBe(2);
+      expect(directoryUnits(result)).toHaveLength(4);
+      expect(byTestId(result, "units-kind-filter")).toHaveLength(0);
+    },
+  );
+
+  it("an owner with no grants of that kind sees a 'none of that kind' line, not the no-units empty state", async () => {
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadManageableUnits.mockResolvedValue(GRANTS);
+    const result = asEl(await EditUnitsPage(props("core")));
+    expect(byTestId(result, "units-kind-filter-empty")).toHaveLength(1);
+    expect(indexUnits(result)).toBeUndefined();
   });
 });

@@ -7,7 +7,7 @@
  * isolates the router's logic.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 const { mockRosterExportEnabled, mockBasics, mockSectionNav, mockFacultyExport } = vi.hoisted(
   () => ({
@@ -358,6 +358,28 @@ describe("UnitEditPage — Members", () => {
     expect(screen.getByTestId("panel-faculty-export")).toBeTruthy();
   });
 
+  it("the ?attr=roster page header: 'Org units / Centers / {name}' crumbs + the unit name as the h1", () => {
+    render(
+      <UnitEditPage
+        ctx={ctx({ unitType: "center", actorRole: "owner" })}
+        attr="roster"
+        orgUnitsNavVisible
+      />,
+    );
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).getByTestId("edit-subnav-units").getAttribute("href")).toBe("/edit/units");
+    const kind = within(crumb).getByTestId("edit-subnav-unit-kind");
+    expect(kind.textContent).toBe("Centers");
+    expect(kind.getAttribute("href")).toBe("/edit/units?kind=center");
+    expect(within(crumb).getByTestId("edit-rail-back").getAttribute("href")).toBe(
+      "/edit/center/N1280",
+    );
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(document.querySelector('[data-slot="edit-role-pill"]')?.textContent).toBe(
+      "Editing as administrator",
+    );
+  });
+
   it("an ED division's roster page is the faculty export only", () => {
     mockRosterExportEnabled.mockReturnValue(true);
     render(
@@ -425,6 +447,21 @@ describe("UnitEditPage — header, breadcrumb and nav", () => {
     render(<UnitEditPage ctx={ctx({ unitType: "division" })} />);
     expect(screen.getByTestId("unit-edit-crumb").textContent).toBe("Parent");
     expect(screen.getByTestId("unit-edit-kind").textContent).toBe("Division");
+  });
+
+  it("the kind crumb links to /edit/units?kind= only when the root crumb links too", () => {
+    const { unmount } = render(<UnitEditPage ctx={ctx({ unitType: "center" })} orgUnitsNavVisible />);
+    const crumb = screen.getByTestId("unit-edit-crumb");
+    expect(crumb.textContent).toBe("Centers");
+    expect(crumb.getAttribute("href")).toBe("/edit/units?kind=center");
+    unmount();
+    const second = render(<UnitEditPage ctx={ctx({ unitType: "center" })} />);
+    expect(screen.getByTestId("unit-edit-crumb").getAttribute("href")).toBeNull();
+    second.unmount();
+    // A division's crumb names its parent department — no kind link behind it.
+    render(<UnitEditPage ctx={ctx({ unitType: "division" })} orgUnitsNavVisible />);
+    expect(screen.getByTestId("unit-edit-crumb").textContent).toBe("Parent");
+    expect(screen.getByTestId("unit-edit-crumb").getAttribute("href")).toBeNull();
   });
 
   it("'Org units' links back to /edit/units when the units-tab grant allows (dwd2001 bug #7)", () => {

@@ -211,12 +211,11 @@ describe("EditPage router — the Apollo shell + rail", () => {
 
   it("uses a single app-level h1 (no repeated '{Attribute} for {Name}' heading)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    // The h1 now wraps a brand Link (badge + wordmark) to /edit (dwd2001 nav
-    // fix), so match by accessible name — not raw textContent, which also
-    // includes the aria-hidden "WCM" badge glyph — for the console name.
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Scholars Console" }),
-    ).toBeTruthy();
+    // Header redesign (2026-09-30): the page header owns the one h1 ("Your
+    // profile" in self mode); the top-bar brand is no longer a heading.
+    const h1s = screen.getAllByRole("heading", { level: 1 });
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0].textContent).toBe("Your profile");
   });
 
   it("defaults to the task-first Home panel for self", () => {
@@ -1128,26 +1127,52 @@ describe("EditPage — unit-admin Profiles crumb (dwd2001 bug #7)", () => {
     expect(link.getAttribute("href")).toBe("/edit/profiles");
   });
 
-  it("defaults to the flat unit-admin label when profilesNavVisible is omitted", () => {
+  it("omits the breadcrumb for a unit admin when profilesNavVisible is omitted", () => {
     render(<EditPage ctx={superuserCtx} mode="unit-admin" />);
-    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
-    expect(within(crumb).getByTestId("edit-subnav-unit-admin")).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+    expect(screen.queryByTestId("edit-subnav-profiles")).toBeNull();
   });
 
-  it("a proxy editor stays flat even when profilesNavVisible={true} — proxy mode never reads it", () => {
+  it("a proxy editor gets no breadcrumb even when profilesNavVisible={true} — proxy mode never reads it", () => {
     render(<EditPage ctx={superuserCtx} mode="proxy" profilesNavVisible={true} />);
-    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
-    expect(within(crumb).getByTestId("edit-subnav-proxy")).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+    expect(screen.queryByTestId("edit-subnav-profiles")).toBeNull();
+  });
+});
+
+describe("EditPage — header role pill per mode (header redesign 2026-09-30)", () => {
+  const pillText = () => document.querySelector('[data-slot="edit-role-pill"]')?.textContent;
+  it("comms_steward reuses the administrator pill", () => {
+    render(<EditPage ctx={superuserCtx} mode="comms_steward" />);
+    expect(pillText()).toBe("Editing as administrator");
+  });
+  it("proxy reads 'Editing as proxy'", () => {
+    render(<EditPage ctx={superuserCtx} mode="proxy" />);
+    expect(pillText()).toBe("Editing as proxy");
+  });
+  it("unit-admin names the conferring unit", () => {
+    render(
+      <EditPage
+        ctx={superuserCtx}
+        mode="unit-admin"
+        unitAdminBanner={{ unitKind: "department", unitName: "Medicine" }}
+      />,
+    );
+    expect(pillText()).toBe("Editing as Medicine administrator");
+  });
+  it("self mode has no pill", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(pillText()).toBeUndefined();
   });
 });
 
 describe("EditPage router — superuser mode", () => {
-  it("defaults to the Home completeness panel, shows the admin banner, and the superuser rail (Home + Profile URL at the top, Publications yes)", () => {
+  it("defaults to the Home completeness panel, shows the admin role pill, and the superuser rail (Home + Profile URL at the top, Publications yes)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);
     expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
-    expect(document.querySelector('[data-slot="superuser-banner"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="edit-role-pill"]')?.textContent).toBe(
+      "Editing as administrator",
+    );
     expect(screen.getByTestId("rail-home")).toBeTruthy();
     expect(screen.getByTestId("rail-profile-url")).toBeTruthy();
     // Publications is now a superuser surface too (managed on the scholar's behalf).
@@ -1437,18 +1462,18 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
 });
 
 describe("EditPage router — cv_generator mode (#2482, read-only)", () => {
-  it("?attr=overview is inert (write affordance blocked) and the banner reads read-only", () => {
+  it("?attr=overview is inert (write affordance blocked) and the role pill reads 'View only'", () => {
     render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="overview" />);
-    expect(screen.getByRole("alert").textContent).toContain("read-only");
-    expect(screen.getByRole("alert").textContent).not.toContain("as an administrator");
+    expect(document.querySelector('[data-slot="edit-role-pill"]')?.textContent).toBe("View only");
+    expect(document.body.textContent).not.toContain("Changes are logged");
     // The overview editor mount (mock-editor) renders inside the inert wrapper.
     expect(screen.getByTestId("mock-editor").closest("[inert]")).not.toBeNull();
   });
 
   it("?attr=cv is the ONE exception — the Download CV button stays interactive", () => {
     render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="cv" cvEnabled />);
-    // Banner still tells the truth even on the exempted panel.
-    expect(screen.getByRole("alert").textContent).toContain("read-only");
+    // The pill still tells the truth even on the exempted panel.
+    expect(document.querySelector('[data-slot="edit-role-pill"]')?.textContent).toBe("View only");
     // But the download control is NOT wrapped inert.
     expect(screen.getByTestId("download-cv").closest("[inert]")).toBeNull();
   });

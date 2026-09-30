@@ -601,7 +601,7 @@ export type EditPageProps = {
    *  mode, where the panel is absent from the rail). */
   unitAdminEditors?: UnitAdminEditorRow[] | null;
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
-   *  administers this scholar, for the "via {unit} administrator" banner.
+   *  administers this scholar, for the header's "Editing as {unit} administrator" pill.
    *  `null`/absent in every other mode. */
   unitAdminBanner?: {
     unitKind: "department" | "division" | "center" | "institution";
@@ -949,7 +949,7 @@ export function EditPage({
 
   return (
     <EditShell
-      // The shell chrome (breadcrumb back to Profiles + the superuser banner) is
+      // The shell chrome (breadcrumb back to Profiles + the role pill) is
       // the same a superuser sees — a comms_steward reaches this editor from the
       // same roster and edits in an administrative capacity, and cv_generator
       // (#2482) reads the same content read-only, so both reuse superuser chrome

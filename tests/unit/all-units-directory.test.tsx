@@ -355,6 +355,23 @@ describe("AllUnitsDirectory", () => {
     expect(rowIds(container)).toEqual(["all-units-row-core-7"]);
   });
 
+  it("initialKind (/edit/units?kind=) seeds the Kind facet — real counts, and Clear works", () => {
+    const { container } = render(
+      <AllUnitsDirectory units={[...allFour, fakeCore]} initialKind="center" />,
+    );
+    expect(rowIds(container)).toEqual([
+      "all-units-row-center-man-onc",
+      "all-units-row-center-man-old",
+    ]);
+    // The other kinds keep their counts (not 0) — the rows weren't pre-filtered.
+    const deptRow = screen.getByTestId("all-units-facet-kinds-department-rail").parentElement!;
+    expect(deptRow.textContent).toBe("Departments1");
+    const clear = screen.getByTestId("all-units-clear-rail") as HTMLButtonElement;
+    expect(clear.disabled).toBe(false);
+    fireEvent.click(clear);
+    expect(rowIds(container)).toHaveLength(5);
+  });
+
   it("labels source codes in plain words", () => {
     render(<AllUnitsDirectory units={[curatedDept, interimCenter, fakeCore]} />);
     expect(screen.getByTestId("all-units-row-department-N1280").textContent).toContain(
