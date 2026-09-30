@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,8 @@ export function RosterFacet({
   searchPlaceholder = "Search…",
   noMatchLabel = "No matches",
   variant = "default",
+  titleAddon,
+  headerExtra,
 }: {
   title: string;
   options: FacetOption[];
@@ -43,6 +45,12 @@ export function RosterFacet({
    *  Checkbox rows, 0.14em label, DS Input search. "default" keeps the
    *  original button-row facet the /edit console rails share, unchanged. */
   variant?: "default" | "unit";
+  /** "unit" only — rendered beside the title, outside the `<h3>` so the
+   *  heading's accessible name stays the bare title (e.g. an info tooltip). */
+  titleAddon?: ReactNode;
+  /** "unit" only — rendered between the title and the search/options (e.g.
+   *  the Disease focus facet's Any / Primary toggle). */
+  headerExtra?: ReactNode;
 }) {
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
@@ -79,9 +87,19 @@ export function RosterFacet({
   if (variant === "unit") {
     return (
       <div className="flex flex-col gap-2">
-        <h3 className="text-[11px] font-normal uppercase tracking-[0.14em] text-muted-foreground">
-          {title}
-        </h3>
+        {titleAddon ? (
+          <div className="flex items-center gap-1">
+            <h3 className="text-[11px] font-normal uppercase tracking-[0.14em] text-muted-foreground">
+              {title}
+            </h3>
+            {titleAddon}
+          </div>
+        ) : (
+          <h3 className="text-[11px] font-normal uppercase tracking-[0.14em] text-muted-foreground">
+            {title}
+          </h3>
+        )}
+        {headerExtra}
         {showSearch ? (
           <div className="relative">
             <Search

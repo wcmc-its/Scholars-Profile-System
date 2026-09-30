@@ -75,6 +75,11 @@ import {
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
+import { isCenterDiseaseFacetEnabled } from "@/lib/center-disease-flags";
+import {
+  buildPublishedDiseasesByCwid,
+  type CenterMemberDisease,
+} from "@/lib/center-member-diseases";
 import { fetchDirectoryPeopleByCwid, type DirectoryPerson } from "@/lib/sources/ldap";
 import {
   CORNELL_EXTERNAL_SOURCE,
@@ -304,6 +309,11 @@ export type CenterMemberHit = DepartmentFacultyHit & {
   methodFamilies?: CenterMemberFamily[];
   /** #962 — top-N (≤3) of `methodFamilies` for the compact per-row chips. */
   topMethods?: CenterMemberFamily[];
+  /** D1 — this member's PUBLISHED curated diseases (`isDiseasePublished`),
+   *  primary focus first then rank. Present only when CENTER_DISEASE_FACET is on
+   *  AND the member has ≥1 published disease; undefined otherwise, so the
+   *  OFF-path payload is byte-identical. Grouped (programmed-center) path only. */
+  diseases?: CenterMemberDisease[];
 };
 
 /** A program section on the public roster (#552 § 6.2). */
@@ -770,6 +780,41 @@ async function getCenterMembersUncached(
     });
   };
 
+  // D1 — layer PUBLISHED curated diseases onto already-built hits (GROUPED path
+  // only: the grouped roster is the data-driven Cancer-Center gate, a center
+  // with a `CenterProgram` taxonomy, the same one `unit-edit-context.ts` uses,
+  // since `CancerCenterDisease*` rows carry no center column). Flag off ⇒ no
+  // query at all and the hits pass through unchanged. One batched read of the
+  // roster's assignments + decisions, then the shared publish predicate.
+  const attachDiseases = async (hits: CenterMemberHit[]): Promise<CenterMemberHit[]> => {
+    if (!isCenterDiseaseFacetEnabled() || hits.length === 0) return hits;
+    const cwids = hits.map((h) => h.cwid);
+    const [center, assignments, decisions] = await Promise.all([
+      prisma.center.findUnique({
+        where: { code: centerCode },
+        select: { diseaseAutoPublish: true },
+      }),
+      prisma.cancerCenterDiseaseAssignment.findMany({
+        where: { cwid: { in: cwids } },
+        select: { cwid: true, diseaseCode: true, rank: true, focus: true, confidence: true },
+      }),
+      prisma.cancerCenterDiseaseDecision.findMany({
+        where: { cwid: { in: cwids } },
+        select: { cwid: true, diseaseCode: true, decision: true },
+      }),
+    ]);
+    const byCwid = buildPublishedDiseasesByCwid(
+      assignments,
+      decisions,
+      center?.diseaseAutoPublish ?? false,
+    );
+    if (byCwid.size === 0) return hits;
+    return hits.map((h) => {
+      const diseases = byCwid.get(h.cwid);
+      return diseases && diseases.length > 0 ? { ...h, diseases } : h;
+    });
+  };
+
   // edge 10 — drop dormant / soft-deleted scholars from the public roster.
   // #2202 — plus the #536 identity-class carve. ONE query drives `total`, the
   // flat page slice AND the grouped-by-program branch, so all three shrink
@@ -902,7 +947,9 @@ async function getCenterMembersUncached(
   // (edge 8).
   // #962 — GROUPED path only: attach public method families for the facet +
   // chips. (The flat path above is left untouched, scope constraint C.)
-  const hits = await attachMethods(attachType(await buildCenterMemberHits(scholars)));
+  const hits = await attachDiseases(
+    await attachMethods(attachType(await buildCenterMemberHits(scholars))),
+  );
   const hitByCwid = new Map(hits.map((h) => [h.cwid, h]));
   const placed = new Set<string>();
   const groups: CenterMemberGroup[] = [];

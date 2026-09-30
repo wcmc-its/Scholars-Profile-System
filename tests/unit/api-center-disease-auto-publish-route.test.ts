@@ -3,7 +3,7 @@
  * "Auto-publish high-confidence inferences" switch. Same authz as the
  * disease-assignments route; one column write + one audit row per change.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const {
@@ -39,6 +39,9 @@ vi.mock("@/lib/edit/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/request")>()),
   readEditRequest: mockReadEditRequest,
 }));
+
+const { mockReflectUnitChange } = vi.hoisted(() => ({ mockReflectUnitChange: vi.fn() }));
+vi.mock("@/lib/edit/revalidation", () => ({ reflectUnitChange: mockReflectUnitChange }));
 
 import { POST } from "@/app/api/edit/center/[code]/disease-auto-publish/route";
 
@@ -78,7 +81,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
   primaryValue = true;
-  mockCenterFindUnique.mockResolvedValue({ code: CODE });
+  mockCenterFindUnique.mockResolvedValue({ code: CODE, slug: "meyer" });
   mockCenterProgramFindFirst.mockResolvedValue({ code: "BR" });
   mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: CODE, role: "curator" }]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
@@ -90,6 +93,29 @@ beforeEach(() => {
     },
   );
   mockAppendAuditRow.mockResolvedValue(undefined);
+});
+
+describe("POST /api/edit/center/[code]/disease-auto-publish — public reflection (CENTER_DISEASE_FACET)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("flag on: a real change reflects the public center page", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "on");
+    const res = await call({ enabled: false });
+    expect(res.status).toBe(200);
+    expect(mockReflectUnitChange).toHaveBeenCalledWith({ unitKind: "center", unitSlug: "meyer" });
+  });
+
+  it("flag on: a no-op (value already set) reflects nothing", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "on");
+    await call({ enabled: true });
+    expect(mockReflectUnitChange).not.toHaveBeenCalled();
+  });
+
+  it("flag off: a real change reflects nothing (nothing public reads it)", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "off");
+    await call({ enabled: false });
+    expect(mockReflectUnitChange).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/edit/center/[code]/disease-auto-publish", () => {

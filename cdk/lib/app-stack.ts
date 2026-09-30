@@ -1508,6 +1508,17 @@ export class AppStack extends Stack {
         // (CENTER_COLLABORATION_NETWORK) is already prod-on; inert unless a center
         // has a CenterProgram taxonomy (Meyer today).
         CENTER_COLLABORATION_GRANT_AXIS: "on",
+        // CENTER_DISEASE_FACET — the public center page's curated disease
+        // layer: a "Disease focus" facet on the Scholars tab plus a DISEASES
+        // row above TOPICS on each member card (D1, decided 2026-09-30 via the
+        // Meyer mockup; diseases sit BESIDE topics, never replace them). Read
+        // via isCenterDiseaseFacetEnabled() (=== "on"); when off the roster
+        // loader queries nothing and the payload is byte-identical. Only
+        // published diseases (human-confirmed, or center auto-publish of high
+        // confidence) render. Data-gated on a CenterProgram taxonomy (Meyer
+        // today). App-only, no reindex, no migration. Staging-on for soak;
+        // prod-off until sign-off.
+        CENTER_DISEASE_FACET: env === "staging" ? "on" : "off",
         // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route

@@ -48,12 +48,16 @@
  * `resolveEditIdentity()` — never the effective/impersonated cwid. One
  * `db.write.$transaction` per call: the lookup + upsert-or-delete +
  * `appendAuditRow` (`action: "disease_assignment_decision"`,
- * `targetEntityType: "scholar"`) commit atomically. No `reflectUnitChange` —
- * this data is not ISR-cached anywhere.
+ * `targetEntityType: "scholar"`) commit atomically. When
+ * `CENTER_DISEASE_FACET` is on, a real change runs `reflectUnitChange` for the
+ * center: the public center page renders published diseases (facet + card
+ * row) from the ISR page and the `center:` swr roster cache. Flag off ⇒ nothing
+ * public reads this data, so no reflection.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { loadDiseaseCodeOptions } from "@/lib/api/unit-edit-context";
+import { isCenterDiseaseFacetEnabled } from "@/lib/center-disease-flags";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
@@ -63,6 +67,7 @@ import {
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { reflectUnitChange } from "@/lib/edit/revalidation";
 import { CWID_PATTERN } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/center/[code]/disease-assignments";
@@ -115,8 +120,17 @@ export async function POST(
   }
 
   const { code } = await params;
-  const center = await db.read.center.findUnique({ where: { code }, select: { code: true } });
+  const center = await db.read.center.findUnique({
+    where: { code },
+    select: { code: true, slug: true },
+  });
   if (!center) return editError(400, "unit_not_found", "code");
+  // The public center page shows published diseases only behind the flag.
+  const reflectPublic = async () => {
+    if (isCenterDiseaseFacetEnabled()) {
+      await reflectUnitChange({ unitKind: "center", unitSlug: center.slug });
+    }
+  };
 
   // Defense in depth — see docblock: `[code]` must resolve to a center with a
   // `CenterProgram` taxonomy, the same data-driven Cancer-Center-only gate
@@ -185,6 +199,7 @@ export async function POST(
       return editError(500, "write_failed");
     }
 
+    await reflectPublic();
     return editOk({ cwid, diseaseCode, decision, changed: true });
   }
 
@@ -261,6 +276,7 @@ export async function POST(
       return decided;
     });
 
+    await reflectPublic();
     return editOk({
       cwid,
       diseaseCode,

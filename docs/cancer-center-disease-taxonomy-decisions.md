@@ -203,7 +203,7 @@ does **not** feed score or rank — see Risks.
 
 *Decided by: Cancer Center review, 2026-08.*
 
-## Open — D0/D0a are resolved and executed; D1 still blocks
+## Open — D0/D0a are resolved and executed; D1 decided 2026-09-30
 
 ### D0. Reconcile with the ruleset — RESOLVED BY #2361, not by us
 
@@ -267,7 +267,7 @@ note to delete it when #2370 lands.
 
 **Taken: option 1.**
 
-### D1. Replace, override, or sit beside `topTopic`?
+### D1. Replace, override, or sit beside `topTopic`? — DECIDED: sit beside
 
 Production **already** renders a per-person disease-named label. `TopicAssignment`
 holds `cwid → topic` with a score, drawn from ReciterAI's catalog — *Breast
@@ -285,7 +285,25 @@ card. It is written by ETL as a full replace, from an upstream score, and
 This is a question about what the public site claims, not an implementation
 detail, which is why it is not an engineering call.
 
-*Needs: Sydney, with Cancer Center input.*
+**Decided 2026-09-30, by the product owner, via the Meyer Cancer Center UI
+mockup (public page, Scholars tab).** The mockup is the sign-off. Curated
+diseases **sit beside** topics on the public center page:
+
+- a "Disease focus" facet on the Scholars tab (after Program, before
+  Membership type), with an "Any involvement" / "Primary focus" toggle;
+- a DISEASES row on each member card, above the TOPICS row, primary-focus
+  diseases highlighted.
+
+Topics are unchanged. `TopicAssignment`, `topTopic` and the TOPICS row are not
+replaced or overridden; the curated layer is additive. A disease is published
+when a curator confirmed it (manual adds included), or when the center's
+auto-publish switch (`Center.diseaseAutoPublish`) is on and the inference is
+high confidence and undecided. A rejected disease never publishes. The rule is
+one shared predicate, `isDiseasePublished` in
+`lib/cancer-center-disease-publish.ts`, read by both /edit and the public page.
+
+Shipped behind the `CENTER_DISEASE_FACET` flag (staging on, prod off until
+sign-off on staging).
 
 ## Open — these do not block
 

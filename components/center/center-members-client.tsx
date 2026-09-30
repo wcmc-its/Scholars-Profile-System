@@ -13,6 +13,11 @@ import {
   type FacetOption,
 } from "@/components/center/center-roster-facets";
 import {
+  DiseaseFocusFacet,
+  type DiseaseFocusMode,
+} from "@/components/center/center-disease-facet";
+import { CenterDiseaseRow } from "@/components/center/center-disease-row";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -207,6 +212,11 @@ function GroupedRoster({
   const [selRanks, setSelRanks] = useState<ReadonlySet<string>>(new Set());
   // "Institution" facet selection (`Scholar.primaryOrgCode` values, #2695).
   const [selInsts, setSelInsts] = useState<ReadonlySet<string>>(new Set());
+  // D1 — "Disease focus" facet: selected disease codes + the Any / Primary
+  // scope. Present only when a member carries published `diseases` (the
+  // CENTER_DISEASE_FACET flag is on server-side and the center has data).
+  const [selDiseases, setSelDiseases] = useState<ReadonlySet<string>>(new Set());
+  const [diseaseMode, setDiseaseMode] = useState<DiseaseFocusMode>("any");
 
   // Flatten to rows tagged with the program section they belong to; keep the
   // (sorted) program order for both the facet and the section layout.
@@ -289,6 +299,13 @@ function GroupedRoster({
   // #962 — the family overlay-key values a member belongs to (facet membership).
   const methodValues = (m: RowWithProgram): string[] =>
     (m.methodFamilies ?? []).map((f) => f.value);
+  // D1 — the disease codes a member matches under the current scope: every
+  // published disease ("any"), or only focus === "primary" ("primary"; a manual
+  // add has no focus and never counts as primary).
+  const diseaseValues = (m: RowWithProgram): string[] =>
+    (m.diseases ?? [])
+      .filter((d) => diseaseMode === "any" || d.focus === "primary")
+      .map((d) => d.diseaseCode);
 
   // Appointment (role) and the name/title query are the outer filters; the
   // sidebar facets compose on top (mock order: appointment, query, facets).
@@ -302,9 +319,13 @@ function GroupedRoster({
   // counts don't collapse when you select within it).
   const passes = (
     m: RowWithProgram,
-    except: "program" | "type" | "dept" | "method" | "rank" | "inst" | null,
+    except: "program" | "disease" | "type" | "dept" | "method" | "rank" | "inst" | null,
   ): boolean =>
     (except === "program" || selPrograms.size === 0 || selPrograms.has(m.programLabel)) &&
+    // D1 — OR within the Disease facet, AND across facets (same as Methods).
+    (except === "disease" ||
+      selDiseases.size === 0 ||
+      diseaseValues(m).some((v) => selDiseases.has(v))) &&
     (except === "type" || selTypes.size === 0 || selTypes.has(typeKey(m))) &&
     (except === "dept" || selDepts.size === 0 || selDepts.has(deptKey(m))) &&
     (except === "rank" || selRanks.size === 0 || selRanks.has(rankKey(m))) &&
@@ -318,7 +339,7 @@ function GroupedRoster({
   const finalRows = useMemo(
     () => base.filter((m) => passes(m, null)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, selPrograms, selTypes, selDepts, selMethods, selRanks, selInsts],
+    [base, selPrograms, selTypes, selDepts, selMethods, selRanks, selInsts, selDiseases, diseaseMode],
   );
 
   const programOptions = useMemo<FacetOption[]>(
@@ -329,7 +350,7 @@ function GroupedRoster({
         count: base.filter((m) => m.programLabel === label && passes(m, "program")).length,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, programOrder, selTypes, selDepts, selMethods, selRanks, selInsts],
+    [base, programOrder, selTypes, selDepts, selMethods, selRanks, selInsts, selDiseases, diseaseMode],
   );
 
   const typeOptions = useMemo<FacetOption[]>(
@@ -340,7 +361,7 @@ function GroupedRoster({
         count: base.filter((m) => typeKey(m) === t && passes(m, "type")).length,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selDepts, selMethods, selRanks, selInsts],
+    [base, allRows, selPrograms, selDepts, selMethods, selRanks, selInsts, selDiseases, diseaseMode],
   );
 
   const deptOptions = useMemo<FacetOption[]>(
@@ -353,7 +374,7 @@ function GroupedRoster({
         }))
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selTypes, selMethods, selRanks, selInsts],
+    [base, allRows, selPrograms, selTypes, selMethods, selRanks, selInsts, selDiseases, diseaseMode],
   );
 
   // #1570 — "Professorial rank" facet, derived exactly like deptOptions: a
@@ -369,7 +390,7 @@ function GroupedRoster({
         }))
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selTypes, selDepts, selMethods, selInsts],
+    [base, allRows, selPrograms, selTypes, selDepts, selMethods, selInsts, selDiseases, diseaseMode],
   );
 
   // "Institution" facet, derived exactly like rankOptions: a sentinel bucket for
@@ -386,7 +407,7 @@ function GroupedRoster({
         }))
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selTypes, selDepts, selMethods, selRanks],
+    [base, allRows, selPrograms, selTypes, selDepts, selMethods, selRanks, selDiseases, diseaseMode],
   );
 
   // #962 — "Methods & tools" facet: family-level options (value = stable overlay
@@ -407,7 +428,28 @@ function GroupedRoster({
       }))
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, allRows, selPrograms, selTypes, selDepts, selRanks, selInsts]);
+  }, [base, allRows, selPrograms, selTypes, selDepts, selRanks, selInsts, selDiseases, diseaseMode]);
+
+  // D1 — "Disease focus" facet: one option per disease any member has
+  // published (stable across the Any / Primary toggle — a disease with no
+  // primary-focus member shows 0, disabled), counted under the current scope,
+  // sorted count desc. `passes(m,"disease")` excludes this facet from its own
+  // counts (smart-count). Empty when no member carries diseases (flag off or
+  // no data) → the facet vanishes.
+  const diseaseOptions = useMemo<FacetOption[]>(() => {
+    const labelByCode = new Map<string, string>();
+    for (const m of allRows)
+      for (const d of m.diseases ?? [])
+        if (!labelByCode.has(d.diseaseCode)) labelByCode.set(d.diseaseCode, d.label);
+    return Array.from(labelByCode.entries())
+      .map(([value, label]) => ({
+        value,
+        label,
+        count: base.filter((m) => diseaseValues(m).includes(value) && passes(m, "disease")).length,
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, allRows, selPrograms, selTypes, selDepts, selMethods, selRanks, selInsts, diseaseMode]);
 
   // Re-group the surviving rows under their program headers. Sections keep the
   // fixed program (sortOrder, label) order — they don't jump when the sort
@@ -454,7 +496,8 @@ function GroupedRoster({
       selDepts.size +
       selMethods.size +
       selRanks.size +
-      selInsts.size >
+      selInsts.size +
+      selDiseases.size >
     0;
   const clearAll = () => {
     setSelPrograms(new Set());
@@ -463,6 +506,7 @@ function GroupedRoster({
     setSelMethods(new Set());
     setSelRanks(new Set());
     setSelInsts(new Set());
+    setSelDiseases(new Set());
     // Mock "Clear all" also resets the name filter (the sort is a view choice).
     setNameQ("");
   };
@@ -519,6 +563,17 @@ function GroupedRoster({
                 </a>
               )}
             </div>
+          )}
+          {/* D1 — Disease focus sits after Program, before Membership type.
+              Vanishes when no member carries a published disease. */}
+          {diseaseOptions.length > 0 && (
+            <DiseaseFocusFacet
+              options={diseaseOptions}
+              selected={selDiseases}
+              onToggle={makeToggle(selDiseases, setSelDiseases)}
+              mode={diseaseMode}
+              onModeChange={setDiseaseMode}
+            />
           )}
           {/* #1570 — hide the Membership-type facet when every shown member shares
               a single type (Meyer is all-Research): a one-option facet can't filter
@@ -658,6 +713,9 @@ function GroupedRoster({
                       methodChips={m.topMethods}
                       meshChips={m.topMesh}
                       activeAppointment={appointment}
+                      diseaseRow={
+                        m.diseases ? <CenterDiseaseRow diseases={m.diseases} /> : undefined
+                      }
                     />
                   ))}
                 </div>

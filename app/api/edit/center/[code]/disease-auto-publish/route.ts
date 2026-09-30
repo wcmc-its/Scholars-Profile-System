@@ -23,11 +23,14 @@
  * value, skip the write and leave the switch off while the UI shows it on.
  * `db.read` is used only for the existence, taxonomy and authz gates.
  *
- * No ISR revalidation: nothing public reads the switch yet. The public center
- * page that will (PR5) must revalidate here when it lands.
+ * When `CENTER_DISEASE_FACET` is on, a real change runs `reflectUnitChange`
+ * for the center: the public center page's facet + card row read the switch
+ * (via the publish predicate) through the ISR page and the `center:` swr
+ * roster cache. Flag off ⇒ nothing public reads it, so no reflection.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
+import { isCenterDiseaseFacetEnabled } from "@/lib/center-disease-flags";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
@@ -37,6 +40,7 @@ import {
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { reflectUnitChange } from "@/lib/edit/revalidation";
 
 const PATH = "/api/edit/center/[code]/disease-auto-publish";
 
@@ -56,7 +60,7 @@ export async function POST(
   const { code } = await params;
   const center = await db.read.center.findUnique({
     where: { code },
-    select: { code: true },
+    select: { code: true, slug: true },
   });
   if (!center) return editError(400, "unit_not_found", "code");
 
@@ -111,5 +115,8 @@ export async function POST(
     return editError(500, "write_failed");
   }
 
+  if (changed && isCenterDiseaseFacetEnabled()) {
+    await reflectUnitChange({ unitKind: "center", unitSlug: center.slug });
+  }
   return editOk({ code: center.code, enabled, changed });
 }
