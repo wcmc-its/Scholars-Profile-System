@@ -15,7 +15,7 @@ export type DiseaseFocusMode = "any" | "primary";
 // confirmation, and the center's auto-publish of high-confidence inferences
 // (no human review). Placeholder until the product owner supplies copy.
 const INFO_COPY =
-  "Disease areas identified from each member's research and reviewed or approved for publication by the center. Any involvement counts every published disease; Primary focus counts only a member's primary disease areas.";
+  "Disease areas identified from each member's research and reviewed or approved for publication by the center. Any counts every published disease; Primary counts only a member's primary disease areas.";
 
 /**
  * The public center roster's "Disease focus" facet (D1 — curated diseases sit
@@ -37,13 +37,16 @@ export function DiseaseFocusFacet({
   mode: DiseaseFocusMode;
   onModeChange: (mode: DiseaseFocusMode) => void;
 }) {
-  const segment = (value: DiseaseFocusMode, label: string) => {
+  // Short visible labels ("Any" / "Primary") so both halves fit the facet
+  // column without truncating; the full meaning stays in the accessible name.
+  const segment = (value: DiseaseFocusMode, label: string, accessibleName: string) => {
     const active = mode === value;
     return (
       <button
         type="button"
         role="radio"
         aria-checked={active}
+        aria-label={accessibleName}
         onClick={() => onModeChange(value)}
         className={`flex-1 cursor-pointer whitespace-nowrap rounded-[3px] border px-2 py-[3px] text-[12px] leading-[16px] transition-colors ${
           active
@@ -91,8 +94,8 @@ export function DiseaseFocusFacet({
           aria-label="Disease focus scope"
           className="flex gap-[2px] rounded-[4px] bg-apollo-surface-2 p-[2px]"
         >
-          {segment("any", "Any involvement")}
-          {segment("primary", "Primary focus")}
+          {segment("any", "Any", "Any involvement")}
+          {segment("primary", "Primary", "Primary focus")}
         </div>
       }
     />
