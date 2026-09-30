@@ -6,6 +6,14 @@ criterion that flips it to prod or kills it. Companion tooling (this PR):
 - `scripts/release/flag-parity.mjs` — CI gate (cdk job): every env key consumed in
   code must be wired in cdk or registered in `flag-parity-allowlist.txt`. Also
   `--dump <env>` prints the synthesized app-container env.
+- `GET /api/edit/effective-flags` (superuser session) — the flag values the
+  RUNNING task actually has, plus its build SHA (#1765). A flag set in
+  `cdk/lib/app-stack.ts` but `null` here is merged-but-dark until
+  `cdk deploy Sps-App-<env>`. It reports only the names in
+  `lib/diagnostics/flag-inventory.generated.ts`; when you wire a new flag and
+  update the cdk snapshot, regenerate that file with
+  `node scripts/release/flag-parity.mjs --write-inventory` (the CI step fails
+  otherwise).
 - `scripts/release/whats-shipping.sh [prod|staging]` — pre-deploy drift report:
   deployed sha, every commit an image roll ships, migrations, cdk/ drift, and the
   exact env vars a `cdk deploy Sps-App-<env>` would change. **Run it (plus
