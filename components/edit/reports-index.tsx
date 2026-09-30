@@ -30,11 +30,13 @@
  * them) unless a search is typed, which reaches every unit — or unless they
  * are ALL there is, when hiding them would open on an empty list.
  *
- * Every core is ONE group (`coreOptions`, core reports index picker,
- * 2026-09-28) with a "Viewing" picker in its header; the picked core rides
- * the URL as `?center=<coreId>&kind=core`, like the filters. A superuser's
- * picker opens with "All cores (N)" (`center=all`): its option lists only the
- * reports that roll up (`onlyReports`: 11–13) and has no profile to edit.
+ * Every unit of a kind is ONE group (`unitOptions`: "Centers", "Departments",
+ * "Divisions", "Cores" — core reports index picker, 2026-09-28, #2857; the
+ * other kinds, #2856) with a "Viewing" picker in its header; the most recent
+ * pick rides the URL as `?center=<code>&kind=<kind>`, like the filters. A
+ * superuser's core picker opens with "All cores (N)" (`center=all`): its
+ * option lists only the reports that roll up (`onlyReports`: 11–13) and has
+ * no profile to edit. No other kind has an "All" option.
  */
 "use client";
 
@@ -42,7 +44,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ChevronRight, Users } from "lucide-react";
 
-import { CorePicker } from "@/components/edit/reports/core-picker";
+import { UnitPicker } from "@/components/edit/reports/unit-picker";
 import {
   REPORTS_INDEX_SCOPES as SCOPES,
   type ReportsIndexScope,
@@ -61,7 +63,8 @@ export type ReportsIndexUnitKind =
   | "institution";
 export type ReportN = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 11 | 12 | 13;
 
-const isPseudo = (k: ReportsIndexUnitKind) => k === "program" || k === "institution";
+const isPseudo = (k: ReportsIndexUnitKind): k is "program" | "institution" =>
+  k === "program" || k === "institution";
 
 export type ReportsIndexReport = {
   n: ReportN;
@@ -92,13 +95,14 @@ export type ReportsIndexUnit = {
   editHref: string;
   reports: ReadonlyArray<ReportsIndexReport>;
   perReport: ReadonlyArray<ReportsIndexPerReport>;
-  /** The one Cores group only: every core, A–Z. The unit's own `code` /
-   *  `editHref` / `perReport` are the selected core's; the "Viewing" picker
-   *  swaps them for another option's. */
-  coreOptions?: ReadonlyArray<ReportsIndexCoreOption>;
+  /** A per-kind group only (Centers / Departments / Divisions / Cores): every
+   *  unit of that kind, A–Z. The unit's own `code` / `editHref` / `perReport`
+   *  are the selected unit's; the "Viewing" picker swaps them for another
+   *  option's. */
+  unitOptions?: ReadonlyArray<ReportsIndexUnitOption>;
 };
 
-export type ReportsIndexCoreOption = Pick<
+export type ReportsIndexUnitOption = Pick<
   ReportsIndexUnit,
   "code" | "name" | "editHref" | "perReport"
 > & {
@@ -154,7 +158,7 @@ function buildRows(units: ReadonlyArray<ReportsIndexUnit>): Row[] {
     for (const report of [...unit.reports].sort((a, b) => a.n - b.n)) {
       const p = byN.get(report.n);
       const live = p?.live ?? false;
-      const coreName = unit.coreOptions?.find((o) => o.code === unit.code)?.name ?? "";
+      const pickedName = unit.unitOptions?.find((o) => o.code === unit.code)?.name ?? "";
       rows.push({
         unit,
         report,
@@ -162,7 +166,7 @@ function buildRows(units: ReadonlyArray<ReportsIndexUnit>): Row[] {
         data: dataLabel(report.n, p),
         toReview: report.n === 2 && live ? (p?.toReview ?? 0) : 0,
         haystack:
-          `${report.name} ${report.description} ${unit.name} ${coreName} #${report.n} ${report.n}`.toLowerCase(),
+          `${report.name} ${report.description} ${unit.name} ${pickedName} #${report.n} ${report.n}`.toLowerCase(),
       });
     }
   }
@@ -184,15 +188,22 @@ export function ReportsIndex({
   initialScope?: ReportsIndexScope;
   initialReview?: boolean;
 }) {
-  // The Cores group's "Viewing" picker: the page hands the group already on
-  // its default core; picking another swaps in that core's code (row hrefs),
-  // edit link and liveness.
-  const coresUnit = units.find((u) => u.coreOptions);
-  const [core, setCore] = React.useState(coresUnit?.code ?? "");
+  // Each per-kind group's "Viewing" picker: the page hands the group already
+  // on its default unit; picking another swaps in that unit's code (row
+  // hrefs), edit link and liveness. `pickedKind` is the group picked last —
+  // the one the URL's single `center`/`kind` pair names.
+  const [picked, setPicked] = React.useState<Partial<Record<ReportsIndexUnitKind, string>>>(() =>
+    Object.fromEntries(units.filter((u) => u.unitOptions).map((u) => [u.kind, u.code])),
+  );
+  const [pickedKind, setPickedKind] = React.useState<ReportsIndexUnitKind | null>(null);
+  const pick = (kind: ReportsIndexUnitKind, code: string) => {
+    setPicked((p) => ({ ...p, [kind]: code }));
+    setPickedKind(kind);
+  };
   const shown = React.useMemo(
     () =>
       units.map((u) => {
-        const o = u.coreOptions?.find((c) => c.code === core);
+        const o = u.unitOptions?.find((c) => c.code === picked[u.kind]);
         if (!o) return u;
         const only = o.onlyReports;
         return {
@@ -203,7 +214,7 @@ export function ReportsIndex({
           reports: only ? u.reports.filter((r) => only.includes(r.n)) : u.reports,
         };
       }),
-    [units, core],
+    [units, picked],
   );
   const rows = React.useMemo(() => buildRows(shown), [shown]);
   const kindsPresent = React.useMemo(() => new Set<string>(units.map((u) => u.kind)), [units]);
@@ -232,15 +243,16 @@ export function ReportsIndex({
     set("q", query.trim() || null);
     set("scope", scope === "all" ? null : scope);
     set("review", review ? "1" : null);
-    // The picked core, as the `?center=<coreId>&kind=core` the page preselects
-    // from — once the viewer picks one or the URL already named a core.
-    if (coresUnit && (core !== coresUnit.code || params.get("kind") === "core")) {
-      params.set("center", core);
-      params.set("kind", "core");
+    // The last pick, as the `?center=<code>&kind=<kind>` the page preselects
+    // from. Until a pick, whatever `center`/`kind` the URL came with stays.
+    const code = pickedKind && picked[pickedKind];
+    if (pickedKind && code) {
+      params.set("center", code);
+      params.set("kind", pickedKind);
     }
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [query, scope, review, core, coresUnit]);
+  }, [query, scope, review, picked, pickedKind]);
 
   const q = query.trim().toLowerCase();
   const inScope = (r: Row, k: ReportsIndexScope) => {
@@ -346,17 +358,22 @@ export function ReportsIndex({
         <div className="mt-7 flex flex-col gap-7">
           {groups.map(({ unit, rows: unitRows }) => (
             <section
-              // The Cores group keeps one key across picks, so the picker keeps focus.
-              key={unit.coreOptions ? "core" : `${unit.kind}:${unit.code}`}
-              data-testid={`reports-index-group-${unit.coreOptions ? "cores" : unit.code}`}
+              // A per-kind group keeps one key across picks, so the picker keeps focus.
+              key={unit.unitOptions ? unit.kind : `${unit.kind}:${unit.code}`}
+              data-testid={`reports-index-group-${unit.unitOptions ? `${unit.kind}s` : unit.code}`}
             >
               <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-1 pb-2.5">
                 <h2 className="text-[17px] font-semibold">{unit.name}</h2>
                 <span className="text-muted-foreground text-[13px]">
                   {unitRows.length} {unitRows.length === 1 ? "report" : "reports"}
                 </span>
-                {unit.coreOptions && unit.coreOptions.length > 1 && (
-                  <CorePicker options={unit.coreOptions} value={core} onChange={setCore} />
+                {unit.unitOptions && unit.unitOptions.length > 1 && !isPseudo(unit.kind) && (
+                  <UnitPicker
+                    kind={unit.kind}
+                    options={unit.unitOptions}
+                    value={unit.code}
+                    onChange={(code) => pick(unit.kind, code)}
+                  />
                 )}
                 {!isPseudo(unit.kind) && unit.editHref && (
                   <Link

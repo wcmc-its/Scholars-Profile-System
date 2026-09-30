@@ -1,5 +1,5 @@
 /**
- * The core report pages' "Viewing" picker: the shared `CorePicker`, where a
+ * The core report pages' "Viewing" picker: the shared `UnitPicker`, where a
  * pick navigates to the SAME report for the chosen core
  * (`<basePath>?center=<coreId>&kind=core`). A push, so Back returns to the
  * previous core. The report's own filters are dropped — they were chosen
@@ -11,21 +11,21 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-import { CorePicker, type CorePickerOption } from "@/components/edit/reports/core-picker";
+import { UnitPicker, type UnitPickerOption } from "@/components/edit/reports/unit-picker";
 
 export function CoreReportPicker({
   options,
   value,
   basePath,
 }: {
-  options: ReadonlyArray<CorePickerOption>;
+  options: ReadonlyArray<UnitPickerOption>;
   value: string;
   basePath: string;
 }) {
   const router = useRouter();
   const [picked, setPicked] = React.useState(value);
   return (
-    <CorePicker
+    <UnitPicker
       options={options}
       value={picked}
       action={basePath}
