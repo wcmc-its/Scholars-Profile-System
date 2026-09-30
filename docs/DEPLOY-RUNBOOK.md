@@ -92,6 +92,23 @@ This order is load-bearing. db-bootstrap runs first so the audit schema + grant 
 
 Any out-of-band deploy (e.g. an operator running `aws ecs update-service` manually because the workflow is broken) MUST follow the same order: db-bootstrap and verify-grants MUST exit 0, then the migration task MUST exit 0, before the service is rolled. Skipping the migration step risks shipping a new app version against an old schema; skipping verify-grants risks rolling on a drifted/over-privileged DB role model; skipping the ordering risks shipping a new schema before the app that needs it.
 
+## Manual `cdk deploy Sps-App-<env>` keeps the digest pin (#2343)
+
+Flags and task env live in the task definition, so lighting one is a manual `cdk deploy Sps-App-<env>`. Until #2343 that deploy re-registered `sps-app-<env>` and `sps-migrate-<env>` on mutable `:latest`, discarding the pin from step 2a: any task started under that revision (scale-out, crash restart, AZ rebalance) pulled whatever `:latest` pointed at in that moment. Pass the digest the service is already running and the CDK-registered revision stays pinned to that image. The deploy then changes env only, never the image:
+
+```sh
+cd cdk
+digest=$(../scripts/release/running-app-digest.sh prod)   # read-only aws ecs describe/list
+npx cdk diff   --exclusively Sps-App-prod -c env=prod -c appImageDigest="$digest"
+npx cdk deploy --exclusively Sps-App-prod -c env=prod -c appImageDigest="$digest"
+```
+
+- **Prod is gated.** A synth, diff or deploy that selects `Sps-App-prod` without `-c appImageDigest` fails with a `#2343` validation error. This includes deploying another prod stack without `--exclusively`, because that deploy pulls `Sps-App-prod` in as an upstream dependency. `cdk deploy --exclusively Sps-Edge-prod` (or `Sps-Etl-prod`, and so on) is unaffected.
+- **Escape hatch.** Pass `-c allowLatestAppImage=true` to synthesize on `:latest` on purpose. Use it for the bootstrap two-step (ECR empty, nothing running) and for CI's `Synth (prod)` step. The next `deploy.yml` run re-pins either way.
+- **Staging is not gated.** Every push to master re-pins it through `deploy.yml`. It honours `-c appImageDigest` too: `digest=$(../scripts/release/running-app-digest.sh staging)`.
+- **What the script reads.** It takes the digest from the service's current task definition when that revision is pinned. If an unpinned revision is live, it takes the `imageDigest` ECS recorded on the RUNNING app containers, but only when every task agrees. It never reads ECR `:latest`, because that is what the service would pull next, not what it is running. It exits non-zero instead of guessing, for example mid-rollout.
+- **Scope.** The pin applies to the app image families (`sps-app`, `sps-migrate`). The ETL-image families in the same stack (`sps-db-bootstrap`, `sps-verify-grants`, `sps-search-eval-canary`) stay on `:latest`: nothing long-running uses them, and `deploy.yml` registers a pinned revision of each right before it runs them. The `Sps-Etl-<env>` families ship on ECR push by design and are unchanged.
+
 ## EdgeStack (CloudFront) — MANUAL deploy, not in CI
 
 `Sps-Edge-${env}` (the CloudFront distribution) is **deliberately not in `deploy.yml`**. Pushing to `master` deploys only AppStack's app image (staging); the distribution is changed by a human running `cdk deploy` from the repo. The app deploy and the EdgeStack deploy are **two separate mechanisms** — a change touching both (e.g. the #700 static-asset split) is rolled out as: merge → `cdk deploy` the stacks → app deploy populates anything CI-side.
@@ -173,7 +190,9 @@ On the first deploy of `Sps-App-${env}`, ECR is empty and the ECS service can't 
 # 1. Deploy AppStack with desiredCount=0 so the service doesn't loop on
 #    failed pulls.
 cd cdk
-npx cdk deploy --exclusively Sps-App-${env} -c env=${env} -c appDesiredCount=0
+#    allowLatestAppImage: nothing is running yet, so there is no digest to
+#    pin (#2343). Required for prod; harmless for staging.
+npx cdk deploy --exclusively Sps-App-${env} -c env=${env} -c appDesiredCount=0 -c allowLatestAppImage=true
 
 # 2. Build + push a bootstrap image so :latest exists in the ECR repo.
 ecr_uri=$(aws cloudformation describe-stacks \
@@ -202,9 +221,10 @@ aws ecs run-task --cluster "$cluster" \
   --launch-type FARGATE \
   --network-configuration "$netcfg"
 
-# 4. Re-deploy with desiredCount back to env default.
+# 4. Re-deploy with desiredCount back to env default. Still no running task to
+#    read a digest from, so :latest once more; the first deploy.yml run pins it.
 cd cdk
-npx cdk deploy --exclusively Sps-App-${env} -c env=${env}
+npx cdk deploy --exclusively Sps-App-${env} -c env=${env} -c allowLatestAppImage=true
 ```
 
 After step 4, the workflow can succeed on subsequent runs. Repeat the two-step for each env on its very first AppStack deploy. Subsequent CDK deploys (config changes, etc.) do not need it.
@@ -313,7 +333,7 @@ The container name is `etl`, not `app` — a `containerOverrides` entry naming a
 
 Before clicking `Approve and deploy` on a prod run:
 
-- [ ] `cdk diff --exclusively Sps-App-prod -c env=prod` is clean against the currently-deployed state, OR the diff has been reviewed and approved separately. (Unintended infra drift surfaces as a diff; the deploy workflow does NOT run `cdk diff`.)
+- [ ] `cdk diff --exclusively Sps-App-prod -c env=prod -c appImageDigest=$(../scripts/release/running-app-digest.sh prod)` (from `cdk/`) is clean against the currently-deployed state, OR the diff has been reviewed and approved separately. (Unintended infra drift surfaces as a diff; the deploy workflow does NOT run `cdk diff`.)
 - [ ] Same commit SHA has successfully deployed to staging within the last 72 hours. The "staging-mirrors-prod" rule (`docs/STAGING.md` § Smoke-test target) means a stale staging deploy is no warranty for prod.
 - [ ] No Prisma migrations in the diff that haven't been previewed against staging. If there are migrations, the [Schema migration checklist](../.github/PULL_REQUEST_TEMPLATE.md) was completed on the originating PR.
 - [ ] On-call coverage confirmed for the next 30 minutes. Rolling deploy is ~5 minutes; circuit-breaker rollback is automatic but post-incident root-cause is faster with a human paying attention.
