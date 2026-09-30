@@ -74,6 +74,7 @@ async function main() {
     ["ASMS", "etl/asms/index.ts"],
     ["InfoEd", "etl/infoed/index.ts"],
     ["Jenzabar", "etl/jenzabar/index.ts"],
+    ["FRT", "etl/frt/index.ts"],
     ["ED-Student-Programs", "etl/ed/student-programs.ts"],
     // #728 — ED admin-role org-unit managers. Runs after ED (which populates the
     // Department/Division rows this resolves against). Writes gated behind

@@ -1170,6 +1170,7 @@ export class EtlStack extends Stack {
       "etl:asms",
       "etl:infoed",
       "etl:coi",
+      "etl:frt",
       "etl:jenzabar",
       "etl:reporter",
       "etl:clinical-trials",
@@ -1709,6 +1710,12 @@ export class EtlStack extends Stack {
       // load-bearing, so weekly is plenty. `continue` — zero candidates until
       // the WCM statement path is flowing must not abort the weekly chain.
       { id: "CoiGapWeekly", npmScript: "etl:coi-gap", external: false, tier: "continue" },
+      // Faculty Review Tool self-reported mentees -> frt_mentee (etl/frt). FRT is
+      // an annual review, but the read is ~30k rows, so weekly picks up a new
+      // review year whenever it lands without a date to schedule around. Same
+      // SQL Server + secret as etl:coi (sources def). `continue`: feeds /edit
+      // suggestions and report 7 only.
+      { id: "FrtWeekly", npmScript: "etl:frt", external: true, tier: "continue" },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true, tier: "continue" },
       // Grant-enrichment sources (#608). They key off the `grant` table that
       // etl:infoed refreshes nightly; neither needs 24h freshness, so they batch
