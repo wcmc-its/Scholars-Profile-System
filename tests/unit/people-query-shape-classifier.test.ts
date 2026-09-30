@@ -179,6 +179,60 @@ describe("classifyPeopleQuery — #528 dept/surname collisions", () => {
   });
 });
 
+describe("classifyPeopleQuery — #2777 verbatim MeSH over surname", () => {
+  // "long" is a known surname; "long covid" is an entry term of Post-Acute
+  // COVID-19 Syndrome. "rice" is both a surname and a descriptor.
+  const TOPIC_SURNAMES: ReadonlySet<string> = new Set([
+    "cantley",
+    "long",
+    "rice",
+  ]);
+
+  function classifyWithConfidence(
+    query: string,
+    meshConfidence: "exact" | "entry-term" | "partial" | null,
+    meshMatchedForm: string = query,
+  ): PeopleQueryShape {
+    return classifyPeopleQuery({
+      query,
+      meshResolved: meshConfidence !== null,
+      meshConfidence,
+      meshMatchedForm,
+      knownCwids: CWIDS,
+      knownSurnames: TOPIC_SURNAMES,
+      knownDepartments: DEPARTMENTS,
+    });
+  }
+
+  it("whole query is an entry term containing a surname -> topic", () => {
+    expect(classifyWithConfidence("Long COVID", "entry-term")).toBe("topic");
+  });
+
+  it("whole query is an exact descriptor name containing a surname -> topic", () => {
+    expect(classifyWithConfidence("long covid", "exact")).toBe("topic");
+  });
+
+  it("surname plus a separate topic term (partial resolution) -> hybrid", () => {
+    expect(classifyWithConfidence("cantley ras", "partial")).toBe("hybrid");
+  });
+
+  it("bare surname with no resolution -> name", () => {
+    expect(classifyWithConfidence("long", null)).toBe("name");
+  });
+
+  it("bare surname that is itself a descriptor stays hybrid", () => {
+    expect(classifyWithConfidence("rice", "exact")).toBe("hybrid");
+  });
+
+  it("filler-stripped retry resolving to a single-token surname stays hybrid", () => {
+    expect(classifyWithConfidence("rice research", "entry-term", "rice")).toBe("hybrid");
+  });
+
+  it("filler-stripped retry resolving to a multi-token entry term -> topic", () => {
+    expect(classifyWithConfidence("long covid patients", "entry-term", "long covid")).toBe("topic");
+  });
+});
+
 // #1347 — clinical-division names (NOT a primaryDepartment) route to the department
 // shape only when the division-shape flag has populated `knownDivisions`.
 describe("classifyPeopleQuery — division-shape routing (#1347)", () => {

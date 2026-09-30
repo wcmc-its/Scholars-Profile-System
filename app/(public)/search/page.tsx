@@ -485,6 +485,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const peopleQueryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
+    meshConfidence: taxonomyMatch.meshResolution?.confidence ?? null,
+    meshMatchedForm: taxonomyMatch.meshResolution?.matchedForm ?? null,
     knownCwids: peopleClassifierSets.cwids,
     knownSurnames: peopleClassifierSets.surnames,
     knownDepartments: peopleClassifierSets.departments,

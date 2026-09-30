@@ -83,6 +83,8 @@ async function classify(
   const shape = classifyPeopleQuery({
     query,
     meshResolved: res != null,
+    meshConfidence: res?.confidence ?? null,
+    meshMatchedForm: res?.matchedForm ?? null,
     knownCwids: sets.cwids,
     knownSurnames: sets.surnames,
     knownDepartments: sets.departments,
