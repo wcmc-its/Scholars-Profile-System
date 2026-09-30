@@ -3891,7 +3891,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "SCHOLARS_COI_URL",
+                "Name": "SCHOLARS_COI_FRT_SERVER",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3900,13 +3900,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_URL::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_FRT_SERVER::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_PORT",
+                "Name": "SCHOLARS_COI_FRT_PORT",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3915,13 +3915,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_PORT::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_FRT_PORT::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_DATABASE",
+                "Name": "SCHOLARS_COI_FRT_DATABASE",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3930,13 +3930,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_DATABASE::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_FRT_DATABASE::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_USERNAME",
+                "Name": "SCHOLARS_COI_FRT_USERNAME",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3945,13 +3945,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_USERNAME::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_FRT_USERNAME::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_PASSWORD",
+                "Name": "SCHOLARS_COI_FRT_PASSWORD",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3960,7 +3960,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_PASSWORD::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_FRT_PASSWORD::",
                     ],
                   ],
                 },
@@ -15052,7 +15052,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "SCHOLARS_COI_URL",
+                "Name": "SCHOLARS_COI_FRT_SERVER",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -15061,13 +15061,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_URL::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_FRT_SERVER::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_PORT",
+                "Name": "SCHOLARS_COI_FRT_PORT",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -15076,13 +15076,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_PORT::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_FRT_PORT::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_DATABASE",
+                "Name": "SCHOLARS_COI_FRT_DATABASE",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -15091,13 +15091,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_DATABASE::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_FRT_DATABASE::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_USERNAME",
+                "Name": "SCHOLARS_COI_FRT_USERNAME",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -15106,13 +15106,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_USERNAME::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_FRT_USERNAME::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "SCHOLARS_COI_PASSWORD",
+                "Name": "SCHOLARS_COI_FRT_PASSWORD",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -15121,7 +15121,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_PASSWORD::",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_FRT_PASSWORD::",
                     ],
                   ],
                 },

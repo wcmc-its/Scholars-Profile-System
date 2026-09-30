@@ -307,8 +307,8 @@ can reach the WCM sources. Everything else (§1 OpenSearch FGAC, §3 `search:ind
 
 ### 7.0 Why this is needed
 
-The eight foundational ETLs — **ED** (LDAPS), **ASMS** / **InfoEd** / **Jenzabar**
-(MSSQL), **ReciterDB-reciter** / **COI** (MySQL), **ED-student-programs**, and
+The eight foundational ETLs — **ED** (LDAPS), **ASMS** / **InfoEd** / **Jenzabar** / **COI**
+(MSSQL), **ReciterDB-reciter** (MySQL), **ED-student-programs**, and
 **RePORTER** (reads ReciterDB) — pull from WCM-internal hosts. They produce the
 rows everything else hangs off: `Scholar`, `Department`, `Division`,
 `Appointment`, `Education`, `Grant`, `Publication`, `PublicationAuthor`,

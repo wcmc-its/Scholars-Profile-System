@@ -88,7 +88,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   COI: {
     label: "Conflict-of-Interest Disclosures",
     description: "Outside organization ties in the profile's External relationships section.",
-    origin: "external", // WCM COI system (MySQL)
+    origin: "external", // WCM COI + FRT SQL Server
   },
   "COI-Gap": {
     label: "Conflict-of-Interest Gaps",

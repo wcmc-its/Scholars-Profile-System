@@ -291,14 +291,19 @@ export class EtlStack extends Stack {
         keys: ["SCHOLARS_INFOED_DB_URL", "SCHOLARS_INFOED_USERNAME", "SCHOLARS_INFOED_PASSWORD"],
       },
       {
+        // COI + FRT SQL Server (lib/sources/mssql-coi-frt.ts):
+        // the COI disclosures view, and the Faculty Review Tool mentee tables.
+        // Kept under the existing etl/coi secret name rather than a new
+        // secret, since Sps-Secrets-prod can't mint one; COI moved here off
+        // the old MySQL host.
         constructId: "EtlSecretCoi",
         secretName: `scholars/${env}/etl/coi`,
         keys: [
-          "SCHOLARS_COI_URL",
-          "SCHOLARS_COI_PORT",
-          "SCHOLARS_COI_DATABASE",
-          "SCHOLARS_COI_USERNAME",
-          "SCHOLARS_COI_PASSWORD",
+          "SCHOLARS_COI_FRT_SERVER",
+          "SCHOLARS_COI_FRT_PORT",
+          "SCHOLARS_COI_FRT_DATABASE",
+          "SCHOLARS_COI_FRT_USERNAME",
+          "SCHOLARS_COI_FRT_PASSWORD",
         ],
       },
       {
