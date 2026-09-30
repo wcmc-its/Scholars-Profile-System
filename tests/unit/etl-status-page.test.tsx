@@ -73,7 +73,7 @@ import {
   toSourceRow,
 } from "@/lib/api/etl-status";
 import { SOURCE_COPY, sourceDescription, sourceLabel } from "@/lib/edit/etl-source-copy";
-import { TRACKED, type TrackedSpec } from "@/lib/etl/freshness-policy";
+import { TRACKED, type TrackedSpec, isTrackedInEnv } from "@/lib/etl/freshness-policy";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -438,12 +438,18 @@ describe("loadEtlStatus", () => {
     expect(summary.sources.map((s) => s.source)).toContain("InfoEd");
   });
 
-  it("skips a source scoped to another env rather than reporting it missing", async () => {
+  // A source scoped to another env must be skipped, not shown as "never ran" —
+  // that would send a superuser chasing an import that is not supposed to exist.
+  // No TRACKED source is env-scoped since #2906, so pin the predicate directly.
+  it("skips a source scoped to another env rather than reporting it missing", () => {
+    const prodOnly: TrackedSpec = { cadence: "nightly", envs: ["prod"] };
+    expect(isTrackedInEnv(prodOnly, "staging")).toBe(false);
+    expect(isTrackedInEnv(prodOnly, "prod")).toBe(true);
+  });
+
+  it("tracks InfoEd in staging too (#2906)", async () => {
     const staging = await loadEtlStatus(fakeClient(), new Date(NOW), "staging");
-    // InfoEd is excluded from the staging nightly; showing "never ran" there
-    // would send a superuser chasing an import that is not supposed to exist.
-    expect(staging.sources.some((s) => s.source === "InfoEd")).toBe(false);
-    expect(TRACKED.InfoEd?.envs).toEqual(["prod"]);
+    expect(staging.sources.some((s) => s.source === "InfoEd")).toBe(true);
   });
 
   it("sorts problems to the top", async () => {

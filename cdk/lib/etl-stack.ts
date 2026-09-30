@@ -803,7 +803,7 @@ export class EtlStack extends Stack {
       NODE_ENV: "production",
       // Deployment env name for steps whose behavior is env-scoped —
       // etl:freshness skips SLA entries for sources a given env's cadence
-      // deliberately omits (InfoEd on staging, MeshAnchor on prod).
+      // deliberately omits (none today; InfoEd was the last, until #2906).
       SCHOLARS_ENV: env,
       // #485 — the search:index build holds the full corpus graph in memory
       // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
@@ -1517,20 +1517,12 @@ export class EtlStack extends Stack {
       // night's mirror, and the step refuses to write on an empty read.
       { id: "OrcidCandidates", npmScript: "etl:orcid-candidates", external: true, tier: "continue" },
       { id: "Asms", npmScript: "etl:asms", external: true, tier: "continue" },
-      // etl:infoed is EXCLUDED from the STAGING cadence (Paul, 2026-06-22).
-      // InfoEd's on-prem address sits in a range that overlaps the Sps VPC's
-      // own CIDR, so once the cadence relocates + peers, scholars-dev routes
-      // that address into the Sps VPC (where InfoEd isn't) and blackholes it;
-      // its Catch→Fail would then abort the whole nightly. The Sps VPC can't
-      // reach it today either (on-prem, not TGW-attached), so dropping it on
-      // staging is safe now and necessary post-relocation. Prod keeps the step.
-      // Re-add once WCM re-IPs / NATs InfoEd out of the overlapping range
-      // (addresses + ranges in docs/etl-vpc-migration-handoff.md).
-      ...(env === "staging"
-        ? []
-        : [
-            { id: "Infoed", npmScript: "etl:infoed", external: true, tier: "continue" } as StepSpec,
-          ]),
+      // #2906 — InfoEd runs in BOTH envs. It was excluded from staging on
+      // 2026-06-22 for a CIDR overlap that only bit the per-env scholars-dev
+      // peering design; the 06-30 shared-VPC decision replaced that design, and
+      // staging's sources tasks now run in the same subnets as prod's, with the
+      // same all-egress SG shape and the same InfoEd secret names.
+      { id: "Infoed", npmScript: "etl:infoed", external: true, tier: "continue" },
       { id: "Coi", npmScript: "etl:coi", external: true, tier: "continue" },
       // COI-gap recommendations moved to the weekly machine (Paul, 2026-08-16,
       // see CoiGapWeekly below) — it reads SPS-DB only and computes against

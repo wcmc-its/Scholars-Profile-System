@@ -1736,18 +1736,13 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("excludes etl:infoed from the staging nightly cadence (on-prem CIDR overlap; docs/etl-vpc-migration-handoff.md), while prod keeps it", () => {
-      const stagingNightly = getStateMachineDefinitionText(
-        template,
-        "scholars-nightly-staging",
+    it("runs etl:infoed in BOTH nightly cadences (#2906)", () => {
+      expect(getStateMachineDefinitionText(template, "scholars-nightly-staging")).toMatch(
+        /etl:infoed/,
       );
-      expect(stagingNightly).not.toMatch(/etl:infoed/);
-      // The exclusion is staging-only — prod's nightly still runs InfoEd.
-      const prodNightly = getStateMachineDefinitionText(
-        buildEtlStack("prod").template,
-        "scholars-nightly-prod",
-      );
-      expect(prodNightly).toMatch(/etl:infoed/);
+      expect(
+        getStateMachineDefinitionText(buildEtlStack("prod").template, "scholars-nightly-prod"),
+      ).toMatch(/etl:infoed/);
     });
 
     it("includes etl:mesh-anchors in BOTH nightly cadences (#1258, promoted to prod in #2016)", () => {
