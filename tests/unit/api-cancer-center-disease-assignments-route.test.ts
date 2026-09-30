@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 const {
   mockCenterFindUnique,
   mockCenterProgramFindFirst,
+  mockCenterProgramFindMany,
   mockUnitAdminFindMany,
   mockReadDecisionFindUnique,
   mockTransaction,
@@ -26,6 +27,7 @@ const {
 } = vi.hoisted(() => ({
   mockCenterFindUnique: vi.fn(),
   mockCenterProgramFindFirst: vi.fn(),
+  mockCenterProgramFindMany: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockReadDecisionFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
@@ -40,7 +42,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     read: {
       center: { findUnique: mockCenterFindUnique },
-      centerProgram: { findFirst: mockCenterProgramFindFirst },
+      centerProgram: { findFirst: mockCenterProgramFindFirst, findMany: mockCenterProgramFindMany },
       unitAdmin: { findMany: mockUnitAdminFindMany },
       cancerCenterDiseaseDecision: { findUnique: mockReadDecisionFindUnique },
     },
@@ -111,6 +113,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockCenterFindUnique.mockResolvedValue(CENTER);
   mockCenterProgramFindFirst.mockResolvedValue({ code: "BR" });
+  mockCenterProgramFindMany.mockResolvedValue([{ code: "BR" }, { code: "CB" }]);
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "center", entityId: CENTER.code, role: "curator" },
   ]);
@@ -131,7 +134,11 @@ describe("POST /api/edit/center/[code]/disease-assignments — public reflection
     vi.stubEnv("CENTER_DISEASE_FACET", "on");
     const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
     expect(res.status).toBe(200);
-    expect(mockReflectUnitChange).toHaveBeenCalledWith({ unitKind: "center", unitSlug: "meyer" });
+    expect(mockReflectUnitChange).toHaveBeenCalledWith({
+      unitKind: "center",
+      unitSlug: "meyer",
+      programCodes: ["BR", "CB"],
+    });
   });
 
   it("flag on: a clear that deletes a decision reflects; a no-op clear does not", async () => {
@@ -141,6 +148,17 @@ describe("POST /api/edit/center/[code]/disease-assignments — public reflection
     mockReadDecisionFindUnique.mockResolvedValue(EXISTING_DECISION);
     await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "clear" });
     expect(mockReflectUnitChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("flag on: a reflection failure after a committed confirm is not reported as write_failed", async () => {
+    vi.stubEnv("CENTER_DISEASE_FACET", "on");
+    mockReflectUnitChange.mockRejectedValueOnce(new Error("revalidate boom"));
+    // The committed write must not be turned into a `500 write_failed`; the
+    // error propagates out of the handler instead, as in the sibling routes.
+    await expect(
+      call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" }),
+    ).rejects.toThrow("revalidate boom");
+    expect(mockTxDecisionUpsert).toHaveBeenCalledTimes(1);
   });
 
   it("flag off: nothing is reflected", async () => {

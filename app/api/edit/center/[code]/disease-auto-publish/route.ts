@@ -24,9 +24,9 @@
  * `db.read` is used only for the existence, taxonomy and authz gates.
  *
  * When `CENTER_DISEASE_FACET` is on, a real change runs `reflectUnitChange`
- * for the center: the public center page's facet + card row read the switch
- * (via the publish predicate) through the ISR page and the `center:` swr
- * roster cache. Flag off ⇒ nothing public reads it, so no reflection.
+ * for the center and each of its program pages: their facet + card row read
+ * the switch (via the publish predicate) through the ISR pages and the
+ * `center:` swr roster cache. Flag off ⇒ nothing public reads it, so no reflection.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
@@ -116,7 +116,15 @@ export async function POST(
   }
 
   if (changed && isCenterDiseaseFacetEnabled()) {
-    await reflectUnitChange({ unitKind: "center", unitSlug: center.slug });
+    const programs = await db.read.centerProgram.findMany({
+      where: { centerCode: center.code },
+      select: { code: true },
+    });
+    await reflectUnitChange({
+      unitKind: "center",
+      unitSlug: center.slug,
+      programCodes: programs.map((p) => p.code),
+    });
   }
   return editOk({ code: center.code, enabled, changed });
 }

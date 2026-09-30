@@ -11,8 +11,11 @@ import {
 
 export type DiseaseFocusMode = "any" | "primary";
 
+// Covers both publication paths of `isDiseasePublished`: a curator's
+// confirmation, and the center's auto-publish of high-confidence inferences
+// (no human review). Placeholder until the product owner supplies copy.
 const INFO_COPY =
-  "Disease areas curated by the center for each member. Any involvement counts every published disease; Primary focus counts only a member's primary disease areas.";
+  "Disease areas identified from each member's research and reviewed or approved for publication by the center. Any involvement counts every published disease; Primary focus counts only a member's primary disease areas.";
 
 /**
  * The public center roster's "Disease focus" facet (D1 — curated diseases sit

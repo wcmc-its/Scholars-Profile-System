@@ -50,9 +50,9 @@
  * `appendAuditRow` (`action: "disease_assignment_decision"`,
  * `targetEntityType: "scholar"`) commit atomically. When
  * `CENTER_DISEASE_FACET` is on, a real change runs `reflectUnitChange` for the
- * center: the public center page renders published diseases (facet + card
- * row) from the ISR page and the `center:` swr roster cache. Flag off ⇒ nothing
- * public reads this data, so no reflection.
+ * center and each of its program pages: both render published diseases (facet
+ * + card row) from their ISR pages and the `center:` swr roster cache. Flag off
+ * ⇒ nothing public reads this data, so no reflection.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
@@ -125,11 +125,19 @@ export async function POST(
     select: { code: true, slug: true },
   });
   if (!center) return editError(400, "unit_not_found", "code");
-  // The public center page shows published diseases only behind the flag.
+  // The public center page — and every program page, which renders the same
+  // GroupedRoster — shows published diseases only behind the flag.
   const reflectPublic = async () => {
-    if (isCenterDiseaseFacetEnabled()) {
-      await reflectUnitChange({ unitKind: "center", unitSlug: center.slug });
-    }
+    if (!isCenterDiseaseFacetEnabled()) return;
+    const programs = await db.read.centerProgram.findMany({
+      where: { centerCode: center.code },
+      select: { code: true },
+    });
+    await reflectUnitChange({
+      unitKind: "center",
+      unitSlug: center.slug,
+      programCodes: programs.map((p) => p.code),
+    });
   };
 
   // Defense in depth — see docblock: `[code]` must resolve to a center with a
@@ -213,8 +221,9 @@ export async function POST(
   });
 
   const decidedAt = new Date();
+  let row: { decision: string; scoreAtDecision: number | null; confidenceAtDecision: string | null };
   try {
-    const row = await db.write.$transaction(async (tx) => {
+    row = await db.write.$transaction(async (tx) => {
       const assignment = await tx.cancerCenterDiseaseAssignment.findUnique({
         where: { cwid_diseaseCode: { cwid, diseaseCode } },
         select: { score: true, confidence: true },
@@ -275,15 +284,6 @@ export async function POST(
 
       return decided;
     });
-
-    await reflectPublic();
-    return editOk({
-      cwid,
-      diseaseCode,
-      decision: row.decision,
-      scoreAtDecision: row.scoreAtDecision,
-      confidenceAtDecision: row.confidenceAtDecision,
-    });
   } catch (err) {
     if (err instanceof AssignmentNotFound) {
       return editError(404, "assignment_not_found", "diseaseCode");
@@ -291,4 +291,15 @@ export async function POST(
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
+
+  // After the try/catch, like the clear path and the sibling routes: a
+  // reflection failure must not report a committed write as `write_failed`.
+  await reflectPublic();
+  return editOk({
+    cwid,
+    diseaseCode,
+    decision: row.decision,
+    scoreAtDecision: row.scoreAtDecision,
+    confidenceAtDecision: row.confidenceAtDecision,
+  });
 }

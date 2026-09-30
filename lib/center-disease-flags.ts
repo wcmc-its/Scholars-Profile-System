@@ -10,6 +10,8 @@
  * with a `CenterProgram` taxonomy renders the grouped roster the diseases hang
  * off (today only the Meyer Cancer Center), and the facet renders only when a
  * member has a published disease (`lib/cancer-center-disease-publish.ts`).
+ * Known constraint: `CancerCenterDisease*` rows have no center column, so a
+ * second programmed center would inherit this curation (see D1 in the doc).
  *
  * Server-only (reads `process.env`); do not import from a client component.
  * Per the flag-parity rule, wired per-env in `cdk/lib/app-stack.ts`

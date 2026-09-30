@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 const {
   mockCenterFindUnique,
   mockCenterProgramFindFirst,
+  mockCenterProgramFindMany,
   mockUnitAdminFindMany,
   mockTransaction,
   mockTxCenterUpdateMany,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => ({
   mockCenterFindUnique: vi.fn(),
   mockCenterProgramFindFirst: vi.fn(),
+  mockCenterProgramFindMany: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockTransaction: vi.fn(),
   mockTxCenterUpdateMany: vi.fn(),
@@ -28,7 +30,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     read: {
       center: { findUnique: mockCenterFindUnique },
-      centerProgram: { findFirst: mockCenterProgramFindFirst },
+      centerProgram: { findFirst: mockCenterProgramFindFirst, findMany: mockCenterProgramFindMany },
       unitAdmin: { findMany: mockUnitAdminFindMany },
     },
     write: { $transaction: mockTransaction },
@@ -83,6 +85,7 @@ beforeEach(() => {
   primaryValue = true;
   mockCenterFindUnique.mockResolvedValue({ code: CODE, slug: "meyer" });
   mockCenterProgramFindFirst.mockResolvedValue({ code: "BR" });
+  mockCenterProgramFindMany.mockResolvedValue([{ code: "BR" }, { code: "CB" }]);
   mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: CODE, role: "curator" }]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockTxCenterUpdateMany.mockImplementation(
@@ -102,7 +105,11 @@ describe("POST /api/edit/center/[code]/disease-auto-publish — public reflectio
     vi.stubEnv("CENTER_DISEASE_FACET", "on");
     const res = await call({ enabled: false });
     expect(res.status).toBe(200);
-    expect(mockReflectUnitChange).toHaveBeenCalledWith({ unitKind: "center", unitSlug: "meyer" });
+    expect(mockReflectUnitChange).toHaveBeenCalledWith({
+      unitKind: "center",
+      unitSlug: "meyer",
+      programCodes: ["BR", "CB"],
+    });
   });
 
   it("flag on: a no-op (value already set) reflects nothing", async () => {

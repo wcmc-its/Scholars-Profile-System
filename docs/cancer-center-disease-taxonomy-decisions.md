@@ -303,7 +303,21 @@ one shared predicate, `isDiseasePublished` in
 `lib/cancer-center-disease-publish.ts`, read by both /edit and the public page.
 
 Shipped behind the `CENTER_DISEASE_FACET` flag (staging on, prod off until
-sign-off on staging).
+sign-off on staging). A curator decision or an auto-publish flip revalidates the
+center page and every one of its program pages, since each program page renders
+the same roster.
+
+**Known constraint: the disease layer has no center column.**
+`CancerCenterDiseaseAssignment` and `CancerCenterDiseaseDecision` are keyed by
+`(cwid, diseaseCode)` only. The public page scopes them by roster cwid and the
+rendering center's own `diseaseAutoPublish`, and the gate is "has a
+`CenterProgram` taxonomy", the same data gate /edit uses. Today only the Meyer
+Cancer Center has one, so this is correct. If a second center ever gets
+programs, its public page would show members' cancer-disease curation under its
+own name, with its own auto-publish switch deciding what publishes. Before that
+happens, add an explicit owner for the taxonomy (a center code on the rows, or a
+configured owning center) and gate both /edit and the public page on it.
+Accepted for now.
 
 ## Open — these do not block
 
@@ -346,9 +360,10 @@ separately (#906 / #552).
 
 ### From Sydney
 
-D0 and D1. Both gate schema; neither is an engineering decision.
+Nothing outstanding. D0 was resolved by #2361; D1 was decided 2026-09-30 by the
+product owner via the Meyer mockup (see D1).
 
-### From engineering, once D0 and D1 land
+### From engineering, now that D0 and D1 have landed
 
 1. Assignment and human-decision tables. **A curator's rejection must be a stored
    decision, never an absent row** — the methods-family work shipped that bug
