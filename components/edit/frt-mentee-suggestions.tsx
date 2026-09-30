@@ -12,6 +12,7 @@
 "use client";
 
 import * as React from "react";
+import { ChevronRight } from "lucide-react";
 
 import {
   DirectoryPeopleTypeahead,
@@ -20,10 +21,13 @@ import {
 import { EditPanel } from "@/components/edit/edit-panel";
 import { MenteeForm, draftToEntry, type Draft } from "@/components/edit/manual-mentees-card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { EditContextFrtMentee } from "@/lib/api/edit-context";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
 
 const GENERIC_ERROR = "We couldn’t update this just now. Please try again.";
+/** Above this many active rows the panel offers a name filter (~11% of mentors). */
+const FILTER_THRESHOLD = 15;
 
 function years(r: EditContextFrtMentee): string {
   return r.firstReviewYear === r.lastReviewYear
@@ -50,9 +54,27 @@ export function FrtMenteeSuggestions({
   const [errors, setErrors] = React.useState<Map<number, string>>(new Map());
   const [busy, setBusy] = React.useState<Set<number>>(new Set());
 
+  const [query, setQuery] = React.useState("");
+
+  // Rows arrive newest review year first, then by name (loader order), and keep
+  // that order inside each group.
   const view = rows.filter((r) => !added.has(r.id)).map((r) => ({ ...r, ...patch.get(r.id) }));
   const active = view.filter((r) => r.dismissedAt === null);
   const gone = view.filter((r) => r.dismissedAt !== null);
+  const needle = query.trim().toLowerCase();
+  const shown =
+    active.length > FILTER_THRESHOLD && needle
+      ? active.filter((r) =>
+          [r.menteeName, r.menteeCwidName, r.menteeCwid].some((v) =>
+            v?.toLowerCase().includes(needle),
+          ),
+        )
+      : active;
+  // Grouped by the next step: linked rows are ready to add; unlinked internal
+  // ones need a CWID first; outside-WCM ones rarely have one, so they collapse.
+  const linked = shown.filter((r) => r.menteeCwid !== null);
+  const unlinked = shown.filter((r) => r.menteeCwid === null && !r.external);
+  const outside = shown.filter((r) => r.menteeCwid === null && r.external);
 
   function setErr(id: number, msg: string | null) {
     setErrors((m) => {
@@ -102,6 +124,26 @@ export function FrtMenteeSuggestions({
     return true;
   }
 
+  const renderRow = (r: EditContextFrtMentee) => (
+    <FrtRow
+      key={r.id}
+      r={r}
+      su={su}
+      scholarName={scholarName}
+      busy={busy.has(r.id)}
+      error={errors.get(r.id) ?? null}
+      onAssign={(v) =>
+        act(
+          r,
+          { op: "assign", cwid: v?.cwid ?? null },
+          { menteeCwid: v?.cwid ?? null, menteeCwidName: v?.name ?? null, cwidAssigned: true },
+        )
+      }
+      onDismiss={() => act(r, { op: "dismiss" }, { dismissedAt: new Date().toISOString() })}
+      onAdd={(d) => onAdd(r, d)}
+    />
+  );
+
   return (
     <EditPanel
       slot="frt-mentee-suggestions-panel"
@@ -112,44 +154,64 @@ export function FrtMenteeSuggestions({
           : "Mentees you listed in the annual Faculty Review Tool. Nothing here is public until you add it. Link each one to a WCM person so their co-publications show on your profile and count in mentoring reports."
       }
     >
+      {active.length > FILTER_THRESHOLD && (
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter by name"
+          aria-label="Filter Faculty Review mentees by name"
+          className="max-w-xs"
+          data-testid="frt-mentees-filter"
+        />
+      )}
+
       {active.length === 0 ? (
         <p className="text-muted-foreground text-sm" data-testid="frt-mentees-empty">
           Nothing left to review from your Faculty Review.
         </p>
+      ) : shown.length === 0 ? (
+        <p className="text-muted-foreground text-sm" data-testid="frt-mentees-no-match">
+          No mentees match “{query.trim()}”.
+        </p>
       ) : (
-        <ul
-          className="border-apollo-border divide-apollo-border divide-y rounded-md border"
-          data-testid="frt-mentees-list"
-        >
-          {active.map((r) => (
-            <FrtRow
-              key={r.id}
-              r={r}
-              su={su}
-              scholarName={scholarName}
-              busy={busy.has(r.id)}
-              error={errors.get(r.id) ?? null}
-              onAssign={(v) =>
-                act(
-                  r,
-                  { op: "assign", cwid: v?.cwid ?? null },
-                  {
-                    menteeCwid: v?.cwid ?? null,
-                    menteeCwidName: v?.name ?? null,
-                    cwidAssigned: true,
-                  },
-                )
-              }
-              onDismiss={() => act(r, { op: "dismiss" }, { dismissedAt: new Date().toISOString() })}
-              onAdd={(d) => onAdd(r, d)}
-            />
-          ))}
-        </ul>
+        <>
+          <Group
+            testId="frt-mentees-linked"
+            heading={`Linked to a WCM person (${linked.length})`}
+            rows={linked}
+            renderRow={renderRow}
+          />
+          <Group
+            testId="frt-mentees-unlinked"
+            heading={`Not linked yet (${unlinked.length})`}
+            rows={unlinked}
+            renderRow={renderRow}
+          />
+          {outside.length > 0 && (
+            <details data-testid="frt-mentees-outside" open={needle !== ""}>
+              <summary className="text-apollo-slate flex cursor-pointer list-none flex-wrap items-center gap-1 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  aria-hidden
+                  className="size-3.5 shrink-0 transition-transform [details[open]>summary>&]:rotate-90"
+                />
+                {outside.length} outside WCM
+              </summary>
+              <ul className="border-apollo-border divide-apollo-border mt-2 divide-y rounded-md border">
+                {outside.map(renderRow)}
+              </ul>
+            </details>
+          )}
+        </>
       )}
 
       {gone.length > 0 && (
         <details data-testid="frt-mentees-dismissed">
-          <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
+          <summary className="text-apollo-slate flex cursor-pointer list-none flex-wrap items-center gap-1 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              aria-hidden
+              className="size-3.5 shrink-0 transition-transform [details[open]>summary>&]:rotate-90"
+            />
             {gone.length} dismissed
           </summary>
           <ul className="mt-2 flex flex-col gap-2">
@@ -181,6 +243,28 @@ export function FrtMenteeSuggestions({
         </details>
       )}
     </EditPanel>
+  );
+}
+
+function Group({
+  testId,
+  heading,
+  rows,
+  renderRow,
+}: {
+  testId: string;
+  heading: string;
+  rows: ReadonlyArray<EditContextFrtMentee>;
+  renderRow: (r: EditContextFrtMentee) => React.ReactNode;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="flex flex-col gap-2" data-testid={testId}>
+      <h3 className="text-sm font-medium">{heading}</h3>
+      <ul className="border-apollo-border divide-apollo-border divide-y rounded-md border">
+        {rows.map(renderRow)}
+      </ul>
+    </section>
   );
 }
 
