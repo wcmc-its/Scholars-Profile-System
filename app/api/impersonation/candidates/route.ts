@@ -32,7 +32,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getSession } from "@/lib/auth/session-server";
 import { canImpersonate } from "@/lib/auth/effective-identity";
-import { isSuperuser } from "@/lib/auth/superuser";
+import { superusersAmong } from "@/lib/auth/superuser";
 import { listCommsStewardCwids } from "@/lib/auth/comms-steward";
 import {
   pickDisplayGrant,
@@ -258,14 +258,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // R2 pre-filter — drop any candidate who is themselves a superuser. The check
   // is the same live LDAPS `isSuperuser` the `POST` guard uses, so the switcher
-  // never offers a target that `assertImpersonable` would reject. Bounded to the
-  // ≤50-row page; run in parallel. Fail-closed: an unexpected error excludes the
-  // candidate (treat as not-assumable) rather than risk listing a superuser.
-  const superuserFlags = await Promise.all(rows.map((r) => isSuperuser(r.cwid).catch(() => true)));
+  // never offers a target that `assertImpersonable` would reject. One LDAPS
+  // connection for the whole page (`superusersAmong`). A directory failure lists
+  // the candidate, as `isSuperuser` always did; the POST guard still refuses.
+  const superusers = await superusersAmong(rows.map((r) => r.cwid));
 
   const candidates: Candidate[] = [];
-  rows.forEach((r, i) => {
-    if (superuserFlags[i]) return; // R2 — not assumable
+  rows.forEach((r) => {
+    if (superusers.has(r.cwid)) return; // R2 — not assumable
     const top = topByCwid.get(r.cwid) ?? null;
     const role: Candidate["role"] = top?.role ?? "scholar";
     const unitKind = top?.entityType ?? null;
@@ -312,14 +312,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ]);
       const profileByCwid = new Map(profiles.map((p) => [p.cwid.toLowerCase(), p]));
       const nameByCwid = new Map(stewardNames.map((n) => [n.cwid.toLowerCase(), n.displayName]));
-      // R2 — exclude any steward who is themselves a superuser, same fail-closed
-      // (error ⇒ exclude) rule as the scholar pass.
-      const stewardSuperuserFlags = await Promise.all(
-        stewardCwids.map((c) => isSuperuser(c).catch(() => true)),
-      );
+      // R2 — exclude any steward who is themselves a superuser, as the scholar pass.
+      const stewardSuperusers = await superusersAmong(stewardCwids);
       const qLower = q.toLowerCase();
-      stewardCwids.forEach((cwid, i) => {
-        if (stewardSuperuserFlags[i]) return; // R2 — not assumable
+      stewardCwids.forEach((cwid) => {
+        if (stewardSuperusers.has(cwid)) return; // R2 — not assumable
         const profile = profileByCwid.get(cwid);
         const preferredName = profile?.preferredName ?? nameByCwid.get(cwid) ?? cwid;
         // `q` matches the CWID or the resolved name (the scholar pass already
@@ -384,15 +381,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // A grant-holder MAY still have a profile that fell outside the scholar
       // page's 50 rows; resolve it so they get their real name + slug rather
       // than a degraded duplicate (mirrors the steward pass's `profiles` read).
-      const [profiles, adminSuperuserFlags] = await Promise.all([
+      const [profiles, adminSuperusers] = await Promise.all([
         db.read.scholar
           .findMany({
             where: { cwid: { in: adminCwids }, deletedAt: null },
             select: { cwid: true, preferredName: true, slug: true },
           })
           .catch(() => [] as Array<{ cwid: string; preferredName: string; slug: string }>),
-        // R2 — fail-closed (error ⇒ exclude), same rule as both passes above.
-        Promise.all(adminCwids.map((c) => isSuperuser(c).catch(() => true))),
+        // R2 — same superuser pre-filter as both passes above.
+        superusersAmong(adminCwids),
       ]);
       const profileByCwid = new Map(profiles.map((p) => [p.cwid.toLowerCase(), p]));
 
@@ -449,7 +446,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       for (const [code, name] of xCore) nameMaps.core.set(code, name);
 
       subjects.forEach((s, i) => {
-        if (adminSuperuserFlags[i]) return; // R2 — not assumable
+        if (adminSuperusers.has(adminCwids[i])) return; // R2 — not assumable
         const top = s.top!; // non-null: filtered above
         if (kindFilter !== "all" && (kindFilter === "scholar" || top.entityType !== kindFilter)) {
           return;
