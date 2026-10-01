@@ -122,6 +122,20 @@ describe("handler get/set/revalidateTag", () => {
     expect(Buffer.isBuffer(got?.value.body)).toBe(true);
     expect([...(got!.value.body as Buffer)]).toEqual([1, 2, 3, 255]);
   });
+
+  it("round-trips APP_PAGE segmentData as a Map of Buffers (Next 16 segment prefetch)", async () => {
+    const s3 = fakeS3();
+    const writer = createHandler({ client: s3, bucket: "b", now: () => 1 });
+    const segmentData = new Map([["/_tree", Buffer.from([7, 8])], ["/_full", Buffer.from([9])]]);
+    await writer.set("k", { kind: "APP_PAGE", segmentData }, { tags: [] });
+    const reader = createHandler({ client: s3, bucket: "b", now: () => 1 });
+    const got = (await reader.get("k")) as { value: { segmentData: unknown } } | null;
+    const seg = got?.value.segmentData as Map<string, Buffer>;
+    expect(seg).toBeInstanceOf(Map);
+    expect(Buffer.isBuffer(seg.get("/_tree"))).toBe(true);
+    expect([...seg.get("/_tree")!]).toEqual([7, 8]);
+    expect([...seg.get("/_full")!]).toEqual([9]);
+  });
 });
 
 describe("fail-open (S3 unavailable never throws)", () => {
