@@ -19,8 +19,10 @@
  *     used · context only", and the quotes.
  * Above them: a search box that also takes several PMIDs at once ("Matched X
  * of Y · Elsewhere: …"), a Filters panel with active chips, sort pills, the
- * session line ("This session: N confirmed · M rejected" + Undo last) and a
- * keyboard-shortcuts popover (j/k/a/r/x/u/?, one window listener).
+ * session line ("This session: N confirmed · M rejected" + Undo last), an
+ * inline key hint and a keyboard-shortcuts popover (j/k/a/r/x/u/?, one window
+ * listener). A decided paper leaves the list at once, the pane moves on to the
+ * next one, and an undo toast offers its Undo for a few seconds.
  *
  * Below `lg` (the console IS used on phones; the designer drew no phone
  * layout, so this is the approved proposal): the rail becomes a select above
@@ -77,6 +79,8 @@ import {
   ScopeRail,
   QueueSummary,
   ShortcutsButton,
+  KEYS_HINT,
+  UndoToast,
   StrengthGlyphs,
   type ActiveChip,
   type FacetGroupView,
@@ -971,7 +975,8 @@ export function searchedPmids(query: string): ReadonlySet<string> {
  * The To review candidates the queue works over, with the display floor
  * applied (`isBelowDisplayFloor`, lib/cores/review-thresholds.ts). Below-floor
  * open engine candidates are left out unless `showLow` is on, EXCEPT a row
- * decided this session (held on screen for its Undo) and a row whose PMID the
+ * decided this session (it keeps its group membership; the list itself drops
+ * it, see `filterRows` in the component) and a row whose PMID the
  * search names (`searchedPmids`). `hidden` is how many the floor left out;
  * `belowFloor` how many sit below it at all (the Show/Hide line's two counts).
  * `weakOnly` is true when every below-floor row carries only repeat-user and/or
@@ -1306,6 +1311,38 @@ interface HistoryEntry {
   pmids: string[];
 }
 
+/**
+ * Which row the pane shows, as an index into `visible` (-1 when nothing is
+ * shown). A null `focusPmid` means the first row; a listed one is that row. A
+ * pmid that has LEFT the list (decided this session: a decided row no longer
+ * shows on To review) falls to whatever now sits at its old position,
+ * `lastIndex`: the next row down, or the new last row when it was at the bottom
+ * (mockup auto-advance). Bulk decisions and in-flight renders resolve the same
+ * way, so no handler has to work out the next row after its await. Pure.
+ */
+export function resolveFocusIndex(
+  visible: readonly { pmid: string }[],
+  focusPmid: string | null,
+  lastIndex: number,
+): number {
+  if (visible.length === 0) return -1;
+  if (focusPmid === null) return 0;
+  const at = visible.findIndex((r) => r.pmid === focusPmid);
+  if (at >= 0) return at;
+  return Math.min(Math.max(lastIndex, 0), visible.length - 1);
+}
+
+/** The undo toast's line after a decision (mockup): "Rejected · Method match
+ *  only" for one paper, "Confirmed 12 papers" for a bulk batch. Pure. */
+export function decisionToastText(status: Decision, count: number, note?: string): string {
+  const word = status === "claimed" ? "Confirmed" : "Rejected";
+  if (count > 1) return `${word} ${count} papers`;
+  return note ? `${word} · ${note}` : word;
+}
+
+/** How long the undo toast stays up (mockup). `u` and "Undo last" outlast it. */
+const TOAST_MS = 5000;
+
 /** Server-side batch cap on the bulk route (`MAX_BULK_PMIDS`). "Reject all N"
  *  can exceed it on a big core, so bulk actions post in chunks of this size. */
 const BULK_CHUNK = 500;
@@ -1499,8 +1536,10 @@ export function CoreClaimQueue({
   // Engine likelihood, high→low — the loader's own order, so the list opens on
   // what the engine is surest of (owner's choice; "Uncertain first" is a pill).
   const [sort, setSort] = useState<SortKey>("likelihood");
-  // The paper in the right-hand pane. Null means "the first one shown".
+  // The paper in the right-hand pane. Null means "the first one shown"; a
+  // decided paper's pmid holds its old place (see `resolveFocusIndex`).
   const [focusPmid, setFocusPmid] = useState<string | null>(null);
+  const lastFocusIndex = useRef(0);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   // Which bulk decision is in flight, if any — a double-click on "Confirm 2"
   // must not post the same batch twice.
@@ -1520,6 +1559,21 @@ export function CoreClaimQueue({
   // Polite SR announcement of the last outcome — the success path is otherwise
   // silent (the pane swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");
+  // The undo toast (mockup): the last decision and its Undo, for TOAST_MS. It
+  // is visual only; the announcement above already speaks the outcome.
+  const [toast, setToast] = useState<{ text: string; tone: Decision | "error" } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (next: { text: string; tone: Decision | "error" } | null) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = next ? setTimeout(() => setToast(null), TOAST_MS) : null;
+    setToast(next);
+  };
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
   // Manual PMID add: paste a block of known PMIDs and claim them directly,
   // independent of the engine queue (POST /api/edit/core-claim/bulk), or send
   // them to review (POST /api/edit/core-queue-add).
@@ -1640,35 +1694,16 @@ export function CoreClaimQueue({
     return result.ok;
   }
 
-  // What the latest render showed, for handlers that finish after an await.
-  const latest = useRef<{ visible: CoreQueueRow[]; focused: string | null }>({
-    visible: [],
-    focused: null,
-  });
-
   /** Decide one paper from the pane, the keys, or a reason chip. On success it
-   *  joins the session history and — when it was the focused paper — the pane
-   *  moves to the next undecided paper below it (mockup), so a reviewer can work
-   *  down a pile with `a`/`r` alone. */
+   *  joins the session history, leaves the To review list, and raises the undo
+   *  toast; when it was the focused paper the pane moves on to the next one
+   *  (`resolveFocusIndex`), so a reviewer can work down a pile with `a`/`r`. */
   async function decide(pmid: string, status: Decision, note?: string) {
     if (pending.has(pmid) || decided.has(pmid)) return;
     const ok = await send(pmid, status, note);
     if (!ok) return;
     setHistory((h) => [...h, { pmids: [pmid] }]);
-    const { visible: shown, focused: wasFocused } = latest.current;
-    if (wasFocused !== pmid) return;
-    const at = shown.findIndex((r) => r.pmid === pmid);
-    const next = shown.slice(at + 1).find((r) => r.pmid !== pmid && !decided.has(r.pmid));
-    if (next) setFocusPmid(next.pmid);
-  }
-
-  /** The pane's own Undo: revoke this one decision and drop it from history. */
-  async function undoOne(pmid: string) {
-    const ok = await send(pmid, "revoked");
-    if (ok)
-      setHistory((h) =>
-        h.map((e) => ({ pmids: e.pmids.filter((p) => p !== pmid) })).filter((e) => e.pmids.length),
-      );
+    showToast({ text: decisionToastText(status, 1, note), tone: status });
   }
 
   const [undoing, setUndoing] = useState(false);
@@ -1677,19 +1712,25 @@ export function CoreClaimQueue({
    * revoke; a bulk batch is revoked one paper at a time on the single-claim route
    * (the bulk route deliberately takes no `revoked`), sequentially so a big batch
    * never fans out into hundreds of parallel requests. Anything that fails stays
-   * decided, keeps its error, and goes back on the stack.
+   * decided and goes back on the stack; a decided row is off the list, so the
+   * failure is told in the toast, whose Undo then retries.
    */
   async function undoLast() {
     const last = history[history.length - 1];
     if (!last || undoing) return;
     setUndoing(true);
+    showToast(null);
     setHistory((h) => h.slice(0, -1));
     const failed: string[] = [];
     for (const p of last.pmids) {
       if (!decided.has(p)) continue;
       if (!(await send(p, "revoked"))) failed.push(p);
     }
-    if (failed.length) setHistory((h) => [...h, { pmids: failed }]);
+    if (failed.length) {
+      setHistory((h) => [...h, { pmids: failed }]);
+      setAnnounce("Undo could not be saved.");
+      showToast({ text: "Undo could not be saved", tone: "error" });
+    }
     setFocusPmid(last.pmids[0]);
     setUndoing(false);
   }
@@ -1725,6 +1766,7 @@ export function CoreClaimQueue({
         return next;
       });
       setHistory((h) => [...h, { pmids: done }]);
+      showToast({ text: decisionToastText(status, done.length), tone: status });
     }
     if (failed.length === 0) setSelected(new Set());
     else
@@ -2096,7 +2138,8 @@ export function CoreClaimQueue({
     searched: searchedPmids(query),
   });
   const reviewRows = floor.shown;
-  // Remaining review work (decided rows stay visible for undo but don't count).
+  // Remaining review work. A paper decided this session stays in `reviewRows`
+  // (its group keeps it as a member) but leaves the list itself (`filterRows`).
   const remaining = reviewRows.filter((c) => !decided.has(c.pmid)).length;
   // ponytail: every derivation below is recomputed per render, no memo. Fine at
   // the queue sizes cores carry today (low thousands); memoize on
@@ -2116,9 +2159,12 @@ export function CoreClaimQueue({
   const onHistory = view !== "review";
   const historyBase = view === "confirmed" ? confirmed : view === "rejected" ? rejected : [];
   const historyTouched = view === "confirmed" ? revokedConfirmed : restoredRejected;
-  const filterRows = onHistory ? historyBase : scopeRows;
-  // A row walked back / decided this session is held on screen for its Undo.
-  const isHeld = (pmid: string) => (onHistory ? historyTouched.has(pmid) : decided.has(pmid));
+  // A paper decided this session leaves the To review list (mockup); its Undo
+  // is the toast, `u`, and the summary strip's "Undo last".
+  const scopeOpen = scopeRows.filter((r) => !decided.has(r.pmid));
+  const filterRows = onHistory ? historyBase : scopeOpen;
+  // A row walked back on a history tab is held on screen for its own Undo.
+  const isHeld = (pmid: string) => onHistory && historyTouched.has(pmid);
   const values = new Map(
     filterRows.map(
       (r) =>
@@ -2174,9 +2220,9 @@ export function CoreClaimQueue({
   );
   const narrowed = activeChips.length > 0 || query.trim().length > 0;
 
-  const focused = visible.find((r) => r.pmid === focusPmid) ?? visible[0] ?? null;
-  const focusIndex = focused ? visible.indexOf(focused) : -1;
-  latest.current = { visible, focused: focused?.pmid ?? null };
+  const focusIndex = resolveFocusIndex(visible, focusPmid, lastFocusIndex.current);
+  const focused = focusIndex >= 0 ? visible[focusIndex] : null;
+  if (focusIndex >= 0) lastFocusIndex.current = focusIndex;
 
   // The selection only ever acts on rows the reviewer can SEE: a row ticked and
   // then hidden by a facet or the search drops out of the batch. Acting on rows
@@ -2490,6 +2536,14 @@ export function CoreClaimQueue({
       <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
         {announce}
       </div>
+      {toast ? (
+        <UndoToast
+          text={toast.text}
+          tone={toast.tone}
+          undoing={undoing}
+          onUndo={() => void undoLast()}
+        />
+      ) : null}
       {/* The mockup's header row: the page's title block on the left, the three
           controls on the right, bottom-aligned. The button group carries
           `ml-auto` so it stays right when the title wraps under it. */}
@@ -2709,8 +2763,8 @@ export function CoreClaimQueue({
       />
 
       {/* The tab row (mockup): the view switch on the left; on the To review
-          tab, the shortcuts popover on the right. The session tally and its
-          Undo moved into the summary strip's "This session" card. */}
+          tab, the key hint and the shortcuts popover on the right. The session
+          tally and its Undo moved into the summary strip's "This session" card. */}
       <div
         data-slot="core-queue-panel"
         className="border-apollo-border-strong flex flex-wrap items-end justify-between gap-x-3 gap-y-2 border-b"
@@ -2743,6 +2797,10 @@ export function CoreClaimQueue({
         )}
         {view === "review" && candidates.length > 0 ? (
           <div className="text-muted-foreground mb-2 flex flex-wrap items-center gap-3 text-xs">
+            {/* Keys are a desktop affordance; on a phone the hint is noise. */}
+            <span data-slot="core-queue-keys-hint" className="hidden whitespace-nowrap md:inline">
+              {KEYS_HINT}
+            </span>
             <ShortcutsButton open={keysOpen} onToggle={() => setKeysOpen((o) => !o)} />
           </div>
         ) : null}
@@ -2917,7 +2975,6 @@ export function CoreClaimQueue({
                       row={r}
                       mode={mode}
                       focused={focused?.pmid === r.pmid}
-                      decided={decided.get(r.pmid)}
                       error={errors.get(r.pmid)}
                       checked={selected.has(r.pmid)}
                       onCheck={() => toggleSelected(r.pmid)}
@@ -2941,7 +2998,7 @@ export function CoreClaimQueue({
                 </p>
               ) : null}
               <p data-slot="core-queue-status" className="text-muted-foreground text-xs">
-                Showing {visible.length} of {scopeRows.length} candidates
+                Showing {visible.length} of {scopeOpen.length} candidates
               </p>
             </section>
 
@@ -2957,14 +3014,11 @@ export function CoreClaimQueue({
                 onCloseSheet={() => setSheetOpen(false)}
                 clientCwids={clientCwids}
                 paperCounts={paperCounts}
-                decided={decided.get(focused.pmid)}
-                note={notes.get(focused.pmid) ?? null}
                 pending={pending.has(focused.pmid)}
                 error={errors.get(focused.pmid)}
                 copied={copiedPmid === focused.pmid}
                 onCopyPmid={() => copyPmid(focused.pmid)}
                 onDecide={(status, note) => void decide(focused.pmid, status, note)}
-                onUndo={() => void undoOne(focused.pmid)}
                 repeatAction={repeatAction}
               />
             ) : null}
@@ -3585,7 +3639,6 @@ function QueueListRow({
   row,
   mode,
   focused,
-  decided,
   error,
   checked,
   onCheck,
@@ -3596,7 +3649,6 @@ function QueueListRow({
   row: CoreQueueRow;
   mode: RailMode;
   focused: boolean;
-  decided: Decision | undefined;
   error: string | undefined;
   checked: boolean;
   onCheck: () => void;
@@ -3609,13 +3661,6 @@ function QueueListRow({
   const meta = [row.journal ?? row.journalAbbrev, row.year, `PMID ${row.pmid}`]
     .filter((v) => v !== null && v !== "")
     .join(" · ");
-  const status = error
-    ? { text: "Not saved", cls: "text-red-700" }
-    : decided === "claimed"
-      ? { text: "Confirmed", cls: "text-apollo-green" }
-      : decided === "rejected"
-        ? { text: "Rejected", cls: "text-red-700" }
-        : null;
   return (
     <li
       data-slot="core-queue-row"
@@ -3629,8 +3674,7 @@ function QueueListRow({
     >
       <input
         type="checkbox"
-        checked={checked && !decided}
-        disabled={!!decided}
+        checked={checked}
         onChange={onCheck}
         aria-label={`Select ${row.title}`}
         className="mt-1 size-4 shrink-0 accent-[var(--apollo-slate)]"
@@ -3638,9 +3682,7 @@ function QueueListRow({
       <button
         type="button"
         onClick={onOpen}
-        className={`flex min-w-0 flex-1 gap-2.5 text-left focus-visible:outline-none ${
-          decided ? "opacity-60" : ""
-        }`}
+        className="flex min-w-0 flex-1 gap-2.5 text-left focus-visible:outline-none"
       >
         <span className="min-w-0 flex-1">
           <span className="text-foreground line-clamp-2 block text-sm leading-snug">
@@ -3672,7 +3714,7 @@ function QueueListRow({
               {band.label} {Math.round(row.likelihood * 100)}%
             </span>
           )}
-          {status ? <span className={`mt-1 block ${status.cls}`}>{status.text}</span> : null}
+          {error ? <span className="mt-1 block text-red-700">Not saved</span> : null}
         </span>
       </button>
     </li>
@@ -3699,14 +3741,11 @@ function FocusedPaper({
   onCloseSheet,
   clientCwids,
   paperCounts,
-  decided,
-  note,
   pending,
   error,
   copied,
   onCopyPmid,
   onDecide,
-  onUndo,
   repeatAction,
 }: {
   row: CoreQueueRow;
@@ -3720,15 +3759,11 @@ function FocusedPaper({
   clientCwids: ReadonlySet<string>;
   /** Per-person confirmed-paper counts for this core (see `clientPaperCounts`). */
   paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
-  decided: Decision | undefined;
-  /** The reject reason given this session, if any. */
-  note: string | null;
   pending: boolean;
   error: string | undefined;
   copied: boolean;
   onCopyPmid: () => void;
   onDecide: (status: Decision, note?: string) => void;
-  onUndo: () => void;
   repeatAction: { label: string; onClick: () => void } | null;
 }) {
   const likelihoodPct = Math.round(row.likelihood * 100);
@@ -3789,13 +3824,11 @@ function FocusedPaper({
       <span className="tabular-nums">PMID {row.pmid}</span>
     ),
   });
-  const statusWord =
-    decided === "claimed" ? "Confirmed" : decided === "rejected" ? "Rejected" : null;
   return (
     <article
       data-slot="core-queue-focus"
       data-pmid={row.pmid}
-      aria-label={`${statusWord ?? "Candidate"}: ${row.title}`}
+      aria-label={`Candidate: ${row.title}`}
       className={`${
         sheetOpen ? "fixed inset-0 z-40 flex overflow-y-auto" : "hidden"
       } bg-apollo-surface lg:border-apollo-border min-w-0 flex-col gap-4 p-5 lg:sticky lg:inset-auto lg:top-4 lg:z-auto lg:flex lg:overflow-visible lg:rounded-[var(--apollo-radius-card)] lg:border lg:px-[22px] lg:py-5 lg:shadow-[var(--apollo-shadow-card)]`}
@@ -3876,13 +3909,7 @@ function FocusedPaper({
 
       <div
         data-slot="core-queue-meter"
-        className={`flex flex-wrap items-center gap-3 rounded-[10px] px-3.5 py-3 ${
-          decided === "claimed"
-            ? "bg-emerald-50"
-            : decided === "rejected"
-              ? "bg-red-50"
-              : "bg-apollo-surface-2"
-        }`}
+        className="bg-apollo-surface-2 flex flex-wrap items-center gap-3 rounded-[10px] px-3.5 py-3"
       >
         {row.queued ? (
           // Sent to review by PMID (mockup): no band and no bar. The engine
@@ -3920,63 +3947,42 @@ function FocusedPaper({
             </div>
           </div>
         )}
-        {statusWord ? (
-          <div className="flex items-center gap-2.5 text-[13px]">
-            <span
-              className={`font-medium ${decided === "claimed" ? "text-emerald-800" : "text-red-800"}`}
-            >
-              {statusWord}
-              {note ? ` · ${note}` : ""}
-            </span>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={onUndo}
-              className="border-border-strong text-muted-foreground hover:text-foreground bg-background inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm disabled:opacity-50"
-            >
-              <Undo2 className="size-3.5" aria-hidden /> Undo
-            </button>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => onDecide("claimed")}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--color-accent-slate)] px-3.5 text-sm font-medium text-white disabled:opacity-50"
-            >
-              <Check className="size-3.5" aria-hidden /> Confirm
-            </button>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => onDecide("rejected")}
-              className="border-border-strong text-foreground bg-background inline-flex h-9 items-center gap-1.5 rounded-md border px-3.5 text-sm disabled:opacity-50"
-            >
-              <X className="size-3.5" aria-hidden /> Reject
-            </button>
-          </div>
-        )}
-        {statusWord ? null : (
-          <div
-            role="group"
-            aria-label="Reject with a reason"
-            className="text-muted-foreground flex basis-full flex-wrap items-center gap-1.5 text-xs"
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onDecide("claimed")}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--color-accent-slate)] px-3.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            <span>Reject with a reason:</span>
-            {REJECT_REASONS.map((reason) => (
-              <button
-                key={reason}
-                type="button"
-                disabled={pending}
-                onClick={() => onDecide("rejected", reason)}
-                className="border-apollo-border-strong bg-apollo-surface text-foreground rounded-full border px-2.5 py-0.5 disabled:opacity-50"
-              >
-                {reason}
-              </button>
-            ))}
-          </div>
-        )}
+            <Check className="size-3.5" aria-hidden /> Confirm
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onDecide("rejected")}
+            className="border-border-strong text-foreground bg-background inline-flex h-9 items-center gap-1.5 rounded-md border px-3.5 text-sm disabled:opacity-50"
+          >
+            <X className="size-3.5" aria-hidden /> Reject
+          </button>
+        </div>
+        <div
+          role="group"
+          aria-label="Reject with a reason"
+          className="text-muted-foreground flex basis-full flex-wrap items-center gap-1.5 text-xs"
+        >
+          <span>Reject with a reason:</span>
+          {REJECT_REASONS.map((reason) => (
+            <button
+              key={reason}
+              type="button"
+              disabled={pending}
+              onClick={() => onDecide("rejected", reason)}
+              className="border-apollo-border-strong bg-apollo-surface text-foreground rounded-full border px-2.5 py-0.5 disabled:opacity-50"
+            >
+              {reason}
+            </button>
+          ))}
+        </div>
       </div>
       {error ? (
         <p className="-mt-2 text-xs text-red-600" role="alert">
