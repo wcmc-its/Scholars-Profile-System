@@ -5214,14 +5214,15 @@ describe("v2 pure helpers", () => {
 
   it("rowChips: short chips, the repeat user named only in By evidence", () => {
     const counts = { ccc1003: { papers: 3, recent: 1, total: 9 } };
-    expect(rowChips(row({ methodTier: "strong" }), counts, new Set(), "evidence")).toEqual([
+    const labels = (chips: { label: string }[]) => chips.map((c) => c.label);
+    expect(labels(rowChips(row({ methodTier: "strong" }), counts, new Set(), "evidence"))).toEqual([
       "Acknowledged",
       "Staff co-author",
       "LLM 7/10",
       "Repeat user · Casey Sample",
       "Method strong",
     ]);
-    expect(rowChips(row(), counts, new Set(["ccc1003"]), "person")).toEqual([
+    expect(labels(rowChips(row(), counts, new Set(["ccc1003"]), "person"))).toEqual([
       "Acknowledged",
       "Staff co-author",
       "LLM 7/10",

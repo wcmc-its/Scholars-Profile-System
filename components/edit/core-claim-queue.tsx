@@ -523,16 +523,56 @@ export type BandLabel = "Strong" | "Moderate" | "Slight" | "Weak";
 interface Band {
   min: number;
   label: BandLabel;
-  /** Tailwind text colour for the band word. */
+  /** Tailwind text colour for the band word on a white or neutral ground. */
   text: string;
-  /** Tailwind background for the meter fill. */
+  /** Tailwind background for the meter fill and the rail's band dot. */
   fill: string;
+  /** Tinted ground + border + text for the band pill and the paper pane's score
+   *  block. Its own text colour, because the band hue alone can miss AA on its
+   *  tint (apollo-green on green-tint is 4.39:1; green-foreground clears it). */
+  tint: string;
+  /** Tailwind left-border colour for a list row's spine. */
+  spine: string;
 }
+// Hues follow the mockup's warm descent — green, amber, terracotta — on existing
+// tokens, with master's four bands and cut-offs unchanged. Moderate moved off
+// slate because slate is the FOCUSED row's spine and tint: a Moderate row would
+// otherwise read as selected. Slight takes coral ("engine output, not yet
+// yours" in globals.css), which is what an unreviewed band is. Weak stays
+// neutral: below the display floor, so only floor-exempt rows ever show it.
 const BANDS: readonly Band[] = [
-  { min: 0.85, label: "Strong", text: "text-apollo-green", fill: "bg-apollo-green" },
-  { min: 0.65, label: "Moderate", text: "text-apollo-slate", fill: "bg-apollo-slate" },
-  { min: 0.4, label: "Slight", text: "text-apollo-amber", fill: "bg-apollo-amber" },
-  { min: 0, label: "Weak", text: "text-muted-foreground", fill: "bg-muted-foreground" },
+  {
+    min: 0.85,
+    label: "Strong",
+    text: "text-apollo-green",
+    fill: "bg-apollo-green",
+    tint: "bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground",
+    spine: "border-l-apollo-green",
+  },
+  {
+    min: 0.65,
+    label: "Moderate",
+    text: "text-apollo-amber",
+    fill: "bg-apollo-amber",
+    tint: "bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber",
+    spine: "border-l-apollo-amber",
+  },
+  {
+    min: 0.4,
+    label: "Slight",
+    text: "text-apollo-coral-foreground",
+    fill: "bg-apollo-coral-foreground",
+    tint: "bg-apollo-coral-tint border-apollo-coral-tint-border text-apollo-coral-foreground",
+    spine: "border-l-apollo-coral-foreground",
+  },
+  {
+    min: 0,
+    label: "Weak",
+    text: "text-muted-foreground",
+    fill: "bg-muted-foreground",
+    tint: "bg-apollo-surface-2 border-apollo-border-strong text-[var(--evidence-body)]",
+    spine: "border-l-muted-foreground",
+  },
 ];
 
 /** Band for a 0–1 likelihood. Thresholds are inclusive lower bounds, so 0.85 is
@@ -541,13 +581,47 @@ export function likelihoodBand(likelihood: number): Band {
   return BANDS.find((b) => likelihood >= b.min) ?? BANDS[BANDS.length - 1];
 }
 
+/** The dense LLM triage score in three tiers — ONE set of cut-offs (8, 6) that
+ *  both the pane's words (`llmVerdict`) and the list chip's tint (`llmChipTone`)
+ *  read, so the two can never disagree about the same score. Pure. */
+export function llmTier(score: number): "core" | "possible" | "little" {
+  return score >= 8 ? "core" : score >= 6 ? "possible" : "little";
+}
+
 /** What the dense LLM triage score means, in words a reviewer can act on. Pure. */
 export function llmVerdict(score: number): string {
-  return score >= 8
+  const tier = llmTier(score);
+  return tier === "core"
     ? "reads as core work"
-    : score >= 6
+    : tier === "possible"
       ? "possibly core work"
       : "little sign of core use";
+}
+
+/** A list-row chip's tint: `signal` (slate) for a counted signal that fired,
+ *  `amber` for an LLM read in the middle tier, `quiet` (neutral) for a weak LLM
+ *  read and for uncounted context — the method tier and a known client. */
+export type ChipTone = "signal" | "amber" | "quiet";
+
+/** The LLM chip's tone off `llmTier`. Pure. */
+export function llmChipTone(score: number): ChipTone {
+  const tier = llmTier(score);
+  return tier === "core" ? "signal" : tier === "possible" ? "amber" : "quiet";
+}
+
+/** Tailwind classes per chip tone (ground, border, text). */
+const CHIP_TONE_CLASS: Record<ChipTone, string> = {
+  signal: "border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate",
+  amber: "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber",
+  quiet: "border-apollo-border-strong bg-apollo-surface-2 text-[var(--evidence-body)]",
+};
+
+/** The rail dot for a pile of papers: the LOWEST band's colour (mockup), so a
+ *  group spanning "Slight to Strong" warns with its weakest member. Neutral for
+ *  an empty pile. Pure. */
+export function bandDot(likelihoods: readonly number[]): string {
+  if (likelihoods.length === 0) return "bg-apollo-border-strong";
+  return likelihoodBand(Math.min(...likelihoods)).fill;
 }
 
 /** One label/value pair in the collapsed evidence strip. */
@@ -2277,6 +2351,7 @@ export function CoreClaimQueue({
             key: ALL_SCOPE,
             label: "All candidates",
             sub: plural(groups.length, "evidence group"),
+            dot: "bg-apollo-slate",
             count: remaining,
           },
           ...groups.map((g) => ({
@@ -2285,6 +2360,9 @@ export function CoreClaimQueue({
             // "Added by you" has no band: the engine did not score these papers
             // onto the queue, so a band word would put its verdict in its mouth.
             sub: g.key === ADDED_GROUP ? ADDED_SUB : groupBandText(g.rows.map((r) => r.likelihood)),
+            // The dot reads the same pile as the band words beside it.
+            dot:
+              g.key === ADDED_GROUP ? "bg-apollo-slate" : bandDot(g.rows.map((r) => r.likelihood)),
             count: g.open,
           })),
         ]
@@ -2292,6 +2370,9 @@ export function CoreClaimQueue({
           key: p.scholar.cwid.toLowerCase(),
           label: displayName(p.scholar.name),
           sub: `${p.counts.papers} prior confirmed${p.scholar.dept ? ` · ${p.scholar.dept}` : ""}`,
+          // Scored rows only: a paper sent here by PMID carries a placeholder 0
+          // likelihood, which would paint every such person Weak.
+          dot: bandDot(p.rows.filter((r) => !r.queued).map((r) => r.likelihood)),
           count: p.open,
         }));
   const railKey =
@@ -3627,26 +3708,33 @@ function RejectedRow({
  * signals off `buildSignals`, a known client on the byline, the method tier —
  * so a chip never names evidence the pane would not show. The repeat-user chip
  * names its person only in By evidence: in By person the whole list is that
- * person, and repeating the name on every row would be noise. Pure.
+ * person, and repeating the name on every row would be noise.
+ *
+ * Each chip carries its tint (mockup): a counted signal in slate, the LLM chip
+ * by `llmChipTone`, and the uncounted context — known client, method tier —
+ * neutral, so the eye lands on what the "N of 4" actually counts. Pure.
  */
 export function rowChips(
   row: CoreQueueRow,
   paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
   clientCwids: ReadonlySet<string>,
   mode: RailMode,
-): string[] {
-  const chips: string[] = [];
+): { label: string; tone: ChipTone }[] {
+  const chips: { label: string; tone: ChipTone }[] = [];
   for (const s of buildSignals(row, paperCounts, clientCwids)) {
-    if (s.kind === "ack") chips.push("Acknowledged");
-    else if (s.kind === "coauthor") chips.push("Staff co-author");
-    else if (s.kind === "llm") chips.push(`LLM ${row.llmScore}/10`);
+    if (s.kind === "ack") chips.push({ label: "Acknowledged", tone: "signal" });
+    else if (s.kind === "coauthor") chips.push({ label: "Staff co-author", tone: "signal" });
+    else if (s.kind === "llm" && row.llmScore !== null)
+      chips.push({ label: `LLM ${row.llmScore}/10`, tone: llmChipTone(row.llmScore) });
     else if (mode === "evidence") {
       const who = repeatUser(row, paperCounts, clientCwids);
-      chips.push(who ? `Repeat user · ${displayName(who.scholar.name)}` : "Repeat user");
+      const label = who ? `Repeat user · ${displayName(who.scholar.name)}` : "Repeat user";
+      chips.push({ label, tone: "signal" });
     }
   }
-  if (matchesFilter(row, "client", clientCwids)) chips.push("Client co-author");
-  if (row.methodTier) chips.push(`Method ${row.methodTier}`);
+  if (matchesFilter(row, "client", clientCwids))
+    chips.push({ label: "Client co-author", tone: "quiet" });
+  if (row.methodTier) chips.push({ label: `Method ${row.methodTier}`, tone: "quiet" });
   return chips;
 }
 
@@ -3688,10 +3776,13 @@ function QueueListRow({
       data-slot="core-queue-row"
       data-pmid={row.pmid}
       aria-current={focused ? "true" : undefined}
-      className={`border-apollo-border flex gap-2.5 border-t px-3.5 py-3 first:border-t-0 ${
+      // The spine (mockup): the row's band colour, slate when focused, none for
+      // a paper sent here by PMID — it has no band to show. pl is px-3.5 less
+      // the 3px spine, so titles stay aligned with the header checkbox.
+      className={`border-apollo-border flex gap-2.5 border-t border-l-[3px] py-3 pr-3.5 pl-[11px] first:border-t-0 ${
         focused
-          ? "bg-apollo-slate-tint shadow-[inset_3px_0_0_var(--apollo-slate)]"
-          : "bg-apollo-surface"
+          ? "bg-apollo-slate-tint border-l-apollo-slate"
+          : `bg-apollo-surface ${row.queued ? "border-l-transparent" : band.spine}`
       }`}
     >
       <input
@@ -3715,10 +3806,11 @@ function QueueListRow({
             <span className="mt-1.5 flex flex-wrap gap-1">
               {chips.map((c) => (
                 <span
-                  key={c}
-                  className="border-apollo-border bg-apollo-surface-2 rounded-full border px-1.5 py-px text-[11px] text-[var(--evidence-body)]"
+                  key={c.label}
+                  data-tone={c.tone}
+                  className={`rounded border px-[7px] py-px text-[11px] ${CHIP_TONE_CLASS[c.tone]}`}
                 >
-                  {c}
+                  {c.label}
                 </span>
               ))}
             </span>
@@ -3732,7 +3824,9 @@ function QueueListRow({
               Added by you
             </span>
           ) : (
-            <span className={`block font-semibold tracking-[0.06em] uppercase ${band.text}`}>
+            <span
+              className={`block rounded border px-[7px] py-0.5 font-medium tracking-[0.08em] whitespace-nowrap uppercase ${band.tint}`}
+            >
               {band.label} {Math.round(row.likelihood * 100)}%
             </span>
           )}
@@ -3931,7 +4025,11 @@ function FocusedPaper({
 
       <div
         data-slot="core-queue-meter"
-        className="bg-apollo-surface-2 flex flex-wrap items-center gap-3 rounded-[10px] px-3.5 py-3"
+        // Band-tinted (mockup), so the verdict and the Confirm/Reject it informs
+        // read as one block; a paper sent here by PMID has no band to tint by.
+        className={`flex flex-wrap items-center gap-3 rounded-[10px] border px-3.5 py-3 ${
+          row.queued ? "bg-apollo-surface-2 border-transparent" : band.tint
+        }`}
       >
         {row.queued ? (
           // Sent to review by PMID (mockup): no band and no bar. The engine
@@ -3953,12 +4051,12 @@ function FocusedPaper({
         ) : (
           <div className="min-w-0 flex-[1_1_140px]">
             <div
-              className={`text-[11px] font-semibold tracking-[0.04em] uppercase ${band.text}`}
+              className="text-[11px] font-semibold tracking-[0.08em] uppercase"
               data-slot="core-queue-score"
             >
               {band.label} {likelihoodPct}%
             </div>
-            <span className="bg-apollo-border-strong mt-1.5 block h-1 overflow-hidden rounded-full">
+            <span className="bg-apollo-surface mt-1.5 block h-1 overflow-hidden rounded-full">
               <span
                 className={`block h-full rounded-full ${band.fill}`}
                 style={{ width: `${likelihoodPct}%` }}
