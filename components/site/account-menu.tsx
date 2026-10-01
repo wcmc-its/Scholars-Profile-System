@@ -82,6 +82,32 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   profiles: UsersIcon,
 };
 
+/** Generational / degree suffixes that stay whole and aren't the surname. */
+const NAME_SUFFIX = /^(jr\.?|sr\.?|ii|iii|iv|md|phd|m\.d\.|ph\.d\.)$/i;
+
+/** Split a display name into first / middles / last, setting a suffix aside. */
+function nameParts(name: string) {
+  const tokens = name.trim().split(/\s+/);
+  const suffix = tokens.length > 2 && NAME_SUFFIX.test(tokens[tokens.length - 1]) ? tokens.pop()! : null;
+  const first = tokens[0];
+  const last = tokens.length > 1 ? tokens[tokens.length - 1] : null;
+  return { first, middles: tokens.slice(1, -1), last, suffix };
+}
+
+/** "Terrie Rose Wheeler" → "Terrie R. Wheeler"; two-token names unchanged. */
+export function shortName(name: string): string {
+  const { first, middles, last, suffix } = nameParts(name);
+  if (!last) return first;
+  const mid = middles.map((m) => (m.endsWith(".") ? m : `${m[0]}.`));
+  return [first, ...mid, last, ...(suffix ? [suffix] : [])].join(" ");
+}
+
+/** "Terrie Rose Wheeler" → "TW" (first + surname; a lone token → one letter). */
+export function nameInitials(name: string): string {
+  const { first, last } = nameParts(name);
+  return `${first[0]}${last ? last[0] : ""}`.toUpperCase();
+}
+
 export type AccountMenuProps = {
   /**
    * The signed-in scholar's slug + preferred display name, or `null` when no
@@ -138,7 +164,9 @@ export function AccountMenu({
   const realName = effectiveScholar?.preferredName ?? probe?.displayName ?? null;
   const impersonating = probe?.impersonating ?? null;
   // While viewing as someone the header names THEM, matching the banner.
-  const label = impersonating?.targetName ?? realName ?? "Account";
+  const fullName = impersonating?.targetName ?? realName;
+  const label = fullName ? shortName(fullName) : "Account";
+  const initials = fullName ? nameInitials(fullName) : null;
   // canImpersonate without superuser = an observer (read-only View as, #2946).
   const adminRole = probe?.isSuperuser ? "Superuser" : canImpersonate ? "Observer" : null;
   // In the console the per-role roster link is replaced by "Back to Scholars",
@@ -168,7 +196,9 @@ export function AccountMenu({
   ) : adminRole && realName ? (
     <div className="flex flex-col gap-0.5 px-3 pt-2 pb-1.5" data-testid="account-menu-identity">
       <span className="text-sm font-medium">{realName}</span>
-      <span className="text-xs text-muted-foreground">{adminRole}</span>
+      <span className="text-xs text-muted-foreground">
+        {probe?.cwid ? `${probe.cwid} · ${adminRole}` : adminRole}
+      </span>
     </div>
   ) : null;
 
@@ -191,17 +221,27 @@ export function AccountMenu({
   return (
     <>
       <Popover open={open} onOpenChange={onOpenChange}>
+        {/* An outlined pill with an initials avatar (Front page tweaks mockup,
+            2026-09-30). The bare "Account" fallback has no name to initial. */}
         <PopoverTrigger
           data-slot="account-menu-trigger"
-          className={
-            isConsole
-              ? // Every console mount now sits in the dark `ConsoleTopBar`.
-                "inline-flex items-center gap-1 py-3 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
-              : "inline-flex items-center gap-1 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
-          }
+          className={`inline-flex items-center gap-2 rounded-full border border-white/50 py-1 text-sm font-medium text-white/90 transition-colors hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${
+            // Every console mount sits in the dark `ConsoleTopBar`; keep its bar height.
+            isConsole ? "my-1.5" : ""
+          } ${initials ? "pr-3 pl-1" : "px-3"}`}
           aria-label="Account menu"
         >
-          <span className="max-w-[14ch] truncate">{label}</span>
+          {initials ? (
+            <span
+              aria-hidden="true"
+              className={`flex size-6 shrink-0 items-center justify-center rounded-full bg-white text-[11px] font-semibold ${
+                isConsole ? "text-apollo-bar" : "text-[var(--color-primary-cornell-red)]"
+              }`}
+            >
+              {initials}
+            </span>
+          ) : null}
+          <span className="max-w-[18ch] truncate">{label}</span>
           <ChevronDownIcon className="size-3.5 shrink-0" aria-hidden="true" />
         </PopoverTrigger>
         <PopoverContent

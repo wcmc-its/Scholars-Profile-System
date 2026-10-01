@@ -3,15 +3,17 @@
 import { useEffect, useState } from "react";
 import { EyeIcon } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
 
 /**
  * The "View as" impersonation banner (#637, impersonation-spec.md §6/§8, R7/T6).
  *
- * A one-line **dark warm-ink** bar (`apollo-bar`, #2a2421; Front page tweaks
- * mockup, 2026-09-30 — it was a three-line amber bar). Neither Cornell red
- * (#B31B1B, the header chrome) nor Apollo maroon (#7d1c1c, the /edit editor);
- * a hairline separates it from the same-colored /edit console bar below it.
+ * A one-line **light warm-neutral** bar (#f2efeb with a #dbd3cd rule; Front
+ * page tweaks mockup, 2026-09-30 — it was a three-line amber bar). Neither
+ * Cornell red (#B31B1B, the header chrome) nor Apollo maroon (#7d1c1c, the /edit
+ * editor), and light against both, so it never blends into either surface.
  * Full-width, sticky to the very top, and it **pushes content down**
  * (it is a flow element, not an overlay) so it can never be missed or hidden
  * behind the header. Non-dismissible (R7) — the only exit is "Return to my view"
@@ -99,19 +101,10 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   development: [{ label: "Grant Matcha", href: "/edit/grant-matcha" }],
 };
 
-/** Compact unit-kind suffix for the banner's subject line. */
-const KIND_SHORT: Record<"department" | "division" | "center" | "core" | "institution", string> = {
-  department: "Dept",
-  division: "Div",
-  center: "Center",
-  core: "Core",
-  institution: "Institution",
-};
-
 /**
- * The subject descriptor after the name: a plain `Scholar`, or
- * `Owner · {unit} ({Dept|Div|Center|Core})` for a unit owner/curator (ADR-005
- * Amendment 1 role × unit-kind, #540).
+ * The subject descriptor after the name: a plain `Scholar`, or `Owner, {unit}`
+ * for a unit owner/curator (ADR-005 Amendment 1 role × unit-kind, #540). The
+ * unit kind is left off here (Front page tweaks mockup); the picker rows keep it.
  */
 export function subjectDescriptor(im: {
   role: SubjectRole;
@@ -123,9 +116,7 @@ export function subjectDescriptor(im: {
   // positive check (owner/curator) rather than an enumeration of the unit-less
   // roles, so a future role added to `SubjectRole` needs no edit here.
   if (im.role !== "owner" && im.role !== "curator") return ROLE_LABEL[im.role];
-  const unit = im.unit ? ` · ${im.unit}` : "";
-  const kind = im.unitKind ? ` (${KIND_SHORT[im.unitKind]})` : "";
-  return `${ROLE_LABEL[im.role]}${unit}${kind}`;
+  return im.unit ? `${ROLE_LABEL[im.role]}, ${im.unit}` : ROLE_LABEL[im.role];
 }
 
 /** Client mirror of the server read-time TTL; falls back to 30 min. */
@@ -186,7 +177,7 @@ export function ImpersonationBanner() {
       aria-live="polite"
       data-slot="impersonation-banner"
       data-testid="impersonation-banner"
-      className="bg-apollo-bar sticky top-0 z-[60] w-full border-b border-white/20 text-white"
+      className="text-foreground sticky top-0 z-[60] w-full border-b border-[#dbd3cd] bg-[#f2efeb]"
     >
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-1 px-6 py-2.5 text-sm">
         <EyeIcon className="size-4 shrink-0" aria-hidden="true" />
@@ -195,23 +186,24 @@ export function ImpersonationBanner() {
           {" · "}
           {subjectDescriptor(impersonating)}
         </span>
-        <span className="text-[#dbd3cd]">Edits logged to {realName ?? "you"}</span>
+        <span className="text-muted-foreground">Edits logged to {realName ?? "you"}</span>
         <span
-          className="ml-auto whitespace-nowrap text-[#dbd3cd] tabular-nums"
+          className="text-muted-foreground ml-auto whitespace-nowrap tabular-nums"
           aria-label={`Auto-expires in ${remaining}`}
           data-testid="impersonation-countdown"
         >
           {remaining} left
         </span>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={returnToMyView}
           disabled={returning}
           data-testid="impersonation-return"
-          className="inline-flex items-center rounded-md bg-white px-3 py-1 font-medium whitespace-nowrap text-apollo-bar transition-colors hover:bg-[#f2efeb] focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-apollo-bar disabled:opacity-60"
         >
           {returning ? "Returning…" : "Return to my view"}
-        </button>
+        </Button>
       </div>
     </div>
   );

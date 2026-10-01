@@ -51,6 +51,8 @@ export type ProbeImpersonating = {
 /** The shape `/api/auth/session` returns once impersonation is wired (#637 §7). */
 export type ImpersonationProbe = {
   authenticated: boolean;
+  /** The REAL signed-in cwid (never the View-as target); `null` signed out. */
+  cwid: string | null;
   scholar: ProbeScholar | null;
   /** Fallback display name for the account-menu trigger when `scholar` is
    *  `null` (a profile-less comms_steward or unit admin, e.g. dwd2001),
@@ -102,6 +104,7 @@ export function useImpersonationProbe(enabled = true): ImpersonationProbe | null
         if (!active || !data) return;
         setProbe({
           authenticated: data.authenticated ?? false,
+          cwid: data.cwid ?? null,
           scholar: data.scholar ?? null,
           displayName: data.displayName ?? null,
           impersonating: data.impersonating ?? null,

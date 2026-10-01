@@ -103,9 +103,11 @@ function describe(c: Candidate): string {
 }
 
 /** `cwid · Owner · Cardiology (Dept)` — the CWID lets the pick be checked
- *  against what was typed. */
-function subline(c: Candidate): string {
-  return c.exact ? c.cwid : `${c.cwid} · ${describe(c)}`;
+ *  against what was typed. The confirm dialog drops the kind (`withKind`
+ *  false); the picker rows keep it, the only Dept-vs-Div cue left there. */
+function subline(c: Candidate, withKind = true): string {
+  if (c.exact) return c.cwid;
+  return `${c.cwid} · ${withKind ? describe(c) : describe({ ...c, unitKind: null })}`;
 }
 
 /** Client mirror of the server read-time TTL; falls back to 30 min. */
@@ -329,7 +331,7 @@ export function ViewAsConfirmDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>View as {name}?</DialogTitle>
-          {candidate ? <DialogDescription>{subline(candidate)}</DialogDescription> : null}
+          {candidate ? <DialogDescription>{subline(candidate, false)}</DialogDescription> : null}
         </DialogHeader>
         <ul className="flex flex-col gap-2.5 text-sm leading-normal">
           <li className="flex gap-2.5">

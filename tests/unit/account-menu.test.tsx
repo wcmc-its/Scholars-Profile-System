@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-import { AccountMenu } from "@/components/site/account-menu";
+import { AccountMenu, nameInitials, shortName } from "@/components/site/account-menu";
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
 import type { ImpersonationProbe } from "@/components/site/use-impersonation-probe";
 
@@ -16,6 +16,7 @@ vi.mock("@/components/site/use-impersonation-probe", () => ({
 function mockProbe(probe: Partial<ImpersonationProbe>): void {
   vi.mocked(useImpersonationProbe).mockReturnValue({
     authenticated: true,
+    cwid: null,
     scholar: null,
     displayName: null,
     impersonating: null,
@@ -242,6 +243,13 @@ describe("AccountMenu — identity and View as", () => {
     expect(screen.getByTestId("account-menu-view-as").textContent).toContain("View as another user…");
   });
 
+  it("prefixes the role with the REAL cwid when the probe has it", () => {
+    mockProbe({ cwid: "pja2001", scholar: paul, canImpersonate: true, isSuperuser: true });
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(screen.getByTestId("account-menu-identity").textContent).toBe("Paul Albertpja2001 · Superuser");
+  });
+
   it("labels canImpersonate without superuser as Observer", () => {
     mockProbe({ scholar: paul, canImpersonate: true, isSuperuser: false });
     render(<AccountMenu scholar={paul} />);
@@ -259,7 +267,7 @@ describe("AccountMenu — identity and View as", () => {
   it("while viewing as, the trigger names the target, not the real user", () => {
     viewing(target({ targetName: "Terrie Rose Wheeler" }));
     render(<AccountMenu scholar={paul} />);
-    expect(screen.getByLabelText("Account menu").textContent).toContain("Terrie Rose Wheeler");
+    expect(screen.getByLabelText("Account menu").textContent).toBe("TWTerrie R. Wheeler");
     expect(screen.getByLabelText("Account menu").textContent).not.toContain("Paul Albert");
   });
 
@@ -293,5 +301,29 @@ describe("AccountMenu — identity and View as", () => {
     render(<AccountMenu scholar={paul} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
     expect(targetLinks()).toEqual([["Their profile", "/edit"]]);
+  });
+});
+
+describe("AccountMenu — pill trigger", () => {
+  it("shortName keeps first + last, initials the middles, keeps a suffix", () => {
+    expect(shortName("Terrie Rose Wheeler")).toBe("Terrie R. Wheeler");
+    expect(shortName("Paul J. Albert")).toBe("Paul J. Albert");
+    expect(shortName("Jane Smith")).toBe("Jane Smith");
+    expect(shortName("John Q Public Jr.")).toBe("John Q. Public Jr.");
+    expect(shortName("lmp2006")).toBe("lmp2006");
+  });
+
+  it("nameInitials uses first + surname, skipping a suffix", () => {
+    expect(nameInitials("Terrie Rose Wheeler")).toBe("TW");
+    expect(nameInitials("John Q Public Jr.")).toBe("JP");
+    expect(nameInitials("lmp2006")).toBe("L");
+  });
+
+  it("renders the initials avatar and short name; no avatar for the 'Account' fallback", () => {
+    const { unmount } = render(<AccountMenu scholar={{ slug: "t", preferredName: "Terrie Rose Wheeler" }} />);
+    expect(screen.getByLabelText("Account menu").textContent).toBe("TWTerrie R. Wheeler");
+    unmount();
+    render(<AccountMenu scholar={null} />);
+    expect(screen.getByLabelText("Account menu").textContent).toBe("Account");
   });
 });

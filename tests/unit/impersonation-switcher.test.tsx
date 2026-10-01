@@ -139,5 +139,8 @@ describe("ImpersonationSwitcher exact-CWID fallback", () => {
     expect(confirm.textContent).toBe("Start viewing as Terrie");
     expect(confirm.getAttribute("data-variant")).toBe("apollo");
     expect(screen.getByRole("dialog").textContent).toContain("Ends automatically after 30 minutes.");
+    // The dialog drops the unit kind; the picker row keeps it.
+    expect(screen.getByRole("dialog").textContent).toContain("tew2004 · Curator · Library");
+    expect(screen.getByRole("dialog").textContent).not.toContain("(Dept)");
   });
 });

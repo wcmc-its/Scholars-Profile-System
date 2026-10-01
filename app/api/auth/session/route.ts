@@ -281,6 +281,9 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json(
     {
       authenticated: true,
+      // The REAL signed-in cwid (never the View-as target): the account menu's
+      // identity row ("pja2001 · Superuser"). The caller's own id, so no leak.
+      cwid: session.cwid,
       scholar,
       displayName,
       impersonating,
