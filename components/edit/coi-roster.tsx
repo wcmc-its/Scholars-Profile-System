@@ -31,6 +31,9 @@ export type CoiRosterProps = {
   includeHidden: boolean;
   page: number;
   pageSize: number;
+  /** Superuser view: the students & alumni toggle and the CSV export (a
+   *  bulk scholar export stays superuser-only). Default true. */
+  fullAccess?: boolean;
 };
 
 const BASE = "/edit/coi";
@@ -78,6 +81,7 @@ export function CoiRoster({
   includeHidden,
   page,
   pageSize,
+  fullAccess = true,
 }: CoiRosterProps) {
   const filters: FilterState = { roleCategories, units, q, gap, includeHidden };
   const start = total === 0 ? 0 : page * pageSize + 1;
@@ -102,6 +106,7 @@ export function CoiRoster({
             q={q}
             gap={gap}
             includeHidden={includeHidden}
+            canIncludeHidden={fullAccess}
           />
         </aside>
 
@@ -123,7 +128,7 @@ export function CoiRoster({
                 ? "No scholars match these filters."
                 : `Showing ${start}–${end} of ${total}`}
             </div>
-            {total > 0 && (
+            {total > 0 && fullAccess && (
               <a href={exportHref(filters)} className="text-sm hover:underline" data-testid="coi-export-link">
                 Download CSV
               </a>

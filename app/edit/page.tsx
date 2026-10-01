@@ -46,6 +46,9 @@ import {
 } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { hasAnyReportAccess } from "@/lib/edit/report-access";
+import { registryDashboards } from "@/lib/auth/functional-role-authz";
+import { isDashboardFlagOn } from "@/lib/edit/dashboard-access";
+import { DASHBOARD_HREF, DASHBOARDS } from "@/lib/edit/functional-roles";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
@@ -197,6 +200,13 @@ export default async function EditSelfPage({
     // (`lib/edit/report-access.ts`). An indexed row read, not a directory call.
     if (await hasAnyReportAccess(editCwid)) {
       redirect("/edit/reports");
+    }
+    // An ad hoc dashboard grantee (a `dash:` Reporting scope) with nothing
+    // else: land on the first dashboard they hold whose flag is on.
+    const granted = await registryDashboards(editCwid);
+    const dashboard = DASHBOARDS.find((d) => isDashboardFlagOn(d) && granted.has(d));
+    if (dashboard) {
+      redirect(DASHBOARD_HREF[dashboard]);
     }
     notFound();
   }
@@ -437,6 +447,10 @@ export default async function EditSelfPage({
             pendingNews={pendingNews}
             pendingClips={pendingClips}
             usageTab={tabs.usage}
+            orcidCoverageTab={tabs.orcidCoverage}
+            coiTab={tabs.coi}
+            activityTab={tabs.activity}
+            etlStatusTab={tabs.etlStatus}
             coresTab={tabs.cores}
             slugsTab={tabs.slugs}
             viewerIsDeveloper={developer}

@@ -10,7 +10,9 @@
  *   - `isDeveloper` (`lib/auth/development.ts`) also admits an
  *     `external_affairs` grant carrying the Development function;
  *   - the report gate (`loadReportScopesForCwid` / `hasAnyReportAccess`,
- *     `lib/edit/report-access.ts`) also admits a `reporting` grant, per scope.
+ *     `lib/edit/report-access.ts`) also admits a `reporting` grant, per scope;
+ *   - each `/edit` dashboard's gate also admits a `reporting` grant carrying
+ *     its `dash:` scope (`registryAdmitsDashboard`).
  * Only `source = "manual"` rows count (rows granted on the Administrators
  * page). An imported row (`report_access`, `allowlist`) mirrors a source that
  * already grants the same access through its own path, so it adds nothing
@@ -33,7 +35,10 @@
  */
 import { db } from "@/lib/db";
 import {
+  dashboardsFromScopes,
   reportScopesFromRegistry,
+  scopesAdmitAnyReport,
+  type Dashboard,
   scopesCarryFunction,
   scopesFromJson,
   type ExternalAffairsFunction,
@@ -105,9 +110,31 @@ export async function registryReportScopes(cwid: string, reportKey: string): Pro
 export async function registryHasAnyReporting(cwid: string): Promise<boolean> {
   if (!isFunctionalRolesAuthzEnabled() || !cwid) return false;
   try {
-    return (await registryScopes("reporting", cwid)).some((s) => s.length > 0);
+    // A dashboards-only grant is not report access: it must not surface an
+    // empty Reports tab.
+    return (await registryScopes("reporting", cwid)).some(scopesAdmitAnyReport);
   } catch (err) {
     logReadFailed("reporting:any", err);
     return false;
   }
+}
+
+/** Every dashboard the registry gives `cwid` (explicit `dash:` scopes on a
+ *  manual Reporting grant). Empty when the flag is off or the read fails. */
+export async function registryDashboards(cwid: string): Promise<Set<Dashboard>> {
+  const out = new Set<Dashboard>();
+  if (!isFunctionalRolesAuthzEnabled() || !cwid) return out;
+  try {
+    for (const scopes of await registryScopes("reporting", cwid)) {
+      for (const d of dashboardsFromScopes(scopes)) out.add(d);
+    }
+  } catch (err) {
+    logReadFailed("reporting:dashboards", err);
+  }
+  return out;
+}
+
+/** Whether the registry gives `cwid` the dashboard `d`. */
+export async function registryAdmitsDashboard(cwid: string, d: Dashboard): Promise<boolean> {
+  return (await registryDashboards(cwid)).has(d);
 }

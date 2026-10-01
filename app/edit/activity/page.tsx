@@ -4,9 +4,10 @@
  * trailing 30 days. The read-only cross-entity companion to the per-entity
  * `/edit/scholar/[cwid]/history` and `/edit/center/[code]/history` surfaces.
  *
- * Superuser-only (this exposes every editor's activity across every unit — a
+ * Superuser, or a person a superuser granted it to ad hoc (`canViewDashboard`,
+ * `lib/edit/dashboard-access.ts`). This exposes every editor's activity across every unit — a
  * strictly-more-privileged view than the per-entity history, which any editor
- * of that entity can see). Re-checked on every GET, never cached. The audit
+ * of that entity can see. Re-checked on every GET, never cached. The audit
  * table lives in the separate `scholars_audit` DB; if the read role lacks SELECT
  * there the read throws and we render an honest "unavailable" notice rather than
  * 500ing (the scholar-history fail-soft pattern).
@@ -22,6 +23,7 @@ import { EditActivityDashboard } from "@/components/edit/edit-activity-dashboard
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { type EditActivitySummary, loadEditActivitySummary } from "@/lib/api/edit-activity";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -39,7 +41,7 @@ export default async function EditActivityPage() {
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/activity");
   }
-  if (!session.isSuperuser) {
+  if (!(await canViewDashboard(session, "activity"))) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "activity",

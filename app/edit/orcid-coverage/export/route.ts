@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import {
   loadOrcidCoverage,
@@ -22,14 +23,13 @@ import {
   parseOrcidCoverageParams,
 } from "@/lib/edit/orcid-coverage";
 import { unitLabels } from "@/lib/edit/person-filter";
-import { canViewUsage } from "@/lib/edit/usage-access";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const session = await getEffectiveEditSession();
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
-  if (!(await canViewUsage(session, db.read)))
+  if (!(await canViewDashboard(session, "orcid-coverage")))
     return new NextResponse("Not found", { status: 404 });
 
   const params = parseOrcidCoverageParams(new URL(request.url).searchParams);

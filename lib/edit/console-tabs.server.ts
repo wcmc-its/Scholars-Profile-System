@@ -42,9 +42,10 @@ import {
 } from "@/lib/edit/cancer-center-reports";
 import { isNewsQueueTabVisible } from "@/lib/edit/news-queue";
 import { isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashboard";
+import { dashboardVisible } from "@/lib/edit/dashboard-access";
+import type { Dashboard } from "@/lib/edit/functional-roles";
+import { registryDashboards } from "@/lib/auth/functional-role-authz";
 import { hasAnyReportAccess } from "@/lib/edit/report-access";
-import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
@@ -115,6 +116,9 @@ export interface ConsoleGrants {
    *  row lands on their own profile editor, so without this the Reports tab
    *  is their only way in. Feeds `reports`. */
   reportAccessCount: number;
+  /** The dashboards an ad hoc Reporting grant gives this cwid
+   *  (`registryDashboards`). Feeds the dashboard tabs. */
+  dashboards: ReadonlySet<Dashboard>;
 }
 
 export type TabPredicate = (session: EditSession, grants: ConsoleGrants) => boolean;
@@ -136,8 +140,10 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // (decision 2026-10-01).
   slugRequests: (s) => s.isSuperuser || s.isObserver === true || s.isContentEditor === true,
   slugs: (s) => s.isSuperuser || s.isObserver === true || s.isContentEditor === true,
-  activity: (s) => s.isSuperuser,
-  etlStatus: (s) => s.isSuperuser,
+  // Dashboards: birthright OR an ad hoc `dash:` Reporting grant, through the
+  // one gate the pages read too (`lib/edit/dashboard-access.ts`).
+  activity: (s, g) => dashboardVisible(s, "activity", g),
+  etlStatus: (s, g) => dashboardVisible(s, "etl-status", g),
   // 2026-08-26 policy widening (decision #6): a comms_steward gets full
   // curator-parity on cores (content, leaders/roster, the claim queue —
   // `authorizeCoreClaim`), so the Cores tab is steward-visible too (I2 nav/
@@ -171,24 +177,21 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
     g.reportAccessCount > 0 ||
     g.viewerCanViewUsage,
 
-  // COI review — superuser-only, no comms_steward/unit-admin escape hatch at
-  // all (unlike `profiles`/`units`/`reports`). Split out of the merged
-  // Profiles page specifically so this stays the one tab a unit admin can
-  // never earn, on-screen or via a crafted query param — see
-  // `app/edit/coi/page.tsx`.
-  coi: (s) => s.isSuperuser && isDataQualityDashboardEnabled(),
+  // COI is public data (decision 2026-10-01): superusers, observers and
+  // content editors by birthright, anyone else by an ad hoc grant.
+  coi: (s, g) => dashboardVisible(s, "coi", g),
 
   // No per-unit data-sharing concept exists (by design — no unit-scoped
   // variant of this dashboard has been decided; unlike Data Quality this
   // isn't cited to a spec doc yet, see Part B).
-  dataSharing: (s) => isDataSharingDashboardTabVisible(s),
+  dataSharing: (s, g) => dashboardVisible(s, "data-sharing", g),
 
   // Gap 4 (usage half): any org-unit UnitAdmin grant (never `institution` —
   // WCM-wide aggregates stay internal), from any page. `canViewUsage`
   // already ORs in `isSuperuser`.
-  usage: (_s, g) => g.viewerCanViewUsage,
+  usage: (s, g) => dashboardVisible(s, "usage", g),
   // `/edit/orcid-coverage` — same audience as Usage (org-wide aggregates).
-  orcidCoverage: (_s, g) => g.viewerCanViewUsage,
+  orcidCoverage: (s, g) => dashboardVisible(s, "orcid-coverage", g),
 
   // Gap 1b: developers get these from the `/edit` landing page too, because
   // visibility no longer depends on which page you're standing on.
@@ -230,12 +233,13 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
  */
 export const loadConsoleGrants = cache(
   async (session: EditSession, db: PrismaClient): Promise<ConsoleGrants> => {
-    const [ownerScope, units, reportable, usage, reportAccess] = await Promise.all([
+    const [ownerScope, units, reportable, usage, reportAccess, dashboards] = await Promise.all([
       session.isSuperuser ? Promise.resolve([]) : loadOwnerManagedUnitScope(session, db),
       loadManageableUnits(session.cwid, db),
       loadReportableUnitsForActor(session, db, REPORTABLE_KINDS),
       canViewUsage(session, db),
       hasAnyReportAccess(session.cwid),
+      registryDashboards(session.cwid),
     ]);
     return {
       ownerUnitCount: ownerScope.length,
@@ -243,6 +247,7 @@ export const loadConsoleGrants = cache(
       reportableUnitCount: reportable.length,
       viewerCanViewUsage: usage,
       reportAccessCount: reportAccess ? 1 : 0,
+      dashboards,
     };
   },
 );
