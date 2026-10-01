@@ -156,6 +156,7 @@ export function AdminSubnav({
   pendingNews = null,
   pendingClips = null,
   coresTab = false,
+  slugsTab = false,
   viewerIsDeveloper = false,
 }: {
   active: AdminSubnavActive;
@@ -250,6 +251,11 @@ export function AdminSubnav({
    *  Administrators above — which would hide it from every steward even
    *  though `/edit/core` itself now admits them. Default `false`. */
   coresTab?: boolean;
+  /** Show the "Profile URLs" tab (`/edit/slugs`) to a non-superuser who may
+   *  read it: an observer (read-only, decision 2026-10-01). Mirrors
+   *  `TAB_PREDICATES.slugs`. Superusers already get it via `superuserSurfaces`.
+   *  Default `false`. */
+  slugsTab?: boolean;
   /** Show the Matcha / Grant Matcha tabs to a pure development-role viewer who
    *  is NOT a superuser. Superusers already get them via `superuserSurfaces`;
    *  this is the dev-role escape hatch on `/edit/grant-matcha` (their console
@@ -319,7 +325,7 @@ export function AdminSubnav({
       // slug-request flag. The request queue lives on the same page (design canvas
       // "Profile URLs", 2026-09-25), so its pending pill rides here.
       {
-        show: superuserSurfaces,
+        show: superuserSurfaces || slugsTab,
         id: "slugs",
         href: "/edit/slugs",
         label: "Profile URLs",

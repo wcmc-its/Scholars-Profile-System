@@ -421,6 +421,7 @@ export default async function EditSelfPage({
             pendingClips={pendingClips}
             usageTab={tabs.usage}
             coresTab={tabs.cores}
+            slugsTab={tabs.slugs}
             viewerIsDeveloper={developer}
           />
         ) : undefined

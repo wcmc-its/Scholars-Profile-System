@@ -184,11 +184,29 @@ export function isHonorQueueEnabled(): boolean {
  * Takes the resolved session booleans rather than a cwid, so this module needs no
  * LDAP import and stays safe to pull into any server component.
  */
-export function isHonorsQueueTabVisible(session: {
+export function isHonorsQueueTabVisible(session: HonorsQueueViewer): boolean {
+  return isHonorQueueEnabled() && canViewHonorsQueue(session);
+}
+
+type HonorsQueueViewer = {
   isSuperuser: boolean;
   isHonorsCurator?: boolean;
-}): boolean {
-  return isHonorQueueEnabled() && (session.isSuperuser || session.isHonorsCurator === true);
+  isObserver?: boolean;
+};
+
+/**
+ * Who may READ the honors queue (page, CSV export, tab): a superuser, an
+ * honors_curator, or an observer (read-only, decision 2026-10-01). Deciding
+ * stays superuser / honors_curator: the decision routes authorize on the
+ * write session, which never carries the observer flag.
+ */
+export function canViewHonorsQueue(session: HonorsQueueViewer): boolean {
+  return session.isSuperuser || session.isHonorsCurator === true || session.isObserver === true;
+}
+
+/** True when the viewer may read the queue but not decide it (an observer). */
+export function isHonorsQueueReadOnly(session: HonorsQueueViewer): boolean {
+  return !session.isSuperuser && session.isHonorsCurator !== true;
 }
 
 /**

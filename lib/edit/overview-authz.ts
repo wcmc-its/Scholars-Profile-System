@@ -101,5 +101,15 @@ export async function authorizeCvExport(args: {
 }): Promise<OverviewWriteAuthz> {
   const authz = await authorizeOverviewWrite(args);
   if (authz.ok) return authz;
-  return args.session.isCvGenerator ? { ok: true, viaUnitAdminUnit: null } : authz;
+  if (args.session.isCvGenerator) return { ok: true, viaUnitAdminUnit: null };
+  // An observer may export too, for the same reason as cv_generator (decision
+  // 2026-10-01). The download is a POST, whose write preamble strips the
+  // session's observer flag (`stripObserverView`), so ask about the REAL cwid.
+  // Not under "View as": the overlay's own roles decide there. Loaded lazily so
+  // the routes sharing this module keep an LDAP-free import graph.
+  if (args.impersonatedCwid === null) {
+    const { isObserver } = await import("@/lib/auth/observer");
+    if (await isObserver(args.realCwid)) return { ok: true, viaUnitAdminUnit: null };
+  }
+  return authz;
 }

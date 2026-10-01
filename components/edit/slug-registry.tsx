@@ -123,6 +123,8 @@ export type SlugRegistryProps = {
   verdict?: RegistryVerdict | null;
   /** The "Requests to review" card, when the slug-request feature is on. */
   requests?: React.ReactNode;
+  /** An observer's view: no row write actions. */
+  readOnly?: boolean;
 };
 
 function segHref(opts: { segment: SlugRegistrySegment; query: string; page: number }): string {
@@ -146,6 +148,7 @@ export function SlugRegistry({
   extras = { people: {}, pinned: [], baseHolders: {} },
   verdict = null,
   requests = null,
+  readOnly = false,
 }: SlugRegistryProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -292,7 +295,7 @@ export function SlugRegistry({
             </p>
           ) : (
             <ul>
-              <SegmentRows segment={tab.seg} rows={rows} extras={extras} />
+              <SegmentRows segment={tab.seg} rows={rows} extras={extras} readOnly={readOnly} />
             </ul>
           )}
         </div>
@@ -474,10 +477,12 @@ function SegmentRows({
   segment,
   rows,
   extras,
+  readOnly,
 }: {
   segment: SlugRegistrySegment;
   rows: ReadonlyArray<SlugRegistryRow>;
   extras: SlugRegistryExtras;
+  readOnly: boolean;
 }) {
   const person = (cwid: string) => extras.people[cwid];
   const pinned = new Set(extras.pinned);
@@ -582,7 +587,7 @@ function SegmentRows({
   return (
     <>
       {cells.map((c) => (
-        <Row key={c.key} r={c} />
+        <Row key={c.key} r={readOnly ? { ...c, write: undefined } : c} />
       ))}
     </>
   );

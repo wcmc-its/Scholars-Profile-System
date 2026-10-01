@@ -73,6 +73,7 @@ function mergeSessions(a: EditSession, b: EditSession): EditSession {
     isHonorsCurator: a.isHonorsCurator === true || b.isHonorsCurator === true,
     isDeveloper: a.isDeveloper === true || b.isDeveloper === true,
     isDataSharingViewer: a.isDataSharingViewer === true || b.isDataSharingViewer === true,
+    isObserver: a.isObserver === true || b.isObserver === true,
   };
 }
 

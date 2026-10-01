@@ -112,6 +112,7 @@ export async function ConsoleShell({
           pendingNews={newsPill}
           pendingClips={clipsPill}
           coresTab={tabs.cores}
+          slugsTab={tabs.slugs}
           usageTab={tabs.usage}
           orcidCoverageTab={tabs.orcidCoverage}
           viewerIsDeveloper={session.isDeveloper === true}
