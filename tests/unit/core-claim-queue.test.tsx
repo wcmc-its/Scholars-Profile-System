@@ -154,6 +154,11 @@ function metaLine(container: HTMLElement): string {
 }
 
 /** The summary strip's "This session" counts, as "<confirmed>/<rejected>". */
+/** The undo toast's text, or null when it is down. */
+function toastText(): string | null {
+  return document.querySelector('[data-slot="core-queue-toast"]')?.textContent ?? null;
+}
+
 function sessionCounts(): string {
   const n = (slot: string) => document.querySelector(`[data-slot="${slot}"]`)?.textContent ?? "";
   return `${n("core-queue-session-confirmed")}/${n("core-queue-session-rejected")}`;
@@ -599,31 +604,142 @@ describe("CoreClaimQueue", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /^confirm$/i })).toBeNull());
   });
 
-  it("tints the decided meter green on confirm and red on reject, and marks the list row", async () => {
+  it("drops a decided row from the list, moves the pane on, and raises an undo toast", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     render(
       <CoreClaimQueue
         core={CORE}
-        candidates={[row({ pmid: "1", title: "Confirm me" }), row({ pmid: "2", title: "Reject me" })]}
+        candidates={[
+          row({ pmid: "1", title: "Confirm me" }),
+          row({ pmid: "2", title: "Reject me" }),
+          row({ pmid: "3", title: "Still open" }),
+        ]}
         confirmed={[]}
       />,
     );
-    const meter = () => pane().querySelector('[data-slot="core-queue-meter"]') as HTMLElement;
     expect(screen.getByLabelText("Candidate: Confirm me")).toBe(pane());
+    expect(toastText()).toBeNull();
     fireEvent.click(within(pane()).getByRole("button", { name: /^confirm$/i }));
-    // a decision moves the pane on to the next undecided paper (mockup)
+    // the decided row leaves To review and the pane moves on (mockup)
     await screen.findByLabelText("Candidate: Reject me");
-    fireEvent.click(within(pane()).getByRole("button", { name: /^reject$/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(listTitles()).toEqual(["Reject me", "Still open"]);
+    expect(toastText()).toBe("ConfirmedUndo");
 
-    await screen.findByLabelText("Rejected: Reject me");
-    expect(meter().className).toContain("bg-red-50");
-    expect(listRow("2").textContent).toContain("Rejected");
-    expect(listRow("1").textContent).toContain("Confirmed");
-    fireEvent.click(within(listRow("1")).getByRole("button"));
-    expect(screen.getByLabelText("Confirmed: Confirm me")).toBe(pane());
-    expect(meter().className).toContain("bg-emerald-50");
+    fireEvent.click(within(pane()).getByRole("button", { name: /^reject$/i }));
+    await screen.findByLabelText("Candidate: Still open");
+    expect(listTitles()).toEqual(["Still open"]);
+    expect(toastText()).toBe("RejectedUndo");
+  });
+
+  it("advances from the bottom row to the new last row, and leaves an unfocused decision's focus alone", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "One" }),
+          row({ pmid: "2", title: "Two" }),
+          row({ pmid: "3", title: "Three" }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    fireEvent.click(within(listRow("3")).getByRole("button"));
+    expect(pane().getAttribute("data-pmid")).toBe("3");
+    press("a");
+    // nothing below it: the pane falls back to the row now at the bottom
+    await waitFor(() => expect(pane().getAttribute("data-pmid")).toBe("2"));
+
+    // a bulk decision of a row ABOVE the focused one keeps the pane where it is
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select One" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm 1 selected" }));
+    await waitFor(() => expect(listTitles()).toEqual(["Two"]));
+    expect(pane().getAttribute("data-pmid")).toBe("2");
+  });
+
+  it("the toast's Undo revokes the decision and puts the row back in the pane", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "One" }), row({ pmid: "2", title: "Two" })]}
+        confirmed={[]}
+      />,
+    );
+    press("r");
+    await screen.findByLabelText("Candidate: Two");
+    const toast = document.querySelector('[data-slot="core-queue-toast"]') as HTMLElement;
+    fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse((fetchMock.mock.calls[1] as [string, { body: string }])[1].body)).toEqual({
+      pmid: "1",
+      coreId: "2",
+      status: "revoked",
+    });
+    await screen.findByLabelText("Candidate: One");
+    expect(listTitles()).toEqual(["One", "Two"]);
+    expect(toastText()).toBeNull();
+  });
+
+  it("takes the toast down after five seconds; u still undoes after it is gone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+      vi.stubGlobal("fetch", fetchMock);
+      render(<CoreClaimQueue core={CORE} candidates={[row({ pmid: "1" })]} confirmed={[]} />);
+      press("a");
+      await waitFor(() => expect(toastText()).toBe("ConfirmedUndo"));
+      act(() => {
+        vi.advanceTimersByTime(4900);
+      });
+      expect(toastText()).toBe("ConfirmedUndo");
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(toastText()).toBeNull();
+
+      press("u");
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(listRow("1")).toBeTruthy());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says all reviewed, not a filter miss, once the last open paper is decided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row({ pmid: "1" })]} confirmed={[]} />);
+    press("a");
+    await screen.findByText("All reviewed. Undo last brings one back.");
+    expect(screen.queryByText("Nothing matches this filter.")).toBeNull();
+    press("u");
+    await waitFor(() => expect(listRow("1")).toBeTruthy());
+    expect(screen.queryByText("All reviewed. Undo last brings one back.")).toBeNull();
+  });
+
+  it("says so in the toast when an undo fails, and its Undo retries", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: "boom" }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row({ pmid: "1" })]} confirmed={[]} />);
+    press("a");
+    await waitFor(() => expect(toastText()).toBe("ConfirmedUndo"));
+    press("u");
+    await waitFor(() => expect(toastText()).toBe("Undo could not be saved" + "Undo"));
+    expect(screen.getByTestId("core-claim-live").textContent).toBe("Undo could not be saved.");
+    // still decided, still off the list, still on the undo stack
+    expect(listRow("1")).toBeNull();
+    const toast = document.querySelector('[data-slot="core-queue-toast"]') as HTMLElement;
+    fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(listRow("1")).toBeTruthy());
   });
 
   it("explains a 0-signal candidate instead of silently omitting the evidence list", () => {
@@ -1261,6 +1377,16 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Select all 2 shown")).toBeTruthy();
   });
 
+  it("shows the real keys inline beside the Shortcuts button", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const hint = document.querySelector('[data-slot="core-queue-keys-hint"]') as HTMLElement;
+    expect(hint.textContent).toBe("J / K move · A confirm · R reject");
+    // desktop-only: hidden below md, where a phone has no keys to press
+    expect(hint.className).toContain("hidden");
+    expect(hint.className).toContain("md:inline");
+    expect(screen.getByRole("button", { name: /^Shortcuts/ })).toBeTruthy();
+  });
+
   it("lists every shortcut in the popover, and '?' toggles it", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     const toggle = screen.getByRole("button", { name: /^Shortcuts/ });
@@ -1347,7 +1473,7 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("Showing 1 of 2 candidates")).toBeTruthy();
   });
 
-  it("keeps a just-decided row visible under a facet that would exclude it, so undo stays reachable", async () => {
+  it("keeps a decided row off the list under any facet, with Undo last still reaching it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     // two candidates so the Acknowledged facet survives the decision
@@ -1365,14 +1491,16 @@ describe("CoreClaimQueue", () => {
     const target = screen.getByLabelText("Candidate: Advanced MRI of the brain");
     fireEvent.click(within(target).getByRole("button", { name: /^confirm$/i }));
     await screen.findByRole("button", { name: "Undo last" });
+    expect(listRow("1")).toBeNull();
 
     openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: /^Acknowledged/ }));
-    // still listed via the decided-row override, marked, and undoable
-    expect(listRow("1").textContent).toContain("Confirmed");
-    fireEvent.click(within(listRow("1")).getByRole("button"));
-    expect(within(pane()).getByRole("button", { name: /^undo$/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Undo last" })).toBeTruthy();
+    expect(listRow("1")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo last" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // back in the queue, but the Acknowledged filter still excludes it
+    await waitFor(() => expect(sessionCounts()).toBe("0/0"));
+    expect(listRow("1")).toBeNull();
   });
 
   // --- the scope rail (v2: evidence groups and people move into it) ---
@@ -1583,9 +1711,9 @@ describe("CoreClaimQueue", () => {
     expect(url).toBe("/api/edit/core-claim/bulk");
     expect(JSON.parse(init.body)).toEqual({ coreId: "2", pmids: ["1", "2"], status: "claimed" });
     expect(screen.getByTestId("core-claim-live").textContent).toBe("Confirmed 2 publications.");
-    // both rows marked, the selection cleared, the session line counts them
-    await waitFor(() => expect(listRow("1").textContent).toContain("Confirmed"));
-    expect(listRow("2").textContent).toContain("Confirmed");
+    // both rows leave the list, the selection clears, the session line counts them
+    await waitFor(() => expect(listTitles()).toEqual(["Left alone"]));
+    expect(toastText()).toBe("Confirmed 2 papersUndo");
     expect(sessionCounts()).toBe("2/0");
     expect(screen.getByText("Select all 1 shown")).toBeTruthy();
   });
@@ -4777,9 +4905,9 @@ describe("CoreClaimQueue — v2 reject reasons", () => {
       status: "rejected",
       note: "Method match only",
     });
-    // the decision echoes its reason, and the reasons go away with the buttons
-    await screen.findByText("Rejected · Method match only");
-    expect(within(pane()).queryByRole("group", { name: "Reject with a reason" })).toBeNull();
+    // the toast echoes the reason; the paper leaves the list, and the pane with it
+    await waitFor(() => expect(toastText()).toBe("Rejected · Method match onlyUndo"));
+    expect(document.querySelector('[data-slot="core-queue-focus"]')).toBeNull();
   });
 
   it("sends NO note on a plain Reject — the body is exactly what it always was", async () => {
@@ -4848,9 +4976,9 @@ describe("CoreClaimQueue — v2 several-PMID search", () => {
     fireEvent.change(screen.getByLabelText("Filter candidates"), {
       target: { value: "33333333 11111111" },
     });
-    // Alpha is decided — held in the list for its Undo, so it counts as shown
+    // Alpha is decided — off the list, so the note says where it went
     expect(document.querySelector('[data-slot="core-queue-pmid-note"]')?.textContent).toBe(
-      "Matched 2 of 2 PMIDs here.",
+      "Matched 1 of 2 PMIDs here. Elsewhere: 11111111 (Confirmed this session).",
     );
   });
 
@@ -4891,9 +5019,9 @@ describe("CoreClaimQueue — This session card and Undo last", () => {
       status: "revoked",
     });
     await waitFor(() => expect(sessionCounts()).toBe("1/0"));
-    // the pane goes back to the paper that was undone
+    // the pane goes back to the paper that was undone; the other stays decided
     expect(pane().getAttribute("data-pmid")).toBe("2");
-    expect(listRow("1").textContent).toContain("Confirmed");
+    expect(listRow("1")).toBeNull();
   });
 
   it("undoes a whole bulk batch, one revoke per paper on the single-claim route", async () => {

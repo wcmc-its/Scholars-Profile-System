@@ -3,8 +3,8 @@
 /**
  * The presentational pieces of the core review queue's v2 layout (Core Review
  * Queue v2 mockup): the scope rail, the "About these signals" note, the To
- * review summary strip, the filters panel and its active chips, and the
- * keyboard-shortcuts popover.
+ * review summary strip, the filters panel and its active chips, the
+ * keyboard-shortcuts popover, and the undo toast.
  *
  * Props in, callbacks out — nothing here owns queue state or knows what a
  * `CoreQueueRow` is. `core-claim-queue.tsx` derives every label and count and
@@ -583,6 +583,20 @@ export const SHORTCUTS: ReadonlyArray<{ label: string; keys: string[] }> = [
   { label: "Show this list", keys: ["?"] },
 ];
 
+/** The first key of the SHORTCUTS entry with this label, as a key cap reads. */
+function keyFor(label: string): string {
+  return (SHORTCUTS.find((s) => s.label === label)?.keys[0] ?? "").toUpperCase();
+}
+
+/**
+ * The tab row's inline hint (mockup "J / K move · C confirm · X reject"), built
+ * off SHORTCUTS so it names the keys the queue actually listens for: `a`
+ * confirms, `r` rejects, and `x` only ticks a row.
+ */
+export const KEYS_HINT = `${keyFor("Next paper")} / ${keyFor("Previous paper")} move · ${keyFor(
+  "Confirm",
+)} confirm · ${keyFor("Reject")} reject`;
+
 function Kbd({ children }: { children: ReactNode }) {
   return (
     <kbd className="border-apollo-border-strong bg-apollo-surface rounded border px-1 font-mono text-[11px]">
@@ -644,6 +658,54 @@ export function ShortcutsButton({ open, onToggle }: { open: boolean; onToggle: (
           </ul>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The undo toast (mockup): bottom-centre, the last decision and its Undo, gone
+ * after a few seconds (the parent owns the timer). It carries no live region
+ * of its own; the queue's polite announcement already speaks each outcome, and
+ * a second one here would read it twice. Above the phone's full-screen sheet
+ * (z-40), and never wider than the screen less its gutters.
+ */
+export function UndoToast({
+  text,
+  tone,
+  undoing,
+  onUndo,
+}: {
+  text: string;
+  tone: "claimed" | "rejected" | "error";
+  undoing: boolean;
+  onUndo: () => void;
+}) {
+  return (
+    <div
+      data-slot="core-queue-toast"
+      className="bg-apollo-bar fixed bottom-6 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-4 rounded-[10px] py-2.5 pr-3.5 pl-4 text-[13px] text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span
+          aria-hidden
+          className={`size-2 shrink-0 rounded-full ${
+            tone === "claimed"
+              ? "bg-emerald-400"
+              : tone === "rejected"
+                ? "bg-red-400"
+                : "bg-amber-400"
+          }`}
+        />
+        <span className="truncate">{text}</span>
+      </span>
+      <button
+        type="button"
+        disabled={undoing}
+        onClick={onUndo}
+        className="shrink-0 text-white underline disabled:opacity-60"
+      >
+        Undo
+      </button>
     </div>
   );
 }
