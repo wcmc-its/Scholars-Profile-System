@@ -503,7 +503,7 @@ function CoreRow({
           {staff.sub && (
             <span
               className={cn(
-                "text-[11.5px] whitespace-nowrap",
+                "text-[11.5px] leading-snug lg:text-right",
                 staff.subWarn ? "text-apollo-amber" : "text-muted-foreground",
               )}
             >
