@@ -13,6 +13,7 @@ import { BrowseAnchorStrip } from "@/components/browse/browse-anchor-strip";
 import { DepartmentsGrid } from "@/components/browse/departments-grid";
 import { CentersGrid } from "@/components/browse/centers-grid";
 import { CoresGrid } from "@/components/browse/cores-grid";
+import { isrBuildFallback } from "@/lib/isr-build-fallback";
 
 /**
  * Departments & Centers hub.
@@ -39,11 +40,12 @@ export const metadata: Metadata = {
 export default async function BrowsePage() {
   // Pre-render against the DB when reachable. In a build environment without
   // a database (CI on a fresh checkout, `docker build`), fall back to empty
-  // grids; the ISR revalidate above and the /api/revalidate webhook
-  // repopulate the hub on the first production render. Mirrors the guards in
+  // grids; the first production render repopulates the hub. At runtime a load
+  // failure rethrows so ISR keeps the last good page instead of caching empty
+  // grids for the revalidate window (isrBuildFallback). Mirrors the guards in
   // app/sitemap.ts and app/llms.txt/route.ts.
   const data = await getBrowseData().catch(
-    (): BrowseData => ({ departments: [], centers: [], cores: [] }),
+    isrBuildFallback<BrowseData>({ departments: [], centers: [], cores: [] }),
   );
 
   return (
