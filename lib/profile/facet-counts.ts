@@ -19,7 +19,7 @@
  * and reused on both the server and the client.
  */
 
-import type { ProfilePublication } from "@/lib/api/profile";
+import type { ProfileClientPublication } from "@/lib/profile/client-publication";
 
 /**
  * Contextual counts for a single facet-filter state.
@@ -39,7 +39,7 @@ export type FacetCounts = {
 
 export type ComputeFacetCountsArgs = {
   /** The scholar's confirmed publications (already loaded; no I/O here). */
-  publications: ProfilePublication[];
+  publications: ProfileClientPublication[];
   /** Selected topic descriptorUis. Empty = Topics facet inactive. */
   selectedUis: string[];
   /** Selected method-family ids. Empty = Methods facet inactive. */
@@ -50,7 +50,7 @@ export type ComputeFacetCountsArgs = {
    * Author-position predicate supplied by the caller. Pass `() => true` when no
    * position filter is active. Keeps this util decoupled from position logic.
    */
-  matchesPosition: (pub: ProfilePublication) => boolean;
+  matchesPosition: (pub: ProfileClientPublication) => boolean;
   /** Profile-wide pubCount per descriptorUi, used to clamp the numerator. */
   topicTotals?: Map<string, number>;
   /** Profile-wide pubCount per familyId, used to clamp the numerator. */
@@ -133,7 +133,7 @@ export function computeFacetCounts(args: ComputeFacetCountsArgs): FacetCounts {
 
   // (3) The two exclude-own-facet pub subsets, built from the same per-pub pass
   // booleans so they cannot disagree with the bar total below.
-  const pmidsForTopicCounts: ProfilePublication[] = []; // passesPosition && passesFamilies
+  const pmidsForTopicCounts: ProfileClientPublication[] = []; // passesPosition && passesFamilies
   const pmidsForMethodCounts = new Set<string>(); // passesPosition && passesTopics
   let barTotal = 0;
 

@@ -16,18 +16,18 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { computeFacetCounts } from "@/lib/profile/facet-counts";
-import type { ProfilePublication } from "@/lib/api/profile";
+import type { ProfileClientPublication } from "@/lib/profile/client-publication";
 
 // ---------------------------------------------------------------------------
 // Fixture builder — only the fields computeFacetCounts reads matter (pmid,
 // meshTerms, authorship). Everything else is filled with inert placeholders so
-// the object satisfies ProfilePublication without distracting from the logic.
+// the object satisfies ProfileClientPublication without distracting from the logic.
 // ---------------------------------------------------------------------------
 function pub(
   pmid: string,
   uis: string[],
   authorship: { isFirst?: boolean; isLast?: boolean; isPenultimate?: boolean } = {},
-): ProfilePublication {
+): ProfileClientPublication {
   return {
     pmid,
     title: `Title ${pmid}`,
@@ -51,7 +51,7 @@ function pub(
     abstract: null,
     wcmAuthors: [],
     score: 0,
-  } as unknown as ProfilePublication;
+  } as unknown as ProfileClientPublication;
 }
 
 const ALWAYS = () => true;
@@ -63,7 +63,7 @@ const ALWAYS = () => true;
 //   p4: T2     first
 //   p5: T1     first
 //   p6: T3     middle (not first)
-function baseFixture(): ProfilePublication[] {
+function baseFixture(): ProfileClientPublication[] {
   return [
     pub("p1", ["T1", "T2"], { isFirst: true }),
     pub("p2", ["T1", "T3"], { isFirst: true }),
@@ -194,7 +194,7 @@ describe("computeFacetCounts", () => {
     //     T2 on p1,p4    -> 2   (p3 excluded)
     //     T3 on p2       -> 1   (p6 excluded)
     //   barTotal = all first-author pubs = 4.
-    const firstAuthorOnly = (p: ProfilePublication) => p.authorship.isFirst;
+    const firstAuthorOnly = (p: ProfileClientPublication) => p.authorship.isFirst;
 
     const res = computeFacetCounts({
       publications: baseFixture(),
