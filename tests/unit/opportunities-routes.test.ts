@@ -244,6 +244,17 @@ describe("GET /api/opportunities (browse list, admin-gated, curated-first)", () 
     ]);
   });
 
+  it("admits only rows positively classified non-honorific — `false`, never `not: true` (#2041)", async () => {
+    // Unclassified (`is_honorific IS NULL`) curated rows are empirically prizes. The predicate must
+    // exclude them by stating `false`, not by leaning on Prisma's three-valued `not: true`, and a
+    // "keeps null/false" rewrite (e.g. `not: true` + `OR null`) would put prizes in the browse.
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    await listGET(req("/api/opportunities?includeGrantsGov=1&includeSuppressed=1"));
+    const callArg = opportunityFindMany.mock.calls[0][0] as { where: Record<string, unknown> };
+    expect(callArg.where.isHonorific).toBe(false);
+    expect(callArg.where.OR).toBeUndefined();
+  });
+
   it("400s on an invalid limit", async () => {
     getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
     const resp = await listGET(req("/api/opportunities?limit=0"));
