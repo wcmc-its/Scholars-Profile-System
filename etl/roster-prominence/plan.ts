@@ -29,6 +29,7 @@ export const MAX_SCORED_DROP_PCT = 20;
 export const MAX_LEADER_DROP_PCT = 20;
 export const MAX_SCORE_DROPS_PCT = 10;
 export const MAX_GRANT_LOSS_PCT = 20;
+export const MAX_RANKED_DROP_PCT = 20;
 
 /** The tiers `classifyLeadership` can award from an `org_unit_role_assignment`
  *  row (department chair/director, center director, division chief). Every
@@ -62,6 +63,9 @@ export const GRANT_LOSS_EPSILON = 0.3;
  *    whose score fell over `GRANT_LOSS_EPSILON`, the latter share. An emptied
  *    `grant` table, which score-drops misses when grant holders are a small
  *    share of the roster. A weight tuned down can trip it too; same bypass.
+ *  - `roster-prominence:ranked`    — far fewer scholars hold ANY tier below
+ *    `none`: titles nulled by an ED run. Title text moves no score, so no
+ *    other guard sees it, and the write would flatten every title rank to none.
  *
  * Every guard no-ops on a first run (nothing stored yet).
  */
@@ -112,6 +116,12 @@ export function assertRosterProminenceVolume(
     pruning: grantsLost,
     of: grantHolders + grantsLost,
     maxPct: MAX_GRANT_LOSS_PCT,
+  });
+  const isRanked = (tier: number | null) => tier !== null && tier < LEADERSHIP_TIER.none;
+  assertSourceVolume("roster-prominence:ranked", {
+    incoming: [...computed.values()].filter((e) => isRanked(e.leadershipTier)).length,
+    existing: held.filter((s) => isRanked(s.rosterLeadershipTier)).length,
+    maxDropPct: MAX_RANKED_DROP_PCT,
   });
 }
 

@@ -235,6 +235,13 @@ describe("assertRosterProminenceVolume on a realistic roster", () => {
     vi.stubEnv("ETL_GUARD_BYPASS", "roster-prominence:grants");
     expect(() => assertRosterProminenceVolume(stored, score(tonight))).not.toThrow();
   });
+
+  it("trips ranked when every title is nulled, which no score-based guard sees", () => {
+    const tonight = people.map((p) => ({ ...p, primaryTitle: null }));
+    expect(() => assertRosterProminenceVolume(stored, score(tonight))).toThrow(
+      /roster-prominence:ranked/,
+    );
+  });
 });
 
 describe('computeProminence(client, "all")', () => {

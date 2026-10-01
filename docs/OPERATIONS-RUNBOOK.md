@@ -434,6 +434,7 @@ Nightly step `RosterProminenceNightly` (`npm run etl:roster-prominence`, [`etl/r
 | `roster-prominence:score-drops` | More than 10% of held scholars' scores fall by over 0.5 | Wiped `scored_pub_count`; also a weight tuned down |
 | `roster-prominence:leaders` | More than 20% of scholars held at a role-awarded tier (chair 4, center director 5, chief 6) get a worse tier or lose over 0.5 of score | Emptied `org_unit_role_assignment` |
 | `roster-prominence:grants` | Of scholars with a PI-grant score tonight plus those with none whose score fell over 0.3, the latter are more than 20% | Emptied `grant` table; also a weight tuned down |
+| `roster-prominence:ranked` | Scholars holding any tier below none (title-derived ranks included) drop more than 20% below the ranked rows held | Titles nulled by an ED run |
 
 Verify the inputs before bypassing (`grant`, `org_unit_role_assignment`, `scholar.scored_pub_count` row counts against the previous night).
 
