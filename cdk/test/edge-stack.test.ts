@@ -91,7 +91,9 @@ const QUERY_KEYED_PATTERNS: ReadonlySet<string> = new Set([
 // The exact query-string allow-list on the custom cache policy: the union of
 // params the Group B pages read (/scholars/* -> mentees-sort; dept/center/
 // division -> page/tab/sort; topics/*/scholars -> q/role/sub/letter;
-// methods/*/*/scholars -> q/role/page).
+// methods/*/*/scholars -> q/role/page), plus Next 16's `_rsc` cache-busting
+// param, which the origin validates on every Flight request (dropping it
+// 307-loops every prefetch to the browser redirect cap).
 const QUERY_KEYED_ALLOWLIST = [
   "mentees-sort",
   "page",
@@ -101,6 +103,16 @@ const QUERY_KEYED_ALLOWLIST = [
   "role",
   "sub",
   "letter",
+  "_rsc",
+] as const;
+
+// Headers on both cacheable page policies: the RSC representation split plus
+// Next-Router-Segment-Prefetch, which the origin needs to answer a segment
+// prefetch and which feeds the `_rsc` hash.
+const RSC_KEY_HEADERS = [
+  "Next-Router-Prefetch",
+  "Next-Router-Segment-Prefetch",
+  "RSC",
 ] as const;
 
 /** Map an app route file to its URL path: drop the route-group `(...)` segments
@@ -819,7 +831,7 @@ describe("EdgeStack", () => {
         // returns the Flight payload, not a cached HTML document.
         expect(headers.HeaderBehavior).toBe("whitelist");
         expect((headers.Headers as string[]).slice().sort()).toEqual(
-          ["Next-Router-Prefetch", "RSC"].sort(),
+          [...RSC_KEY_HEADERS].sort(),
         );
         // Accept-Encoding negotiation stays on so gzip/br are served.
         expect(params.EnableAcceptEncodingGzip).toBe(true);
@@ -914,17 +926,21 @@ describe("EdgeStack", () => {
         const headers = params.HeadersConfig as Record<string, unknown>;
         expect(headers.HeaderBehavior).toBe("whitelist");
         expect((headers.Headers as string[]).slice().sort()).toEqual(
-          ["Next-Router-Prefetch", "RSC"].sort(),
+          [...RSC_KEY_HEADERS].sort(),
         );
       });
 
-      it("does not key on cookies or the query string (mirrors Managed-CachingOptimized)", () => {
+      it("does not key on cookies; keys on ONLY the `_rsc` query param (Next 16 cache-busting)", () => {
+        // `_rsc` must reach the origin or Next 16 307s every Flight request
+        // back to itself (prefetch redirect loop). Every other param stays
+        // stripped, as under Managed-CachingOptimized.
         const params = defaultCacheConfig()
           .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
         const cookies = params.CookiesConfig as Record<string, unknown>;
         const qs = params.QueryStringsConfig as Record<string, unknown>;
         expect(cookies.CookieBehavior).toBe("none");
-        expect(qs.QueryStringBehavior).toBe("none");
+        expect(qs.QueryStringBehavior).toBe("whitelist");
+        expect(qs.QueryStrings).toEqual(["_rsc"]);
         expect(params.EnableAcceptEncodingGzip).toBe(true);
         expect(params.EnableAcceptEncodingBrotli).toBe(true);
       });

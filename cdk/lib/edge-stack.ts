@@ -610,16 +610,43 @@ export class EdgeStack extends Stack {
     // apply, so the click silently does nothing (e.g. the "About these
     // disclosures" cross-page link). Keying on these two headers -- and
     // CloudFront forwards cache-key headers to the origin, so the app
-    // returns the matching representation -- splits the cache into at most
-    // three variants per URL: document, navigation flight, prefetch flight.
+    // returns the matching representation -- splits the cache into a
+    // document variant plus the Flight variants (navigation, prefetch,
+    // segment prefetch), further separated by `_rsc` below.
     // We deliberately do NOT key on `Next-Router-State-Tree` / `Next-Url`:
     // they vary per navigation context and would all but eliminate edge
     // cacheability of the static pages.
-    const rscCacheKeyHeaders = ["RSC", "Next-Router-Prefetch"];
+    //
+    // Next 16 cache-busting param: the client router appends
+    // `?_rsc=<hash>` to every Flight request, where the hash is computed from
+    // Next-Router-Prefetch, Next-Router-Segment-Prefetch,
+    // Next-Router-State-Tree and Next-Url. The origin (base-server.js)
+    // recomputes it and, on a mismatch -- including a MISSING `_rsc` --
+    // 307s to the same URL with the expected `_rsc`. A cache policy that
+    // drops `_rsc` from the key also drops it from the origin request, so
+    // every prefetch 307-looped to the browser's 20-redirect cap (21 requests
+    // per link, ~290 per /search load, tripping the WAF per-IP rate limit).
+    // Both cacheable page policies below therefore key on `_rsc`. That is
+    // Next's intended design: `_rsc` IS the hash of the router headers, so it
+    // separates the per-context variants without keying on Next-Url /
+    // State-Tree directly. `Next-Router-Segment-Prefetch` joins the header
+    // key so origin receives it (a segment prefetch must get the segment
+    // payload) and the variant is cached separately.
+    const rscCacheKeyHeaders = [
+      "RSC",
+      "Next-Router-Prefetch",
+      "Next-Router-Segment-Prefetch",
+    ];
+    const RSC_CACHE_BUST_PARAM = "_rsc";
     const defaultRscCache = new cloudfront.CachePolicy(this, "DefaultRscCache", {
       cachePolicyName: `sps-default-rsc-${env}`,
       comment: `SPS default cache (${env}) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.`,
-      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+      // Only Next's `_rsc` cache-busting param (see above); every other query
+      // param stays stripped, as under Managed-CachingOptimized. A plain HTML
+      // document request carries no `_rsc`, so it keeps one cache entry.
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.allowList(
+        RSC_CACHE_BUST_PARAM,
+      ),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
       headerBehavior: cloudfront.CacheHeaderBehavior.allowList(
         ...rscCacheKeyHeaders,
@@ -840,7 +867,8 @@ export class EdgeStack extends Stack {
       comment: `SPS query-keyed cache (${env}) -- per-query cache key, cookies stripped (#634).`,
       // Union of params read by the Group B pages: /scholars/* (mentees-sort),
       // /departments/* + /centers/* + divisions (page/tab/sort),
-      // /topics/*/scholars (q/role/sub/letter), /methods/*/*/scholars (q/role/page).
+      // /topics/*/scholars (q/role/sub/letter), /methods/*/*/scholars (q/role/page),
+      // plus Next 16's `_rsc` cache-busting param (see `rscCacheKeyHeaders`).
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.allowList(
         "mentees-sort",
         "page",
@@ -850,6 +878,8 @@ export class EdgeStack extends Stack {
         "role",
         "sub",
         "letter",
+        // 9 of CloudFront's 10 query strings per cache policy quota.
+        RSC_CACHE_BUST_PARAM,
       ),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
       // Key on the RSC headers too (same rationale as `defaultRscCache`) so

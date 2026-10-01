@@ -62,10 +62,14 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "Headers": [
                 "RSC",
                 "Next-Router-Prefetch",
+                "Next-Router-Segment-Prefetch",
               ],
             },
             "QueryStringsConfig": {
-              "QueryStringBehavior": "none",
+              "QueryStringBehavior": "whitelist",
+              "QueryStrings": [
+                "_rsc",
+              ],
             },
           },
         },
@@ -1331,6 +1335,7 @@ a{color:var(--slate)}
               "Headers": [
                 "RSC",
                 "Next-Router-Prefetch",
+                "Next-Router-Segment-Prefetch",
               ],
             },
             "QueryStringsConfig": {
@@ -1344,6 +1349,7 @@ a{color:var(--slate)}
                 "role",
                 "sub",
                 "letter",
+                "_rsc",
               ],
             },
           },
@@ -1670,10 +1676,14 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "Headers": [
                 "RSC",
                 "Next-Router-Prefetch",
+                "Next-Router-Segment-Prefetch",
               ],
             },
             "QueryStringsConfig": {
-              "QueryStringBehavior": "none",
+              "QueryStringBehavior": "whitelist",
+              "QueryStrings": [
+                "_rsc",
+              ],
             },
           },
         },
@@ -2939,6 +2949,7 @@ a{color:var(--slate)}
               "Headers": [
                 "RSC",
                 "Next-Router-Prefetch",
+                "Next-Router-Segment-Prefetch",
               ],
             },
             "QueryStringsConfig": {
@@ -2952,6 +2963,7 @@ a{color:var(--slate)}
                 "role",
                 "sub",
                 "letter",
+                "_rsc",
               ],
             },
           },
