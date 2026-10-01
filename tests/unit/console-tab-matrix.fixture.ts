@@ -106,6 +106,31 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "titles per canReviewTitles — the display-title pin gate (superuser or steward)",
   },
   {
+    name: "observer (synthetic steward read view)",
+    session: sess({ isCommsSteward: true, isObserver: true }),
+    // `canViewUsage` admits an observer, so the real loader returns true here.
+    grants: grants({ viewerCanViewUsage: true }),
+    expect: [
+      "profiles",
+      "units",
+      "news",
+      "methods",
+      "reports",
+      "dataSharing",
+      "cores",
+      "roleVocabulary",
+      "titles",
+      "honors",
+      "slugRequests",
+      "slugs",
+      "usage",
+      "orcidCoverage",
+    ],
+    pins:
+      "2026-10-01 — an observer sees every queue and dashboard read-only; " +
+      "COI, Activity and ETL status stay superuser-only (role-matrix row 11 open)",
+  },
+  {
     name: "pure honors_curator",
     session: sess({ isHonorsCurator: true }),
     grants: grants(),

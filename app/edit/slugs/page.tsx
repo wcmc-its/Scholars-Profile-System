@@ -109,7 +109,13 @@ export default async function EditSlugsPage({
     redirect("/api/auth/saml/login?return=/edit/slugs");
   }
   // Superuser re-check on every GET (B2). Emits the `edit_authz_denied` line.
-  const denial = requireSuperuserGet({ session, path: "/edit/slugs", targetId: "slug-registry" });
+  // An observer reads the page (decision 2026-10-01) with every write control
+  // hidden; the write routes stay superuser-only regardless.
+  const readOnly = !session.isSuperuser;
+  const denial =
+    session.isObserver === true
+      ? null
+      : requireSuperuserGet({ session, path: "/edit/slugs", targetId: "slug-registry" });
   if (denial !== null) {
     return (
       <ConsoleShell
@@ -172,9 +178,14 @@ export default async function EditSlugsPage({
         counts={counts}
         extras={extras}
         verdict={verdict}
+        readOnly={readOnly}
         requests={
           requests ? (
-            <SlugRequestQueue initialRequests={requests} lastDecidedAt={lastDecidedAt} />
+            <SlugRequestQueue
+              initialRequests={requests}
+              lastDecidedAt={lastDecidedAt}
+              readOnly={readOnly}
+            />
           ) : null
         }
       />

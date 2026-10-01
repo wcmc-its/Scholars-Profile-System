@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHonorCsv,
+  canViewHonorsQueue,
+  isHonorsQueueReadOnly,
   isHonorsQueueTabVisible,
   loadHonorQueue,
   yearPlausibilityNote,
@@ -441,5 +443,24 @@ describe("buildHonorCsv", () => {
   it("quotes a value containing a comma (CSV escaping)", () => {
     const csv = buildHonorCsv([exportRow({ scholarName: "Hopper, Grace" })]);
     expect(csv).toContain('"Hopper, Grace"');
+  });
+});
+
+describe("canViewHonorsQueue / isHonorsQueueReadOnly", () => {
+  it("an observer reads the queue but may not decide it", () => {
+    const obs = { isSuperuser: false, isObserver: true };
+    expect(canViewHonorsQueue(obs)).toBe(true);
+    expect(isHonorsQueueReadOnly(obs)).toBe(true);
+  });
+
+  it("superuser and honors_curator read and decide", () => {
+    for (const s of [{ isSuperuser: true }, { isSuperuser: false, isHonorsCurator: true }]) {
+      expect(canViewHonorsQueue(s)).toBe(true);
+      expect(isHonorsQueueReadOnly(s)).toBe(false);
+    }
+  });
+
+  it("anyone else is refused", () => {
+    expect(canViewHonorsQueue({ isSuperuser: false })).toBe(false);
   });
 });
