@@ -613,9 +613,13 @@ export class EdgeStack extends Stack {
     // returns the matching representation -- splits the cache into a
     // document variant plus the Flight variants (navigation, prefetch,
     // segment prefetch), further separated by `_rsc` below.
-    // We deliberately do NOT key on `Next-Router-State-Tree` / `Next-Url`:
-    // they vary per navigation context and would all but eliminate edge
-    // cacheability of the static pages.
+    // `Next-Router-State-Tree` / `Next-Url` are keyed as well (below): the
+    // `_rsc` param already hashes both, so keying them adds no cache
+    // fragmentation beyond `_rsc` -- and the origin must SEE them, or its
+    // recomputed hash differs from the client's and every Flight request
+    // takes an extra 307 hop (measured on staging after #2962: 197 of 393
+    // RSC responses on one /search load were that hop). Document requests
+    // carry neither header, so static-page HTML caching is unaffected.
     //
     // Next 16 cache-busting param: the client router appends
     // `?_rsc=<hash>` to every Flight request, where the hash is computed from
@@ -636,6 +640,8 @@ export class EdgeStack extends Stack {
       "RSC",
       "Next-Router-Prefetch",
       "Next-Router-Segment-Prefetch",
+      "Next-Router-State-Tree",
+      "Next-Url",
     ];
     const RSC_CACHE_BUST_PARAM = "_rsc";
     const defaultRscCache = new cloudfront.CachePolicy(this, "DefaultRscCache", {
