@@ -46,6 +46,7 @@ export function ScopeRail({
   onSelect,
   emptyText,
   about,
+  noun = "candidates",
 }: {
   mode: RailMode;
   onMode: (m: RailMode) => void;
@@ -55,12 +56,14 @@ export function ScopeRail({
   /** Shown instead of the list when the mode has nothing to scope by. */
   emptyText: string;
   about: ReactNode;
+  /** What the rail groups, for its accessible name ("Group confirmed papers"). */
+  noun?: string;
 }) {
   return (
     <aside data-slot="core-queue-rail" className="flex min-w-0 flex-col gap-3">
       <div
         role="group"
-        aria-label="Group candidates"
+        aria-label={`Group ${noun}`}
         className="bg-apollo-rail flex rounded-lg p-[3px]"
       >
         {(["evidence", "person"] as const).map((m) => {
@@ -216,11 +219,16 @@ export function AboutSignals({
   staffCount,
   staffTrackedCount,
   meshCount,
+  one = "candidate",
+  many = "candidates",
 }: {
   staffCount: number | null;
   staffTrackedCount: number | null;
-  /** Candidates whose topical prior decodes to a MeSH-branch match. */
+  /** Rows on this tab whose topical prior decodes to a MeSH-branch match. */
   meshCount: number;
+  /** What those rows are called ("confirmed paper" on the Confirmed tab). */
+  one?: string;
+  many?: string;
 }) {
   return (
     <div
@@ -237,8 +245,8 @@ export function AboutSignals({
       </p>
       <p>
         {meshCount === 0
-          ? "No candidate here carries a topical MeSH match, so that prior never shows."
-          : `${meshCount} ${meshCount === 1 ? "candidate carries" : "candidates carry"} a topical MeSH match. It shows as a footnote on the paper and is never counted.`}
+          ? `No ${one} here carries a topical MeSH match, so that prior never shows.`
+          : `${meshCount} ${meshCount === 1 ? `${one} carries` : `${many} carry`} a topical MeSH match. It shows as a footnote on the paper and is never counted.`}
       </p>
     </div>
   );

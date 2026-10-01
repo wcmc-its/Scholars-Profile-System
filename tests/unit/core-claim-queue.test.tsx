@@ -2042,9 +2042,12 @@ describe("CoreClaimQueue", () => {
       coreId: "2",
       status: "revoked",
     });
-    // Title, year, PMID all stay visible — only the trailing note changes.
-    expect(await screen.findByText("Claimed pub")).toBeTruthy();
-    expect(screen.getByText(/— Revoked, re-files on next load/)).toBeTruthy();
+    // The row stays in the list, struck through and marked; the pane says it
+    // re-files on the next load and offers the Undo.
+    const list = screen.getByRole("list", { name: "Confirmed papers" });
+    expect(await within(list).findByText("Claimed pub")).toBeTruthy();
+    expect(within(list).getByText(/· Revoked$/)).toBeTruthy();
+    expect(screen.getByText(/Revoked, re-files on next load/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /undo/i })).toBeTruthy();
   });
 
@@ -2083,7 +2086,9 @@ describe("CoreClaimQueue", () => {
     );
     // no candidates → default view is Confirmed, so the row shows without a click
     expect(screen.getByRole("group", { name: "Queue view" })).toBeTruthy();
-    expect(screen.getByText("Done pub")).toBeTruthy();
+    expect(
+      within(screen.getByRole("list", { name: "Confirmed papers" })).getByText("Done pub"),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: /^revoke$/i })).toBeTruthy();
   });
 
@@ -3494,8 +3499,8 @@ describe("CoreClaimQueue — Confirmed rows carry the score", () => {
     fireEvent.click(within(screen.getByRole("group", { name: "Queue view" })).getByText(/Confirmed/));
     const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
     expect(text).toContain("Strong 91%");
-    expect(text).toContain(`of ${4} signals`);
-    expect(text).toContain("Acknowledged as");
+    expect(text).toContain(`of ${4} signals fired · on the public core page`);
+    expect(text).toContain("Named in the acknowledgments as");
   });
 
   it("takes a confirmed row's OWN paper out of its 'previous occasions'", () => {
@@ -3596,7 +3601,8 @@ describe("CoreClaimQueue — Confirmed rows carry the score", () => {
     // and the count is the LLM read alone.
     expect(text).toContain("Client co-author");
     expect(text).toContain("Only Once");
-    expect(text).not.toContain("Repeat user");
+    expect(text).toContain("Did not fire: no author with prior confirmed use");
+    expect(text).not.toContain("has used the core");
     expect(text).not.toContain("of an author's own work");
     expect(text).toContain("1 of 4 signals");
   });
@@ -3614,8 +3620,9 @@ describe("CoreClaimQueue — Confirmed rows carry the score", () => {
     const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
     // Staff co-author + LLM. The affinity signal must not come back as the
     // unnamed fallback about the very person the staff token names.
-    expect(text).toContain("Staff co-author");
-    expect(text).not.toContain("Repeat user");
+    expect(text).toContain("Only Once, core staff, is on the byline");
+    expect(text).toContain("Did not fire: no author with prior confirmed use");
+    expect(text).not.toContain("has used the core");
     expect(text).not.toContain("of an author's own work");
     expect(text).toContain("2 of 4 signals");
   });
@@ -3637,7 +3644,8 @@ describe("CoreClaimQueue — Confirmed rows carry the score", () => {
     );
     openConfirmed();
     const text = (ev()?.textContent ?? "").replace(/\s+/g, " ");
-    expect(text).not.toContain("Repeat user");
+    expect(text).toContain("Did not fire: no author with prior confirmed use");
+    expect(text).not.toContain("has used the core");
     expect(text).not.toContain("of an author's own work");
     expect(text).toContain("1 of 4 signals");
   });
@@ -3907,7 +3915,9 @@ describe("CoreClaimQueue — header rows", () => {
         .getAllByRole("button")
         .map((b) => b.getAttribute("aria-pressed")),
     ).toEqual(["false", "true", "false"]);
-    expect(screen.getByText("Done pub")).toBeTruthy();
+    expect(
+      within(screen.getByRole("list", { name: "Confirmed papers" })).getByText("Done pub"),
+    ).toBeTruthy();
   });
 
   it("renders Confirmed/Rejected tabs ONLY when their own count is above 0", () => {
@@ -3947,9 +3957,11 @@ describe("CoreClaimQueue — header rows", () => {
   });
 
   // PR A kept the search and Filters off these tabs because they were inert
-  // there. PR B wires them to the tab's own rows (mockup), so they are back —
-  // labelled for the tab — while the panes, sort pills and keys stay review-only.
-  it("gives the Confirmed and Rejected tabs their own search + Filters, but not the panes", () => {
+  // there. PR B wired them to the tab's own rows (mockup), labelled for the tab.
+  // Confirmed now has its own panes and sort pills (mockup refresh); To
+  // review's pane, status line and keys stay review-only, and Rejected stays a
+  // plain list.
+  it("gives the Confirmed and Rejected tabs their own search + Filters, not To review's pane", () => {
     render(withHistory);
     expect(screen.getByLabelText("Filter candidates")).toBeTruthy();
 
@@ -3957,9 +3969,14 @@ describe("CoreClaimQueue — header rows", () => {
     expect(screen.queryByLabelText("Filter candidates")).toBeNull();
     expect(screen.getByLabelText("Filter confirmed papers")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Filters/ })).toBeTruthy();
-    expect(screen.queryByRole("group", { name: "Sort" })).toBeNull();
-    expect(screen.queryByText(/^Showing /)).toBeNull();
+    expect(
+      within(screen.getByRole("group", { name: "Sort" }))
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Strongest first", "Newest"]);
+    expect(document.querySelector('[data-slot="core-queue-status"]')).toBeNull();
     expect(document.querySelector('[data-slot="core-queue-focus"]')).toBeNull();
+    expect(document.querySelector('[data-slot="core-queue-confirmed-focus"]')).not.toBeNull();
     // the keys belong to the review tab: 'a' here decides nothing
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -3969,6 +3986,8 @@ describe("CoreClaimQueue — header rows", () => {
     fireEvent.click(screen.getByRole("button", { name: /Rejected 1/ }));
     expect(screen.queryByLabelText("Filter candidates")).toBeNull();
     expect(screen.getByLabelText("Filter rejected papers")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Sort" })).toBeNull();
+    expect(document.querySelector('[data-slot="core-queue-confirmed-focus"]')).toBeNull();
 
     // ...and comes back on the way home
     fireEvent.click(screen.getByRole("button", { name: /To review/ }));

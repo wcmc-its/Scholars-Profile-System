@@ -282,18 +282,42 @@ export const SIGNAL_KINDS: ReadonlyArray<{
   dots: number;
   strength: string;
   label: string;
+  /** The Confirmed list's signal-strip cell (mockup: Ack / Staff / LLM / Repeat). */
+  short: string;
   facet: string;
 }> = [
-  { kind: "ack", dots: 4, strength: "Direct", label: "Acknowledgment", facet: "Acknowledged" },
+  {
+    kind: "ack",
+    dots: 4,
+    strength: "Direct",
+    label: "Acknowledgment",
+    short: "Ack",
+    facet: "Acknowledged",
+  },
   {
     kind: "coauthor",
     dots: 3,
     strength: "Strong",
     label: "Staff co-author",
+    short: "Staff",
     facet: "Staff co-author",
   },
-  { kind: "llm", dots: 2, strength: "Moderate", label: "LLM read", facet: "LLM read" },
-  { kind: "affinity", dots: 1, strength: "Weak", label: "Repeat user", facet: "Repeat user" },
+  {
+    kind: "llm",
+    dots: 2,
+    strength: "Moderate",
+    label: "LLM read",
+    short: "LLM",
+    facet: "LLM read",
+  },
+  {
+    kind: "affinity",
+    dots: 1,
+    strength: "Weak",
+    label: "Repeat user",
+    short: "Repeat",
+    facet: "Repeat user",
+  },
 ];
 const SIGNAL_BY_KIND = Object.fromEntries(SIGNAL_KINDS.map((s) => [s.kind, s])) as Record<
   SignalKind,
@@ -675,7 +699,7 @@ export function namedWithCounts(
  * repeat-user line speaks that ("...on 17 previous occasions"). They are the
  * same map everywhere but the Confirmed tab, which is why `priorCounts`
  * defaults to `holdings`: a candidate's own paper was never inside these counts.
- * `ConfirmedRow` is the one caller that passes both, and it MUST, because
+ * `ConfirmedPaper` is the one caller that passes both, and it MUST, because
  * handing `withoutOwnPaper`'s adjusted copy to the client token made the same
  * person read "18 papers" on Review and "17 papers" on Confirmed.
  * Pure.
@@ -787,8 +811,10 @@ export function evidenceGroupKey(
   clientCwids: ReadonlySet<string> = new Set(),
 ): string {
   // A paper a reviewer sent here by PMID is its own pile whatever the engine
-  // made of it: the engine did not put it on the queue, a person did.
-  if (row.queued) return ADDED_GROUP;
+  // made of it: the engine did not put it on the queue, a person did. A manual
+  // add on the Confirmed tab is the same pile (on To review every manual row is
+  // also `queued`): the engine never scored it, so it has no evidence key.
+  if (row.queued || row.isManual) return ADDED_GROUP;
   const kinds = buildSignals(row, paperCounts, clientCwids).map((s) => s.kind);
   return kinds.length === 0 ? "none" : kinds.join("+");
 }
@@ -1167,31 +1193,52 @@ export function matchesFacets(
   return true;
 }
 
-/** One rail evidence group: every candidate whose fired kinds share a key, and
- *  how many of them are still undecided. */
+/** One rail evidence group: every row whose fired kinds share a key, and how
+ *  many of them are still open (undecided on To review, not revoked on
+ *  Confirmed). */
 export interface EvidenceGroup {
   key: string;
   rows: CoreQueueRow[];
   open: number;
 }
 
+/** The pmids already acted on this session: To review's `decided` map, or the
+ *  Confirmed tab's revoked set. Only membership is read. */
+type ActedOn = { has(pmid: string): boolean };
+
+/** Per-person confirmed-paper counts for a row: one map for every row, or a
+ *  function for the Confirmed tab, whose rows each take their own paper back out
+ *  (`withoutOwnPaper`). */
+export type RowCounts =
+  | Readonly<Record<string, CoreClientPaperCount>>
+  | ((row: CoreQueueRow) => Readonly<Record<string, CoreClientPaperCount>>);
+
+function countsForRow(
+  counts: RowCounts,
+  row: CoreQueueRow,
+): Readonly<Record<string, CoreClientPaperCount>> {
+  return typeof counts === "function" ? counts(row) : counts;
+}
+
 /**
  * The rail's "By evidence" list, straight off `evidenceGroupKey` — the same key
  * the card's own signals produce, so a group can never name a pile its papers
- * do not show. Membership is over ALL candidates (a paper decided this session
- * stays in its group, held for its Undo); `open` counts the undecided ones.
- * Groups keep first-appearance order over `candidates`, which the loader ranks
- * by likelihood, so the group holding the surest paper leads. Pure.
+ * do not show. Works over any row list: To review's candidates, or the
+ * Confirmed tab's rows (with `withoutOwnPaper` counts, so a group matches the
+ * strip each row draws). Membership is over ALL rows (a paper decided or
+ * revoked this session stays in its group); `open` counts the rest. Groups keep
+ * first-appearance order over `rows`, which the loader ranks by likelihood, so
+ * the group holding the surest paper leads. Pure.
  */
 export function buildEvidenceGroups(
-  candidates: readonly CoreQueueRow[],
-  decided: ReadonlyMap<string, unknown>,
-  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  rows: readonly CoreQueueRow[],
+  decided: ActedOn,
+  paperCounts: RowCounts = {},
   clientCwids: ReadonlySet<string> = new Set(),
 ): EvidenceGroup[] {
   const byKey = new Map<string, EvidenceGroup>();
-  for (const r of candidates) {
-    const key = evidenceGroupKey(r, paperCounts, clientCwids);
+  for (const r of rows) {
+    const key = evidenceGroupKey(r, countsForRow(paperCounts, r), clientCwids);
     let g = byKey.get(key);
     if (!g) {
       g = { key, rows: [], open: 0 };
@@ -1305,7 +1352,7 @@ export function sessionNote(decidedCount: number, left: number): string {
 }
 
 /** One rail person: a WCM byline author this core already holds confirmed work
- *  from, and the candidates they are on. */
+ *  from, and the rows (candidates, or confirmed papers) they are on. */
 export interface RailPerson {
   scholar: QueueScholar;
   counts: CoreClientPaperCount;
@@ -1314,21 +1361,23 @@ export interface RailPerson {
 }
 
 /**
- * The rail's "By person" list: every WCM byline author of a candidate who has a
+ * The rail's "By person" list: every WCM byline author of a row who has a
  * confirmed paper with this core (`paperCounts`, server-computed and uncapped —
- * the same numbers the repeat-user row prints). One entry per person, keyed on
- * the lowercased CWID, and each candidate listed ONCE under each person on its
- * byline (the mockup's sample data showed one paper twice under one person;
- * that is not the behaviour). Ordered by open candidates, then confirmed
- * papers, then name. Pure.
+ * the same numbers the repeat-user row prints). Any row list: on the Confirmed
+ * tab that is every byline author with a confirmed paper, and `paperCounts` is
+ * passed as loaded (a holding, see `namedWithCounts`). One entry per person,
+ * keyed on the lowercased CWID, and each row listed ONCE under each person on
+ * its byline (the mockup's sample data showed one paper twice under one person;
+ * that is not the behaviour). Ordered by open rows, then confirmed papers,
+ * then name. Pure.
  */
 export function buildRailPeople(
-  candidates: readonly CoreQueueRow[],
-  decided: ReadonlyMap<string, unknown>,
+  rows: readonly CoreQueueRow[],
+  decided: ActedOn,
   paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
 ): RailPerson[] {
   const byCwid = new Map<string, RailPerson>();
-  for (const r of candidates) {
+  for (const r of rows) {
     const seen = new Set<string>();
     for (const a of r.wcmAuthors) {
       const cwid = a.cwid.toLowerCase();
@@ -1352,6 +1401,128 @@ export function buildRailPeople(
       displayName(a.scholar.name).localeCompare(displayName(b.scholar.name)),
   );
 }
+
+/** One cell of a Confirmed row's signal strip. */
+export interface StripCell {
+  kind: SignalKind;
+  /** "Ack" / "Staff" / "LLM" / "Repeat". */
+  label: string;
+  /** "Acknowledgment" etc., for the cell's accessible name. */
+  name: string;
+  fired: boolean;
+}
+
+/**
+ * The Confirmed list's four-cell signal strip (mockup default, "labels"): every
+ * counted signal in strength order, fired or not, so a row reads its evidence
+ * at a glance and the empty cells say what is missing. Off `buildSignals`, so a
+ * cell can never claim what the pane does not show. Pass the row's
+ * `withoutOwnPaper` counts: on this tab a person's only confirmed paper is the
+ * row itself, which is no prior use. Pure.
+ */
+export function signalStrip(
+  row: CoreQueueRow,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  clientCwids: ReadonlySet<string> = new Set(),
+): StripCell[] {
+  const fired = new Set(buildSignals(row, paperCounts, clientCwids).map((s) => s.kind));
+  return SIGNAL_KINDS.map((s) => ({
+    kind: s.kind,
+    label: s.short,
+    name: s.label,
+    fired: fired.has(s.kind),
+  }));
+}
+
+/** One row of the Confirmed pane's "Why this was confirmed". */
+export interface ConfirmedSignal {
+  kind: SignalKind;
+  label: string;
+  strength: string;
+  dots: number;
+  fired: boolean;
+  /** The finding in one line, or what did not fire. */
+  head: string;
+  /** The LLM's rationale, when the run kept one. */
+  body: string | null;
+  /** The acknowledgment sentence, when the run captured it. */
+  quote: string | null;
+}
+
+/**
+ * "Why this was confirmed" (mockup): all four counted signals, fired ones with
+ * their evidence and the rest as "Did not fire: …", so a reviewer revisiting a
+ * confirmation sees what it rests on AND what it lacks. The sentences are the
+ * queue's own: the repeat-user line is `evidenceTokens`' (named off
+ * `priorCounts`, the row's `withoutOwnPaper` counts), the LLM line `llmVerdict`.
+ * Nothing here claims a confirmation teaches the engine anything beyond what it
+ * reads (owner decision 8). Pure.
+ */
+export function confirmedEvidence(
+  row: CoreQueueRow,
+  priorCounts: Readonly<Record<string, CoreClientPaperCount>>,
+  clientCwids: ReadonlySet<string> = new Set(),
+): ConfirmedSignal[] {
+  const fired = new Set(buildSignals(row, priorCounts, clientCwids).map((s) => s.kind));
+  const repeatLine =
+    evidenceTokens(row, clientCwids, priorCounts, priorCounts).find(
+      (t) => t.label === "Repeat user",
+    )?.value ?? "";
+  const staff = [
+    ...row.coauthorScholars.map((s) => displayName(s.name)),
+    ...row.coauthors.filter(
+      (c) => !row.coauthorScholars.some((s) => s.cwid.toLowerCase() === c.toLowerCase()),
+    ),
+  ];
+  return SIGNAL_KINDS.map((s) => {
+    const on = fired.has(s.kind);
+    let head: string;
+    let body: string | null = null;
+    let quote: string | null = null;
+    switch (s.kind) {
+      case "ack":
+        head = on
+          ? row.ackAlias
+            ? `Named in the acknowledgments as “${row.ackAlias}”`
+            : "Acknowledged in the full text"
+          : "Did not fire: no core alias in the acknowledgments";
+        if (on) quote = row.ackSnippet;
+        break;
+      case "coauthor":
+        head = on
+          ? `${staff.join(", ")}, core staff, ${staff.length === 1 ? "is" : "are"} on the byline`
+          : "Did not fire: no core staff on the byline";
+        break;
+      case "llm":
+        head =
+          on && row.llmScore !== null
+            ? `${row.llmScore}/10 · ${llmVerdict(row.llmScore).replace(/^./, (c) => c.toUpperCase())}`
+            : "Did not fire: no LLM read on file";
+        if (on) body = row.llmRationale;
+        break;
+      case "affinity":
+        head = on ? repeatLine : "Did not fire: no author with prior confirmed use";
+        break;
+    }
+    return {
+      kind: s.kind,
+      label: s.label,
+      strength: s.strength,
+      dots: s.dots,
+      fired: on,
+      head,
+      body,
+      quote,
+    };
+  });
+}
+
+/** The Confirmed tab's sort pills (mockup: Strongest first · Newest), on the
+ *  existing `likelihood` and `year` keys. */
+const CONFIRMED_SORT_PILLS: { key: SortKey; label: string }[] = [
+  { key: "likelihood", label: "Strongest first" },
+  { key: "year", label: "Newest" },
+];
 
 interface CoreClaimQueueProps {
   core: CoreReviewQueue["core"];
@@ -1620,6 +1791,15 @@ export function CoreClaimQueue({
   const [mode, setMode] = useState<RailMode>("evidence");
   const [groupKey, setGroupKey] = useState<string>(ALL_SCOPE);
   const [personCwid, setPersonCwid] = useState<string | null>(null);
+  // The Confirmed tab's own rail, sort and pane (mockup), kept apart from To
+  // review's so a tab switch never lands either on the other's pile. "By
+  // person" opens on Everyone here: every confirmed paper has somebody on it.
+  const [confMode, setConfMode] = useState<RailMode>("evidence");
+  const [confGroup, setConfGroup] = useState<string>(ALL_SCOPE);
+  const [confPerson, setConfPerson] = useState<string>(ALL_SCOPE);
+  const [confSort, setConfSort] = useState<SortKey>("likelihood");
+  const [confFocusPmid, setConfFocusPmid] = useState<string | null>(null);
+  const lastConfIndex = useRef(0);
   // Ticked facet values (Filters panel), OR within a group and AND across.
   const [facets, setFacets] = useState<FacetSelection>({});
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -2252,7 +2432,22 @@ export function CoreClaimQueue({
   // (mockup): same facets, same words, over that tab's rows. The selection
   // there is its own (`histSelected`), and a tab switch clears both.
   const onHistory = view !== "review";
-  const historyBase = view === "confirmed" ? confirmed : view === "rejected" ? rejected : [];
+  // The Confirmed tab's rail (mockup), over the same builders as To review's.
+  // Each confirmed row is inside its own counts, so its evidence key reads the
+  // row's `withoutOwnPaper` copy, the one its strip and pane read; the people
+  // list reads the holdings as loaded. A revoked row stays in its pile, held.
+  const ownCounts = (r: CoreQueueRow) => withoutOwnPaper(r, paperCounts);
+  const confGroups = buildEvidenceGroups(confirmed, revokedConfirmed, ownCounts, clientCwids);
+  const confPeople = buildRailPeople(confirmed, revokedConfirmed, paperCounts);
+  const confActiveGroup =
+    confMode === "evidence" ? (confGroups.find((g) => g.key === confGroup) ?? null) : null;
+  const confActivePerson =
+    confMode === "person"
+      ? (confPeople.find((p) => p.scholar.cwid.toLowerCase() === confPerson) ?? null)
+      : null;
+  const confScopeRows = confActiveGroup?.rows ?? confActivePerson?.rows ?? confirmed;
+  const confOpen = confirmed.length - confirmed.filter((r) => revokedConfirmed.has(r.pmid)).length;
+  const historyBase = view === "confirmed" ? confScopeRows : view === "rejected" ? rejected : [];
   const historyTouched = view === "confirmed" ? revokedConfirmed : restoredRejected;
   // A paper decided this session leaves the To review list (mockup); its Undo
   // is the toast, `u`, and the summary strip's "Undo last".
@@ -2285,7 +2480,13 @@ export function CoreClaimQueue({
   );
   // The To review list sorts; the history tabs keep the loader's order.
   const visible = onHistory ? [] : matched.slice().sort((a, b) => compareBySort(sort, a, b));
-  const historyShown = onHistory ? matched : [];
+  // Rejected keeps the loader's order; Confirmed sorts on its own pills.
+  const historyShown =
+    view === "confirmed"
+      ? matched.slice().sort((a, b) => compareBySort(confSort, a, b))
+      : onHistory
+        ? matched
+        : [];
   const historyOpen = historyShown.filter((r) => !historyTouched.has(r.pmid));
   const historySelectedRows = historyOpen.filter((r) => histSelected.has(r.pmid));
   const historyAllChecked =
@@ -2318,6 +2519,14 @@ export function CoreClaimQueue({
   const focusIndex = resolveFocusIndex(visible, focusPmid, lastFocusIndex.current);
   const focused = focusIndex >= 0 ? visible[focusIndex] : null;
   if (focusIndex >= 0) lastFocusIndex.current = focusIndex;
+  // The Confirmed pane's paper. A revoked row is held in the list, so it keeps
+  // its place and the pane keeps it for its Undo.
+  const confFocusIndex =
+    view === "confirmed"
+      ? resolveFocusIndex(historyShown, confFocusPmid, lastConfIndex.current)
+      : -1;
+  const confFocused = confFocusIndex >= 0 ? historyShown[confFocusIndex] : null;
+  if (confFocusIndex >= 0) lastConfIndex.current = confFocusIndex;
 
   // The selection only ever acts on rows the reviewer can SEE: a row ticked and
   // then hidden by a facet or the search drops out of the batch. Acting on rows
@@ -2403,6 +2612,66 @@ export function CoreClaimQueue({
     (r) => r.topicalPrior !== null && decodeTopicalPrior(r.topicalPrior).mesh,
   ).length;
 
+  // The Confirmed rail, the To review rail's vocabulary over confirmed papers.
+  const confRailItems: RailItem[] =
+    confMode === "evidence"
+      ? [
+          {
+            key: ALL_SCOPE,
+            label: "All confirmed",
+            sub: plural(confGroups.length, "evidence group"),
+            dot: "bg-apollo-slate",
+            count: confOpen,
+          },
+          ...confGroups.map((g) => ({
+            key: g.key,
+            label: evidenceGroupName(g.key),
+            sub: g.key === ADDED_GROUP ? ADDED_SUB : groupBandText(g.rows.map((r) => r.likelihood)),
+            dot:
+              g.key === ADDED_GROUP ? "bg-apollo-slate" : bandDot(g.rows.map((r) => r.likelihood)),
+            count: g.open,
+          })),
+        ]
+      : [
+          {
+            key: ALL_SCOPE,
+            label: "Everyone",
+            sub: plural(confPeople.length, "person", "people"),
+            dot: "bg-apollo-slate",
+            count: confOpen,
+          },
+          ...confPeople.map((p) => ({
+            key: p.scholar.cwid.toLowerCase(),
+            label: displayName(p.scholar.name),
+            sub: `${p.counts.papers} confirmed${p.scholar.dept ? ` · ${p.scholar.dept}` : ""}`,
+            // Engine-scored rows only, as on To review: a manual or queued add
+            // carries a placeholder likelihood.
+            dot: bandDot(p.rows.filter((r) => !r.queued && !r.isManual).map((r) => r.likelihood)),
+            count: p.open,
+          })),
+        ];
+  const confRailKey =
+    confActiveGroup?.key ?? confActivePerson?.scholar.cwid.toLowerCase() ?? ALL_SCOPE;
+  const confScopeTitle = confActivePerson
+    ? `Confirmed with ${displayName(confActivePerson.scholar.name)}`
+    : confActiveGroup
+      ? evidenceGroupName(confActiveGroup.key)
+      : confMode === "person"
+        ? "Everyone"
+        : "All confirmed";
+  const confScopeSub = confActivePerson
+    ? `${confActivePerson.counts.papers} of ${plural(confActivePerson.counts.total, "publication")} confirmed with this core`
+    : confActiveGroup
+      ? `${plural(confActiveGroup.open, "paper")} · ${
+          confActiveGroup.key === ADDED_GROUP
+            ? ADDED_SUB
+            : groupBandText(confActiveGroup.rows.map((r) => r.likelihood))
+        }`
+      : `${plural(confOpen, "confirmed paper")} across ${plural(confGroups.length, "evidence group")}`;
+  const confMeshCount = confirmed.filter(
+    (r) => r.topicalPrior !== null && decodeTopicalPrior(r.topicalPrior).mesh,
+  ).length;
+
   // Tabs only earn their place once there's history to switch to; otherwise the
   // queue is the single "To review" view it always was.
   const hasHistory = confirmed.length > 0 || rejected.length > 0;
@@ -2432,6 +2701,50 @@ export function CoreClaimQueue({
     else setPersonCwid(key);
     resetForScope();
   };
+  /** A Confirmed scope change drops the selection, the guard and the pane's
+   *  paper, as a To review one does. */
+  const resetConfScope = () => {
+    setConfFocusPmid(null);
+    setHistSelected(new Set());
+    setHistArmed(false);
+  };
+  const chooseConfMode = (m: RailMode) => {
+    if (m === confMode) return;
+    setConfMode(m);
+    setConfGroup(ALL_SCOPE);
+    setConfPerson(ALL_SCOPE);
+    resetConfScope();
+  };
+  const chooseConfScope = (key: string) => {
+    if (confMode === "evidence") setConfGroup(key);
+    else setConfPerson(key);
+    resetConfScope();
+  };
+  /** The pane's "Review all N confirmed papers by X" / "See all papers with X":
+   *  By person on that person, keeping this paper in the pane. Null for someone
+   *  the rail does not list, or when the list already is that person. */
+  const confPersonAction = (
+    cwid: string | undefined,
+    label: (p: RailPerson) => string,
+  ): { label: string; onClick: () => void } | null => {
+    if (!cwid || !confFocused) return null;
+    const key = cwid.toLowerCase();
+    if (confActivePerson?.scholar.cwid.toLowerCase() === key) return null;
+    const person = confPeople.find((p) => p.scholar.cwid.toLowerCase() === key);
+    if (!person) return null;
+    const keep = confFocused.pmid;
+    return {
+      label: label(person),
+      onClick: () => {
+        setConfMode("person");
+        setConfPerson(key);
+        setConfGroup(ALL_SCOPE);
+        setHistSelected(new Set());
+        setHistArmed(false);
+        setConfFocusPmid(keep);
+      },
+    };
+  };
   const toggleFacet = (group: string, value: string) => {
     setFacets((f) => {
       const k = group as FacetKey;
@@ -2439,6 +2752,7 @@ export function CoreClaimQueue({
       return { ...f, [k]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] };
     });
     setFocusPmid(null);
+    setConfFocusPmid(null);
     setArmed(null);
     setHistArmed(false);
   };
@@ -2487,6 +2801,8 @@ export function CoreClaimQueue({
   // dialogs; and while either dialog is open, whose focus trap owns the keys.
   const onKey = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
+    // The Confirmed pane is a sheet below `lg` too; Escape closes it there.
+    if (view === "confirmed" && e.key === "Escape") setSheetOpen(false);
     if (view !== "review" || candidates.length === 0 || addOpen || clientsOpen) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target as HTMLElement | null;
@@ -2560,6 +2876,7 @@ export function CoreClaimQueue({
           onChange={(e) => {
             setQuery(e.target.value);
             setFocusPmid(null);
+            setConfFocusPmid(null);
             setArmed(null);
             setHistArmed(false);
           }}
@@ -2572,6 +2889,7 @@ export function CoreClaimQueue({
             const end = el.selectionEnd ?? el.value.length;
             setQuery(`${el.value.slice(0, start)}${flat}${el.value.slice(end)}`);
             setFocusPmid(null);
+            setConfFocusPmid(null);
             setArmed(null);
             setHistArmed(false);
           }}
@@ -2593,23 +2911,24 @@ export function CoreClaimQueue({
             {activeChips.length}
           </span>
         </button>
-        {onHistory ? null : (
+        {view === "rejected" ? null : (
           <div role="group" aria-label="Sort" className="flex shrink-0 gap-1">
-            {SORT_PILLS.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                aria-pressed={sort === s.key}
-                onClick={() => setSort(s.key)}
-                className={`rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap ${
-                  sort === s.key
-                    ? "border-apollo-border-strong bg-apollo-surface"
-                    : "border-transparent"
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
+            {(view === "confirmed" ? CONFIRMED_SORT_PILLS : SORT_PILLS).map((s) => {
+              const active = (view === "confirmed" ? confSort : sort) === s.key;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => (view === "confirmed" ? setConfSort(s.key) : setSort(s.key))}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap ${
+                    active ? "border-apollo-border-strong bg-apollo-surface" : "border-transparent"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -2884,6 +3203,7 @@ export function CoreClaimQueue({
               setQuery("");
               setHistSelected(new Set());
               setHistArmed(false);
+              setSheetOpen(false);
             }}
             reviewCount={remaining}
             confirmedCount={confirmed.length}
@@ -3129,17 +3449,148 @@ export function CoreClaimQueue({
         </>
       ) : null}
 
-      {view === "confirmed" || view === "rejected" ? (
+      {view === "confirmed" ? (
+        <>
+          {searchBar}
+          {/* Three panes at `lg` (mockup), the To review layout: the rail, the
+              list with each paper's signal strip, and the paper. Below it the
+              rail is a select and the paper a full-screen sheet. */}
+          <div
+            data-slot="core-queue-confirmed-panes"
+            className="mt-4 flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,232px)_minmax(0,1fr)_minmax(0,1.2fr)] lg:items-start lg:gap-5"
+          >
+            <ScopeRail
+              mode={confMode}
+              onMode={chooseConfMode}
+              items={confRailItems}
+              activeKey={confRailKey}
+              onSelect={chooseConfScope}
+              noun="confirmed papers"
+              emptyText="Nobody on these bylines has a confirmed paper with this core."
+              about={
+                <AboutSignals
+                  staffCount={core.staffCount}
+                  staffTrackedCount={core.staffTrackedCount}
+                  meshCount={confMeshCount}
+                  one="confirmed paper"
+                  many="confirmed papers"
+                />
+              }
+            />
+
+            <section aria-label="Confirmed" className="flex min-w-0 flex-col gap-2.5">
+              <div>
+                <h2 className="text-base leading-snug font-medium">{confScopeTitle}</h2>
+                <p className="text-muted-foreground mt-0.5 text-xs">{confScopeSub}</p>
+                <p className="text-muted-foreground mt-0.5 text-xs">
+                  Confirmed papers appear on the public core page. Revoking takes a paper off it.
+                </p>
+              </div>
+              <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
+                <HistorySelectionBar
+                  tab="confirmed"
+                  openCount={historyOpen.length}
+                  selectedCount={historySelectedRows.length}
+                  allChecked={historyAllChecked}
+                  narrowed={narrowed}
+                  pending={histPending}
+                  onToggleAll={() => {
+                    setHistArmed(false);
+                    setHistSelected((s) => {
+                      const next = new Set(s);
+                      for (const r of historyOpen) {
+                        if (historyAllChecked) next.delete(r.pmid);
+                        else next.add(r.pmid);
+                      }
+                      return next;
+                    });
+                  }}
+                  onArm={() => setHistArmed(true)}
+                />
+                {histArmed && historySelectedRows.length > 0 ? (
+                  <HistoryGuard
+                    tab="confirmed"
+                    count={historySelectedRows.length}
+                    text={historyGuardText("confirmed", historySelectedRows)}
+                    disabled={histPending}
+                    onConfirm={() => void bulkHistory("confirmed", historySelectedRows)}
+                    onCancel={() => setHistArmed(false)}
+                  />
+                ) : null}
+                <ul aria-label="Confirmed papers" className="flex flex-col">
+                  {historyShown.map((row) => (
+                    <ConfirmedListRow
+                      key={row.pmid}
+                      row={row}
+                      focused={confFocused?.pmid === row.pmid}
+                      revoked={revokedConfirmed.has(row.pmid)}
+                      pending={pending.has(row.pmid)}
+                      error={errors.get(row.pmid)}
+                      checked={histSelected.has(row.pmid)}
+                      onCheck={() => toggleHistSelected(row.pmid)}
+                      onOpen={() => {
+                        setConfFocusPmid(row.pmid);
+                        setSheetOpen(true);
+                      }}
+                      paperCounts={paperCounts}
+                      clientCwids={clientCwids}
+                    />
+                  ))}
+                </ul>
+              </div>
+              {historyShown.length === 0 ? (
+                <p className="text-muted-foreground border-apollo-border rounded-lg border border-dashed px-4 py-6 text-center text-sm">
+                  Nothing matches these filters.
+                </p>
+              ) : null}
+              <p data-slot="core-queue-confirmed-status" className="text-muted-foreground text-xs">
+                Showing {historyShown.length} of {confScopeRows.length} confirmed
+              </p>
+            </section>
+
+            {confFocused ? (
+              <ConfirmedPaper
+                row={confFocused}
+                position={`${confFocusIndex + 1} of ${historyShown.length} shown`}
+                hasPrev={confFocusIndex > 0}
+                hasNext={confFocusIndex < historyShown.length - 1}
+                onPrev={() => setConfFocusPmid(historyShown[confFocusIndex - 1].pmid)}
+                onNext={() => setConfFocusPmid(historyShown[confFocusIndex + 1].pmid)}
+                sheetOpen={sheetOpen}
+                onCloseSheet={() => setSheetOpen(false)}
+                clientCwids={clientCwids}
+                paperCounts={paperCounts}
+                revoked={revokedConfirmed.has(confFocused.pmid)}
+                pending={pending.has(confFocused.pmid)}
+                error={errors.get(confFocused.pmid)}
+                copied={copiedPmid === confFocused.pmid}
+                onCopyPmid={() => copyPmid(confFocused.pmid)}
+                onRevoke={() => void revokeConfirmed(confFocused)}
+                onUndo={() => void undoRevokeConfirmed(confFocused.pmid, confFocused.claimed)}
+                staffAction={confPersonAction(
+                  confFocused.coauthorScholars[0]?.cwid,
+                  (p) => `See all papers with ${displayName(p.scholar.name)}`,
+                )}
+                repeatAction={confPersonAction(
+                  repeatUser(confFocused, ownCounts(confFocused), clientCwids)?.scholar.cwid,
+                  (p) =>
+                    `Review all ${plural(p.rows.length, "confirmed paper")} by ${displayName(p.scholar.name)}`,
+                )}
+              />
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
+      {view === "rejected" ? (
         <>
           {searchBar}
           <p className="text-muted-foreground mt-3 text-xs">
-            {view === "confirmed"
-              ? "Confirmed papers appear on the public core page. Revoking takes a paper off it."
-              : "Rejected papers are hidden from public pages. Restoring re-opens a paper."}
+            Rejected papers are hidden from public pages. Restoring re-opens a paper.
           </p>
           <div className="border-apollo-border bg-apollo-surface mt-2 overflow-hidden rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
             <HistorySelectionBar
-              tab={view}
+              tab="rejected"
               openCount={historyOpen.length}
               selectedCount={historySelectedRows.length}
               allChecked={historyAllChecked}
@@ -3160,47 +3611,28 @@ export function CoreClaimQueue({
             />
             {histArmed && historySelectedRows.length > 0 ? (
               <HistoryGuard
-                tab={view}
+                tab="rejected"
                 count={historySelectedRows.length}
-                text={historyGuardText(view, historySelectedRows)}
+                text={historyGuardText("rejected", historySelectedRows)}
                 disabled={histPending}
-                onConfirm={() => void bulkHistory(view, historySelectedRows)}
+                onConfirm={() => void bulkHistory("rejected", historySelectedRows)}
                 onCancel={() => setHistArmed(false)}
               />
             ) : null}
-            <ul
-              aria-label={view === "confirmed" ? "Confirmed papers" : "Rejected papers"}
-              className="flex flex-col"
-            >
-              {historyShown.map((row) =>
-                view === "confirmed" ? (
-                  <ConfirmedRow
-                    key={row.pmid}
-                    row={row}
-                    revoked={revokedConfirmed.has(row.pmid)}
-                    pending={pending.has(row.pmid)}
-                    error={errors.get(row.pmid)}
-                    clientCwids={clientCwids}
-                    paperCounts={paperCounts}
-                    checked={histSelected.has(row.pmid)}
-                    onCheck={() => toggleHistSelected(row.pmid)}
-                    onRevoke={() => revokeConfirmed(row)}
-                    onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
-                  />
-                ) : (
-                  <RejectedRow
-                    key={row.pmid}
-                    row={row}
-                    restored={restoredRejected.has(row.pmid)}
-                    pending={pending.has(row.pmid)}
-                    error={errors.get(row.pmid)}
-                    checked={histSelected.has(row.pmid)}
-                    onCheck={() => toggleHistSelected(row.pmid)}
-                    onRestore={() => restoreRejected(row.pmid, row.title)}
-                    onUndo={() => undoRestoreRejected(row.pmid)}
-                  />
-                ),
-              )}
+            <ul aria-label="Rejected papers" className="flex flex-col">
+              {historyShown.map((row) => (
+                <RejectedRow
+                  key={row.pmid}
+                  row={row}
+                  restored={restoredRejected.has(row.pmid)}
+                  pending={pending.has(row.pmid)}
+                  error={errors.get(row.pmid)}
+                  checked={histSelected.has(row.pmid)}
+                  onCheck={() => toggleHistSelected(row.pmid)}
+                  onRestore={() => restoreRejected(row.pmid, row.title)}
+                  onUndo={() => undoRestoreRejected(row.pmid)}
+                />
+              ))}
             </ul>
           </div>
           {historyShown.length === 0 ? (
@@ -3462,7 +3894,7 @@ function ViewTabs({
  * come from the same `isConfirmed` byline read the counts do, so the paper really
  * is in there. Pure.
  */
-function withoutOwnPaper(
+export function withoutOwnPaper(
   row: CoreQueueRow,
   paperCounts: Readonly<Record<string, CoreClientPaperCount>>,
 ): Readonly<Record<string, CoreClientPaperCount>> {
@@ -3479,152 +3911,465 @@ function withoutOwnPaper(
 const HISTORY_ROW =
   "border-apollo-border flex gap-2.5 border-t px-3.5 py-2.5 text-sm first:border-t-0";
 
-// A confirmed publication with an inline Revoke (kept walk-back-able for the
-// session — the one thing this list needs to earn its place below the queue).
-//
-// It carries the SCORE and the evidence too. A confirmation is not final: the
-// engine re-scores every night, so a row confirmed months ago can be one the
-// evidence no longer supports, and until now this list showed a reviewer nothing
-// to judge that on — title, year, PMID and a Revoke button. Same band and
-// "N of 4 signals" the review queue shows, plus the evidence tokens, so
-// revisiting a confirmation and re-reviewing it use the same vocabulary.
-//
-// A MANUAL add has no engine row at all (`isManual`), so it gets the existing
-// "Manually added" note and NO score — a 0% band on a human's deliberate
-// addition would read as the engine disagreeing, when it simply never scored it.
-function ConfirmedRow({
+/**
+ * One row in the Confirmed list (mockup): title, year and PMID, the band, and
+ * the four-cell signal strip (`signalStrip`), so a reviewer can see what each
+ * confirmation rests on without opening it. A confirmation is not final — the
+ * engine re-scores every night, and a row confirmed months ago can be one the
+ * evidence no longer supports — so the band and the strip use the same
+ * vocabulary as To review. Clicking anywhere but the checkbox opens the paper
+ * in the pane (below `lg`, the sheet).
+ *
+ * A MANUAL add has no engine row at all (`isManual`), so it gets the "Manually
+ * added" marker in place of the band and NO strip — a 0% band on a human's
+ * deliberate addition would read as the engine disagreeing, when it simply
+ * never scored it. A row revoked this session stays, struck through, with no
+ * checkbox: its Undo is in the pane.
+ */
+function ConfirmedListRow({
   row,
+  focused,
   revoked,
   pending,
   error,
-  checked = false,
-  onCheck = () => {},
-  onRevoke,
-  onUndo,
-  clientCwids = new Set<string>(),
-  paperCounts = {},
+  checked,
+  onCheck,
+  onOpen,
+  paperCounts,
+  clientCwids,
 }: {
   row: CoreQueueRow;
+  focused: boolean;
   revoked: boolean;
   pending: boolean;
   error: string | undefined;
   /** Ticked for the bulk Revoke. */
-  checked?: boolean;
-  onCheck?: () => void;
-  onRevoke: () => void;
-  onUndo: () => void;
-  /** The core's known-client CWIDs, so the evidence line reads the same here as
-   *  it does on the review queue. */
-  clientCwids?: ReadonlySet<string>;
-  /** Per-person confirmed-paper counts for this core (see `clientPaperCounts`). */
-  paperCounts?: Readonly<Record<string, CoreClientPaperCount>>;
+  checked: boolean;
+  onCheck: () => void;
+  onOpen: () => void;
+  /** Per-person confirmed-paper counts for this core, as loaded. */
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
+  clientCwids: ReadonlySet<string>;
 }) {
-  if (revoked) {
-    return (
-      <li className={`${HISTORY_ROW} text-muted-foreground items-center`}>
-        <span className="size-4 shrink-0" aria-hidden />
-        <span className="flex min-w-0 flex-1 items-baseline gap-2">
-          <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
-          <span className="truncate">{row.title}</span>
-          {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
-          <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
-          <span className="shrink-0 text-xs italic">— Revoked, re-files on next load</span>
-        </span>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={onUndo}
-          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-xs disabled:opacity-50"
-        >
-          <Undo2 className="size-3" aria-hidden /> Undo
-        </button>
-      </li>
-    );
-  }
   const band = likelihoodBand(row.likelihood);
-  // THIS row is inside its own counts — they are computed over `queue.confirmed`,
-  // which is the very list being rendered — so every byline author here carries
-  // this paper in their own "previous occasions". It comes back out before the
-  // strip prints anything. Candidates and rejected rows are untouched: the counts
-  // never saw their pmids.
-  const ownCounts = withoutOwnPaper(row, paperCounts);
-  // BOTH maps, and they go to different tokens. "Previous occasions" is about
-  // the papers before this one (`ownCounts`); "18 papers, 11 recent" on the
-  // client token is what this core HOLDS from them, which the row on screen is
-  // part of. Handing the subtracted copy to both made one person's number
-  // disagree with itself across the two tabs — Review "18 papers", Confirmed
-  // "17" — for a token whose whole job is to state a holding.
-  const tokens = evidenceTokens(row, clientCwids, paperCounts, ownCounts);
-  // The signal count is the repeat-user question alone, so it reads the
-  // subtracted map: a person whose only confirmed paper is this one adds no
-  // previous occasion and the count must not rise on the tab that subtracts.
-  const signalCount = buildSignals(row, ownCounts, clientCwids).length;
+  // THIS row is inside its own counts (they are computed over the very list
+  // being rendered), so the strip reads the copy with its own paper taken out.
+  const strip = signalStrip(row, withoutOwnPaper(row, paperCounts), clientCwids);
+  const client = matchesFilter(row, "client", clientCwids);
+  const meta = [row.year, `PMID ${row.pmid}`, revoked ? "Revoked" : null]
+    .filter((v) => v !== null)
+    .join(" · ");
   return (
-    <li className={`${HISTORY_ROW} text-muted-foreground items-start`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={pending}
-        onChange={onCheck}
-        aria-label={`Select ${row.title}`}
-        className="mt-0.5 size-4 shrink-0 accent-[var(--apollo-slate)]"
-      />
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-baseline gap-2">
-          <Check className="size-3.5 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden />
-          <span className="text-foreground truncate">{row.title}</span>
-          {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
-          <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
+    <li
+      data-slot="core-queue-confirmed-row"
+      data-pmid={row.pmid}
+      aria-current={focused ? "true" : undefined}
+      // The Confirmed mockup draws a spine only on the focused row (slate);
+      // every row here already passed review, so a band spine would be noise.
+      className={`border-apollo-border flex gap-2.5 border-t border-l-[3px] py-3 pr-3.5 pl-[11px] first:border-t-0 ${
+        focused ? "bg-apollo-slate-tint border-l-apollo-slate" : "bg-apollo-surface border-l-transparent"
+      }`}
+    >
+      {revoked ? (
+        <span className="size-4 shrink-0" aria-hidden />
+      ) : (
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={pending}
+          onChange={onCheck}
+          aria-label={`Select ${row.title}`}
+          className="mt-1 size-4 shrink-0 accent-[var(--apollo-slate)]"
+        />
+      )}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 gap-2.5 text-left focus-visible:outline-none"
+      >
+        <span className="min-w-0 flex-1">
+          <span
+            className={`line-clamp-2 block text-sm leading-snug ${
+              revoked ? "text-muted-foreground line-through" : "text-foreground"
+            }`}
+          >
+            {displayTitle(row.title)}
+          </span>
+          <span className="text-muted-foreground mt-0.5 block text-xs tabular-nums">{meta}</span>
+          {row.isManual ? null : (
+            <span data-slot="core-queue-strip" className="mt-1.5 flex flex-wrap gap-1">
+              {strip.map((c) => (
+                <span
+                  key={c.kind}
+                  data-fired={c.fired}
+                  title={`${c.name}: ${c.fired ? "fired" : "did not fire"}`}
+                  className={`rounded border px-[7px] py-px text-[11px] ${
+                    c.fired
+                      ? CHIP_TONE_CLASS.signal
+                      : "border-apollo-border text-muted-foreground bg-transparent"
+                  }`}
+                >
+                  {c.label}
+                  <span className="sr-only">{c.fired ? " fired" : " did not fire"}</span>
+                </span>
+              ))}
+              {/* A known client is evidence a reviewer weighs but not a counted
+                  signal: a quiet chip after the four cells, as on To review. */}
+              {client ? (
+                <span
+                  data-tone="quiet"
+                  className={`rounded border px-[7px] py-px text-[11px] ${CHIP_TONE_CLASS.quiet}`}
+                >
+                  Client co-author
+                </span>
+              ) : null}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 text-right text-[11px]">
           {row.isManual ? (
-            <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-xs italic">
+            <span className="text-muted-foreground inline-flex items-center gap-1 italic">
               <PenLine className="size-3" aria-hidden /> Manually added
             </span>
-          ) : null}
-        </span>
-        {row.isManual ? null : (
-          <span
-            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pl-5 text-[11.5px]"
-            data-slot="core-queue-confirmed-evidence"
-          >
-            <span className={`font-semibold uppercase tracking-[0.04em] ${band.text}`}>
+          ) : (
+            // Band word in its colour, no pill (mockup).
+            <span
+              className={`block pt-0.5 font-medium tracking-[0.08em] whitespace-nowrap uppercase ${band.text}`}
+            >
               {band.label} {Math.round(row.likelihood * 100)}%
             </span>
-            <span className="text-muted-foreground">
-              · {signalCount} of {SIGNAL_COUNT} signals
-            </span>
-            {tokens.map((t) => (
-              <span key={t.label} className="inline-flex items-baseline gap-1">
-                <span className="text-muted-foreground/60 font-bold" aria-hidden>
-                  ·
-                </span>
-                <span className="text-muted-foreground">{t.label}</span>
-                <span className="text-foreground font-medium">{t.value}</span>
-              </span>
-            ))}
-          </span>
-        )}
-      </span>
-      <span className="flex shrink-0 items-center gap-2">
-        {error ? (
-          <span className="text-xs text-red-600" role="alert">
-            Could not save: {error}
-          </span>
-        ) : null}
-        <button
-          type="button"
-          disabled={pending}
-          onClick={onRevoke}
-          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-7 items-center gap-1 rounded-full border bg-background px-2.5 text-xs disabled:opacity-50"
-        >
-          <Undo2 className="size-3" aria-hidden /> Revoke
-        </button>
-      </span>
+          )}
+          {error ? <span className="mt-1 block text-red-700">Not saved</span> : null}
+        </span>
+      </button>
     </li>
   );
 }
 
+/**
+ * The Confirmed tab's right-hand pane (mockup): the paper, its band and "N of 4
+ * signals fired · on the public core page", Revoke (or, once revoked this
+ * session, Undo), and "Why this was confirmed" — all four counted signals off
+ * `confirmedEvidence`, fired or not, then the uncounted context the To review
+ * pane shows too (a known client, the method family, the topical-prior
+ * footnote). Revoke posts what `revokeStatusFor` says, so an engine
+ * confirmation takes the `rejected` override.
+ *
+ * Below `lg` this is the same full-screen sheet as To review's pane.
+ */
+function ConfirmedPaper({
+  row,
+  position,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
+  sheetOpen,
+  onCloseSheet,
+  clientCwids,
+  paperCounts,
+  revoked,
+  pending,
+  error,
+  copied,
+  onCopyPmid,
+  onRevoke,
+  onUndo,
+  staffAction,
+  repeatAction,
+}: {
+  row: CoreQueueRow;
+  position: string;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  sheetOpen: boolean;
+  onCloseSheet: () => void;
+  clientCwids: ReadonlySet<string>;
+  /** Per-person confirmed-paper counts for this core, as loaded. */
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>>;
+  revoked: boolean;
+  pending: boolean;
+  error: string | undefined;
+  copied: boolean;
+  onCopyPmid: () => void;
+  onRevoke: () => void;
+  onUndo: () => void;
+  staffAction: { label: string; onClick: () => void } | null;
+  repeatAction: { label: string; onClick: () => void } | null;
+}) {
+  const band = likelihoodBand(row.likelihood);
+  const pct = Math.round(row.likelihood * 100);
+  // Two maps, as on the old list row: "previous occasions" reads the counts
+  // with this paper taken out; the client token states a HOLDING, which this
+  // paper is part of (see `evidenceTokens`).
+  const own = withoutOwnPaper(row, paperCounts);
+  const evidence = confirmedEvidence(row, own, clientCwids);
+  const firedCount = evidence.filter((e) => e.fired).length;
+  const clientToken =
+    evidenceTokens(row, clientCwids, paperCounts, own).find((t) =>
+      t.label.startsWith("Client co-author"),
+    ) ?? null;
+  const footnote = priorFootnote(
+    row.topicalPrior,
+    evidence.some((e) => e.kind === "affinity" && e.fired),
+  );
+  const methodFamilies = row.methodTier
+    ? [...new Set(row.methodEvidence.map((m) => m.family))]
+    : [];
+  const revokeButton = (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={revoked ? onUndo : onRevoke}
+      className="border-border-strong text-foreground bg-background inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm disabled:opacity-50"
+    >
+      <Undo2 className="size-3.5" aria-hidden /> {revoked ? "Undo" : "Revoke"}
+    </button>
+  );
+  const publicLine = revoked ? "Revoked, re-files on next load" : "on the public core page";
+  return (
+    <article
+      data-slot="core-queue-confirmed-focus"
+      data-pmid={row.pmid}
+      aria-label={`Confirmed: ${row.title}`}
+      className={`${
+        sheetOpen ? "fixed inset-0 z-40 flex overflow-y-auto" : "hidden"
+      } bg-apollo-surface lg:border-apollo-border min-w-0 flex-col gap-4 p-5 lg:sticky lg:inset-auto lg:top-4 lg:z-auto lg:flex lg:overflow-visible lg:rounded-[var(--apollo-radius-card)] lg:border lg:px-[22px] lg:py-5 lg:shadow-[var(--apollo-shadow-card)]`}
+    >
+      <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
+        <span>{position}</span>
+        <span className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={!hasPrev}
+            onClick={onPrev}
+            className="hover:text-foreground rounded-md px-2 py-1 disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            disabled={!hasNext}
+            onClick={onNext}
+            className="hover:text-foreground rounded-md px-2 py-1 disabled:opacity-40"
+          >
+            Next
+          </button>
+          <button
+            type="button"
+            onClick={onCloseSheet}
+            aria-label="Close paper"
+            className="border-apollo-border-strong text-foreground ml-1 inline-flex size-7 items-center justify-center rounded-md border lg:hidden"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+        </span>
+      </div>
+
+      <div>
+        <h3 className="text-foreground text-[19px] leading-snug font-medium text-pretty">
+          {displayTitle(row.title)}
+        </h3>
+        <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px]">
+          {row.year !== null ? (
+            <>
+              <span className="tabular-nums">{row.year}</span>
+              <span className="text-muted-foreground/60" aria-hidden>
+                ·
+              </span>
+            </>
+          ) : null}
+          {row.pubmedUrl ? (
+            <a
+              href={row.pubmedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-apollo-slate inline-flex items-center gap-1 tabular-nums hover:underline"
+            >
+              PMID {row.pmid} <ExternalLink className="size-3" aria-hidden />
+            </a>
+          ) : (
+            <span className="tabular-nums">PMID {row.pmid}</span>
+          )}
+          <button
+            type="button"
+            onClick={onCopyPmid}
+            title={copied ? "PMID copied" : "Copy PMID"}
+            aria-label={copied ? "PMID copied" : "Copy PMID"}
+            className="border-border-strong text-muted-foreground hover:text-foreground bg-apollo-surface-2 inline-flex size-5 items-center justify-center rounded border"
+          >
+            {copied ? (
+              <Check className="size-3 text-emerald-600" aria-hidden />
+            ) : (
+              <Copy className="size-3" aria-hidden />
+            )}
+          </button>
+        </div>
+        <Byline row={row} clientCwids={clientCwids} />
+      </div>
+
+      {row.isManual ? (
+        <>
+          <div className="bg-apollo-surface-2 flex flex-wrap items-center gap-3 rounded-[10px] px-3.5 py-3">
+            <div className="min-w-0 flex-[1_1_180px]">
+              <div className="text-apollo-slate text-[11px] font-semibold tracking-[0.04em] uppercase">
+                Added by PMID
+              </div>
+              <div className="text-muted-foreground mt-1 text-xs">
+                Not scored by the engine · {publicLine}
+              </div>
+            </div>
+            {revokeButton}
+          </div>
+          <p className="bg-apollo-surface-2 rounded-lg px-3 py-2.5 text-[12.5px] leading-relaxed text-[var(--evidence-body)]">
+            This paper was added by PMID. The engine never scored it for this core, so there is no
+            evidence to show.
+          </p>
+        </>
+      ) : (
+        <div data-slot="core-queue-confirmed-evidence" className="flex flex-col gap-4">
+          <div
+            className={`flex flex-wrap items-center gap-3 rounded-[10px] border px-3.5 py-3 ${band.tint}`}
+          >
+            <div className="min-w-0 flex-[1_1_180px]">
+              <div className="text-[11px] font-semibold tracking-[0.08em] uppercase">
+                {band.label} {pct}%
+              </div>
+              <span className="bg-apollo-surface mt-1.5 block h-1 overflow-hidden rounded-full">
+                <span
+                  className={`block h-full rounded-full ${band.fill}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </span>
+              <div className="text-muted-foreground mt-1 text-xs">
+                {firedCount} of {SIGNAL_COUNT} signals fired · {publicLine}
+              </div>
+            </div>
+            {revokeButton}
+          </div>
+
+          <div>
+            <p className="text-muted-foreground border-apollo-border-strong border-b pb-2 text-[11px] tracking-[0.1em] uppercase">
+              Why this was confirmed
+            </p>
+            <ul aria-label="Signals">
+              {evidence.map((e) => {
+                const action =
+                  e.fired && e.kind === "coauthor"
+                    ? staffAction
+                    : e.fired && e.kind === "affinity"
+                      ? repeatAction
+                      : null;
+                return (
+                  <li
+                    key={e.kind}
+                    data-fired={e.fired}
+                    className={`border-apollo-border grid grid-cols-[minmax(0,150px)_minmax(0,1fr)] items-start gap-3.5 border-b py-3 ${
+                      e.fired ? "" : "opacity-60"
+                    }`}
+                  >
+                    <div>
+                      <div className="text-foreground text-[13px] leading-tight">{e.label}</div>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <StrengthGlyphs dots={e.dots} />
+                        <span className="text-muted-foreground text-[11px]">{e.strength}</span>
+                      </div>
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <span
+                        className={`text-[13px] ${
+                          e.fired ? "text-foreground font-medium" : "text-muted-foreground"
+                        }`}
+                      >
+                        {e.head}
+                      </span>
+                      {e.quote ? (
+                        <blockquote className="border-apollo-border-strong border-l-2 pl-3 text-[13px] leading-normal text-[var(--evidence-body)]">
+                          “<QuoteWithAlias text={e.quote} alias={row.ackAlias} />”
+                        </blockquote>
+                      ) : null}
+                      {e.body ? (
+                        <span className="text-[13px] leading-normal text-[var(--evidence-body)]">
+                          {e.body}
+                        </span>
+                      ) : null}
+                      {e.kind === "coauthor" && e.fired ? (
+                        <span className="text-muted-foreground text-xs">
+                          <CoauthorDetail row={row} />
+                        </span>
+                      ) : null}
+                      {action ? (
+                        <button
+                          type="button"
+                          onClick={action.onClick}
+                          className="text-apollo-slate self-start text-left text-[13px] hover:underline"
+                        >
+                          {action.label}
+                        </button>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {clientToken ? (
+              <div
+                data-slot="core-queue-client-row"
+                className="border-apollo-border grid grid-cols-[minmax(0,150px)_minmax(0,1fr)] items-start gap-3.5 border-b py-3"
+              >
+                <div>
+                  <div className="text-foreground text-[13px] leading-tight">
+                    {clientToken.label}
+                  </div>
+                  <div className="text-muted-foreground mt-1 text-xs">
+                    Known client · not counted
+                  </div>
+                </div>
+                <div className="text-foreground min-w-0 text-[13px] leading-normal font-medium">
+                  {clientToken.value}
+                </div>
+              </div>
+            ) : null}
+            {row.methodTier ? (
+              // Context, not a counted signal: weighted 0.00 in the engine's
+              // combine.WEIGHTS (see `evidenceTokens`), so always with its tier.
+              <div
+                data-slot="core-queue-methods"
+                className="grid grid-cols-[minmax(0,150px)_minmax(0,1fr)] items-start gap-3.5 py-3"
+              >
+                <div>
+                  <div className="text-foreground text-[13px] leading-tight">Method family</div>
+                  <div className="text-muted-foreground mt-1 text-xs">Context only</div>
+                </div>
+                <span className="text-[13px] leading-normal text-[var(--evidence-body)]">
+                  <span className="text-foreground font-medium capitalize">{row.methodTier}</span>{" "}
+                  method match
+                  {methodFamilies.length > 0 ? ` (${methodFamilies.join(", ")})` : ""}. Shows what
+                  the paper did, not whether this core did it.
+                </span>
+              </div>
+            ) : null}
+            {footnote ? (
+              <p className="text-muted-foreground mt-2 text-[12px] leading-relaxed italic">
+                {footnote}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
+      {error ? (
+        <p className="-mt-2 text-xs text-red-600" role="alert">
+          Could not save: {error}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
 // A previously-rejected publication with an inline Restore — the mirror of
-// ConfirmedRow's Revoke. Restore soft-revokes the rejection (re-opens for review).
+// Confirmed tab's Revoke. Restore soft-revokes the rejection (re-opens for review).
 function RejectedRow({
   row,
   restored,

@@ -171,7 +171,7 @@ An owner who knows a paper used their core — one the engine never scored, or s
 
 **Read path.** All three consumers (`loadCoreReviewQueue`/`lib/api/core-queue.ts`, `getCorePage`/`lib/api/cores.ts`, `resolvePublicationCores`/`lib/api/publication-detail.ts`) now run a fourth query for `core_claim` rows with no matching `publication_core` row (CLAIMED only — a REJECTED claim with nothing to reject isn't surfaced), joined directly to `Publication` (and `Core`, for the modal) for display fields, and union the result into the same collection handed to the existing partition/select functions — the shape `getMenteesForMentor` (`lib/api/mentoring.ts`) already used to fold `getManualMentees` (`lib/api/manual-layer.ts`) in alongside engine-sourced queries. `core-merge.ts` needed no changes: `effectiveCoreStatus`/`isEffectiveConfirmed` already short-circuit on an active claim before reading engine status, so a manual row's placeholder `status` field is never actually read. New `isManual: boolean` field on `CoreQueueRow`, threaded through so the UI can label the row.
 
-**UI.** An "Add PMIDs" affordance in the owner queue header, alongside "Download CSV" and "Known clients" — a textarea taking a newline/comma/space-separated block (`parsePmidBlock`, client-side parse + de-dupe), posting to the same bulk endpoint with `status: "claimed"`. The result line reports added / already-claimed / not-found-in-SPS, then `router.refresh()`s so the new row's real title/journal/etc. comes from the server (the component has no local data for a pmid it didn't already have in props). Turns out the once-open "likelihood bar" display question resolved itself for free: `partitionCoreQueue` always routes an active `claimed` claim straight to the **Confirmed** tab, which renders the compact `ConfirmedRow` (title/year/PMID/Revoke) — it never reaches the candidate-card likelihood-bar rendering at all. `ConfirmedRow` shows a small "Manually added" badge when `isManual` is set, so the row's missing evidence trail is explained rather than silently absent.
+**UI.** An "Add PMIDs" affordance in the owner queue header, alongside "Download CSV" and "Known clients" — a textarea taking a newline/comma/space-separated block (`parsePmidBlock`, client-side parse + de-dupe), posting to the same bulk endpoint with `status: "claimed"`. The result line reports added / already-claimed / not-found-in-SPS, then `router.refresh()`s so the new row's real title/journal/etc. comes from the server (the component has no local data for a pmid it didn't already have in props). Turns out the once-open "likelihood bar" display question resolved itself for free: `partitionCoreQueue` always routes an active `claimed` claim straight to the **Confirmed** tab, which lists it as a `ConfirmedListRow` — it never reaches the candidate-card likelihood-bar rendering at all. A manual row shows a small "Manually added" marker in place of the band (and no signal strip) when `isManual` is set, so the row's missing evidence trail is explained rather than silently absent; it files under the rail's "Added by you" group.
 
 ## Send to review — `POST /api/edit/core-queue-add` (Queue v2 PR B)
 
@@ -273,17 +273,25 @@ Once at least one candidate has been confirmed or rejected, the single "To revie
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Confirmed tab** — compact rows, not full cards (the review work is done):
+**Confirmed tab** — three panes, like To review (Core publication queue mockup refresh):
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ +  Spatial transcriptomics of the tumor microenvironment...         [Revoke] │
-│    2026 . PMID 39812345                                                      │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ +  Multiplexed imaging reveals immune cell heterogeneity...         [Revoke] │
-│    2025 . PMID 38209981                                                      │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────┬───────────────────────────────────┬──────────────────────────────────┐
+│ [By evidence|   │ All confirmed                     │ 1 of 36 shown     Previous  Next │
+│  By person]     │ [ ] Select all 36 shown  [Revoke] │ Spatial transcriptomics of ...   │
+│ All confirmed 36│ ┃ Spatial transcriptomics ... STRONG 99% │ 2026 · PMID 39812345 ↗    │
+│ Ack + LLM     14│ ┃ 2026 · PMID 39812345             │ STRONG 99%  ▬▬▬▬▬▬▬   [Revoke] │
+│ Staff + LLM    4│ ┃ [Ack][Staff][LLM][Repeat]        │ 2 of 4 signals fired · on the   │
+│ LLM read      12│ ┃ Multiplexed imaging ...          │ public core page                │
+│ ...             │ ┃ ...                              │ WHY THIS WAS CONFIRMED          │
+│ About these     │                                   │ Acknowledgment  "We thank ..."  │
+│ signals         │                                   │ Staff co-author Did not fire... │
+└─────────────────┴───────────────────────────────────┴──────────────────────────────────┘
 ```
+
+- **Rail.** "By evidence" groups confirmed papers with the same `buildEvidenceGroups` To review uses (each row's evidence key reads its `withoutOwnPaper` counts, the same ones its strip and pane read); manual adds file under "Added by you". "By person" opens on Everyone and lists every byline author with a confirmed paper here (`buildRailPeople`, holdings as loaded). Counts exclude rows revoked this session. Below `lg` the rail is a select, as on To review. "About these signals" carries the live staff line (`staffTrackedCount` of `staffCount`).
+- **List.** Each row has its band word and percent in the band colour (no pill, and no band spine: only the focused row gets the slate spine, as in the mockup) and the four-cell signal strip (`signalStrip`: Ack / Staff / LLM / Repeat, fired cells tinted), plus a quiet "Client co-author" chip when a known client is on the byline. The list sorts "Strongest first" (the `likelihood` key, default) or "Newest" (`year`). The search box, Filters, the selection bar's bulk Revoke and its guard are unchanged.
+- **Pane.** "N of 4 signals fired · on the public core page", Revoke (posting what `revokeStatusFor` says), and "Why this was confirmed": all four counted signals off `confirmedEvidence`, the fired ones with their evidence (the acknowledgment quote, the core staff, the LLM score and rationale, the repeat-user sentence) and the rest as "Did not fire: …". Then the uncounted context To review shows: a known client ("Known client · not counted"), the method family (context only) and the topical-prior footnote. The staff and repeat-user rows link to that person under By person. Below `lg` the pane is a full-screen sheet opened by tapping a row; Escape closes it.
 
 **Rejected tab** — same shape, mirrored action:
 
@@ -294,7 +302,7 @@ Once at least one candidate has been confirmed or rejected, the single "To revie
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Revoking/restoring keeps the row visible for the session with a one-line "Revoked — …" / "Restored — …" state and an Undo, rather than yanking it out of the list immediately — it re-files into the correct tab on next page load.
+Revoking/restoring keeps the row visible for the session rather than yanking it out of the list immediately — it re-files into the correct tab on next page load. On Confirmed the row stays in the list struck through and marked "Revoked", loses its checkbox, and the pane says "Revoked, re-files on next load" with an Undo; on Rejected the row becomes a one-line "Restored — …" state with its Undo.
 
 ### A decided card, mid-session (before the page reloads)
 

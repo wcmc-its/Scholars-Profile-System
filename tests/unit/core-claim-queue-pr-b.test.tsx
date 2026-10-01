@@ -150,10 +150,13 @@ describe("bulk Revoke on the Confirmed tab", () => {
         body: { coreId: "2", pmids: ["33"], status: "rejected" },
       },
     ]);
-    await waitFor(() =>
-      expect(screen.getAllByText(/— Revoked, re-files on next load/)).toHaveLength(3),
-    );
-    expect(screen.getAllByRole("button", { name: /^undo$/i })).toHaveLength(3);
+    // Each row stays listed, marked Revoked, and keeps its own Undo in the pane.
+    const list = screen.getByRole("list", { name: "Confirmed papers" });
+    await waitFor(() => expect(within(list).getAllByText(/· Revoked$/)).toHaveLength(3));
+    for (const title of ["Claimed alpha", "Claimed beta", "Engine gamma"]) {
+      fireEvent.click(within(list).getByText(title));
+      expect(screen.getByRole("button", { name: /^undo$/i })).toBeTruthy();
+    }
     // the bar is back to nothing selected
     expect(screen.getByRole("button", { name: "Revoke selected" })).toBeTruthy();
   });
@@ -165,7 +168,10 @@ describe("bulk Revoke on the Confirmed tab", () => {
     fireEvent.click(screen.getByLabelText(/^Select all 2/));
     fireEvent.click(screen.getByRole("button", { name: "Revoke 2 selected" }));
     fireEvent.click(within(historyGuard()!).getByRole("button", { name: "Revoke 2" }));
-    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    // Both rows say so in the list; the pane spells out the open one's error.
+    const list = screen.getByRole("list", { name: "Confirmed papers" });
+    await waitFor(() => expect(within(list).getAllByText("Not saved")).toHaveLength(2));
+    expect(screen.getByRole("alert").textContent).toContain("bulk revoke failed");
     expect(screen.queryByText(/re-files on next load/)).toBeNull();
   });
 
