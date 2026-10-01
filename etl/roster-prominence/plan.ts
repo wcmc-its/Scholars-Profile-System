@@ -28,17 +28,40 @@ export const SCORE_DROP_EPSILON = 0.5;
 export const MAX_SCORED_DROP_PCT = 20;
 export const MAX_LEADER_DROP_PCT = 20;
 export const MAX_SCORE_DROPS_PCT = 10;
+export const MAX_GRANT_LOSS_PCT = 20;
+
+/** The tiers `classifyLeadership` can award from an `org_unit_role_assignment`
+ *  row (department chair/director, center director, division chief). Every
+ *  other tier (deanery, endowed, program director, academic rank) comes from
+ *  title text alone, so an emptied role table cannot move it. */
+export const ROLE_TIERS: ReadonlySet<number> = new Set([
+  LEADERSHIP_TIER.chair,
+  LEADERSHIP_TIER.institutionalCenterDirector,
+  LEADERSHIP_TIER.divisionChief,
+]);
+
+/** A score fall this large, on a scholar with no grant score tonight, reads as
+ *  lost grants: just under one PI grant's weight (0.5 · ln 2 ≈ 0.35). */
+export const GRANT_LOSS_EPSILON = 0.3;
 
 /**
  * Refuse to write when tonight's result is implausibly thin vs. what is stored:
  *
  *  - `roster-prominence:scholars`  — fewer scholars scored (a short scholar read).
- *  - `roster-prominence:leaders`   — fewer scholars in any leadership tier (an
- *    emptied `org_unit_role_assignment`, or titles nulled upstream).
+ *  - `roster-prominence:leaders`   — too many held ROLE-tier leaders (`ROLE_TIERS`)
+ *    demoted: a worse tier tonight, or a score fall over `SCORE_DROP_EPSILON`
+ *    (the chair/chief weight lost while the title keeps the tier). An emptied
+ *    `org_unit_role_assignment`. Title-only tiers are left out on purpose: they
+ *    outnumber the role-backed leaders and would dilute a role wipe away.
  *  - `roster-prominence:score-drops` — too many scholars' scores FELL by more than
- *    `SCORE_DROP_EPSILON` (an emptied `grant` table, `scored_pub_count` wiped).
- *    Also trips on a weight tuned DOWN, deliberately: rerun with the bypass
+ *    `SCORE_DROP_EPSILON` (`scored_pub_count` wiped). Also trips on a weight
+ *    tuned DOWN, deliberately: rerun with the bypass
  *    (docs/OPERATIONS-RUNBOOK.md, "Roster prominence").
+ *  - `roster-prominence:grants`    — too many grant holders LOST their grant
+ *    score: of the scholars with a grant score tonight plus those with none
+ *    whose score fell over `GRANT_LOSS_EPSILON`, the latter share. An emptied
+ *    `grant` table, which score-drops misses when grant holders are a small
+ *    share of the roster. A weight tuned down can trip it too; same bypass.
  *
  * Every guard no-ops on a first run (nothing stored yet).
  */
@@ -53,25 +76,42 @@ export function assertRosterProminenceVolume(
     maxDropPct: MAX_SCORED_DROP_PCT,
   });
 
-  const isLeader = (tier: number | null) => tier !== null && tier < LEADERSHIP_TIER.none;
-  assertSourceVolume("roster-prominence:leaders", {
-    incoming: [...computed.values()].filter((e) => isLeader(e.leadershipTier)).length,
-    existing: held.filter((s) => isLeader(s.rosterLeadershipTier)).length,
-    maxDropPct: MAX_LEADER_DROP_PCT,
-  });
-
   let comparable = 0;
   let dropped = 0;
+  let roleLeaders = 0;
+  let demoted = 0;
+  let grantHolders = 0;
+  let grantsLost = 0;
   for (const s of held) {
     const next = computed.get(s.cwid);
     if (!next) continue;
     comparable++;
-    if (s.rosterProminence! - next.prominence > SCORE_DROP_EPSILON) dropped++;
+    const fall = s.rosterProminence! - next.prominence;
+    if (fall > SCORE_DROP_EPSILON) dropped++;
+    const tier = s.rosterLeadershipTier;
+    if (tier !== null && ROLE_TIERS.has(tier)) {
+      roleLeaders++;
+      if (next.leadershipTier > tier || fall > SCORE_DROP_EPSILON) demoted++;
+    }
+    if (next.grantScore > 0) grantHolders++;
+    else if (fall > GRANT_LOSS_EPSILON) grantsLost++;
   }
   assertPruneVolume("roster-prominence:score-drops", {
     pruning: dropped,
     of: comparable,
     maxPct: MAX_SCORE_DROPS_PCT,
+  });
+  // The cohort guards run after score-drops, so a broad fall (pubs wiped) is
+  // named for what it is rather than for whichever cohort it also thins.
+  assertPruneVolume("roster-prominence:leaders", {
+    pruning: demoted,
+    of: roleLeaders,
+    maxPct: MAX_LEADER_DROP_PCT,
+  });
+  assertPruneVolume("roster-prominence:grants", {
+    pruning: grantsLost,
+    of: grantHolders + grantsLost,
+    maxPct: MAX_GRANT_LOSS_PCT,
   });
 }
 

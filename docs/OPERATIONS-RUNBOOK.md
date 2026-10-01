@@ -424,15 +424,16 @@ Verify before bypassing: confirm with CTSC that the roster really shrank (or tha
 
 Nightly step `RosterProminenceNightly` (`npm run etl:roster-prominence`, [`etl/roster-prominence/index.ts`](../etl/roster-prominence/index.ts); #2596) writes `scholar.roster_prominence` and `scholar.roster_leadership_tier` from `computeProminence` in [`lib/api/prominence.ts`](../lib/api/prominence.ts). The formula and weights live only there; this step is the writer. It writes only changed rows, clears deleted scholars to NULL, and leaves `updated_at` alone. Freshness source `RosterProminence`, cadence nightly. `tier: "continue"`: a failed night keeps last night's values.
 
-**Tuning a weight.** The stored values move only when this step runs. ETL code ships on the ECR push, so the next nightly picks up a merged weight change. To see it sooner, run the step once on a one-off `run-task` of `sps-etl-<env>` with command `npm run etl:roster-prominence`. A weight tuned *down* trips `roster-prominence:score-drops` by design; run that once with `ETL_GUARD_BYPASS="roster-prominence:score-drops"`.
+**Tuning a weight.** The stored values move only when this step runs. ETL code ships on the ECR push, so the next nightly picks up a merged weight change. To see it sooner, run the step once on a one-off `run-task` of `sps-etl-<env>` with command `npm run etl:roster-prominence`. A weight tuned *down* trips `roster-prominence:score-drops` (and can trip `roster-prominence:grants`) by design; run that once with `ETL_GUARD_BYPASS="roster-prominence:score-drops,roster-prominence:grants"`.
 
 **Guards** (all refuse to write; nothing changes on a refusal; each skips the first run):
 
 | Guard | Trips when | Usual cause |
 |---|---|---|
 | `roster-prominence:scholars` | Scholars scored drop more than 20% below the scored rows held | Short scholar read |
-| `roster-prominence:leaders` | Scholars in any leadership tier drop more than 20% | Emptied role assignments, or titles nulled by an ED run |
-| `roster-prominence:score-drops` | More than 10% of held scholars' scores fall by over 0.5 | Emptied `grant` table or wiped `scored_pub_count`; also a weight tuned down |
+| `roster-prominence:score-drops` | More than 10% of held scholars' scores fall by over 0.5 | Wiped `scored_pub_count`; also a weight tuned down |
+| `roster-prominence:leaders` | More than 20% of scholars held at a role-awarded tier (chair 4, center director 5, chief 6) get a worse tier or lose over 0.5 of score | Emptied `org_unit_role_assignment` |
+| `roster-prominence:grants` | Of scholars with a PI-grant score tonight plus those with none whose score fell over 0.3, the latter are more than 20% | Emptied `grant` table; also a weight tuned down |
 
 Verify the inputs before bypassing (`grant`, `org_unit_role_assignment`, `scholar.scored_pub_count` row counts against the previous night).
 
