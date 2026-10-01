@@ -21,7 +21,7 @@ overridden status — the HTTP response status is **200**, with the branded
 the SPEC's denial copy; only the wire status is 200 rather than 403.
 
 The **unauthenticated** case is different and unaffected: no session →
-`redirect("/api/auth/saml/login?return=…")` (302), reinforced by `middleware.ts`
+`redirect("/api/auth/saml/login?return=…")` (302), reinforced by `proxy.ts`
 matching `/edit*`. This doc is only about the *authenticated-but-not-permitted*
 case.
 

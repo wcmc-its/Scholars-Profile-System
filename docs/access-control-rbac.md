@@ -29,7 +29,7 @@ Plus **break-glass** — the emergency-access and kill-switch procedures.
   `/centers`, `/search` pages are anonymous.
 - **Editing** requires **WCM SSO via SAML 2.0** (`login-proxy.weill.cornell.edu`). The
   session cookie is HttpOnly, Secure, SameSite=Lax, scoped to the host. There is never a
-  token in a URL. `middleware.ts` gates `/edit/*` and `/api/edit/*`; an unauthenticated hit
+  token in a URL. `proxy.ts` gates `/edit/*` and `/api/edit/*`; an unauthenticated hit
   redirects to SSO. Session ≈ 8 h. See [`saml-sp.md`](./saml-sp.md).
 
 ### The roles
