@@ -11,7 +11,7 @@ import {
 } from "@/components/profile/author-position-badge";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
-import type { ProfilePublication } from "@/lib/api/profile";
+import type { ProfileClientPublication } from "@/lib/profile/client-publication";
 import { Caret } from "@/components/ui/caret";
 
 /**
@@ -53,7 +53,7 @@ export function PublicationsSection({
   onPositionsChange,
   scholarCwid,
 }: {
-  publications: ProfilePublication[];
+  publications: ProfileClientPublication[];
   /** The scholar whose profile these pubs belong to. Threaded to
    *  <PublicationRow> so PersonPopover can apply the self-hover guard and
    *  route co-author chips to the co-author surface (#242). */

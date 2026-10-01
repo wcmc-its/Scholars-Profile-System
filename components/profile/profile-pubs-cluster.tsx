@@ -2,7 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import type { ProfilePublication, ScholarFamilyView, ScholarKeyword } from "@/lib/api/profile";
+import type { ScholarFamilyView, ScholarKeyword } from "@/lib/api/profile";
+import type { ProfileClientPublication } from "@/lib/profile/client-publication";
 import {
   ActiveFilterBanner,
   POSITION_BANNER_LABEL,
@@ -35,7 +36,7 @@ const VALID_NON_ALL_POSITIONS: ReadonlySet<Exclude<PositionFilter, "all">> = new
  * (curated 3-item list, not a feed).
  */
 type ProfilePubsClusterProps = {
-  publications: ProfilePublication[];
+  publications: ProfileClientPublication[];
   keywords: ScholarKeyword[];
   /** #799 — family-primary Methods lens rows; empty when the lens flag is off. */
   families: ScholarFamilyView[];

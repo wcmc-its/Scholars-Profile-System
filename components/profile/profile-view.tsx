@@ -40,6 +40,7 @@ import {
   type ProfilePayload,
   type ProfilePublication,
 } from "@/lib/api/profile";
+import { toClientPublication } from "@/lib/profile/client-publication";
 import { serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   groupProfileAppointments,
@@ -205,6 +206,11 @@ export async function ProfileView({ slug }: { slug: string }) {
   // count and the active-trial count are all gone from here — each was already
   // stated by its own section body (year groups; an "Active" grants heading;
   // an "Active" trials group). Nothing was lost, only de-duplicated.
+
+  // #2213 — one slimmed array, passed to both client components below so the
+  // RSC payload serializes it once (the fallback and the cluster share the
+  // reference).
+  const clientPublications = profile.publications.map(toClientPublication);
 
   return (
     <>
@@ -627,13 +633,13 @@ export async function ProfileView({ slug }: { slug: string }) {
               <Suspense
                 fallback={
                   <PublicationsSection
-                    publications={profile.publications}
+                    publications={clientPublications}
                     scholarCwid={profile.cwid}
                   />
                 }
               >
                 <ProfilePubsCluster
-                  publications={profile.publications}
+                  publications={clientPublications}
                   keywords={profile.keywords.keywords}
                   families={profile.families}
                   sensitiveGateActive={
