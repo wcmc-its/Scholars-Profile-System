@@ -252,6 +252,9 @@ export type OrgUnitRoleRosterProps = {
   roles: ReadonlyArray<OrgUnitRoleRosterRow>;
   /** The page's title + intro, laid out beside the "Add role" button. */
   intro?: React.ReactNode;
+  /** Observers and content editors read the vocabulary: no Add role, and the
+   *  table's controls go inert. The kind tabs stay usable. */
+  readOnly?: boolean;
 };
 
 /** Each role group's heading sub-line. */
@@ -291,7 +294,7 @@ export function moveWrites(
     .filter(({ row, sortOrder }) => row.sortOrder !== sortOrder);
 }
 
-export function OrgUnitRoleRoster({ roles, intro }: OrgUnitRoleRosterProps) {
+export function OrgUnitRoleRoster({ roles, intro, readOnly = false }: OrgUnitRoleRosterProps) {
   const [rows, setRows] = React.useState<OrgUnitRoleRosterRow[]>(() =>
     roles.map((r) => ({ ...r })),
   );
@@ -447,15 +450,17 @@ export function OrgUnitRoleRoster({ roles, intro }: OrgUnitRoleRosterProps) {
     <div className="flex flex-col gap-[22px]" data-slot="org-unit-role-roster">
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-0 flex-1 basis-[300px]">{intro}</div>
-        <Button
-          type="button"
-          variant="apollo"
-          onClick={() => setAddOpen(true)}
-          data-testid="roles-add-trigger"
-        >
-          <Plus className="size-4" />
-          Add role
-        </Button>
+        {readOnly ? null : (
+          <Button
+            type="button"
+            variant="apollo"
+            onClick={() => setAddOpen(true)}
+            data-testid="roles-add-trigger"
+          >
+            <Plus className="size-4" />
+            Add role
+          </Button>
+        )}
       </div>
 
       <div
@@ -515,7 +520,14 @@ export function OrgUnitRoleRoster({ roles, intro }: OrgUnitRoleRosterProps) {
         </div>
       )}
 
-      <div role="tabpanel" className="flex flex-col gap-[22px]" data-testid={`roles-panel-${kind}`}>
+      {/* Read-only viewers (observer, content editor) switch kinds freely; the
+          table's rename / reorder / profile-title / delete controls go inert. */}
+      <div
+        role="tabpanel"
+        className="flex flex-col gap-[22px]"
+        data-testid={`roles-panel-${kind}`}
+        inert={readOnly || undefined}
+      >
         {ROLE_GROUP_ORDER.filter((g) => byGroup.has(g)).map((roleGroup) => (
           <section
             key={roleGroup}

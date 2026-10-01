@@ -137,6 +137,14 @@ export type VisibilityCardProps = {
    */
   thirdPerson?: boolean;
   /**
+   * Whether this editor may hide / restore the WHOLE profile. False for a
+   * delegated editor (proxy, unit admin, content editor): the suppress route
+   * refuses them a whole-scholar hide and the revoke route the scholar's own
+   * hide, so the panel shows the status only. The Sections toggles below are
+   * unaffected (they authorize like the bio). Default true.
+   */
+  profileControls?: boolean;
+  /**
    * section-visibility-spec — the Sections panel state (the seven whole-section
    * hide toggles). When provided, a second "Sections" panel renders below the
    * whole-profile control. Omitted ⇒ the panel is not rendered, so existing
@@ -151,6 +159,7 @@ export function VisibilityCard({
   scholarName,
   mode = "self",
   thirdPerson = false,
+  profileControls = true,
   sections,
 }: VisibilityCardProps) {
   const router = useRouter();
@@ -278,7 +287,11 @@ export function VisibilityCard({
         }
       >
         <div className="flex flex-col gap-3">
-          {mode === "self"
+          {!profileControls ? (
+            <p className="text-sm" data-testid="visibility-status-only">
+              {`${scholarName ?? "This scholar"}'s profile is ${isHidden ? "hidden from" : "visible to"} the public. Only the scholar or a site administrator can hide or restore the whole profile.`}
+            </p>
+          ) : mode === "self"
             ? renderSelfBody({
                 ownRow,
                 adminRow,

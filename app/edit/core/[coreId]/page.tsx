@@ -191,6 +191,7 @@ export default async function EditCorePage({
       leaders={leaders}
       roleLabels={roleLabels}
       access={access}
+      accessReadOnly={session.isContentEditor === true}
       actorCwid={session.cwid}
       actorRole={actorRole}
       pending={{

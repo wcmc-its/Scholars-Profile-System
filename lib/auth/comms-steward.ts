@@ -8,11 +8,16 @@
  * (`lib/auth/superuser.ts`, which this module mirrors). The verdict is paired
  * into `EditSession` as `isCommsSteward` by `getEditSession()`.
  *
- * The role is **global** (not per-scholar, not unit-scoped) and unlocks **only**
- * the Method-Family surface (§5–§7). It is NOT a superuser: it confers no
- * profile-field writes and no other `/edit` tabs. Superusers pass every
- * `comms_steward` guard (superset) — that direction lives in the authz
- * predicate, not here.
+ * The role is **global** (not per-scholar, not unit-scoped). It began as the
+ * Method-Family surface only (§5–§7) and has since widened to superuser profile
+ * parity minus slugs and proxy delegation (bios, Highlights, hides, takedowns,
+ * display-title pins), unit/center/core content, the news queues, the role
+ * vocabulary, and granting Owner/Curator and report access. It is NOT a
+ * superuser. Superusers pass every `comms_steward` guard (superset) — that
+ * direction lives in the authz predicates, not here. Each widening lives in
+ * its predicate in `lib/edit/authz.ts` and the routes; read those, not this
+ * summary, for the current scope. The `content_editor` and `observer` roles
+ * borrow a SYNTHETIC steward flag for reads (`lib/auth/observer-view.ts`).
  *
  * The comms-steward group is a real Enterprise Directory group object under
  * `ou=Groups` (cn env `SCHOLARS_COMMS_STEWARD_GROUP_CN`, e.g.

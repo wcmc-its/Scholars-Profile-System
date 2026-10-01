@@ -1104,15 +1104,18 @@ describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () =>
     },
   );
 
+  // A delegated editor (proxy, unit admin, content editor) may not hide or
+  // restore the WHOLE profile: the suppress route excludes `scholar` from its
+  // delegated allowlist (PE-03 as amended 2026-09-22), so the button only ever
+  // 403'd. The panel keeps the third-person status and the self state machine.
   it.each(["proxy", "unit-admin"] as const)(
-    "Visibility tab is third-person but keeps the self (ownRow) controls for a %s editor",
+    "Visibility tab is third-person, status only, for a %s editor",
     (mode) => {
       render(<EditPage ctx={superuserCtx} mode={mode} attr="visibility" />);
-      // Third-person copy…
-      expect(screen.getByText(/Alex Other's profile is visible to the public/)).toBeTruthy();
-      expect(screen.getByTestId("visibility-hide").textContent).toBe("Hide profile");
-      // …but the SELF state machine (data-mode='self'): a proxy hides via the
-      // scholar's own row, never an admin hold.
+      expect(screen.getByTestId("visibility-status-only").textContent).toContain(
+        "Alex Other's profile is visible to the public",
+      );
+      expect(screen.queryByTestId("visibility-hide")).toBeNull();
       expect(
         document.querySelector('[data-slot="visibility-card"]')?.getAttribute("data-mode"),
       ).toBe("self");
@@ -1328,6 +1331,23 @@ describe("EditPage router — superuser mode", () => {
     const panel = document.querySelector('[data-slot="highlights-card"]');
     expect(panel?.textContent).toContain("on their behalf");
     expect(panel?.textContent).not.toContain("yourself");
+  });
+
+  // A content editor edits in unit-admin mode, and its read session loads
+  // Highlights (a real unit admin's never does, so `ctx.highlights` is null).
+  it("surfaces Highlights in unit-admin mode when the loader populated it (a content editor)", () => {
+    const withHighlights: EditContext = {
+      ...superuserCtx,
+      highlights: { manualEnabled: false, manualPmids: [], aiPmids: [], pickable: [] },
+    };
+    render(<EditPage ctx={withHighlights} mode="unit-admin" attr="highlights" />);
+    expect(screen.getByTestId("rail-highlights")).toBeTruthy();
+    expect(document.querySelector('[data-slot="highlights-card"]')).toBeTruthy();
+  });
+
+  it("no Highlights in unit-admin mode when the loader left it null (a real unit admin)", () => {
+    render(<EditPage ctx={superuserCtx} mode="unit-admin" />);
+    expect(screen.queryByTestId("rail-highlights")).toBeNull();
   });
 
   it("drops the Highlights rail item in superuser mode when the loader left it null (flag off / not loaded)", () => {

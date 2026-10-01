@@ -64,6 +64,9 @@ import {
   FUNCTIONAL_ROLES,
   isFunctionalRole,
   normalizeScopes,
+  DASHBOARDS,
+  DASHBOARD_LABEL,
+  DASHBOARD_SCOPE_PREFIX,
   sameScopes,
   scopesFromJson,
   type ExternalAffairsFunction,
@@ -94,8 +97,9 @@ function reportName(reportKey: string): string {
 /**
  * Reporting's scope options: "All reports", then each person-grantable report
  * (`REPORT_ACCESS_SCOPE_OPTIONS`) as a whole, then each of its sub-scopes
- * ("Mentored publications · MD"). Keys: `"*"`, `reportKey`,
- * `"reportKey:scope"`: the same shape the import writes.
+ * ("Mentored publications · MD"), then each dashboard ("Dashboard · COI").
+ * Keys: `"*"`, `reportKey`, `"reportKey:scope"` (the shape the import
+ * writes), `"dash:<dashboard>"`.
  */
 export function reportingScopeOptions(): FunctionalRoleScopeOption[] {
   const out: FunctionalRoleScopeOption[] = [{ key: ALL_SCOPE, label: "All reports" }];
@@ -106,6 +110,10 @@ export function reportingScopeOptions(): FunctionalRoleScopeOption[] {
       if (scopeKey === ALL_SCOPE) continue;
       out.push({ key: `${reportKey}:${scopeKey}`, label: `${name} · ${label}` });
     }
+  }
+  // Dashboards last, one by one ("All reports" does not cover them).
+  for (const d of DASHBOARDS) {
+    out.push({ key: `${DASHBOARD_SCOPE_PREFIX}${d}`, label: `Dashboard · ${DASHBOARD_LABEL[d]}` });
   }
   return out;
 }

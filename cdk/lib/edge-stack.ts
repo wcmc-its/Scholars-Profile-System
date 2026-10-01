@@ -1346,13 +1346,13 @@ export class EdgeStack extends Stack {
     //   ALL_VIEWER must never be attached here, because it would forward
     //   cookies onto the CACHEABLE path and leak one viewer's HTML to
     //   another.
-    // - #1930/#1931 briefly attached `viewerHostOrp` here so `middleware.ts`
+    // - #1930/#1931 briefly attached `viewerHostOrp` here so `proxy.ts`
     //   could build absolute redirect Locations from the forwarded viewer
     //   `Host` (needed for the legacy VIVO paths -- `/display`, `/individual`,
     //   `/profile` -- which match no behavior below and so are served HERE).
     //   That header was forwarded but not cache-keyed, which made the
     //   default behavior Host-poisonable (reproduced in prod 2026-07-25).
-    //   #1935 closed this at the source: `middleware.ts` now builds those
+    //   #1935 closed this at the source: `proxy.ts` now builds those
     //   Locations from the configured `SITE_URL`, not from `Host`, so
     //   nothing on this behavior needs the header any more. `viewerHostOrp`
     //   was removed (#1944) once #1935 was confirmed running in both envs.

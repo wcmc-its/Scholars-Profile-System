@@ -9,11 +9,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ProxyLookup } from "@/lib/edit/proxy-authz";
 import type { UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 
-const { mockIsGrantedProxy, mockCheckConflict, mockResolveUnit } = vi.hoisted(() => ({
-  mockIsGrantedProxy: vi.fn(),
-  mockCheckConflict: vi.fn(),
-  mockResolveUnit: vi.fn(),
-}));
+const { mockIsGrantedProxy, mockCheckConflict, mockResolveUnit, mockIsObserver } = vi.hoisted(
+  () => ({
+    mockIsGrantedProxy: vi.fn(),
+    mockCheckConflict: vi.fn(),
+    mockResolveUnit: vi.fn(),
+    mockIsObserver: vi.fn(),
+  }),
+);
 
 vi.mock("@/lib/edit/proxy-authz", () => ({
   isGrantedProxy: mockIsGrantedProxy,
@@ -22,6 +25,7 @@ vi.mock("@/lib/edit/proxy-authz", () => ({
 vi.mock("@/lib/edit/unit-scholar-authz", () => ({
   resolveEditableUnitViaUnitAdmin: mockResolveUnit,
 }));
+vi.mock("@/lib/auth/observer", () => ({ isObserver: mockIsObserver }));
 
 import { authorizeCvExport, authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 
@@ -44,6 +48,7 @@ function call(over: Partial<Parameters<typeof authorizeOverviewWrite>[0]> = {}) 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockIsObserver.mockResolvedValue(false);
   mockIsGrantedProxy.mockResolvedValue(false);
   mockCheckConflict.mockResolvedValue({ ok: true });
   mockResolveUnit.mockResolvedValue(null);
@@ -173,5 +178,30 @@ describe("authorizeCvExport (#2482 — the cv_generator widening)", () => {
   it("self / superuser / proxy / unit-admin allows pass through unchanged (no cv_generator needed)", async () => {
     const r = await callCv({ entityId: SELF });
     expect(r).toEqual({ ok: true, viaUnitAdminUnit: null });
+  });
+
+  // The download is a POST: its write preamble has already stripped the
+  // observer's session flag, so the check has to ask about the REAL cwid.
+  it("allows an observer whose session was stripped for the write path", async () => {
+    mockIsObserver.mockResolvedValue(true);
+    const r = await callCv({
+      session: { cwid: "obs001", isSuperuser: false, isCommsSteward: false },
+      realCwid: "obs001",
+      entityId: OTHER,
+    });
+    expect(r).toEqual({ ok: true, viaUnitAdminUnit: null });
+    expect(mockIsObserver).toHaveBeenCalledWith("obs001");
+  });
+
+  it("does not use the observer grant under View as", async () => {
+    mockIsObserver.mockResolvedValue(true);
+    const r = await callCv({
+      session: { cwid: "target1", isSuperuser: false, isCommsSteward: false },
+      realCwid: "obs001",
+      impersonatedCwid: "target1",
+      entityId: OTHER,
+    });
+    expect(r).toEqual({ ok: false, reason: "not_self" });
+    expect(mockIsObserver).not.toHaveBeenCalled();
   });
 });

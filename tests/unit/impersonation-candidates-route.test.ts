@@ -16,7 +16,7 @@ vi.mock("@/lib/auth/session-server", () => ({
   getSession: vi.fn(async () => ({ cwid: "su001", iat: 0, exp: 0 })),
 }));
 vi.mock("@/lib/auth/effective-identity", () => ({ canImpersonate: vi.fn(async () => true) }));
-vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: vi.fn(async () => false) }));
+vi.mock("@/lib/auth/superuser", () => ({ superusersAmong: vi.fn(async () => new Set<string>()) }));
 vi.mock("@/lib/auth/comms-steward", () => ({ listCommsStewardCwids: () => [] }));
 vi.mock("@/lib/db", () => {
   const none = { findMany: vi.fn(async () => []) };

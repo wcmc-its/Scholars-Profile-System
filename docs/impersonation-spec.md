@@ -75,7 +75,7 @@ So `readEditRequest` returns `{ realCwid, effective: EditSession, impersonatedCw
 | request ctx | `lib/edit/request.ts` (edit) | `readEditRequest` → `{ realCwid, effective, impersonatedCwid }` |
 | API | `app/api/impersonation/route.ts` | `POST` start / `DELETE` stop |
 | candidates | `app/api/impersonation/candidates/route.ts` | server-filtered assumable targets (R2 pre-filter) |
-| middleware gate | `middleware.ts` (edit) | route-level enforce on `/api/impersonation` |
+| proxy gate | `proxy.ts` (edit) | route-level enforce on `/api/impersonation` |
 | banner | `components/site/impersonation-banner.tsx` | amber, client-probed via `/api/auth/session` |
 | probe payload | `app/api/auth/session/route.ts` (edit) | add `impersonating` block |
 | switcher | `components/site/impersonation-switcher.tsx` | popover off `account-menu.tsx`, gated render |
@@ -101,7 +101,7 @@ No new LDAP group — **R1 reuses `isSuperuser`** (`ITS:Library:Scholars/superus
 
 ## 6. Security
 
-Enforced in `middleware.ts` on `/api/impersonation` (route-level):
+Enforced in `proxy.ts` on `/api/impersonation` (route-level):
 
 **R1 — Initiator gate.** `canImpersonate(realCwid) = isSuperuser(realCwid) || isObserver(realCwid)` (observer added 2026-09-30: an observer-started overlay is **always read-only** — every write refuses `impersonation_readonly` regardless of `IMPERSONATION_READONLY`; see [`access-control-rbac.md`](./access-control-rbac.md) Observer) — the existing live, fail-closed LDAPS check (`lib/auth/superuser.ts`), against `session.cwid`, **never** the effective cwid.
 

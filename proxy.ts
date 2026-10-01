@@ -11,7 +11,7 @@ import vivoRedirectCwids from "@/data/vivo-redirects.json";
  *
  * Static import of the build-time-generated CWID list from
  * `scripts/etl/generate-vivo-redirect-set.ts`. Wrapped in a Set so lookups are
- * O(1) per request. Edge-safe: no runtime dependency, ~3-4 k strings (~50 KB
+ * O(1) per request. No runtime dependency, ~3-4 k strings (~50 KB
  * uncompressed), evaluated once at cold start.
  */
 const VIVO_CWID_SET = new Set<string>(vivoRedirectCwids as readonly string[]);
@@ -43,34 +43,37 @@ const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)
  *
  * #637 "View as" impersonation: `/api/impersonation*` joins the coarse gate
  * exactly like `/api/edit*` — an unauthenticated request gets a bare 401; the
- * route handler runs the authoritative R1 (`canImpersonate`, an LDAPS check
- * that cannot run in Edge) and the 404-when-flag-off. Middleware adds only a
- * cheap Edge-safe `IMPERSONATION_ENABLED` short-circuit: when the flag is unset
- * the feature is dark, so the route 404s before any handler work — `process.env`
- * is readable in the Edge runtime, but `isSuperuser` (`lib/auth/superuser.ts`,
- * Node-only `ldapts`) is NOT, and is deliberately never imported here.
+ * route handler runs the authoritative R1 (`canImpersonate`, an LDAPS check)
+ * and the 404-when-flag-off. The proxy adds only a cheap
+ * `IMPERSONATION_ENABLED` short-circuit: when the flag is unset the feature is
+ * dark, so the route 404s before any handler work. `isSuperuser`
+ * (`lib/auth/superuser.ts`, `ldapts`) is deliberately never imported here.
  *
- * Edge-safe: imports only `lib/auth/session.ts` (iron-session + config), never
- * `saml.ts` (Node-only), `superuser.ts` (Node-only), or `session-server.ts`
- * (`next/headers`).
+ * Runtime: this file was `middleware.ts` on the Edge runtime until Next 16
+ * renamed the convention to `proxy`, which always runs on Node.js. The Edge
+ * constraint that used to keep `saml.ts`, `superuser.ts` and `session-server.ts`
+ * out of here is gone, but keep the imports to `lib/auth/session.ts`
+ * (iron-session + config) anyway: this runs on EVERY non-static request, so
+ * anything imported here — and any network call it makes — taxes every page.
  */
 /**
  * Attach the runtime Content-Security-Policy headers (#374) to a response.
  *
- * Emitted here, in middleware, rather than from `next.config.ts` `headers()`:
+ * Emitted here, in the proxy, rather than from `next.config.ts` `headers()`:
  * that function is evaluated at `next build` and frozen into the routes
  * manifest, so `SECURITY_CSP_MODE` read there can never flip a deployed image
  * (proven on staging 2026-06-08 — a task-def env change left the baked
- * report-only header unchanged). Middleware runs per request, so the env is
+ * report-only header unchanged). The proxy runs per request, so the env is
  * read live and a task-def flip + service roll promotes the policy with no
  * rebuild. See lib/security-headers.ts.
  *
  * Apply ONLY to document responses (`NextResponse.next()`). It must NOT wrap a
- * redirect. Setting a header on an already-constructed redirect makes the edge
+ * redirect. Setting a header on an already-constructed redirect makes the Next
  * runtime re-finalize the response and re-parse its `Location` through
  * `new URL()`, which throws `TypeError: Invalid URL` and 500s the route
- * (regressed `/edit` when it first shipped, back when Locations here were
- * relative). Redirects and bodyless 401/404s carry no document, so they need no
+ * (regressed `/edit` when it first shipped on the Edge runtime, back when
+ * Locations here were relative; not re-tested on the Node proxy runtime, so
+ * keep the rule). Redirects and bodyless 401/404s carry no document, so they need no
  * CSP anyway — return them directly. The browser gets the CSP on the page it
  * lands on, which is itself a `next()` response.
  *
@@ -115,7 +118,7 @@ function isGatedOrLegacyPath(pathname: string): boolean {
  * Build an ABSOLUTE redirect `Location` for a same-origin path, from the
  * CONFIGURED public origin — never from the viewer-supplied `Host` header.
  *
- * Redirect targets must be absolute: the Next runtime parses a middleware
+ * Redirect targets must be absolute: the Next runtime parses a proxy
  * redirect's `Location` through `new URL()`, which throws `TypeError: Invalid
  * URL` on a bare relative path and 500s the route (this is what broke an
  * unauthenticated `/edit` redirect). `request.nextUrl` cannot supply the base —
@@ -148,7 +151,7 @@ function isGatedOrLegacyPath(pathname: string): boolean {
  *
  * `SITE_URL` is a RUNTIME env var set per-env in the ECS task definition
  * (`cdk/lib/app-stack.ts`, derived from the SAML ACS origin so the two can
- * never disagree). It is readable here: this middleware already gates
+ * never disagree). It is readable here: this proxy already gates
  * `/api/impersonation` on the runtime-only `IMPERSONATION_ENABLED` (#637).
  * The `Host` fallback is for LOCAL DEV ONLY, where neither var is set — every
  * deployed environment always sets `SITE_URL`.
@@ -176,7 +179,7 @@ function absoluteLocation(request: NextRequest, pathAndQuery: string): string {
   return `https://${host}${pathAndQuery}`;
 }
 
-export async function middleware(request: NextRequest): Promise<NextResponse> {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   // Public fast path. The broadened matcher (for CSP coverage) runs this on
   // every non-static request, but the SSO gate + legacy redirects apply only to
   // the prefixes in isGatedOrLegacyPath. Everything else — every public page,
@@ -215,8 +218,8 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // #637 — flag-off short-circuit. When `IMPERSONATION_ENABLED` is unset the
   // whole feature is dark: the route handlers 404, the switcher hides, any
-  // overlay is ignored. Mirror the 404 at the edge so a flag-off deployment
-  // never reaches the handler (cheap; `process.env` is Edge-readable). Runs
+  // overlay is ignored. Mirror the 404 in the proxy so a flag-off deployment
+  // never reaches the handler (cheap: one env read). Runs
   // before the session gate so the response is a 404, not a 401, regardless of
   // auth state — exactly what the handler returns (spec §5/§7).
   if (
@@ -282,7 +285,7 @@ export const config = {
   // Run on every request except Next's own static output and the favicon, so the
   // runtime CSP (#374) covers every HTML document. This is deliberately broader
   // than the gated/legacy prefixes — the SSO gate stays scoped inside
-  // middleware() via isGatedOrLegacyPath, so broadening the matcher widens only
+  // proxy() via isGatedOrLegacyPath, so broadening the matcher widens only
   // header coverage, never the auth gate. Static assets (`_next/static`,
   // `_next/image`) keep the build-time static headers from next.config and need
   // no per-request CSP.

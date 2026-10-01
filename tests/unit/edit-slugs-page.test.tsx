@@ -111,6 +111,23 @@ describe("/edit/slugs — authorization", () => {
     expect(reg.props.total).toBe(1);
     expect(reg.props.counts).toEqual({ active: 1 });
     expect(mockLoadRegistry).toHaveBeenCalledOnce();
+    expect(reg.props.readOnly).toBe(false);
+    expect(asEl(reg.props.requests).props.readOnly).toBe(false);
+  });
+
+  it("observer → renders the registry and request queue read-only", async () => {
+    mockGetEditSession.mockResolvedValue({
+      cwid: "obs001",
+      isSuperuser: false,
+      isCommsSteward: true,
+      isObserver: true,
+    });
+    const result = asEl(await EditSlugsPage({ searchParams: sp() }));
+    const reg = asEl(result.props.children);
+    expect(reg.type).toBe(mockRegistry);
+    expect(reg.props.readOnly).toBe(true);
+    expect(asEl(reg.props.requests).props.readOnly).toBe(true);
+    expect(console.warn).not.toHaveBeenCalled(); // no denial line for an observer
   });
 });
 

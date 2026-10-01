@@ -174,11 +174,18 @@ export default async function EditScholarPage({
   // gate 5 only admits us past `forbidden` when isSelf/isProxy/isUnitAdmin/
   // isCommsSteward/isCvGenerator/isSuperuser — one of the two is guaranteed true
   // here, so this is exhaustive, not a fallback guess.
+  // A content editor (`lib/auth/content-editor.ts`) edits in UNIT-ADMIN mode:
+  // the scholar's own surface (bio, Highlights, one-profile hides, title
+  // request) and no steward extras (title pin, takedown, whole-scholar hide,
+  // proxy list). `isContentEditor` is only ever set without a real steward or
+  // superuser grant, so it can't shadow either below.
+  const contentEditorView =
+    !isSelf && !isProxy && !isUnitAdmin && !session.isSuperuser && session.isContentEditor === true;
   const mode = isSelf
     ? "self"
     : isProxy
       ? "proxy"
-      : isUnitAdmin
+      : isUnitAdmin || contentEditorView
         ? "unit-admin"
         : session.isSuperuser
           ? "superuser"
@@ -261,7 +268,7 @@ export default async function EditScholarPage({
       : Promise.resolve(null),
     // Drives `EditShell`'s unit-admin "Profiles" breadcrumb (dwd2001 bug #7) —
     // only unit-admin mode reads it, so skip the read for every other mode.
-    isUnitAdmin ? loadConsoleTabs(session, db.read) : Promise.resolve(null),
+    mode === "unit-admin" ? loadConsoleTabs(session, db.read) : Promise.resolve(null),
   ]);
 
   const proxyEditors =
@@ -291,6 +298,7 @@ export default async function EditScholarPage({
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
       unitAdminBanner={unitAdminBanner}
+      actorLabel={contentEditorView ? "Editing as content editor" : undefined}
       profilesNavVisible={consoleTabs?.profiles ?? false}
       reciterPendingEnabled={reciterPendingEnabled}
       orcidTabEnabled={isOrcidSuggestionEnabled()}

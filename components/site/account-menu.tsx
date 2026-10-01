@@ -167,8 +167,15 @@ export function AccountMenu({
   const fullName = impersonating?.targetName ?? realName;
   const label = fullName ? shortName(fullName) : "Account";
   const initials = fullName ? nameInitials(fullName) : null;
-  // canImpersonate without superuser = an observer (read-only View as, #2946).
-  const adminRole = probe?.isSuperuser ? "Superuser" : canImpersonate ? "Observer" : null;
+  // canImpersonate without superuser = an observer (read-only View as, #2946),
+  // unless the probe names the viewer a content editor.
+  const adminRole = probe?.isSuperuser
+    ? "Superuser"
+    : probe?.isContentEditor
+      ? "Content Editor"
+      : canImpersonate
+        ? "Observer"
+        : null;
   // In the console the per-role roster link is replaced by "Back to Scholars",
   // so drop the manage-profiles row; any remaining role destinations (Method
   // Families / Units) stay reachable.

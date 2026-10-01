@@ -33,6 +33,9 @@ export type ViewAsButtonProps = {
   onStarted?: () => void;
   size?: React.ComponentProps<typeof Button>["size"];
   variant?: React.ComponentProps<typeof Button>["variant"];
+  /** A non-superuser's View as (observer, content editor) never saves: the
+   *  confirm says so instead of promising edits. Default false. */
+  readOnly?: boolean;
 };
 
 /** Map an `/api/impersonation` error reason to a human message. Shared with the
@@ -57,6 +60,7 @@ export function ViewAsButton({
   onStarted,
   size = "sm",
   variant = "outline",
+  readOnly = false,
 }: ViewAsButtonProps) {
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -119,7 +123,11 @@ export function ViewAsButton({
         open={open}
         onOpenChange={setOpen}
         title={`View as ${targetName}?`}
-        description={`You’ll browse and edit as ${targetName}. Changes are made as them and logged to you, and a banner stays up until you select “Return to my view”.`}
+        description={
+          readOnly
+            ? `You’ll see Scholars as ${targetName} does. Read-only: you can look, but not save changes. A banner stays up until you select “Return to my view”.`
+            : `You’ll browse and edit as ${targetName}. Changes are made as them and logged to you, and a banner stays up until you select “Return to my view”.`
+        }
         reasonMode="none"
         confirmLabel={`View as ${targetName}`}
         confirmVariant="default"

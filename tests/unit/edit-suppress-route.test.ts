@@ -527,3 +527,57 @@ describe("POST /api/edit/suppress — delegated hide widened past publications (
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/edit/suppress — content editor (lib/auth/content-editor.ts)", () => {
+  // The READ session a content editor carries: a synthetic steward grant. The
+  // write preamble strips it (`stripContentEditorView`) and keeps the flag, so
+  // only the one-profile allowlist admits the write — never steward parity.
+  const CONTENT_EDITOR = {
+    cwid: "cedit1",
+    isSuperuser: false,
+    isCommsSteward: true,
+    isContentEditor: true,
+  };
+
+  it("hides one author's publication on any scholar's profile — 200", async () => {
+    mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+    const res = await POST(
+      post({ entityType: "publication", entityId: "999", contributorCwid: "other9", reason: "x" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+  });
+
+  for (const entityType of ["appointment", "education", "grant"] as const) {
+    it(`hides any scholar's ${entityType} row — 200`, async () => {
+      mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+      const res = await POST(post({ entityType, entityId: "row-1", reason: "wrong row" }));
+      expect(res.status).toBe(200);
+    });
+  }
+
+  // The stripped steward grant would have allowed each of these.
+  for (const [name, body] of [
+    ["a whole scholar", { entityType: "scholar", entityId: "other9", reason: "x" }],
+    ["a whole-publication takedown", { entityType: "publication", entityId: "999", reason: "x" }],
+    ["a mentee", { entityType: "mentee", entityId: "other9:men01", reason: "x" }],
+  ] as const) {
+    it(`may not hide ${name} — 403`, async () => {
+      mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+      const res = await POST(post(body));
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+  }
+
+  it("still meets the leadership-appointment 409", async () => {
+    mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+    mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Chair of Medicine" });
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({ entityId: "MED" });
+    mockDepartmentFindUnique.mockResolvedValue({ name: "Medicine" });
+    const res = await POST(
+      post({ entityType: "appointment", entityId: "row-1", reason: "wrong row" }),
+    );
+    expect(res.status).toBe(409);
+  });
+});

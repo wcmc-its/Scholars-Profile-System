@@ -11,7 +11,7 @@ vi.mock("@/lib/auth/session-server", () => ({
   getSession: vi.fn(),
 }));
 
-import { getEditSession, isSuperuser } from "@/lib/auth/superuser";
+import { getEditSession, isSuperuser, superusersAmong } from "@/lib/auth/superuser";
 import { openLdap } from "@/lib/sources/ldap";
 import { getSession } from "@/lib/auth/session-server";
 
@@ -225,5 +225,46 @@ describe("getEditSession", () => {
       isDataSharingViewer: false,
       isCvGenerator: false,
     });
+  });
+});
+
+describe("superusersAmong", () => {
+  it("answers a whole page on ONE connection and group lookup", async () => {
+    const client = fakeClient(
+      async () => entries(1),
+      async (_dn, _attr, value) => value.startsWith("uid=su1,"),
+    );
+    mockedOpenLdap.mockResolvedValue(asClient(client));
+    const got = await superusersAmong(["su1", "abc1234", "def5678"]);
+    expect([...got]).toEqual(["su1"]);
+    expect(mockedOpenLdap).toHaveBeenCalledTimes(1);
+    expect(client.search).toHaveBeenCalledTimes(1);
+    expect(client.compare).toHaveBeenCalledTimes(3);
+    expect(client.unbind).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes allowlisted CWIDs without LDAP and skips them in the compare", async () => {
+    process.env.SCHOLARS_SUPERUSER_CWIDS = "su9";
+    const client = fakeClient(async () => entries(1), async () => false);
+    mockedOpenLdap.mockResolvedValue(asClient(client));
+    expect([...(await superusersAmong(["su9", "abc1234"]))]).toEqual(["su9"]);
+    expect(client.compare).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a CWID out when its compare fails, without losing the rest", async () => {
+    const client = fakeClient(
+      async () => entries(1),
+      async (_dn, _attr, value) => {
+        if (value.startsWith("uid=bad,")) throw new Error("timeout");
+        return true;
+      },
+    );
+    mockedOpenLdap.mockResolvedValue(asClient(client));
+    expect([...(await superusersAmong(["bad", "su1"]))]).toEqual(["su1"]);
+  });
+
+  it("is empty when the directory is unreachable", async () => {
+    mockedOpenLdap.mockRejectedValue(new Error("down"));
+    expect((await superusersAmong(["su1"])).size).toBe(0);
   });
 });

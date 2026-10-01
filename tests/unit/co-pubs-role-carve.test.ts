@@ -54,7 +54,7 @@ vi.mock("@/lib/api/mentoring", () => ({
 
 import RollupPage, {
   generateMetadata as rollupMetadata,
-} from "@/app/(public)/scholars/[slug]/co-pubs/page";
+} from "@/app/(public)/scholars/[slug]/co-pubs/(rollup)/page";
 import MenteePage, {
   generateMetadata as menteeMetadata,
 } from "@/app/(public)/scholars/[slug]/co-pubs/[menteeCwid]/page";

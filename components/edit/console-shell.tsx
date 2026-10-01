@@ -112,8 +112,12 @@ export async function ConsoleShell({
           pendingNews={newsPill}
           pendingClips={clipsPill}
           coresTab={tabs.cores}
+          slugsTab={tabs.slugs}
           usageTab={tabs.usage}
           orcidCoverageTab={tabs.orcidCoverage}
+          coiTab={tabs.coi}
+          activityTab={tabs.activity}
+          etlStatusTab={tabs.etlStatus}
           viewerIsDeveloper={session.isDeveloper === true}
         />
       </ConsoleTopBar>
