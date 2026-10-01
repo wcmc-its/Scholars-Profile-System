@@ -285,6 +285,9 @@ export async function GET(): Promise<NextResponse> {
       displayName,
       impersonating,
       canImpersonate,
+      // The REAL cwid's superuser verdict: the account menu names the role, and
+      // canImpersonate && !isSuperuser marks an observer's read-only View as.
+      isSuperuser: superuser,
       canAccessFundingMatcher,
       consoleLinks,
     },

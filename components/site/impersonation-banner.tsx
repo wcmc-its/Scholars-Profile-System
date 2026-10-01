@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import { EyeIcon } from "lucide-react";
 
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
 
 /**
  * The "View as" impersonation banner (#637, impersonation-spec.md §6/§8, R7/T6).
  *
- * A deliberately **off-brand amber** bar — neither Cornell red (#B31B1B, the
- * header chrome) nor Apollo maroon (#7d1c1c, the /edit editor): impersonation is
- * an exceptional, attention-demanding state and must not blend into either
- * surface. Full-width, sticky to the very top, and it **pushes content down**
+ * A one-line **dark warm-ink** bar (`apollo-bar`, #2a2421; Front page tweaks
+ * mockup, 2026-09-30 — it was a three-line amber bar). Neither Cornell red
+ * (#B31B1B, the header chrome) nor Apollo maroon (#7d1c1c, the /edit editor);
+ * a hairline separates it from the same-colored /edit console bar below it.
+ * Full-width, sticky to the very top, and it **pushes content down**
  * (it is a flow element, not an overlay) so it can never be missed or hidden
  * behind the header. Non-dismissible (R7) — the only exit is "Return to my view"
  * or auto-expiry.
@@ -25,8 +26,9 @@ import { useImpersonationProbe } from "@/components/site/use-impersonation-probe
  *
  * Editing is live while impersonating (edits authorize as the target but are
  * attributed to the real actor + `impersonated_cwid`, R3), so the copy states
- * plainly that changes are made *as them* and *logged to you* — the confused-
- * deputy mitigation (T6) made explicit in words, not just color.
+ * plainly that edits are *logged to you* — the confused-deputy mitigation (T6)
+ * made explicit in words, not just color. The header's account trigger shows
+ * the target's name while this bar is up (`account-menu.tsx`).
  *
  * `role="status"` + `aria-live="polite"` announces the state to assistive tech
  * on entry; the "Return to my view" exit is an always-present, keyboard-
@@ -35,30 +37,14 @@ import { useImpersonationProbe } from "@/components/site/use-impersonation-probe
  * overlay's `startedAt`; it is advisory — the authoritative expiry is the server
  * seam (`lib/auth/effective-identity.ts`).
  *
- * A third line ("Can access: …", `ROLE_LINKS` below) links straight to the
- * target's own destination(s). Without it, a superuser previewing a narrower
- * role has no way to know where that role's own console page lives — the four
- * global roles aren't even searchable in the switcher, and reloading on
- * whatever `/edit/*` page they started from just as likely 403s.
+ * The target's own destination(s) (`ROLE_LINKS` below) render in the account
+ * menu, not here. Without them, a superuser previewing a narrower role has no
+ * way to know where that role's own console page lives — the four global roles
+ * aren't even searchable in the switcher, and reloading on whatever `/edit/*`
+ * page they started from just as likely 403s.
  */
 
-const AMBER_GRADIENT = "linear-gradient(90deg, #7a4f01 0%, #92611a 100%)";
-const AMBER_UNDERLINE = "#f0b429";
-const AMBER_TEXT = "#fff8eb";
-
-/**
- * The "Return to my view" button: a light chip on the amber bar, with the focus
- * ring's offset color set to the bar's darker amber (not the page white) so the
- * `focus-visible:ring-offset-2` ring reads correctly against the gradient. The
- * CSS custom property needs the cast — `CSSProperties` has no index signature.
- */
-const RETURN_BUTTON_STYLE = {
-  backgroundColor: AMBER_TEXT,
-  color: "#5a3a00",
-  "--tw-ring-offset-color": "#7a4f01",
-} as CSSProperties;
-
-type SubjectRole =
+export type SubjectRole =
   | "owner"
   | "curator"
   | "scholar"
@@ -93,7 +79,7 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
  * …>` mirrors `ROLE_LABEL` above — a role added to the union fails to compile
  * here until it's placed.
  */
-const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href: string }>> = {
+export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href: string }>> = {
   scholar: [{ label: "Their profile", href: "/edit" }],
   owner: [
     { label: "Profiles", href: "/edit/profiles" },
@@ -127,7 +113,7 @@ const KIND_SHORT: Record<"department" | "division" | "center" | "core" | "instit
  * `Owner · {unit} ({Dept|Div|Center|Core})` for a unit owner/curator (ADR-005
  * Amendment 1 role × unit-kind, #540).
  */
-function subjectDescriptor(im: {
+export function subjectDescriptor(im: {
   role: SubjectRole;
   unitKind: "department" | "division" | "center" | "core" | "institution" | null;
   unit: string | null;
@@ -143,7 +129,7 @@ function subjectDescriptor(im: {
 }
 
 /** Client mirror of the server read-time TTL; falls back to 30 min. */
-const TTL_SECONDS = Number(process.env.NEXT_PUBLIC_IMPERSONATION_TTL_SECONDS ?? 1800);
+export const TTL_SECONDS = Number(process.env.NEXT_PUBLIC_IMPERSONATION_TTL_SECONDS ?? 1800);
 
 /** Format whole seconds remaining as `m:ss` (clamped at 0). */
 function formatRemaining(seconds: number): string {
@@ -175,8 +161,7 @@ export function ImpersonationBanner() {
 
   if (!impersonating) return null;
 
-  const realName = probe?.scholar?.preferredName ?? null;
-  const firstName = realName ? realName.split(/\s+/)[0] : "you";
+  const realName = probe?.scholar?.preferredName ?? probe?.displayName ?? null;
   const expiresAt = impersonating.startedAt + TTL_SECONDS;
   const remaining = formatRemaining(expiresAt - nowSeconds);
 
@@ -201,57 +186,32 @@ export function ImpersonationBanner() {
       aria-live="polite"
       data-slot="impersonation-banner"
       data-testid="impersonation-banner"
-      className="sticky top-0 z-[60] w-full"
-      style={{
-        background: AMBER_GRADIENT,
-        borderBottom: `3px solid ${AMBER_UNDERLINE}`,
-        color: AMBER_TEXT,
-      }}
+      className="bg-apollo-bar sticky top-0 z-[60] w-full border-b border-white/20 text-white"
     >
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-6 py-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="text-sm leading-tight">
-            Viewing as{" "}
-            <strong className="font-semibold">{impersonating.targetName}</strong>
-            {" · "}
-            {subjectDescriptor(impersonating)}
-          </p>
-          <p className="text-xs leading-tight" style={{ color: "#f6e6c4" }}>
-            You are {realName ?? "signed in as yourself"}. Changes are made as{" "}
-            {firstName} and logged to you.
-          </p>
-          <p className="text-xs leading-tight" style={{ color: "#f6e6c4" }} data-testid="impersonation-role-links">
-            Can access:{" "}
-            {ROLE_LINKS[impersonating.role].map((link, i) => (
-              <span key={link.href}>
-                {i > 0 && " · "}
-                <Link href={link.href} className="underline hover:no-underline" style={{ color: AMBER_TEXT }}>
-                  {link.label}
-                </Link>
-              </span>
-            ))}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span
-            className="text-xs tabular-nums"
-            style={{ color: "#f6e6c4" }}
-            aria-label={`Auto-expires in ${remaining}`}
-            data-testid="impersonation-countdown"
-          >
-            Expires in {remaining}
-          </span>
-          <button
-            type="button"
-            onClick={returnToMyView}
-            disabled={returning}
-            data-testid="impersonation-return"
-            className="inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-60"
-            style={RETURN_BUTTON_STYLE}
-          >
-            {returning ? "Returning…" : "Return to my view"}
-          </button>
-        </div>
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-1 px-6 py-2.5 text-sm">
+        <EyeIcon className="size-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0">
+          Viewing as <strong className="font-semibold">{impersonating.targetName}</strong>
+          {" · "}
+          {subjectDescriptor(impersonating)}
+        </span>
+        <span className="text-[#dbd3cd]">Edits logged to {realName ?? "you"}</span>
+        <span
+          className="ml-auto whitespace-nowrap text-[#dbd3cd] tabular-nums"
+          aria-label={`Auto-expires in ${remaining}`}
+          data-testid="impersonation-countdown"
+        >
+          {remaining} left
+        </span>
+        <button
+          type="button"
+          onClick={returnToMyView}
+          disabled={returning}
+          data-testid="impersonation-return"
+          className="inline-flex items-center rounded-md bg-white px-3 py-1 font-medium whitespace-nowrap text-apollo-bar transition-colors hover:bg-[#f2efeb] focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-apollo-bar disabled:opacity-60"
+        >
+          {returning ? "Returning…" : "Return to my view"}
+        </button>
       </div>
     </div>
   );

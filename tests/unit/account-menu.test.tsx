@@ -20,6 +20,7 @@ function mockProbe(probe: Partial<ImpersonationProbe>): void {
     displayName: null,
     impersonating: null,
     canImpersonate: false,
+    isSuperuser: false,
     consoleLinks: [],
     ...probe,
   });
@@ -212,5 +213,85 @@ describe("AccountMenu — unified dropdown", () => {
     expect(screen.getByTestId("account-menu-console-methods").textContent).toContain(
       "Method families",
     );
+  });
+});
+
+// Front page tweaks mockup (2026-09-30): identity row, target-named trigger,
+// and the target's destinations (moved here from the banner).
+describe("AccountMenu — identity and View as", () => {
+  const paul = { slug: "paul-albert", preferredName: "Paul Albert" };
+  const viewing = (role: ImpersonationProbe["impersonating"]) =>
+    mockProbe({ scholar: paul, canImpersonate: true, isSuperuser: true, impersonating: role });
+  const target = (over: Partial<NonNullable<ImpersonationProbe["impersonating"]>>) => ({
+    targetCwid: "own001",
+    targetName: "Jane Owner",
+    role: "owner" as const,
+    unitKind: "department" as const,
+    unit: "Cardiology",
+    startedAt: 0,
+    ...over,
+  });
+  const targetLinks = () =>
+    screen.getAllByTestId("account-menu-target-link").map((el) => [el.textContent, el.getAttribute("href")]);
+
+  it("names a superuser's role in the header row", () => {
+    mockProbe({ scholar: paul, canImpersonate: true, isSuperuser: true });
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(screen.getByTestId("account-menu-identity").textContent).toBe("Paul AlbertSuperuser");
+    expect(screen.getByTestId("account-menu-view-as").textContent).toContain("View as another user…");
+  });
+
+  it("labels canImpersonate without superuser as Observer", () => {
+    mockProbe({ scholar: paul, canImpersonate: true, isSuperuser: false });
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(screen.getByTestId("account-menu-identity").textContent).toBe("Paul AlbertObserver");
+  });
+
+  it("no identity row for a plain scholar", () => {
+    mockProbe({ scholar: paul });
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(screen.queryByTestId("account-menu-identity")).toBeNull();
+  });
+
+  it("while viewing as, the trigger names the target, not the real user", () => {
+    viewing(target({ targetName: "Terrie Rose Wheeler" }));
+    render(<AccountMenu scholar={paul} />);
+    expect(screen.getByLabelText("Account menu").textContent).toContain("Terrie Rose Wheeler");
+    expect(screen.getByLabelText("Account menu").textContent).not.toContain("Paul Albert");
+  });
+
+  it("unit owner target → Profiles + Org units under '{First} can access'", () => {
+    viewing(target({}));
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(screen.getByText("Jane can access")).toBeTruthy();
+    expect(targetLinks()).toEqual([
+      ["Profiles", "/edit/profiles"],
+      ["Org units", "/edit/units"],
+    ]);
+  });
+
+  it("search-blind global role (development) → its one console page", () => {
+    viewing(target({ targetName: "lmp2006", role: "development", unitKind: null, unit: null }));
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(targetLinks()).toEqual([["Grant Matcha", "/edit/grant-matcha"]]);
+  });
+
+  it("comms_steward → the Admin console (the #2521 collapse)", () => {
+    viewing(target({ targetName: "Dan Dickinson", role: "comms_steward", unitKind: null, unit: null }));
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(targetLinks()).toEqual([["Admin console", "/edit/profiles"]]);
+  });
+
+  it("plain scholar target → their own self-edit surface", () => {
+    viewing(target({ targetName: "Jane Scholar", role: "scholar", unitKind: null, unit: null }));
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(targetLinks()).toEqual([["Their profile", "/edit"]]);
   });
 });

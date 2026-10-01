@@ -33,7 +33,6 @@ import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { SectionHeading } from "@/components/home/section-heading";
-import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
@@ -82,17 +81,13 @@ export function SpotlightSection({
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
     >
-      <SectionHeading
-        aside={
-          <SectionInfoButton label="Spotlight" anchor="spotlight">
-            Spotlight rotates subareas with the strongest recent activity at
-            WCM, one per research area, refreshed weekly. Subareas are scored
-            from ReCiterAI publication scores on PubMed records.
-          </SectionInfoButton>
-        }
-      >
-        Spotlight
-      </SectionHeading>
+      <SectionHeading>Spotlight</SectionHeading>
+      {/* Plain text, not an ⓘ popover: the selection rule is the point of the
+          section, and a hover-only icon is easy to miss and dead on touch. */}
+      <p className="text-muted-foreground mt-2 max-w-[62ch] text-[15px] leading-6 text-pretty">
+        Subareas with the strongest recent publication activity at WCM, one per research area.
+        Updated weekly.
+      </p>
 
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
         <SpotlightDetail card={active} />
@@ -143,12 +138,12 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
     <div
       // `key` retriggers the fade-in transition on activeIdx swap.
       key={card.subtopicId}
-      className="animate-in fade-in slide-in-from-bottom-1 border-apollo-border bg-apollo-surface flex min-h-[380px] flex-col rounded-[var(--apollo-radius-card)] border border-t-[3px] border-t-apollo-maroon p-7 shadow-[var(--apollo-shadow-card)] duration-300"
+      className="animate-in fade-in slide-in-from-bottom-1 border-apollo-border bg-apollo-surface flex min-h-[380px] flex-col rounded-[var(--apollo-radius-card)] border p-7 shadow-[var(--apollo-shadow-card)] duration-300"
     >
       <a
         href={parentHref}
         aria-label={`View research area ${card.parentTopicLabel}`}
-        className={`text-[11px] leading-4 font-semibold tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase ${noUnderlineHover}`}
+        className={`text-[11px] leading-4 font-semibold tracking-[0.1em] text-apollo-maroon uppercase ${noUnderlineHover}`}
       >
         {card.parentTopicLabel}
       </a>
@@ -362,7 +357,12 @@ function SpotlightCardButton({
           : "border-apollo-border bg-apollo-surface hover:border-apollo-border-strong focus-visible:border-apollo-border-strong shadow-[var(--apollo-shadow-card)]",
       ].join(" ")}
     >
-      <div className="line-clamp-2 min-h-[30px] text-[10.5px] leading-[15px] font-semibold tracking-[0.1em] text-[var(--color-primary-cornell-red)] uppercase">
+      {/* "Showing" gets its own reserved row so it never crowds the counts, and
+          every tile's eyebrow + title start at the same height. */}
+      <div className="flex h-4 justify-end">
+        {active ? <span className="text-foreground text-[11px] leading-4 font-semibold">Showing</span> : null}
+      </div>
+      <div className="line-clamp-2 min-h-[30px] text-[10.5px] leading-[15px] font-semibold tracking-[0.1em] text-apollo-maroon uppercase">
         {card.parentTopicLabel}
       </div>
       <div className="text-foreground line-clamp-3 text-[14px] leading-[19px] font-medium text-pretty">
@@ -370,16 +370,11 @@ function SpotlightCardButton({
       </div>
       {/* #2218 — same rule as the detail pane: an absent aggregate row is not
           "0 pubs · 0 scholars". Omit the line rather than assert a false zero. */}
-      <div className="text-muted-foreground mt-auto flex items-baseline justify-between gap-2 pt-1.5 text-xs">
-        {card.publicationCount !== null && card.scholarCount !== null ? (
-          <span>
-            {card.publicationCount.toLocaleString()} pubs · {card.scholarCount.toLocaleString()} scholars
-          </span>
-        ) : (
-          <span />
-        )}
-        {active ? <span className="text-foreground text-[11px] font-semibold">Showing</span> : null}
-      </div>
+      {card.publicationCount !== null && card.scholarCount !== null ? (
+        <div className="text-muted-foreground mt-auto pt-1.5 text-xs whitespace-nowrap">
+          {card.publicationCount.toLocaleString()} pubs · {card.scholarCount.toLocaleString()} scholars
+        </div>
+      ) : null}
     </button>
   );
 }

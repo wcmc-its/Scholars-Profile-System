@@ -15,7 +15,12 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
-import { ImpersonationSwitcher } from "@/components/site/impersonation-switcher";
+import {
+  type Candidate,
+  ImpersonationSwitcher,
+  ViewAsConfirmDialog,
+} from "@/components/site/impersonation-switcher";
+import { ROLE_LINKS, subjectDescriptor } from "@/components/site/impersonation-banner";
 import type { ConsoleLink } from "@/lib/auth/console-links";
 import { profilePath } from "@/lib/profile-url";
 
@@ -49,6 +54,15 @@ import { profilePath } from "@/lib/profile-url";
  * deployment — never sees the row, since the probe returns
  * `canImpersonate: false` when the feature flag is off.
  *
+ * **Identity + Admin label (Front page tweaks mockup, 2026-09-30).** A
+ * superuser / observer sees a header row naming who they are and the role that
+ * puts the admin rows in the menu; the console rows sit under an "Admin" label.
+ * While viewing as someone, the trigger and header row name the TARGET (the
+ * banner says whose edits they are), and a "{First} can access" section links
+ * the target's own destinations (`ROLE_LINKS`, moved here from the banner).
+ * The menu and the switcher share one width, so swapping views never jumps.
+ * Picking a target closes the popover and opens `ViewAsConfirmDialog`.
+ *
  * Sign out is a POST `<form>` (not a `<Link>`) — the /api/auth/logout route
  * accepts only POST, so a tricked GET cannot end a session. The Popover
  * primitive provides arrow / Esc keyboarding and focus-return-to-trigger.
@@ -58,6 +72,9 @@ const ROW_CLASS =
   "block rounded-sm px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none transition-colors";
 
 /** Leading icon per console destination, keyed by `ConsoleLink["id"]`. */
+const SECTION_LABEL_CLASS =
+  "px-3 pt-2 pb-1 text-[11px] font-medium tracking-[0.1em] text-muted-foreground uppercase";
+
 const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   "manage-profiles": UsersIcon,
   methods: FlaskConicalIcon,
@@ -98,6 +115,9 @@ export function AccountMenu({
   const isConsole = context === "console";
   // In-place sub-view of the popover: the menu rows, or the "View as" switcher.
   const [view, setView] = useState<"menu" | "switcher">("menu");
+  const [open, setOpen] = useState(false);
+  // The View-as target awaiting confirmation; the dialog lives outside the popover.
+  const [pending, setPending] = useState<Candidate | null>(null);
   // Probe on mount, not on open: deferring it made the console rows and
   // "View as…" pop in a beat after the menu opened. The root-layout
   // ImpersonationBanner already probes /api/auth/session on every page, so
@@ -115,7 +135,12 @@ export function AccountMenu({
   // to name the trigger after, but the probe's `displayName` fallback
   // (`stewardDirectory`) still gives them a real name instead of the bare
   // "Account" default.
-  const label = effectiveScholar?.preferredName ?? probe?.displayName ?? "Account";
+  const realName = effectiveScholar?.preferredName ?? probe?.displayName ?? null;
+  const impersonating = probe?.impersonating ?? null;
+  // While viewing as someone the header names THEM, matching the banner.
+  const label = impersonating?.targetName ?? realName ?? "Account";
+  // canImpersonate without superuser = an observer (read-only View as, #2946).
+  const adminRole = probe?.isSuperuser ? "Superuser" : canImpersonate ? "Observer" : null;
   // In the console the per-role roster link is replaced by "Back to Scholars",
   // so drop the manage-profiles row; any remaining role destinations (Method
   // Families / Units) stay reachable.
@@ -126,8 +151,26 @@ export function AccountMenu({
 
   // Reset to the menu whenever the popover closes so it reopens on the rows.
   function onOpenChange(next: boolean) {
+    setOpen(next);
     if (!next) setView("menu");
   }
+
+  function onPick(c: Candidate) {
+    onOpenChange(false);
+    setPending(c);
+  }
+
+  const identityRow = impersonating ? (
+    <div className="flex flex-col gap-0.5 px-3 pt-2 pb-1.5" data-testid="account-menu-identity">
+      <span className="text-sm font-medium">{impersonating.targetName}</span>
+      <span className="text-xs text-muted-foreground">{subjectDescriptor(impersonating)}</span>
+    </div>
+  ) : adminRole && realName ? (
+    <div className="flex flex-col gap-0.5 px-3 pt-2 pb-1.5" data-testid="account-menu-identity">
+      <span className="text-sm font-medium">{realName}</span>
+      <span className="text-xs text-muted-foreground">{adminRole}</span>
+    </div>
+  ) : null;
 
   const editRow = (
     <Link href="/edit" className={ROW_CLASS} data-testid="account-menu-edit">
@@ -146,104 +189,141 @@ export function AccountMenu({
     ) : null;
 
   return (
-    <Popover onOpenChange={onOpenChange}>
-      <PopoverTrigger
-        data-slot="account-menu-trigger"
-        className={
-          isConsole
-            ? // Every console mount now sits in the dark `ConsoleTopBar`.
-              "inline-flex items-center gap-1 py-3 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
-            : "inline-flex items-center gap-1 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
-        }
-        aria-label="Account menu"
-      >
-        <span className="max-w-[14ch] truncate">{label}</span>
-        <ChevronDownIcon className="size-3.5 shrink-0" aria-hidden="true" />
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        className={view === "switcher" ? "w-[22rem] bg-popover p-2" : "w-48 bg-popover p-1"}
-        data-slot="account-menu-content"
-      >
-        {view === "switcher" ? (
-          <div className="flex flex-col gap-1">
-            <button
-              type="button"
-              onClick={() => setView("menu")}
-              className="inline-flex items-center gap-1 self-start rounded-sm px-1.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-              Back
-            </button>
-            <ImpersonationSwitcher />
-          </div>
-        ) : (
-          <>
-            {effectiveScholar ? (
-              <>
-                {viewRow}
-                {editRow}
-                <Separator className="my-1" />
-              </>
-            ) : null}
-            {showConsoleSection ? (
-              <>
-                {isConsole ? (
-                  <Link
-                    href="/"
-                    className={`${ROW_CLASS} flex w-full items-center gap-2`}
-                    data-testid="account-menu-back-to-scholars"
-                  >
-                    <ChevronLeftIcon
-                      className="size-4 shrink-0 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                    Back to Scholars
-                  </Link>
-                ) : null}
-                {consoleRows.map((link) => {
-                  const Icon = CONSOLE_LINK_ICON[link.id];
-                  return (
+    <>
+      <Popover open={open} onOpenChange={onOpenChange}>
+        <PopoverTrigger
+          data-slot="account-menu-trigger"
+          className={
+            isConsole
+              ? // Every console mount now sits in the dark `ConsoleTopBar`.
+                "inline-flex items-center gap-1 py-3 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
+              : "inline-flex items-center gap-1 text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
+          }
+          aria-label="Account menu"
+        >
+          <span className="max-w-[14ch] truncate">{label}</span>
+          <ChevronDownIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          className={`bg-popover ${canImpersonate ? "w-80" : "w-48"} ${view === "switcher" ? "p-2" : "p-1"}`}
+          data-slot="account-menu-content"
+        >
+          {view === "switcher" ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={() => setView("menu")}
+                  className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+                  Back
+                </button>
+                <span className="ml-auto px-1.5 text-[11px] font-medium tracking-[0.1em] text-muted-foreground uppercase">
+                  View as
+                </span>
+              </div>
+              <ImpersonationSwitcher onPick={onPick} />
+            </div>
+          ) : (
+            <>
+              {identityRow ? (
+                <>
+                  {identityRow}
+                  <Separator className="my-1" />
+                </>
+              ) : null}
+              {impersonating ? (
+                <>
+                  <p className={SECTION_LABEL_CLASS}>
+                    {impersonating.targetName.split(/\s+/)[0]} can access
+                  </p>
+                  {ROLE_LINKS[impersonating.role].map((link) => (
                     <Link
-                      key={link.id}
+                      key={link.href}
                       href={link.href}
-                      className={`${ROW_CLASS} flex w-full items-center gap-2`}
-                      data-testid={`account-menu-console-${link.id}`}
+                      className={ROW_CLASS}
+                      data-testid="account-menu-target-link"
                     >
-                      <Icon
+                      {link.label}
+                    </Link>
+                  ))}
+                  <Separator className="my-1" />
+                </>
+              ) : null}
+              {effectiveScholar ? (
+                <>
+                  {viewRow}
+                  {editRow}
+                  <Separator className="my-1" />
+                </>
+              ) : null}
+              {showConsoleSection ? (
+                <>
+                  <p className={SECTION_LABEL_CLASS}>Admin</p>
+                  {isConsole ? (
+                    <Link
+                      href="/"
+                      className={`${ROW_CLASS} flex w-full items-center gap-2`}
+                      data-testid="account-menu-back-to-scholars"
+                    >
+                      <ChevronLeftIcon
                         className="size-4 shrink-0 text-muted-foreground"
                         aria-hidden="true"
                       />
-                      {link.label}
+                      Back to Scholars
                     </Link>
-                  );
-                })}
-                {canImpersonate ? (
-                  <button
-                    type="button"
-                    onClick={() => setView("switcher")}
-                    className={`${ROW_CLASS} flex w-full items-center gap-2 text-left`}
-                    data-testid="account-menu-view-as"
-                  >
-                    <EyeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    View as…
-                  </button>
-                ) : null}
-                <Separator className="my-1" />
-              </>
-            ) : null}
-            <form action="/api/auth/logout" method="POST">
-              <button
-                type="submit"
-                className={`${ROW_CLASS} w-full text-left`}
-                data-testid="account-menu-signout"
-              >
-                Sign out
-              </button>
-            </form>
-          </>
-        )}
-      </PopoverContent>
-    </Popover>
+                  ) : null}
+                  {consoleRows.map((link) => {
+                    const Icon = CONSOLE_LINK_ICON[link.id];
+                    return (
+                      <Link
+                        key={link.id}
+                        href={link.href}
+                        className={`${ROW_CLASS} flex w-full items-center gap-2`}
+                        data-testid={`account-menu-console-${link.id}`}
+                      >
+                        <Icon
+                          className="size-4 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                        {link.label}
+                      </Link>
+                    );
+                  })}
+                  {canImpersonate ? (
+                    <button
+                      type="button"
+                      onClick={() => setView("switcher")}
+                      className={`${ROW_CLASS} flex w-full items-center gap-2 text-left`}
+                      data-testid="account-menu-view-as"
+                    >
+                      <EyeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      View as another user…
+                    </button>
+                  ) : null}
+                  <Separator className="my-1" />
+                </>
+              ) : null}
+              <form action="/api/auth/logout" method="POST">
+                <button
+                  type="submit"
+                  className={`${ROW_CLASS} w-full text-left`}
+                  data-testid="account-menu-signout"
+                >
+                  Sign out
+                </button>
+              </form>
+            </>
+          )}
+        </PopoverContent>
+      </Popover>
+      <ViewAsConfirmDialog
+        candidate={pending}
+        readOnly={canImpersonate && !probe?.isSuperuser}
+        onClose={() => setPending(null)}
+      />
+    </>
   );
 }
