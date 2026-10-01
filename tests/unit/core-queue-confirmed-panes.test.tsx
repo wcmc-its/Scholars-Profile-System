@@ -241,6 +241,14 @@ describe("Confirmed tab as rendered", () => {
     expect(rows[1].className).toContain("border-l-transparent");
   });
 
+  it("groups a person's only confirmed paper under its other evidence, not as repeat use", () => {
+    renderConfirmed([repeatRow], { paperCounts: { zzz9001: { papers: 1, recent: 1, total: 20 } } });
+    const items = [...document.querySelectorAll('[data-slot="core-queue-rail-item"]')].map(
+      (b) => b.textContent,
+    );
+    expect(items).toEqual(["All confirmed1 evidence group1", "LLM readStrong band1"]);
+  });
+
   it("sorts Strongest first by default, and Newest by year", () => {
     renderConfirmed([llmOnly, repeatRow, ackRow]);
     expect(titles()).toEqual(["Acknowledged alpha", "Repeat beta", "Model gamma"]);
