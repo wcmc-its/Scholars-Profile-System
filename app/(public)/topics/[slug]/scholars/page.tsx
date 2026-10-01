@@ -3,10 +3,10 @@ import type { Metadata } from "next";
 import {
   getDistinctScholarCountForTopic,
   getSubtopicsForTopic,
-  getTopic,
   getTopicScholars,
   type TopicAllScholarRole,
 } from "@/lib/api/topics";
+import { loadTopic } from "./load-topic";
 import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
@@ -54,7 +54,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const topic = await getTopic(slug).catch(() => null);
+  const topic = await loadTopic(slug).catch(() => null);
   if (!topic) return { title: "Topic not found" };
   return {
     title: `Scholars in ${topic.label} — Scholars at WCM`,
@@ -73,7 +73,7 @@ export default async function TopicScholarsPage({
   const { slug } = await params;
   const sp = await searchParams;
 
-  const topic = await getTopic(slug);
+  const topic = await loadTopic(slug);
   if (!topic) notFound();
 
   const role = parseRole(typeof sp.role === "string" ? sp.role : undefined);
