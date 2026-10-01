@@ -12,7 +12,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { resolveMentor } from "./resolve-mentor";
+import { resolveMentor } from "../resolve-mentor";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
   menteeProgramLabel,
@@ -33,7 +33,7 @@ export const dynamicParams = true;
 type Params = { slug: string };
 
 // #2599 — `roleCategory` is already selected by `resolveMentor` (it feeds the
-// fail-closed `isPubliclyDisplayed` gate in ./resolve-mentor), and it is the only shape
+// fail-closed `isPubliclyDisplayed` gate in ../resolve-mentor), and it is the only shape
 // this wrapper is ever called with. Threading it through keeps the enrolled-student
 // postnominal suppression on this anonymous surface, where the mentor's name is
 // published in `<title>`, the meta description and the `<h1>`.

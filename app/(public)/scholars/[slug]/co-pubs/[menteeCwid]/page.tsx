@@ -15,13 +15,9 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { resolveMentor } from "../resolve-mentor";
+import { resolvePair } from "./resolve-pair";
 import { identityImageEndpoint } from "@/lib/headshot";
-import {
-  getCoPublications,
-  getMentorMenteePair,
-  type CoPublicationFull,
-} from "@/lib/api/mentoring";
+import { getCoPublications, type CoPublicationFull } from "@/lib/api/mentoring";
 import { AuthorChipRow, type AuthorChip } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { pubTitleProps } from "@/components/publication/pub-html";
@@ -40,10 +36,9 @@ export async function generateMetadata({
   params: Promise<Params>;
 }): Promise<Metadata> {
   const { slug, menteeCwid } = await params;
-  const mentor = await resolveMentor(slug);
-  if (!mentor) return { title: "Not found" };
-  const pair = await getMentorMenteePair(mentor.cwid, menteeCwid);
-  if (!pair) return { title: "Not found" };
+  const resolved = await resolvePair(slug, menteeCwid);
+  if (!resolved) return { title: "Not found" };
+  const { pair } = resolved;
   return {
     title: `Co-authored publications — ${pair.mentorName} and ${pair.menteeName}`,
     description: `Publications co-authored by ${pair.mentorName} and ${pair.menteeName}.`,
@@ -57,11 +52,11 @@ export default async function CoPubsPage({
 }) {
   const { slug, menteeCwid } = await params;
 
-  const mentor = await resolveMentor(slug);
-  if (!mentor) notFound();
-
-  const pair = await getMentorMenteePair(mentor.cwid, menteeCwid);
-  if (!pair) notFound();
+  // The segment layout already 404s a missing pair (#2963); this stays as the
+  // type narrow and a backstop.
+  const resolved = await resolvePair(slug, menteeCwid);
+  if (!resolved) notFound();
+  const { mentor, pair } = resolved;
 
   // #2011 follow-up — `pair` already knows whether any ETL source contributed
   // this mentee; a manual-only one has no bridge rows and is computed locally.

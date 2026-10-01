@@ -6,6 +6,8 @@
  *
  * Synthetic slugs only.
  */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockNotFound } = vi.hoisted(() => ({
@@ -15,23 +17,31 @@ const { mockNotFound } = vi.hoisted(() => ({
 }));
 vi.mock("next/navigation", () => ({ notFound: mockNotFound }));
 
-const { scholarFindFirst, getTopic, getFamily, methodPagesEnabled } = vi.hoisted(() => ({
-  scholarFindFirst: vi.fn(),
-  getTopic: vi.fn(),
-  getFamily: vi.fn(),
-  methodPagesEnabled: vi.fn(() => true),
-}));
+const { scholarFindFirst, getMentorMenteePair, getTopic, getFamily, methodPagesEnabled } =
+  vi.hoisted(() => ({
+    scholarFindFirst: vi.fn(),
+    getMentorMenteePair: vi.fn(),
+    getTopic: vi.fn(),
+    getFamily: vi.fn(),
+    methodPagesEnabled: vi.fn(() => true),
+  }));
 vi.mock("@/lib/db", () => ({ prisma: { scholar: { findFirst: scholarFindFirst } } }));
+vi.mock("@/lib/api/mentoring", () => ({ getMentorMenteePair }));
 vi.mock("@/lib/api/topics", () => ({ getTopic }));
 vi.mock("@/lib/api/methods", () => ({ getFamily }));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({ isMethodPagesEnabled: methodPagesEnabled }));
 
 import CoPubsLayout from "@/app/(public)/scholars/[slug]/co-pubs/layout";
+import MenteeCoPubsLayout from "@/app/(public)/scholars/[slug]/co-pubs/[menteeCwid]/layout";
 import TopicScholarsLayout from "@/app/(public)/topics/[slug]/scholars/layout";
 import FamilyScholarsLayout from "@/app/(public)/methods/[supercategory]/[family]/scholars/layout";
 
 const CHILD = "child";
 const slugParams = { params: Promise.resolve({ slug: "zz-test" }), children: CHILD };
+const pairParams = {
+  params: Promise.resolve({ slug: "zz-test", menteeCwid: "zzz8888" }),
+  children: CHILD,
+};
 const familyParams = {
   params: Promise.resolve({ supercategory: "zz-sc", family: "zz-fam" }),
   children: CHILD,
@@ -40,6 +50,7 @@ const familyParams = {
 beforeEach(() => {
   mockNotFound.mockClear();
   scholarFindFirst.mockReset();
+  getMentorMenteePair.mockReset();
   getTopic.mockReset();
   getFamily.mockReset();
   methodPagesEnabled.mockReturnValue(true);
@@ -69,6 +80,43 @@ describe("loading.tsx routes 404 from the layout, outside the Suspense boundary"
       roleCategory: "doctoral_student_dds",
     });
     await expect(CoPubsLayout(slugParams)).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("co-pubs/[menteeCwid]: a real mentor with an unrecorded mentee 404s; a recorded pair renders children", async () => {
+    scholarFindFirst.mockResolvedValue({
+      cwid: "zzz9999",
+      slug: "zz-test",
+      preferredName: "Test Person",
+      postnominal: null,
+      roleCategory: "full_time_faculty",
+    });
+    getMentorMenteePair.mockResolvedValue(null);
+    await expect(MenteeCoPubsLayout(pairParams)).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(getMentorMenteePair).toHaveBeenCalledWith("zzz9999", "zzz8888");
+
+    getMentorMenteePair.mockResolvedValue({
+      mentorName: "Test Person",
+      menteeName: "Test Mentee",
+      manualOnly: false,
+    });
+    await expect(MenteeCoPubsLayout(pairParams)).resolves.toBe(CHILD);
+  });
+
+  it("co-pubs/[menteeCwid]: an unknown mentor 404s without a pair lookup", async () => {
+    scholarFindFirst.mockResolvedValue(null);
+    await expect(MenteeCoPubsLayout(pairParams)).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(getMentorMenteePair).not.toHaveBeenCalled();
+  });
+
+  it("co-pubs: no loading.tsx sits above the [menteeCwid] layout", () => {
+    // A parent loading.tsx's Suspense boundary wraps NESTED layouts too, so a
+    // co-pubs/loading.tsx would put the pair gate back behind the fallback and
+    // the unrecorded-pair 404 would be a 200 again. The rollup's skeleton lives
+    // in the (rollup) route group; the per-mentee one sits below its layout.
+    const coPubs = join(process.cwd(), "app/(public)/scholars/[slug]/co-pubs");
+    expect(existsSync(join(coPubs, "loading.tsx"))).toBe(false);
+    expect(existsSync(join(coPubs, "(rollup)/loading.tsx"))).toBe(true);
+    expect(existsSync(join(coPubs, "[menteeCwid]/loading.tsx"))).toBe(true);
   });
 
   it("topic scholars: unknown topic 404s; a known topic renders children", async () => {
