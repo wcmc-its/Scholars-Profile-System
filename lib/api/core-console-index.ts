@@ -9,8 +9,9 @@
  *     `candidate` row with no active CoreClaim, the review queue's own
  *     `candidates` partition. Counted with a grouped query rather than loading
  *     every candidate row, then corrected for the (few) claimed/rejected pairs.
- *     Only candidates at or above CANDIDATE_DISPLAY_FLOOR count — the ones the
- *     queue shows by default (lib/cores/review-thresholds.ts).
+ *     Only candidates the queue shows by default count — at or above
+ *     CANDIDATE_DISPLAY_FLOOR, or carrying a FLOOR_EXEMPT_METHOD_TIERS tier
+ *     (`isBelowDisplayFloor`, lib/cores/review-thresholds.ts).
  *   - "Confirmed" is `loadConfirmedCorePmidsByCore` (lib/api/cores.ts).
  *   - Clients are active `CoreClient` rows (`removedAt IS NULL`), split into
  *     CWID and name-only.
@@ -20,7 +21,12 @@
 import { db } from "@/lib/db";
 import { claimKey } from "@/lib/api/core-merge";
 import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
-import { CANDIDATE_DISPLAY_FLOOR, HIGH_CONFIDENCE_LIKELIHOOD } from "@/lib/cores/review-thresholds";
+import {
+  CANDIDATE_DISPLAY_FLOOR,
+  FLOOR_EXEMPT_METHOD_TIERS,
+  HIGH_CONFIDENCE_LIKELIHOOD,
+  isBelowDisplayFloor,
+} from "@/lib/cores/review-thresholds";
 
 // Both cuts live in the pure `lib/cores/review-thresholds.ts` (client components
 // read them); re-exported so existing server-side imports keep working.
@@ -34,15 +40,21 @@ export function countHighConfidence(candidates: ReadonlyArray<{ likelihood: numb
 }
 
 /** Of a loaded queue's open candidates, the ones this index counts as "To
- *  review" (`reviewTotal`): ENGINE candidates at or above the display floor.
+ *  review" (`reviewTotal`): ENGINE candidates the display floor does not hide.
  *  The core editor's "pending in total" banner count, so the two pages agree.
  *  A pmid sent to review by hand (not `status: "candidate"`) is on the queue
  *  but is not an engine suggestion, so neither page counts it. */
 export function countReviewSuggestions(
-  candidates: ReadonlyArray<{ likelihood: number; status: string }>,
+  candidates: ReadonlyArray<{ likelihood: number; status: string; methodTier: string | null }>,
 ): number {
   return candidates.filter(
-    (c) => c.status === "candidate" && c.likelihood >= CANDIDATE_DISPLAY_FLOOR,
+    (c) =>
+      c.status === "candidate" &&
+      !isBelowDisplayFloor({
+        likelihood: c.likelihood,
+        status: c.status,
+        methodTier: c.methodTier,
+      }),
   ).length;
 }
 
@@ -64,7 +76,7 @@ export interface CoreConsoleRow {
   leaders: CoreConsoleLeader[];
   owners: string[];
   curators: string[];
-  /** Open candidates (no active claim) at or above CANDIDATE_DISPLAY_FLOOR. */
+  /** Open candidates (no active claim) the display floor does not hide. */
   reviewTotal: number;
   /** Of `reviewTotal`, those with likelihood >= HIGH_CONFIDENCE_LIKELIHOOD. */
   reviewHigh: number;
@@ -98,12 +110,16 @@ export interface CoreConsoleInputs {
     granteeName: string | null;
   }>;
   names: ReadonlyMap<string, string>;
-  /** Engine `candidate` counts per core at or above the display floor, before
+  /** Engine `candidate` counts per core the display floor does not hide, before
    *  claims are applied. */
   candidateTotals: ReadonlyMap<string, number>;
   candidateHighs: ReadonlyMap<string, number>;
   /** Engine `candidate` rows that carry an ACTIVE claim — decided, so not open. */
-  claimedCandidates: ReadonlyArray<{ coreId: string; likelihood: number }>;
+  claimedCandidates: ReadonlyArray<{
+    coreId: string;
+    likelihood: number;
+    methodTier: string | null;
+  }>;
   confirmedByCore: ReadonlyMap<string, readonly string[]>;
   clients: ReadonlyArray<{ coreId: string; cwid: string | null }>;
 }
@@ -113,9 +129,9 @@ export function buildCoreConsoleRows(input: CoreConsoleInputs): CoreConsoleRow[]
   const claimedTotal = new Map<string, number>();
   const claimedHigh = new Map<string, number>();
   for (const c of input.claimedCandidates) {
-    // `candidateTotals` only counts rows at/above the floor, so only those are
-    // subtracted back out.
-    if (c.likelihood < CANDIDATE_DISPLAY_FLOOR) continue;
+    // `candidateTotals` only counts rows the floor does not hide, so only those
+    // are subtracted back out.
+    if (isBelowDisplayFloor({ ...c, status: "candidate" })) continue;
     claimedTotal.set(c.coreId, (claimedTotal.get(c.coreId) ?? 0) + 1);
     if (c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD) {
       claimedHigh.set(c.coreId, (claimedHigh.get(c.coreId) ?? 0) + 1);
@@ -210,7 +226,13 @@ export async function loadCoreConsoleIndex(
     }),
     client.publicationCore.groupBy({
       by: ["coreId"],
-      where: { status: "candidate", likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
+      where: {
+        status: "candidate",
+        OR: [
+          { likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
+          { methodTier: { in: [...FLOOR_EXEMPT_METHOD_TIERS] } },
+        ],
+      },
       _count: { _all: true },
     }),
     client.publicationCore.groupBy({
@@ -239,7 +261,7 @@ export async function loadCoreConsoleIndex(
             status: "candidate",
             pmid: { in: [...new Set(activeClaims.map((c) => c.pmid))] },
           },
-          select: { coreId: true, pmid: true, likelihood: true },
+          select: { coreId: true, pmid: true, likelihood: true, methodTier: true },
         });
 
   const nameCwids = [...new Set([...leaders.map((l) => l.cwid), ...admins.map((a) => a.cwid)])];
@@ -266,7 +288,11 @@ export async function loadCoreConsoleIndex(
     candidateHighs: new Map(highs.map((t) => [t.coreId, t._count._all])),
     claimedCandidates: claimedRows
       .filter((r) => claimKeys.has(claimKey(r.pmid, r.coreId)))
-      .map((r) => ({ coreId: r.coreId, likelihood: Number(r.likelihood) })),
+      .map((r) => ({
+        coreId: r.coreId,
+        likelihood: Number(r.likelihood),
+        methodTier: r.methodTier,
+      })),
     confirmedByCore,
     clients,
   });

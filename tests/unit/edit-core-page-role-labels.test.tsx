@@ -190,16 +190,18 @@ describe("/edit/core/[coreId] — single-scroll page data", () => {
   it("'pending in total' is the index's floored count: below-floor and queued rows are left out", async () => {
     mockLoadQueue.mockResolvedValue({
       candidates: [
-        { likelihood: 0.95, status: "candidate" },
-        { likelihood: CANDIDATE_DISPLAY_FLOOR, status: "candidate" },
-        { likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01, status: "candidate" },
-        { likelihood: 0.31, status: "candidate" },
+        { likelihood: 0.95, status: "candidate", methodTier: null },
+        { likelihood: CANDIDATE_DISPLAY_FLOOR, status: "candidate", methodTier: null },
+        { likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01, status: "candidate", methodTier: null },
+        { likelihood: 0.31, status: "candidate", methodTier: "weak" },
+        // a strong method tier is exempt from the floor, so it counts
+        { likelihood: 0.36, status: "candidate", methodTier: "strong" },
         // sent to review by hand: on the queue, not an engine suggestion
-        { likelihood: 0, status: "unscored", queued: true },
+        { likelihood: 0, status: "unscored", queued: true, methodTier: null },
       ],
     });
     const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
-    expect(findByType(result, mockSections)!.props.pending).toEqual({ total: 2, strong: 1 });
+    expect(findByType(result, mockSections)!.props.pending).toEqual({ total: 3, strong: 1 });
   });
 
   it("an empty queue is 0 of 0", async () => {

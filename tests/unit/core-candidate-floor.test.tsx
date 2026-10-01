@@ -1,7 +1,8 @@
 /**
  * The core review display floor (lib/cores/review-thresholds.ts): open engine
  * candidates below CANDIDATE_DISPLAY_FLOOR are hidden from the queue by default
- * and left out of the /edit/core index and core-editor "To review" counts.
+ * and left out of the /edit/core index and core-editor "To review" counts —
+ * unless a strong or moderate method tier exempts them.
  *
  * Every fixture value here is synthetic: made-up titles, CWIDs and PMIDs.
  */
@@ -24,6 +25,8 @@ import { partitionCoreQueue, type CoreQueueRow } from "@/lib/api/core-queue";
 import {
   CANDIDATE_DISPLAY_FLOOR,
   CANDIDATE_DISPLAY_FLOOR_PCT,
+  FLOOR_EXEMPT_METHOD_TIERS,
+  hasOnlyRepeatUserOrWeakMethod,
   isBelowDisplayFloor,
 } from "@/lib/cores/review-thresholds";
 
@@ -67,6 +70,15 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
 
 const CORE = { id: "2", name: "Synthetic Core", staffCount: null, staffTrackedCount: null };
 
+// The shape every hidden row on core 14 has: repeat-user evidence only.
+const REPEAT_USER_ONLY = {
+  signalAck: false,
+  ackAlias: null,
+  ackSnippet: null,
+  llmScore: null,
+  authorAffinity: 0.6,
+} as const;
+
 // Two above the floor (one exactly AT it — inclusive), three below.
 const HIGH = row({ pmid: "90000001", title: "High paper", likelihood: 0.82 });
 const AT = row({ pmid: "90000002", title: "At floor paper", likelihood: CANDIDATE_DISPLAY_FLOOR });
@@ -108,6 +120,32 @@ describe("isBelowDisplayFloor", () => {
     expect(isBelowDisplayFloor(row({ likelihood: 0.2, claimed: true }))).toBe(false);
     expect(isBelowDisplayFloor(row({ likelihood: 0.2, status: "confirmed" }))).toBe(false);
   });
+
+  it("exempts a strong or moderate method tier; weak or none stays below", () => {
+    expect(FLOOR_EXEMPT_METHOD_TIERS).toEqual(["strong", "moderate"]);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "strong" }))).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "moderate" }))).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "weak" }))).toBe(true);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: null }))).toBe(true);
+  });
+});
+
+describe("hasOnlyRepeatUserOrWeakMethod", () => {
+  it("is true only for repeat-user and/or weak-method evidence and nothing else", () => {
+    const bare = row(REPEAT_USER_ONLY);
+    expect(hasOnlyRepeatUserOrWeakMethod(bare)).toBe(true);
+    expect(hasOnlyRepeatUserOrWeakMethod({ ...bare, methodTier: "weak" })).toBe(true);
+    expect(hasOnlyRepeatUserOrWeakMethod({ ...bare, methodTier: "moderate" })).toBe(false);
+    expect(hasOnlyRepeatUserOrWeakMethod({ ...bare, signalAck: true })).toBe(false);
+    expect(hasOnlyRepeatUserOrWeakMethod({ ...bare, ackAlias: "SYN" })).toBe(false);
+    expect(hasOnlyRepeatUserOrWeakMethod({ ...bare, coauthors: ["zzz9999"] })).toBe(false);
+    expect(hasOnlyRepeatUserOrWeakMethod({ ...bare, llmScore: 3 })).toBe(false);
+    // no evidence at all is not "repeat-user evidence"
+    expect(hasOnlyRepeatUserOrWeakMethod({ ...bare, authorAffinity: null })).toBe(false);
+    expect(
+      hasOnlyRepeatUserOrWeakMethod({ ...bare, authorAffinity: null, methodTier: "weak" }),
+    ).toBe(true);
+  });
 });
 
 describe("applyDisplayFloor / searchedPmids", () => {
@@ -117,6 +155,27 @@ describe("applyDisplayFloor / searchedPmids", () => {
     expect(f.shown.map((r) => r.pmid)).toEqual(["90000001", "90000002"]);
     expect(f.hidden).toBe(3);
     expect(f.belowFloor).toBe(3);
+    // the fixtures carry an ack and an LLM score, so the line can't say "repeat-user only"
+    expect(f.weakOnly).toBe(false);
+  });
+  it("keeps strong/moderate method rows below the likelihood floor; weakOnly when the rest are bare", () => {
+    const strong = row({ ...REPEAT_USER_ONLY, pmid: "1", likelihood: 0.36, methodTier: "strong" });
+    const moderate = row({
+      ...REPEAT_USER_ONLY,
+      pmid: "2",
+      likelihood: 0.36,
+      methodTier: "moderate",
+    });
+    const weak = row({ ...REPEAT_USER_ONLY, pmid: "3", likelihood: 0.36, methodTier: "weak" });
+    const bare = row({ ...REPEAT_USER_ONLY, pmid: "4", likelihood: 0.36 });
+    const f = applyDisplayFloor([strong, moderate, weak, bare], {
+      showLow: false,
+      decided: none,
+      searched: none,
+    });
+    expect(f.shown.map((r) => r.pmid)).toEqual(["1", "2"]);
+    expect(f.hidden).toBe(2);
+    expect(f.weakOnly).toBe(true);
   });
   it("showLow, a session decision, or a searched PMID brings a row back", () => {
     expect(
@@ -236,6 +295,36 @@ describe("CoreClaimQueue — display floor", () => {
     expect(floorLine()).toBe("1 lower-confidence candidate hidden (likelihood below 40%) · Show");
   });
 
+  it("says WHAT is hidden when every hidden row is repeat-user evidence or a weak method match", () => {
+    const strongLow = row({
+      ...REPEAT_USER_ONLY,
+      pmid: "90000031",
+      title: "Strong method low",
+      likelihood: 0.36,
+      methodTier: "strong",
+    });
+    const weakLow = row({
+      ...REPEAT_USER_ONLY,
+      pmid: "90000032",
+      likelihood: 0.37,
+      methodTier: "weak",
+    });
+    const many = Array.from({ length: 1200 }, (_, i) =>
+      row({ ...REPEAT_USER_ONLY, pmid: String(91000000 + i), likelihood: 0.36 }),
+    );
+    const { q, titles, floorLine } = renderQueue({
+      candidates: [HIGH, strongLow, weakLow, ...many],
+    });
+    expect(titles()).toEqual(["90000001", "90000031"]);
+    expect(floorLine()).toBe(
+      "1,201 hidden: repeat-user evidence only or a weak method match · Show",
+    );
+    fireEvent.click(q.getByRole("button", { name: "Show" }));
+    expect(floorLine()).toBe(
+      "1,201 shown: repeat-user evidence only or a weak method match · Hide",
+    );
+  });
+
   it("a free-text search does NOT reach below the floor", () => {
     const { q, titles } = renderQueue();
     fireEvent.change(q.getByRole("searchbox", { name: "Filter candidates" }), {
@@ -257,11 +346,15 @@ describe("index and editor counts agree on the floor", () => {
       row({ pmid: "5", likelihood: 0.31 }),
       row({ pmid: "6", likelihood: 0.6 }), // claimed
       row({ pmid: "7", likelihood: 0.35 }), // rejected
+      row({ pmid: "9", likelihood: 0.36, methodTier: "strong" }), // exempt
+      row({ pmid: "10", likelihood: 0.36, methodTier: "weak" }), // hidden
+      row({ pmid: "11", likelihood: 0.37, methodTier: "moderate" }), // claimed, exempt
     ];
     const queuedOnly = row({ pmid: "8", likelihood: 0, status: "unscored", isManual: true });
     const claims = new Map([
       ["6", "claimed" as const],
       ["7", "rejected" as const],
+      ["11", "claimed" as const],
     ]);
     const { candidates } = partitionCoreQueue(
       [...engine, queuedOnly],
@@ -269,8 +362,13 @@ describe("index and editor counts agree on the floor", () => {
       new Set(["8"]),
     );
 
-    // What the index's grouped query sees: engine candidates at/above the floor.
-    const aboveFloor = engine.filter((r) => r.likelihood >= CANDIDATE_DISPLAY_FLOOR).length;
+    // What the index's grouped query sees: engine candidates at/above the floor
+    // OR carrying a strong/moderate method tier.
+    const aboveFloor = engine.filter(
+      (r) =>
+        r.likelihood >= CANDIDATE_DISPLAY_FLOOR ||
+        (r.methodTier !== null && FLOOR_EXEMPT_METHOD_TIERS.includes(r.methodTier)),
+    ).length;
     const inputs: CoreConsoleInputs = {
       cores: [
         {
@@ -292,13 +390,13 @@ describe("index and editor counts agree on the floor", () => {
       candidateHighs: new Map([["2", 1]]),
       claimedCandidates: engine
         .filter((r) => claims.has(r.pmid))
-        .map((r) => ({ coreId: "2", likelihood: r.likelihood })),
+        .map((r) => ({ coreId: "2", likelihood: r.likelihood, methodTier: r.methodTier })),
       confirmedByCore: new Map(),
       clients: [],
     };
     const [indexRow] = buildCoreConsoleRows(inputs);
 
-    expect(indexRow.reviewTotal).toBe(3); // pmids 1, 2, 3
+    expect(indexRow.reviewTotal).toBe(4); // pmids 1, 2, 3, 9
     expect(countReviewSuggestions(candidates)).toBe(indexRow.reviewTotal);
   });
 });

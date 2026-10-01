@@ -132,7 +132,7 @@ const HEADS: ReadonlyArray<{
     key: "review",
     label: "To review",
     align: "right",
-    tip: `Engine candidates with no active claim, likelihood ≥ ${CANDIDATE_DISPLAY_FLOOR_PCT}%. High = likelihood ≥ 80%`,
+    tip: `Engine candidates with no active claim, likelihood ≥ ${CANDIDATE_DISPLAY_FLOOR_PCT}% or a strong/moderate method match. High = likelihood ≥ 80%`,
   },
   { key: "confirmed", label: "Confirmed", align: "right", tip: "After owners’ claims" },
   {
@@ -359,11 +359,12 @@ export function CoreFacilitiesIndex({ cores, offFlags }: CoreFacilitiesIndexProp
 
       <p className="text-muted-foreground max-w-[100ch] text-[12.5px] leading-normal">
         Confirmed counts apply owners’ claims on top of the engine. “To review” is engine candidates
-        with no active claim and likelihood ≥ {CANDIDATE_DISPLAY_FLOOR_PCT}%, split into high
-        confidence (likelihood ≥ 80%) and other; lower-confidence candidates stay hidden in the
-        review queue unless shown there. Staff listed shows how many listed staff are tracked, the
-        ones the co-author signal can match. “Not listed” means the staff feed hasn’t been published
-        yet, which is different from none.
+        with no active claim and either likelihood ≥ {CANDIDATE_DISPLAY_FLOOR_PCT}% or a strong or
+        moderate method match, split into high confidence (likelihood ≥ 80%) and other; the rest
+        (repeat-user evidence only or a weak method match) stay hidden in the review queue unless
+        shown there. Staff listed shows how many listed staff are tracked, the ones the co-author
+        signal can match. “Not listed” means the staff feed hasn’t been published yet, which is
+        different from none.
       </p>
     </div>
   );

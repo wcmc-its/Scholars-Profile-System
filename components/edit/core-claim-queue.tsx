@@ -64,7 +64,11 @@ import { extractLastNameSort, stripUnitDisambiguation } from "@/lib/name-sort";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 // Pure and import-free, so safe in this client bundle (the loader modules that
 // also export these construct prisma at module scope).
-import { CANDIDATE_DISPLAY_FLOOR_PCT, isBelowDisplayFloor } from "@/lib/cores/review-thresholds";
+import {
+  CANDIDATE_DISPLAY_FLOOR_PCT,
+  hasOnlyRepeatUserOrWeakMethod,
+  isBelowDisplayFloor,
+} from "@/lib/cores/review-thresholds";
 import { CoreClientsDialog } from "@/components/edit/core-clients-panel";
 import {
   AboutSignals,
@@ -933,25 +937,29 @@ export function searchedPmids(query: string): ReadonlySet<string> {
  * decided this session (held on screen for its Undo) and a row whose PMID the
  * search names (`searchedPmids`). `hidden` is how many the floor left out;
  * `belowFloor` how many sit below it at all (the Show/Hide line's two counts).
- * Order is preserved. Pure.
+ * `weakOnly` is true when every below-floor row carries only repeat-user and/or
+ * weak-method evidence (`hasOnlyRepeatUserOrWeakMethod`), which lets that line
+ * say what is hidden. Order is preserved. Pure.
  */
 export function applyDisplayFloor(
   candidates: readonly CoreQueueRow[],
   opts: { showLow: boolean; decided: ReadonlySet<string>; searched: ReadonlySet<string> },
-): { shown: CoreQueueRow[]; hidden: number; belowFloor: number } {
+): { shown: CoreQueueRow[]; hidden: number; belowFloor: number; weakOnly: boolean } {
   const shown: CoreQueueRow[] = [];
   let hidden = 0;
   let belowFloor = 0;
+  let weakOnly = true;
   for (const r of candidates) {
     if (!isBelowDisplayFloor(r)) {
       shown.push(r);
       continue;
     }
     belowFloor++;
+    if (!hasOnlyRepeatUserOrWeakMethod(r)) weakOnly = false;
     if (opts.showLow || opts.decided.has(r.pmid) || opts.searched.has(r.pmid)) shown.push(r);
     else hidden++;
   }
-  return { shown, hidden, belowFloor };
+  return { shown, hidden, belowFloor, weakOnly };
 }
 
 /** The Filters panel's groups, in the mockup's order. */
@@ -1290,23 +1298,29 @@ export function historyGuardText(
   return `${head} ${middle} Each gets its own audit row.`;
 }
 
-/** "2,290 lower-confidence candidates hidden (likelihood below 40%) · Show" —
+/** "2,140 hidden: repeat-user evidence only or a weak method match · Show" —
  *  the display floor's one quiet line in the list header; Show/Hide toggles the
- *  below-floor rows in and out. */
+ *  below-floor rows in and out. Falls back to "N lower-confidence candidates
+ *  hidden (likelihood below 40%)" when a below-floor row carries other evidence
+ *  (`weakOnly` false), so the line never describes evidence a row lacks. */
 function FloorLine({
   count,
   showing,
+  weakOnly,
   onToggle,
 }: {
   count: number;
   showing: boolean;
+  weakOnly: boolean;
   onToggle: () => void;
 }) {
+  const n = count.toLocaleString("en-US");
+  const state = showing ? "shown" : "hidden";
   return (
     <p data-slot="core-queue-floor" className="text-muted-foreground mt-0.5 text-xs">
-      {`${count.toLocaleString("en-US")} lower-confidence ${count === 1 ? "candidate" : "candidates"} ${
-        showing ? "shown" : "hidden"
-      } (likelihood below ${CANDIDATE_DISPLAY_FLOOR_PCT}%) · `}
+      {weakOnly
+        ? `${n} ${state}: repeat-user evidence only or a weak method match · `
+        : `${n} lower-confidence ${count === 1 ? "candidate" : "candidates"} ${state} (likelihood below ${CANDIDATE_DISPLAY_FLOOR_PCT}%) · `}
       <button
         type="button"
         aria-pressed={showing}
@@ -2674,6 +2688,7 @@ export function CoreClaimQueue({
                   <FloorLine
                     count={showLow ? floor.belowFloor : floor.hidden}
                     showing={showLow}
+                    weakOnly={floor.weakOnly}
                     onToggle={() => {
                       setShowLow((v) => !v);
                       resetForScope();
