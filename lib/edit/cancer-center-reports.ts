@@ -264,6 +264,8 @@ export type ReportableUnit = {
   kind: ReportableUnitKind;
   name: string;
   centerType: "center" | "institute" | null;
+  /** A division's parent department, when the source carries it (global viewers). */
+  parentName?: string | null;
 };
 
 /**
@@ -325,6 +327,7 @@ export async function loadReportableUnitsForActor(
     kind: ReportableUnitKind;
     name: string;
     centerType: "center" | "institute" | null;
+    parentName?: string | null;
   };
   let candidates: Candidate[];
   if (isGlobal) {
@@ -340,6 +343,7 @@ export async function loadReportableUnitsForActor(
         kind: u.kind,
         name: u.name,
         centerType: u.kind === "center" ? u.centerType : null,
+        parentName: u.parentDeptName,
       }));
   } else {
     const manageable = await loadManageableUnits(session.cwid, db);
@@ -425,6 +429,7 @@ export async function loadReportableUnitsForActor(
       name: c.name,
       centerType:
         c.kind !== "center" ? null : centerTypeByCode ? (centerTypeByCode.get(c.code) ?? "center") : (c.centerType ?? "center"),
+      ...(c.parentName ? { parentName: c.parentName } : {}),
     }));
 }
 

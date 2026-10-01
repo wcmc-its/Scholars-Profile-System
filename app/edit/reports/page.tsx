@@ -242,7 +242,7 @@ export default async function EditReportsIndexPage({
   // group on that unit, not a one-unit view: every unit of a kind collapses
   // into one group with a picker (#2857 cores, #2856 the rest).
   const preselected = center || null;
-  let baseUnits: ReadonlyArray<{ code: string; kind: ReportableUnitKind; name: string }> =
+  let baseUnits: ReadonlyArray<{ code: string; kind: ReportableUnitKind; name: string; parentName?: string | null }> =
     await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
   let preselectedCode = preselected;
   if (preselected) {
@@ -268,6 +268,7 @@ export default async function EditReportsIndexPage({
   // somewhere to go.
   if (baseUnits.length === 0 && !session.isSuperuser && extraUnits.length === 0) notFound();
 
+  baseUnits = disambiguateNames(baseUnits);
   const liveness = await loadReportLiveness(
     baseUnits.map((u) => ({ code: u.code, kind: u.kind })),
     db.read,
@@ -378,6 +379,19 @@ function buildKindGroup(
   const first = unitOptions.find((o) => !(withAll && isAllCores(o.code))) ?? unitOptions[0];
   const selected = units.find((u) => u.code === (preselected ?? first.code)) ?? units[0];
   return { ...selected, name: name ?? selected.name, unitOptions };
+}
+
+/** Two units of one kind with the same name (two "Cardiology" divisions)
+ *  read as the same picker option; suffix the parent department, else the
+ *  code. Unique names are untouched. */
+function disambiguateNames<T extends { code: string; kind: string; name: string; parentName?: string | null }>(
+  units: ReadonlyArray<T>,
+): T[] {
+  const count = new Map<string, number>();
+  for (const u of units) count.set(`${u.kind}|${u.name}`, (count.get(`${u.kind}|${u.name}`) ?? 0) + 1);
+  return units.map((u) =>
+    (count.get(`${u.kind}|${u.name}`) ?? 0) > 1 ? { ...u, name: `${u.name} (${u.parentName || u.code})` } : u,
+  );
 }
 
 /** A per-kind group's heading: the kind's scope segment label. */

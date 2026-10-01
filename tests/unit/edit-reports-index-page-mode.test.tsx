@@ -359,6 +359,28 @@ describe("/edit/reports — one grouped list for every viewer", () => {
     });
   });
 
+  it("two same-named divisions get their parent department (else code) in the picker; unique names untouched", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockLoadReportableUnits.mockResolvedValue([
+      { code: "d1", name: "Cardiology", kind: "division", centerType: null, parentName: "Pediatrics" },
+      { code: "d2", name: "Cardiology", kind: "division", centerType: null, parentName: "Medicine" },
+      { code: "d3", name: "Cardiology", kind: "division", centerType: null, parentName: null },
+      { code: "d4", name: "Neurology", kind: "division", centerType: null, parentName: "Medicine" },
+      { code: "dept", name: "Cardiology", kind: "department", centerType: null },
+    ]);
+    const props = await indexProps();
+    const options = (u: (typeof props.units)[number]) =>
+      (u as typeof u & { unitOptions?: Array<{ name: string }> }).unitOptions?.map((o) => o.name);
+    expect(options(props.units.find((u) => u.name === "Divisions")!)).toEqual([
+      "Cardiology (d3)",
+      "Cardiology (Medicine)",
+      "Cardiology (Pediatrics)",
+      "Neurology",
+    ]);
+    // A department sharing a division's name is a different kind: no suffix.
+    expect(props.units.find((u) => u.code === "dept")!.name).toBe("Cardiology");
+  });
+
   describe.each([
     ["department", "Departments"],
     ["division", "Divisions"],
