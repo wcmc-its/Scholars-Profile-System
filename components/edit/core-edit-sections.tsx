@@ -147,6 +147,7 @@ export function CoreEditSections({
       rootCrumb={{ label: "Cores", href: "/edit/core" }}
       orgUnitsNavVisible={coresNavVisible}
       actorRole={actorRole}
+      contentEditor={accessReadOnly}
       previewHref={previewHref}
       sections={sections}
       initialSection={attr ? LEGACY_ATTR_SECTION[attr] : undefined}

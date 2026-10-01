@@ -56,6 +56,7 @@ export function UnitEditSections({
   rootCrumb = { label: "Org units", href: "/edit/units" },
   orgUnitsNavVisible,
   actorRole,
+  contentEditor = false,
   previewHref,
   reportsHref,
   sections,
@@ -76,6 +77,9 @@ export function UnitEditSections({
   /** Whether the root crumb links back to its index (the viewer's tab predicate). */
   orgUnitsNavVisible: boolean;
   actorRole: UnitActorRole;
+  /** A content editor: the actor note names the role, not the curator floor
+   *  `actorRole` falls back to. */
+  contentEditor?: boolean;
   previewHref?: string;
   reportsHref?: string;
   sections: ReadonlyArray<UnitEditSection>;
@@ -148,8 +152,10 @@ export function UnitEditSections({
               {titleBadge}
             </div>
             <p className="text-muted-foreground text-[13px]" data-testid="unit-edit-actor-note">
-              Editing as administrator ({ROLE_LABEL[actorRole]}). Changes are logged against your
-              account.
+              {contentEditor
+                ? "Editing as content editor."
+                : `Editing as administrator (${ROLE_LABEL[actorRole]}).`}{" "}
+              Changes are logged against your account.
             </p>
           </div>
           {(reportsHref || previewHref) && (

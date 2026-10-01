@@ -91,7 +91,12 @@ const STEWARD = { cwid: "zzc0001", isSuperuser: false, isCommsSteward: true };
 const NEITHER = { cwid: "zzg0001", isSuperuser: false, isCommsSteward: false };
 const BASE = "/edit/titles-queue";
 
-type Session = { isSuperuser: boolean; isCommsSteward: boolean; isContentEditor?: boolean };
+type Session = {
+  isSuperuser: boolean;
+  isCommsSteward: boolean;
+  isContentEditor?: boolean;
+  isObserver?: boolean;
+};
 
 async function renderBody(session: Session, searchParams: Record<string, string> = {}) {
   const data = await loadTitlesQueue();
@@ -270,6 +275,14 @@ describe("Titles queue body", () => {
     const ce = await renderBody({ ...STEWARD, isContentEditor: true });
     expect(ce.getByTestId("title-row-zzc9003")).toBeTruthy();
     expect(ce.queryByTestId("title-change-zzc9003")).toBeNull();
+  });
+
+  it("an observer reads the queue (synthetic steward view) but gets no pin control or pin wording", async () => {
+    const ob = await renderBody({ ...STEWARD, isObserver: true });
+    expect(ob.getByTestId("title-row-zzc9003")).toBeTruthy();
+    expect(ob.queryByTestId("title-change-zzc9003")).toBeNull();
+    expect(ob.queryByText(/pin a title/)).toBeNull();
+    expect(ob.getByText(/Fix the source\.$/)).toBeTruthy();
   });
 
   it("carries no report chrome (no 'Report 10', no '← All reports')", async () => {

@@ -22,9 +22,8 @@
  * (`/edit/titles-queue/export`) takes the same query string through the same
  * `parseTitleDashboardParams`. The pin panel posts the same `/api/edit/field`
  * write as `TitleField` — this page adds no write path. The page's gate
- * (`canReviewTitles`) is the pin gate, so every viewer gets the pin control;
- * `canSet` is still derived from the session so the control can never show
- * to someone the write would refuse.
+ * (`canReviewTitles`) also admits observers and content editors, who read but
+ * never pin, so the pin control and pin wording follow `canPinTitles`.
  */
 import Link from "next/link";
 import { Download } from "lucide-react";
@@ -50,6 +49,7 @@ import {
   TITLE_RULES,
   TITLE_TAB_LABEL,
   TITLE_TAB_NOTE,
+  TITLE_TAB_NOTE_READ_ONLY,
   TITLE_TABS,
   titleDashboardQueryString,
   titleRowNotes,
@@ -62,7 +62,7 @@ import {
   type TitleReason,
   type TitleTab,
 } from "@/lib/edit/title-dashboard";
-import { canReviewTitles } from "@/lib/edit/titles-queue";
+import { canPinTitles } from "@/lib/edit/titles-queue";
 import { TITLE_RANK, TITLE_RANK_LABEL } from "@/lib/scholar-title";
 import { cn } from "@/lib/utils";
 
@@ -455,7 +455,7 @@ export function TitlesQueue({
   basePath,
 }: {
   data: TitlesQueueData;
-  session: Pick<EditSession, "isSuperuser" | "isCommsSteward" | "isContentEditor">;
+  session: Pick<EditSession, "isSuperuser" | "isCommsSteward" | "isContentEditor" | "isObserver">;
   searchParams: TitlesQueueSearchParams;
   /** `/edit/titles-queue` — for the page's own links (tabs, chips, the form). */
   basePath: string;
@@ -467,9 +467,7 @@ export function TitlesQueue({
   const inTab = params.tab === "all" ? all.length : counts[params.tab!];
   const base = filterTitleDashboard(all, { ...params, reason: null });
   const rows = params.reason ? base.filter((r) => r.reasons.includes(params.reason!)) : base;
-  // A content editor reads the queue but never pins (title decisions stay
-  // with the stewards; the pin write refuses it regardless).
-  const canSet = canReviewTitles(session) && session.isContentEditor !== true;
+  const canSet = canPinTitles(session);
   const grid = canSet ? GRID_SET : GRID_VIEW;
   const downloadHref = `${basePath}/export?${titleDashboardQueryString(params)}`;
 
@@ -479,7 +477,7 @@ export function TitlesQueue({
       <div className="flex flex-col gap-2.5">
         <Tabs basePath={basePath} params={params} counts={counts} />
         <p className="text-muted-foreground text-[13.5px]" data-testid="display-titles-tab-note">
-          {TITLE_TAB_NOTE[params.tab!]}
+          {canSet ? TITLE_TAB_NOTE[params.tab!] : TITLE_TAB_NOTE_READ_ONLY[params.tab!]}
         </p>
       </div>
       <Toolbar

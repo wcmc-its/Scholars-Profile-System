@@ -200,6 +200,8 @@ export type EditShellProps = {
   /** Replaces the role pill's "Editing as …" text. A content editor reuses
    *  unit-admin mode with no conferring unit, so it names itself here. */
   actorLabel?: string;
+  /** Replaces the unit-admin note under the header (what this viewer can edit). */
+  actorNote?: string;
   /**
    * `cv_generator` role (#2482): the header's role pill reads "View only" (and
    * drops "Changes are logged…") instead of "Editing as administrator" — true on
@@ -243,6 +245,7 @@ export function EditShell({
   backHref,
   unitAdmin,
   actorLabel,
+  actorNote,
   readOnly = false,
   contentInert = readOnly,
   children,
@@ -432,8 +435,8 @@ export function EditShell({
             below the h1. */}
         {isUnitAdmin && (
           <p className="text-muted-foreground text-[13px]" data-slot="edit-unit-admin-note">
-            You can edit the overview and hide misattributed publications; name, title, and contact
-            details come from WCM systems, and the profile URL is set by a Scholars administrator.
+            {actorNote ??
+              "You can edit the overview and hide misattributed publications; name, title, and contact details come from WCM systems, and the profile URL is set by a Scholars administrator."}
           </p>
         )}
       </div>

@@ -40,6 +40,7 @@ import {
   canGrant,
 } from "@/lib/edit/authz";
 import { canViewHonorsQueue, isHonorsQueueReadOnly } from "@/lib/edit/honor-queue";
+import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { resolveEditIdentityForWrite } from "@/lib/edit/request";
 import { canViewUsage, type UsageAccessClient } from "@/lib/edit/usage-access";
 
@@ -115,6 +116,18 @@ describe("write predicates", () => {
     ] as const) {
       expect(authorizeFieldEdit(WRITE, { entityId: OTHER, fieldName }).ok).toBe(true);
     }
+  });
+
+  it("hides a whole profile section (decision 2026-10-01): the toggle rides authorizeOverviewWrite", async () => {
+    const authz = await authorizeOverviewWrite({
+      session: WRITE,
+      realCwid: WRITE.cwid,
+      impersonatedCwid: null,
+      entityId: OTHER,
+      proxyDb: {} as never,
+      unitDb: {} as never,
+    });
+    expect(authz.ok).toBe(true);
   });
 
   it("never pins a display title or sets a slug", () => {

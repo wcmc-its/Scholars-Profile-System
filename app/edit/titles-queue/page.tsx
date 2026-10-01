@@ -28,7 +28,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
-import { canReviewTitles, rememberTitlesPendingCount } from "@/lib/edit/titles-queue";
+import { canPinTitles, canReviewTitles, rememberTitlesPendingCount } from "@/lib/edit/titles-queue";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +75,8 @@ export default async function TitlesQueuePage({
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Titles</h1>
         <p className="text-muted-foreground m-0 max-w-3xl text-[14.5px] leading-normal">
           Scholars whose displayed title needs a look: contested leadership titles, leadership
-          titles that lost, and roles the title text disagrees with. Fix the source or pin a title.
+          titles that lost, and roles the title text disagrees with.{" "}
+          {canPinTitles(session) ? "Fix the source or pin a title." : "Fix the source."}
         </p>
       </div>
       <TitlesQueue data={data} session={session} searchParams={sp} basePath={BASE_PATH} />
