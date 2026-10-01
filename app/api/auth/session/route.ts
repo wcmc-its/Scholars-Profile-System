@@ -136,11 +136,12 @@ export async function GET(): Promise<NextResponse> {
   // (mirrored from `impersonationActive`) keeps a dark deployment from
   // advertising the switcher entry.
   const featureEnabled = process.env.IMPERSONATION_ENABLED === "true";
+  // A content editor's verdict also names the role in the account menu, so it
+  // is resolved once here (never for a superuser, who outranks it).
+  const contentEditor = !superuser && (await isContentEditor(session.cwid).catch(() => false));
   const canImpersonate =
     featureEnabled &&
-    (superuser ||
-      (await isObserver(session.cwid).catch(() => false)) ||
-      (await isContentEditor(session.cwid).catch(() => false)));
+    (superuser || contentEditor || (await isObserver(session.cwid).catch(() => false)));
 
   // Role-aware console entry points for the account-menu dropdown
   // (`lib/auth/console-links.ts`, role-aware-navigation-entry-points-spec.md).
@@ -163,8 +164,8 @@ export async function GET(): Promise<NextResponse> {
     // steward-shaped read view).
     const commsSteward =
       (await isCommsSteward(session.cwid).catch(() => false)) ||
-      (await isObserver(session.cwid).catch(() => false)) ||
-      (await isContentEditor(session.cwid).catch(() => false));
+      contentEditor ||
+      (await isObserver(session.cwid).catch(() => false));
     const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
     const managesUnits = manageable !== null && manageable.total > 0;
     consoleLinks = buildConsoleLinks({
@@ -297,6 +298,7 @@ export async function GET(): Promise<NextResponse> {
       // The REAL cwid's superuser verdict: the account menu names the role, and
       // canImpersonate && !isSuperuser marks an observer's read-only View as.
       isSuperuser: superuser,
+      isContentEditor: contentEditor,
       canAccessFundingMatcher,
       consoleLinks,
     },

@@ -17,6 +17,8 @@ import { isGrantedProxy, type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/revalidation";
 import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
+import { isCwid } from "@/lib/cwid";
+import { isRejectReason } from "@/lib/edit/reject-reason";
 import { findSuppressibleEntityOwner } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/revoke";
@@ -40,6 +42,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       entityId: true,
       contributorCwid: true,
       createdBy: true,
+      reason: true,
       revokedAt: true,
     },
   });
@@ -162,17 +165,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 /**
  * Whose profile a suppression is on, for the content-editor revoke leg — set
- * only for the one-profile kinds a content editor may hide (the suppress
- * route's delegated allowlist): a per-author publication hide, or an
- * appointment / education / grant. Null for a whole scholar, a whole-
+ * only for a hide a PERSON applied (its creator is a CWID, so never an ETL hold
+ * such as `system-confidential-title` or `system-recency`, which the ETL never
+ * re-applies once lifted) that is not a ReCiter "Not mine" reject, and only for
+ * the one-profile kinds a content editor may hide (the suppress route's
+ * delegated allowlist): a per-author publication hide, or an appointment /
+ * education / grant. Null for everything else — a whole scholar, a whole-
  * publication takedown, a mentee, a dataset, a unit, or a row whose owner no
- * longer resolves, so `authorizeRevoke` refuses them.
+ * longer resolves — so `authorizeRevoke` refuses it.
  */
 async function contentEditorRevokeSubject(s: {
   entityType: string;
   entityId: string;
   contributorCwid: string | null;
+  createdBy: string;
+  reason: string | null;
 }): Promise<string | null> {
+  if (!isCwid(s.createdBy) || isRejectReason(s.reason)) return null;
   if (s.entityType === "publication") return s.contributorCwid;
   if (s.entityType === "appointment" || s.entityType === "education" || s.entityType === "grant") {
     const owner = await findSuppressibleEntityOwner(s.entityType, s.entityId, db.read);

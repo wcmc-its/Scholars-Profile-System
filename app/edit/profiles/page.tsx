@@ -169,6 +169,7 @@ export default async function EditScholarsPage({
           impersonationEnabled() &&
           (session.isSuperuser || session.isObserver === true || session.isContentEditor === true)
         }
+        viewAsReadOnly={!session.isSuperuser}
         viewerCwid={session.cwid}
       />
     </ConsoleShell>

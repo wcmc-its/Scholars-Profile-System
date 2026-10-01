@@ -244,6 +244,14 @@ describe("POST /api/edit/revoke — content editor", () => {
   });
 
   for (const [name, row] of [
+    // An ETL compliance hold (CDA/NDA title): the ETL never re-applies it.
+    [
+      "an ETL compliance hold",
+      { entityType: "grant", entityId: "g-1", contributorCwid: null, createdBy: "system-confidential-title" },
+    ],
+    ["an ETL recency hold", { entityType: "grant", entityId: "g-1", contributorCwid: null, createdBy: "system-recency" }],
+    // A superuser-applied ReCiter "Not mine" reject.
+    ["a ReCiter reject", { createdBy: "adm001", reason: "Rejected as not the author's via /edit (#746)" }],
     ["a whole-publication takedown", { contributorCwid: null }],
     ["a whole-scholar hide", { entityType: "scholar", entityId: "other9", contributorCwid: null }],
     ["a mentee hide", { entityType: "mentee", entityId: "other9:men01", contributorCwid: null }],

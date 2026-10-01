@@ -217,11 +217,12 @@ export function authorizeSuppress(
  *
  * A content editor may also lift a hide STAFF applied on one profile. The route
  * resolves, for a content editor only, `subject` (whose profile the hide is on:
- * set only for the one-profile kinds — a per-author publication hide, or an
- * appointment / education / grant — and null for a whole scholar, a takedown,
- * a mentee or a dataset) and `bySubject` (the scholar or their proxy applied
- * it). Takedowns, whole-scholar hides and a scholar's own hides stay out of
- * reach.
+ * set only for a person-made, non-reject hide of a one-profile kind — a
+ * per-author publication, or an appointment / education / grant — and null for
+ * an ETL hold, a ReCiter reject, a whole scholar, a takedown, a mentee or a
+ * dataset) and `bySubject` (the scholar or their proxy applied it). Takedowns,
+ * whole-scholar hides, system holds, rejects and a scholar's own hides stay out
+ * of reach.
  */
 export function authorizeRevoke(
   session: EditSession,

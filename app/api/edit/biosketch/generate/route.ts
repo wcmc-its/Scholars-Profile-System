@@ -92,8 +92,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   // --- prompt-version gate (#917 v6). Only a superuser / comms-steward / unit-admin curator
   //     may steer the biosketch prompt version; everyone else is silently downgraded to the
   //     live default (the posted body is untrusted). Mirrors the overview generate route. ---
+  // A content editor edits in unit-admin mode, so it gets the unit admin's selector.
   const canSelectBiosketchPromptVersion =
-    session.isSuperuser || session.isCommsSteward || authz.viaUnitAdminUnit !== null;
+    session.isSuperuser ||
+    session.isCommsSteward ||
+    session.isContentEditor === true ||
+    authz.viaUnitAdminUnit !== null;
   const effectiveParams =
     canSelectBiosketchPromptVersion || params.promptVersion === defaultBiosketchPromptVersionId()
       ? params
