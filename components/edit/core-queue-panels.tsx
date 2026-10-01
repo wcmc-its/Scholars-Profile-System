@@ -19,6 +19,10 @@ export interface RailItem {
   key: string;
   label: string;
   sub: string;
+  /** Tailwind background for the sub-line's 7px dot (mockup) — the caller
+   *  picks it (a band colour, or slate for a pile with no band). No dot when
+   *  absent. */
+  dot?: string;
   /** Open (undecided) papers in this scope. */
   count: number;
 }
@@ -115,7 +119,16 @@ export function ScopeRail({
                   >
                     <span className="min-w-0">
                       <span className="text-foreground block text-[13px]">{i.label}</span>
-                      <span className="text-muted-foreground mt-px block text-xs">{i.sub}</span>
+                      <span className="text-muted-foreground mt-0.5 flex items-center gap-[5px] text-xs">
+                        {i.dot ? (
+                          <span
+                            aria-hidden
+                            data-slot="core-queue-rail-dot"
+                            className={`size-[7px] shrink-0 rounded-full ${i.dot}`}
+                          />
+                        ) : null}
+                        {i.sub}
+                      </span>
                     </span>
                     <span className="text-muted-foreground text-xs tabular-nums">{i.count}</span>
                   </button>
