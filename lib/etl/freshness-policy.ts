@@ -240,6 +240,9 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   FamilySensitivity: { cadence: "nightly" },
   FamilySuppression: { cadence: "nightly" },
   MeshCoverage: { cadence: "nightly" },
+  // #2596 — cdk RosterProminenceNightly. A guard refusal records status=failed,
+  // so a stuck sort order surfaces here as Late rather than silently.
+  RosterProminence: { cadence: "nightly" },
   // #1258/#2016 — both envs. The `envs: ["staging"]` restriction is retired with
   // the nightlySteps env split it mirrored. Tracking prod is the POINT of this
   // half of the change: prod's anchors sat at a uniform 2026-06-02 refreshed_at

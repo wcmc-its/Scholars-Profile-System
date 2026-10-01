@@ -54,7 +54,13 @@ export async function loadCenterDirectors(
 }
 
 /** Prominence weights — kept here so they're easy to tune in one place.
- *  Leadership weights mirror the people-search #532 constants (chair > chief). */
+ *  Leadership weights mirror the people-search #532 constants (chair > chief).
+ *
+ *  🔴 Tuning a weight does NOT move `Scholar.rosterProminence` (#2596) until
+ *  `etl:roster-prominence` reruns: nightly on its own, or on demand per
+ *  docs/OPERATIONS-RUNBOOK.md ("Roster prominence"). A weight tuned DOWN trips
+ *  that step's `roster-prominence:score-drops` guard by design; rerun it with
+ *  the bypass the runbook names. */
 const W_HINDEX = 0.5;
 const W_PI = 0.5;
 const W_NIH_PI = 0.5;
@@ -221,18 +227,24 @@ export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
  * A cwid with no scholar row is simply ABSENT from the returned map (rather than
  * carrying a fabricated 0-score entry the caller can't distinguish from a real
  * one); callers supply their own default.
+ *
+ * `"all"` (#2596) scores every non-deleted scholar with the same five reads,
+ * unscoped. That is the nightly `etl:roster-prominence` writer's shape — the
+ * one caller that wants the whole roster and writes it to `Scholar`, so the
+ * stored column and every in-app caller share this exact code path.
  */
 export async function computeProminence(
   client: ProminenceClient,
-  cwids: readonly string[],
+  cwids: readonly string[] | "all",
 ): Promise<Map<string, ProminenceEntry>> {
   const out = new Map<string, ProminenceEntry>();
-  const unique = [...new Set(cwids)];
-  if (unique.length === 0) return out;
+  const unique = cwids === "all" ? null : [...new Set(cwids)];
+  if (unique !== null && unique.length === 0) return out;
+  const inCwids = unique === null ? {} : { cwid: { in: unique } };
 
   const [scholars, chairRows, chiefRows, piRows, nihPiRows, centerDirectors] = await Promise.all([
     client.scholar.findMany({
-      where: { cwid: { in: unique } },
+      where: unique === null ? { deletedAt: null } : inCwids,
       select: {
         cwid: true,
         hIndex: true,
@@ -248,32 +260,32 @@ export async function computeProminence(
       where: {
         entityType: "department",
         roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
-        cwid: { in: unique },
+        ...inCwids,
       },
       select: { cwid: true, roleKey: true },
     }),
     client.orgUnitRoleAssignment.findMany({
-      where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY, cwid: { in: unique } },
+      where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY, ...inCwids },
       select: { cwid: true },
     }),
     client.grant.groupBy({
       by: ["cwid"],
       // PI prominence weights WCM-administered grants only; exclude RePORTER
       // backfill so a recruit's prior-institution history doesn't inflate it.
-      where: { cwid: { in: unique }, role: { in: [...PI_ROLES] }, source: { not: "RePORTER" } },
+      where: { ...inCwids, role: { in: [...PI_ROLES] }, source: { not: "RePORTER" } },
       _count: { _all: true },
     }),
     client.grant.groupBy({
       by: ["cwid"],
       where: {
-        cwid: { in: unique },
+        ...inCwids,
         role: { in: [...PI_ROLES] },
         nihIc: { not: null },
         source: { not: "RePORTER" },
       },
       _count: { _all: true },
     }),
-    loadCenterDirectors(client, unique),
+    loadCenterDirectors(client, unique ?? undefined),
   ]);
 
   const chairLabelByCwid = new Map<string, string>();

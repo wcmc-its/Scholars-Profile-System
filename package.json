@@ -119,6 +119,7 @@
     "etl:family-suppression": "tsx etl/family-suppression/index.ts",
     "etl:family-review": "tsx etl/family-review/index.ts",
     "etl:mesh-coverage": "tsx etl/mesh-coverage/index.ts",
+    "etl:roster-prominence": "tsx etl/roster-prominence/index.ts",
     "etl:spotlight": "tsx etl/spotlight/index.ts",
     "etl:scholar-tool": "tsx etl/tools/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",

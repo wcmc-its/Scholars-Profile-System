@@ -1662,6 +1662,17 @@ export class EtlStack extends Stack {
       // continue-tier so a bad digest alarms this step, never the chain. Before
       // Sps-InboundMail is deployed (or any mail arrives) the run is a 0-row success.
       { id: "ClipsNightly", npmScript: "etl:news-clips", external: false, tier: "continue" },
+      // #2596 — materialize Scholar.rosterProminence/rosterLeadershipTier from
+      // lib/api/prominence.ts. After Ed (titles), Infoed (PI grants) and
+      // Dynamodb (scored pubs, h-index), whose outputs it scores. SPS-DB only,
+      // so external:false. `continue`: a guard refusal leaves last night's
+      // order in place (stale but coherent) and still warns via etl-failures.
+      {
+        id: "RosterProminenceNightly",
+        npmScript: "etl:roster-prominence",
+        external: false,
+        tier: "continue",
+      },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Reliability-audit PR-5 — terminal volume gate. Reads etl_run
