@@ -263,7 +263,9 @@ describe("Confirmed tab as rendered", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "By person" }));
     expect(titles()).toHaveLength(3); // Everyone
-    fireEvent.click(screen.getByRole("button", { name: /^Pat Example/ }));
+    // The rail's entry; the summary strip has a person chip by the same name.
+    const rail = document.querySelector('[data-slot="core-queue-rail"]') as HTMLElement;
+    fireEvent.click(within(rail).getByRole("button", { name: /^Pat Example/ }));
     expect(titles()).toEqual(["Repeat beta"]);
     expect(screen.getByRole("heading", { name: "Confirmed with Pat Example" })).toBeTruthy();
   });
