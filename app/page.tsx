@@ -41,7 +41,7 @@ import { SiteFooter } from "@/components/site/footer";
 // (docs/1503-shared-cachehandler-spec.md). Regeneration is background (SWR).
 export const revalidate = 7200; // 2 hours
 export const dynamicParams = true;
-// Fail the build if any dynamic API (headers/cookies/searchParams) sneaks into this tree — incl. not-found — and silently turns off ISR.
+// Fail the build if any dynamic API (headers, cookies, request query) sneaks into this tree — incl. not-found — and silently turns off ISR.
 export const dynamic = "error";
 
 // methodCategories drives BOTH the hero "N method families" stat (in HomeStats)

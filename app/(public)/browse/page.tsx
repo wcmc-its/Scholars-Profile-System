@@ -26,7 +26,7 @@ import { CoresGrid } from "@/components/browse/cores-grid";
  * tab. Surname-finding belongs with search, not org-structure exploration.
  */
 export const revalidate = 3600;
-// Fail the build if any dynamic API (headers/cookies/searchParams) sneaks into this tree — incl. not-found — and silently turns off ISR.
+// Fail the build if any dynamic API (headers, cookies, request query) sneaks into this tree — incl. not-found — and silently turns off ISR.
 export const dynamic = "error";
 
 export const metadata: Metadata = {
