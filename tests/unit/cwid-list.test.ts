@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   mockImpersonationActive: vi.fn(),
   canView: vi.fn(),
   create: vi.fn(),
+  isObserver: vi.fn(),
 }));
 
 // Impersonated writes now re-check that the REAL initiator is a superuser (an
@@ -34,6 +35,7 @@ vi.mock("@/lib/auth/session", () => ({ nowSeconds: () => 1_000 }));
 vi.mock("@/lib/edit/authz", () => ({ verifyRequestOrigin: () => ({ ok: true }), logEditDenial: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: { reportCwidList: { create: h.create } } } }));
 vi.mock("@/lib/edit/article-count-report", () => ({ canViewArticleCountReport: h.canView }));
+vi.mock("@/lib/auth/observer", () => ({ isObserver: h.isObserver }));
 
 import { POST } from "@/app/api/edit/reports/article-count/cwid-list/route";
 import { CWID_LIST_MAX, parseCwidText } from "@/lib/cwid-list-text";
@@ -54,6 +56,7 @@ beforeEach(() => {
   h.mockImpersonationActive.mockReturnValue(false);
   h.canView.mockResolvedValue(true);
   h.create.mockResolvedValue({});
+  h.isObserver.mockResolvedValue(false);
 });
 
 describe("parseCwidText", () => {
@@ -122,6 +125,32 @@ describe("POST /api/edit/reports/article-count/cwid-list", () => {
 
   it("403 for someone who cannot open report 8, before anything is written", async () => {
     h.canView.mockResolvedValue(false);
+    const res = await POST(post({ text: "abc1234" }));
+    expect(res.status).toBe(403);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  // The write preamble strips an observer's synthetic steward view, so the
+  // report gate alone refuses the filter list an observer can see on the page.
+  it("an observer (real cwid, not under View as) may store a list", async () => {
+    h.canView.mockResolvedValue(false);
+    h.isObserver.mockResolvedValue(true);
+    const res = await POST(post({ text: "abc1234" }));
+    expect(res.status).toBe(200);
+    expect(h.isObserver).toHaveBeenCalledWith("usr0001");
+  });
+
+  it("the observer leg does not apply under View as", async () => {
+    h.canView.mockResolvedValue(false);
+    h.isObserver.mockResolvedValue(true);
+    h.mockGetEffectiveEditSession.mockResolvedValue({ cwid: "tgt0001", isSuperuser: false, isCommsSteward: false });
+    h.mockGetSession.mockResolvedValue({
+      cwid: "usr0001",
+      iat: 0,
+      exp: 0,
+      impersonating: { targetCwid: "tgt0001", startedAt: 0 },
+    });
+    h.mockImpersonationActive.mockReturnValue(true);
     const res = await POST(post({ text: "abc1234" }));
     expect(res.status).toBe(403);
     expect(h.create).not.toHaveBeenCalled();
