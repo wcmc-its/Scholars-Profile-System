@@ -503,7 +503,7 @@ Snapshot diff per env: +1 `AWS::Lambda::Function`, +1 `AWS::IAM::Role`, +1 `AWS:
 
 ## Phase 4 — EdgeStack (B07 + B14)
 
-CloudFront distribution fronting the `sps-public-${env}` ALB. Eight cache behaviors implementing `docs/cloudfront-cache-spec.md` (one cacheable default + seven uncacheable carve-outs for writer routes, SSO, mutating endpoints, the health probe, telemetry, and on-demand exports), plus the B14 legacy-VIVO redirect layer in `middleware.ts`. WAF (B26 #125) and security headers beyond HSTS (B21 #120) attach to the same distribution / response-headers policy in follow-on rows without restructuring it.
+CloudFront distribution fronting the `sps-public-${env}` ALB. Eight cache behaviors implementing `docs/cloudfront-cache-spec.md` (one cacheable default + seven uncacheable carve-outs for writer routes, SSO, mutating endpoints, the health probe, telemetry, and on-demand exports), plus the B14 legacy-VIVO redirect layer in `proxy.ts`. WAF (B26 #125) and security headers beyond HSTS (B21 #120) attach to the same distribution / response-headers policy in follow-on rows without restructuring it.
 
 ### Cache policy choices (D5)
 

@@ -2706,7 +2706,7 @@ export class AppStack extends Stack {
         COAUTHOR_HIDDEN_STUDENT_CHIPS: "on", // Prod flipped 2026-07-07 (#1026 FERPA non-linked chips; operator-approved).
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
-        // middleware.ts, the /api/impersonation* routes, the /api/auth/session
+        // proxy.ts, the /api/impersonation* routes, the /api/auth/session
         // probe), so the value is the literal string "true", not "on". When
         // unset/anything-else the whole feature is dark: /api/impersonation*
         // 404s, the switcher hides, any overlay is ignored. Requires the
