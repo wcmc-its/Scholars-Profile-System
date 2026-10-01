@@ -2,8 +2,9 @@
 
 /**
  * The presentational pieces of the core review queue's v2 layout (Core Review
- * Queue v2 mockup): the scope rail, the "About these signals" note, the filters
- * panel and its active chips, and the keyboard-shortcuts popover.
+ * Queue v2 mockup): the scope rail, the "About these signals" note, the To
+ * review summary strip, the filters panel and its active chips, and the
+ * keyboard-shortcuts popover.
  *
  * Props in, callbacks out — nothing here owns queue state or knows what a
  * `CoreQueueRow` is. `core-claim-queue.tsx` derives every label and count and
@@ -227,6 +228,235 @@ export function AboutSignals({
           : `${meshCount} ${meshCount === 1 ? "candidate carries" : "candidates carry"} a topical MeSH match. It shows as a footnote on the paper and is never counted.`}
       </p>
     </div>
+  );
+}
+
+/** Four dots, `dots` of them filled — the fixed per-signal-type strength. */
+export function StrengthGlyphs({ dots }: { dots: number }) {
+  return (
+    <span className="flex items-center gap-1" aria-hidden>
+      {[0, 1, 2, 3].map((i) => (
+        <span
+          key={i}
+          className={`size-1.5 rounded-full border ${
+            i < dots ? "border-apollo-maroon bg-apollo-maroon" : "border-muted-foreground/40"
+          }`}
+        />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * The fill for evidence group `index` of `count` in the summary's stacked bar
+ * and its legend: one slate ramp, darkest first. Groups arrive in
+ * `buildEvidenceGroups` order (the pile holding the surest paper leads), so the
+ * darkest segment is the strongest pile, as in the mockup. A ramp rather than
+ * a fixed palette because the number of groups is the data's, not ours. Pure.
+ */
+export function groupShade(index: number, count: number): string {
+  const t = count > 1 ? index / (count - 1) : 0;
+  const lightness = 0.42 + t * (0.9 - 0.42);
+  return `oklch(${lightness.toFixed(3)} 0.06 250)`;
+}
+
+/** "candidates in 4 evidence groups. 543 have two or more signals." — the line
+ *  beside the big number, singular-safe. Pure. */
+export function openSummaryText(total: number, groups: number, multiSignal: number): string {
+  const head = `${total === 1 ? "candidate" : "candidates"} in ${groups} evidence ${
+    groups === 1 ? "group" : "groups"
+  }.`;
+  return `${head} ${multiSignal} ${multiSignal === 1 ? "has" : "have"} two or more signals.`;
+}
+
+export interface SummaryGroupView {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface SummarySignalView {
+  /** The "Signals fired" facet value a click toggles. */
+  facet: string;
+  label: string;
+  strength: string;
+  dots: number;
+  count: number;
+  /** Already ticked in the Filters panel. */
+  active: boolean;
+}
+
+export interface SessionView {
+  confirmed: number;
+  rejected: number;
+  reasons: { label: string; count: number }[];
+  note: string;
+  canUndo: boolean;
+  undoing: boolean;
+  onUndo: () => void;
+}
+
+const EYEBROW = "text-muted-foreground text-[11px] tracking-[0.1em] uppercase";
+
+/**
+ * The To review summary strip (mockup): open candidates by evidence group,
+ * which signals fired (each row a toggle on the Filters panel's "Signals fired"
+ * facet), and this session's decisions. Three columns at `lg`; below it they
+ * stack, each under a hairline, so a 390px screen gets one readable column.
+ * Every number arrives computed — see `summarizeOpen` and `reasonTally`.
+ */
+export function QueueSummary({
+  total,
+  multiSignal,
+  groups,
+  signals,
+  onSignal,
+  session,
+}: {
+  total: number;
+  multiSignal: number;
+  groups: SummaryGroupView[];
+  signals: SummarySignalView[];
+  onSignal: (facet: string) => void;
+  session: SessionView;
+}) {
+  const pane = "flex min-w-0 flex-col gap-3 px-5 py-4";
+  const divider = "border-apollo-border border-t lg:border-t-0 lg:border-l";
+  return (
+    <section
+      aria-label="Queue summary"
+      data-slot="core-queue-summary"
+      className="border-apollo-border bg-apollo-surface mt-4 grid grid-cols-1 rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)] lg:grid-cols-3"
+    >
+      <div data-slot="core-queue-summary-groups" className={pane}>
+        <p className={EYEBROW}>Open candidates by evidence</p>
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-4xl leading-none font-semibold tabular-nums">{total}</span>
+          <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
+            {openSummaryText(total, groups.length, multiSignal)}
+          </span>
+        </div>
+        {total > 0 ? (
+          <>
+            <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+              {groups.map((g, i) => (
+                <div
+                  key={g.key}
+                  className="min-w-1"
+                  style={{ flex: `${g.count} 1 0`, background: groupShade(i, groups.length) }}
+                />
+              ))}
+            </div>
+            <ul className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-xs text-[var(--evidence-body)]">
+              {groups.map((g, i) => (
+                <li key={g.key} className="contents">
+                  <span
+                    className="size-2 rounded-sm"
+                    style={{ background: groupShade(i, groups.length) }}
+                    aria-hidden
+                  />
+                  <span className="min-w-0">{g.label}</span>
+                  <span className="tabular-nums">{g.count}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+      </div>
+
+      <div data-slot="core-queue-summary-signals" className={`${pane} ${divider} gap-2.5`}>
+        <div className="flex items-baseline justify-between gap-2">
+          <p className={EYEBROW}>Which signals fired</p>
+          <span className="text-muted-foreground text-[11px] whitespace-nowrap">
+            Click to filter
+          </span>
+        </div>
+        <div role="group" aria-label="Filter by signal" className="flex flex-col gap-0.5">
+          {signals.map((s) => (
+            <button
+              key={s.facet}
+              type="button"
+              aria-pressed={s.active}
+              disabled={s.count === 0 && !s.active}
+              onClick={() => onSignal(s.facet)}
+              className={`focus-visible:ring-apollo-maroon -mx-2 grid grid-cols-[minmax(0,1fr)_minmax(40px,110px)_34px] items-center gap-3 rounded-lg border px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 ${
+                s.active
+                  ? "border-apollo-slate-tint-border bg-apollo-slate-tint"
+                  : "hover:bg-apollo-surface-2 border-transparent"
+              }`}
+            >
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-foreground text-[13px]">{s.label}</span>
+                <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+                  <StrengthGlyphs dots={s.dots} />
+                  {s.strength}
+                </span>
+              </span>
+              <span className="bg-apollo-surface-2 h-1.5 overflow-hidden rounded-full" aria-hidden>
+                <span
+                  className="bg-apollo-slate block h-full rounded-full"
+                  style={{ width: `${total > 0 ? Math.min(100, (s.count / total) * 100) : 0}%` }}
+                />
+              </span>
+              <span className="text-right text-[13px] tabular-nums">{s.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div data-slot="core-queue-session" className={`${pane} ${divider}`}>
+        <div className="flex items-baseline justify-between gap-2">
+          <p className={EYEBROW}>This session</p>
+          {session.canUndo ? (
+            <button
+              type="button"
+              disabled={session.undoing}
+              onClick={session.onUndo}
+              className="text-apollo-slate text-xs hover:underline disabled:opacity-50"
+            >
+              Undo last
+            </button>
+          ) : null}
+        </div>
+        <div className="flex gap-6">
+          <p className="flex flex-col gap-0.5">
+            <span
+              data-slot="core-queue-session-confirmed"
+              className="text-apollo-green text-[32px] leading-none font-semibold tabular-nums"
+            >
+              {session.confirmed}
+            </span>
+            <span className="text-xs text-[var(--evidence-body)]">Confirmed</span>
+          </p>
+          <p className="flex flex-col gap-0.5">
+            <span
+              data-slot="core-queue-session-rejected"
+              className="text-[32px] leading-none font-semibold text-red-700 tabular-nums"
+            >
+              {session.rejected}
+            </span>
+            <span className="text-xs text-[var(--evidence-body)]">Rejected</span>
+          </p>
+        </div>
+        {session.reasons.length > 0 ? (
+          <ul
+            aria-label="Reject reasons this session"
+            data-slot="core-queue-session-reasons"
+            className="flex flex-col gap-0.5 text-xs text-[var(--evidence-body)]"
+          >
+            {session.reasons.map((r) => (
+              <li key={r.label} className="flex justify-between gap-2">
+                <span className="min-w-0">{r.label}</span>
+                <span className="tabular-nums">{r.count}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <p className="border-apollo-border mt-auto border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]">
+          {session.note}
+        </p>
+      </div>
+    </section>
   );
 }
 

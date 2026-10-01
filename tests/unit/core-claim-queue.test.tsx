@@ -153,6 +153,12 @@ function metaLine(container: HTMLElement): string {
   return (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** The summary strip's "This session" counts, as "<confirmed>/<rejected>". */
+function sessionCounts(): string {
+  const n = (slot: string) => document.querySelector(`[data-slot="${slot}"]`)?.textContent ?? "";
+  return `${n("core-queue-session-confirmed")}/${n("core-queue-session-rejected")}`;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -1411,7 +1417,11 @@ describe("CoreClaimQueue", () => {
     ]);
 
     // picking a group scopes the list (and the pane) to it
-    fireEvent.click(screen.getByRole("button", { name: /^LLM read/ }));
+    fireEvent.click(
+      within(screen.getByRole("list", { name: "Evidence groups" })).getByRole("button", {
+        name: /^LLM read/,
+      }),
+    );
     expect(listTitles()).toEqual(["LLM only"]);
     expect(pane().getAttribute("data-pmid")).toBe("3");
     expect(screen.getByText("Showing 1 of 1 candidates")).toBeTruthy();
@@ -1576,7 +1586,7 @@ describe("CoreClaimQueue", () => {
     // both rows marked, the selection cleared, the session line counts them
     await waitFor(() => expect(listRow("1").textContent).toContain("Confirmed"));
     expect(listRow("2").textContent).toContain("Confirmed");
-    expect(screen.getByText("This session: 2 confirmed · 0 rejected")).toBeTruthy();
+    expect(sessionCounts()).toBe("2/0");
     expect(screen.getByText("Select all 1 shown")).toBeTruthy();
   });
 
@@ -4826,7 +4836,7 @@ describe("CoreClaimQueue — v2 several-PMID search", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<CoreClaimQueue core={CORE} candidates={rows()} confirmed={[]} />);
     fireEvent.click(within(pane()).getByRole("button", { name: /^confirm$/i })); // Alpha
-    await screen.findByText(/This session: 1 confirmed/);
+    await waitFor(() => expect(sessionCounts()).toBe("1/0"));
     openFilters();
     fireEvent.click(screen.getByRole("checkbox", { name: /^No prior usage/ })); // Gamma only
     fireEvent.change(screen.getByLabelText("Filter candidates"), {
@@ -4852,7 +4862,7 @@ describe("CoreClaimQueue — v2 several-PMID search", () => {
   });
 });
 
-describe("CoreClaimQueue — v2 session line and Undo last", () => {
+describe("CoreClaimQueue — This session card and Undo last", () => {
   it("counts this session's decisions and undoes the LAST one only", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
@@ -4863,14 +4873,15 @@ describe("CoreClaimQueue — v2 session line and Undo last", () => {
         confirmed={[]}
       />,
     );
-    // silent until something is decided
-    expect(document.querySelector('[data-slot="core-queue-session"]')).toBeNull();
+    // the card is always there; nothing to undo until something is decided
+    expect(sessionCounts()).toBe("0/0");
+    expect(screen.queryByRole("button", { name: "Undo last" })).toBeNull();
 
     press("a"); // One -> confirmed, pane moves to Two
-    await screen.findByText("This session: 1 confirmed · 0 rejected");
+    await waitFor(() => expect(sessionCounts()).toBe("1/0"));
     await screen.findByLabelText("Candidate: Two");
     press("r");
-    await screen.findByText("This session: 1 confirmed · 1 rejected");
+    await waitFor(() => expect(sessionCounts()).toBe("1/1"));
 
     fireEvent.click(screen.getByRole("button", { name: "Undo last" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
@@ -4879,7 +4890,7 @@ describe("CoreClaimQueue — v2 session line and Undo last", () => {
       coreId: "2",
       status: "revoked",
     });
-    await screen.findByText("This session: 1 confirmed · 0 rejected");
+    await waitFor(() => expect(sessionCounts()).toBe("1/0"));
     // the pane goes back to the paper that was undone
     expect(pane().getAttribute("data-pmid")).toBe("2");
     expect(listRow("1").textContent).toContain("Confirmed");
@@ -4897,7 +4908,7 @@ describe("CoreClaimQueue — v2 session line and Undo last", () => {
     );
     fireEvent.click(screen.getByRole("checkbox", { name: /^Select all 2 shown/ }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm 2 selected" }));
-    await screen.findByText("This session: 2 confirmed · 0 rejected");
+    await waitFor(() => expect(sessionCounts()).toBe("2/0"));
 
     press("u");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
@@ -4907,9 +4918,8 @@ describe("CoreClaimQueue — v2 session line and Undo last", () => {
       { pmid: "1", coreId: "2", status: "revoked" },
       { pmid: "2", coreId: "2", status: "revoked" },
     ]);
-    await waitFor(() =>
-      expect(document.querySelector('[data-slot="core-queue-session"]')).toBeNull(),
-    );
+    await waitFor(() => expect(sessionCounts()).toBe("0/0"));
+    expect(screen.queryByRole("button", { name: "Undo last" })).toBeNull();
   });
 });
 

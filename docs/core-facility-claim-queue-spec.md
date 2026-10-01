@@ -253,6 +253,14 @@ The **free-text filter** on the controls row narrows the review list on the card
 
 One request for the whole hand-picked set (`POST /api/edit/core-claim/bulk`), with both buttons disabled and the acting one reading "Confirming…"/"Rejecting…" until it returns. No confirmation dialog: the rows were picked one at a time and are on screen.
 
+**Summary strip (Core publication queue mockup refresh).** Between the tab row and the search box, To review carries a three-part card, computed client-side from rows already loaded (`summarizeOpen`, `reasonTally`):
+
+- **Open candidates by evidence**: the number of open candidates the list shows (after the display floor; a hidden below-floor row is not counted until "Show" brings it in), a stacked bar and legend by evidence group (`buildEvidenceGroups`), and how many carry two or more counted signals. It covers the whole queue, not the rail's current pile.
+- **Which signals fired · Click to filter**: per-signal counts off `buildSignals` (so the repeat-user de-dup applies). A click toggles that value in the Filters panel's "Signals fired" facet, the same value `facetValues` emits, so it shows as an ordinary removable filter chip. A signal with no hits is disabled.
+- **This session**: confirmed and rejected counts, the reject-reason tally, and "Undo last" (moved here from the tab row). Its footnote says only what the engine reads. The writeback mirrors a decision's status and nothing else, the next run uses confirmed papers only as the repeat-user prior, and reject reasons stay in SPS (claim row and audit row).
+
+Below `lg` the three parts stack in one column.
+
 ### Tabs, once there's history
 
 Once at least one candidate has been confirmed or rejected, the single "To review" heading becomes a 3-way segmented control:

@@ -75,7 +75,9 @@ import {
   ActiveFilterChips,
   FiltersPanel,
   ScopeRail,
+  QueueSummary,
   ShortcutsButton,
+  StrengthGlyphs,
   type ActiveChip,
   type FacetGroupView,
   type RailItem,
@@ -263,6 +265,36 @@ const KIND_ORDER: Record<SignalKind, number> = {
   llm: 2,
   affinity: 3,
 };
+
+/**
+ * One table per counted signal: its fixed strength (see `buildSignals`), its
+ * name in the summary strip, and the "Signals fired" facet value it drives.
+ * `facetValues` and the summary's click-to-filter both read `facet` from here,
+ * so a click on a summary row ticks exactly the value the Filters panel shows.
+ * Strongest-first, which is the order the summary lists them.
+ */
+export const SIGNAL_KINDS: ReadonlyArray<{
+  kind: SignalKind;
+  dots: number;
+  strength: string;
+  label: string;
+  facet: string;
+}> = [
+  { kind: "ack", dots: 4, strength: "Direct", label: "Acknowledgment", facet: "Acknowledged" },
+  {
+    kind: "coauthor",
+    dots: 3,
+    strength: "Strong",
+    label: "Staff co-author",
+    facet: "Staff co-author",
+  },
+  { kind: "llm", dots: 2, strength: "Moderate", label: "LLM read", facet: "LLM read" },
+  { kind: "affinity", dots: 1, strength: "Weak", label: "Repeat user", facet: "Repeat user" },
+];
+const SIGNAL_BY_KIND = Object.fromEntries(SIGNAL_KINDS.map((s) => [s.kind, s])) as Record<
+  SignalKind,
+  (typeof SIGNAL_KINDS)[number]
+>;
 
 /**
  * Which of the prefilter's two signals actually produced this prior.
@@ -467,13 +499,18 @@ export function buildSignals(
   paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
   clientCwids: ReadonlySet<string> = new Set(),
 ): Signal[] {
-  const out: Signal[] = [];
-  if (row.signalAck || row.ackAlias) out.push({ kind: "ack", dots: 4, strength: "Direct" });
-  if (row.coauthors.length > 0) out.push({ kind: "coauthor", dots: 3, strength: "Strong" });
-  if (row.llmScore !== null) out.push({ kind: "llm", dots: 2, strength: "Moderate" });
-  if (repeatUserFires(row, paperCounts, clientCwids))
-    out.push({ kind: "affinity", dots: 1, strength: "Weak" });
-  return out.sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
+  const kinds: SignalKind[] = [];
+  if (row.signalAck || row.ackAlias) kinds.push("ack");
+  if (row.coauthors.length > 0) kinds.push("coauthor");
+  if (row.llmScore !== null) kinds.push("llm");
+  if (repeatUserFires(row, paperCounts, clientCwids)) kinds.push("affinity");
+  return kinds
+    .map((kind) => ({
+      kind,
+      dots: SIGNAL_BY_KIND[kind].dots,
+      strength: SIGNAL_BY_KIND[kind].strength,
+    }))
+    .sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 }
 
 /** The four score bands. `label` is the whole score vocabulary of this surface —
@@ -1000,11 +1037,11 @@ export function facetValues(
 ): Record<FacetKey, string[]> {
   const kinds = new Set(buildSignals(row, paperCounts, clientCwids).map((s) => s.kind));
   const signal: string[] = [];
-  if (kinds.has("ack")) signal.push("Acknowledged");
-  if (kinds.has("coauthor")) signal.push("Staff co-author");
+  if (kinds.has("ack")) signal.push(SIGNAL_BY_KIND.ack.facet);
+  if (kinds.has("coauthor")) signal.push(SIGNAL_BY_KIND.coauthor.facet);
   if (matchesFilter(row, "client", clientCwids)) signal.push("Client co-author");
-  if (kinds.has("llm")) signal.push("LLM read");
-  if (kinds.has("affinity")) signal.push("Repeat user");
+  if (kinds.has("llm")) signal.push(SIGNAL_BY_KIND.llm.facet);
+  if (kinds.has("affinity")) signal.push(SIGNAL_BY_KIND.affinity.facet);
   const llm =
     row.llmScore === null
       ? "Not read"
@@ -1109,6 +1146,83 @@ export function groupBandText(likelihoods: readonly number[]): string {
   const range =
     likelihoods.length === 1 ? likelihoodBand(likelihoods[0]).label : bandRange(likelihoods);
   return range.includes(" to ") ? range : `${range} band`;
+}
+
+/** The To review summary strip's left two panels, as numbers. */
+export interface OpenSummary {
+  /** Open (undecided) candidates among the rows passed in. */
+  total: number;
+  /** Of those, how many carry two or more counted signals. */
+  multiSignal: number;
+  /** Open candidates per evidence group, `buildEvidenceGroups` order, empty
+   *  groups dropped. */
+  groups: { key: string; count: number }[];
+  /** Open candidates on which each counted signal fired. */
+  signals: Record<SignalKind, number>;
+}
+
+/**
+ * "Open candidates by evidence" and "Which signals fired" (mockup), off the
+ * same `buildEvidenceGroups` / `buildSignals` the rail and the card use, so the
+ * strip can never count a pile or a signal the list does not show. The caller
+ * passes the rows AFTER the display floor (`applyDisplayFloor`): a candidate the
+ * list hides is not an open candidate as far as this strip is concerned (owner,
+ * decision 7). Decided rows are skipped — they are on screen only for their
+ * Undo. Pure.
+ */
+export function summarizeOpen(
+  rows: readonly CoreQueueRow[],
+  decided: ReadonlyMap<string, unknown>,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  clientCwids: ReadonlySet<string> = new Set(),
+): OpenSummary {
+  const signals: Record<SignalKind, number> = { ack: 0, coauthor: 0, llm: 0, affinity: 0 };
+  let total = 0;
+  let multiSignal = 0;
+  for (const r of rows) {
+    if (decided.has(r.pmid)) continue;
+    total++;
+    const fired = buildSignals(r, paperCounts, clientCwids);
+    if (fired.length >= 2) multiSignal++;
+    for (const s of fired) signals[s.kind]++;
+  }
+  const groups = buildEvidenceGroups(rows, decided, paperCounts, clientCwids)
+    .filter((g) => g.open > 0)
+    .map((g) => ({ key: g.key, count: g.open }));
+  return { total, multiSignal, groups, signals };
+}
+
+/**
+ * This session's reject reasons, counted — only for papers still rejected (an
+ * undone rejection takes its reason with it). Most-used first, then by label.
+ * The tally is the reviewer's own record: the claim route stores the note on
+ * the claim row and its audit row, and nothing sends it to the engine. Pure.
+ */
+export function reasonTally(
+  notes: ReadonlyMap<string, string>,
+  decided: ReadonlyMap<string, unknown>,
+): { label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const [pmid, note] of notes) {
+    if (decided.get(pmid) !== "rejected") continue;
+    counts.set(note, (counts.get(note) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+/**
+ * The "This session" card's footnote. Says only what the engine actually
+ * reads: the writeback mirrors a decision's status and nothing else
+ * (lib/cores/claim-writeback.ts), and the next run's only use of it is the
+ * repeat-user prior, built from confirmed papers. A reject reason never leaves
+ * SPS. No "trains the next run" — it does not. Pure.
+ */
+export function sessionNote(decidedCount: number, left: number): string {
+  if (decidedCount === 0)
+    return "Nothing decided yet. Reject reasons are tallied here for your own record; the engine never reads them.";
+  return `${plural(left, "candidate")} left to review. Confirmed papers feed the repeat-user prior on the engine’s next run; reject reasons stay with the decision and are not sent to the engine.`;
 }
 
 /** One rail person: a WCM byline author this core already holds confirmed work
@@ -2146,6 +2260,10 @@ export function CoreClaimQueue({
   const hasHistory = confirmed.length > 0 || rejected.length > 0;
   const sessionConfirmed = [...decided.values()].filter((d) => d === "claimed").length;
   const sessionRejected = decided.size - sessionConfirmed;
+  // The summary strip counts the rows the list SHOWS (`reviewRows`, after the
+  // display floor) across the whole queue, not the rail's current pile: it is
+  // the queue's overview, and a signal click narrows whatever pile is open.
+  const summary = summarizeOpen(reviewRows, decided, paperCounts, clientCwids);
 
   // ---- scope changes ------------------------------------------------------
 
@@ -2591,8 +2709,8 @@ export function CoreClaimQueue({
       />
 
       {/* The tab row (mockup): the view switch on the left; on the To review
-          tab, the session line with its Undo and the shortcuts popover on the
-          right. */}
+          tab, the shortcuts popover on the right. The session tally and its
+          Undo moved into the summary strip's "This session" card. */}
       <div
         data-slot="core-queue-panel"
         className="border-apollo-border-strong flex flex-wrap items-end justify-between gap-x-3 gap-y-2 border-b"
@@ -2625,21 +2743,6 @@ export function CoreClaimQueue({
         )}
         {view === "review" && candidates.length > 0 ? (
           <div className="text-muted-foreground mb-2 flex flex-wrap items-center gap-3 text-xs">
-            {history.length > 0 ? (
-              <span data-slot="core-queue-session" className="flex items-center gap-2">
-                <span className="text-foreground">
-                  This session: {sessionConfirmed} confirmed · {sessionRejected} rejected
-                </span>
-                <button
-                  type="button"
-                  disabled={undoing}
-                  onClick={() => void undoLast()}
-                  className="text-apollo-slate hover:underline disabled:opacity-50"
-                >
-                  Undo last
-                </button>
-              </span>
-            ) : null}
             <ShortcutsButton open={keysOpen} onToggle={() => setKeysOpen((o) => !o)} />
           </div>
         ) : null}
@@ -2654,6 +2757,33 @@ export function CoreClaimQueue({
 
       {view === "review" && candidates.length > 0 ? (
         <>
+          <QueueSummary
+            total={summary.total}
+            multiSignal={summary.multiSignal}
+            groups={summary.groups.map((g) => ({
+              key: g.key,
+              label: evidenceGroupName(g.key),
+              count: g.count,
+            }))}
+            signals={SIGNAL_KINDS.map((s) => ({
+              facet: s.facet,
+              label: s.label,
+              strength: s.strength,
+              dots: s.dots,
+              count: summary.signals[s.kind],
+              active: (facets.signal ?? []).includes(s.facet),
+            }))}
+            onSignal={(facet) => toggleFacet("signal", facet)}
+            session={{
+              confirmed: sessionConfirmed,
+              rejected: sessionRejected,
+              reasons: reasonTally(notes, decided),
+              note: sessionNote(decided.size, remaining),
+              canUndo: history.length > 0,
+              undoing,
+              onUndo: () => void undoLast(),
+            }}
+          />
           {searchBar}
 
           {/* Three panes at `lg` (mockup); below it the rail is a select, the list
@@ -4589,22 +4719,6 @@ function Byline({
       })}
       {more}
     </p>
-  );
-}
-
-/** Four dots, `dots` of them filled — the fixed per-signal-type strength. */
-function StrengthGlyphs({ dots }: { dots: number }) {
-  return (
-    <span className="flex items-center gap-1" aria-hidden>
-      {[0, 1, 2, 3].map((i) => (
-        <span
-          key={i}
-          className={`size-1.5 rounded-full border ${
-            i < dots ? "border-apollo-maroon bg-apollo-maroon" : "border-muted-foreground/40"
-          }`}
-        />
-      ))}
-    </span>
   );
 }
 
