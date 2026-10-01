@@ -385,45 +385,12 @@ export function QueueSummary({
         ) : null}
       </div>
 
-      <div data-slot="core-queue-summary-signals" className={`${pane} ${divider} gap-2.5`}>
-        <div className="flex items-baseline justify-between gap-2">
-          <p className={EYEBROW}>Which signals fired</p>
-          <span className="text-muted-foreground text-[11px] whitespace-nowrap">
-            Click to filter
-          </span>
-        </div>
-        <div role="group" aria-label="Filter by signal" className="flex flex-col gap-0.5">
-          {signals.map((s) => (
-            <button
-              key={s.facet}
-              type="button"
-              aria-pressed={s.active}
-              disabled={s.count === 0 && !s.active}
-              onClick={() => onSignal(s.facet)}
-              className={`focus-visible:ring-apollo-maroon -mx-2 grid grid-cols-[minmax(0,1fr)_minmax(40px,110px)_34px] items-center gap-3 rounded-lg border px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 ${
-                s.active
-                  ? "border-apollo-slate-tint-border bg-apollo-slate-tint"
-                  : "hover:bg-apollo-surface-2 border-transparent"
-              }`}
-            >
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-foreground text-[13px]">{s.label}</span>
-                <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-                  <StrengthGlyphs dots={s.dots} />
-                  {s.strength}
-                </span>
-              </span>
-              <span className="bg-apollo-surface-2 h-1.5 overflow-hidden rounded-full" aria-hidden>
-                <span
-                  className="bg-apollo-slate block h-full rounded-full"
-                  style={{ width: `${total > 0 ? Math.min(100, (s.count / total) * 100) : 0}%` }}
-                />
-              </span>
-              <span className="text-right text-[13px] tabular-nums">{s.count}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <SignalCoverage
+        className={`${pane} ${divider} gap-2.5`}
+        signals={signals}
+        total={total}
+        onSignal={onSignal}
+      />
 
       <div data-slot="core-queue-session" className={`${pane} ${divider}`}>
         <div className="flex items-baseline justify-between gap-2">
@@ -476,6 +443,325 @@ export function QueueSummary({
         <p className="border-apollo-border mt-auto border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]">
           {session.note}
         </p>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * "Which signals fired · Click to filter", shared by both summary strips: one
+ * row per counted signal, its fixed strength, a bar against `total` and the
+ * count. A click toggles the Filters panel's "Signals fired" value, so it
+ * shows as an ordinary removable chip; a signal with no hits is disabled.
+ * `footer` is the Confirmed strip's method note.
+ */
+export function SignalCoverage({
+  className,
+  signals,
+  total,
+  onSignal,
+  footer,
+}: {
+  className: string;
+  signals: SummarySignalView[];
+  total: number;
+  onSignal: (facet: string) => void;
+  footer?: ReactNode;
+}) {
+  return (
+    <div data-slot="core-queue-summary-signals" className={className}>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className={EYEBROW}>Which signals fired</p>
+        <span className="text-muted-foreground text-[11px] whitespace-nowrap">Click to filter</span>
+      </div>
+      <div role="group" aria-label="Filter by signal" className="flex flex-col gap-0.5">
+        {signals.map((s) => (
+          <button
+            key={s.facet}
+            type="button"
+            aria-pressed={s.active}
+            disabled={s.count === 0 && !s.active}
+            onClick={() => onSignal(s.facet)}
+            className={`focus-visible:ring-apollo-maroon -mx-2 grid grid-cols-[minmax(0,1fr)_minmax(40px,110px)_34px] items-center gap-3 rounded-lg border px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 ${
+              s.active
+                ? "border-apollo-slate-tint-border bg-apollo-slate-tint"
+                : "hover:bg-apollo-surface-2 border-transparent"
+            }`}
+          >
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-foreground text-[13px]">{s.label}</span>
+              <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+                <StrengthGlyphs dots={s.dots} />
+                {s.strength}
+              </span>
+            </span>
+            <span className="bg-apollo-surface-2 h-1.5 overflow-hidden rounded-full" aria-hidden>
+              <span
+                className="bg-apollo-slate block h-full rounded-full"
+                style={{ width: `${total > 0 ? Math.min(100, (s.count / total) * 100) : 0}%` }}
+              />
+            </span>
+            <span className="text-right text-[13px] tabular-nums">{s.count}</span>
+          </button>
+        ))}
+      </div>
+      {footer ? (
+        <p className="border-apollo-border mt-auto border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]">
+          {footer}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** "122 of 123 confirmed papers rest on two or more independent signals." —
+ *  the line beside the big number, singular-safe. Pure. */
+export function multiSignalText(total: number): string {
+  return `of ${total} confirmed ${total === 1 ? "paper rests" : "papers rest"} on two or more independent signals`;
+}
+
+/** A band word in its own colour, as the mockup sets STRONG. */
+export interface BandWordView {
+  label: string;
+  /** The band's text colour class (`likelihoodBand(...).text`). */
+  className: string;
+}
+
+export interface ConfirmedPersonView {
+  /** Lowercased CWID, the rail's By person key. */
+  key: string;
+  name: string;
+  papers: number;
+}
+
+/** How many repeat-user people the Confirmed strip shows as chips; the rest
+ *  are a count, and the rail's By person lists everyone. */
+export const CONFIRMED_PEOPLE_SHOWN = 6;
+
+/**
+ * The Confirmed tab's summary strip (mockup): independent signals per paper,
+ * which signals fired, and what these confirmations rest on. The mockup's
+ * third card was "What these confirmations teach the next run"; it is
+ * "Behind these confirmations" here, because the engine reads back one thing
+ * from a confirmation, the repeat-user prior (owner decision 8). The
+ * acknowledgment aliases come from the core's dictionary and the LLM read is a
+ * per-paper read, so each says what it is rather than claiming to be learned.
+ * Three columns at `lg`, one stacked column below it. Every number arrives
+ * computed — see `summarizeConfirmed`.
+ */
+export function ConfirmedSummaryStrip({
+  total,
+  manual,
+  bySignals,
+  multiSignal,
+  band,
+  signals,
+  onSignal,
+  methodNote,
+  people,
+  onPerson,
+  aliases,
+  ackNoAlias,
+  llm,
+  llmUnread,
+}: {
+  total: number;
+  manual: number;
+  /** Papers per number of signals fired, indexed 0–4. */
+  bySignals: number[];
+  multiSignal: number;
+  band: { low: BandWordView; high: BandWordView; pct: string } | null;
+  signals: SummarySignalView[];
+  onSignal: (facet: string) => void;
+  methodNote: string;
+  /** Everyone with a confirmed paper here, most papers first. */
+  people: ConfirmedPersonView[];
+  onPerson: (key: string) => void;
+  aliases: { alias: string; count: number }[];
+  ackNoAlias: number;
+  llm: { tier: string; label: string; count: number }[];
+  llmUnread: number;
+}) {
+  const pane = "flex min-w-0 flex-col gap-3 px-5 py-4";
+  const divider = "border-apollo-border border-t lg:border-t-0 lg:border-l";
+  const footnote =
+    "border-apollo-border mt-auto border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]";
+  const note = "text-muted-foreground text-[11px] leading-snug";
+  // Light to dark by signal count: the mockup's rail / slate / bar for one to
+  // three, with a step either side for none and all four.
+  const countShade = [
+    "bg-apollo-surface-2",
+    "bg-apollo-rail",
+    "bg-apollo-slate",
+    "bg-apollo-bar",
+    "bg-apollo-maroon",
+  ];
+  const shade = (n: number) => countShade[Math.min(n, countShade.length - 1)];
+  const counts = bySignals.map((count, n) => ({ n, count })).filter((c) => c.count > 0);
+  const llmShade: Record<string, string> = {
+    core: "bg-apollo-slate",
+    possible: "bg-apollo-slate-tint-border",
+    little: "bg-apollo-rail",
+  };
+  const shownPeople = people.slice(0, CONFIRMED_PEOPLE_SHOWN);
+  const bandWord = (b: BandWordView) => (
+    <span className={`font-semibold tracking-[0.06em] uppercase ${b.className}`}>{b.label}</span>
+  );
+  return (
+    <section
+      aria-label="Confirmed summary"
+      data-slot="core-queue-confirmed-summary"
+      className="border-apollo-border bg-apollo-surface mt-4 grid grid-cols-1 rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)] lg:grid-cols-3"
+    >
+      <div data-slot="core-queue-confirmed-summary-signals" className={pane}>
+        <p className={EYEBROW}>Independent signals per paper</p>
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-4xl leading-none font-semibold tabular-nums">{multiSignal}</span>
+          <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
+            {multiSignalText(total)}
+          </span>
+        </div>
+        {total > 0 ? (
+          <>
+            <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+              {counts.map((c) => (
+                <div
+                  key={c.n}
+                  className={`min-w-1 ${shade(c.n)}`}
+                  style={{ flex: `${c.count} 1 0` }}
+                />
+              ))}
+            </div>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--evidence-body)]">
+              {counts.map((c) => (
+                <li key={c.n} className="flex items-center gap-1.5">
+                  <span
+                    className={`border-apollo-border-strong size-2 rounded-sm border ${shade(c.n)}`}
+                    aria-hidden
+                  />
+                  {c.n === 1 ? "1 signal" : `${c.n} signals`} · {c.count}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {manual > 0 ? (
+          <p className={note}>
+            {manual} manually added {manual === 1 ? "paper is" : "papers are"} unscored and not
+            counted.
+          </p>
+        ) : null}
+        {band ? (
+          <p data-slot="core-queue-confirmed-band" className={footnote}>
+            {band.low.label === band.high.label ? (
+              <>
+                Every confirmation sits in the {bandWord(band.high)} band, {band.pct}.
+              </>
+            ) : (
+              <>
+                Confirmations run from the {bandWord(band.low)} to the {bandWord(band.high)} band,{" "}
+                {band.pct}.
+              </>
+            )}
+          </p>
+        ) : null}
+      </div>
+
+      <SignalCoverage
+        className={`${pane} ${divider} gap-2.5`}
+        signals={signals}
+        total={total}
+        onSignal={onSignal}
+        footer={methodNote}
+      />
+
+      <div data-slot="core-queue-confirmed-summary-behind" className={`${pane} ${divider}`}>
+        <p className={EYEBROW}>Behind these confirmations</p>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-foreground text-[13px]">
+            Repeat-user prior for {people.length} {people.length === 1 ? "person" : "people"}
+          </span>
+          {shownPeople.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {shownPeople.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => onPerson(p.key)}
+                  aria-label={`${p.name}, ${p.papers} confirmed ${p.papers === 1 ? "paper" : "papers"}`}
+                  className="border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate hover:bg-apollo-slate-tint-border focus-visible:ring-apollo-maroon flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  {p.name}
+                  <span className="text-muted-foreground tabular-nums">{p.papers}</span>
+                </button>
+              ))}
+              {people.length > shownPeople.length ? (
+                <span className="text-muted-foreground self-center text-xs">
+                  +{people.length - shownPeople.length} more under By person
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          <p className={note}>
+            The one thing the engine reads back from a confirmation: each byline author&rsquo;s
+            confirmed papers with this core.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-foreground text-[13px]">Acknowledgment aliases that matched</span>
+          {aliases.length > 0 || ackNoAlias > 0 ? (
+            <ul className="flex flex-col gap-0.5 text-xs text-[var(--evidence-body)]">
+              {aliases.map((a) => (
+                <li key={a.alias} className="flex justify-between gap-2">
+                  <span className="min-w-0">&ldquo;{a.alias}&rdquo;</span>
+                  <span className="tabular-nums">{a.count}</span>
+                </li>
+              ))}
+              {ackNoAlias > 0 ? (
+                <li className="flex justify-between gap-2">
+                  <span className="min-w-0">Acknowledged, no alias captured</span>
+                  <span className="tabular-nums">{ackNoAlias}</span>
+                </li>
+              ) : null}
+            </ul>
+          ) : (
+            <span className="text-xs text-[var(--evidence-body)]">None matched.</span>
+          )}
+          <p className={note}>
+            From the core&rsquo;s alias list. Confirming a paper does not add one.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-foreground text-[13px]">LLM read of title and abstract</span>
+          {llm.length > 0 ? (
+            <>
+              <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+                {llm.map((t) => (
+                  <div
+                    key={t.tier}
+                    className={`min-w-1 ${llmShade[t.tier] ?? "bg-apollo-rail"}`}
+                    style={{ flex: `${t.count} 1 0` }}
+                  />
+                ))}
+              </div>
+              <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--evidence-body)]">
+                {llm.map((t) => (
+                  <li key={t.tier}>
+                    {t.label} · {t.count}
+                  </li>
+                ))}
+                {llmUnread > 0 ? <li>Not read · {llmUnread}</li> : null}
+              </ul>
+            </>
+          ) : (
+            <span className="text-xs text-[var(--evidence-body)]">No LLM read on file.</span>
+          )}
+          <p className={note}>
+            What the read said about each paper when it was scored. It is not a prior.
+          </p>
+        </div>
       </div>
     </section>
   );

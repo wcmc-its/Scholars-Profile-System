@@ -75,6 +75,7 @@ import { CoreClientsDialog } from "@/components/edit/core-clients-panel";
 import {
   AboutSignals,
   ActiveFilterChips,
+  ConfirmedSummaryStrip,
   FiltersPanel,
   ScopeRail,
   QueueSummary,
@@ -612,14 +613,16 @@ export function llmTier(score: number): "core" | "possible" | "little" {
   return score >= 8 ? "core" : score >= 6 ? "possible" : "little";
 }
 
+/** Each `llmTier` in words a reviewer can act on. */
+const LLM_VERDICT: Record<ReturnType<typeof llmTier>, string> = {
+  core: "reads as core work",
+  possible: "possibly core work",
+  little: "little sign of core use",
+};
+
 /** What the dense LLM triage score means, in words a reviewer can act on. Pure. */
 export function llmVerdict(score: number): string {
-  const tier = llmTier(score);
-  return tier === "core"
-    ? "reads as core work"
-    : tier === "possible"
-      ? "possibly core work"
-      : "little sign of core use";
+  return LLM_VERDICT[llmTier(score)];
 }
 
 /** A list-row chip's tint: `signal` (slate) for a counted signal that fired,
@@ -1515,6 +1518,143 @@ export function confirmedEvidence(
       quote,
     };
   });
+}
+
+/** The Confirmed tab's summary strip, as numbers. */
+export interface ConfirmedSummary {
+  /** Engine-scored confirmations, less any revoked this session. */
+  total: number;
+  /** Manual adds among the not-revoked confirmations: no engine row, so their
+   *  signals and likelihood are placeholders and none of the counts below
+   *  include them. */
+  manual: number;
+  /** Papers per number of counted signals fired, indexed 0–4. */
+  bySignals: number[];
+  /** Of `total`, how many rest on two or more counted signals. */
+  multiSignal: number;
+  /** Papers on which each counted signal fired. */
+  signals: Record<SignalKind, number>;
+  /** Lowest and highest likelihood among `total`; null when it is 0. */
+  low: number | null;
+  high: number | null;
+  /** Method-family tier per paper (context, not counted), strong first. */
+  methodTiers: { tier: string; count: number }[];
+  /** Acknowledgment aliases that matched, most-matched first. */
+  aliases: { alias: string; count: number }[];
+  /** Acknowledged in the full text with no alias captured. */
+  ackNoAlias: number;
+  /** LLM read per `llmTier`, worded by `llmVerdict`, empty tiers dropped. */
+  llm: { tier: "core" | "possible" | "little"; label: string; count: number }[];
+  /** Engine-scored papers with no LLM read on file. */
+  llmUnread: number;
+}
+
+const METHOD_TIER_ORDER = ["strong", "moderate", "weak"];
+
+/**
+ * The Confirmed tab's summary strip (mockup), over the same `buildSignals` the
+ * row's strip and the pane read, each row through its `withoutOwnPaper` counts
+ * (a confirmed paper is not its own prior use). Covers the whole tab, not the
+ * rail's pile, as To review's strip does. Revoked rows are skipped, and so are
+ * manual adds: a human added the PMID and the engine never scored it, so its
+ * zero signals and 0% would drag the distribution and the band down with
+ * numbers nobody computed. Pure.
+ */
+export function summarizeConfirmed(
+  rows: readonly CoreQueueRow[],
+  revoked: ActedOn,
+  paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
+  clientCwids: ReadonlySet<string> = new Set(),
+): ConfirmedSummary {
+  const bySignals = Array.from({ length: SIGNAL_COUNT + 1 }, () => 0);
+  const signals: Record<SignalKind, number> = { ack: 0, coauthor: 0, llm: 0, affinity: 0 };
+  const tiers = new Map<string, number>();
+  const aliases = new Map<string, number>();
+  const llm = new Map<"core" | "possible" | "little", number>();
+  let total = 0;
+  let manual = 0;
+  let ackNoAlias = 0;
+  let llmUnread = 0;
+  let low: number | null = null;
+  let high: number | null = null;
+  for (const r of rows) {
+    if (revoked.has(r.pmid)) continue;
+    if (r.isManual) {
+      manual++;
+      continue;
+    }
+    total++;
+    const fired = buildSignals(r, withoutOwnPaper(r, paperCounts), clientCwids);
+    bySignals[fired.length]++;
+    for (const s of fired) signals[s.kind]++;
+    low = low === null ? r.likelihood : Math.min(low, r.likelihood);
+    high = high === null ? r.likelihood : Math.max(high, r.likelihood);
+    if (r.methodTier) tiers.set(r.methodTier, (tiers.get(r.methodTier) ?? 0) + 1);
+    if (r.ackAlias) aliases.set(r.ackAlias, (aliases.get(r.ackAlias) ?? 0) + 1);
+    else if (r.signalAck) ackNoAlias++;
+    if (r.llmScore === null) llmUnread++;
+    else llm.set(llmTier(r.llmScore), (llm.get(llmTier(r.llmScore)) ?? 0) + 1);
+  }
+  const rank = (t: string) => {
+    const i = METHOD_TIER_ORDER.indexOf(t);
+    return i < 0 ? METHOD_TIER_ORDER.length : i;
+  };
+  return {
+    total,
+    manual,
+    bySignals,
+    multiSignal: bySignals.slice(2).reduce((a, b) => a + b, 0),
+    signals,
+    low,
+    high,
+    methodTiers: [...tiers]
+      .map(([tier, count]) => ({ tier, count }))
+      .sort((a, b) => rank(a.tier) - rank(b.tier) || a.tier.localeCompare(b.tier)),
+    aliases: [...aliases]
+      .map(([alias, count]) => ({ alias, count }))
+      .sort((a, b) => b.count - a.count || a.alias.localeCompare(b.alias)),
+    ackNoAlias,
+    llm: (["core", "possible", "little"] as const)
+      .filter((t) => llm.has(t))
+      .map((tier) => ({
+        tier,
+        label: LLM_VERDICT[tier].replace(/^./, (c) => c.toUpperCase()),
+        count: llm.get(tier)!,
+      })),
+    llmUnread,
+  };
+}
+
+/**
+ * Where the confirmations sit, in the band vocabulary plus the percent span the
+ * rows themselves print ("98–100%"), off the real lowest and highest
+ * likelihood rather than a fixed caption. A confirmation is not frozen: the
+ * engine re-scores nightly, so this can widen below Strong. Null with nothing
+ * scored. Pure.
+ */
+export function confirmedBandSpan(
+  low: number | null,
+  high: number | null,
+): { low: BandLabel; high: BandLabel; pct: string } | null {
+  if (low === null || high === null) return null;
+  const lo = Math.round(low * 100);
+  const hi = Math.round(high * 100);
+  return {
+    low: likelihoodBand(low).label,
+    high: likelihoodBand(high).label,
+    pct: lo === hi ? `${lo}%` : `${lo}–${hi}%`,
+  };
+}
+
+/** The Confirmed strip's method footnote: the tier is context the engine
+ *  weights at zero (see `CoreQueueRow.methodTier`), so it is listed, never
+ *  counted. Pure. */
+export function methodTierNote(tiers: readonly { tier: string; count: number }[]): string {
+  if (tiers.length === 0)
+    return "Method family is context and isn’t counted. No confirmed paper carries a tier.";
+  return `Method family is context and isn’t counted. It reads ${tiers
+    .map((t) => `${t.tier} on ${t.count}`)
+    .join(", ")}.`;
 }
 
 /** The Confirmed tab's sort pills (mockup: Strongest first · Newest), on the
@@ -2447,6 +2587,13 @@ export function CoreClaimQueue({
       : null;
   const confScopeRows = confActiveGroup?.rows ?? confActivePerson?.rows ?? confirmed;
   const confOpen = confirmed.length - confirmed.filter((r) => revokedConfirmed.has(r.pmid)).length;
+  // The Confirmed summary strip covers the whole tab, as To review's does.
+  const confSummary = summarizeConfirmed(confirmed, revokedConfirmed, paperCounts, clientCwids);
+  const confBand = confirmedBandSpan(confSummary.low, confSummary.high);
+  const bandWord = (label: BandLabel) => ({
+    label,
+    className: BANDS.find((b) => b.label === label)!.text,
+  });
   const historyBase = view === "confirmed" ? confScopeRows : view === "rejected" ? rejected : [];
   const historyTouched = view === "confirmed" ? revokedConfirmed : restoredRejected;
   // A paper decided this session leaves the To review list (mockup); its Undo
@@ -2718,6 +2865,13 @@ export function CoreClaimQueue({
   const chooseConfScope = (key: string) => {
     if (confMode === "evidence") setConfGroup(key);
     else setConfPerson(key);
+    resetConfScope();
+  };
+  /** A Confirmed strip person chip: By person on that person. */
+  const showConfPerson = (key: string) => {
+    setConfMode("person");
+    setConfPerson(key);
+    setConfGroup(ALL_SCOPE);
     resetConfScope();
   };
   /** The pane's "Review all N confirmed papers by X" / "See all papers with X":
@@ -3451,6 +3605,48 @@ export function CoreClaimQueue({
 
       {view === "confirmed" ? (
         <>
+          {confirmed.length > 0 ? (
+            <ConfirmedSummaryStrip
+              total={confSummary.total}
+              manual={confSummary.manual}
+              bySignals={confSummary.bySignals}
+              multiSignal={confSummary.multiSignal}
+              band={
+                confBand && {
+                  low: bandWord(confBand.low),
+                  high: bandWord(confBand.high),
+                  pct: confBand.pct,
+                }
+              }
+              signals={SIGNAL_KINDS.map((s) => ({
+                facet: s.facet,
+                label: s.label,
+                strength: s.strength,
+                dots: s.dots,
+                count: confSummary.signals[s.kind],
+                active: (facets.signal ?? []).includes(s.facet),
+              }))}
+              onSignal={(facet) => toggleFacet("signal", facet)}
+              methodNote={methodTierNote(confSummary.methodTiers)}
+              people={confPeople
+                .filter((p) => p.open > 0)
+                .sort(
+                  (a, b) =>
+                    b.counts.papers - a.counts.papers ||
+                    displayName(a.scholar.name).localeCompare(displayName(b.scholar.name)),
+                )
+                .map((p) => ({
+                  key: p.scholar.cwid.toLowerCase(),
+                  name: displayName(p.scholar.name),
+                  papers: p.counts.papers,
+                }))}
+              onPerson={showConfPerson}
+              aliases={confSummary.aliases}
+              ackNoAlias={confSummary.ackNoAlias}
+              llm={confSummary.llm}
+              llmUnread={confSummary.llmUnread}
+            />
+          ) : null}
           {searchBar}
           {/* Three panes at `lg` (mockup), the To review layout: the rail, the
               list with each paper's signal strip, and the paper. Below it the
