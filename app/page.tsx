@@ -17,6 +17,7 @@
  */
 import Link from "next/link";
 import { cache, Suspense } from "react";
+import { isrBuildFallback } from "@/lib/isr-build-fallback";
 import {
   getSpotlights,
   getBrowseAllResearchAreas,
@@ -34,12 +35,11 @@ import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { SiteHeader } from "@/components/site/header";
 import { SiteFooter } from "@/components/site/footer";
 
-// #1503 interim — 2h fallback TTL (was 6h). Prod runs 2–6 app tasks with no
-// shared cacheHandler, so `revalidatePath("/")` busts only one task's ISR store
-// and CloudFront can refill the edge from a still-stale task. Shortening the TTL
-// bounds that cross-task staleness window until the shared S3 cacheHandler lands
-// (docs/1503-shared-cachehandler-spec.md). Regeneration is background (SWR).
-export const revalidate = 7200; // 2 hours
+// 5 min. Origin sends s-maxage=revalidate and CloudFront honors it, and deploys
+// don't invalidate the edge, so this bounds how long the edge serves a previous
+// deploy's (or a failed regeneration's) home. Regeneration is background (SWR),
+// so a short window costs one render per 5 min, never a visitor wait.
+export const revalidate = 300;
 export const dynamicParams = true;
 // Fail the build if any dynamic API (headers, cookies, request query) sneaks into this tree — incl. not-found — and silently turns off ISR.
 export const dynamic = "error";
@@ -116,15 +116,15 @@ export default function HomePage() {
 }
 
 // --- Streamed data regions -------------------------------------------------
-// Each is `.catch`-guarded (defense-in-depth so a transient DB blip on one
-// surface hides only that surface rather than 5xx-ing the page) and returns
-// null when its data is absent/sparse, exactly as the previous inline render
-// did.
+// Each returns null when its data is absent/sparse. Load FAILURES rethrow at
+// runtime (isrBuildFallback): on this ISR page a swallowed error is cached with
+// the page, so Next keeping the last good render beats hiding a section for the
+// whole revalidate window. Only the build-time prerender (no DB) degrades.
 
 async function HomeStats() {
   const [stats, methodCategories] = await Promise.all([
-    getHomeStats().catch(() => null),
-    getMethodCategoriesOnce().catch(() => null),
+    getHomeStats().catch(isrBuildFallback(null)),
+    getMethodCategoriesOnce().catch(isrBuildFallback(null)),
   ]);
   if (!stats) return null;
   const stat = "flex flex-col items-center gap-0.5 text-[13px] text-muted-foreground no-underline hover:underline underline-offset-4 decoration-1";
@@ -166,7 +166,7 @@ async function HomeStats() {
 }
 
 async function HomeSpotlights() {
-  const spotlights = await getSpotlights().catch(() => null);
+  const spotlights = await getSpotlights().catch(isrBuildFallback(null));
   if (!spotlights) return null;
   // #1709 — draw the 8 displayed spotlights (and the starting card) HERE, not in
   // a client useEffect. Re-picking after mount threw away this very render and
@@ -187,13 +187,13 @@ async function HomeSpotlights() {
 
 async function HomeBrowseGrid() {
   const browse = await getBrowseAllResearchAreas().catch(
-    () => [] as Awaited<ReturnType<typeof getBrowseAllResearchAreas>>,
+    isrBuildFallback([] as Awaited<ReturnType<typeof getBrowseAllResearchAreas>>),
   );
   return <BrowseAllResearchAreasGrid items={browse ?? []} />;
 }
 
 async function HomeMethodsSection() {
-  const methodCategories = await getMethodCategoriesOnce().catch(() => null);
+  const methodCategories = await getMethodCategoriesOnce().catch(isrBuildFallback(null));
   if (!methodCategories) return null;
   return (
     <div id="browse-by-method" tabIndex={-1} className="scroll-mt-16 outline-none">
