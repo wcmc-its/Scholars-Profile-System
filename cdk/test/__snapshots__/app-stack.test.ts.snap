@@ -619,7 +619,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CONTENT_EDITOR_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_CONTENT_EDITOR_GROUP_CN",
