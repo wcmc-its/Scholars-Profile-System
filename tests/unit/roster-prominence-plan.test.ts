@@ -212,6 +212,21 @@ describe("assertRosterProminenceVolume on a realistic roster", () => {
     );
   });
 
+  it("trips leaders on a role wipe even when every chair/chief title keeps the tier", () => {
+    // The title holds tier 4/6 on its own; only the lost chair/chief weight shows.
+    const titled = people.map((p) =>
+      p.chairLabel
+        ? { ...p, primaryTitle: "Chair of Medicine" }
+        : p.isChief
+          ? { ...p, primaryTitle: "Chief of Cardiology" }
+          : p,
+    );
+    const tonight = titled.map((p) => ({ ...p, chairLabel: null, isChief: false }));
+    expect(() => assertRosterProminenceVolume(store(titled), score(tonight))).toThrow(
+      /roster-prominence:leaders/,
+    );
+  });
+
   it("trips grants when the grant table is emptied, which score-drops misses", () => {
     const tonight = people.map((p) => ({ ...p, piCount: 0, nihPiCount: 0 }));
     expect(() => assertRosterProminenceVolume(stored, score(tonight))).toThrow(
