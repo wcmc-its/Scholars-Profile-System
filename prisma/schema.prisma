@@ -153,7 +153,7 @@ model Scholar {
   /// (lib/search.ts, a banded multiplier), and search must never read it.
   /// NULL = not scored (new since the last run, or deleted) — never a zero.
   rosterProminence        Float?    @map("roster_prominence")
-  rosterLeadershipTier    Int?      @map("roster_leadership_tier")
+  rosterLeadershipTier    Float?    @map("roster_leadership_tier") // fractional (viceChair = 8.5)
   deletedAt               DateTime? @map("deleted_at")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")

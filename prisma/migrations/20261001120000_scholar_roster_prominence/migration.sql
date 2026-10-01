@@ -13,4 +13,4 @@
 
 -- AlterTable
 ALTER TABLE `scholar` ADD COLUMN `roster_prominence` DOUBLE NULL,
-    ADD COLUMN `roster_leadership_tier` INTEGER NULL;
+    ADD COLUMN `roster_leadership_tier` DOUBLE NULL; -- fractional: TITLE_RANK.viceChair = 8.5
