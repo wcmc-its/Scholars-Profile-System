@@ -6,7 +6,11 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 
-import { decisionToastText, resolveFocusIndex } from "@/components/edit/core-claim-queue";
+import {
+  decisionToastText,
+  emptyListText,
+  resolveFocusIndex,
+} from "@/components/edit/core-claim-queue";
 import { KEYS_HINT, SHORTCUTS, UndoToast } from "@/components/edit/core-queue-panels";
 
 const rows = (...pmids: string[]) => pmids.map((pmid) => ({ pmid }));
@@ -53,6 +57,40 @@ describe("decisionToastText", () => {
   it("counts a bulk batch and drops any reason", () => {
     expect(decisionToastText("claimed", 12)).toBe("Confirmed 12 papers");
     expect(decisionToastText("rejected", 2, "ignored")).toBe("Rejected 2 papers");
+  });
+});
+
+describe("emptyListText", () => {
+  const base = { noPerson: false, allDecided: false, hiddenBelowFloor: 0, narrowed: false };
+
+  it("says all reviewed, not a filter miss, once every row in scope was decided", () => {
+    expect(emptyListText({ ...base, allDecided: true })).toBe(
+      "All reviewed. Undo last brings one back.",
+    );
+  });
+
+  it("points at the floor when only hidden rows remain, decided or not", () => {
+    expect(emptyListText({ ...base, hiddenBelowFloor: 3 })).toBe(
+      "Only lower-confidence candidates are left. Show them above.",
+    );
+    expect(emptyListText({ ...base, allDecided: true, hiddenBelowFloor: 3 })).toBe(
+      "All reviewed. Only lower-confidence candidates are left. Show them above.",
+    );
+  });
+
+  it("is a filter miss whenever a facet or the search is narrowing", () => {
+    expect(emptyListText({ ...base, allDecided: true, narrowed: true })).toBe(
+      "Nothing matches this filter.",
+    );
+    expect(emptyListText({ ...base, hiddenBelowFloor: 3, narrowed: true })).toBe(
+      "Nothing matches this filter.",
+    );
+  });
+
+  it("has no one to review by in an empty person mode", () => {
+    expect(emptyListText({ ...base, noPerson: true, allDecided: true })).toBe(
+      "No one to review by yet.",
+    );
   });
 });
 

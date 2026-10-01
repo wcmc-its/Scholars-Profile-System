@@ -709,6 +709,18 @@ describe("CoreClaimQueue", () => {
     }
   });
 
+  it("says all reviewed, not a filter miss, once the last open paper is decided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row({ pmid: "1" })]} confirmed={[]} />);
+    press("a");
+    await screen.findByText("All reviewed. Undo last brings one back.");
+    expect(screen.queryByText("Nothing matches this filter.")).toBeNull();
+    press("u");
+    await waitFor(() => expect(listRow("1")).toBeTruthy());
+    expect(screen.queryByText("All reviewed. Undo last brings one back.")).toBeNull();
+  });
+
   it("says so in the toast when an undo fails, and its Undo retries", async () => {
     const fetchMock = vi
       .fn()

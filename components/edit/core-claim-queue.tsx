@@ -1340,6 +1340,27 @@ export function decisionToastText(status: Decision, count: number, note?: string
   return note ? `${word} · ${note}` : word;
 }
 
+/**
+ * What the To review list says when it shows no rows. Decided rows leave the
+ * list, so an empty list with nothing narrowing it and rows in scope means the
+ * reviewer decided every one of them this session -- not a filter miss. Pure.
+ */
+export function emptyListText(s: {
+  noPerson: boolean;
+  allDecided: boolean;
+  hiddenBelowFloor: number;
+  narrowed: boolean;
+}): string {
+  if (s.noPerson) return "No one to review by yet.";
+  if (s.narrowed) return "Nothing matches this filter.";
+  if (s.hiddenBelowFloor > 0) {
+    return s.allDecided
+      ? "All reviewed. Only lower-confidence candidates are left. Show them above."
+      : "Only lower-confidence candidates are left. Show them above.";
+  }
+  return s.allDecided ? "All reviewed. Undo last brings one back." : "Nothing matches this filter.";
+}
+
 /** How long the undo toast stays up (mockup). `u` and "Undo last" outlast it. */
 const TOAST_MS = 5000;
 
@@ -2990,11 +3011,12 @@ export function CoreClaimQueue({
               </div>
               {visible.length === 0 ? (
                 <p className="text-muted-foreground border-apollo-border rounded-lg border border-dashed px-4 py-6 text-center text-sm">
-                  {mode === "person" && !activePerson
-                    ? "No one to review by yet."
-                    : floor.hidden > 0 && !narrowed
-                      ? "Only lower-confidence candidates are left. Show them above."
-                      : "Nothing matches this filter."}
+                  {emptyListText({
+                    noPerson: mode === "person" && !activePerson,
+                    allDecided: scopeRows.length > 0 && scopeOpen.length === 0,
+                    hiddenBelowFloor: floor.hidden,
+                    narrowed,
+                  })}
                 </p>
               ) : null}
               <p data-slot="core-queue-status" className="text-muted-foreground text-xs">
