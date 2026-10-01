@@ -63,6 +63,8 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "RSC",
                 "Next-Router-Prefetch",
                 "Next-Router-Segment-Prefetch",
+                "Next-Router-State-Tree",
+                "Next-Url",
               ],
             },
             "QueryStringsConfig": {
@@ -1336,6 +1338,8 @@ a{color:var(--slate)}
                 "RSC",
                 "Next-Router-Prefetch",
                 "Next-Router-Segment-Prefetch",
+                "Next-Router-State-Tree",
+                "Next-Url",
               ],
             },
             "QueryStringsConfig": {
@@ -1677,6 +1681,8 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "RSC",
                 "Next-Router-Prefetch",
                 "Next-Router-Segment-Prefetch",
+                "Next-Router-State-Tree",
+                "Next-Url",
               ],
             },
             "QueryStringsConfig": {
@@ -2950,6 +2956,8 @@ a{color:var(--slate)}
                 "RSC",
                 "Next-Router-Prefetch",
                 "Next-Router-Segment-Prefetch",
+                "Next-Router-State-Tree",
+                "Next-Url",
               ],
             },
             "QueryStringsConfig": {

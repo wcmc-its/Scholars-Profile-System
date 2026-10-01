@@ -112,6 +112,8 @@ const QUERY_KEYED_ALLOWLIST = [
 const RSC_KEY_HEADERS = [
   "Next-Router-Prefetch",
   "Next-Router-Segment-Prefetch",
+  "Next-Router-State-Tree",
+  "Next-Url",
   "RSC",
 ] as const;
 
