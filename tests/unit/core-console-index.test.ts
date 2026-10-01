@@ -45,8 +45,8 @@ function inputs(over: Partial<CoreConsoleInputs> = {}): CoreConsoleInputs {
     candidateTotals: new Map([["2", 10]]),
     candidateHighs: new Map([["2", 4]]),
     claimedCandidates: [
-      { coreId: "2", likelihood: 0.9 },
-      { coreId: "2", likelihood: 0.5 },
+      { coreId: "2", likelihood: 0.9, methodTier: null },
+      { coreId: "2", likelihood: 0.5, methodTier: null },
     ],
     confirmedByCore: new Map([["2", ["1", "2", "3"]]]),
     clients: [
@@ -90,12 +90,15 @@ describe("buildCoreConsoleRows", () => {
     const [alpha] = buildCoreConsoleRows(
       inputs({
         claimedCandidates: [
-          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR },
-          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01 },
+          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR, methodTier: null },
+          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01, methodTier: null },
+          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01, methodTier: "weak" },
+          // a strong/moderate tier is exempt from the floor, so the totals include it
+          { coreId: "2", likelihood: CANDIDATE_DISPLAY_FLOOR - 0.01, methodTier: "moderate" },
         ],
       }),
     );
-    expect(alpha.reviewTotal).toBe(9);
+    expect(alpha.reviewTotal).toBe(8);
   });
 
   it("never reports negative or high > total", () => {
@@ -104,8 +107,8 @@ describe("buildCoreConsoleRows", () => {
         candidateTotals: new Map([["2", 1]]),
         candidateHighs: new Map([["2", 5]]),
         claimedCandidates: [
-          { coreId: "2", likelihood: 0.5 },
-          { coreId: "2", likelihood: 0.5 },
+          { coreId: "2", likelihood: 0.5, methodTier: null },
+          { coreId: "2", likelihood: 0.5, methodTier: null },
         ],
       }),
     );
@@ -131,8 +134,9 @@ describe("loadCoreConsoleIndex", () => {
             : [{ coreId: "1", pmid: "100" }],
       },
       publicationCore: {
-        groupBy: async (args: { where: { likelihood: { gte: number } } }) =>
-          groupByWheres.push(args.where) && args.where.likelihood.gte === HIGH_CONFIDENCE_LIKELIHOOD
+        groupBy: async (args: { where: { likelihood?: { gte: number } } }) =>
+          groupByWheres.push(args.where) &&
+          args.where.likelihood?.gte === HIGH_CONFIDENCE_LIKELIHOOD
             ? [{ coreId: "1", _count: { _all: 2 } }]
             : [{ coreId: "1", _count: { _all: 5 } }],
         findMany: async (args: { where: { status: string } }) =>
@@ -149,7 +153,13 @@ describe("loadCoreConsoleIndex", () => {
     const [row] = await loadCoreConsoleIndex(reader);
     expect(groupByWheres).toEqual(
       expect.arrayContaining([
-        { status: "candidate", likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
+        {
+          status: "candidate",
+          OR: [
+            { likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
+            { methodTier: { in: ["strong", "moderate"] } },
+          ],
+        },
         { status: "candidate", likelihood: { gte: HIGH_CONFIDENCE_LIKELIHOOD } },
       ]),
     );
