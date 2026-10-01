@@ -12,13 +12,10 @@ WORKDIR /app
 
 # ---- Dependencies -----------------------------------------------------------
 # Installed against the lockfile in a cache-friendly layer. `npm ci` runs the
-# repo `postinstall` (prisma generate + the #1995 Next Flight client patch), so
-# the Prisma schema and the patch script are copied first. The build and etl
-# stages reuse this node_modules, so both get the patched Flight client.
+# repo `postinstall` (prisma generate), so the Prisma schema is copied first.
 FROM base AS deps
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-COPY scripts/patch-next-flight-then.mjs ./scripts/patch-next-flight-then.mjs
 RUN npm ci
 
 # ---- Build ------------------------------------------------------------------
