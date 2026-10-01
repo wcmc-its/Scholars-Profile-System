@@ -8,6 +8,8 @@
  * silently dropped (return 204, no log) so a malicious caller cannot
  * inject arbitrary keys/values into the structured log stream.
  */
+import { logNotFound, type NotFoundPattern } from "@/lib/analytics/errors";
+import { logVivoFourOhFour } from "@/lib/analytics/vivo-pattern";
 
 /** Event types accepted by the beacon endpoint.
  *  - search_click: result clicks on /search (Phase 6 / ANALYTICS-02).
@@ -61,6 +63,31 @@ function capStr(v: unknown): string | null {
 }
 
 /**
+ * `not_found` — sent by `components/site/not-found-beacon.tsx` when a 404
+ * page mounts. Deliberately NOT in `VALID_EVENTS`: it is not echoed through
+ * the generic click-log shape below but re-emitted through the existing
+ * `logNotFound` (and, for the root not-found, `logVivoFourOhFour`) emitters so
+ * the CloudWatch event shapes are unchanged from when the not-found files
+ * logged server-side. The not-found files can no longer log server-side:
+ * reading the path there needed `headers()`, which forced every route dynamic.
+ */
+const NOT_FOUND_EVENT = "not_found";
+const NOT_FOUND_PATTERNS = new Set<NotFoundPattern>(["vivo", "profile", "other"]);
+
+function handleNotFoundBeacon(p: Record<string, unknown>): void {
+  if (typeof p.path !== "string" || !p.path.startsWith("/")) return;
+  // Path only, never query/fragment (privacy — docs/error-handling-spec.md §6).
+  // The client sends location.pathname, but the endpoint is unauthenticated.
+  const path = p.path.split(/[?#]/, 1)[0].slice(0, MAX_STR);
+  const pattern = p.pattern as NotFoundPattern;
+  if (!NOT_FOUND_PATTERNS.has(pattern)) return;
+  logNotFound({ path, pattern });
+  // The root not-found always emitted vivo_404 alongside not_found (the
+  // helper itself only logs on a /display/cwid-… match) — keep that exactly.
+  if (p.variant === "root") logVivoFourOhFour(path);
+}
+
+/**
  * Validates the beacon payload and emits a structured `search_click` log
  * line. Pure: no Next.js / fs / network dependencies. Safe to call from
  * any context (route handler, test, future server-to-server pipeline).
@@ -72,6 +99,10 @@ export function handleAnalyticsBeacon(payload: unknown): void {
   if (typeof payload !== "object" || payload === null) return;
   const p = payload as Record<string, unknown>;
   const event = typeof p.event === "string" ? p.event : "";
+  if (event === NOT_FOUND_EVENT) {
+    handleNotFoundBeacon(p);
+    return;
+  }
   if (!VALID_EVENTS.has(event)) return;
 
   // Sanitize filters to known fields with explicit type checks (T-06-02-01).

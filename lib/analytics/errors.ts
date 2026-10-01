@@ -44,7 +44,9 @@ export function logGlobalError(fields: { digest?: string; kind?: ErrorKind }): v
 
 /** A 404 was served. Generalizes `vivo_404` (which is kept, unchanged, for
  *  continuity of the redirect-map-pruning signal — see the SPEC's resolved
- *  decisions). Server-side callers (`not-found.tsx`) reach CloudWatch. */
+ *  decisions). Called from the `/api/analytics` handler on a `not_found`
+ *  beacon from `NotFoundBeacon` (the not-found files cannot read the path
+ *  server-side without forcing every route dynamic), so it reaches CloudWatch. */
 export function logNotFound(fields: { path: string; pattern: NotFoundPattern }): void {
   emit("not_found", { path: fields.path, pattern: fields.pattern });
 }

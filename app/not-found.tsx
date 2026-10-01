@@ -1,9 +1,7 @@
-import { headers } from "next/headers";
 import { SiteHeader } from "@/components/site/header";
 import { SiteFooter } from "@/components/site/footer";
-import { NotFoundContent } from "@/components/site/not-found-content";
-import { logVivoFourOhFour, VIVO_PATTERN } from "@/lib/analytics/vivo-pattern";
-import { logNotFound } from "@/lib/analytics/errors";
+import { RootNotFoundBody } from "@/components/site/root-not-found-body";
+import { NotFoundBeacon } from "@/components/site/not-found-beacon";
 
 /**
  * Root 404 (#668 §2) — the catch site for everything OUTSIDE the `(public)`
@@ -14,43 +12,25 @@ import { logNotFound } from "@/lib/analytics/errors";
  * cookie-safe). In-group 404s use `(public)/not-found.tsx`, which inherits the
  * chrome from `(public)/layout`.
  *
- * Telemetry: keeps the unchanged `vivo_404` signal (ANALYTICS-04 redirect-map
- * pruning) and adds the generalized `not_found` event alongside it.
+ * MUST stay free of dynamic APIs (`headers()` / `cookies()`): the layout
+ * renders this element on the server as part of every route's tree, so a
+ * dynamic call here forces EVERY page dynamic and silently defeats ISR on `/`
+ * and `/browse` (guarded by `dynamic = "error"` on those pages).
  *
- * Header source for the incoming pathname: tries x-invoke-path,
- * x-nextjs-matched-path, x-matched-path, x-pathname in order, then falls back
- * to the referer path. Belt-and-suspenders against the unstable-header risk.
+ * Telemetry (`not_found` + the unchanged `vivo_404`) is sent from the client
+ * by `NotFoundBeacon`, which reads the real path from `window.location`.
+ *
+ * The VIVO-migrant copy is decided client-side too (`RootNotFoundBody`).
  */
-export default async function NotFound() {
-  const h = await headers();
-  const pathname =
-    h.get("x-invoke-path") ??
-    h.get("x-nextjs-matched-path") ??
-    h.get("x-matched-path") ??
-    h.get("x-pathname") ??
-    extractPathFromReferer(h.get("referer")) ??
-    "";
-
-  const isVivo = VIVO_PATTERN.test(pathname);
-  logVivoFourOhFour(pathname);
-  logNotFound({ path: pathname, pattern: isVivo ? "vivo" : "other" });
-
+export default function NotFound() {
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
       <div className="flex-1">
-        <NotFoundContent isVivo={isVivo} />
+        <RootNotFoundBody />
       </div>
       <SiteFooter />
+      <NotFoundBeacon variant="root" />
     </div>
   );
-}
-
-function extractPathFromReferer(referer: string | null): string | null {
-  if (!referer) return null;
-  try {
-    return new URL(referer).pathname;
-  } catch {
-    return null;
-  }
 }

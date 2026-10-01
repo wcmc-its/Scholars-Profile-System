@@ -161,11 +161,11 @@ New single-line JSON events, added to the app's vocabulary in [`logging-referenc
 |---|---|---|
 | `error_boundary` | A segment `error.tsx` renders. | `digest`, `route?`, `kind` (`db`/`search`/`unknown`) |
 | `global_error` | `global-error.tsx` renders (root-layout failure). | `digest`, `kind` |
-| `not_found` | A 404 is served (generalizes `vivo_404`). | `path`, `pattern` (`vivo`/`profile`/`other`) |
+| `not_found` | A 404 page mounts in the browser (generalizes `vivo_404`). Emitted via the client beacon: `NotFoundBeacon` (`components/site/not-found-beacon.tsx`) posts `{event:"not_found", path, pattern, variant}` to `/api/analytics`, which re-emits it server-side. The not-found files must not read `headers()` — they render in every route's tree, so a dynamic API there forces every page dynamic and defeats ISR. | `path`, `pattern` (`vivo`/`profile`/`other`) |
 | `search_degraded` | The `/search` degraded path is taken. | `q_len` (length only, never the query text), `reason` |
-| `vivo_404` | **Unchanged** — kept for continuity of the redirect-map-pruning signal. Settled: **not** folded into `not_found` in this work (see Resolved decisions); fold later when the pruning query is next touched. | `url` |
+| `vivo_404` | **Unchanged shape** — kept for continuity of the redirect-map-pruning signal. Emitted by the same `/api/analytics` handler for a root-not-found `not_found` beacon whose path matches `VIVO_PATTERN`. Settled: **not** folded into `not_found` in this work (see Resolved decisions); fold later when the pruning query is next touched. | `url` |
 
-Privacy: log **path only**, never query strings (matches the existing `vivo_404` threat model); for search, log `q_len` not `q`.
+Privacy: log **path only**, never query strings (matches the existing `vivo_404` threat model); for search, log `q_len` not `q`. The beacon sends `location.pathname`, and the handler still strips anything from `?`/`#` and caps the path at 512 chars because the endpoint is unauthenticated.
 
 Candidate alarms (defer to #595 / `SLOs.md`): `global_error` rate > 0 (any root failure is notable); `search_degraded` sustained > N/min (corroborates the OpenSearch `ClusterStatus.red` alarm from the request side).
 
