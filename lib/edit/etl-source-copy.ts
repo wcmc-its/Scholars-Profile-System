@@ -153,6 +153,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Measures how common each subject heading is in WCM papers, to rank search.",
     origin: "internal", // recomputed from this app's own publication/mesh tables
   },
+  RosterProminence: {
+    label: "Roster Ordering",
+    description: "Ranks scholars by leadership and research activity for the /edit rosters.",
+    origin: "internal", // recomputed from this app's own scholar/grant/role tables
+  },
   MeshAnchor: {
     label: "Research Area Links",
     description: "Links paper subject headings to the research areas people browse by.",
