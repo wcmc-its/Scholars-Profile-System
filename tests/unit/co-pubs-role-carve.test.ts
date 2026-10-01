@@ -58,6 +58,7 @@ import RollupPage, {
 import MenteePage, {
   generateMetadata as menteeMetadata,
 } from "@/app/(public)/scholars/[slug]/co-pubs/[menteeCwid]/page";
+import CoPubsLayout from "@/app/(public)/scholars/[slug]/co-pubs/layout";
 import { GET as rollupExport } from "@/app/(public)/scholars/[slug]/co-pubs/export/route";
 import { GET as menteeExport } from "@/app/(public)/scholars/[slug]/co-pubs/[menteeCwid]/export/route";
 
@@ -97,6 +98,15 @@ describe("co-pubs child routes — a hidden mentor is a 404, not a name", () => 
     expect(await menteeMetadata(menteeParams)).toEqual({ title: "Not found" });
   });
 
+  // #2963 — the segment layout is the real-404 gate: it renders above the
+  // `loading.tsx` Suspense boundary, so only its notFound() sets HTTP 404.
+  it("404s in the segment layout (above the loading boundary)", async () => {
+    scholarFindFirst.mockResolvedValue(HIDDEN_MENTOR);
+    await expect(CoPubsLayout({ children: null, ...rollupParams })).rejects.toThrow(
+      "NEXT_NOT_FOUND",
+    );
+  });
+
   it("404s both export routes", async () => {
     scholarFindFirst.mockResolvedValue(HIDDEN_MENTOR);
     expect((await rollupExport(exportRequest("export"), rollupParams)).status).toBe(404);
@@ -108,6 +118,7 @@ describe("co-pubs child routes — a hidden mentor is a 404, not a name", () => 
     expect(await rollupMetadata(rollupParams)).toMatchObject({
       title: expect.stringContaining("Test Person"),
     });
+    expect(await CoPubsLayout({ children: "kids", ...rollupParams })).toBe("kids");
     expect((await rollupExport(exportRequest("export"), rollupParams)).status).toBe(200);
     expect((await menteeExport(exportRequest("zzz9999/export"), menteeParams)).status).toBe(200);
   });

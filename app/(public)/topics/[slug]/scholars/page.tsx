@@ -3,7 +3,6 @@ import type { Metadata } from "next";
 import {
   getDistinctScholarCountForTopic,
   getSubtopicsForTopic,
-  getTopic,
   getTopicScholars,
   type TopicAllScholarRole,
 } from "@/lib/api/topics";
@@ -11,6 +10,7 @@ import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopicAllScholars } from "@/components/topic/topic-all-scholars";
+import { getTopicCached } from "./get-topic";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -54,7 +54,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const topic = await getTopic(slug).catch(() => null);
+  const topic = await getTopicCached(slug).catch(() => null);
   if (!topic) return { title: "Topic not found" };
   return {
     title: `Scholars in ${topic.label} — Scholars at WCM`,
@@ -73,7 +73,7 @@ export default async function TopicScholarsPage({
   const { slug } = await params;
   const sp = await searchParams;
 
-  const topic = await getTopic(slug);
+  const topic = await getTopicCached(slug);
   if (!topic) notFound();
 
   const role = parseRole(typeof sp.role === "string" ? sp.role : undefined);
