@@ -2450,13 +2450,13 @@ export class AppStack extends Stack {
         //     title/abstract; never admits or drops a grant (counts unchanged).
         //   SEARCH_FUNDING_TEXT_EVIDENCE -- "In abstract: ..." / "In keywords: ..."
         //     evidence lines on funding results.
-        // STAGING ON (soak + measure the count drop and tune the MSM threshold for
-        // the funding index -- the floor is calibrated for publications); PROD OFF
-        // until that tuning lands. Flip is env-only via cdk deploy Sps-App-<env>
-        // (CD re-rolls the image only) -- the flag-parity rule.
-        SEARCH_FUNDING_TAB_MSM: env === "staging" ? "on" : "off",
-        SEARCH_FUNDING_PHRASE_BOOST: env === "staging" ? "on" : "off",
-        SEARCH_FUNDING_TEXT_EVIDENCE: env === "staging" ? "on" : "off",
+        // ON both envs: staging soak 2026-09-30 (#1090) showed multi-term queries
+        // right-sized ("sickle cell" 3544 -> 18) and 0 blank-reason rows (#2244).
+        // Flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the image
+        // only) -- the flag-parity rule.
+        SEARCH_FUNDING_TAB_MSM: "on",
+        SEARCH_FUNDING_PHRASE_BOOST: "on",
+        SEARCH_FUNDING_TEXT_EVIDENCE: "on",
         // #861 -- streams the /search shell so the header/tabs paint before the
         // cold MeSH precompute + the three badge-count searches resolve (the
         // 6-10s first-byte block). resolveSearchShellStreaming reads === "on".

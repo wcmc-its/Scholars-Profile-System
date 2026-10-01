@@ -872,15 +872,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_FUNDING_TAB_MSM",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_FUNDING_PHRASE_BOOST",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_FUNDING_TEXT_EVIDENCE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
