@@ -12,18 +12,18 @@ WORKDIR /app
 
 # ---- Dependencies -----------------------------------------------------------
 # Installed against the lockfile in a cache-friendly layer. `npm ci` runs the
-# repo `postinstall` (prisma generate + the #1995 Next Flight client patch), so
-# the Prisma schema and the patch script are copied first. The build and etl
-# stages reuse this node_modules, so both get the patched Flight client.
+# repo `postinstall` (prisma generate), so the Prisma schema is copied first.
 FROM base AS deps
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-COPY scripts/patch-next-flight-then.mjs ./scripts/patch-next-flight-then.mjs
 RUN npm ci
 
 # ---- Build ------------------------------------------------------------------
 FROM base AS build
 ENV NEXT_TELEMETRY_DISABLED=1
+# Next 16's in-build TypeScript pass OOMs at Node's default heap on an 8 GB
+# Docker Desktop VM (~2 GB); 4 GB matches what the 16 GB CI runner gets anyway.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 # Version-skew protection. NEXT_DEPLOYMENT_ID (the deploying commit SHA, passed
 # as a build-arg by the Deploy workflow) is inlined by Next into both the client
 # and server bundles. When a browser loaded from an older build makes a

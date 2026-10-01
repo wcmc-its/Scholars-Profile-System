@@ -71,7 +71,16 @@ export default function RootLayout({
   // never even shipped to the browser when the flag is off.
   const showFeedbackBadge = process.env.FEEDBACK_BADGE_ENABLED === "on";
   return (
-    <html lang="en" className={`${inter.variable} ${charter.variable}`}>
+    // data-scroll-behavior="smooth": Next 16 stopped forcing
+    // `scroll-behavior: auto` around client navigations. globals.css sets
+    // `smooth` on :root for the home and /browse pages (in-page anchor jumps);
+    // this attribute keeps the Next 15 behavior of instant route-change
+    // scroll-to-top instead of an animated one.
+    <html
+      lang="en"
+      className={`${inter.variable} ${charter.variable}`}
+      data-scroll-behavior="smooth"
+    >
       <body className="bg-background text-foreground antialiased">
         <FeedbackBadgeProvider>
           {/* #637 — "View as" banner above all chrome. Client-probed (T6) and
