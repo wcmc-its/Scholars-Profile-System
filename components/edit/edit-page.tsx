@@ -1056,9 +1056,14 @@ function orcidEditHref(orcidTabEnabled: boolean, detailBase: string, cwid: strin
 /** #2634 — non-dismissed suggestion rows (co-author + Faculty Review Tool):
  *  the rail badge + Mentees pointer count. */
 function activeMenteeSuggestionCount(ctx: EditContext): number {
+  const frt = ctx.frtMentees.filter((s) => s.dismissedAt === null);
+  // A co-author who is also an active FRT mentee is one suggestion, not two
+  // (the card folds them into the FRT row).
+  const frtCwids = new Set(frt.map((s) => s.menteeCwid).filter((c) => c !== null));
   return (
-    ctx.menteeSuggestions.filter((s) => s.dismissedAt === null).length +
-    ctx.frtMentees.filter((s) => s.dismissedAt === null).length
+    frt.length +
+    ctx.menteeSuggestions.filter((s) => s.dismissedAt === null && !frtCwids.has(s.menteeCwid))
+      .length
   );
 }
 

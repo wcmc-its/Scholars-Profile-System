@@ -130,6 +130,48 @@ describe("FRT mentee suggestions", () => {
     expect(screen.getByTestId("frt-mentees-no-match")).toBeTruthy();
   });
 
+  it("FRT panel leads; a co-author who is also an FRT mentee shows once, on the FRT row", () => {
+    const coauthor = (id: number, menteeCwid: string, menteeName: string) => ({
+      id,
+      menteeCwid,
+      menteeName,
+      menteeTitle: null,
+      menteeUnit: null,
+      kind: "postdoc" as const,
+      tier: "presumptive" as const,
+      nCoPubs: 3,
+      nMentorLastAuthor: 1,
+      firstYear: 2023,
+      lastYear: 2025,
+      menteeFirstPublishedYear: 2020,
+      strong: false,
+      dismissedAt: null,
+      dismissReason: null,
+      evidence: [],
+    });
+    const { container } = render(
+      <MenteeSuggestionsCard
+        cwid="self01"
+        suggestions={[coauthor(1, "anr2002", "Ana Ruiz"), coauthor(2, "oth3003", "Omar Other")]}
+        frtMentees={ROWS}
+        manualMentees={[]}
+      />,
+    );
+    const panels = [...container.querySelectorAll("[data-slot$='-panel']")].map((e) =>
+      e.getAttribute("data-slot"),
+    );
+    expect(panels).toEqual(["frt-mentee-suggestions-panel", "mentee-suggestions-panel"]);
+    // One h2#panel-heading per page; the second panel carries its own id.
+    expect(container.querySelectorAll("#panel-heading")).toHaveLength(1);
+    expect(container.querySelector("#mentee-suggestions-coauthor-heading")).not.toBeNull();
+    expect(screen.queryByTestId("mentee-suggestion-1")).toBeNull(); // folded into FRT row 12
+    expect(screen.getByTestId("mentee-suggestion-2")).toBeTruthy();
+    expect(screen.getByTestId("frt-mentee-coauthor-12").textContent).toBe(
+      "Also a co-author: 3 co-authored publications",
+    );
+    expect(screen.queryByTestId("frt-mentee-coauthor-11")).toBeNull();
+  });
+
   it("Not a mentee POSTs dismiss and moves the row to the dismissed footer", async () => {
     renderCard();
     fireEvent.click(screen.getByTestId("frt-mentee-not-11"));

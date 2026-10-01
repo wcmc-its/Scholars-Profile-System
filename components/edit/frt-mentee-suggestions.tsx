@@ -39,11 +39,15 @@ export function FrtMenteeSuggestions({
   rows,
   su,
   scholarName,
+  coPubsByCwid,
   addMentee,
 }: {
   rows: ReadonlyArray<EditContextFrtMentee>;
   su: boolean;
   scholarName: string;
+  /** Co-authored paper count per CWID from the co-author suggestions; a linked
+   *  FRT mentee found here notes it (that suggestion is not shown separately). */
+  coPubsByCwid?: ReadonlyMap<string, number>;
   /** Appends to manualMentees; resolves to an error message, or null on success. */
   addMentee: (entry: ManualMentee) => Promise<string | null>;
 }) {
@@ -130,6 +134,7 @@ export function FrtMenteeSuggestions({
       r={r}
       su={su}
       scholarName={scholarName}
+      coPubs={r.menteeCwid ? (coPubsByCwid?.get(r.menteeCwid) ?? null) : null}
       busy={busy.has(r.id)}
       error={errors.get(r.id) ?? null}
       onAssign={(v) =>
@@ -272,6 +277,7 @@ function FrtRow({
   r,
   su,
   scholarName,
+  coPubs,
   busy,
   error,
   onAssign,
@@ -281,6 +287,8 @@ function FrtRow({
   r: EditContextFrtMentee;
   su: boolean;
   scholarName: string;
+  /** Co-authored papers with this mentee, when they are also a co-author suggestion. */
+  coPubs: number | null;
   busy: boolean;
   error: string | null;
   onAssign: (v: DirectoryValue | null) => Promise<void>;
@@ -319,6 +327,11 @@ function FrtRow({
           </span>
         )}
       </p>
+      {coPubs !== null && (
+        <p className="text-sm" data-testid={`frt-mentee-coauthor-${r.id}`}>
+          Also a co-author: {coPubs} co-authored {coPubs === 1 ? "publication" : "publications"}
+        </p>
+      )}
 
       {panel === "link" ? (
         <div className="flex flex-col gap-2" data-testid={`frt-mentee-link-form-${r.id}`}>
