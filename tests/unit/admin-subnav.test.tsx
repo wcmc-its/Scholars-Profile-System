@@ -47,6 +47,24 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
+  it("a non-superuser sees Profile URLs only with slugsTab (an observer's read-only grant)", () => {
+    const { unmount } = render(
+      <AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} superuserSurfaces={false} />,
+    );
+    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
+    unmount();
+    render(
+      <AdminSubnav
+        active="profiles"
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        superuserSurfaces={false}
+        slugsTab
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-slugs").getAttribute("href")).toBe("/edit/slugs");
+  });
+
   it("always shows the Profile URLs tab — even when the request feature is off", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     const tab = screen.getByTestId("admin-tab-slugs");
