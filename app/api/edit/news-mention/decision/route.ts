@@ -146,7 +146,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // Cross-scholar surface ⇒ superuser OR comms_steward. `||`, never a bare role
   // read — the session route reports role booleans false FOR a superuser.
-  if (!session.isSuperuser && session.isCommsSteward !== true) {
+  // A content editor works the news queues too (`lib/auth/content-editor.ts`).
+  if (
+    !session.isSuperuser &&
+    session.isCommsSteward !== true &&
+    session.isContentEditor !== true
+  ) {
     return new NextResponse(null, { status: 403 });
   }
 

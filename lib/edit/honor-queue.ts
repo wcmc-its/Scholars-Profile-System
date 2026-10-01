@@ -192,16 +192,22 @@ type HonorsQueueViewer = {
   isSuperuser: boolean;
   isHonorsCurator?: boolean;
   isObserver?: boolean;
+  isContentEditor?: boolean;
 };
 
 /**
  * Who may READ the honors queue (page, CSV export, tab): a superuser, an
- * honors_curator, or an observer (read-only, decision 2026-10-01). Deciding
- * stays superuser / honors_curator: the decision routes authorize on the
- * write session, which never carries the observer flag.
+ * honors_curator, or an observer / content editor (read-only, decision
+ * 2026-10-01). Deciding stays superuser / honors_curator: the decision routes
+ * check `isHonorsCurator` on the write session.
  */
 export function canViewHonorsQueue(session: HonorsQueueViewer): boolean {
-  return session.isSuperuser || session.isHonorsCurator === true || session.isObserver === true;
+  return (
+    session.isSuperuser ||
+    session.isHonorsCurator === true ||
+    session.isObserver === true ||
+    session.isContentEditor === true
+  );
 }
 
 /** True when the viewer may read the queue but not decide it (an observer). */

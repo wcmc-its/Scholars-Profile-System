@@ -132,9 +132,10 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   profiles: (s, g) => s.isSuperuser || s.isCommsSteward || g.manageableUnitCount > 0,
   units: (s, g) => s.isSuperuser || s.isCommsSteward || g.manageableUnitCount > 0,
 
-  // Observers see the Profile URLs page read-only (decision 2026-10-01).
-  slugRequests: (s) => s.isSuperuser || s.isObserver === true,
-  slugs: (s) => s.isSuperuser || s.isObserver === true,
+  // Observers and content editors see the Profile URLs page read-only
+  // (decision 2026-10-01).
+  slugRequests: (s) => s.isSuperuser || s.isObserver === true || s.isContentEditor === true,
+  slugs: (s) => s.isSuperuser || s.isObserver === true || s.isContentEditor === true,
   activity: (s) => s.isSuperuser,
   etlStatus: (s) => s.isSuperuser,
   // 2026-08-26 policy widening (decision #6): a comms_steward gets full

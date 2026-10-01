@@ -24,12 +24,13 @@
  */
 import { cache } from "react";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isContentEditor } from "@/lib/auth/content-editor";
 import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isObserver } from "@/lib/auth/observer";
-import { withObserverView } from "@/lib/auth/observer-view";
+import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
 import { isGroupMember } from "@/lib/auth/ldap-group";
@@ -96,6 +97,15 @@ export interface EditSession {
    * grant first (`stripObserverView`), so no write predicate ever sees it.
    */
   isObserver?: boolean;
+  /**
+   * `content_editor` (`lib/auth/content-editor.ts`): `true` when this person is
+   * a content editor who is not also a real superuser / comms_steward. On the
+   * READ session `isCommsSteward` is then a SYNTHETIC grant
+   * (`withContentEditorView`); the write path strips it and keeps this flag
+   * (`stripContentEditorView`), so only predicates that name `isContentEditor`
+   * admit a content editor's write.
+   */
+  isContentEditor?: boolean;
 }
 
 
@@ -150,7 +160,7 @@ export async function getEditSession(): Promise<EditSession | null> {
   // #1514 — six independent LDAPS group checks; resolve concurrently so the
   // wall-clock cost is one directory round-trip, not six. All six are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc, dsv, cvg, obs] = await Promise.all([
+  const [su, cs, dev, hc, dsv, cvg, obs, ce] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
@@ -158,17 +168,23 @@ export async function getEditSession(): Promise<EditSession | null> {
     isDataSharingViewer(session.cwid),
     isCvGenerator(session.cwid),
     isObserver(session.cwid),
+    isContentEditor(session.cwid),
   ]);
+  // Content editor first: its synthetic steward grant then makes the observer
+  // view a no-op, so someone in both groups edits rather than viewing only.
   return withObserverView(
-    {
-      cwid: session.cwid,
-      isSuperuser: su,
-      isCommsSteward: cs,
-      isDeveloper: dev,
-      isHonorsCurator: hc,
-      isDataSharingViewer: dsv,
-      isCvGenerator: cvg,
-    },
+    withContentEditorView(
+      {
+        cwid: session.cwid,
+        isSuperuser: su,
+        isCommsSteward: cs,
+        isDeveloper: dev,
+        isHonorsCurator: hc,
+        isDataSharingViewer: dsv,
+        isCvGenerator: cvg,
+      },
+      ce,
+    ),
     obs,
   );
 }

@@ -19,6 +19,8 @@ export type EducationCardProps = {
   mode: "self" | "superuser";
   scholarName: string;
   educations: ReadonlyArray<EditContextEducation>;
+  /** See `EntityPanel`'s `delegated`. */
+  delegated?: boolean;
   /** #1997 — whether `field_override(scholar, hideEducationYears)` is set. */
   hideYears: boolean;
 };
@@ -29,6 +31,7 @@ export function EducationCard({
   scholarName,
   educations,
   hideYears,
+  delegated,
 }: EducationCardProps) {
   const possessive = mode === "superuser" ? `${scholarName}'s` : "your";
   return (
@@ -37,6 +40,7 @@ export function EducationCard({
       cwid={cwid}
       mode={mode}
       scholarName={scholarName}
+      delegated={delegated}
       entityType="education"
       entities={educations}
       extendable
