@@ -128,11 +128,13 @@ describe("reasonTally", () => {
       ["2", "Method match only"],
       ["3", "External data, not this core"],
       ["4", "Author used core elsewhere"], // undone: no longer decided
+      ["5", "Author used core elsewhere"], // re-decided as a confirm
     ]);
     const decided = new Map([
       ["1", "rejected"],
       ["2", "rejected"],
       ["3", "rejected"],
+      ["5", "claimed"],
     ]);
     expect(reasonTally(notes, decided)).toEqual([
       { label: "Method match only", count: 2 },
