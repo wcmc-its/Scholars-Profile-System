@@ -41,7 +41,7 @@ describe("ImpersonationBanner", () => {
     render(<ImpersonationBanner />);
 
     const banner = await screen.findByTestId("impersonation-banner");
-    expect(banner.textContent).toContain("Viewing as Terrie Rose Wheeler · Curator · Library (Dept)");
+    expect(banner.textContent).toContain("Viewing as Terrie Rose Wheeler · Curator, Library");
     expect(banner.textContent).toContain("Edits logged to Paul Albert");
     expect(banner.textContent).not.toContain("made as Paul");
     // The role links live in the account menu now, not the bar.

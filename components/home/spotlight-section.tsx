@@ -5,7 +5,7 @@
  *   - Left pane: the active spotlight (kicker, name, lede, papers with WCM
  *     author chips, browse-all-publications link).
  *   - Right pane: 2-column grid of small button-cards (one per spotlight).
- *     Click swaps the active spotlight. Active card = rail tint + "Showing"
+ *     Click swaps the active spotlight. Active card = maroon outline + "Showing" badge
  *     (home refinements mockup, 2026-09-24).
  *
  * Behavior:
@@ -33,6 +33,7 @@ import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { SectionHeading } from "@/components/home/section-heading";
+import { Badge } from "@/components/ui/badge";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
@@ -84,9 +85,11 @@ export function SpotlightSection({
       <SectionHeading>Spotlight</SectionHeading>
       {/* Plain text, not an ⓘ popover: the selection rule is the point of the
           section, and a hover-only icon is easy to miss and dead on touch. */}
-      <p className="text-muted-foreground mt-2 max-w-[62ch] text-[15px] leading-6 text-pretty">
-        Subareas with the strongest recent publication activity at WCM, one per research area.
-        Updated weekly.
+      {/* One line on desktop (keep it under ~90 chars); may wrap on narrow
+          screens, never truncate. Mirrors the ReciterAI rotation: top-ranked
+          subareas, one per research area, recency-decayed, published weekly. */}
+      <p className="text-muted-foreground mt-2 text-[15px] leading-6 text-pretty">
+        The most active WCM research subareas, one per research area, rotated weekly.
       </p>
 
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
@@ -350,17 +353,21 @@ function SpotlightCardButton({
       className={[
         "flex h-full min-w-0 flex-col gap-1.5 rounded-[10px] border px-3.5 py-3 text-left transition-colors duration-[120ms] ease-out",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]",
-        // Active = the rail tint + a "Showing" label; the detail pane earns the
+        // Active = a maroon outline + "Showing" badge, no fill; the detail pane earns the
         // visual weight, these cards are navigation.
         active
-          ? "border-apollo-rail-border bg-apollo-rail"
+          ? "border-apollo-maroon bg-apollo-surface shadow-[inset_0_0_0_1px_var(--apollo-maroon)]"
           : "border-apollo-border bg-apollo-surface hover:border-apollo-border-strong focus-visible:border-apollo-border-strong shadow-[var(--apollo-shadow-card)]",
       ].join(" ")}
     >
       {/* "Showing" gets its own reserved row so it never crowds the counts, and
           every tile's eyebrow + title start at the same height. */}
       <div className="flex h-4 justify-end">
-        {active ? <span className="text-foreground text-[11px] leading-4 font-semibold">Showing</span> : null}
+        {active ? (
+          <Badge variant="secondary" className="h-4 px-1.5 text-[10.5px]">
+            Showing
+          </Badge>
+        ) : null}
       </div>
       <div className="line-clamp-2 min-h-[30px] text-[10.5px] leading-[15px] font-semibold tracking-[0.1em] text-apollo-maroon uppercase">
         {card.parentTopicLabel}
