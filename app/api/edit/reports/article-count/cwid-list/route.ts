@@ -16,6 +16,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isObserver } from "@/lib/auth/observer";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { CWID_LIST_MAX, createCwidList } from "@/lib/edit/cwid-list";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
@@ -26,9 +27,15 @@ const PATH = "/api/edit/reports/article-count/cwid-list";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, realCwid, body } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body } = req.ctx;
 
-  if (!(await canViewArticleCountReport(session))) return editError(403, "forbidden");
+  // An observer reads report 8 on its synthetic steward view, which the write
+  // preamble strips; storing a filter list grants nothing, so admit a real
+  // observer here too (outside View as), as `authorizeCvExport` does.
+  const allowed =
+    (await canViewArticleCountReport(session)) ||
+    (impersonatedCwid === null && (await isObserver(realCwid)));
+  if (!allowed) return editError(403, "forbidden");
 
   if (typeof body.text !== "string") return editError(400, "invalid_text", "text");
   const { cwids, invalid } = parseCwidText(body.text);

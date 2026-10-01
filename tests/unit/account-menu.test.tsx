@@ -22,6 +22,7 @@ function mockProbe(probe: Partial<ImpersonationProbe>): void {
     impersonating: null,
     canImpersonate: false,
     isSuperuser: false,
+    isContentEditor: false,
     consoleLinks: [],
     ...probe,
   });
@@ -255,6 +256,13 @@ describe("AccountMenu — identity and View as", () => {
     render(<AccountMenu scholar={paul} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
     expect(screen.getByTestId("account-menu-identity").textContent).toBe("Paul AlbertObserver");
+  });
+
+  it("labels a content editor as Content Editor, not Observer", () => {
+    mockProbe({ scholar: paul, canImpersonate: true, isSuperuser: false, isContentEditor: true });
+    render(<AccountMenu scholar={paul} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(screen.getByTestId("account-menu-identity").textContent).toBe("Paul AlbertContent Editor");
   });
 
   it("no identity row for a plain scholar", () => {

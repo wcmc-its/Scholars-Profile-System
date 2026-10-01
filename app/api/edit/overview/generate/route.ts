@@ -104,8 +104,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   //     pick a NON-default prompt version; a faculty owner (self) or a proxy always
   //     generates on the live default. The owner's UI never sends a non-default, but
   //     the body is untrusted, so downgrade defensively here. ---
+  // A content editor edits in unit-admin mode, so it gets the unit admin's selector.
   const canSelectPromptVersion =
-    session.isSuperuser || session.isCommsSteward || authz.viaUnitAdminUnit !== null;
+    session.isSuperuser ||
+    session.isCommsSteward ||
+    session.isContentEditor === true ||
+    authz.viaUnitAdminUnit !== null;
   const effectiveParams =
     canSelectPromptVersion || params.promptVersion === defaultPromptVersionId()
       ? params

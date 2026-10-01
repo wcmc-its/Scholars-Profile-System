@@ -124,3 +124,58 @@ export async function isGroupMember(
     await client.unbind().catch(() => {});
   }
 }
+
+/**
+ * Which of `cwids` are members of `groupCn` — the batch form of
+ * {@link isGroupMember} for list surfaces (the View-as candidate pre-filter).
+ * One connection, one bind, one group-DN lookup, then every `compare` on that
+ * connection concurrently. Calling `isGroupMember` per CWID opened a fresh
+ * LDAPS connection + bind + group search for each of ~50 rows (13–17 s per
+ * popover search, staging 2026-10-01). Same fail-closed contract: any failure
+ * leaves the CWID out of the set (never a member); bad CWIDs are skipped.
+ */
+export async function groupMembersAmong(
+  groupCn: string,
+  cwids: readonly string[],
+  onFailure: (reason: string) => void,
+): Promise<Set<string>> {
+  const members = new Set<string>();
+  const safe = [...new Set(cwids.filter(isSafeCwid))];
+  if (safe.length === 0) return members;
+
+  let client: Awaited<ReturnType<typeof openLdap>>;
+  try {
+    client = await openLdap();
+  } catch {
+    onFailure("ldap_unavailable");
+    return members;
+  }
+
+  try {
+    const { searchEntries } = await client.search(GROUPS_BASE, {
+      scope: "sub",
+      filter: `(cn=${escapeLdapFilterValue(groupCn)})`,
+      attributes: ["cn"],
+    });
+    const groupDn = searchEntries[0]?.dn;
+    if (!groupDn) {
+      onFailure("group_not_found");
+      return members;
+    }
+    await Promise.all(
+      safe.map(async (cwid) => {
+        try {
+          if (await client.compare(String(groupDn), "member", personDn(cwid))) members.add(cwid);
+        } catch {
+          onFailure("ldap_compare_failed");
+        }
+      }),
+    );
+    return members;
+  } catch {
+    onFailure("ldap_search_failed");
+    return members;
+  } finally {
+    await client.unbind().catch(() => {});
+  }
+}

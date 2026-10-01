@@ -242,7 +242,7 @@ export function ImpersonationSwitcher({ onPick }: { onPick: (c: Candidate) => vo
                 data-testid="impersonation-view-as-exact-cwid"
               >
                 View as “{exactCwidCandidate.cwid}” by exact CWID — some roles (CV Generator, Honors
-                Curator, Data Sharing Viewer, Development) can’t be searched.
+                Curator, Data Sharing Viewer, Development, Content Editor) can’t be searched.
               </button>
             )}
           </div>

@@ -89,7 +89,7 @@ seed-output/
 # no scraped bio prose); regenerable via the SQL + scripts in the same folder.
 !docs/overview-coverage/*.csv
 # Exception: B14 legacy-VIVO redirect set is build-time generated from ED
-# (scripts/etl/generate-vivo-redirect-set.ts) and consumed by middleware as
+# (scripts/etl/generate-vivo-redirect-set.ts) and consumed by proxy.ts as
 # a static import. The file is intentionally checked in so prod deploys
 # pick up the CI-built artifact rather than running an LDAP query in CI.
 !data/

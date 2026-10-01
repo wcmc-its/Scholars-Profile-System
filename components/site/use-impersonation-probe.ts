@@ -66,6 +66,9 @@ export type ImpersonationProbe = {
   /** The REAL cwid is a superuser. `canImpersonate && !isSuperuser` = an
    *  observer, whose "View as" is read-only (#2946). */
   isSuperuser: boolean;
+  /** The REAL cwid is a content editor (not also a superuser). Names the role
+   *  in the account menu; its "View as" is read-only like an observer's. */
+  isContentEditor: boolean;
   /** The role-aware `/edit` console entry points the viewer may open, computed
    *  server-side (`lib/auth/console-links.ts`). Each renders as a row in the
    *  account-menu's "Manage" section. `[]` (the default) renders no section —
@@ -110,6 +113,7 @@ export function useImpersonationProbe(enabled = true): ImpersonationProbe | null
           impersonating: data.impersonating ?? null,
           canImpersonate: data.canImpersonate ?? false,
           isSuperuser: data.isSuperuser ?? false,
+          isContentEditor: data.isContentEditor ?? false,
           consoleLinks: data.consoleLinks ?? [],
         });
       })

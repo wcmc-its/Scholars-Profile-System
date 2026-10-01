@@ -18,9 +18,11 @@ export type FundingCardProps = {
   mode: "self" | "superuser";
   scholarName: string;
   grants: ReadonlyArray<EditContextGrant>;
+  /** See `EntityPanel`'s `delegated`. */
+  delegated?: boolean;
 };
 
-export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProps) {
+export function FundingCard({ cwid, mode, scholarName, grants, delegated }: FundingCardProps) {
   // The panel mixes two systems of record: InfoEd (the default) and NIH
   // RePORTER (the "via NIH RePORTER" backfill rows). Surface both in the header
   // when present, and route each row's "Request a change" to the right place.
@@ -31,6 +33,7 @@ export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProp
       cwid={cwid}
       mode={mode}
       scholarName={scholarName}
+      delegated={delegated}
       entityType="grant"
       entities={grants}
       filterable

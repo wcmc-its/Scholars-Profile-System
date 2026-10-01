@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { middleware } from "@/middleware";
+import { proxy } from "@/proxy";
 import { createSessionCookie } from "@/lib/auth/session";
 
 process.env.SESSION_COOKIE_SECRET = "test-session-secret-0123456789-0123456789";
@@ -16,9 +16,9 @@ async function authedRequest(path: string): Promise<NextRequest> {
   });
 }
 
-describe("middleware — SSO gate", () => {
+describe("proxy — SSO gate", () => {
   it("redirects an unauthenticated /edit request to SSO login", async () => {
-    const res = await middleware(new NextRequest(`${ORIGIN}/edit`));
+    const res = await proxy(new NextRequest(`${ORIGIN}/edit`));
     expect(res.status).toBe(302);
     const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.pathname).toBe("/api/auth/saml/login");
@@ -26,7 +26,7 @@ describe("middleware — SSO gate", () => {
   });
 
   it("preserves the intended path and query in the return parameter", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/edit/scholar/abc1234?tab=overview`),
     );
     const loc = new URL(res.headers.get("location")!, ORIGIN);
@@ -36,21 +36,21 @@ describe("middleware — SSO gate", () => {
   });
 
   it("returns a bare 401 for an unauthenticated /api/edit request", async () => {
-    const res = await middleware(new NextRequest(`${ORIGIN}/api/edit/field`));
+    const res = await proxy(new NextRequest(`${ORIGIN}/api/edit/field`));
     expect(res.status).toBe(401);
     expect(await res.text()).toBe("");
     expect(res.headers.get("location")).toBeNull();
   });
 
   it("passes an authenticated /edit request through", async () => {
-    const res = await middleware(await authedRequest("/edit"));
+    const res = await proxy(await authedRequest("/edit"));
     expect(res.status).not.toBe(302);
     expect(res.status).not.toBe(401);
     expect(res.headers.get("location")).toBeNull();
   });
 
   it("treats a garbage session cookie as unauthenticated", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/edit`, {
         headers: { cookie: "__Secure-sps_session=not-a-valid-seal" },
       }),
@@ -59,13 +59,13 @@ describe("middleware — SSO gate", () => {
   });
 });
 
-describe("middleware — local-dev login bounce (no IdP)", () => {
+describe("proxy — local-dev login bounce (no IdP)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("bounces unauthenticated /edit to dev-login under `next dev` with no SAML", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("SAML_IDP_SSO_URL", "");
-    const res = await middleware(new NextRequest(`${ORIGIN}/edit?attr=publications`));
+    const res = await proxy(new NextRequest(`${ORIGIN}/edit?attr=publications`));
     expect(res.status).toBe(302);
     const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.pathname).toBe("/api/auth/dev-login");
@@ -75,7 +75,7 @@ describe("middleware — local-dev login bounce (no IdP)", () => {
   it("does NOT bounce to dev-login when an IdP is configured (prod-like)", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("SAML_IDP_SSO_URL", "https://idp.example/sso");
-    const res = await middleware(new NextRequest(`${ORIGIN}/edit`));
+    const res = await proxy(new NextRequest(`${ORIGIN}/edit`));
     expect(res.status).toBe(302);
     const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.pathname).toBe("/api/auth/saml/login");
@@ -98,9 +98,9 @@ const KNOWN_CWID = REDIRECT_SET[0]!;
 const KNOWN_CWID_LATE = REDIRECT_SET[REDIRECT_SET.length - 1]!;
 const UNKNOWN_CWID = "zzz9999notincorpus";
 
-describe("middleware — B14 legacy VIVO redirects", () => {
+describe("proxy — B14 legacy VIVO redirects", () => {
   it("301s /display/cwid-{cwid} to /scholars/by-cwid/{cwid} when the CWID is in the set (B14-3)", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/display/cwid-${KNOWN_CWID}`),
     );
     expect(res.status).toBe(301);
@@ -109,7 +109,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
   });
 
   it("301s /individual/cwid-{cwid} to /scholars/by-cwid/{cwid} for the late-bucket anchor (B14-5)", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/individual/cwid-${KNOWN_CWID_LATE}`),
     );
     expect(res.status).toBe(301);
@@ -118,7 +118,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
   });
 
   it("301s /profile/cwid-{cwid} too (defensive coverage; B14-5)", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/profile/cwid-${KNOWN_CWID}`),
     );
     expect(res.status).toBe(301);
@@ -127,7 +127,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
   });
 
   it("passes through (no redirect) when the CWID is not in the set (B14-4)", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/display/cwid-${UNKNOWN_CWID}`),
     );
     // NextResponse.next() yields a non-redirect; default status is 200 with a
@@ -138,7 +138,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
   });
 
   it("strips any query string from the canonical redirect target", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/display/cwid-${KNOWN_CWID}?utm=campaign`),
     );
     expect(res.status).toBe(301);
@@ -148,7 +148,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
   });
 
   it("does not run the SSO gate on legacy VIVO paths (no 302 even when unauthenticated)", async () => {
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/display/cwid-${KNOWN_CWID}`),
     );
     expect(res.status).not.toBe(302);
@@ -160,15 +160,15 @@ describe("middleware — B14 legacy VIVO redirects", () => {
 });
 
 // #374 — the Content-Security-Policy moved out of next.config.ts `headers()`
-// (baked at build time, unflippable on a deployed image) into middleware, which
-// reads SECURITY_CSP_MODE per request. The broadened matcher means middleware
+// (baked at build time, unflippable on a deployed image) into the proxy, which
+// reads SECURITY_CSP_MODE per request. The broadened matcher means the proxy
 // now runs on public pages too, so the gate MUST stay scoped — these assert
 // both halves: public pages get the header but are never sent to SSO.
-describe("middleware — runtime CSP headers (#374)", () => {
+describe("proxy — runtime CSP headers (#374)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("attaches the report-only CSP + Reporting-Endpoints to a public page and does NOT gate it", async () => {
-    const res = await middleware(new NextRequest(`${ORIGIN}/`));
+    const res = await proxy(new NextRequest(`${ORIGIN}/`));
     // Public page: passes through, never sent to SSO.
     expect(res.status).not.toBe(302);
     expect(res.status).not.toBe(401);
@@ -185,14 +185,14 @@ describe("middleware — runtime CSP headers (#374)", () => {
 
   it("flips the public-page CSP to the enforcing header when SECURITY_CSP_MODE=enforce", async () => {
     vi.stubEnv("SECURITY_CSP_MODE", "enforce");
-    const res = await middleware(new NextRequest(`${ORIGIN}/search?q=cancer`));
+    const res = await proxy(new NextRequest(`${ORIGIN}/search?q=cancer`));
     expect(res.headers.get("content-security-policy")).toBeTruthy();
     expect(res.headers.get("content-security-policy-report-only")).toBeNull();
   });
 
   it("defaults to report-only for an unset / unknown SECURITY_CSP_MODE (fail-safe)", async () => {
     vi.stubEnv("SECURITY_CSP_MODE", "on"); // not the literal "enforce"
-    const res = await middleware(new NextRequest(`${ORIGIN}/about`));
+    const res = await proxy(new NextRequest(`${ORIGIN}/about`));
     expect(
       res.headers.get("content-security-policy-report-only"),
     ).toBeTruthy();
@@ -200,14 +200,14 @@ describe("middleware — runtime CSP headers (#374)", () => {
   });
 
   it("redirects unauthenticated /edit to an ABSOLUTE SSO Location and attaches no CSP (regression guard)", async () => {
-    // The runtime parses a middleware redirect's Location through new URL();
+    // The runtime parses a proxy redirect's Location through new URL();
     // a bare relative path throws "Invalid URL" and 500s (the pre-existing
     // /edit bug). With no SITE_URL set (the local-dev fallback) the Location
     // is built from the Host header — see the SITE_URL block below for the
     // deployed behaviour. A redirect also carries no CSP — it is returned
     // directly, not wrapped.
     const host = "scholars.weill.cornell.edu";
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${ORIGIN}/edit`, { headers: { host } }),
     );
     expect(res.status).toBe(302);
@@ -219,7 +219,7 @@ describe("middleware — runtime CSP headers (#374)", () => {
   });
 
   it("attaches the CSP to an authenticated /edit document (a next() response)", async () => {
-    const res = await middleware(await authedRequest("/edit"));
+    const res = await proxy(await authedRequest("/edit"));
     expect(res.status).not.toBe(302);
     expect(res.status).not.toBe(401);
     expect(
@@ -228,7 +228,7 @@ describe("middleware — runtime CSP headers (#374)", () => {
   });
 });
 
-describe("middleware — absolute Location is built from SITE_URL, not the viewer Host (#1934)", () => {
+describe("proxy — absolute Location is built from SITE_URL, not the viewer Host (#1934)", () => {
   const SITE = "https://scholars.weill.cornell.edu";
 
   afterEach(() => {
@@ -246,7 +246,7 @@ describe("middleware — absolute Location is built from SITE_URL, not the viewe
 
   it("ignores a spoofed Host on the SSO redirect", async () => {
     process.env.SITE_URL = SITE;
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${SITE}/edit`, {
         headers: { host: "dboe1z46whvts.cloudfront.net" },
       }),
@@ -261,7 +261,7 @@ describe("middleware — absolute Location is built from SITE_URL, not the viewe
     process.env.SITE_URL = SITE;
     // Reuse the corpus-derived anchor rather than a literal cwid, so this
     // keeps working when the redirect set is regenerated.
-    const res = await middleware(
+    const res = await proxy(
       new NextRequest(`${SITE}/display/cwid-${KNOWN_CWID}`, {
         headers: { host: "evil.example.com" },
       }),
@@ -274,7 +274,7 @@ describe("middleware — absolute Location is built from SITE_URL, not the viewe
 
   it("strips a trailing slash on SITE_URL so the Location has no double slash", async () => {
     process.env.SITE_URL = `${SITE}/`;
-    const res = await middleware(new NextRequest(`${SITE}/edit`));
+    const res = await proxy(new NextRequest(`${SITE}/edit`));
     expect(res.headers.get("location")).toBe(
       `${SITE}/api/auth/saml/login?return=%2Fedit`,
     );
@@ -282,7 +282,7 @@ describe("middleware — absolute Location is built from SITE_URL, not the viewe
 
   it("falls back to NEXT_PUBLIC_SITE_URL, then to Host, when SITE_URL is unset", async () => {
     process.env.NEXT_PUBLIC_SITE_URL = SITE;
-    const viaPublic = await middleware(
+    const viaPublic = await proxy(
       new NextRequest(`${SITE}/edit`, { headers: { host: "spoofed.example" } }),
     );
     expect(viaPublic.headers.get("location")).toBe(
@@ -292,7 +292,7 @@ describe("middleware — absolute Location is built from SITE_URL, not the viewe
     // Neither var set: local dev only. Every deployed env always sets SITE_URL
     // (cdk/lib/app-stack.ts derives it from the SAML ACS origin).
     delete process.env.NEXT_PUBLIC_SITE_URL;
-    const viaHost = await middleware(
+    const viaHost = await proxy(
       new NextRequest(`${SITE}/edit`, { headers: { host: "localhost:3002" } }),
     );
     expect(viaHost.headers.get("location")).toBe(

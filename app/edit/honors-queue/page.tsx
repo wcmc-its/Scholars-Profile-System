@@ -28,7 +28,13 @@ import { db } from "@/lib/db";
 // No `countPendingHonors` here: this page has already loaded the queue, so it
 // feeds the sub-nav badge from `groups` rather than paying for a second COUNT —
 // the same thing `/edit/slug-requests` does with `requests.length`.
-import { isHonorQueueEnabled, loadHonorQueue, loadHonorSources } from "@/lib/edit/honor-queue";
+import {
+  canViewHonorsQueue,
+  isHonorQueueEnabled,
+  isHonorsQueueReadOnly,
+  loadHonorQueue,
+  loadHonorSources,
+} from "@/lib/edit/honor-queue";
 import { isHonorsRunNowEnabled } from "@/lib/honors/run-now";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
@@ -49,11 +55,11 @@ export default async function HonorsQueuePage() {
   if (!isHonorQueueEnabled()) {
     notFound();
   }
-  // `isSuperuser || isHonorsCurator` — never a bare curator read; the session route
-  // reports `isDeveloper: false` for a superuser to skip a redundant LDAPS call
-  // (`app/api/auth/session/route.ts`), and a bare read of any role flag inherits
-  // that shape and locks superusers out.
-  if (!session.isSuperuser && session.isHonorsCurator !== true) {
+  // `canViewHonorsQueue` (superuser, honors_curator or observer) — never a bare
+  // curator read; the session route reports `isDeveloper: false` for a superuser
+  // to skip a redundant LDAPS call (`app/api/auth/session/route.ts`), and a bare
+  // read of any role flag inherits that shape and locks superusers out.
+  if (!canViewHonorsQueue(session)) {
     return (
       <ConsoleShell
         active="honors-queue"
@@ -82,6 +88,9 @@ export default async function HonorsQueuePage() {
     loadHonorQueue(db.read, "published", { self: true }),
     loadHonorSources(db.read),
   ]);
+  // An observer reads the queue but never decides it (the decision routes 403
+  // them anyway); hide the controls rather than show buttons that fail.
+  const readOnly = isHonorsQueueReadOnly(session);
   const pendingCount = groups.reduce((sum, g) => sum + g.rows.length, 0);
   // The subnav's slug badge is a live count; keep it truthful on this page too
   // rather than passing 0 and making the tab lie.
@@ -122,7 +131,8 @@ export default async function HonorsQueuePage() {
         rejected={rejected}
         userAsserted={userAsserted}
         sources={sources}
-        runNowEnabled={isHonorsRunNowEnabled()}
+        runNowEnabled={!readOnly && isHonorsRunNowEnabled()}
+        readOnly={readOnly}
       />
     </ConsoleShell>
   );

@@ -124,7 +124,7 @@ const nextConfig: NextConfig = {
   // The env-gated Content-Security-Policy is deliberately NOT here: `headers()`
   // is frozen at `next build`, so `SECURITY_CSP_MODE` could never be flipped on
   // a deployed image from it (#374). The CSP is emitted at runtime from
-  // `middleware.ts` instead. See lib/security-headers.ts. `serverActions.
+  // `proxy.ts` instead. See lib/security-headers.ts. `serverActions.
   // allowedOrigins` is intentionally absent — the codebase uses no server
   // actions.
   async headers() {

@@ -25,12 +25,18 @@
  * Node-runtime only (every predicate here reuses `lib/sources/ldap.ts`) —
  * never pull this into the Edge middleware bundle or a client component.
  */
+import { isContentEditor } from "@/lib/auth/content-editor";
 import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 
-export type GlobalRole = "cv_generator" | "honors_curator" | "data_sharing_viewer" | "development";
+export type GlobalRole =
+  | "cv_generator"
+  | "honors_curator"
+  | "data_sharing_viewer"
+  | "development"
+  | "content_editor";
 
 /** Display label per role — reused by the session route; client components
  *  (banner) keep their own copy rather than import this Node-only module. */
@@ -39,6 +45,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
+  content_editor: "Content Editor",
 };
 
 /** Each role's one console entry point (every one of these modules' own
@@ -56,6 +63,7 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
   development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
+  content_editor: { href: "/edit/profiles", label: "Profiles" },
 };
 
 const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string) => Promise<boolean> }> = [
@@ -63,6 +71,7 @@ const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string
   { role: "honors_curator", check: isHonorsCurator },
   { role: "data_sharing_viewer", check: isDataSharingViewer },
   { role: "development", check: isDeveloper },
+  { role: "content_editor", check: isContentEditor },
 ];
 
 /**

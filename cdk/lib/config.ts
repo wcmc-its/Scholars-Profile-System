@@ -655,7 +655,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // prefetch={false} in 7274cec; zero non-probe violations in the trailing
     // 48h; an active Playwright pass over home/search/profile/topic/about found
     // none). Takes effect because the CSP is emitted at runtime from
-    // middleware.ts (#780) — next.config headers() baked the mode at build time
+    // proxy.ts (#780) — next.config headers() baked the mode at build time
     // and could never flip a deployed image. Prod stays report-only until
     // staging soaks clean in enforce.
     cspMode: "enforce",
@@ -819,7 +819,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #374 — promoted to enforce 2026-06-08, after staging ran enforce cleanly
     // (browser pass: zero blocked resources) and prod ran report-only via the
     // same middleware/policy. Takes effect because the CSP is emitted at runtime
-    // from middleware.ts (prod now on the 4b6ec0e image); prod's task def
+    // from proxy.ts (prod now on the 4b6ec0e image); prod's task def
     // previously carried no SECURITY_CSP_MODE, so this cdk deploy adds it as
     // enforce. The policy value is identical to report-only, so revert =
     // flip back + cdk deploy.

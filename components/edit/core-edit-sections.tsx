@@ -49,6 +49,8 @@ export type CoreEditSectionsProps = {
   roleLabels: Record<string, string>;
   /** Null when the viewer can't manage access — the section is omitted. */
   access: UnitAccessCardProps["access"];
+  /** A content editor reads the access list but never grants or removes. */
+  accessReadOnly?: boolean;
   actorCwid: string;
   actorRole: UnitActorRole;
   pending: { total: number; strong: number };
@@ -65,6 +67,7 @@ export function CoreEditSections({
   leaders,
   roleLabels,
   access,
+  accessReadOnly = false,
   actorCwid,
   actorRole,
   pending,
@@ -121,6 +124,7 @@ export function CoreEditSections({
           access={access}
           actorCwid={actorCwid}
           headingId="access-heading"
+          readOnly={accessReadOnly}
         />
       ),
     });

@@ -64,6 +64,8 @@ export type ProfilesRosterProps = {
   pageSize: number;
   /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729). */
   canImpersonate: boolean;
+  /** The viewer's View as is read-only (not a superuser). */
+  viewAsReadOnly?: boolean;
   /** The viewer's own cwid — the "View as" button is hidden on their own row. */
   viewerCwid: string;
 };
@@ -147,6 +149,7 @@ export function ProfilesRoster({
   page,
   pageSize,
   canImpersonate,
+  viewAsReadOnly = false,
   viewerCwid,
 }: ProfilesRosterProps) {
   const filters: FilterState = {
@@ -279,7 +282,12 @@ export function ProfilesRoster({
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-3">
                           {canImpersonate && e.cwid !== viewerCwid && (
-                            <ViewAsButton targetCwid={e.cwid} targetName={e.name} variant="ghost" />
+                            <ViewAsButton
+                              targetCwid={e.cwid}
+                              targetName={e.name}
+                              variant="ghost"
+                              readOnly={viewAsReadOnly}
+                            />
                           )}
                         </div>
                       </td>

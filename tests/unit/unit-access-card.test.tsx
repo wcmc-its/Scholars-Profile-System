@@ -72,6 +72,14 @@ describe("UnitAccessCard", () => {
     ).toBeTruthy();
   });
 
+  it("readOnly (a content editor): the list renders with no Remove and no Grant", () => {
+    const { container } = render(<UnitAccessCard {...base} access={rows} readOnly />);
+    expect(screen.getByText("Casey Curator")).toBeTruthy();
+    expect(screen.queryByTestId("unit-access-remove-cur001")).toBeNull();
+    expect(screen.queryByTestId("unit-access-grant")).toBeNull();
+    expect(container.querySelector('[data-slot="unit-access-add"]')).toBeNull();
+  });
+
   it("disables Remove on the acting user's own row (self-revoke guard)", () => {
     render(<UnitAccessCard {...base} access={rows} />);
     expect(screen.getByTestId("unit-access-remove-own001").hasAttribute("disabled")).toBe(true);

@@ -116,6 +116,11 @@ export type EntityPanelProps<T extends EntityRow> = {
   aboveList?: React.ReactNode;
   /** `data-slot` for tests (e.g. "appointments-panel"). */
   slot: string;
+  /** The editor acts for the scholar without being them or an administrator
+   *  (a proxy, a unit admin, a content editor). Such an editor can never undo
+   *  the scholar's own hide, and can't hide a mentee at all, so those controls
+   *  don't render (the write routes refuse them). Default false. */
+  delegated?: boolean;
 };
 
 /** The visible text of a meta line, so two rows with the same title get
@@ -143,10 +148,14 @@ export function EntityPanel<T extends EntityRow>({
   getRequestAttribute,
   aboveList,
   slot,
+  delegated = false,
 }: EntityPanelProps<T>) {
   const [list, setList] = React.useState<T[]>([...entities]);
   const [, startTransition] = React.useTransition();
   const isSuperuser = mode === "superuser";
+  // A delegated editor hides grants / education / appointments for the
+  // scholar, never a mentee (the suppress route's delegated allowlist).
+  const canHide = !delegated || entityType !== "mentee";
 
   // Only SHOW is optimistic: a bulk hide commits row by row as each POST lands,
   // so there is nothing to revert.
@@ -300,6 +309,8 @@ export function EntityPanel<T extends EntityRow>({
           error={errors.get(e.externalId) ?? null}
           selected={selected.has(e.externalId)}
           busy={busy}
+          selectable={canHide}
+          revealSelfHidden={canHide && !delegated}
           onSelect={(on) => toggle(e.externalId, on)}
           onShow={() => onShowClick(e)}
           testId={`${entityType}-row-${e.externalId}`}
@@ -443,6 +454,8 @@ function EntityRowView({
   error,
   selected,
   busy,
+  selectable,
+  revealSelfHidden,
   onSelect,
   onShow,
   testId,
@@ -457,6 +470,10 @@ function EntityRowView({
   selected: boolean;
   /** A batch is in flight — a tick made now would be discarded when it settles. */
   busy: boolean;
+  /** Whether this editor may hide the row (and so tick it / Show it at all). */
+  selectable: boolean;
+  /** Whether this editor may undo the SCHOLAR's own hide. */
+  revealSelfHidden: boolean;
   onSelect: (on: boolean) => void;
   onShow: () => void;
   testId: string;
@@ -464,8 +481,12 @@ function EntityRowView({
 }) {
   const isSuperuser = mode === "superuser";
   const isHidden = state === "hidden_by_self" || state === "hidden_by_admin";
-  // Show iff hidden_by_self, or (superuser AND hidden_by_admin).
-  const canShow = state === "hidden_by_self" || (isSuperuser && state === "hidden_by_admin");
+  // Show iff hidden_by_self (when this editor may undo the scholar's own hide),
+  // or (superuser AND hidden_by_admin) — never on a row it can't hide at all.
+  const canShow =
+    selectable &&
+    ((state === "hidden_by_self" && revealSelfHidden) ||
+      (isSuperuser && state === "hidden_by_admin"));
   const badgeText =
     state === "hidden_by_admin"
       ? "Hidden by an administrator"
@@ -479,7 +500,7 @@ function EntityRowView({
   return (
     <li className="flex flex-col gap-2 py-4" data-testid={testId}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        {state === "shown" ? (
+        {state === "shown" && selectable ? (
           <label className="hover:bg-apollo-surface-2 -mt-1 -ml-1.5 flex size-[30px] shrink-0 items-center justify-center rounded-[7px]">
             <Checkbox
               className="border-apollo-border-strong size-[18px] border-2"

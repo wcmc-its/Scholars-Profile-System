@@ -1,9 +1,9 @@
 /**
- * `app/edit/coi/page.tsx` — the COI (conflict-of-interest) dashboard.
- * Superuser-only AND behind `EDIT_DATA_QUALITY_DASHBOARD`, with NO
- * comms_steward / unit-admin escape hatch at all (unlike `/edit/profiles`) —
- * a non-superuser 404s regardless of any unit grants, and scope is always
- * `{ all: true }` (`loadDataQualityScope` is never even called).
+ * `app/edit/coi/page.tsx` — the COI (conflict-of-interest) dashboard, behind
+ * `EDIT_DATA_QUALITY_DASHBOARD`. Superusers, observers and content editors
+ * see it by birthright (decision 2026-10-01); a comms_steward or unit admin
+ * without an ad hoc grant still 404s, and scope is always `{ all: true }`
+ * (`loadDataQualityScope` is never even called).
  *
  * Mirrors `tests/unit/edit-scholars-roster-page.test.tsx`'s structure and
  * mocking idiom — same `getEffectiveEditSession`/`loadDataQualityRoster`/
@@ -161,5 +161,27 @@ describe("/edit/coi — gap sanitization", () => {
     await EditCoiPage({ searchParams: sp() });
     const [opts] = mockLoadDataQualityRoster.mock.calls[0];
     expect(opts.gap).toBe("all");
+  });
+});
+
+describe("/edit/coi — widened view (COI is public data, 2026-10-01)", () => {
+  const OBSERVER = { cwid: "obs001", isSuperuser: false, isCommsSteward: true, isObserver: true };
+
+  it("an observer sees the public set only: no students & alumni, no CSV export", async () => {
+    mockGetEditSession.mockResolvedValue(OBSERVER);
+    const result = asEl(await EditCoiPage({ searchParams: sp() }));
+    const [opts] = mockLoadDataQualityRoster.mock.calls[0];
+    expect(opts.includeHidden).toBe(false);
+    const roster = asEl(result.props.children);
+    expect(roster.props.includeHidden).toBe(false);
+    expect(roster.props.fullAccess).toBe(false);
+  });
+
+  it("a superuser keeps the full view (hidden roles by default, export)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const result = asEl(await EditCoiPage({ searchParams: sp() }));
+    const [opts] = mockLoadDataQualityRoster.mock.calls[0];
+    expect(opts.includeHidden).toBe(true);
+    expect(asEl(result.props.children).props.fullAccess).toBe(true);
   });
 });
