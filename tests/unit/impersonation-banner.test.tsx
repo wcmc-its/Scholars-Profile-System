@@ -1,9 +1,7 @@
 /**
- * `components/site/impersonation-banner.tsx` — the "Can access" role-links
- * line (2026-08-19). Covers that the banner picks the right fixed
- * destination(s) per `SubjectRole`, since `ROLE_LINKS` is the one place that
- * policy lives and a missing/wrong entry is otherwise silent (no server round
- * trip to fail loudly).
+ * `components/site/impersonation-banner.tsx` — the one-line "View as" bar
+ * (Front page tweaks mockup, 2026-09-30). The target's role links moved to the
+ * account menu (`account-menu.test.tsx`, "while viewing as").
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -14,14 +12,15 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-function stubProbe(impersonating: Record<string, unknown>) {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+function stubProbe(impersonating: Record<string, unknown> | null) {
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(
       JSON.stringify({
         authenticated: true,
         scholar: { slug: "paul-albert", preferredName: "Paul Albert" },
         impersonating,
         canImpersonate: true,
+        isSuperuser: true,
         consoleLinks: [],
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
@@ -29,84 +28,28 @@ function stubProbe(impersonating: Record<string, unknown>) {
   );
 }
 
-describe("ImpersonationBanner role links", () => {
-  it("links a search-blind global role (development) straight to its one console page", async () => {
-    stubProbe({
-      targetCwid: "lmp2006",
-      targetName: "lmp2006",
-      role: "development",
-      unitKind: null,
-      unit: null,
-      startedAt: Math.floor(Date.now() / 1000),
-    });
-    render(<ImpersonationBanner />);
-
-    await screen.findByTestId("impersonation-role-links");
-    const link = screen.getByRole("link", { name: "Grant Matcha" });
-    expect(link.getAttribute("href")).toBe("/edit/grant-matcha");
-  });
-
-  it("gives a unit owner both of the same two links a non-superuser unit admin gets", async () => {
+describe("ImpersonationBanner", () => {
+  it("names the target and logs edits to the REAL user (never 'made as Paul')", async () => {
     stubProbe({
       targetCwid: "own001",
-      targetName: "Jane Owner",
-      role: "owner",
+      targetName: "Terrie Rose Wheeler",
+      role: "curator",
       unitKind: "department",
-      unit: "Cardiology",
+      unit: "Library",
       startedAt: Math.floor(Date.now() / 1000),
     });
     render(<ImpersonationBanner />);
 
-    const profiles = await screen.findByRole("link", { name: "Profiles" });
-    expect(profiles.getAttribute("href")).toBe("/edit/profiles");
-    const units = screen.getByRole("link", { name: "Org units" });
-    expect(units.getAttribute("href")).toBe("/edit/units");
+    const banner = await screen.findByTestId("impersonation-banner");
+    expect(banner.textContent).toContain("Viewing as Terrie Rose Wheeler · Curator · Library (Dept)");
+    expect(banner.textContent).toContain("Edits logged to Paul Albert");
+    expect(banner.textContent).not.toContain("made as Paul");
+    // The role links live in the account menu now, not the bar.
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
-  it("sends a comms_steward to the Admin console (the #2521 collapse, not the old Method-families deep link)", async () => {
-    stubProbe({
-      targetCwid: "dwd2001",
-      targetName: "Dan Dickinson",
-      role: "comms_steward",
-      unitKind: null,
-      unit: null,
-      startedAt: Math.floor(Date.now() / 1000),
-    });
-    render(<ImpersonationBanner />);
-
-    const link = await screen.findByRole("link", { name: "Admin console" });
-    expect(link.getAttribute("href")).toBe("/edit/profiles");
-    expect(screen.queryByRole("link", { name: "Method families" })).toBeNull();
-  });
-
-  it("sends a plain scholar to their own self-edit surface", async () => {
-    stubProbe({
-      targetCwid: "sch001",
-      targetName: "Jane Scholar",
-      role: "scholar",
-      unitKind: null,
-      unit: null,
-      startedAt: Math.floor(Date.now() / 1000),
-    });
-    render(<ImpersonationBanner />);
-
-    const link = await screen.findByRole("link", { name: "Their profile" });
-    expect(link.getAttribute("href")).toBe("/edit");
-  });
-
-  it("renders nothing (no role-links line) when there is no live overlay", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          authenticated: true,
-          scholar: { slug: "paul-albert", preferredName: "Paul Albert" },
-          impersonating: null,
-          canImpersonate: true,
-          consoleLinks: [],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+  it("renders nothing when there is no live overlay", async () => {
+    const fetchMock = stubProbe(null);
     render(<ImpersonationBanner />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { EyeIcon, SearchIcon } from "lucide-react";
+import { ClockIcon, EyeIcon, PencilIcon, SearchIcon, XIcon } from "lucide-react";
 
 import {
   Dialog,
@@ -22,20 +22,23 @@ import { mapStartError } from "@/components/edit/view-as-button";
  * non-superuser never even ships this control.
  *
  * Lets a superuser pick whom to view/act as: a debounced search by name or CWID,
- * **unit-kind** filter chips (All · Department · Division · Center · Core ·
- * Scholar — the data-scoping axis), and a list of assumable targets from
+ * a two-way **People · Org unit roles** toggle (everyone, or only org-unit
+ * owners/curators — Front page tweaks mockup, 2026-09-30; it was seven
+ * unit-kind chips), and a list of assumable targets from
  * `GET /api/impersonation/candidates`. Each row reads `Name` over
- * `{Owner|Curator} · {unit} ({Dept|Div|Center|Core})` (or `Scholar`), per the
+ * `cwid · {Owner|Curator} · {unit} ({Dept|Div|Center|Core})` (or `Scholar`), per the
  * real RBAC model (ADR-005 Amendment 1 / #540, widened for cores-as-org-units —
  * a core owner/curator is often non-faculty staff, exactly who "View as" exists
  * to preview). Superusers are pre-filtered server-side (R2), so no row here can
  * escalate.
  *
  * **Confirm semantics (§8).** Choosing a user **always** opens a confirm dialog
- * — it states writes are attributed to the real actor (R3), the confused-deputy
- * guard. On confirm, "View as" POSTs `/api/impersonation { targetCwid }` and
- * reloads so the whole app re-renders through the effective seam and the amber
- * banner appears.
+ * (`ViewAsConfirmDialog`, below) — it states writes are attributed to the real
+ * actor (R3), the confused-deputy guard. The switcher only reports the pick
+ * (`onPick`); the account menu closes its popover and owns the dialog, so the
+ * picker never sits as a second layer under the dialog's scrim. On confirm,
+ * the dialog POSTs `/api/impersonation { targetCwid }` and reloads so the whole
+ * app re-renders through the effective seam and the banner appears.
  *
  * **Exact-CWID fallback.** Four global roles (`cv_generator`, `honors_curator`,
  * `data_sharing_viewer`, `development`, `lib/auth/global-roles.ts`) are valid
@@ -49,32 +52,30 @@ import { mapStartError } from "@/components/edit/view-as-button";
  * the POST route is the real authority either way and re-validates the target
  * fully regardless of how the CWID was supplied.
  *
- * This is a self-contained panel (its own search/list state) so it can be
- * dropped into the account-menu popover without threading state through it.
+ * Search/list state is self-contained, so the panel drops into the account-menu
+ * popover with only `onPick` threaded through.
  */
 
 type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward";
 type UnitKind = "department" | "division" | "center" | "core" | "institution";
 
 /** A row from `/api/impersonation/candidates` (§7). */
-type Candidate = {
+export type Candidate = {
   cwid: string;
   preferredName: string;
   slug: string | null;
   role: CandidateRole;
   unitKind: UnitKind | null;
   unit: string | null;
+  /** The exact-CWID fallback's synthetic candidate: its role/unit are unknown. */
+  exact?: boolean;
 };
 
-/** The unit-kind filter chips (§8). `all` clears; `scholar` is the no-grant floor. */
-const KIND_FILTERS: ReadonlyArray<{ key: "all" | UnitKind | "scholar"; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "department", label: "Department" },
-  { key: "division", label: "Division" },
-  { key: "center", label: "Center" },
-  { key: "core", label: "Core" },
-  { key: "institution", label: "Institution" },
-  { key: "scholar", label: "Scholar" },
+/** People = everyone (the route's `all`); Org unit roles = `kind=unit`. */
+type Tab = "all" | "unit";
+const TABS: ReadonlyArray<{ key: Tab; label: string }> = [
+  { key: "all", label: "People" },
+  { key: "unit", label: "Org unit roles" },
 ];
 
 const ROLE_LABEL: Record<CandidateRole, string> = {
@@ -101,20 +102,26 @@ function describe(c: Candidate): string {
   return `${ROLE_LABEL[c.role]}${unit}${kind}`;
 }
 
-export function ImpersonationSwitcher() {
+/** `cwid · Owner · Cardiology (Dept)` — the CWID lets the pick be checked
+ *  against what was typed. */
+function subline(c: Candidate): string {
+  return c.exact ? c.cwid : `${c.cwid} · ${describe(c)}`;
+}
+
+/** Client mirror of the server read-time TTL; falls back to 30 min. */
+const TTL_MINUTES = Math.round(Number(process.env.NEXT_PUBLIC_IMPERSONATION_TTL_SECONDS ?? 1800) / 60);
+
+export function ImpersonationSwitcher({ onPick }: { onPick: (c: Candidate) => void }) {
   const [query, setQuery] = useState("");
-  const [kindFilter, setKindFilter] = useState<"all" | UnitKind | "scholar">("all");
+  const [tab, setTab] = useState<Tab>("all");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(false);
-  // The message for whichever request last failed (search or start); null = none.
   const [error, setError] = useState<string | null>(null);
-  // The target awaiting confirmation; null = no dialog open.
-  const [pending, setPending] = useState<Candidate | null>(null);
-  const [starting, setStarting] = useState(false);
 
   const searchId = useId();
+  const hintId = useId();
 
-  // Debounced fetch on query / kind change. The server does the filtering (it
+  // Debounced fetch on query / tab change. The server does the filtering (it
   // also pre-filters superusers for R2); we pass `q` and `kind` through.
   useEffect(() => {
     let active = true;
@@ -123,7 +130,7 @@ export function ImpersonationSwitcher() {
     const id = window.setTimeout(() => {
       const params = new URLSearchParams();
       if (query.trim()) params.set("q", query.trim());
-      if (kindFilter !== "all") params.set("kind", kindFilter);
+      if (tab !== "all") params.set("kind", tab);
       const qs = params.toString();
       fetch(`/api/impersonation/candidates${qs ? `?${qs}` : ""}`, {
         cache: "no-store",
@@ -147,87 +154,71 @@ export function ImpersonationSwitcher() {
       active = false;
       window.clearTimeout(id);
     };
-  }, [query, kindFilter]);
-
-  async function startImpersonation(candidate: Candidate) {
-    setStarting(true);
-    // The route's `{ error }` reason (e.g. `target_not_found` on the exact-CWID
-    // fallback) — a bare network failure or empty body maps to the generic message.
-    let code = "";
-    try {
-      const res = await fetch("/api/impersonation", {
-        method: "POST",
-        cache: "no-store",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ targetCwid: candidate.cwid }),
-      });
-      if (res.ok) {
-        // Reload so every surface re-renders through the effective seam and the
-        // amber banner mounts.
-        window.location.reload();
-        return;
-      }
-      code = ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "";
-    } catch {
-      /* fall through to the error state below */
-    }
-    setStarting(false);
-    setPending(null);
-    setError(mapStartError(code));
-  }
+  }, [query, tab]);
 
   const hasRows = candidates.length > 0;
 
   // The exact-CWID fallback (see docblock): only offered for a single-token
   // query (a name search has a space; a CWID never does) with no search
-  // matches. `role: "scholar"` is a throwaway placeholder — this candidate is
-  // never rendered as a list row, only handed to the confirm dialog + POST,
-  // neither of which reads `role`/`unitKind`/`unit`.
+  // matches. `role: "scholar"` is a placeholder; `exact` keeps it unrendered.
   const trimmedQuery = query.trim();
   const exactCwidCandidate: Candidate | null =
     !hasRows && trimmedQuery && !trimmedQuery.includes(" ")
-      ? { cwid: trimmedQuery, preferredName: trimmedQuery, slug: null, role: "scholar", unitKind: null, unit: null }
+      ? { cwid: trimmedQuery, preferredName: trimmedQuery, slug: null, role: "scholar", unitKind: null, unit: null, exact: true }
       : null;
 
   return (
     <div data-slot="impersonation-switcher" className="flex w-full flex-col gap-2">
-      <p className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        View as
-      </p>
-
-      <div className="relative">
-        <SearchIcon
-          aria-hidden="true"
-          className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          id={searchId}
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search name or CWID"
-          aria-label="Search people to view as"
-          className="h-8 pl-8 text-sm"
-        />
+      <div>
+        <div className="relative">
+          <SearchIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          {/* type="text", not "search": the native clear control is a browser-
+              blue ×; ours below uses the muted foreground. */}
+          <Input
+            id={searchId}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name or CWID"
+            aria-label="Search people to view as"
+            aria-describedby={hintId}
+            className="h-9 pl-8 pr-8 text-sm"
+          />
+          {query ? (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <XIcon className="size-3.5" aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+        <p id={hintId} className="mt-1 px-1 text-xs text-muted-foreground">
+          Name or CWID
+        </p>
       </div>
 
-      <div role="group" aria-label="Filter by unit" className="flex flex-wrap gap-1">
-        {KIND_FILTERS.map((f) => {
-          const selected = kindFilter === f.key;
+      <div role="group" aria-label="Show" className="grid grid-cols-2 rounded-md bg-muted p-0.5 text-sm">
+        {TABS.map((t) => {
+          const selected = tab === t.key;
           return (
             <button
-              key={f.key}
+              key={t.key}
               type="button"
               aria-pressed={selected}
-              onClick={() => setKindFilter(f.key)}
-              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              onClick={() => setTab(t.key)}
+              className={`rounded-[5px] px-2 py-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 selected
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  ? "bg-background font-medium text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {f.label}
+              {t.label}
             </button>
           );
         })}
@@ -244,7 +235,7 @@ export function ImpersonationSwitcher() {
             {exactCwidCandidate && (
               <button
                 type="button"
-                onClick={() => setPending(exactCwidCandidate)}
+                onClick={() => onPick(exactCwidCandidate)}
                 className="mt-1 text-left font-medium text-primary hover:underline"
                 data-testid="impersonation-view-as-exact-cwid"
               >
@@ -261,55 +252,125 @@ export function ImpersonationSwitcher() {
               className="flex items-center gap-2 rounded-sm px-1 py-1.5 hover:bg-accent"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-foreground">{c.preferredName}</p>
-                <p className="truncate text-xs text-muted-foreground">{describe(c)}</p>
+                <p className="truncate text-sm font-medium text-foreground">{c.preferredName}</p>
+                <p className="truncate text-xs text-muted-foreground">{subline(c)}</p>
               </div>
               <Button
                 type="button"
                 variant="outline"
                 size="xs"
-                onClick={() => setPending(c)}
-                disabled={starting}
+                onClick={() => onPick(c)}
                 data-testid="impersonation-view-as"
               >
-                <EyeIcon aria-hidden="true" />
                 View as
               </Button>
             </div>
           ))
         )}
       </div>
-
-      <Dialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>View as {pending?.preferredName}?</DialogTitle>
-            <DialogDescription>
-              You will see and act on Scholars exactly as {pending?.preferredName}. Any changes you
-              make are applied as them but <strong>logged to you</strong>. Your session auto-returns
-              to your own view after the impersonation window expires.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setPending(null)}
-              disabled={starting}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => pending && startImpersonation(pending)}
-              disabled={starting}
-              data-testid="impersonation-confirm"
-            >
-              {starting ? "Starting…" : `View as ${pending?.preferredName ?? "user"}`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
+  );
+}
+
+/**
+ * The §8 confirm step, rendered by the account menu outside its (by then
+ * closed) popover. `readOnly` = an observer's View as (#2946): writes are
+ * refused server-side, so the copy says so instead of promising edits.
+ */
+export function ViewAsConfirmDialog({
+  candidate,
+  readOnly = false,
+  onClose,
+}: {
+  candidate: Candidate | null;
+  readOnly?: boolean;
+  onClose: () => void;
+}) {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Clear a previous attempt's error when a new target is picked.
+  useEffect(() => setError(null), [candidate]);
+
+  async function start(c: Candidate) {
+    setStarting(true);
+    setError(null);
+    // The route's `{ error }` reason (e.g. `target_not_found` on the exact-CWID
+    // fallback) — a bare network failure or empty body maps to the generic message.
+    let code = "";
+    try {
+      const res = await fetch("/api/impersonation", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ targetCwid: c.cwid }),
+      });
+      if (res.ok) {
+        // Reload so every surface re-renders through the effective seam and the
+        // banner mounts.
+        window.location.reload();
+        return;
+      }
+      code = ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "";
+    } catch {
+      /* fall through to the error state below */
+    }
+    setStarting(false);
+    setError(mapStartError(code));
+  }
+
+  const name = candidate?.preferredName ?? "";
+  // A CWID-only synthetic candidate has no first name to use.
+  const first = candidate?.exact ? name : name.split(/\s+/)[0];
+
+  return (
+    <Dialog open={candidate !== null} onOpenChange={(open) => !open && !starting && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>View as {name}?</DialogTitle>
+          {candidate ? <DialogDescription>{subline(candidate)}</DialogDescription> : null}
+        </DialogHeader>
+        <ul className="flex flex-col gap-2.5 text-sm leading-normal">
+          <li className="flex gap-2.5">
+            <EyeIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            You’ll see Scholars with {first}’s permissions.
+          </li>
+          <li className="flex gap-2.5">
+            <PencilIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {readOnly ? (
+              <span>Read-only: you can look, but not save changes.</span>
+            ) : (
+              <span>
+                Edits are saved as {first} and <strong className="font-semibold">logged to you</strong>.
+              </span>
+            )}
+          </li>
+          <li className="flex gap-2.5">
+            <ClockIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            Ends automatically after {TTL_MINUTES} minutes.
+          </li>
+        </ul>
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={starting}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="apollo"
+            onClick={() => candidate && start(candidate)}
+            disabled={starting}
+            data-testid="impersonation-confirm"
+          >
+            {starting ? "Starting…" : `Start viewing as ${first}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

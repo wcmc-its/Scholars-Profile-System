@@ -48,8 +48,9 @@ export const dynamic = "force-dynamic";
 /** Max rows returned — keeps the per-candidate superuser pre-filter bounded. */
 const CANDIDATE_LIMIT = 50;
 
-/** The unit-kind chip filter (spec §8: All · Department · Division · Center · Scholar). */
-type KindFilter = ImpersonationUnitKind | "scholar" | "all";
+/** The unit-kind filter (spec §8). `unit` = any org-unit owner/curator — the
+ *  switcher's "Org unit roles" tab; the per-kind values stay accepted. */
+type KindFilter = ImpersonationUnitKind | "unit" | "scholar" | "all";
 
 /** One assumable target (spec §7). */
 interface Candidate {
@@ -72,7 +73,8 @@ function parseKind(value: string | null): KindFilter {
     value === "center" ||
     value === "core" ||
     value === "institution" ||
-    value === "scholar"
+    value === "scholar" ||
+    value === "unit"
     ? value
     : "all";
 }
@@ -246,9 +248,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const unitKind = top?.entityType ?? null;
     const homeUnit = r.department?.name ?? r.division?.name ?? null;
     const unit = top ? (nameMaps[top.entityType].get(top.entityId) ?? homeUnit) : homeUnit;
-    // Unit-kind chip: a kind matches the administered kind; `scholar` matches an
-    // ungranted scholar; `all` passes everything.
-    if (kindFilter !== "all") {
+    // Unit-kind filter: a kind matches the administered kind; `unit` matches any
+    // administered kind; `scholar` matches an ungranted scholar; `all` passes everything.
+    if (kindFilter === "unit") {
+      if (unitKind === null) return;
+    } else if (kindFilter !== "all") {
       if (kindFilter === "scholar" ? role !== "scholar" : unitKind !== kindFilter) return;
     }
     candidates.push({ cwid: r.cwid, preferredName: r.preferredName, slug: r.slug, role, unitKind, unit });
