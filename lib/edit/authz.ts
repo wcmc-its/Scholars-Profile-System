@@ -99,7 +99,12 @@ export function authorizeFieldEdit(
   // effect until an operator approves, so the self test is the whole gate; a
   // proxy is handled at the route (PE-03), exactly as `overview` is.
   if (target.fieldName === "primaryTitleRequest") {
-    if (session.cwid === target.entityId || session.isSuperuser || session.isCommsSteward) {
+    if (
+      session.cwid === target.entityId ||
+      session.isSuperuser ||
+      session.isCommsSteward ||
+      session.isContentEditor === true
+    ) {
       return ALLOW;
     }
     return { ok: false, reason: "not_self" };
@@ -113,8 +118,15 @@ export function authorizeFieldEdit(
     // Self OR superuser OR comms_steward — scoped to these three fields. A
     // comms_steward edits any scholar's narrative (superuser profile parity,
     // comms-steward-profile-editing-spec.md §3b); the deferred broad-admin
-    // widening must still not leak to other fields via this branch.
-    if (session.cwid === target.entityId || session.isSuperuser || session.isCommsSteward) {
+    // widening must still not leak to other fields via this branch. A content
+    // editor (`lib/auth/content-editor.ts`) edits these on any scholar too; it
+    // never reaches the title-pin or slug branches above and below.
+    if (
+      session.cwid === target.entityId ||
+      session.isSuperuser ||
+      session.isCommsSteward ||
+      session.isContentEditor === true
+    ) {
       return ALLOW;
     }
     return { ok: false, reason: "not_self" };
@@ -202,17 +214,32 @@ export function authorizeSuppress(
 /**
  * `POST /api/edit/revoke`. A scholar may lift only a suppression they applied
  * themselves (`created_by == session.cwid`); a superuser may lift any.
+ *
+ * A content editor may also lift a hide STAFF applied on one profile. The route
+ * resolves, for a content editor only, `subject` (whose profile the hide is on:
+ * set only for a person-made, non-reject hide of a one-profile kind — a
+ * per-author publication, or an appointment / education / grant — and null for
+ * an ETL hold, a ReCiter reject, a whole scholar, a takedown, a mentee or a
+ * dataset) and `bySubject` (the scholar or their proxy applied it). Takedowns,
+ * whole-scholar hides, system holds, rejects and a scholar's own hides stay out
+ * of reach.
  */
 export function authorizeRevoke(
   session: EditSession,
-  suppression: { createdBy: string },
+  suppression: { createdBy: string; subject?: string | null; bySubject?: boolean },
 ): AuthzResult {
   // Superuser, and a comms_steward at superuser profile parity (§3b) — a steward
   // may lift any suppression, the mirror of their suppress parity above.
   if (session.isSuperuser || session.isCommsSteward) return ALLOW;
-  return session.cwid === suppression.createdBy
-    ? ALLOW
-    : { ok: false, reason: "not_owner" };
+  if (session.cwid === suppression.createdBy) return ALLOW;
+  if (
+    session.isContentEditor === true &&
+    suppression.subject != null &&
+    suppression.bySubject === false
+  ) {
+    return ALLOW;
+  }
+  return { ok: false, reason: "not_owner" };
 }
 
 /**
@@ -228,6 +255,17 @@ export function authorizeRevoke(
 export function authorizeCommsStewardAction(session: EditSession): AuthzResult {
   if (session.isCommsSteward || session.isSuperuser) return ALLOW;
   return { ok: false, reason: "not_comms_steward" };
+}
+
+/**
+ * The Method-Family write gate (`/api/edit/methods/*`):
+ * {@link authorizeCommsStewardAction} plus a content editor. The role
+ * vocabulary editor keeps the plain steward gate — renaming a role renames a
+ * title on every holder's profile, which a content editor may not do.
+ */
+export function authorizeMethodsAction(session: EditSession): AuthzResult {
+  if (session.isContentEditor === true) return ALLOW;
+  return authorizeCommsStewardAction(session);
 }
 
 // `POST /api/edit/appointment-visibility` — reveal/hide a historical
@@ -255,7 +293,12 @@ export function canAccessScholarEditPage(
   session: EditSession,
   targetCwid: string,
 ): boolean {
-  return session.cwid === targetCwid || session.isSuperuser || session.isCommsSteward;
+  return (
+    session.cwid === targetCwid ||
+    session.isSuperuser ||
+    session.isCommsSteward ||
+    session.isContentEditor === true
+  );
 }
 
 /**
@@ -484,7 +527,10 @@ export function authorizeCoreClaim(
   session: EditSession,
   coreRole: EffectiveUnitRole,
 ): AuthzResult {
-  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
+  // A content editor works every core's content, leaders and claim queue.
+  if (session.isSuperuser || session.isCommsSteward || session.isContentEditor === true) {
+    return ALLOW;
+  }
   if (coreRole === "owner" || coreRole === "curator") return ALLOW;
   return { ok: false, reason: "not_core_owner" };
 }
@@ -504,8 +550,11 @@ export function canEditUnit(
   // §3b "minus adding/remove org units" excludes only create/delete + grants,
   // not editing existing units. As of the 2026-08-26 policy widening
   // (decision #3), `canManageAccess` ALSO admits comms_steward now — it's
-  // unit create/delete specifically that stays unwidened, not grants.
-  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
+  // unit create/delete specifically that stays unwidened, not grants. A content
+  // editor edits any existing unit's content too (never create or grants).
+  if (session.isSuperuser || session.isCommsSteward || session.isContentEditor === true) {
+    return ALLOW;
+  }
   if (effectiveRole === "owner" || effectiveRole === "curator") return ALLOW;
   return { ok: false, reason: "not_curator" };
 }

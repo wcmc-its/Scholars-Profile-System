@@ -7,9 +7,10 @@
  * the window matches the page's KPIs and chart), plus the names those rows
  * need.
  *
- * Superuser-only, like the page, re-checked on every GET. A read has no CSRF
+ * Same gate as the page (`canViewDashboard(session, "activity")`: superuser or
+ * an ad hoc grant), re-checked on every GET. A read has no CSRF
  * surface and a cross-origin read can't see the response (CORS), so the
- * session + `isSuperuser` re-check is the whole gate (the `GET
+ * session + gate re-check is the whole gate (the `GET
  * /api/edit/slugs` pattern). No flag: this only pages further through the
  * rows the page already shows.
  */
@@ -17,6 +18,7 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { decodeCursor, loadOlderEdits, parseAsOf } from "@/lib/api/edit-activity";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk } from "@/lib/edit/request";
@@ -28,7 +30,7 @@ const PATH = "/api/edit/activity/recent";
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const session = await getEffectiveEditSession();
   if (!session) return editError(401, "unauthenticated");
-  if (!session.isSuperuser) {
+  if (!(await canViewDashboard(session, "activity"))) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "activity",

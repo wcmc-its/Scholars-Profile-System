@@ -13,7 +13,12 @@ import { NextResponse } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { buildHonorCsv, isHonorQueueEnabled, loadHonorExport } from "@/lib/edit/honor-queue";
+import {
+  buildHonorCsv,
+  canViewHonorsQueue,
+  isHonorQueueEnabled,
+  loadHonorExport,
+} from "@/lib/edit/honor-queue";
 
 export const dynamic = "force-dynamic";
 // `maxDuration` is inert under `output: "standalone"`; the real budget this route is
@@ -27,9 +32,10 @@ export async function GET() {
   if (!session) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
-  // `isSuperuser || isHonorsCurator`, never a bare curator read — same reason as
-  // the page (the session route reports `isDeveloper:false` for a superuser).
-  if (!session.isSuperuser && session.isHonorsCurator !== true) {
+  // `canViewHonorsQueue` (superuser, honors_curator or observer), never a bare
+  // curator read — same reason as the page (the session route reports
+  // `isDeveloper:false` for a superuser).
+  if (!canViewHonorsQueue(session)) {
     return new NextResponse("Not found", { status: 404 });
   }
 

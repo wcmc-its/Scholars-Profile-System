@@ -73,6 +73,8 @@ function mergeSessions(a: EditSession, b: EditSession): EditSession {
     isHonorsCurator: a.isHonorsCurator === true || b.isHonorsCurator === true,
     isDeveloper: a.isDeveloper === true || b.isDeveloper === true,
     isDataSharingViewer: a.isDataSharingViewer === true || b.isDataSharingViewer === true,
+    isObserver: a.isObserver === true || b.isObserver === true,
+    isContentEditor: a.isContentEditor === true || b.isContentEditor === true,
   };
 }
 
@@ -83,6 +85,7 @@ function mergeGrants(a: ConsoleGrants, b: ConsoleGrants): ConsoleGrants {
     reportableUnitCount: a.reportableUnitCount + b.reportableUnitCount,
     viewerCanViewUsage: a.viewerCanViewUsage || b.viewerCanViewUsage,
     reportAccessCount: a.reportAccessCount + b.reportAccessCount,
+    dashboards: new Set([...a.dashboards, ...b.dashboards]),
   };
 }
 

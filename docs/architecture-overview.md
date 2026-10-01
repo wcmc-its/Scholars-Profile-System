@@ -66,7 +66,7 @@ code in **AWS CDK** across nine stacks, deployed to a **single AWS account**
 flowchart TD
   staff([WCM staff browser]):::ext
   cf2["CloudFront<br/>(/edit/*, /api/edit/* = CachingDisabled)"]:::edge
-  mw["middleware.ts<br/>gates /edit/*, /api/edit/*"]:::app
+  mw["proxy.ts<br/>gates /edit/*, /api/edit/*"]:::app
   saml["WCM SAML IdP<br/>login-proxy.weill.cornell.edu"]:::ext
   ldap["WCM Enterprise Directory<br/>(LDAPS) — superuser + unit role checks"]:::ext
   app2["Next.js /api/edit/* handlers<br/>authz predicates (lib/edit/authz.ts)"]:::app

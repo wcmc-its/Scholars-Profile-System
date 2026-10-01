@@ -3,7 +3,7 @@
  * Zooms inside the single Next.js container: rendering surfaces, the API route
  * handlers grouped by purpose, and the internal libraries they share — wired to
  * the data tier and external systems.
- * Source: app/ (routes), lib/db.ts, lib/search.ts, lib/edit/*, lib/headshot.ts, middleware.ts.
+ * Source: app/ (routes), lib/db.ts, lib/search.ts, lib/edit/*, lib/headshot.ts, proxy.ts.
  */
 import { A } from "../lib.mjs";
 
@@ -11,8 +11,8 @@ const nodes = {
   // ---- inbound (outside the app) ----
   inb:    { x: 36, y: 38, w: 250, h: 48, kind: "ext", title: "CloudFront / public ALB", sub: ["HTTPS"] },
   etlInb: { x: 1166, y: 38, w: 250, h: 48, kind: "ext", title: "ETL · internal ALB", sub: ["POST /api/revalidate"] },
-  // ---- middleware + rendering surfaces ----
-  mw:     { x: 540, y: 124, w: 400, h: 48, kind: "app", title: "middleware.ts", sub: ["auth gate · /edit, /api/edit"] },
+  // ---- proxy + rendering surfaces ----
+  mw:     { x: 540, y: 124, w: 400, h: 48, kind: "app", title: "proxy.ts", sub: ["auth gate · /edit, /api/edit"] },
   pages:  { x: 64, y: 200, w: 430, h: 66, kind: "app", title: "Public pages — RSC / ISR", sub: ["scholars · topics · depts · centers", "browse · search · about"] },
   editui: { x: 986, y: 200, w: 430, h: 66, kind: "app", title: "/edit UI — RSC (staff)", sub: ["scholar · publication · unit editors", "slug-requests"] },
   // ---- API route handlers ----
@@ -42,7 +42,7 @@ const edges = [
   // inbound
   { p0: A(nodes.inb, "r"), p1: A(nodes.mw, "l", 0.3), color: "maroon", label: "HTTPS" },
   { p0: A(nodes.etlInb, "b"), p1: A(nodes.opsapi, "t", 0.6), color: "green", label: "revalidate" },
-  // middleware -> surfaces
+  // proxy -> surfaces
   { p0: A(nodes.mw, "b", 0.2), p1: A(nodes.pages, "t", 0.62), color: "gray" },
   { p0: A(nodes.mw, "b", 0.85), p1: A(nodes.editui, "t", 0.38), color: "gray" },
   // clean vertical columns: API -> lib -> external
@@ -79,13 +79,13 @@ export const meta = {
     "libraries</b> they share, wired to Aurora (reader/writer), OpenSearch, the SAML IdP, and the WCM " +
     "directory (LDAP authz + live headshots). The <b>/edit</b> surface adds Bedrock-backed <b>AI " +
     "generation</b> (overview · biosketch · CV) — the CV path reads clinical fields live from POPS " +
-    "(<code>lib/edit/pops.ts</code>). <code>middleware.ts</code> gates every <code>/edit</code> path.",
+    "(<code>lib/edit/pops.ts</code>). <code>proxy.ts</code> gates every <code>/edit</code> path.",
   legend: [
-    { fill: "#e3faf3", stroke: "#0ca678", label: "Rendering (RSC) / middleware" },
+    { fill: "#e3faf3", stroke: "#0ca678", label: "Rendering (RSC) / proxy" },
     { fill: "#e7ecff", stroke: "#4263eb", label: "API route handler" },
     { fill: "#f0ebff", stroke: "#7048e8", label: "Internal library" },
     { fill: "#fff4d6", stroke: "#f08c00", label: "Data store" },
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "External system" },
   ],
-  source: "app/api/* (search · methods · centers/collaboration · units · nih-portfolio · opportunities · analytics · impersonation) · lib/api/{match-opportunities,search-funding,center-collaboration}.ts · lib/edit/{overview-generator,biosketch-generator,pops}.ts (Bedrock AI generation) · lib/db.ts · lib/search.ts · lib/headshot.ts · middleware.ts",
+  source: "app/api/* (search · methods · centers/collaboration · units · nih-portfolio · opportunities · analytics · impersonation) · lib/api/{match-opportunities,search-funding,center-collaboration}.ts · lib/edit/{overview-generator,biosketch-generator,pops}.ts (Bedrock AI generation) · lib/db.ts · lib/search.ts · lib/headshot.ts · proxy.ts",
 };

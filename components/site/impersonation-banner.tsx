@@ -54,7 +54,8 @@ export type SubjectRole =
   | "cv_generator"
   | "honors_curator"
   | "data_sharing_viewer"
-  | "development";
+  | "development"
+  | "content_editor";
 
 const ROLE_LABEL: Record<SubjectRole, string> = {
   owner: "Owner",
@@ -65,6 +66,7 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
+  content_editor: "Content Editor",
 };
 
 /**
@@ -99,6 +101,10 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
   development: [{ label: "Grant Matcha", href: "/edit/grant-matcha" }],
+  content_editor: [
+    { label: "Profiles", href: "/edit/profiles" },
+    { label: "Org units", href: "/edit/units" },
+  ],
 };
 
 /**

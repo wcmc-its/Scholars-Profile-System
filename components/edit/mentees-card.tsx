@@ -21,9 +21,11 @@ export type MenteesCardProps = {
   mode: "self" | "superuser";
   scholarName: string;
   mentees: ReadonlyArray<EditContextMentee>;
+  /** See `EntityPanel`'s `delegated`. */
+  delegated?: boolean;
 };
 
-export function MenteesCard({ cwid, mode, scholarName, mentees }: MenteesCardProps) {
+export function MenteesCard({ cwid, mode, scholarName, mentees, delegated }: MenteesCardProps) {
   const possessive = mode === "superuser" ? `${scholarName}'s` : "your";
   return (
     <EntityPanel
@@ -31,6 +33,7 @@ export function MenteesCard({ cwid, mode, scholarName, mentees }: MenteesCardPro
       cwid={cwid}
       mode={mode}
       scholarName={scholarName}
+      delegated={delegated}
       entityType="mentee"
       entities={mentees}
       getTitle={(m) => m.name}

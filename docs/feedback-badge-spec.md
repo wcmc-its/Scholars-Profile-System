@@ -135,7 +135,7 @@ The v1.1 callout is **viewer-correct** by self-selection: it asks a question onl
 | **When shown** | **Only** when `mode = contextual` AND `pageRoute = '/scholars/[slug]'`. |
 | **When hidden** | Generic mode, dept / division / center / topic / search / browse / `/edit/*` / homepage. On non-profile contextual surfaces, there is no specific person to be "this is about," so the question is incoherent. On `/edit/*` the user is already authenticated and editing — the callout is redundant. |
 | **No identity inference** | The callout does **not** read the session CWID or compare it to the profile slug's owner. We considered surfacing a confident "Edit your profile" variant when `session.cwid` matches the profile owner, and rejected it: it adds DB lookups + edge-case handling for a marginal UX win, and the self-selecting question works for everyone. |
-| **Routes through middleware** | `/edit` is intercepted by `middleware.ts`, which SAML-redirects unauthenticated visitors and lands authenticated profile owners on their own editor. The callout does not need to know the auth state. |
+| **Routes through middleware** | `/edit` is intercepted by `proxy.ts`, which SAML-redirects unauthenticated visitors and lands authenticated profile owners on their own editor. The callout does not need to know the auth state. |
 
 ---
 

@@ -152,6 +152,9 @@ export type UnitEditContext = {
     grantedBy: string | null;
     grantedAt: Date;
   }> | null;
+  /** A content editor sees `access` (its synthetic steward read grant) but
+   *  never grants or removes: the card renders without its controls. */
+  accessReadOnly?: boolean;
   /** Present iff the unit carries a roster (center, or manual division). The
    *  extended fields (#552) are populated for a center; always null for a
    *  manual division (DivisionMembership has no such columns). Dates are
@@ -1183,6 +1186,7 @@ export async function loadUnitEditContext(
         : null,
     },
     access,
+    accessReadOnly: session.isContentEditor === true,
     roster,
     programs,
     centerLeadership,

@@ -37,6 +37,8 @@ const {
   mockIsDeveloper,
   mockResolveGlobalRole,
   mockIsCommsSteward,
+  mockIsObserver,
+  mockIsContentEditor,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEffectiveCwid: vi.fn(),
@@ -60,6 +62,8 @@ const {
   mockIsDeveloper: vi.fn(),
   mockResolveGlobalRole: vi.fn(),
   mockIsCommsSteward: vi.fn(),
+  mockIsObserver: vi.fn(),
+  mockIsContentEditor: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -135,6 +139,8 @@ vi.mock("@/lib/edit/titles-queue", async (orig) => ({
   countTitlesNeedingReview: async () => 0,
 }));
 vi.mock("@/lib/auth/development", () => ({ isDeveloper: mockIsDeveloper }));
+vi.mock("@/lib/auth/observer", () => ({ isObserver: mockIsObserver }));
+vi.mock("@/lib/auth/content-editor", () => ({ isContentEditor: mockIsContentEditor }));
 vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,
   visibleAttrKeys: () => ["home"],
@@ -210,6 +216,8 @@ beforeEach(() => {
   mockCountPendingSlugRequests.mockResolvedValue(0);
   mockIsHonorsCurator.mockResolvedValue(false);
   mockIsDeveloper.mockResolvedValue(false);
+  mockIsObserver.mockResolvedValue(false);
+  mockIsContentEditor.mockResolvedValue(false);
   mockResolveGlobalRole.mockResolvedValue(null);
   mockIsCommsSteward.mockResolvedValue(false);
   mockHasAnyReportAccess.mockResolvedValue(false);
@@ -382,6 +390,19 @@ describe("/edit (self) — loadConsoleTabs migration (Gaps 1 / 1b)", () => {
     mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
     const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
     expect(result.props.consoleNav).toBeUndefined();
+  });
+
+  // I1 — the strip here must match every ConsoleShell page, which reads the
+  // observer / content-editor synthetic steward views via getEffectiveEditSession.
+  it.each([
+    ["an observer", mockIsObserver],
+    ["a content editor", mockIsContentEditor],
+  ])("%s with their own Scholar row gets the steward console nav", async (_who, mock) => {
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    mock.mockResolvedValue(true);
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    const consoleNav = asElement(result.props.consoleNav);
+    expect(consoleNav.props.profilesTab).toBe(true);
   });
 
   it("a comms_steward gets coresTab threaded into AdminSubnav, same as every ConsoleShell page", async () => {

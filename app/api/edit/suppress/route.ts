@@ -237,6 +237,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         viaUnitAdminUnit = unit;
       }
     }
+    // Content editor (`lib/auth/content-editor.ts`): the same one-profile
+    // allowlist on ANY scholar, keyed on the write session's own flag (never
+    // set under "View as": a non-superuser's overlay refuses every write first).
+    if (!authz.ok && delegatedEligible && session.isContentEditor === true) {
+      authz = { ok: true };
+    }
     if (!authz.ok) {
       logEditDenial({
         actorCwid: session.cwid,

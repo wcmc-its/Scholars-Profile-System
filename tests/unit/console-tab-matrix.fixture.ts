@@ -29,6 +29,7 @@ export const grants = (over: Partial<ConsoleGrants> = {}): ConsoleGrants => ({
   reportableUnitCount: 0,
   viewerCanViewUsage: false,
   reportAccessCount: 0,
+  dashboards: new Set(),
   ...over,
 });
 
@@ -104,6 +105,69 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "cores per the 2026-08-26 policy widening (decision #6, full curator-parity on cores); " +
       "roleVocabulary per isOrgUnitRoleConsoleTabVisible (#2542) — superuser-or-steward gate; " +
       "titles per canReviewTitles — the display-title pin gate (superuser or steward)",
+  },
+  {
+    name: "observer (synthetic steward read view)",
+    session: sess({ isCommsSteward: true, isObserver: true }),
+    // `canViewUsage` admits an observer, so the real loader returns true here.
+    grants: grants({ viewerCanViewUsage: true }),
+    expect: [
+      "profiles",
+      "units",
+      "news",
+      "methods",
+      "reports",
+      "dataSharing",
+      "cores",
+      "roleVocabulary",
+      "titles",
+      "honors",
+      "slugRequests",
+      "slugs",
+      "usage",
+      "orcidCoverage",
+      "coi",
+    ],
+    pins:
+      "2026-10-01 — an observer sees every queue and dashboard read-only, COI " +
+      "included (public data); Activity and ETL status stay superuser-only",
+  },
+  {
+    name: "content editor (synthetic steward read view)",
+    session: sess({ isCommsSteward: true, isContentEditor: true }),
+    // `canViewUsage` admits a content editor, so the real loader returns true.
+    grants: grants({ viewerCanViewUsage: true }),
+    // The observer's set: titles and roleVocabulary stay visible (read-only:
+    // no pin control, an inert roster), so making an observer a content
+    // editor never takes a tab away (I3).
+    expect: [
+      "profiles",
+      "units",
+      "news",
+      "methods",
+      "reports",
+      "dataSharing",
+      "cores",
+      "roleVocabulary",
+      "titles",
+      "honors",
+      "slugRequests",
+      "slugs",
+      "usage",
+      "orcidCoverage",
+      "coi",
+    ],
+    pins: "2026-10-01 — a content editor reads what an observer reads; its writes are allowlisted",
+  },
+  {
+    name: "ad hoc dashboard grantee (every dash: scope, no other role)",
+    session: sess(),
+    grants: grants({
+      dashboards: new Set(["coi", "usage", "orcid-coverage", "etl-status", "activity", "data-sharing"]),
+    }),
+    // A dashboards-only grant is not report access: no Reports tab.
+    expect: ["coi", "usage", "orcidCoverage", "etlStatus", "activity", "dataSharing"],
+    pins: "2026-10-01 — dashboards granted ad hoc on the Reporting role, one dash: scope each",
   },
   {
     name: "pure honors_curator",

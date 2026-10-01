@@ -59,8 +59,8 @@ export async function loadCenterDirectors(
  *  🔴 Tuning a weight does NOT move `Scholar.rosterProminence` (#2596) until
  *  `etl:roster-prominence` reruns: nightly on its own, or on demand per
  *  docs/OPERATIONS-RUNBOOK.md ("Roster prominence"). A weight tuned DOWN trips
- *  that step's `roster-prominence:score-drops` guard by design; rerun it with
- *  the bypass the runbook names. */
+ *  that step's `roster-prominence:score-drops` guard (and can trip `:grants`)
+ *  by design; rerun it with the bypass the runbook names. */
 const W_HINDEX = 0.5;
 const W_PI = 0.5;
 const W_NIH_PI = 0.5;
@@ -183,6 +183,9 @@ export type ProminenceEntry = {
   leadershipTier: number;
   /** Display label ("Dean", "Associate Dean", "Chair", "Chief", …) or null. */
   leadershipLabel: string | null;
+  /** The PI-grant part of `prominence` (0 = no WCM-administered PI grants), so
+   *  `etl:roster-prominence` can tell an emptied `grant` table from drift. */
+  grantScore: number;
 };
 
 /**
@@ -194,12 +197,16 @@ export type ProminenceEntry = {
  * poison the whole score to NaN and sort that scholar arbitrarily.
  */
 export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
+  const piScore = W_PI * Math.log1p(input.piCount ?? 0);
+  const nihPiScore = W_NIH_PI * Math.log1p(input.nihPiCount ?? 0);
+  // Summed term by term in the original order: regrouping the grant terms would
+  // shift `prominence` by an ulp and rewrite every stored row once.
   const prominence =
     Math.log1p(input.scoredPubCount ?? 0) +
     W_HINDEX * Math.log1p(input.hIndex ?? 0) +
     Math.max(input.chairLabel !== null ? W_CHAIR : 0, input.isChief ? W_CHIEF : 0) +
-    W_PI * Math.log1p(input.piCount ?? 0) +
-    W_NIH_PI * Math.log1p(input.nihPiCount ?? 0) +
+    piScore +
+    nihPiScore +
     (input.roleCategory === "full_time_faculty" ? W_FACULTY : 0);
 
   const { tier, label } = classifyLeadership(
@@ -209,7 +216,12 @@ export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
     input.isCenterDirector ?? false,
     input.department ?? null,
   );
-  return { prominence, leadershipTier: tier, leadershipLabel: label };
+  return {
+    prominence,
+    leadershipTier: tier,
+    leadershipLabel: label,
+    grantScore: piScore + nihPiScore,
+  };
 }
 
 /**

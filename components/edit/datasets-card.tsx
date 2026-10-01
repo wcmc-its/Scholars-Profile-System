@@ -47,6 +47,9 @@ export type DatasetsCardProps = {
   mode?: "self" | "superuser";
   scholarName?: string;
   datasets: ReadonlyArray<EditContextDataset>;
+  /** A delegated editor (proxy, unit admin, content editor) can't hide or
+   *  restore a dataset deposit (the suppress route refuses it): no controls. */
+  readOnly?: boolean;
 };
 
 type Row = EditContextDataset;
@@ -99,7 +102,13 @@ function applyOptimistic(state: Row[], update: OptimisticUpdate): Row[] {
   });
 }
 
-export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }: DatasetsCardProps) {
+export function DatasetsCard({
+  cwid,
+  mode = "self",
+  scholarName = "",
+  datasets,
+  readOnly = false,
+}: DatasetsCardProps) {
   const su = mode === "superuser";
   const possessive = su ? `${scholarName}’s` : "your";
   const hideReason = su ? "Hidden by a superuser via /edit" : "Hidden by the author via /edit";
@@ -216,6 +225,7 @@ export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }
               onHide={() => suppress(d.datasetId, hideReason)}
               onNotMine={() => suppress(d.datasetId, notMineReason)}
               onShow={() => show(d)}
+              readOnly={readOnly}
             />
           ))}
         </ul>
@@ -230,12 +240,14 @@ function DatasetRow({
   onHide,
   onNotMine,
   onShow,
+  readOnly,
 }: {
   dataset: Row;
   error: string | null;
   onHide: () => void;
   onNotMine: () => void;
   onShow: () => void;
+  readOnly: boolean;
 }) {
   const url = resolveDatasetUrl(dataset);
   const hidden = dataset.state === "hidden_by_self";
@@ -273,7 +285,7 @@ function DatasetRow({
           )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {dataset.state === "shown" && (
+          {!readOnly && dataset.state === "shown" && (
             <>
               <Button
                 type="button"
@@ -299,7 +311,7 @@ function DatasetRow({
               </Button>
             </>
           )}
-          {hidden && (
+          {!readOnly && hidden && (
             <Button
               type="button"
               variant="ghost"

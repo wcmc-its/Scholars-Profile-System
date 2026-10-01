@@ -20,7 +20,7 @@ import { type NextRequest, type NextResponse } from "next/server";
 import { isCommsStewardEnabled } from "@/lib/auth/comms-steward";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import { authorizeCommsStewardAction, logEditDenial } from "@/lib/edit/authz";
+import { authorizeMethodsAction, logEditDenial } from "@/lib/edit/authz";
 import { apiError } from "@/lib/api/error-response";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!req.ok) return req.response;
   const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
-  const authz = authorizeCommsStewardAction(session);
+  const authz = authorizeMethodsAction(session);
   if (!authz.ok) {
     logEditDenial({
       actorCwid: session.cwid,

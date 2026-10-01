@@ -12,7 +12,11 @@
  *     as its scopes (`communications`, `development`). A person who works in
  *     both holds one grant with both functions. Communications corresponds to
  *     the existing `comms_steward` role, Development to the `development` role.
- *   - Reporting (`reporting`): report access, scoped per report.
+ *   - Reporting (`reporting`): report access, scoped per report, plus the
+ *     `/edit` dashboards (`dash:<dashboard>` scopes, decision 2026-10-01).
+ *     The wildcard `"*"` admits every REPORT and no dashboard: dashboards are
+ *     always picked one by one, so an existing "All reports" grant never
+ *     widens and a dashboard added later is never granted silently.
  *
  * Authorization: while `FUNCTIONAL_ROLES_AUTHZ` is not "on" (the default in
  * every env), no gate reads `functional_role_grant` and the table is a
@@ -78,6 +82,54 @@ export const ALLOWLIST_GRANTER = "ALLOWLIST";
 /** The wildcard scope: everything the role covers (Reporting only). */
 export const ALL_SCOPE = "*";
 
+/** The `/edit` dashboards a Reporting grant can admit, one by one. COI is
+ *  public data (decision 2026-10-01); its page has no actions. */
+export const DASHBOARDS = ["coi", "usage", "orcid-coverage", "etl-status", "activity", "data-sharing"] as const;
+export type Dashboard = (typeof DASHBOARDS)[number];
+
+export const DASHBOARD_LABEL: Record<Dashboard, string> = {
+  coi: "COI",
+  usage: "Usage",
+  "orcid-coverage": "ORCID coverage",
+  "etl-status": "ETL status",
+  activity: "Activity",
+  "data-sharing": "Data sharing",
+};
+
+/** The page each dashboard lives on. */
+export const DASHBOARD_HREF: Record<Dashboard, string> = {
+  coi: "/edit/coi",
+  usage: "/edit/usage",
+  "orcid-coverage": "/edit/orcid-coverage",
+  "etl-status": "/edit/etl-status",
+  activity: "/edit/activity",
+  "data-sharing": "/edit/data-sharing",
+};
+
+/** Dashboard scope keys carry this prefix, so they can never collide with a
+ *  report key or a `reportKey:scope` sub-scope. */
+export const DASHBOARD_SCOPE_PREFIX = "dash:";
+
+export function isDashboardScope(key: string): boolean {
+  return key.startsWith(DASHBOARD_SCOPE_PREFIX);
+}
+
+/** The dashboards a Reporting grant's scopes admit: explicit `dash:` keys
+ *  only. The wildcard admits none. */
+export function dashboardsFromScopes(scopes: ReadonlyArray<string>): Set<Dashboard> {
+  const out = new Set<Dashboard>();
+  for (const s of scopes) {
+    const d = s.slice(DASHBOARD_SCOPE_PREFIX.length);
+    if (isDashboardScope(s) && (DASHBOARDS as readonly string[]).includes(d)) out.add(d as Dashboard);
+  }
+  return out;
+}
+
+/** Whether a Reporting grant's scopes admit any report (not just dashboards). */
+export function scopesAdmitAnyReport(scopes: ReadonlyArray<string>): boolean {
+  return scopes.some((s) => !isDashboardScope(s));
+}
+
 /** A scope choice: the stored key and its label. */
 export type FunctionalRoleScopeOption = { key: string; label: string };
 
@@ -101,14 +153,16 @@ export function defaultScopes(options: ReadonlyArray<FunctionalRoleScopeOption>)
 }
 
 /**
- * Normalize a scope list for storage: de-duplicated, sorted, and collapsed to
- * `["*"]` when the wildcard is present (a wildcard makes every other key
- * redundant). Order-stable so two equal sets compare equal as JSON.
+ * Normalize a scope list for storage: de-duplicated and sorted. The wildcard
+ * swallows every other REPORT key (it makes them redundant) but keeps the
+ * dashboard keys, which it does not cover. Order-stable so two equal sets
+ * compare equal as JSON.
  */
 export function normalizeScopes(scopes: ReadonlyArray<string>): string[] {
   const set = new Set(scopes.map((s) => s.trim()).filter((s) => s.length > 0));
-  if (set.has(ALL_SCOPE)) return [ALL_SCOPE];
-  return [...set].sort();
+  const sorted = [...set].sort();
+  if (set.has(ALL_SCOPE)) return [ALL_SCOPE, ...sorted.filter(isDashboardScope)];
+  return sorted;
 }
 
 /** Whether two normalized scope lists are the same set. */

@@ -607,6 +607,9 @@ export type EditPageProps = {
     unitKind: "department" | "division" | "center" | "institution";
     unitName: string;
   } | null;
+  /** Overrides the header's role pill text (`EditShell`'s `actorLabel`): a
+   *  content editor edits in unit-admin mode with no conferring unit. */
+  actorLabel?: string;
   /** Self mode only: whether to mount the live ReCiter pending-articles nudge
    *  (`SELF_EDIT_RECITER_PENDING_HINT`). True only for a genuine, non-impersonating
    *  self viewer with the flag on; when true the Publications card + Home teaser
@@ -744,6 +747,7 @@ export function EditPage({
   proxyEditors = null,
   unitAdminEditors = null,
   unitAdminBanner = null,
+  actorLabel,
   reciterPendingEnabled = false,
   orcidTabEnabled = false,
   profileLinksEnabled = false,
@@ -767,7 +771,10 @@ export function EditPage({
   // (flag on + self or superuser). The loader (per surface) enforces who may load
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
   // proxy / unit-admin — so a non-null value here already implies an allowed actor.
-  const hasHighlights = (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
+  // A content editor edits in unit-admin mode and IS loaded (its read session's
+  // steward grant), so unit-admin is admitted here; a real unit admin never is.
+  const hasHighlights =
+    (mode === "self" || isSuperuserLike(mode) || mode === "unit-admin") && ctx.highlights !== null;
   // RePORTER "Is this you?" — present for self OR superuser when the loader (per
   // surface) returned pending candidates OR confirmed history. The loader gates
   // who may load + the flag, so a non-empty array here already implies an allowed
@@ -984,6 +991,7 @@ export function EditPage({
       profilesNavVisible={profilesNavVisible}
       consoleNav={consoleNav}
       unitAdmin={unitAdminBanner ?? undefined}
+      actorLabel={actorLabel}
     >
       {renderPanel(
         active.key,
@@ -1102,6 +1110,12 @@ function renderPanel(
   // explicit `thirdPerson` purely for its copy.
   const thirdPerson = mode !== "self";
   const voiceMode: "self" | "superuser" = thirdPerson ? "superuser" : "self";
+  // An editor acting FOR the scholar without being them or an administrator: a
+  // proxy, a unit admin, or a content editor (who edits in unit-admin mode).
+  // The write routes refuse such an editor a whole-profile hide, the scholar's
+  // own hides, mentee / dataset hides and the ReCiter reject, so those controls
+  // don't render for them.
+  const delegated = mode === "proxy" || mode === "unit-admin";
   const detailBase = mode === "self" ? "/edit" : `/edit/scholar/${cwid}`;
   switch (key) {
     case "grant-recs":
@@ -1347,6 +1361,7 @@ function renderPanel(
           // purely to reframe its copy for a proxy / unit-admin (#955 #10).
           mode={childMode}
           thirdPerson={thirdPerson}
+          profileControls={!delegated}
           // section-visibility-spec — the Sections panel. Hidden keys come from
           // the loader; the per-section hidden-RECORD counts are derived from the
           // already-loaded edit-context suppression state (no new query). The
@@ -1373,7 +1388,7 @@ function renderPanel(
           mode={voiceMode}
           scholarName={scholarName}
           publications={ctx.publications}
-          rejectEnabled={isReciterRejectEnabled()}
+          rejectEnabled={isReciterRejectEnabled() && !delegated}
           // Surfaced for the scholar themselves OR a superuser viewing the target
           // (parity with the COI-gap hint). `childMode` is "self" for a genuine
           // self viewer and "superuser" for a superuser; both mount the loader,
@@ -1387,7 +1402,13 @@ function renderPanel(
       );
     case "funding":
       return (
-        <FundingCard cwid={cwid} mode={voiceMode} scholarName={scholarName} grants={ctx.grants} />
+        <FundingCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          grants={ctx.grants}
+          delegated={delegated}
+        />
       );
     case "technologies":
       // Read-only CTL "Available technologies" — the loader populates
@@ -1433,6 +1454,7 @@ function renderPanel(
           mode={voiceMode}
           scholarName={scholarName}
           datasets={ctx.datasets}
+          readOnly={delegated}
         />
       );
     case "appointments": {
@@ -1517,6 +1539,7 @@ function renderPanel(
           // so its current state rides the same `hiddenSections` array the
           // Visibility card's Sections panel reads.
           hideYears={ctx.scholar.hiddenSections.includes("hideEducationYears")}
+          delegated={delegated}
         />
       );
     case "mentees":
@@ -1554,6 +1577,7 @@ function renderPanel(
             mode={voiceMode}
             scholarName={scholarName}
             mentees={ctx.mentees}
+            delegated={delegated}
           />
         </div>
       );

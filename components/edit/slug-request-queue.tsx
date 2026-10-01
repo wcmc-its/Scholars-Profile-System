@@ -28,10 +28,13 @@ function formatShortDate(iso: string): string {
 export function SlugRequestQueue({
   initialRequests,
   lastDecidedAt = null,
+  readOnly = false,
 }: {
   initialRequests: SlugRequestQueueRow[];
   /** ISO time of the most recent decision, for the empty state. */
   lastDecidedAt?: string | null;
+  /** An observer's view: no Approve / Deny. */
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [rows, setRows] = React.useState<SlugRequestQueueRow[]>(initialRequests);
@@ -77,7 +80,7 @@ export function SlugRequestQueue({
         <ul data-testid="slug-request-queue">
           {rows.map((r) => (
             <li key={r.id} className="border-apollo-border border-b last:border-b-0">
-              <SlugRequestRow request={r} onDecided={handleDecided} />
+              <SlugRequestRow request={r} onDecided={handleDecided} readOnly={readOnly} />
             </li>
           ))}
         </ul>

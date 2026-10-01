@@ -516,6 +516,7 @@ function unitSections(
           access={ctx.access}
           actorCwid={ctx.actorCwid}
           headingId="access-heading"
+          readOnly={ctx.accessReadOnly === true}
         />
       ),
     });

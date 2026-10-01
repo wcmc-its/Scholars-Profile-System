@@ -455,7 +455,7 @@ export function TitlesQueue({
   basePath,
 }: {
   data: TitlesQueueData;
-  session: Pick<EditSession, "isSuperuser" | "isCommsSteward">;
+  session: Pick<EditSession, "isSuperuser" | "isCommsSteward" | "isContentEditor">;
   searchParams: TitlesQueueSearchParams;
   /** `/edit/titles-queue` — for the page's own links (tabs, chips, the form). */
   basePath: string;
@@ -467,7 +467,9 @@ export function TitlesQueue({
   const inTab = params.tab === "all" ? all.length : counts[params.tab!];
   const base = filterTitleDashboard(all, { ...params, reason: null });
   const rows = params.reason ? base.filter((r) => r.reasons.includes(params.reason!)) : base;
-  const canSet = canReviewTitles(session);
+  // A content editor reads the queue but never pins (title decisions stay
+  // with the stewards; the pin write refuses it regardless).
+  const canSet = canReviewTitles(session) && session.isContentEditor !== true;
   const grid = canSet ? GRID_SET : GRID_VIEW;
   const downloadHref = `${basePath}/export?${titleDashboardQueryString(params)}`;
 

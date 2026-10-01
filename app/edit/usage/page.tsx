@@ -36,11 +36,11 @@ import {
 import { addDays, resolveUsageRange } from "@/lib/api/usage-range";
 import { type NamedCount, type UsageSummary, loadUsageSummary } from "@/lib/api/usage-summary";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { canViewUsage } from "@/lib/edit/usage-access";
 import { cn } from "@/lib/utils";
 
 import { fillDayGaps, monthLabel, pctLabel, shortDay } from "./usage-format";
@@ -406,7 +406,7 @@ export default async function EditUsagePage({
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/usage");
   }
-  if (!(await canViewUsage(session, db.read))) {
+  if (!(await canViewDashboard(session, "usage"))) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "usage",
