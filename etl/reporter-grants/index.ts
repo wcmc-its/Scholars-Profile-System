@@ -189,7 +189,7 @@ async function runReporterMatchV2(): Promise<void> {
       if (st === "rejected" || st === "revoked") continue;
       let pubs;
       try {
-        pubs = await fetchPublicationsByCoreProjectNums(g.coreNums);
+        pubs = await fetchPublicationsByCoreProjectNums(g.coreNums, trustedPmids);
       } catch (err) {
         errored++;
         console.warn(
