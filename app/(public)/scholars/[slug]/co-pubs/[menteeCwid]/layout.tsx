@@ -6,7 +6,9 @@ import { resolvePair } from "./resolve-pair";
  * co-pubs layout only knows the mentor slug, so a real mentor with an unknown
  * or unrecorded mentee reached the page, whose `notFound()` lands after the
  * loading.tsx fallback has streamed with a 200 (a soft 404). This layout 404s
- * the pair before the page renders.
+ * the pair before anything streams. That only holds while no loading.tsx sits
+ * ABOVE this segment: a parent boundary wraps nested layouts too, which is why
+ * the rollup's loading.tsx lives in the `(rollup)` route group.
  */
 export default async function MenteeCoPubsLayout({
   children,

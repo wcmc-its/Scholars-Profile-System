@@ -6,6 +6,8 @@
  *
  * Synthetic slugs only.
  */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockNotFound } = vi.hoisted(() => ({
@@ -104,6 +106,17 @@ describe("loading.tsx routes 404 from the layout, outside the Suspense boundary"
     scholarFindFirst.mockResolvedValue(null);
     await expect(MenteeCoPubsLayout(pairParams)).rejects.toThrow("NEXT_NOT_FOUND");
     expect(getMentorMenteePair).not.toHaveBeenCalled();
+  });
+
+  it("co-pubs: no loading.tsx sits above the [menteeCwid] layout", () => {
+    // A parent loading.tsx's Suspense boundary wraps NESTED layouts too, so a
+    // co-pubs/loading.tsx would put the pair gate back behind the fallback and
+    // the unrecorded-pair 404 would be a 200 again. The rollup's skeleton lives
+    // in the (rollup) route group; the per-mentee one sits below its layout.
+    const coPubs = join(process.cwd(), "app/(public)/scholars/[slug]/co-pubs");
+    expect(existsSync(join(coPubs, "loading.tsx"))).toBe(false);
+    expect(existsSync(join(coPubs, "(rollup)/loading.tsx"))).toBe(true);
+    expect(existsSync(join(coPubs, "[menteeCwid]/loading.tsx"))).toBe(true);
   });
 
   it("topic scholars: unknown topic 404s; a known topic renders children", async () => {
