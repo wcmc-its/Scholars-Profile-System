@@ -21,6 +21,9 @@ RUN npm ci
 # ---- Build ------------------------------------------------------------------
 FROM base AS build
 ENV NEXT_TELEMETRY_DISABLED=1
+# Next 16's in-build TypeScript pass OOMs at Node's default heap on an 8 GB
+# Docker Desktop VM (~2 GB); 4 GB matches what the 16 GB CI runner gets anyway.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 # Version-skew protection. NEXT_DEPLOYMENT_ID (the deploying commit SHA, passed
 # as a build-arg by the Deploy workflow) is inlined by Next into both the client
 # and server bundles. When a browser loaded from an older build makes a
