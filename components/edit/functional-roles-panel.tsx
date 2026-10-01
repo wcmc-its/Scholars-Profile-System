@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import {
   ALL_SCOPE,
   defaultScopes,
+  isDashboardScope,
   FUNCTIONAL_ROLE_DESCRIPTION,
   FUNCTIONAL_ROLE_LABEL,
   FUNCTIONAL_ROLE_SCOPE_NOUN,
@@ -159,10 +160,12 @@ function mapError(code: string | undefined): string {
   }
 }
 
-/** Toggle one scope key in a draft: "*" is exclusive of every other key. */
+/** Toggle one scope key in a draft: "*" is exclusive of every other report
+ *  key; dashboard keys sit alongside it ("All reports" does not cover them). */
 export function toggleScope(draft: ReadonlyArray<string>, key: string): string[] {
   if (draft.includes(key)) return draft.filter((k) => k !== key);
-  if (key === ALL_SCOPE) return [ALL_SCOPE];
+  if (key === ALL_SCOPE) return [ALL_SCOPE, ...draft.filter(isDashboardScope)];
+  if (isDashboardScope(key)) return [...draft, key];
   return [...draft.filter((k) => k !== ALL_SCOPE), key];
 }
 

@@ -1,14 +1,15 @@
 /**
- * `/edit/coi` — the COI (conflict-of-interest) dashboard. Superuser-only, and
- * only when `EDIT_DATA_QUALITY_DASHBOARD` is on — unlike Profiles, there is no
- * comms_steward or unit Owner/Curator tier here at all, so scope is always
- * `{ all: true }` and there's nothing to resolve via `loadDataQualityScope`.
+ * `/edit/coi` — the COI (conflict-of-interest) dashboard, only when
+ * `EDIT_DATA_QUALITY_DASHBOARD` is on. Scope is always `{ all: true }`, so
+ * there's nothing to resolve via `loadDataQualityScope`.
  *
- * A prominence-sorted list of scholars with pending COI-review counts. Split
- * out of the merged Profiles page (`/edit/profiles`) so COI review — the one
- * genuinely sensitive signal in this data set — lives somewhere a
- * comms_steward or unit admin can never reach, on-screen or via a crafted
- * query param (see `gap` sanitization below and in the export route).
+ * A prominence-sorted list of scholars with pending COI-review counts. COI is
+ * public data (decision 2026-10-01): superusers, observers and content
+ * editors see it by birthright, anyone else by an ad hoc Reporting grant
+ * (`canViewDashboard`, `lib/edit/dashboard-access.ts`). The page has no
+ * actions. Two things stay superuser-only: students & alumni (no public
+ * profile) and the CSV export (a bulk scholar export). See `gap`
+ * sanitization below and in the export route.
  *
  * `force-dynamic` + `noindex`, mirroring the rest of `/edit/*`.
  */
@@ -18,8 +19,8 @@ import { ConsoleShell } from "@/components/edit/console-shell";
 import { CoiRoster } from "@/components/edit/coi-roster";
 import { loadDataQualityFacets, loadDataQualityRoster, parseDataQualityParams } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
-import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -41,9 +42,9 @@ export default async function EditCoiPage({
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/coi");
   }
-  // Superuser + flag only — a dark deployment or a non-superuser 404s like any
-  // other unbuilt surface, never revealing that the route exists.
-  if (!session.isSuperuser || !isDataQualityDashboardEnabled()) {
+  // Flag + `canViewDashboard` (superuser, observer, content editor, or an ad
+  // hoc grant) — anyone else 404s, never revealing that the route exists.
+  if (!(await canViewDashboard(session, "coi"))) {
     notFound();
   }
 
@@ -51,6 +52,9 @@ export default async function EditCoiPage({
   // Strip "no-headshot"/"no-overview" — those are Profiles-only dimensions
   // this page never renders (module doc comment on `lib/api/data-quality.ts`).
   const gap = params.gap === "has-coi" ? "has-coi" : "all";
+  // Students & alumni have no public profile: only a superuser can include
+  // them. Everyone else gets the public set (COI is public data, 2026-10-01).
+  const includeHidden = session.isSuperuser && params.includeHidden;
 
   const [roster, facets] = await Promise.all([
     loadDataQualityRoster(
@@ -60,7 +64,7 @@ export default async function EditCoiPage({
         roleCategories: params.roleCategories,
         unitValues: params.unitValues,
         gap,
-        includeHidden: params.includeHidden,
+        includeHidden,
         limit: PAGE_SIZE,
         offset: params.page * PAGE_SIZE,
       },
@@ -84,9 +88,10 @@ export default async function EditCoiPage({
         units={params.unitValues}
         q={params.q}
         gap={gap}
-        includeHidden={params.includeHidden}
+        includeHidden={includeHidden}
         page={params.page}
         pageSize={PAGE_SIZE}
+        fullAccess={session.isSuperuser}
       />
     </ConsoleShell>
   );

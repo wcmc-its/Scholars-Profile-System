@@ -29,6 +29,7 @@ export const grants = (over: Partial<ConsoleGrants> = {}): ConsoleGrants => ({
   reportableUnitCount: 0,
   viewerCanViewUsage: false,
   reportAccessCount: 0,
+  dashboards: new Set(),
   ...over,
 });
 
@@ -125,10 +126,11 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "slugs",
       "usage",
       "orcidCoverage",
+      "coi",
     ],
     pins:
-      "2026-10-01 — an observer sees every queue and dashboard read-only; " +
-      "COI, Activity and ETL status stay superuser-only (role-matrix row 11 open)",
+      "2026-10-01 — an observer sees every queue and dashboard read-only, COI " +
+      "included (public data); Activity and ETL status stay superuser-only",
   },
   {
     name: "content editor (synthetic steward read view)",
@@ -153,8 +155,19 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "slugs",
       "usage",
       "orcidCoverage",
+      "coi",
     ],
     pins: "2026-10-01 — a content editor reads what an observer reads; its writes are allowlisted",
+  },
+  {
+    name: "ad hoc dashboard grantee (every dash: scope, no other role)",
+    session: sess(),
+    grants: grants({
+      dashboards: new Set(["coi", "usage", "orcid-coverage", "etl-status", "activity", "data-sharing"]),
+    }),
+    // A dashboards-only grant is not report access: no Reports tab.
+    expect: ["coi", "usage", "orcidCoverage", "etlStatus", "activity", "dataSharing"],
+    pins: "2026-10-01 — dashboards granted ad hoc on the Reporting role, one dash: scope each",
   },
   {
     name: "pure honors_curator",

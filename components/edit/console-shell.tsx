@@ -115,6 +115,9 @@ export async function ConsoleShell({
           slugsTab={tabs.slugs}
           usageTab={tabs.usage}
           orcidCoverageTab={tabs.orcidCoverage}
+          coiTab={tabs.coi}
+          activityTab={tabs.activity}
+          etlStatusTab={tabs.etlStatus}
           viewerIsDeveloper={session.isDeveloper === true}
         />
       </ConsoleTopBar>

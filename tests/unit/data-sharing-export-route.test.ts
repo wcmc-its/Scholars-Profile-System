@@ -48,9 +48,11 @@ const {
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockSession }));
 vi.mock("@/lib/edit/data-sharing-dashboard", () => ({
   isDataSharingDashboardEnabled: mockEnabled,
-  canViewDataSharingDashboard: mockCanView,
   parseDataSharingParams: mockParseDataSharingParams,
 }));
+// The route's view gate is the shared dashboard gate (birthright OR an ad hoc
+// `dash:data-sharing` grant, `lib/edit/dashboard-access.ts`).
+vi.mock("@/lib/edit/dashboard-access", () => ({ canViewDashboard: mockCanView }));
 vi.mock("@/lib/api/data-sharing-report", () => ({
   loadDatasetLinkRows: mockLoadRows,
   capDatasetLinkRows: mockCap,

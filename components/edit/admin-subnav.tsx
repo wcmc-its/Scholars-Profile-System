@@ -151,6 +151,9 @@ export function AdminSubnav({
   unitsTab = false,
   usageTab = false,
   orcidCoverageTab = false,
+  coiTab = false,
+  activityTab = false,
+  etlStatusTab = false,
   reportsTab = false,
   newsTab = false,
   pendingNews = null,
@@ -224,6 +227,14 @@ export function AdminSubnav({
   /** Show the "ORCID coverage" tab (`/edit/orcid-coverage`) — same audience
    *  and gate as `usageTab` (`canViewUsage`). Default `false`. */
   orcidCoverageTab?: boolean;
+  /** Show COI / Activity / ETL status to a viewer who is NOT a superuser: an
+   *  observer or content editor (COI), or an ad hoc dashboard grantee
+   *  (`lib/edit/dashboard-access.ts`). Mirrors the matching
+   *  `TAB_PREDICATES`. Superusers already get them via `superuserSurfaces`.
+   *  Default `false`. */
+  coiTab?: boolean;
+  activityTab?: boolean;
+  etlStatusTab?: boolean;
   /** Show the "Reports" tab (`/edit/reports`, the Cancer Center reports console)
    *  to a non-superuser unit admin (owner/curator) with at least one reportable
    *  unit. Superusers already get it via `superuserSurfaces`; this is the
@@ -370,19 +381,23 @@ export function AdminSubnav({
         label: "Reports",
         activeIsLink: true,
       },
-      // Superuser + flag only, no grant escape hatch — the one tab a unit
-      // admin can never earn (`lib/edit/console-tabs.server.ts`'s `coi`
-      // predicate mirrors this exactly).
-      { show: superuserSurfaces && isDataQualityDashboardEnabled(), id: "coi", href: "/edit/coi", label: "COI" },
+      // COI is public data (decision 2026-10-01): `coiTab` admits observers,
+      // content editors and ad hoc grantees (the `coi` predicate).
+      {
+        show: (superuserSurfaces || coiTab) && isDataQualityDashboardEnabled(),
+        id: "coi",
+        href: "/edit/coi",
+        label: "COI",
+      },
       {
         show: dataSharingTab !== null && dataSharingTab !== undefined,
         id: "data-sharing",
         href: "/edit/data-sharing",
         label: "Data sharing",
       },
-      // Fleet-wide edit-activity oversight. Superuser-only; no separate flag — the
-      // superuser gate on the page IS the control.
-      { show: superuserSurfaces, id: "activity", href: "/edit/activity", label: "Activity" },
+      // Fleet-wide edit-activity oversight. Superuser, or an ad hoc grantee
+      // (`activityTab`); no separate flag.
+      { show: superuserSurfaces || activityTab, id: "activity", href: "/edit/activity", label: "Activity" },
       // Wider audience than the other superuser tabs: a superuser OR any unit admin
       // (via `usageTab`, set when `canViewUsage` passes).
       { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
@@ -392,9 +407,14 @@ export function AdminSubnav({
         href: "/edit/orcid-coverage",
         label: "ORCID coverage",
       },
-      // Read-only ETL health board. Superuser-only; no separate flag — same
-      // rationale as Activity above, the superuser gate on the page IS the control.
-      { show: superuserSurfaces, id: "etl-status", href: "/edit/etl-status", label: "ETL status" },
+      // Read-only ETL health board. Superuser, or an ad hoc grantee
+      // (`etlStatusTab`); no separate flag.
+      {
+        show: superuserSurfaces || etlStatusTab,
+        id: "etl-status",
+        href: "/edit/etl-status",
+        label: "ETL status",
+      },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
       // `coresTab` is the comms_steward escape hatch (2026-08-26, decision #6).
