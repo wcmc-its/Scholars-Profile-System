@@ -309,14 +309,21 @@ export type ReporterPublication = {
  * is chunked (the criteria array is bounded) and each chunk is offset-paginated;
  * the caller unions the returned PMIDs into a candidate's `grantPmids` Set, so
  * cross-chunk duplicates are harmless. Returns one row per (core, pmid) linkage.
- * A chunk over RePORTER's 9,999-offset cap falls back to per-core fetches, and a
- * core that alone exceeds the cap is skipped with a warning (#2592).
+ * A chunk over RePORTER's 9,999-offset cap falls back to per-core fetches (#2592).
+ * A core that alone exceeds the cap (e.g. a ~33k-publication cancer-center P30)
+ * is re-fetched restricted to `restrictToPmids` — RePORTER ANDs `pmids` with
+ * `core_project_nums`, and it offers no date/year criterion to window on — so the
+ * rows returned for that core are exactly its linkages to those PMIDs, which is
+ * all the PMID-overlap count needs. Without `restrictToPmids` such a core is
+ * skipped with a warning.
  */
 export async function fetchPublicationsByCoreProjectNums(
   coreNums: string[],
+  restrictToPmids?: Iterable<number>,
 ): Promise<ReporterPublication[]> {
   const cores = coreNums.filter((c) => !!c && c.trim().length > 0);
   if (cores.length === 0) return [];
+  const pmids = [...new Set(restrictToPmids ?? [])].filter((p) => p > 0);
   const out: ReporterPublication[] = [];
 
   for (let i = 0; i < cores.length; i += CORE_NUMS_BATCH) {
@@ -326,11 +333,13 @@ export async function fetchPublicationsByCoreProjectNums(
       out.push(...rows);
       continue;
     }
-    // #2592 — the batch overflows the offset cap: re-fetch core by core and
-    // skip only a core that overflows on its own, so the candidate is still
-    // evaluated on its remaining cores.
+    // #2592 — the batch overflows the offset cap: re-fetch core by core; a core
+    // that overflows on its own is re-fetched restricted to `pmids`, and skipped
+    // only if that is impossible, so the candidate is still evaluated.
     for (const core of batch) {
-      const coreRows = batch.length > 1 ? await fetchPublicationPages([core]) : null;
+      const coreRows =
+        (batch.length > 1 ? await fetchPublicationPages([core]) : null) ??
+        (await fetchCorePublicationsForPmids(core, pmids));
       if (coreRows) {
         out.push(...coreRows);
       } else {
@@ -344,13 +353,36 @@ export async function fetchPublicationsByCoreProjectNums(
   return out;
 }
 
+/** PMIDs per `pmids`-restricted request for an over-cap core. Each slice
+ *  returns at most one row per (pmid, linking appl_id), far under the cap. */
+const PMIDS_BATCH = 500;
+
+/** #2592 — an over-cap core's linkages to `pmids` only, sliced so each request
+ *  stays under the offset cap; null when there are no PMIDs to restrict to or a
+ *  slice still overflows (the caller then skips the core). */
+async function fetchCorePublicationsForPmids(
+  core: string,
+  pmids: number[],
+): Promise<ReporterPublication[] | null> {
+  if (pmids.length === 0) return null;
+  const out: ReporterPublication[] = [];
+  for (let i = 0; i < pmids.length; i += PMIDS_BATCH) {
+    const rows = await fetchPublicationPages([core], pmids.slice(i, i + PMIDS_BATCH));
+    if (!rows) return null;
+    out.push(...rows);
+  }
+  return out;
+}
+
 /** RePORTER rejects offsets past this, so a larger result set can't be paged. */
 const REPORTER_OFFSET_CAP = 9999;
 
-/** Every publication row linked to `cores`, or null when the result set exceeds
- *  the 9,999-offset cap (detected from the first page's total, before paging). */
+/** Every publication row linked to `cores` (and, when given, to one of `pmids`),
+ *  or null when the result set exceeds the 9,999-offset cap (detected from the
+ *  first page's total, before paging). */
 async function fetchPublicationPages(
   cores: string[],
+  pmids?: number[],
 ): Promise<ReporterPublication[] | null> {
   const out: ReporterPublication[] = [];
   let offset = 0;
@@ -360,7 +392,7 @@ async function fetchPublicationPages(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        criteria: { core_project_nums: cores },
+        criteria: pmids ? { core_project_nums: cores, pmids } : { core_project_nums: cores },
         limit: PAGE_LIMIT,
         offset,
       }),
