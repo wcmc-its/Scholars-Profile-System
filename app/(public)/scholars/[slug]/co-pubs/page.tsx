@@ -12,7 +12,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { resolveMentor } from "./resolve-mentor";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
   menteeProgramLabel,
@@ -32,30 +32,8 @@ export const dynamicParams = true;
 
 type Params = { slug: string };
 
-/**
- * #2268 — this anonymous child route publishes the mentor's NAME in `<title>`,
- * the meta description and the `<h1>`, so it carries the same two-layer #536
- * carve as the parent profile route (`lib/url-resolver.ts`): `publicRoleWhere()`
- * in the where-clause, then a fail-closed `isPubliclyDisplayed` on the RAW
- * column, because Prisma cannot express the `doctoral_student*` prefix. Without
- * it `/scholars/{hidden-slug}` 404s while this route still serves the name.
- */
-async function resolveMentor(slug: string) {
-  const mentor = await prisma.scholar.findFirst({
-    where: { slug, deletedAt: null, status: "active", ...publicRoleWhere() },
-    select: {
-      cwid: true,
-      slug: true,
-      preferredName: true,
-      postnominal: true,
-      roleCategory: true,
-    },
-  });
-  return mentor && isPubliclyDisplayed(mentor.roleCategory) ? mentor : null;
-}
-
 // #2599 — `roleCategory` is already selected by `resolveMentor` (it feeds the
-// fail-closed `isPubliclyDisplayed` link gate above), and it is the only shape
+// fail-closed `isPubliclyDisplayed` gate in ./resolve-mentor), and it is the only shape
 // this wrapper is ever called with. Threading it through keeps the enrolled-student
 // postnominal suppression on this anonymous surface, where the mentor's name is
 // published in `<title>`, the meta description and the `<h1>`.

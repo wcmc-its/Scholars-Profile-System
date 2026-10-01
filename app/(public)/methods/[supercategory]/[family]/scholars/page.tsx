@@ -1,10 +1,10 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
-  getFamily,
   getMethodScholars,
   type MethodScholarRole,
 } from "@/lib/api/methods";
+import { loadFamily } from "./load-family";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
@@ -63,7 +63,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   if (!isMethodPagesEnabled()) return { title: "Method not found" };
   const { supercategory, family } = await params;
-  const resolved = await getFamily(supercategory, family).catch(() => null);
+  const resolved = await loadFamily(supercategory, family).catch(() => null);
   if (!resolved) return { title: "Method not found" };
   return {
     title: `Scholars using ${resolved.familyLabel} — Scholars at WCM`,
@@ -85,7 +85,7 @@ export default async function FamilyScholarsPage({
   const { supercategory, family } = await params;
   const sp = await searchParams;
 
-  const resolved = await getFamily(supercategory, family);
+  const resolved = await loadFamily(supercategory, family);
   if (!resolved) notFound();
 
   const role = parseRole(typeof sp.role === "string" ? sp.role : undefined);
