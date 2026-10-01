@@ -12,7 +12,8 @@
  * Gate order (§7/§9):
  *   (a) COMMS_STEWARD_ENABLED off  => 404 (whole surface dark — never reveal it)
  *   (b) no session                 => 401
- *   (c) not comms_steward/superuser => 403 (`not_comms_steward`, denial logged)
+ *   (c) not comms_steward/superuser/content editor => 403 (`not_comms_steward`, denial logged;
+ *       `authorizeMethodsAction`)
  *
  * A read has no CSRF surface and a cross-origin read cannot see the response, so
  * the session + role re-check is the whole gate (mirrors GET /api/edit/slugs).
@@ -22,7 +23,7 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { isCommsStewardEnabled } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { authorizeCommsStewardAction, logEditDenial } from "@/lib/edit/authz";
+import { authorizeMethodsAction, logEditDenial } from "@/lib/edit/authz";
 import { apiError } from "@/lib/api/error-response";
 import { editError, editOk } from "@/lib/edit/request";
 import {
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // (c) comms_steward OR superuser (§3 superset). Denials logged like every
   // /edit predicate; a non-steward gets 403 here (§13 — 403 on the API).
-  const authz = authorizeCommsStewardAction(session);
+  const authz = authorizeMethodsAction(session);
   if (!authz.ok) {
     logEditDenial({
       actorCwid: session.cwid,

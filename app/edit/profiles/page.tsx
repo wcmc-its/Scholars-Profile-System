@@ -165,7 +165,10 @@ export default async function EditScholarsPage({
         ranks={params.ranks}
         page={params.page}
         pageSize={PAGE_SIZE}
-        canImpersonate={impersonationEnabled() && (session.isSuperuser || session.isObserver === true)}
+        canImpersonate={
+          impersonationEnabled() &&
+          (session.isSuperuser || session.isObserver === true || session.isContentEditor === true)
+        }
         viewerCwid={session.cwid}
       />
     </ConsoleShell>

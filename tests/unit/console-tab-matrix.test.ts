@@ -74,6 +74,7 @@ function mergeSessions(a: EditSession, b: EditSession): EditSession {
     isDeveloper: a.isDeveloper === true || b.isDeveloper === true,
     isDataSharingViewer: a.isDataSharingViewer === true || b.isDataSharingViewer === true,
     isObserver: a.isObserver === true || b.isObserver === true,
+    isContentEditor: a.isContentEditor === true || b.isContentEditor === true,
   };
 }
 

@@ -607,6 +607,9 @@ export type EditPageProps = {
     unitKind: "department" | "division" | "center" | "institution";
     unitName: string;
   } | null;
+  /** Overrides the header's role pill text (`EditShell`'s `actorLabel`): a
+   *  content editor edits in unit-admin mode with no conferring unit. */
+  actorLabel?: string;
   /** Self mode only: whether to mount the live ReCiter pending-articles nudge
    *  (`SELF_EDIT_RECITER_PENDING_HINT`). True only for a genuine, non-impersonating
    *  self viewer with the flag on; when true the Publications card + Home teaser
@@ -744,6 +747,7 @@ export function EditPage({
   proxyEditors = null,
   unitAdminEditors = null,
   unitAdminBanner = null,
+  actorLabel,
   reciterPendingEnabled = false,
   orcidTabEnabled = false,
   profileLinksEnabled = false,
@@ -984,6 +988,7 @@ export function EditPage({
       profilesNavVisible={profilesNavVisible}
       consoleNav={consoleNav}
       unitAdmin={unitAdminBanner ?? undefined}
+      actorLabel={actorLabel}
     >
       {renderPanel(
         active.key,

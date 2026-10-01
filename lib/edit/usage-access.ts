@@ -18,7 +18,12 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 export type UsageAccessClient = Pick<PrismaClient, "unitAdmin">;
 
 /** The session fields the check reads (structural — decoupled from EditSession). */
-export type UsageViewer = { cwid: string; isSuperuser: boolean; isObserver?: boolean };
+export type UsageViewer = {
+  cwid: string;
+  isSuperuser: boolean;
+  isObserver?: boolean;
+  isContentEditor?: boolean;
+};
 
 /** The grant kinds that confer the WCM-wide view — every org-unit kind, never
  *  `institution`. An allowlist (not `not: "institution"`) so a future kind is
@@ -34,9 +39,11 @@ export async function canViewUsage(
   viewer: UsageViewer,
   db: UsageAccessClient,
 ): Promise<boolean> {
-  // An observer (read-only console view, `lib/auth/observer.ts`) sees every
-  // dashboard, these included (decision 2026-10-01).
-  if (viewer.isSuperuser || viewer.isObserver === true) return true;
+  // An observer (read-only console view, `lib/auth/observer.ts`) and a content
+  // editor see every dashboard, these included (decisions 2026-10-01).
+  if (viewer.isSuperuser || viewer.isObserver === true || viewer.isContentEditor === true) {
+    return true;
+  }
   const grant = await db.unitAdmin.findFirst({
     where: { cwid: viewer.cwid, entityType: { in: [...USAGE_GRANT_KINDS] } },
     select: { cwid: true },

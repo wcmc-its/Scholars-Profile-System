@@ -131,6 +131,32 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "COI, Activity and ETL status stay superuser-only (role-matrix row 11 open)",
   },
   {
+    name: "content editor (synthetic steward read view)",
+    session: sess({ isCommsSteward: true, isContentEditor: true }),
+    // `canViewUsage` admits a content editor, so the real loader returns true.
+    grants: grants({ viewerCanViewUsage: true }),
+    // The observer's set: titles and roleVocabulary stay visible (read-only:
+    // no pin control, an inert roster), so making an observer a content
+    // editor never takes a tab away (I3).
+    expect: [
+      "profiles",
+      "units",
+      "news",
+      "methods",
+      "reports",
+      "dataSharing",
+      "cores",
+      "roleVocabulary",
+      "titles",
+      "honors",
+      "slugRequests",
+      "slugs",
+      "usage",
+      "orcidCoverage",
+    ],
+    pins: "2026-10-01 — a content editor reads what an observer reads; its writes are allowlisted",
+  },
+  {
     name: "pure honors_curator",
     session: sess({ isHonorsCurator: true }),
     grants: grants(),

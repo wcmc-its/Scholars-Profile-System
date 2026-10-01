@@ -24,6 +24,7 @@
  * `SessionData`, which needs neither `next/headers` nor LDAP.
  */
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isContentEditor } from "@/lib/auth/content-editor";
 import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
@@ -31,7 +32,7 @@ import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isObserver } from "@/lib/auth/observer";
 import { getSession } from "@/lib/auth/session-server";
 import { type SessionData, nowSeconds } from "@/lib/auth/session";
-import { withObserverView } from "@/lib/auth/observer-view";
+import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
 
 /**
@@ -89,7 +90,7 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
   const cwid = getEffectiveCwid(session);
   // #1514 — same concurrent resolve as getEditSession: independent fail-closed
   // checks, one directory round-trip of wall-clock instead of five.
-  const [su, cs, dev, hc, dsv, cvg, obs] = await Promise.all([
+  const [su, cs, dev, hc, dsv, cvg, obs, ce] = await Promise.all([
     isSuperuser(cwid),
     isCommsSteward(cwid),
     isDeveloper(cwid),
@@ -97,29 +98,36 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
     isDataSharingViewer(cwid),
     isCvGenerator(cwid),
     isObserver(cwid),
+    isContentEditor(cwid),
   ]);
+  // Same order as getEditSession: content editor first, then observer.
   return withObserverView(
-    {
-      cwid,
-      isSuperuser: su,
-      isCommsSteward: cs,
-      isDeveloper: dev,
-      isHonorsCurator: hc,
-      isDataSharingViewer: dsv,
-      isCvGenerator: cvg,
-    },
+    withContentEditorView(
+      {
+        cwid,
+        isSuperuser: su,
+        isCommsSteward: cs,
+        isDeveloper: dev,
+        isHonorsCurator: hc,
+        isDataSharingViewer: dsv,
+        isCvGenerator: cvg,
+      },
+      ce,
+    ),
     obs,
   );
 }
 
 /**
  * Initiator gate (R1): who may *start* impersonating — a superuser, or an
- * `observer` (read-only: `readEditRequest` refuses every write under an overlay
- * a non-superuser started). Always evaluated against the REAL `session.cwid`,
- * never the effective cwid (threat T1).
+ * `observer` / `content_editor` (read-only: `readEditRequest` refuses every
+ * write under an overlay a non-superuser started). Always evaluated against
+ * the REAL `session.cwid`, never the effective cwid (threat T1).
  */
 export async function canImpersonate(cwid: string): Promise<boolean> {
-  return (await isSuperuser(cwid)) || (await isObserver(cwid));
+  return (
+    (await isSuperuser(cwid)) || (await isObserver(cwid)) || (await isContentEditor(cwid))
+  );
 }
 
 /**

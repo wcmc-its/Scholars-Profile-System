@@ -618,6 +618,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "ITS:Library:Scholars/observer-role",
               },
               {
+                "Name": "CONTENT_EDITOR_ENABLED",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_CONTENT_EDITOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/content-editor-role",
+              },
+              {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",
                 "Value": "on",
               },
@@ -5192,6 +5200,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_OBSERVER_GROUP_CN",
                 "Value": "ITS:Library:Scholars/observer-role",
+              },
+              {
+                "Name": "CONTENT_EDITOR_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_CONTENT_EDITOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/content-editor-role",
               },
               {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",

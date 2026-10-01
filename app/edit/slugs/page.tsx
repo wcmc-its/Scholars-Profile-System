@@ -109,11 +109,11 @@ export default async function EditSlugsPage({
     redirect("/api/auth/saml/login?return=/edit/slugs");
   }
   // Superuser re-check on every GET (B2). Emits the `edit_authz_denied` line.
-  // An observer reads the page (decision 2026-10-01) with every write control
-  // hidden; the write routes stay superuser-only regardless.
+  // An observer or content editor reads the page (decision 2026-10-01) with
+  // every write control hidden; the write routes stay superuser-only regardless.
   const readOnly = !session.isSuperuser;
   const denial =
-    session.isObserver === true
+    session.isObserver === true || session.isContentEditor === true
       ? null
       : requireSuperuserGet({ session, path: "/edit/slugs", targetId: "slug-registry" });
   if (denial !== null) {

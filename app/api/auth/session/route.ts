@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
+import { isContentEditor } from "@/lib/auth/content-editor";
 import { isObserver } from "@/lib/auth/observer";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { isDeveloper } from "@/lib/auth/development";
@@ -136,7 +137,10 @@ export async function GET(): Promise<NextResponse> {
   // advertising the switcher entry.
   const featureEnabled = process.env.IMPERSONATION_ENABLED === "true";
   const canImpersonate =
-    featureEnabled && (superuser || (await isObserver(session.cwid).catch(() => false)));
+    featureEnabled &&
+    (superuser ||
+      (await isObserver(session.cwid).catch(() => false)) ||
+      (await isContentEditor(session.cwid).catch(() => false)));
 
   // Role-aware console entry points for the account-menu dropdown
   // (`lib/auth/console-links.ts`, role-aware-navigation-entry-points-spec.md).
@@ -155,10 +159,12 @@ export async function GET(): Promise<NextResponse> {
       managesUnits: false,
     });
   } else {
-    // An observer gets the steward's console entry (their read-only view).
+    // An observer or content editor gets the steward's console entry (their
+    // steward-shaped read view).
     const commsSteward =
       (await isCommsSteward(session.cwid).catch(() => false)) ||
-      (await isObserver(session.cwid).catch(() => false));
+      (await isObserver(session.cwid).catch(() => false)) ||
+      (await isContentEditor(session.cwid).catch(() => false));
     const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
     const managesUnits = manageable !== null && manageable.total > 0;
     consoleLinks = buildConsoleLinks({

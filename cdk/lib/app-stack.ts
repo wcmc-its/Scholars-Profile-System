@@ -1906,6 +1906,17 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         OBSERVER_ENABLED: "on",
         SCHOLARS_OBSERVER_GROUP_CN: "ITS:Library:Scholars/observer-role",
+        // `content_editor` role (2026-10-01) -- edits profile and unit content
+        // site-wide (bios, Highlights, one-profile hides, units, centers,
+        // cores, news queues, Method Families) with steward-shaped reads, but
+        // never grants access, pins titles, takes down, or edits the role
+        // vocabulary (lib/auth/content-editor.ts). Staging first; prod stays
+        // off until the staging check passes.
+        //   CONTENT_EDITOR_ENABLED -- master kill switch; not "on" => dormant.
+        //   SCHOLARS_CONTENT_EDITOR_GROUP_CN -- ED group (create in MARIA).
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        CONTENT_EDITOR_ENABLED: envConfig.envName === "prod" ? "off" : "on",
+        SCHOLARS_CONTENT_EDITOR_GROUP_CN: "ITS:Library:Scholars/content-editor-role",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"

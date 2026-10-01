@@ -50,6 +50,14 @@ vi.mock("@/lib/edit/revalidation", () => ({
 vi.mock("@/lib/edit/search-suppression", () => ({
   reflectSearchSuppression: vi.fn(),
 }));
+// The content-editor leg resolves whose profile a hide is on, and whether that
+// scholar's proxy applied it.
+const { mockFindOwner, mockIsGrantedProxy } = vi.hoisted(() => ({
+  mockFindOwner: vi.fn(),
+  mockIsGrantedProxy: vi.fn(),
+}));
+vi.mock("@/lib/edit/validators", () => ({ findSuppressibleEntityOwner: mockFindOwner }));
+vi.mock("@/lib/edit/proxy-authz", () => ({ isGrantedProxy: mockIsGrantedProxy }));
 
 import { POST } from "@/app/api/edit/revoke/route";
 
@@ -91,6 +99,8 @@ beforeEach(() => {
   mockScholarUpdateMany.mockResolvedValue({ count: 1 });
   mockExecuteRaw.mockResolvedValue(1);
   mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
+  mockFindOwner.mockResolvedValue({ ownerCwid: "other9", title: null });
+  mockIsGrantedProxy.mockResolvedValue(false);
 });
 
 describe("POST /api/edit/revoke", () => {
@@ -177,4 +187,73 @@ describe("POST /api/edit/revoke", () => {
     expect(res.status).toBe(403);
     expect(mockTransaction).not.toHaveBeenCalled();
   });
+});
+
+describe("POST /api/edit/revoke — content editor", () => {
+  // The READ session; the write preamble strips the synthetic steward grant.
+  const CONTENT_EDITOR = {
+    cwid: "cedit1",
+    isSuperuser: false,
+    isCommsSteward: true,
+    isContentEditor: true,
+  };
+  const staffPubHide = {
+    id: "sup-9",
+    entityType: "publication",
+    entityId: "999",
+    contributorCwid: "other9",
+    createdBy: "curat1",
+    revokedAt: null,
+  };
+
+  it("lifts a staff hide of one author's publication — 200", async () => {
+    mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+    mockSuppressionFindUnique.mockResolvedValue(staffPubHide);
+    const res = await POST(post({ suppressionId: "sup-9" }));
+    expect(res.status).toBe(200);
+    expect(mockIsGrantedProxy).toHaveBeenCalledWith("curat1", "other9", expect.anything());
+  });
+
+  it("lifts a staff hide of a scholar's appointment — 200", async () => {
+    mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+    mockSuppressionFindUnique.mockResolvedValue({
+      ...staffPubHide,
+      entityType: "appointment",
+      entityId: "row-1",
+      contributorCwid: null,
+    });
+    const res = await POST(post({ suppressionId: "sup-9" }));
+    expect(res.status).toBe(200);
+    expect(mockFindOwner).toHaveBeenCalledWith("appointment", "row-1", expect.anything());
+  });
+
+  it("not the scholar's own hide — 403", async () => {
+    mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+    mockSuppressionFindUnique.mockResolvedValue({ ...staffPubHide, createdBy: "other9" });
+    const res = await POST(post({ suppressionId: "sup-9" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("not a hide the scholar's proxy applied — 403", async () => {
+    mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+    mockSuppressionFindUnique.mockResolvedValue(staffPubHide);
+    mockIsGrantedProxy.mockResolvedValue(true);
+    const res = await POST(post({ suppressionId: "sup-9" }));
+    expect(res.status).toBe(403);
+  });
+
+  for (const [name, row] of [
+    ["a whole-publication takedown", { contributorCwid: null }],
+    ["a whole-scholar hide", { entityType: "scholar", entityId: "other9", contributorCwid: null }],
+    ["a mentee hide", { entityType: "mentee", entityId: "other9:men01", contributorCwid: null }],
+  ] as const) {
+    it(`not ${name} — 403`, async () => {
+      mockGetEditSession.mockResolvedValue(CONTENT_EDITOR);
+      mockSuppressionFindUnique.mockResolvedValue({ ...staffPubHide, ...row });
+      const res = await POST(post({ suppressionId: "sup-9" }));
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+  }
 });

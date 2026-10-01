@@ -69,6 +69,8 @@ export type UnitAccessCardProps = {
    *  as a sibling of other panels on the same page (e.g. `/edit/core/[coreId]`,
    *  a flat page with no attribute rail to guarantee only one panel mounts). */
   headingId?: string;
+  /** A content editor reads the access list but never grants or removes. */
+  readOnly?: boolean;
 };
 
 const CASCADE_HINT: Record<UnitAccessCardProps["entityType"], string | null> = {
@@ -84,6 +86,7 @@ export function UnitAccessCard({
   access,
   actorCwid,
   headingId,
+  readOnly = false,
 }: UnitAccessCardProps) {
   // Defensive: the rail only mounts this panel for Owner/Superuser, where
   // `access` is non-null. A null slips through ⇒ render nothing.
@@ -272,18 +275,20 @@ export function UnitAccessCard({
                         Managed in the Enterprise Directory
                       </span>
                     )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={isSelf || edLocked || busy}
-                      title={removeTitle}
-                      onClick={() => setRevokeTarget(row)}
-                      className="text-destructive hover:text-destructive"
-                      data-testid={`unit-access-remove-${row.cwid}`}
-                    >
-                      Remove
-                    </Button>
+                    {readOnly ? null : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isSelf || edLocked || busy}
+                        title={removeTitle}
+                        onClick={() => setRevokeTarget(row)}
+                        className="text-destructive hover:text-destructive"
+                        data-testid={`unit-access-remove-${row.cwid}`}
+                      >
+                        Remove
+                      </Button>
+                    )}
                   </div>
                 </li>
               );
@@ -291,47 +296,49 @@ export function UnitAccessCard({
           </ul>
         )}
 
-        <div
-          className="bg-apollo-page border-apollo-border-strong flex flex-wrap items-center gap-2 rounded-[10px] border border-dashed px-3 py-2.5"
-          data-slot="unit-access-add"
-        >
-          <span className="text-[13px] font-medium">Grant</span>
-          <div className="min-w-[180px] flex-1">
-            <DirectoryPeopleTypeahead idPrefix="grant" value={addValue} onChange={setAddValue} />
+        {readOnly ? null : (
+          <div
+            className="bg-apollo-page border-apollo-border-strong flex flex-wrap items-center gap-2 rounded-[10px] border border-dashed px-3 py-2.5"
+            data-slot="unit-access-add"
+          >
+            <span className="text-[13px] font-medium">Grant</span>
+            <div className="min-w-[180px] flex-1">
+              <DirectoryPeopleTypeahead idPrefix="grant" value={addValue} onChange={setAddValue} />
+            </div>
+            <RadioGroup
+              value={addRole}
+              onValueChange={(v) => setAddRole(v as "owner" | "curator")}
+              aria-label="Role"
+              className="bg-apollo-surface-2 border-apollo-border flex gap-0.5 rounded-[7px] border p-0.5"
+            >
+              {(["curator", "owner"] as const).map((r) => (
+                <label
+                  key={r}
+                  className={cn(
+                    "cursor-pointer rounded-[5px] px-2.5 py-[3px] text-[13px] capitalize select-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-apollo-ring/40",
+                    addRole === r
+                      ? "text-foreground bg-white shadow-[0_1px_2px_rgba(34,30,28,0.12)]"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <RadioGroupItem value={r} className="sr-only" data-testid={`grant-role-${r}`} />
+                  {r}
+                </label>
+              ))}
+            </RadioGroup>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={grant}
+              disabled={!addValue || busy}
+              className="border-apollo-slate text-apollo-slate"
+              data-testid="unit-access-grant"
+            >
+              {busy ? "Granting…" : "Grant access"}
+            </Button>
           </div>
-          <RadioGroup
-            value={addRole}
-            onValueChange={(v) => setAddRole(v as "owner" | "curator")}
-            aria-label="Role"
-            className="bg-apollo-surface-2 border-apollo-border flex gap-0.5 rounded-[7px] border p-0.5"
-          >
-            {(["curator", "owner"] as const).map((r) => (
-              <label
-                key={r}
-                className={cn(
-                  "cursor-pointer rounded-[5px] px-2.5 py-[3px] text-[13px] capitalize select-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-apollo-ring/40",
-                  addRole === r
-                    ? "text-foreground bg-white shadow-[0_1px_2px_rgba(34,30,28,0.12)]"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <RadioGroupItem value={r} className="sr-only" data-testid={`grant-role-${r}`} />
-                {r}
-              </label>
-            ))}
-          </RadioGroup>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={grant}
-            disabled={!addValue || busy}
-            className="border-apollo-slate text-apollo-slate"
-            data-testid="unit-access-grant"
-          >
-            {busy ? "Granting…" : "Grant access"}
-          </Button>
-        </div>
+        )}
 
         {error && (
           <Alert variant="destructive">

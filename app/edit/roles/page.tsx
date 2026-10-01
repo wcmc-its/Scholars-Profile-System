@@ -61,6 +61,10 @@ export default async function RoleVocabularyPage() {
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
   const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
+  // Observers and content editors read the vocabulary but never change it (the
+  // write route is steward-only): the roster renders `inert`, like
+  // cv_generator's editor, so its controls can't be reached.
+  const viewOnly = session.isObserver === true || session.isContentEditor === true;
 
   return (
     <ConsoleShell
@@ -69,19 +73,31 @@ export default async function RoleVocabularyPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <OrgUnitRoleRoster
-        roles={roster}
-        intro={
-          <div className="flex flex-col gap-1.5">
-            <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Role vocabulary</h1>
-            <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
-              Leadership and membership role labels for each unit kind. Renaming a label changes
-              what every current holder&rsquo;s role reads on their profile and the unit page. Order
-              and &ldquo;profile title&rdquo; only affect display.
-            </p>
-          </div>
-        }
-      />
+      {viewOnly && !session.isObserver ? (
+        <p
+          role="note"
+          data-testid="role-vocabulary-view-only"
+          className="border-border bg-muted text-muted-foreground mb-6 rounded-md border px-4 py-2 text-sm"
+        >
+          <strong className="text-foreground">View only.</strong> Role names are set by
+          communications stewards.
+        </p>
+      ) : null}
+      <div inert={viewOnly || undefined} data-testid="role-vocabulary-roster">
+        <OrgUnitRoleRoster
+          roles={roster}
+          intro={
+            <div className="flex flex-col gap-1.5">
+              <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Role vocabulary</h1>
+              <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
+                Leadership and membership role labels for each unit kind. Renaming a label changes
+                what every current holder&rsquo;s role reads on their profile and the unit page.
+                Order and &ldquo;profile title&rdquo; only affect display.
+              </p>
+            </div>
+          }
+        />
+      </div>
     </ConsoleShell>
   );
 }

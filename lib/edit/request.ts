@@ -16,7 +16,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { nowSeconds } from "@/lib/auth/session";
 import { getSession } from "@/lib/auth/session-server";
-import { stripObserverView } from "@/lib/auth/observer-view";
+import { stripContentEditorView, stripObserverView } from "@/lib/auth/observer-view";
 import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
 import {
   getEffectiveEditSession,
@@ -240,7 +240,9 @@ export async function resolveEditIdentity(): Promise<EditIdentity | null> {
  * The identity a WRITE authorizes against — {@link resolveEditIdentity} with the
  * two write-only refusals every mutating `/api/edit/*` handler owes:
  *   - the observer's synthetic steward grant is stripped (`stripObserverView`),
- *     so a write is authorized by the person's OWN roles only;
+ *     so a write is authorized by the person's OWN roles only; so is the
+ *     content editor's (`stripContentEditorView`), which keeps
+ *     `isContentEditor` for the write predicates that allow it;
  *   - under a "View as" overlay, `IMPERSONATION_READONLY` or an initiator who is
  *     not a superuser (i.e. an observer, `canImpersonate`) refuses the write.
  * `readEditRequest` calls this; a write route that reads its own body calls it
@@ -257,7 +259,10 @@ export async function resolveEditIdentityForWrite(): Promise<
   ) {
     return { ok: false, response: editError(403, "impersonation_readonly") };
   }
-  return { ok: true, id: { ...id, session: stripObserverView(id.session) } };
+  return {
+    ok: true,
+    id: { ...id, session: stripContentEditorView(stripObserverView(id.session)) },
+  };
 }
 
 /**

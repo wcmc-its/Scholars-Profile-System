@@ -33,7 +33,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
   const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
-  if (!session.isSuperuser && session.isCommsSteward !== true) {
+  // A content editor works the news queues too (`lib/auth/content-editor.ts`).
+  if (
+    !session.isSuperuser &&
+    session.isCommsSteward !== true &&
+    session.isContentEditor !== true
+  ) {
     return new NextResponse(null, { status: 403 });
   }
 
