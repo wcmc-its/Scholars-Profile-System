@@ -115,6 +115,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const q = (searchParams.get("q") ?? "").trim();
   const kindFilter = parseKind(searchParams.get("kind"));
 
+  // A unit filter ("Org unit roles", or one kind) narrows the scholar page to
+  // grant holders IN the query, before `take`. Filtering only in memory after a
+  // 50-row alphabetical page dropped every grant holder past row 50 — "Org unit
+  // roles" with a short query came back near-empty. The in-memory check below
+  // still applies (it filters on the TOP grant's kind, a subset of this).
+  const unitScope =
+    kindFilter === "all" || kindFilter === "scholar"
+      ? null
+      : await db.read.unitAdmin
+          .findMany({
+            where: {
+              entityType:
+                kindFilter === "unit"
+                  ? { in: ["department", "division", "center", "core", "institution"] }
+                  : kindFilter,
+            },
+            select: { cwid: true },
+            distinct: ["cwid"],
+          })
+          .then((rows) => rows.map((r) => r.cwid))
+          .catch(() => [] as string[]);
+
   // Candidate scholars: non-departed, name/cwid search — the query is tokenized
   // on whitespace and AND'd (`buildScholarNameClauses`), so "First Last" matches
   // regardless of a stored middle name; still `contains`, case-insensitive by the
@@ -124,6 +146,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .findMany({
       where: {
         deletedAt: null,
+        ...(unitScope ? { cwid: { in: unitScope } } : {}),
         ...(q ? { AND: buildScholarNameClauses(q) } : {}),
       },
       select: {
