@@ -33,7 +33,7 @@ import { isObserver } from "@/lib/auth/observer";
 import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
-import { isGroupMember } from "@/lib/auth/ldap-group";
+import { groupMembersAmong, isGroupMember } from "@/lib/auth/ldap-group";
 
 /**
  * B01 identity (`cwid`) paired with the live authorization verdicts:
@@ -147,6 +147,24 @@ export const isSuperuser = cache(async (cwid: string): Promise<boolean> => {
 
   return isGroupMember(groupCn, cwid, (reason) => logCheckFailed(cwid, reason));
 });
+
+/**
+ * The superusers among `cwids` — {@link isSuperuser} for a list, on one LDAPS
+ * connection (`groupMembersAmong`). Same allowlist-first order and the same
+ * failure mode: a CWID the directory can't answer for is not in the set.
+ */
+export async function superusersAmong(cwids: readonly string[]): Promise<Set<string>> {
+  const allow = getSuperuserAllowlist();
+  const out = new Set(cwids.filter((c) => c && allow.includes(c.toLowerCase())));
+  const { groupCn } = getSuperuserConfig();
+  const rest = cwids.filter((c) => c && !out.has(c));
+  if (!groupCn || rest.length === 0) return out;
+  const members = await groupMembersAmong(groupCn, rest, (reason) =>
+    logCheckFailed(`batch:${rest.length}`, reason),
+  );
+  for (const c of members) out.add(c);
+  return out;
+}
 
 /**
  * The current edit session: B01's identity plus the live `isSuperuser` and
