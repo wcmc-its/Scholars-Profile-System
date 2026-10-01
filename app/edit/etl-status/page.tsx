@@ -2,9 +2,10 @@
  * `/edit/etl-status` — the state of every automatic data import, in language a
  * non-technical superuser can act on. Read-only; nothing on this page writes.
  *
- * Superuser-only, re-checked on every GET and never cached — the page is ABOUT
+ * Superuser, or an ad hoc grant (`canViewDashboard`, `lib/edit/dashboard-access.ts`),
+ * re-checked on every GET and never cached — the page is ABOUT
  * freshness, so serving a cached copy would be self-defeating. No feature flag:
- * the superuser gate IS the control, exactly as on `/edit/activity`.
+ * the gate IS the control, exactly as on `/edit/activity`.
  *
  * Fails soft. If `etl_run` is unreadable the loader throws and we render an
  * honest "unavailable" notice rather than 500ing (the /edit/activity pattern).
@@ -28,6 +29,7 @@ import {
   needsAttention,
 } from "@/lib/api/etl-status";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import {
@@ -673,7 +675,7 @@ export default async function EtlStatusPage({
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/etl-status");
   }
-  if (!session.isSuperuser) {
+  if (!(await canViewDashboard(session, "etl-status"))) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "etl-status",

@@ -267,6 +267,31 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     expect(ctx.scholar.cwid).toBe("other7");
   });
 
+  it("signed-in content editor on another cwid → EditPage(mode='unit-admin') + 'content editor' pill, no unit banner", async () => {
+    // The READ session a content editor carries (synthetic steward grant).
+    mockGetEditSession.mockResolvedValue({
+      cwid: "cedit1",
+      isSuperuser: false,
+      isCommsSteward: true,
+      isContentEditor: true,
+    });
+    mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
+    const result = asElement(await EditScholarPage({ params: params("other7") }));
+    expect(result.type).toBe(mockEditPage);
+    // Never the steward surface (title pin, takedown, whole-scholar hide).
+    expect(result.props.mode).toBe("unit-admin");
+    expect(result.props.actorLabel).toBe("Editing as content editor");
+    expect(result.props.unitAdminBanner).toBeNull();
+  });
+
+  it("a real comms_steward keeps the steward surface and no content-editor pill", async () => {
+    mockGetEditSession.mockResolvedValue({ cwid: "stew01", isSuperuser: false, isCommsSteward: true });
+    mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
+    const result = asElement(await EditScholarPage({ params: params("other7") }));
+    expect(result.props.mode).toBe("comms_steward");
+    expect(result.props.actorLabel).toBeUndefined();
+  });
+
   it("signed-in superuser on own cwid → EditPage(mode='self') (self path wins over the superuser path)", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     mockLoadEditContext.mockResolvedValue(fakeCtx("adm001"));

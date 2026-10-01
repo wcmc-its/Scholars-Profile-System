@@ -30,6 +30,7 @@ import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -48,7 +49,6 @@ import {
 } from "@/lib/edit/orcid-coverage";
 import { unitLabels } from "@/lib/edit/person-filter";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
-import { canViewUsage } from "@/lib/edit/usage-access";
 import { cn } from "@/lib/utils";
 
 import { CoverageTables } from "./coverage-tables";
@@ -393,7 +393,7 @@ export default async function EditOrcidCoveragePage({
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/orcid-coverage");
   }
-  if (!(await canViewUsage(session, db.read))) {
+  if (!(await canViewDashboard(session, "orcid-coverage"))) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "orcid-coverage",

@@ -31,6 +31,8 @@ export type SlugRequestRowProps = {
   request: SlugRequestQueueRow;
   /** Called with the request id after a successful approve or decline. */
   onDecided: (id: string) => void;
+  /** An observer's view: no Approve / Deny. */
+  readOnly?: boolean;
 };
 
 const DECISION_PATH = (id: string) => `/api/edit/slug-request/${id}/decision`;
@@ -40,7 +42,7 @@ const CHECK_OK =
   "bg-apollo-green-tint text-apollo-green-foreground border-apollo-green-tint-border";
 const CHECK_BLOCKED = "bg-apollo-red-tint text-destructive border-apollo-red-tint-border";
 
-export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
+export function SlugRequestRow({ request, onDecided, readOnly = false }: SlugRequestRowProps) {
   const [approving, setApproving] = React.useState(false);
   const [declining, setDeclining] = React.useState(false);
   const [declineOpen, setDeclineOpen] = React.useState(false);
@@ -171,32 +173,34 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
           </span>
           <span className="text-muted-foreground text-[12.5px]">{check.note}</span>
         </div>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setDeclineOpen((o) => !o)}
-            disabled={declining}
-            aria-expanded={declineOpen}
-            className="border-apollo-border-strong bg-apollo-surface hover:bg-apollo-surface-2 text-[13.5px]"
-            data-testid="slug-request-decline-open"
-          >
-            Deny
-          </Button>
-          <Button
-            type="button"
-            variant="apollo"
-            size="sm"
-            onClick={handleApprove}
-            disabled={approveDisabled}
-            title={warning !== null ? "This URL isn't free" : undefined}
-            className="text-[13.5px]"
-            data-testid="slug-request-approve"
-          >
-            {approving ? "Approving…" : "Approve"}
-          </Button>
-        </div>
+        {readOnly ? null : (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDeclineOpen((o) => !o)}
+              disabled={declining}
+              aria-expanded={declineOpen}
+              className="border-apollo-border-strong bg-apollo-surface hover:bg-apollo-surface-2 text-[13.5px]"
+              data-testid="slug-request-decline-open"
+            >
+              Deny
+            </Button>
+            <Button
+              type="button"
+              variant="apollo"
+              size="sm"
+              onClick={handleApprove}
+              disabled={approveDisabled}
+              title={warning !== null ? "This URL isn't free" : undefined}
+              className="text-[13.5px]"
+              data-testid="slug-request-approve"
+            >
+              {approving ? "Approving…" : "Approve"}
+            </Button>
+          </div>
+        )}
       </div>
 
       {request.reason && request.reason.trim().length > 0 && (

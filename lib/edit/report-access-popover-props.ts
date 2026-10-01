@@ -19,7 +19,7 @@ import {
  *  row, so the two never disagree. */
 export async function loadReportAccessPopoverProps(
   reportKey: string,
-  session: Pick<EditSession, "isSuperuser" | "isCommsSteward">,
+  session: Pick<EditSession, "isSuperuser" | "isCommsSteward" | "isContentEditor">,
   note?: string,
 ): Promise<ReportAccessPopoverPersonProps> {
   // A grantee with no Scholar row and no stored name gets an ED name
@@ -34,7 +34,9 @@ export async function loadReportAccessPopoverProps(
     reportKey,
     initialRows: rows.map((r) => ({ ...r, grantedAt: r.grantedAt.toISOString() })),
     scopeOptions: REPORT_ACCESS_SCOPE_OPTIONS[reportKey] ?? WHOLE_REPORT_SCOPE_OPTIONS,
-    canManage: canManageReportAccess(session),
+    // A content editor reads every report (its synthetic steward grant) but
+    // never manages access; the write route refuses it regardless.
+    canManage: canManageReportAccess(session) && session.isContentEditor !== true,
     note,
   };
 }

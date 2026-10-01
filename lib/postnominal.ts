@@ -68,7 +68,7 @@ export function normalizePostnominal(raw: string | null | undefined): string | n
  *   - `lib/api/mentoring.ts` ×2 — `getMenteesForMentor` (the MENTEE CHIP) and
  *     `getMentorMenteePair` (the per-mentee `/scholars/<slug>/co-pubs/<menteeCwid>`
  *     page and its export route).
- *   - `app/(public)/scholars/[slug]/co-pubs/page.tsx` and `.../co-pubs/export/route.ts`
+ *   - `app/(public)/scholars/[slug]/co-pubs/(rollup)/page.tsx` and `.../co-pubs/export/route.ts`
  *     — the rollup page's MENTOR name.
  *   - `lib/edit/news-queue.ts` and `lib/edit/honor-queue.ts` — the /edit queue rows.
  *   - `lib/api/profile.ts` — `publishedName` on the profile payload, which is the

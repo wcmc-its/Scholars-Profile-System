@@ -1027,7 +1027,7 @@ describe("EdgeStack", () => {
     });
 
     describe("#1944 viewerHostOrp retired -- legacy VIVO redirects now come from SITE_URL, not the viewer Host", () => {
-      // middleware.ts absoluteLocation() used to build redirect Locations from
+      // proxy.ts absoluteLocation() used to build redirect Locations from
       // the Host header, which needed #1930/#1931's viewerHostOrp forwarding
       // the viewer's Host onto the default (cached) behavior. #1935 moved that
       // logic onto the configured SITE_URL instead, so nothing on the default

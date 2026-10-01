@@ -71,6 +71,8 @@ type Props = {
   sources: HonorSourcesSummary;
   /** HONORS_RUN_NOW: offer Run now on each scraped list. */
   runNowEnabled?: boolean;
+  /** An observer's view: the queue renders, the decision controls do not. */
+  readOnly?: boolean;
 };
 
 type Tab = "pending" | "approved" | "rejected" | "self" | "sources";
@@ -296,6 +298,7 @@ export function HonorsQueue({
   userAsserted,
   sources,
   runNowEnabled = false,
+  readOnly = false,
 }: Props) {
   const router = useRouter();
   // Possible first — the redesign: land on the working queue.
@@ -691,6 +694,7 @@ export function HonorsQueue({
             onApprove={approve}
             onRejectAll={rejectAll}
             onUndo={undo}
+            readOnly={readOnly}
           />
         )
       ) : (
@@ -846,6 +850,7 @@ function PendingSections({
   onApprove,
   onRejectAll,
   onUndo,
+  readOnly,
 }: {
   sections: Section[];
   sortKey: SortKey;
@@ -858,6 +863,7 @@ function PendingSections({
   onApprove: (group: HonorQueueGroup) => void;
   onRejectAll: (group: HonorQueueGroup) => void;
   onUndo: (groupKey: string) => void;
+  readOnly: boolean;
 }) {
   const ordered = sections
     .map((s) => ({ ...s, groups: [...s.groups].sort((a, b) => compareGroups(a, b, sortKey)) }))
@@ -894,6 +900,7 @@ function PendingSections({
               onApprove={onApprove}
               onRejectAll={onRejectAll}
               onUndo={onUndo}
+              readOnly={readOnly}
             />
           ))}
         </section>
@@ -913,6 +920,7 @@ function PendingGroup({
   onApprove,
   onRejectAll,
   onUndo,
+  readOnly,
 }: {
   group: HonorQueueGroup;
   busy: string | null;
@@ -924,6 +932,7 @@ function PendingGroup({
   onApprove: (group: HonorQueueGroup) => void;
   onRejectAll: (group: HonorQueueGroup) => void;
   onUndo: (groupKey: string) => void;
+  readOnly: boolean;
 }) {
   const head = group.rows[0];
   const choosing = group.contested && !decided;
@@ -1003,7 +1012,7 @@ function PendingGroup({
         ))}
       </div>
 
-      {decided ? (
+      {readOnly ? null : decided ? (
         <button
           type="button"
           onClick={() => onUndo(group.key)}

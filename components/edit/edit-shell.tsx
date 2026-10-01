@@ -197,6 +197,9 @@ export type EditShellProps = {
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, naming the "Editing as {unit} administrator" pill. */
   unitAdmin?: { unitKind: "department" | "division" | "center" | "institution"; unitName: string };
+  /** Replaces the role pill's "Editing as …" text. A content editor reuses
+   *  unit-admin mode with no conferring unit, so it names itself here. */
+  actorLabel?: string;
   /**
    * `cv_generator` role (#2482): the header's role pill reads "View only" (and
    * drops "Changes are logged…") instead of "Editing as administrator" — true on
@@ -239,6 +242,7 @@ export function EditShell({
   hideRail = false,
   backHref,
   unitAdmin,
+  actorLabel,
   readOnly = false,
   contentInert = readOnly,
   children,
@@ -284,11 +288,12 @@ export function EditShell({
     ? null
     : readOnly
       ? "View only"
-      : mode === "proxy"
-        ? "Editing as proxy"
-        : isUnitAdmin
-          ? `Editing as ${unitAdmin?.unitName ?? "unit"} administrator`
-          : "Editing as administrator";
+      : (actorLabel ??
+        (mode === "proxy"
+          ? "Editing as proxy"
+          : isUnitAdmin
+            ? `Editing as ${unitAdmin?.unitName ?? "unit"} administrator`
+            : "Editing as administrator"));
   const metaItems: React.ReactNode[] = [];
   if (!isSelf && !readOnly) {
     metaItems.push(<span key="logged">Changes are logged to your account</span>);

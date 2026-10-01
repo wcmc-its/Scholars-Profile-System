@@ -27,6 +27,12 @@ describe("canViewUsage", () => {
     expect(c.unitAdmin.findFirst).not.toHaveBeenCalled();
   });
 
+  it("observer: true without a DB read (read-only console view)", async () => {
+    const c = client([]);
+    expect(await canViewUsage({ cwid: "obs", isSuperuser: false, isObserver: true }, c)).toBe(true);
+    expect(c.unitAdmin.findFirst).not.toHaveBeenCalled();
+  });
+
   it("any org-unit grant (department/division/center/core) qualifies", async () => {
     for (const entityType of ["department", "division", "center", "core"]) {
       expect(

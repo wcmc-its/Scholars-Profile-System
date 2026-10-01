@@ -19,8 +19,9 @@ import { DataSharingDashboard } from "@/components/edit/data-sharing-dashboard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { loadDataSharingReport } from "@/lib/api/data-sharing-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
-import { canViewDataSharingDashboard, parseDataSharingParams } from "@/lib/edit/data-sharing-dashboard";
+import { parseDataSharingParams } from "@/lib/edit/data-sharing-dashboard";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -43,7 +44,7 @@ export default async function EditDataSharingPage({
 
   // Flag + role gate, combined — a dark deployment or a non-steward viewer
   // both 404 like any other unbuilt surface (the data-quality precedent).
-  if (!canViewDataSharingDashboard(session)) {
+  if (!(await canViewDashboard(session, "data-sharing"))) {
     notFound();
   }
 

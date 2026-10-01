@@ -19,6 +19,9 @@ import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDeveloper } from "@/lib/auth/development";
+import { isContentEditor } from "@/lib/auth/content-editor";
+import { isObserver } from "@/lib/auth/observer";
+import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { GLOBAL_ROLE_HOME, resolveGlobalRole } from "@/lib/auth/global-roles";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
@@ -43,6 +46,9 @@ import {
 } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { hasAnyReportAccess } from "@/lib/edit/report-access";
+import { registryDashboards } from "@/lib/auth/functional-role-authz";
+import { isDashboardFlagOn } from "@/lib/edit/dashboard-access";
+import { DASHBOARD_HREF, DASHBOARDS } from "@/lib/edit/functional-roles";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
@@ -195,6 +201,13 @@ export default async function EditSelfPage({
     if (await hasAnyReportAccess(editCwid)) {
       redirect("/edit/reports");
     }
+    // An ad hoc dashboard grantee (a `dash:` Reporting scope) with nothing
+    // else: land on the first dashboard they hold whose flag is on.
+    const granted = await registryDashboards(editCwid);
+    const dashboard = DASHBOARDS.find((d) => isDashboardFlagOn(d) && granted.has(d));
+    if (dashboard) {
+      redirect(DASHBOARD_HREF[dashboard]);
+    }
     notFound();
   }
 
@@ -316,6 +329,11 @@ export default async function EditSelfPage({
     // gating the "Funding matcher"/"Matcha" tabs below (their only console entry
     // points from this self-edit landing page). Fail-closed like the others.
     developer,
+    // The observer / content-editor synthetic steward READ views: the console
+    // strip here must match every other console page (I1), which reads them
+    // through `getEffectiveEditSession`. Effective for the same reason as above.
+    observer,
+    contentEditor,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
@@ -329,6 +347,8 @@ export default async function EditSelfPage({
     isCommsSteward(editCwid).catch(() => false),
     isHonorsCurator(editCwid).catch(() => false),
     isDeveloper(editCwid).catch(() => false),
+    isObserver(editCwid).catch(() => false),
+    isContentEditor(editCwid).catch(() => false),
   ]);
 
   const manageableUnits = [
@@ -366,13 +386,20 @@ export default async function EditSelfPage({
   // ordinary predicates like every other tab, reachable from this landing page
   // like anywhere else.
   const hasUnitGrants = manageableUnits.length > 0;
-  const effectiveSession: EditSession = {
-    cwid: editCwid,
-    isSuperuser: canBrowseProfiles,
-    isCommsSteward: commsSteward,
-    isHonorsCurator: honorsCurator,
-    isDeveloper: developer,
-  };
+  // Same composition as `getEffectiveEditSession`: content editor, then observer.
+  const effectiveSession: EditSession = withObserverView(
+    withContentEditorView(
+      {
+        cwid: editCwid,
+        isSuperuser: canBrowseProfiles,
+        isCommsSteward: commsSteward,
+        isHonorsCurator: honorsCurator,
+        isDeveloper: developer,
+      },
+      contentEditor,
+    ),
+    observer,
+  );
   const tabs = await loadConsoleTabs(effectiveSession, db.read);
   // Nothing to render if every predicate is false — the same "no strip at all"
   // fallback the old `showConsoleNav` gate gave a plain scholar, now derived
@@ -420,7 +447,12 @@ export default async function EditSelfPage({
             pendingNews={pendingNews}
             pendingClips={pendingClips}
             usageTab={tabs.usage}
+            orcidCoverageTab={tabs.orcidCoverage}
+            coiTab={tabs.coi}
+            activityTab={tabs.activity}
+            etlStatusTab={tabs.etlStatus}
             coresTab={tabs.cores}
+            slugsTab={tabs.slugs}
             viewerIsDeveloper={developer}
           />
         ) : undefined

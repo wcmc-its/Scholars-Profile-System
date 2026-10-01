@@ -391,6 +391,24 @@ describe("POST /api/edit/overview/generate", () => {
       );
     });
 
+    // The READ session; the write preamble strips the synthetic steward and keeps
+    // isContentEditor. A content editor edits in unit-admin mode, so it gets the
+    // unit admin's selector rather than a silently ignored one.
+    it("honors a non-default version for a content editor", async () => {
+      mockGetEditSession.mockResolvedValue({
+        cwid: "cedit1",
+        isSuperuser: false,
+        isCommsSteward: true,
+        isContentEditor: true,
+      });
+      mockAuthorizeOverviewWrite.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
+      await POST(post({ entityId: "other9", params: { promptVersion: "v2" } }));
+      expect(mockGenerateDraft).toHaveBeenCalledWith(
+        FACTS,
+        expect.objectContaining({ promptVersion: "v2" }),
+      );
+    });
+
     it("honors a non-default version for an org-unit curator (unit-admin)", async () => {
       mockAuthorizeOverviewWrite.mockResolvedValue({
         ok: true,

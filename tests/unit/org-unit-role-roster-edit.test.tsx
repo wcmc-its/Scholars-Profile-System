@@ -134,3 +134,26 @@ describe("OrgUnitRoleRoster — Add role", () => {
     expect(select.value).toBe("department");
   });
 });
+
+describe("OrgUnitRoleRoster — readOnly (observer, content editor)", () => {
+  it("keeps the kind tabs usable, drops Add role, and makes the table inert", () => {
+    const { container } = render(
+      <OrgUnitRoleRoster
+        roles={[row({}), row({ key: "chair", entityType: "department", label: "Chair" })]}
+        readOnly
+      />,
+    );
+    expect(screen.queryByTestId("roles-add-trigger")).toBeNull();
+    // The tabs sit outside the inert panel, so switching kinds still works.
+    fireEvent.click(screen.getByTestId("roles-tab-department"));
+    const panel = container.querySelector('[data-testid="roles-panel-department"]');
+    expect(panel?.textContent).toContain("Chair");
+    expect(panel?.hasAttribute("inert")).toBe(true);
+  });
+
+  it("is editable by default", () => {
+    const { container } = render(<OrgUnitRoleRoster roles={[row({})]} />);
+    expect(screen.getByTestId("roles-add-trigger")).toBeTruthy();
+    expect(container.querySelector('[role="tabpanel"]')?.hasAttribute("inert")).toBe(false);
+  });
+});

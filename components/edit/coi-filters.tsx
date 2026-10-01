@@ -33,6 +33,9 @@ export type CoiFiltersProps = {
   q: string;
   gap: DataQualityGapFilter;
   includeHidden: boolean;
+  /** False for a non-superuser: students & alumni (no public profile) are
+   *  always hidden, so the checkbox is not offered. Default true. */
+  canIncludeHidden?: boolean;
 };
 
 type FilterState = {
@@ -55,7 +58,15 @@ function hrefFor(s: FilterState): string {
   return qs ? `${BASE}?${qs}` : BASE;
 }
 
-export function CoiFilters({ facets, roleCategories, units, q, gap, includeHidden }: CoiFiltersProps) {
+export function CoiFilters({
+  facets,
+  roleCategories,
+  units,
+  q,
+  gap,
+  includeHidden,
+  canIncludeHidden = true,
+}: CoiFiltersProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -189,19 +200,21 @@ export function CoiFilters({ facets, roleCategories, units, q, gap, includeHidde
         </select>
       </div>
 
-      <label className="mb-5 flex items-center gap-2 text-sm" htmlFor="coi-hidden">
-        <input
-          id="coi-hidden"
-          type="checkbox"
-          checked={hide}
-          onChange={(e) => {
-            setHide(e.target.checked);
-            apply({ hide: e.target.checked });
-          }}
-          className="size-4"
-        />
-        Hide students &amp; alumni
-      </label>
+      {canIncludeHidden && (
+        <label className="mb-5 flex items-center gap-2 text-sm" htmlFor="coi-hidden">
+          <input
+            id="coi-hidden"
+            type="checkbox"
+            checked={hide}
+            onChange={(e) => {
+              setHide(e.target.checked);
+              apply({ hide: e.target.checked });
+            }}
+            className="size-4"
+          />
+          Hide students &amp; alumni
+        </label>
+      )}
 
       <RosterFacet
         title="Person type"

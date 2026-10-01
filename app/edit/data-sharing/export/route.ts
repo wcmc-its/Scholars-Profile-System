@@ -61,9 +61,9 @@ import {
   type SectionItemsFilter,
 } from "@/lib/api/data-sharing-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import {
-  canViewDataSharingDashboard,
   isDataSharingDashboardEnabled,
   parseDataSharingParams,
 } from "@/lib/edit/data-sharing-dashboard";
@@ -120,7 +120,7 @@ export async function GET(request: Request) {
   if (!session) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
-  if (!canViewDataSharingDashboard(session)) {
+  if (!(await canViewDashboard(session, "data-sharing"))) {
     return new NextResponse("Not found", { status: 404 });
   }
 

@@ -157,6 +157,29 @@ describe("HonorsQueue redesign — Possible", () => {
     await waitFor(() => expect(within(card).getByText("Rejected")).toBeTruthy());
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ id: "s1", decision: "reject" });
   });
+
+  it("readOnly (an observer): the cards render with no decision controls", () => {
+    const { container } = render(
+      <HonorsQueue
+        pending={[single, contested]}
+        approved={[]}
+        rejected={[]}
+        userAsserted={[]}
+        sources={NO_SOURCES}
+        readOnly
+      />,
+    );
+    const card = container.querySelector('[data-slot="honor-group"]') as HTMLElement;
+    const contestedCard = container.querySelector(
+      '[data-slot="honor-group-contested"]',
+    ) as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(contestedCard).toBeTruthy();
+    for (const c of [card, contestedCard]) {
+      expect(within(c).queryByRole("button", { name: /Approve|Reject|None of these/ })).toBeNull();
+      expect(c.querySelector('[data-slot="honor-reject-reason"]')).toBeNull();
+    }
+  });
 });
 
 describe("HonorsQueue redesign — read-only tabs", () => {

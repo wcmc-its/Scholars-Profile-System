@@ -1906,6 +1906,17 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         OBSERVER_ENABLED: "on",
         SCHOLARS_OBSERVER_GROUP_CN: "ITS:Library:Scholars/observer-role",
+        // `content_editor` role (2026-10-01) -- edits profile and unit content
+        // site-wide (bios, Highlights, one-profile hides, units, centers,
+        // cores, news queues, Method Families) with steward-shaped reads, but
+        // never grants access, pins titles, takes down, or edits the role
+        // vocabulary (lib/auth/content-editor.ts). On in both envs: the staging
+        // check passed 2026-10-01.
+        //   CONTENT_EDITOR_ENABLED -- master kill switch; not "on" => dormant.
+        //   SCHOLARS_CONTENT_EDITOR_GROUP_CN -- ED group (create in MARIA).
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        CONTENT_EDITOR_ENABLED: "on",
+        SCHOLARS_CONTENT_EDITOR_GROUP_CN: "ITS:Library:Scholars/content-editor-role",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"
@@ -2706,7 +2717,7 @@ export class AppStack extends Stack {
         COAUTHOR_HIDDEN_STUDENT_CHIPS: "on", // Prod flipped 2026-07-07 (#1026 FERPA non-linked chips; operator-approved).
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
-        // middleware.ts, the /api/impersonation* routes, the /api/auth/session
+        // proxy.ts, the /api/impersonation* routes, the /api/auth/session
         // probe), so the value is the literal string "true", not "on". When
         // unset/anything-else the whole feature is dark: /api/impersonation*
         // 404s, the switcher hides, any overlay is ignored. Requires the
