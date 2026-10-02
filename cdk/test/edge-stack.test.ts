@@ -433,6 +433,15 @@ describe("EdgeStack", () => {
                 .CachePolicyConfig as Record<string, unknown>
             ).Name === "sps-search-nostore-compress-prod",
         )?.[0];
+        const popoverPolicyLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::CachePolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .CachePolicyConfig as Record<string, unknown>
+            ).Name === "sps-popover-context-prod",
+        )?.[0];
         expect(searchPolicyLogicalId).toBeDefined();
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
@@ -452,6 +461,11 @@ describe("EdgeStack", () => {
             // Accept-Encoding flags off.
             expect(behavior.CachePolicyId).toEqual({
               Ref: searchPolicyLogicalId,
+            });
+          } else if (path === "/api/scholars/*/popover-context") {
+            // Public, cookie-free hover JSON: origin-driven TTL capped at 5 min.
+            expect(behavior.CachePolicyId).toEqual({
+              Ref: popoverPolicyLogicalId,
             });
           } else {
             // Managed-CachingDisabled id.
@@ -916,9 +930,9 @@ describe("EdgeStack", () => {
       };
 
       it("synthesizes the env-named default policy alongside the query-keyed + search ones", () => {
-        // Three custom policies: default RSC-aware, #634 query-keyed, and the
-        // search-API no-store-but-compressible policy.
-        template.resourceCountIs("AWS::CloudFront::CachePolicy", 3);
+        // Four custom policies: default RSC-aware, #634 query-keyed, the
+        // search-API no-store-but-compressible policy, and the popover-context one.
+        template.resourceCountIs("AWS::CloudFront::CachePolicy", 4);
         expect(defaultCacheConfig().Name).toBe("sps-default-rsc-prod");
       });
 
