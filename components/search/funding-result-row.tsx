@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import { HoverPrefetchLink } from "@/components/search/hover-prefetch-link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
 import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
@@ -164,13 +164,13 @@ export function FundingResultRow({
                   isMultiPi: hit.isMultiPi,
                 }}
               >
-                <Link
+                <HoverPrefetchLink
                   href={profilePath(p.slug)}
                   onClick={() => trackClick(p.cwid)}
                   className="inline-flex items-center gap-1.5 text-[13px] text-[#2c4f6e] hover:underline"
                 >
                   {inner}
-                </Link>
+                </HoverPrefetchLink>
               </PersonPopover>
             );
           })}
