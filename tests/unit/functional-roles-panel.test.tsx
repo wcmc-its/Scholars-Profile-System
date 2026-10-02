@@ -139,6 +139,22 @@ describe("Administrators tabs", () => {
     expect(screen.getByTestId("administrators-add-trigger")).toBeTruthy();
   });
 
+  it("roleCounts adds a read-only All roles tab with no header action", () => {
+    stubFetch(() => ({ ok: true }));
+    render(
+      <AdministratorsRoster
+        entries={[UNIT_ENTRY]}
+        isSuperuser
+        actorCwid="adm0001"
+        nameResolutionDegraded={false}
+        roleCounts={{ unit_owner: 1 }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-tab-catalog"));
+    expect(screen.getByTestId("roles-catalog")).toBeTruthy();
+    expect(screen.queryByTestId("administrators-add-trigger")).toBeNull();
+  });
+
   it("shows both tabs with counts; switching swaps the header action and body", () => {
     stubFetch(() => ({ ok: true }));
     renderRoster([MANUAL, IMPORTED, ALLOW]);

@@ -187,6 +187,25 @@ describe("/edit/administrators — authorization", () => {
     expect(console.warn).toHaveBeenCalled();
   });
 
+  it("observer who owns no unit → the read-only role catalog alone, no roster query", async () => {
+    mockGetEditSession.mockResolvedValue({ ...NOBODY, isCommsSteward: true, isObserver: true });
+    mockLoadOwnerScope.mockResolvedValue([]);
+    const result = asEl(await AdministratorsPage());
+    expect(asEl(result.props.children).type).not.toBe(mockForbidden);
+    expect(JSON.stringify(result.props.children, (_k, v) => (typeof v === "function" ? v.name : v))).toContain(
+      "RolesCatalog",
+    );
+    expect(mockLoadRoster).not.toHaveBeenCalled();
+  });
+
+  it("superuser → roster gets role holder counts for the All roles tab; an owner doesn't", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    expect(rosterProps(asEl(await AdministratorsPage())).roleCounts).toBeDefined();
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadOwnerScope.mockResolvedValue(["N1280"]);
+    expect(rosterProps(asEl(await AdministratorsPage())).roleCounts).toBeUndefined();
+  });
+
   it("owner → roster loaded with their owned scope, not forbidden", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
     mockLoadOwnerScope.mockResolvedValue(["N1280", "N1280-A"]);
