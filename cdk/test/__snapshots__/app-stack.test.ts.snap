@@ -340,6 +340,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "3000",
               },
               {
+                "Name": "KEEP_ALIVE_TIMEOUT",
+                "Value": "65000",
+              },
+              {
                 "Name": "OTEL_SERVICE_NAME",
                 "Value": "Scholars-prod",
               },
@@ -4914,6 +4918,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "PORT",
                 "Value": "3000",
+              },
+              {
+                "Name": "KEEP_ALIVE_TIMEOUT",
+                "Value": "65000",
               },
               {
                 "Name": "OTEL_SERVICE_NAME",
