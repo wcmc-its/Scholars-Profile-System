@@ -51,7 +51,7 @@ import type {
 import type { DirectoryPerson } from "@/lib/sources/ldap";
 import { cn } from "@/lib/utils";
 import { INSTITUTIONS } from "@/lib/institutions";
-import { ROLE_CATALOG, type RoleHolderCounts } from "@/lib/edit/role-catalog";
+import { ROLE_CATALOG, type RoleHolderCounts, type RoleMembers } from "@/lib/edit/role-catalog";
 import { RolesCatalog } from "@/components/edit/roles-catalog";
 
 /** Two-letter initials for the roster avatar, e.g. "Alex Example" → "AE". */
@@ -197,6 +197,8 @@ export type AdministratorsRosterProps = {
   };
   /** Holder counts for the read-only "All roles" tab; absent hides the tab. */
   roleCounts?: RoleHolderCounts;
+  /** ED-group role members for the same tab. */
+  roleMembers?: RoleMembers;
 };
 
 type RosterTab = "units" | "roles" | "catalog";
@@ -252,6 +254,7 @@ export function AdministratorsRoster({
   header,
   functionalRoles,
   roleCounts,
+  roleMembers,
 }: AdministratorsRosterProps) {
   const [tab, setTab] = React.useState<RosterTab>("units");
   const [functionalRows, setFunctionalRows] = React.useState<FunctionalRoleRow[]>(() => [
@@ -997,7 +1000,7 @@ export function AdministratorsRoster({
       )}
 
       {tab === "catalog" && roleCounts ? (
-        <RolesCatalog counts={roleCounts} />
+        <RolesCatalog counts={roleCounts} members={roleMembers} />
       ) : tab === "roles" && functionalRoles ? (
         <>
           <p

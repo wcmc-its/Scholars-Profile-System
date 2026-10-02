@@ -9,6 +9,7 @@ import {
   ROLE_SOURCE_LABEL,
   type RoleCatalogEntry,
   type RoleHolderCounts,
+  type RoleMembers,
 } from "@/lib/edit/role-catalog";
 import { cn } from "@/lib/utils";
 
@@ -33,14 +34,47 @@ function Chips({ items, tone }: { items: readonly string[]; tone: "can" | "canno
   );
 }
 
-function holders(role: RoleCatalogEntry, counts: RoleHolderCounts): string {
-  if (role.source === "ed_group") return "Managed in MARIA";
-  if (role.source === "scholar") return "Set by each scholar";
+const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+
+function Holders({
+  role,
+  counts,
+  members,
+}: {
+  role: RoleCatalogEntry;
+  counts: RoleHolderCounts;
+  members: RoleMembers;
+}) {
+  if (role.source === "scholar") return <>Set by each scholar</>;
+  if (role.source === "ed_group") {
+    const list = members[role.key];
+    if (!list) return <>Managed in MARIA</>;
+    if (list.length === 0) return <>No one</>;
+    return (
+      <details>
+        <summary className="cursor-pointer">{people(list.length)}</summary>
+        <ul className="mt-1.5 flex flex-col gap-0.5" data-testid={`role-members-${role.key}`}>
+          {list.map((m) => (
+            <li key={m.cwid} className="whitespace-nowrap">
+              <span className="text-foreground">{m.name ?? m.cwid}</span>
+              {m.name && <span className="font-mono"> {m.cwid}</span>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    );
+  }
   const n = counts[role.key];
-  return n === undefined ? "—" : `${n} ${n === 1 ? "person" : "people"}`;
+  return <>{n === undefined ? "—" : people(n)}</>;
 }
 
-export function RolesCatalog({ counts }: { counts: RoleHolderCounts }) {
+export function RolesCatalog({
+  counts,
+  members = {},
+}: {
+  counts: RoleHolderCounts;
+  members?: RoleMembers;
+}) {
   return (
     <div className="flex flex-col gap-2" data-testid="roles-catalog">
       <p className="text-muted-foreground -mt-2 text-[13px]">
@@ -77,7 +111,7 @@ export function RolesCatalog({ counts }: { counts: RoleHolderCounts }) {
                   <Chips items={r.cannot} tone="cannot" />
                 </td>
                 <td className="text-muted-foreground py-3 text-xs whitespace-nowrap" data-testid={`role-holders-${r.key}`}>
-                  {holders(r, counts)}
+                  <Holders role={r} counts={counts} members={members} />
                 </td>
               </tr>
             ))}

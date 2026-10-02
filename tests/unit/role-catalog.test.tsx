@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { RolesCatalog } from "@/components/edit/roles-catalog";
 import { ROLE_CATALOG } from "@/lib/edit/role-catalog";
-import { loadRoleHolderCounts } from "@/lib/edit/role-catalog.server";
+import { loadRoleHolderCounts, loadRoleMembers } from "@/lib/edit/role-catalog.server";
 
 describe("loadRoleHolderCounts", () => {
   it("counts distinct people per unit role and reporting; institutions apart", async () => {
@@ -30,7 +30,37 @@ describe("loadRoleHolderCounts", () => {
   });
 });
 
+describe("loadRoleMembers", () => {
+  it("names each ED role's members; an unreadable group is left out", async () => {
+    const members = await loadRoleMembers({
+      listMembers: async (cns) =>
+        new Map(cns.map((cn) => [cn, cn.endsWith("observer-role") ? ["bbb2", "aaa1"] : null])),
+      resolveNames: async () => new Map([["aaa1", "Zed Able"], ["bbb2", "Amy Baker"]]),
+    });
+    expect(members.observer).toEqual([
+      { cwid: "bbb2", name: "Amy Baker" },
+      { cwid: "aaa1", name: "Zed Able" },
+    ]);
+    expect(members.content_editor).toBeUndefined();
+  });
+});
+
 describe("RolesCatalog", () => {
+  it("an ED role with members lists name and CWID; unreadable stays MARIA; empty says No one", () => {
+    render(
+      <RolesCatalog
+        counts={{}}
+        members={{ observer: [{ cwid: "aaa1", name: "Amy Able" }, { cwid: "zz9", name: null }], cv_generator: [] }}
+      />,
+    );
+    expect(screen.getByTestId("role-holders-observer").textContent).toContain("2 people");
+    const list = screen.getByTestId("role-members-observer");
+    expect(list.textContent).toContain("Amy Able aaa1");
+    expect(list.textContent).toContain("zz9");
+    expect(screen.getByTestId("role-holders-cv_generator").textContent).toBe("No one");
+    expect(screen.getByTestId("role-holders-superuser").textContent).toBe("Managed in MARIA");
+  });
+
   it("lists every role; ED groups say MARIA, counted roles show people", () => {
     render(<RolesCatalog counts={{ unit_owner: 3, reporting: 1 }} />);
     for (const r of ROLE_CATALOG) expect(screen.getByTestId(`role-row-${r.key}`)).toBeTruthy();

@@ -18,7 +18,8 @@
  *      expansion. The role groups live in containers under `ou=Groups` (e.g.
  *      `ou=application security`), so this must stay a subtree search.
  *   2. Ask the server to evaluate membership *at that one entry* with an LDAP
- *      `compare` op. dynlist expands exactly one group, and the directory answers
+ *      `compare` op. (To LIST members, read `memberURL` instead — see
+ *      `listGroupMemberCwids` below; the bind account can read that.) dynlist expands exactly one group, and the directory answers
  *      true/false without ever returning member values (the read-only bind account
  *      can compare `member` but not read it, so a base-scope read comes back empty
  *      — do not "optimize" this into a read + client-side scan; it silently
@@ -175,6 +176,102 @@ export async function groupMembersAmong(
   } catch {
     onFailure("ldap_search_failed");
     return members;
+  } finally {
+    await client.unbind().catch(() => {});
+  }
+}
+
+/**
+ * Parse one dynamic-group `memberURL` (RFC 4516: `ldap:///<dn>?<attrs>?<scope>?<filter>`).
+ * Returns null for anything that isn't an LDAP URL.
+ */
+export function parseMemberUrl(
+  url: string,
+): { dn: string; scope: "base" | "one" | "sub"; filter: string } | null {
+  const m = /^ldaps?:\/\/[^/]*\/(.*)$/i.exec(url.trim());
+  if (!m) return null;
+  const [dnPart = "", , scopePart = "", filterPart = ""] = m[1].split("?");
+  let dn: string;
+  let filter: string;
+  try {
+    dn = decodeURIComponent(dnPart);
+    filter = decodeURIComponent(filterPart) || "(objectClass=*)";
+  } catch {
+    return null;
+  }
+  if (!dn) return null;
+  const scope = scopePart === "one" || scopePart === "sub" ? scopePart : "base";
+  return { dn, scope, filter };
+}
+
+/** Upper bound on CWIDs one rule-based memberURL may contribute. */
+const MEMBER_URL_SEARCH_CAP = 500;
+
+/**
+ * The CWIDs in each group named by `groupCns`, read from the groups'
+ * `memberURL` values on ONE connection (the bind account can read
+ * `memberURL`, though not the synthesized `member`). A `uid=<cwid>,…` base
+ * URL — how members are added (`ops/ed-*-group/add-member.sh`) — yields its
+ * CWID directly; any other URL is evaluated as the search it describes,
+ * capped. A group that can't be read maps to null (unknown, not empty).
+ * Never throws.
+ */
+export async function listGroupMemberCwids(
+  groupCns: readonly string[],
+  onFailure: (reason: string) => void,
+): Promise<Map<string, string[] | null>> {
+  const out = new Map<string, string[] | null>(groupCns.map((cn) => [cn, null]));
+  if (groupCns.length === 0) return out;
+
+  let client: Awaited<ReturnType<typeof openLdap>>;
+  try {
+    client = await openLdap();
+  } catch {
+    onFailure("ldap_unavailable");
+    return out;
+  }
+
+  try {
+    await Promise.all(
+      groupCns.map(async (cn) => {
+        try {
+          const { searchEntries } = await client.search(GROUPS_BASE, {
+            scope: "sub",
+            filter: `(cn=${escapeLdapFilterValue(cn)})`,
+            attributes: ["memberURL"],
+          });
+          const entry = searchEntries[0];
+          if (!entry) {
+            onFailure("group_not_found");
+            return;
+          }
+          const cwids = new Set<string>();
+          for (const raw of [entry.memberURL ?? []].flat()) {
+            const parsed = parseMemberUrl(String(raw));
+            if (!parsed) continue;
+            const uid = /^uid=([^,]+),/i.exec(parsed.dn)?.[1];
+            if (parsed.scope === "base" && uid) {
+              if (isSafeCwid(uid)) cwids.add(uid.toLowerCase());
+              continue;
+            }
+            const { searchEntries: people } = await client.search(parsed.dn, {
+              scope: parsed.scope,
+              filter: parsed.filter,
+              attributes: ["weillCornellEduCWID", "uid"],
+              sizeLimit: MEMBER_URL_SEARCH_CAP,
+            });
+            for (const p of people) {
+              const id = [p.weillCornellEduCWID ?? p.uid ?? []].flat()[0];
+              if (id && isSafeCwid(String(id))) cwids.add(String(id).toLowerCase());
+            }
+          }
+          out.set(cn, [...cwids].sort());
+        } catch {
+          onFailure("ldap_search_failed");
+        }
+      }),
+    );
+    return out;
   } finally {
     await client.unbind().catch(() => {});
   }
