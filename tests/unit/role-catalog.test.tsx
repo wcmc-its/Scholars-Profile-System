@@ -73,3 +73,37 @@ describe("RolesCatalog", () => {
     expect(ce.getByText("Pin titles")).toBeTruthy();
   });
 });
+
+describe("table-backed roles list their holders too", () => {
+  const client = {
+    unitAdmin: {
+      findMany: async () => [
+        { cwid: "own1", role: "owner", entityType: "department" },
+        { cwid: "OWN1", role: "owner", entityType: "center" },
+        { cwid: "cur1", role: "curator", entityType: "core" },
+      ],
+    },
+    functionalRoleGrant: { findMany: async () => [{ cwid: "rep1" }] },
+  };
+
+  it("loadRoleMembers with a client names unit and Reporting holders", async () => {
+    const members = await loadRoleMembers({
+      client,
+      listMembers: async (cns) => new Map(cns.map((cn) => [cn, null])),
+      resolveNames: async () => new Map([["rep1", "Rae Porter"]]),
+    });
+    expect(members.unit_owner).toEqual([{ cwid: "own1", name: null }]);
+    expect(members.unit_curator).toEqual([{ cwid: "cur1", name: null }]);
+    expect(members.institution_admin).toEqual([]);
+    expect(members.reporting).toEqual([{ cwid: "rep1", name: "Rae Porter" }]);
+    expect(members.observer).toBeUndefined();
+  });
+
+  it("renders the list for a table role, and falls back to the count when unread", () => {
+    render(
+      <RolesCatalog counts={{ unit_curator: 3 }} members={{ reporting: [{ cwid: "rep1", name: "Rae Porter" }] }} />,
+    );
+    expect(screen.getByTestId("role-members-reporting").textContent).toContain("Rae Porter rep1");
+    expect(screen.getByTestId("role-holders-unit_curator").textContent).toBe("3 people");
+  });
+});
