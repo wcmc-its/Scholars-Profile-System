@@ -37,7 +37,7 @@ vi.mock("@/components/ui/hover-card", () => ({
     React.createElement("div", { "data-testid": "hovercard-content" }, children),
 }));
 
-import { PersonPopover } from "@/components/scholar/person-popover";
+import { PersonPopover, resetPopoverCache } from "@/components/scholar/person-popover";
 import { TopScholarChip } from "@/components/topic/top-scholar-chip";
 import type { TopScholarChipData } from "@/lib/api/topics";
 
@@ -97,6 +97,7 @@ function lastFetchUrl(fn: ReturnType<typeof vi.fn>): string {
 }
 
 beforeEach(() => {
+  resetPopoverCache();
   vi.restoreAllMocks();
 });
 afterEach(() => {

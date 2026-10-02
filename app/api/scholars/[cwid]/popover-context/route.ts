@@ -48,10 +48,9 @@ export async function GET(
   const contextSupercategory = sp.get("contextSupercategory") || undefined;
   const contextFamilyLabel = sp.get("contextFamilyLabel") || undefined;
 
-  const header = await fetchPopoverHeader(cwid);
-  if (!header) {
-    return apiError("not found", 404);
-  }
+  // Started alongside the contextual lookups below (hover latency); the 404
+  // still gates the response, so a hidden scholar's lookup results are discarded.
+  const headerP = fetchPopoverHeader(cwid);
 
   // Per-surface contextual lookups. Each is independent so a single failure
   // doesn't blank the popover — Promise.allSettled keeps the header + counts
@@ -75,16 +74,7 @@ export async function GET(
   const wantsMethodFamilies =
     contextMethods && surface === "top-scholar" && isMethodPagesEnabled();
 
-  const [
-    authorshipR,
-    coPubsR,
-    topicRankR,
-    recentR,
-    recentGrantsR,
-    topSponsorR,
-    methodFamiliesR,
-    scopeR,
-  ] = await Promise.allSettled([
+  const lookupsP = Promise.allSettled([
     wantsAuthorship ? fetchAuthorshipOnPub(cwid, contextPubPmid!) : Promise.resolve(null),
     wantsCoPubs ? fetchCoPubsSummary(cwid, contextScholarCwid!) : Promise.resolve(null),
     wantsTopicRank ? fetchTopicRank(cwid, contextTopicSlug!) : Promise.resolve(null),
@@ -101,6 +91,21 @@ export async function GET(
         ).then((pmids) => summarizeScope(cwid, pmids))
       : Promise.resolve(null),
   ]);
+
+  const header = await headerP;
+  if (!header) {
+    return apiError("not found", 404);
+  }
+  const [
+    authorshipR,
+    coPubsR,
+    topicRankR,
+    recentR,
+    recentGrantsR,
+    topSponsorR,
+    methodFamiliesR,
+    scopeR,
+  ] = await lookupsP;
   const unwrap = <T>(r: PromiseSettledResult<T>, fb: T): T =>
     r.status === "fulfilled" ? r.value : fb;
 
