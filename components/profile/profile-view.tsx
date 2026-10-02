@@ -231,7 +231,9 @@ export async function ProfileView({ slug }: { slug: string }) {
                   identityImageEndpoint={profile.identityImageEndpoint}
                 />
               </div>
-              <h1 className="page-title text-[36px] font-bold leading-[1.05] tracking-tight">{profile.publishedName}</h1>
+              <h1 className="page-title text-[36px] leading-[1.05] tracking-tight">
+                {profile.publishedName}
+              </h1>
               {profile.primaryTitle ? (
                 <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
                   {profile.primaryTitle}

@@ -148,9 +148,7 @@ export default async function EditCoreReviewPage({
               </p>
               {/* `page-title` (not `font-serif`) is the repo's page-subject hook —
                   see the typography rule in app/globals.css. */}
-              <h1 className="page-title mb-1.5 text-[29px] leading-tight font-semibold">
-                {queue.core.name}
-              </h1>
+              <h1 className="page-title mb-1.5 text-[29px] leading-tight">{queue.core.name}</h1>
               <p className="text-muted-foreground max-w-[56ch] text-[13px]">
                 Confirm the publications that used this core and reject the false positives.
                 Decisions show on public profiles and prime the next inference run.

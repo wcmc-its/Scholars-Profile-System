@@ -205,7 +205,7 @@ export async function DepartmentPage({
             label="Department website"
           />
         </div>
-        <h1 className="page-title mt-2 text-balance text-[40px] font-normal leading-[1.15]">
+        <h1 className="page-title mt-2 text-[40px] leading-[1.15] text-balance">
           {deptDisplayName}
         </h1>
         {detail.dept.description && (

@@ -17,7 +17,7 @@ import Link from "next/link";
 export function NotFoundContent({ isVivo = false }: { isVivo?: boolean }) {
   return (
     <main className="mx-auto max-w-2xl px-6 py-16 text-center">
-      <h1 className="page-title text-3xl font-semibold">
+      <h1 className="page-title text-3xl">
         {isVivo ? "This profile may have moved" : "Page not found"}
       </h1>
       <p className="mt-4 text-zinc-600 dark:text-zinc-400">
