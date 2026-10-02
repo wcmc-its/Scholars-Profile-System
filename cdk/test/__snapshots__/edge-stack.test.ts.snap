@@ -412,7 +412,9 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "HEAD",
                 "OPTIONS",
               ],
-              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "CachePolicyId": {
+                "Ref": "PopoverContextCache904BCEC1",
+              },
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholars/*/popover-context",
@@ -1318,6 +1320,31 @@ a{color:var(--slate)}
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "PopoverContextCache904BCEC1": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS person-popover context (prod) -- origin-driven TTL up to 5 min, query-keyed, no cookies.",
+          "DefaultTTL": 0,
+          "MaxTTL": 300,
+          "MinTTL": 0,
+          "Name": "sps-popover-context-prod",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "all",
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
+    },
     "QueryKeyedCacheF5F61D4E": {
       "Properties": {
         "CachePolicyConfig": {
@@ -2030,7 +2057,9 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "HEAD",
                 "OPTIONS",
               ],
-              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "CachePolicyId": {
+                "Ref": "PopoverContextCache904BCEC1",
+              },
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholars/*/popover-context",
@@ -2935,6 +2964,31 @@ a{color:var(--slate)}
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "PopoverContextCache904BCEC1": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS person-popover context (staging) -- origin-driven TTL up to 5 min, query-keyed, no cookies.",
+          "DefaultTTL": 0,
+          "MaxTTL": 300,
+          "MinTTL": 0,
+          "Name": "sps-popover-context-staging",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "all",
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
     },
     "QueryKeyedCacheF5F61D4E": {
       "Properties": {

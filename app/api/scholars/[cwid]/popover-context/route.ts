@@ -103,16 +103,35 @@ export async function GET(
   ]);
   const unwrap = <T>(r: PromiseSettledResult<T>, fb: T): T =>
     r.status === "fulfilled" ? r.value : fb;
+  // Public, cookie-free, per-URL data: let CloudFront hold it briefly (its
+  // behavior in cdk/lib/edge-stack.ts keys on the full query string) so repeat
+  // hovers skip the origin and Aurora. Never cache a degraded body — a lookup
+  // that fell back would otherwise be served for the whole window. Trade-off: a
+  // new hide/takedown can show in a hover for up to s-maxage.
+  const degraded = [
+    authorshipR,
+    coPubsR,
+    topicRankR,
+    recentR,
+    recentGrantsR,
+    topSponsorR,
+    methodFamiliesR,
+    scopeR,
+  ].some((r) => r.status === "rejected");
+  const cacheControl = degraded ? "no-store" : "public, max-age=60, s-maxage=300";
 
-  return NextResponse.json({
-    header,
-    authorship: unwrap(authorshipR, null),
-    coPubs: unwrap(coPubsR, null),
-    topicRank: unwrap(topicRankR, null),
-    recentPubs: unwrap(recentR, []),
-    recentGrants: unwrap(recentGrantsR, []),
-    topSponsor: unwrap(topSponsorR, null),
-    methodFamilies: unwrap(methodFamiliesR, []),
-    scope: unwrap(scopeR, null),
-  });
+  return NextResponse.json(
+    {
+      header,
+      authorship: unwrap(authorshipR, null),
+      coPubs: unwrap(coPubsR, null),
+      topicRank: unwrap(topicRankR, null),
+      recentPubs: unwrap(recentR, []),
+      recentGrants: unwrap(recentGrantsR, []),
+      topSponsor: unwrap(topSponsorR, null),
+      methodFamilies: unwrap(methodFamiliesR, []),
+      scope: unwrap(scopeR, null),
+    },
+    { headers: { "Cache-Control": cacheControl } },
+  );
 }

@@ -594,11 +594,31 @@ export class EdgeStack extends Stack {
         maxTtl: Duration.seconds(1),
       },
     );
-    // Per-path cache-policy override (mirrors `orpOverrides`): ONLY
-    // `/api/search*` swaps off Managed-CachingDisabled; every other
-    // uncacheable behavior keeps it.
-    const cachePolicyOverrides: ReadonlyMap<string, cloudfront.ICachePolicy> =
-      new Map([["/api/search*", searchApiNoStoreCompressible]]);
+    // Person-popover context: public, cookie-free JSON keyed entirely by the
+    // path cwid + query string. The route sends `s-maxage=300` on a complete
+    // response and `no-store` on a degraded one or an error, so the origin
+    // decides; defaultTtl 0 keeps any header-less response uncached and maxTtl
+    // caps a hide/takedown's hover lag at 5 minutes. Hover latency (2026-10-02):
+    // every hover by every user previously went to the origin and Aurora.
+    const popoverContextCache = new cloudfront.CachePolicy(this, "PopoverContextCache", {
+      cachePolicyName: `sps-popover-context-${env}`,
+      comment: `SPS person-popover context (${env}) -- origin-driven TTL up to 5 min, query-keyed, no cookies.`,
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      minTtl: Duration.seconds(0),
+      defaultTtl: Duration.seconds(0),
+      maxTtl: Duration.seconds(300),
+    });
+    // Per-path cache-policy override (mirrors `orpOverrides`): only these
+    // paths swap off Managed-CachingDisabled; every other uncacheable behavior
+    // keeps it.
+    const cachePolicyOverrides: ReadonlyMap<string, cloudfront.ICachePolicy> = new Map([
+      ["/api/search*", searchApiNoStoreCompressible],
+      ["/api/scholars/*/popover-context", popoverContextCache],
+    ]);
 
     // Next.js App Router serves two representations at the SAME URL: the
     // full HTML document (a hard navigation / refresh) and the React
@@ -767,7 +787,8 @@ export class EdgeStack extends Stack {
       ["/api/directory/people", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // RePORTER click-through proxy -- reads `cwid` / `profile_id`, 302s.
       ["/api/nih-portfolio", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
-      // Person-popover context -- reads `surface` + `context*` params.
+      // Person-popover context -- reads `surface` + `context*` params. Cached
+      // briefly via `popoverContextCache` (cachePolicyOverrides), not disabled.
       ["/api/scholars/*/popover-context", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method-badge representative-paper hover (#967 §7) -- `force-dynamic`,
       // `no-store`, reads `?family=` to resolve the family's exemplar pub.
