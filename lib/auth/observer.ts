@@ -6,7 +6,7 @@
  * `isObserver(cwid)` answers "is this CWID a member of the observer group?"
  * with a live LDAPS query against the WCM Enterprise Directory — re-evaluated
  * per request, never cached for the session, exactly like its siblings
- * (`data-sharing-viewer.ts`, `honors-curator.ts`, `cv-generator.ts`).
+ * (`data-sharing-viewer.ts`, `honors-curator.ts`).
  *
  * HOW THE ROLE WORKS (unlike its narrow siblings, it is not a per-surface
  * predicate). An observer who is not already a superuser or comms_steward is

@@ -203,9 +203,9 @@ export type EditShellProps = {
   /** Replaces the unit-admin note under the header (what this viewer can edit). */
   actorNote?: string;
   /**
-   * `cv_generator` role (#2482): the header's role pill reads "View only" (and
+   * Read-only viewer (an observer): the header's role pill reads "View only" (and
    * drops "Changes are logged…") instead of "Editing as administrator" — true on
-   * every panel this role reaches, including the one exception below, since
+   * every panel it reaches, including the one exception below, since
    * downloading a CV doesn't change the profile either. Default false leaves
    * every existing caller unchanged.
    */
@@ -213,10 +213,9 @@ export type EditShellProps = {
   /**
    * Whether the panel content is native `inert` (unfocusable/unclickable,
    * still fully visible) — the actual write-prevention mechanism. Defaults to
-   * `readOnly`. Pass `false` while `readOnly` is `true` for the ONE cv_generator
-   * exception (the "cv" attr's "Download CV" button, which never writes
-   * anything and is the role's named purpose) so that one panel stays
-   * interactive while the pill still tells the truth about the role.
+   * `readOnly`. Pass `false` while `readOnly` is `true` for the ONE exception
+   * (the "cv" attr's "Download CV" button, which never writes anything) so
+   * that one panel stays interactive while the pill still tells the truth.
    */
   contentInert?: boolean;
   children: React.ReactNode;
@@ -478,7 +477,7 @@ export function EditShell({
             />
           )}
 
-          {/* `cv_generator` (#2482): native `inert` makes every control below
+          {/* Read-only mode (an observer): native `inert` makes every control below
               unfocusable/unclickable while staying fully visible — "see
               everything, act on nothing" without threading a read-only variant
               through every card's own mode prop. `contentInert` (not `readOnly`

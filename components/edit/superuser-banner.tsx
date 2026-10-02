@@ -28,7 +28,7 @@ export type SuperuserBannerProps = {
    */
   targetKind?: "profile" | "publication";
   /**
-   * The `cv_generator` role (#2482) reaches this same superuser-parity chrome
+   * A read-only viewer (an observer) reaches this same superuser-parity chrome
    * for READ access only — every write affordance below is `inert` (see
    * `EditShell`). Swaps the "editing … as an administrator" claim for an
    * honest read-only line so the banner never overstates what the viewer can

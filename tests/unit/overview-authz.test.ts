@@ -129,7 +129,7 @@ describe("authorizeOverviewWrite", () => {
   });
 });
 
-describe("authorizeCvExport (#2482 — the cv_generator widening)", () => {
+describe("authorizeCvExport (the observer widening)", () => {
   function callCv(over: Partial<Parameters<typeof authorizeCvExport>[0]> = {}) {
     return authorizeCvExport({
       session: { cwid: SELF, isSuperuser: false, isCommsSteward: false },
@@ -142,40 +142,16 @@ describe("authorizeCvExport (#2482 — the cv_generator widening)", () => {
     });
   }
 
-  it("allows a cv_generator viewer who fails every authorizeOverviewWrite leg", async () => {
+  it("still denies not_self for a viewer with no grant", async () => {
     const r = await callCv({
-      session: { cwid: "cvg001", isSuperuser: false, isCommsSteward: false, isCvGenerator: true },
-      realCwid: "cvg001",
-      entityId: OTHER,
-    });
-    expect(r).toEqual({ ok: true, viaUnitAdminUnit: null });
-    // Falls through every authorizeOverviewWrite leg first — real cost, not skipped.
-    expect(mockResolveUnit).toHaveBeenCalledWith("cvg001", OTHER, UNIT_DB);
-  });
-
-  it("still denies not_self for a viewer who is NOT a cv_generator", async () => {
-    const r = await callCv({
-      session: { cwid: "nobody", isSuperuser: false, isCommsSteward: false, isCvGenerator: false },
+      session: { cwid: "nobody", isSuperuser: false, isCommsSteward: false },
       realCwid: "nobody",
       entityId: OTHER,
     });
     expect(r).toEqual({ ok: false, reason: "not_self" });
   });
 
-  it("still overrides even a specific proxy_conflict denial — cv_generator is an independent global grant", async () => {
-    mockIsGrantedProxy.mockResolvedValue(true);
-    mockCheckConflict.mockResolvedValue({ ok: false, reason: "proxy_is_superuser" });
-    const r = await callCv({
-      session: { cwid: "px", isSuperuser: false, isCommsSteward: false, isCvGenerator: true },
-      realCwid: "px",
-      entityId: OTHER,
-    });
-    // The proxy leg's own conflict re-check failing is irrelevant to the
-    // cv_generator grant — it doesn't depend on the proxy relationship at all.
-    expect(r).toEqual({ ok: true, viaUnitAdminUnit: null });
-  });
-
-  it("self / superuser / proxy / unit-admin allows pass through unchanged (no cv_generator needed)", async () => {
+  it("self / superuser / proxy / unit-admin allows pass through unchanged (no observer needed)", async () => {
     const r = await callCv({ entityId: SELF });
     expect(r).toEqual({ ok: true, viaUnitAdminUnit: null });
   });

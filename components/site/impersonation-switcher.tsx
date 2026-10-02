@@ -40,12 +40,10 @@ import { mapStartError } from "@/components/edit/view-as-button";
  * the dialog POSTs `/api/impersonation { targetCwid }` and reloads so the whole
  * app re-renders through the effective seam and the banner appears.
  *
- * **Exact-CWID fallback.** Four global roles (`cv_generator`, `honors_curator`,
- * `data_sharing_viewer`, `development`, `lib/auth/global-roles.ts`) are valid
- * "View as" targets but can never appear in the search results above: ED group
- * membership can only be checked one CWID at a time (the read-only LDAP bind
- * can `compare`, not `read`, a group's member list — `lib/auth/ldap-group.ts`),
- * so there is no query this panel could send that would enumerate them. When a
+ * **Exact-CWID fallback.** The global roles (`honors_curator`,
+ * `data_sharing_viewer`, `development`, `content_editor`,
+ * `lib/auth/global-roles.ts`) are valid "View as" targets but never appear in
+ * the search results above, which come from our own tables, not ED groups. When a
  * single-token query has zero matches, the empty state offers "View as this
  * exact CWID" — it reuses the same confirm dialog and `startImpersonation`, just
  * with a synthetic candidate built from the typed text instead of a search row;

@@ -11,10 +11,10 @@
  * artifact — nothing is saved to the profile and no version row is persisted (v1).
  *
  * Authorization is the SHARED `authorizeCvExport` (self OR superuser OR granted
- * proxy OR org-unit owner/curator OR the read-only `cv_generator` role, #2482),
+ * proxy OR org-unit owner/curator OR the read-only observer role),
  * keyed on `realCwid`, exactly like the biosketch generate route — generating a
  * CV for a profile you cannot write would be pointless, so this reuses the
- * bio-write predicate (widened for `cv_generator`, since exporting a CV never
+ * bio-write predicate (widened for observers, since exporting a CV never
  * writes anything) rather than authoring one that could drift.
  *
  * Flag-gated behind `EDIT_CV_EXPORT` (off ⇒ 404), default-off and staging-first.
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // --- authorization: the SHARED bio-write predicate (self OR superuser OR
   //     granted proxy OR org-unit owner/curator), WIDENED with the read-only
-  //     cv_generator role (#2482) — exporting a CV never writes anything.
+  //     observer role — exporting a CV never writes anything.
   //     Keyed on `realCwid`, gated to non-impersonating for the delegated legs. ---
   const authz = await authorizeCvExport({
     session,

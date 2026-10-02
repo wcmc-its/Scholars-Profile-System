@@ -38,7 +38,6 @@ export type ProbeImpersonating = {
     | "curator"
     | "scholar"
     | "comms_steward"
-    | "cv_generator"
     | "honors_curator"
     | "data_sharing_viewer"
     | "development";

@@ -235,7 +235,7 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
   proxy: "home",
   "unit-admin": "home",
   comms_steward: "home",
-  "cv-generator": "home",
+  "read-only": "home",
 };
 
 /** The actor surfaces. `proxy` (#779) is a scholar-assigned designee, and
@@ -246,35 +246,35 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
  *  `comms_steward` (comms-steward-profile-editing-spec.md §3b) edits any scholar
  *  at SUPERUSER parity MINUS slug + proxy delegation. Visual/interaction polish
  *  is a UI-SPEC deliverable. */
-type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward" | "cv-generator";
+type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward" | "read-only";
 
 /** Whether a mode renders with SUPERUSER editability (overview editable,
  *  publications hideable, generate enabled): the superuser surface itself, and
  *  the `comms_steward` profile editor, which is superuser parity minus slug +
  *  proxy-editors. The child cards collapse to this (`childMode` below).
- *  `cv-generator` (#2482) is included here too — it sees the same full content
- *  as a superuser, but `EditShell` wraps it `inert` (see `isContentInert`), so
- *  none of that editability is actually reachable — except the one export
- *  action that role exists for (`isContentInert`'s "cv" exception). */
+ *  `read-only` (an observer) is included here too — it sees the same full
+ *  content as a superuser, but `EditShell` wraps it `inert` (see
+ *  `isContentInert`), so none of that editability is reachable — except the
+ *  CV download (`isContentInert`'s "cv" exception). */
 function isSuperuserLike(mode: EditMode): boolean {
-  return mode === "superuser" || mode === "comms_steward" || mode === "cv-generator";
+  return mode === "superuser" || mode === "comms_steward" || mode === "read-only";
 }
 
-/** `cv_generator` (#2482): read-only on every panel — drives `EditShell`'s
+/** `read-only` (an observer): read-only on every panel — drives `EditShell`'s
  *  banner copy ("viewing … read-only"). True regardless of which attr is
  *  active; see `isContentInert` for the one exception to the `inert` wrap
  *  that backs this up. */
 function isReadOnlyMode(mode: EditMode): boolean {
-  return mode === "cv-generator";
+  return mode === "read-only";
 }
 
 /**
- * `cv_generator` (#2482): whether the panel content should be native `inert`
+ * `read-only` (an observer): whether the panel content should be native `inert`
  * (unfocusable/unclickable, still fully visible). ONE exception to
  * `isReadOnlyMode`: the "cv" attr (`CV (WCM format)`), whose "Download CV"
  * button never writes anything (`authorizeCvExport`,
  * `lib/edit/overview-authz.ts` — "nothing is saved to the profile, no version
- * row is persisted") and is the role's named purpose ("generate CVs"). `inert`
+ * row is persisted") and is something an observer may do. `inert`
  * cascades to every descendant with no way for a nested element to opt back
  * in, so the only way to keep that one button clickable is to not wrap the
  * "cv" panel in `inert` at all — there is nothing else on that panel to
@@ -282,7 +282,7 @@ function isReadOnlyMode(mode: EditMode): boolean {
  * since downloading a CV doesn't change the profile either.
  */
 function isContentInert(mode: EditMode, activeKey: AttrKey): boolean {
-  return mode === "cv-generator" && activeKey !== "cv";
+  return mode === "read-only" && activeKey !== "cv";
 }
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
@@ -312,11 +312,11 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.key !== "proxy-editors", // delegation — out of the steward's scope (§3b)
     );
   }
-  // `cv_generator` (#2482) sees the FULL superuser attribute set, unfiltered —
+  // `read-only` (an observer) sees the FULL superuser attribute set, unfiltered —
   // "see all the other content" (issue body) — since every write affordance is
   // `inert` regardless of which panel it's on, there is no per-attribute reason
   // to hold anything back the way comms_steward's narrower scope does.
-  if (mode === "cv-generator") {
+  if (mode === "read-only") {
     return ATTRIBUTES.filter((a) => a.modes.includes("superuser"));
   }
   return ATTRIBUTES.filter((a) => a.modes.includes(mode));
@@ -962,11 +962,11 @@ export function EditPage({
     <EditShell
       // The shell chrome (breadcrumb back to Profiles + the role pill) is
       // the same a superuser sees — a comms_steward reaches this editor from the
-      // same roster and edits in an administrative capacity, and cv_generator
-      // (#2482) reads the same content read-only, so both reuse superuser chrome
+      // same roster and edits in an administrative capacity, and an observer
+      // reads the same content read-only, so both reuse superuser chrome
       // rather than add bespoke chrome. `readOnly` (below) is what actually
-      // makes cv_generator's copy of that chrome non-editable.
-      mode={mode === "comms_steward" || mode === "cv-generator" ? "superuser" : mode}
+      // makes the observer's copy of that chrome non-editable.
+      mode={mode === "comms_steward" || mode === "read-only" ? "superuser" : mode}
       readOnly={isReadOnlyMode(mode)}
       contentInert={isContentInert(mode, active.key)}
       scholarName={scholarName}
@@ -1503,7 +1503,7 @@ function renderPanel(
       );
     case "identifiers-profiles": {
       // Every EditMode may reach this panel; each write re-authorizes server-side
-      // (`authorizeOverviewWrite`), and the shell makes cv-generator inert. The
+      // (`authorizeOverviewWrite`), and the shell makes read-only mode inert. The
       // two cards are independently flagged (the tab shows when either is on);
       // whichever renders first owns the `panel-heading` id. They have separate
       // saves, so a rule (not just a gap) separates them.

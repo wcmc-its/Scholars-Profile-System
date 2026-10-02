@@ -37,7 +37,7 @@ describe("SuperuserBanner", () => {
     expect(banner.className).not.toContain("maroon");
   });
 
-  it("uses the read-only copy when readOnly=true (#2482 cv_generator), not the editing claim", () => {
+  it("uses the read-only copy when readOnly=true (an observer), not the editing claim", () => {
     render(<SuperuserBanner targetLabel="Alex Other" readOnly />);
     const banner = screen.getByRole("alert");
     expect(banner.textContent).toContain("viewing");

@@ -78,18 +78,16 @@ export async function authorizeOverviewWrite(args: {
 /**
  * Authorization for the CV export surfaces (`POST /api/edit/cv` download,
  * `GET /api/edit/cv/outline` preview) — `authorizeOverviewWrite`, WIDENED with
- * the read-only `cv_generator` role (#2482, fast-follow to #2483).
+ * the read-only observer role.
  *
  * Exporting a CV never writes anything (both routes' own doc comments: "nothing
  * is saved to the profile, no version row is persisted"), so admitting a
  * read-only role here doesn't leak write capability the way adding it to
  * `authorizeOverviewWrite` itself would — that predicate also backs 15+ genuine
  * mutation routes (field edits, appointment CRUD, honor/news-mention decisions,
- * biosketch generation), which must stay closed to `cv_generator`. Keeping the
- * widening in its own function, rather than an inline `|| session.isCvGenerator`
- * at each of the two call sites, is what stops a third CV-adjacent route from
- * drifting out of sync the way `authorizeOverviewWrite`'s own doc comment
- * describes for the overview write/generate pair.
+ * biosketch generation), which must stay closed to observers. Keeping the
+ * widening in its own function is what stops a third CV-adjacent route from
+ * drifting out of sync.
  */
 export async function authorizeCvExport(args: {
   session: EditSession;
@@ -101,9 +99,8 @@ export async function authorizeCvExport(args: {
 }): Promise<OverviewWriteAuthz> {
   const authz = await authorizeOverviewWrite(args);
   if (authz.ok) return authz;
-  if (args.session.isCvGenerator) return { ok: true, viaUnitAdminUnit: null };
-  // An observer may export too, for the same reason as cv_generator (decision
-  // 2026-10-01). The download is a POST, whose write preamble strips the
+  // An observer may export too: a CV writes nothing and shows nothing the
+  // observer can't already read (decision 2026-10-01). The download is a POST, whose write preamble strips the
   // session's observer flag (`stripObserverView`), so ask about the REAL cwid.
   // Not under "View as": the overlay's own roles decide there. Loaded lazily so
   // the routes sharing this module keep an LDAP-free import graph.

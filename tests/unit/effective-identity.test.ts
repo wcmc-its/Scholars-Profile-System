@@ -316,7 +316,6 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
-      isCvGenerator: false,
     });
   });
 
@@ -335,7 +334,6 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
-      isCvGenerator: false,
     });
   });
 });

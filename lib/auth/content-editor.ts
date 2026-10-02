@@ -6,7 +6,7 @@
  * `isContentEditor(cwid)` answers "is this CWID a member of the content-editor
  * group?" with a live LDAPS query against the WCM Enterprise Directory —
  * re-evaluated per request, never cached for the session, exactly like its
- * siblings (`observer.ts`, `cv-generator.ts`).
+ * siblings (`observer.ts`, `honors-curator.ts`).
  *
  * HOW THE ROLE WORKS. Reads look like a steward's: a content editor who is not
  * already a superuser or comms_steward gets a SYNTHETIC `isCommsSteward: true`

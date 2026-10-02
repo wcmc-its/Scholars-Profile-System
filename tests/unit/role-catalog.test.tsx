@@ -50,15 +50,17 @@ describe("RolesCatalog", () => {
     render(
       <RolesCatalog
         counts={{}}
-        members={{ observer: [{ cwid: "aaa1", name: "Amy Able" }, { cwid: "zz9", name: null }], cv_generator: [] }}
+        members={{ observer: [{ cwid: "aaa1", name: "Amy Able" }, { cwid: "zz9", name: null }], honors_curator: [] }}
       />,
     );
     expect(screen.getByTestId("role-holders-observer").textContent).toContain("2 people");
     const list = screen.getByTestId("role-members-observer");
     expect(list.textContent).toContain("Amy Able aaa1");
     expect(list.textContent).toContain("zz9");
-    expect(screen.getByTestId("role-holders-cv_generator").textContent).toBe("No one");
+    expect(screen.getByTestId("role-holders-honors_curator").textContent).toBe("No one");
     expect(screen.getByTestId("role-holders-superuser").textContent).toBe("Managed in MARIA");
+    // Retired 2026-10-02 (members moved to Observer): no longer listed.
+    expect(screen.queryByTestId("role-row-cv_generator")).toBeNull();
   });
 
   it("lists every role; ED groups say MARIA, counted roles show people", () => {

@@ -134,7 +134,7 @@ import EditScholarPage from "@/app/edit/scholar/[cwid]/page";
 
 const SELF = { cwid: "self01", isSuperuser: false };
 const ADMIN = { cwid: "adm001", isSuperuser: true };
-const CV_GENERATOR = { cwid: "cvg001", isSuperuser: false, isCvGenerator: true };
+const OBSERVER = { cwid: "obs001", isSuperuser: false, isCommsSteward: true, isObserver: true };
 
 const fakeCtx = (cwid: string) => ({
   scholar: { cwid, slug: cwid, preferredName: cwid, fullName: cwid, overview: "", slugOverride: null, suppression: { ownRow: null, adminRow: null } },
@@ -257,12 +257,12 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     expect(ctx.scholar.cwid).toBe("other7");
   });
 
-  it("signed-in cv_generator on another cwid → EditPage(mode='cv-generator') (#2482, never falls to comms_steward)", async () => {
-    mockGetEditSession.mockResolvedValue(CV_GENERATOR);
+  it("signed-in observer on another cwid → EditPage(mode='read-only'), never the comms_steward editor", async () => {
+    mockGetEditSession.mockResolvedValue(OBSERVER);
     mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
     const result = asElement(await EditScholarPage({ params: params("other7") }));
     expect(result.type).toBe(mockEditPage);
-    expect(result.props.mode).toBe("cv-generator");
+    expect(result.props.mode).toBe("read-only");
     const ctx = result.props.ctx as { scholar: { cwid: string } };
     expect(ctx.scholar.cwid).toBe("other7");
   });
