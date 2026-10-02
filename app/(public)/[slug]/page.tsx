@@ -26,10 +26,16 @@ import { canonicalProfilePath } from "@/lib/profile-url";
 import { buildProfileMetadata } from "@/lib/profile-metadata";
 import { ProfileView } from "@/components/profile/profile-view";
 
-// Dynamic render — see ProfileView / #640. Profiles read cookies()/headers()
-// transitively via <SiteHeader>, so static/ISR is untenable; CloudFront caches
-// the public response by path at the edge.
-export const dynamic = "force-dynamic";
+// On-demand ISR, matching the department/center pages. #640 made this
+// force-dynamic because the header and global not-found read cookies()/headers();
+// both have since moved off the server path (header auth is a client island,
+// not-found fixed in #2951), and force-dynamic sent `max-age=0`, so CloudFront
+// never cached a profile and every view was an origin render plus Aurora
+// (2026-10-01 load test). The profile tree must stay free of request-time APIs,
+// and its loaders must throw rather than degrade (getMenteesForMentor `strict`).
+// Edits bust the entry via lib/edit/revalidation.ts; 6 h covers the nightly ETL.
+export const revalidate = 21600;
+export const dynamicParams = true;
 
 export async function generateMetadata({
   params,

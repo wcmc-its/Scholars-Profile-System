@@ -174,7 +174,7 @@ export async function ProfileView({ slug }: { slug: string }) {
   };
   const { mentees: menteesAll, copubSourceAvailable } = hiddenSectionSet.has("hideMentoring")
     ? emptyMentoring
-    : await getMenteesForMentor(profile.cwid, { sort: "copubs" });
+    : await getMenteesForMentor(profile.cwid, { sort: "copubs", strict: true });
 
   // #160 follow-up — a mentor may HIDE a mentee from their public profile. The
   // suppression layer is the SOR for that choice (ADR-005 immediacy: per-
