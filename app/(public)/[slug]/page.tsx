@@ -37,6 +37,15 @@ import { ProfileView } from "@/components/profile/profile-view";
 export const revalidate = 21600;
 export const dynamicParams = true;
 
+// Required for the ISR above: without generateStaticParams, Next renders a
+// dynamic segment on every request regardless of `revalidate` (staging
+// 2026-10-02: profiles carried no x-nextjs-cache header after #3002). An empty
+// list prerenders nothing at build (CI has no DB) and caches each profile on its
+// first request.
+export async function generateStaticParams(): Promise<{ slug: string }[]> {
+  return [];
+}
+
 export async function generateMetadata({
   params,
 }: {
