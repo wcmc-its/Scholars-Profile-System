@@ -2,46 +2,48 @@
  * View 1 — System context (the combined landscape).
  * Upstream sources -> scheduled ETL -> platform stores -> public + staff editors.
  * Sources laid out in TWO columns so the whole landscape fits one window.
- * Source: docs/architecture-overview.md, docs/dependency-outage-matrix.md.
+ * Source: docs/architecture-overview.md, docs/dependency-outage-matrix.md, cdk/lib/etl-stack.ts.
  */
 import { A } from "../lib.mjs";
 
-// Two source columns (col A / col B) so the left rail is ~5 rows tall, not ~14.
+// Two source columns (col A / col B) so the left rail is ~6 rows tall, not ~12.
 const AX = 40, BX = 350, SW = 300, SH = 52; // col-A x, col-B x, source width, height
 
 const nodes = {
   // ----- left: WCM source systems (2 cols × 6 rows) -----  (chip = ETL cadence)
-  // Row pairs keep the source-to-source lineage arrows short & horizontal
-  // (ASMS→ED on row 1, OnCore→ReciterDB on row 3).
-  ed:     { x: AX, y: 150, w: SW, h: SH, kind: "ext", title: "Enterprise Directory", sub: ["LDAPS · person types, appointments, headshots"], chip: { tone: "nightly", text: "nightly" } },
-  asms:   { x: BX, y: 150, w: SW, h: SH, kind: "ext", title: "ASMS", sub: ["MS SQL · education, degrees"], chip: { tone: "nightly", text: "nightly" } },
+  // Col B holds the three sources with a second, platform-to-source edge, so each
+  // of those edges is a short horizontal hop across the gap with no crossings:
+  // Identity (ORCID push, row 1), ReciterAI (app write-back, row 4) and the
+  // Enterprise Directory (read-time headshot, row 5, level with the app).
+  rdb:    { x: AX, y: 150, w: SW, h: SH, kind: "ext", title: "ReciterDB", sub: ["MariaDB · pubs, COI stmts, trials, datasets, JIF"], chip: { tone: "nightly", text: "nightly" } },
+  ident:  { x: BX, y: 150, w: SW, h: SH, kind: "ext", title: "WCM Identity (ReCiter)", sub: ["DynamoDB · ORCID iDs (read + push-back)"], chip: { tone: "nightly", text: "nightly" } },
   infoed: { x: AX, y: 210, w: SW, h: SH, kind: "ext", title: "InfoEd", sub: ["MS SQL · grants (funding)"], chip: { tone: "nightly", text: "nightly" } },
-  coi:    { x: BX, y: 210, w: SW, h: SH, kind: "ext", title: "COI Portal", sub: ["MS SQL · disclosures"], chip: { tone: "nightly", text: "nightly" } },
-  rdb:    { x: AX, y: 270, w: SW, h: SH, kind: "ext", title: "ReciterDB", sub: ["MariaDB · publications, MeSH, clinical trials"], chip: { tone: "nightly", text: "nightly" } },
-  onc:    { x: BX, y: 270, w: SW, h: SH, kind: "ext", title: "OnCore (CTMS)", sub: ["clinical-trial mgmt · investigators, status"], chip: { tone: "ondemand", text: "manual export" } },
-  rai:    { x: AX, y: 330, w: SW, h: SH, kind: "ext", title: "ReciterAI", sub: ["DynamoDB + S3 · topics, spotlights"], chip: { tone: "weekly", text: "weekly" } },
-  jenz:   { x: BX, y: 330, w: SW, h: SH, kind: "ext", title: "Jenzabar", sub: ["MS SQL · grad-school mentoring"], chip: { tone: "nightly", text: "nightly" } },
-  hr:     { x: AX, y: 390, w: SW, h: SH, kind: "ext", title: "Human Resources", sub: ["employer / employee mentees"], chip: { tone: "planned", text: "planned" } },
-  pops:   { x: BX, y: 390, w: SW, h: SH, kind: "ext", title: "POPS directory", sub: ["HTTPS · board certs, specialties, expertise"], chip: { tone: "nightly", text: "nightly" } },
+  coi:    { x: BX, y: 210, w: SW, h: SH, kind: "ext", title: "COI Portal", sub: ["MS SQL · disclosures (server shared w/ FRT)"], chip: { tone: "nightly", text: "nightly" } },
+  jenz:   { x: AX, y: 270, w: SW, h: SH, kind: "ext", title: "Jenzabar", sub: ["MS SQL · grad-school mentoring"], chip: { tone: "nightly", text: "nightly" } },
+  frt:    { x: BX, y: 270, w: SW, h: SH, kind: "ext", title: "Faculty Review Tool", sub: ["MS SQL (COI server) · mentee self-reports"], chip: { tone: "weekly", text: "weekly" } },
+  onc:    { x: AX, y: 330, w: SW, h: SH, kind: "ext", title: "OnCore (CTMS)", sub: ["clinical-trial mgmt · investigators, status"], chip: { tone: "ondemand", text: "manual export" } },
+  rai:    { x: BX, y: 330, w: SW, h: SH, kind: "ext", title: "ReciterAI", sub: ["DynamoDB + S3 · scores, topics, spotlights"], chip: { tone: "nightly", text: "nightly + weekly" } },
+  asms:   { x: AX, y: 390, w: SW, h: SH, kind: "ext", title: "ASMS", sub: ["MS SQL · education, degrees"], chip: { tone: "nightly", text: "nightly" } },
+  ed:     { x: BX, y: 390, w: SW, h: SH, kind: "ext", title: "Enterprise Directory", sub: ["LDAPS · appointments, headshots, HR postdoc mentors"], chip: { tone: "nightly", text: "nightly" } },
   ctsc:   { x: AX, y: 450, w: SW, h: SH, kind: "ext", title: "CTSC roster feed", sub: ["HTTPS · CTSC center roster (not publications)"], chip: { tone: "nightly", text: "nightly" } },
-  // ----- left: external (public HTTPS) (2 cols × 2 rows) -----
-  ctgov:  { x: AX, y: 574, w: SW, h: SH, kind: "ext", title: "ClinicalTrials.gov", sub: ["HTTPS API v2 · NCT trial enrichment"], chip: { tone: "weekly", text: "weekly" } },
-  nih:    { x: BX, y: 574, w: SW, h: SH, kind: "ext", title: "NIH RePORTER", sub: ["HTTPS · grant enrichment"], chip: { tone: "ondemand", text: "on-demand" } },
-  nsf:    { x: AX, y: 634, w: SW, h: SH, kind: "ext", title: "NSF Awards", sub: ["HTTPS · federal awards"], chip: { tone: "ondemand", text: "on-demand" } },
-  mesh:   { x: BX, y: 634, w: SW, h: SH, kind: "ext", title: "NLM MeSH", sub: ["HTTPS · taxonomy"], chip: { tone: "annual", text: "annual" } },
+  pops:   { x: BX, y: 450, w: SW, h: SH, kind: "ext", title: "POPS directory", sub: ["HTTPS · board certs, specialties, expertise"], chip: { tone: "weekly", text: "weekly" } },
+  // ----- left: external (public HTTPS) (2 cols × 3 rows) -----
+  ctgov:  { x: AX, y: 574, w: SW, h: SH, kind: "ext", title: "ClinicalTrials.gov", sub: ["HTTPS API v2 · live NCT enrichment"], chip: { tone: "weekly", text: "weekly" } },
+  grants: { x: BX, y: 574, w: SW, h: SH, kind: "ext", title: "NIH RePORTER · NSF · Gates", sub: ["HTTPS · PI profiles, award enrichment"], chip: { tone: "weekly", text: "weekly" } },
+  mesh:   { x: AX, y: 634, w: SW, h: SH, kind: "ext", title: "PubMed + NLM MeSH", sub: ["E-utils retractions · MeSH tree (on-demand)"], chip: { tone: "nightly", text: "nightly" } },
+  honors: { x: BX, y: 634, w: SW, h: SH, kind: "ext", title: "Honor-society rosters", sub: ["public lists · pending curator queue"], chip: { tone: "weekly", text: "weekly (Mon)" } },
   ctl:    { x: AX, y: 694, w: SW, h: SH, kind: "ext", title: "CTL portfolio", sub: ["HTTPS · WCM licensable technologies"], chip: { tone: "weekly", text: "weekly" } },
-  news:   { x: BX, y: 694, w: SW, h: SH, kind: "ext", title: "WCM Newsroom", sub: ["feed.json · scholar news mentions"], chip: { tone: "weekly", text: "weekly" } },
+  news:   { x: BX, y: 694, w: SW, h: SH, kind: "ext", title: "WCM Newsroom + clips", sub: ["feed.json weekly · EA clips email nightly"], chip: { tone: "weekly", text: "weekly" } },
   // ----- center: the platform -----
-  etl:    { x: 738, y: 172, w: 320, h: 54, kind: "app", title: "ETL pipeline", sub: ["Step Functions · nightly / weekly / annual"] },
+  etl:    { x: 738, y: 172, w: 320, h: 54, kind: "app", title: "ETL pipeline", sub: ["Step Functions · nightly/weekly/annual/honors"] },
   aur:    { x: 738, y: 284, w: 154, h: 60, kind: "data", title: "Aurora MySQL", sub: ["canonical store"] },
   os:     { x: 904, y: 284, w: 154, h: 60, kind: "data", title: "OpenSearch", sub: ["search + autocomplete"] },
-  app:    { x: 738, y: 400, w: 320, h: 56, kind: "app", title: "Next.js application", sub: ["public profiles + /edit"] },
+  app:    { x: 738, y: 388, w: 320, h: 56, kind: "app", title: "Next.js application", sub: ["public profiles + /edit"] },
   ovr:    { x: 738, y: 498, w: 320, h: 52, kind: "aws", title: "Manual-override layer", sub: ["staff edits survive every rebuild"] },
   // ----- right: audiences -----
-  vis:    { x: 1162, y: 172, w: 326, h: 68, kind: "ext", title: "Public & research community", sub: ["~9,000 profiles · topics, depts", "search"] },
-  crawl:  { x: 1162, y: 268, w: 326, h: 54, kind: "ext", title: "Search-engine crawlers", sub: ["sitemaps · SEO discovery"] },
-  staff:  { x: 1162, y: 360, w: 326, h: 56, kind: "ext", title: "WCM staff editors", sub: ["SAML SSO -> /edit writes"] },
-  idp:    { x: 1162, y: 468, w: 326, h: 68, kind: "aws", title: "WCM SAML IdP + Directory", sub: ["login-proxy · authn", "Enterprise Directory · authz"] },
+  vis:    { x: 1162, y: 180, w: 326, h: 68, kind: "ext", title: "Public & research community", sub: ["~9,000 profiles · topics, depts, search", "+ search-engine crawlers (sitemaps)"] },
+  staff:  { x: 1162, y: 324, w: 326, h: 56, kind: "ext", title: "WCM staff editors", sub: ["SAML SSO -> /edit writes"] },
+  idp:    { x: 1162, y: 444, w: 326, h: 68, kind: "aws", title: "WCM SAML IdP + Directory", sub: ["login-proxy · authn", "Enterprise Directory · authz"] },
 };
 
 const groups = [
@@ -50,33 +52,34 @@ const groups = [
   { x: 706, y: 136, w: 384, h: 436, kind: "edge", title: "Scholars Profile System" },
   { x: 1138, y: 136, w: 372, h: 436, kind: "net", title: "Who it serves" },
 ];
+// The old over-the-top headshot route needed a ~60px top margin; it is gone, so
+// lift the whole layout (nodes + groups) instead of re-typing every y.
+const DY = 60;
+for (const b of [...Object.values(nodes), ...groups]) b.y -= DY;
 const [gWcm, gExt, gSps] = groups;
 
 const edges = [
-  { p0: A(gWcm, "r", 0.5), p1: A(nodes.etl, "l", 0.3), color: "teal", label: "ingest" },
-  { p0: A(gExt, "r", 0.5), p1: A(nodes.etl, "l", 0.72), color: "teal" },
+  { p0: A(gWcm, "r", 0.5), p1: A(nodes.etl, "l", 0.35), color: "teal", label: "ingest" },
+  // ClinicalTrials.gov now flows like the other HTTPS sources: the weekly
+  // etl:clinical-trials step fetches each NCT live (#2769), so it rides this arrow.
+  { p0: A(gExt, "r", 0.5), p1: A(nodes.etl, "l", 0.75), color: "teal" },
+  // The two places data flows back UP to a source system (dashed violet), plus the
+  // read-time headshot. Each is a level hop across the gap, so labels stay short.
+  { p0: A(nodes.etl, "l", 0.08), p1: A(nodes.ident, "r", 0.5), color: "violet", dash: true, label: "ORCID push" },
+  { p0: A(nodes.app, "l", 0.1), p1: A(nodes.rai, "r", 0.8), color: "violet", dash: true, label: "write-back", lp: { x: 694, y: 380 - DY } },
   // ED also serves the headshot — fetched live at read time, bypassing the ETL.
-  // Routed up-and-over the source rail (col-A nodes are boxed in by col B).
-  { p0: A(nodes.ed, "t", 0.5), p1: A(nodes.app, "l", 0.4), color: "violet", dash: true, label: "headshot · read-time", lp: { x: 388, y: 100 }, points: [{ x: 190, y: 106 }, { x: 690, y: 106 }, { x: 690, y: 422 }] },
-  // Clinical-trial lineage: ClinicalTrials.gov's NCT pull stages into reciterdb tables
-  // (clinical_trials_enriched) that the ETL reads — it never flows straight to the ETL
-  // like the other external sources, so a dashed arrow up the far-left channel corrects
-  // its path (SPS never calls it; ReciterAI pulls it upstream). OnCore likewise stages
-  // via reciterdb (footnote) — its own arrow is dropped in the 2-col layout because a
-  // same-row connector is too short to read; the footnote carries that lineage.
-  { p0: A(nodes.ctgov, "l", 0.5), p1: A(nodes.rdb, "l", 0.3), color: "gray", w: 1.5, dash: true, points: [{ x: 18, y: 600 }, { x: 18, y: 286 }] },
+  { p0: A(nodes.ed, "r", 0.5), p1: A(nodes.app, "l", 0.5), color: "violet", dash: true, label: "headshot" },
   { p0: A(nodes.etl, "b", 0.3), p1: A(nodes.aur, "t", 0.5), color: "teal" },
   { p0: A(nodes.etl, "b", 0.72), p1: A(nodes.os, "t", 0.5), color: "teal" },
   { p0: A(nodes.aur, "b", 0.5), p1: A(nodes.app, "t", 0.28), color: "gray", label: "read" },
   { p0: A(nodes.os, "b", 0.5), p1: A(nodes.app, "t", 0.72), color: "gray" },
   { p0: A(nodes.ovr, "t", 0.5), p1: A(nodes.app, "b", 0.5), color: "violet", label: "merge at read" },
-  { p0: A(gSps, "r", 0.22), p1: A(nodes.vis, "l", 0.5), color: "maroon", label: "HTTPS via CDN" },
-  { p0: A(gSps, "r", 0.42), p1: A(nodes.crawl, "l", 0.5), color: "maroon" },
-  { p0: A(nodes.staff, "l", 0.5), p1: A(gSps, "r", 0.72), color: "indigo", label: "authenticated writes" },
+  { p0: A(gSps, "r", 0.22), p1: A(nodes.vis, "l", 0.5), color: "maroon", label: "via CDN" },
+  { p0: A(nodes.staff, "l", 0.5), p1: A(gSps, "r", 0.6), color: "indigo", label: "edits" },
   { p0: A(nodes.idp, "t", 0.5), p1: A(nodes.staff, "b", 0.5), color: "gray", label: "SSO" },
 ];
 
-export const spec = { id: "system-context", vb: [1540, 784], groups, nodes, edges };
+export const spec = { id: "system-context", vb: [1540, 724], groups, nodes, edges };
 
 export const meta = {
   nav: "① System context",
@@ -86,39 +89,51 @@ export const meta = {
   blurb:
     "The one-glance picture for newcomers and stakeholders: every displayed value is " +
     "<b>derived</b> — <b>20+ upstream connectors</b> feed a scheduled ETL into the platform's stores, " +
-    "which the app serves to the public and to authenticated staff editors. Third-party sources live " +
+    "which the app serves to the public and to authenticated staff editors. Dashed violet arrows are " +
+    "the few flows that run the other way. Third-party sources live " +
     "<b>here</b>, in context, rather than in a diagram of their own.",
   legend: [
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "Source / external actor" },
     { fill: "#e3faf3", stroke: "#0ca678", label: "Compute / pipeline" },
     { fill: "#fff4d6", stroke: "#f08c00", label: "Data store" },
-    { fill: "#f0ebff", stroke: "#7048e8", label: "Override / identity" },
+    { fill: "#f0ebff", stroke: "#7048e8", label: "Override / identity · write-back (dashed)" },
     { fill: "#fbeaea", stroke: "#7d1c1c", label: "Platform boundary" },
   ],
   cadenceLegend: {
     title: "ETL refresh cadence — deployed Step Functions schedule (cdk/lib/etl-stack.ts)",
     items: [
-      { tone: "nightly", label: "07:00 UTC daily" },
-      { tone: "weekly", label: "Sun 08:00 UTC" },
-      { tone: "annual", label: "Jul 1 + manual gate" },
-      { tone: "ondemand", label: "not yet scheduled" },
-      { tone: "planned", label: "planned · not yet built" },
+      { tone: "nightly", label: "07:00 UTC daily (staging 07:45)" },
+      { tone: "weekly", label: "Sun 12:00 UTC (honors: Mon 10:00)" },
+      { tone: "ondemand", label: "manual / on-demand" },
     ],
   },
   footnote:
     "<b>Headshots</b> load live at read time straight from the WCM directory " +
     "(<code>directory.weill.cornell.edu</code>) — never stored, never via the ETL. " +
-    "<b>On-demand</b> sources (RePORTER, NSF) aren't on a Step Functions cadence yet; " +
-    "they run via the daily prototype chain. <b>Human Resources</b> (employer/employee mentees) is " +
-    "a planned source, not yet built. <b>POPS</b> (the public <code>weillcornell.org</code> physician " +
+    "<b>Write-backs</b>: the nightly <code>etl:orcid-push</code> copies confirmed ORCID iDs back into " +
+    "WCM Identity through the ReCiter engine API, the ETL's only write to a WCM system of record " +
+    "(prod only; staging runs it as a dry run). The app writes to ReciterAI only for core-claim " +
+    "mirrors and the opportunity SUBMISSION queue. " +
+    "<b>ReciterAI</b> scores, topics, tools and grants refresh nightly, spotlights weekly, and the " +
+    "topic hierarchy on the annual run (Jul 1, behind a manual approval gate). Some ReciterDB-side " +
+    "data (ed, mentoring, citations, clinical-trials) reaches the in-VPC ETL as NDJSON bridge files " +
+    "in ReciterAI's S3 bucket rather than as direct reads. " +
+    "<b>Postdoc mentees</b> come from HR: Enterprise Directory carries the HR employee-SOR role records, and the nightly ED pass reads each postdoc's <code>manager</code> (the PI, or the PI named in the lab unit) into <code>postdoc_mentor_relationship</code>, alumni included. " +
+    "<b>Faculty Review Tool</b> self-reported mentees are read weekly from the COI portal's SQL Server " +
+    "(<code>etl/frt</code>) and feed /edit mentee suggestions. " +
+    "<b>POPS</b> (the public <code>weillcornell.org</code> physician " +
     "directory) enriches clinical scholars with board certifications, specialties, and expertise " +
-    "(<code>etl/pops/index.ts</code>) — it runs after Enterprise Directory (it keys off the " +
-    "clinical-profile flag ED sets) and feeds the people search index; it rides the daily chain, not " +
-    "yet a standalone Step Functions step. <b>Clinical trials</b> originate in <b>OnCore</b> (the CTMS — a " +
-    "<b>manual</b> institutional export, static until the next export lands) and " +
-    "are enriched against the <b>ClinicalTrials.gov</b> registry (API v2); both stage into reciterdb " +
-    "tables (<code>clinical_trials</code> / <code>clinical_trials_enriched</code>, the latter pulled " +
-    "upstream by ReciterAI) that the nightly ETL reads — SPS never calls ClinicalTrials.gov directly. " +
+    "(<code>etl/pops/index.ts</code>) — it keys off the clinical-profile flag Enterprise Directory " +
+    "sets, runs weekly (<code>PopsWeekly</code>) after the nightly ED pass has set that flag, and " +
+    "feeds the people search index. <b>Grant enrichment</b> runs weekly: NIH RePORTER (PI profiles " +
+    "from the public API, plus RePORTER-derived tables in ReciterDB), NSF awards, and the Gates " +
+    "Foundation's public committed-grants CSV. <b>PubMed</b> E-utilities stamp retracted papers " +
+    "nightly; the NLM MeSH descriptor download (<code>etl:mesh</code>) is on-demand, not scheduled. " +
+    "<b>Clinical trials</b> originate in <b>OnCore</b> (the CTMS — a " +
+    "<b>manual</b> institutional export, static until the next export lands). OnCore's export " +
+    "stages into reciterdb (<code>clinical_trials</code>); the weekly <code>etl:clinical-trials</code> " +
+    "reads that list and fetches each NCT live from ClinicalTrials.gov API v2, falling back to " +
+    "reciterdb's <code>clinical_trials_enriched</code> row only when a batch fails. " +
     "<b>CTL portfolio</b> (available technologies) is WCM's own Center for Technology Licensing, " +
     "scraped weekly from its public portal (<code>innovation.weill.cornell.edu</code>). " +
     "<b>WCM Newsroom</b> is read weekly for articles that mention a scholar " +
@@ -128,9 +143,17 @@ export const meta = {
     "<code>/edit</code>. The Research office's news page " +
     "(<code>research.weill.cornell.edu/about-us/news-updates</code>) is a <b>syndication target</b> of " +
     "the newsroom, not a source — SPS scraped it until #2200/#2231. " +
+    "<b>Media clips</b>: External Affairs' daily 'WCM in the News' digest is mailed to an SES inbound " +
+    "address (<code>cdk/lib/inbound-mail-stack.ts</code>), and <code>etl:news-clips</code> parses it " +
+    "nightly into pending mentions for comms review; the Research Dean's weekly funding digest arrives " +
+    "the same way and <code>etl:funding-digest</code> feeds it to the ReciterAI submission queue " +
+    "(Views 6 and 7; prod only, staging is a dry run). " +
+    "<b>Honor-society rosters</b> are scraped from public lists on their own Step Functions machine " +
+    "(Mon 10:00 UTC), not the Sunday weekly chain; every match is human-reviewed. Also read over public " +
+    "HTTPS: the ORCID registry (weekly; advisory /edit/orcid-coverage only). " +
     "<b>CTSC roster feed</b> (the Clinical &amp; Translational Science Center's investigators-and-trainees " +
     "feed, the one the ReCiter Institutional Client reads) mirrors the <code>ctsc</code> center roster " +
     "nightly (<code>etl/ctsc-roster</code>). It is <b>not</b> a publication source: its PubMed IDs are " +
     "never read, and its CWIDs are checked against Enterprise Directory before a member is linked.",
-  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/pops/index.ts · docs/pops-clinical-search-spec.md · etl/clinical-trials/* · docs/clinical-trials-source-spec.md · etl/news/* · docs/2026-07-18-news-mentions-plan.md · etl/ctsc-roster/*",
+  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · cdk/lib/app-stack.ts · cdk/lib/inbound-mail-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/orcid-push/* · etl/frt/* · etl/pops/index.ts · docs/pops-clinical-search-spec.md · etl/clinical-trials/* · docs/clinical-trials-source-spec.md · etl/news/* · etl/news/clips.ts · docs/2026-07-18-news-mentions-plan.md · etl/gates/* · etl/pubmed-retractions/* · etl/honors/* · etl/ctsc-roster/*",
 };
