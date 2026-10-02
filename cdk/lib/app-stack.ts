@@ -1894,7 +1894,9 @@ export class AppStack extends Stack {
         //     confers the role. Same shape as its siblings (groupOfURLs under
         //     `ou=application security`); see the LDIF handoff for creation.
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        CV_GENERATOR_ENABLED: "on",
+        // RETIRED 2026-10-02: its members moved to the observer role, which
+        // also downloads CVs. Off in both envs; the code is dormant.
+        CV_GENERATOR_ENABLED: "off",
         SCHOLARS_CV_GENERATOR_GROUP_CN: "ITS:Library:Scholars/cv-generator-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff

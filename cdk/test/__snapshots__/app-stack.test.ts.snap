@@ -603,7 +603,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CV_GENERATOR_ENABLED",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_CV_GENERATOR_GROUP_CN",
@@ -5187,7 +5187,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CV_GENERATOR_ENABLED",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_CV_GENERATOR_GROUP_CN",

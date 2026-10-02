@@ -84,15 +84,6 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     cannot: ["Edit profiles"],
   },
   {
-    key: "cv_generator",
-    label: "CV generator",
-    description: "Faculty Affairs CV downloads.",
-    source: "ed_group",
-    groupCn: ED("cv-generator"),
-    can: ["Download any CV"],
-    cannot: ["Any edit"],
-  },
-  {
     key: "data_sharing_viewer",
     label: "Data-sharing viewer",
     description: "The data-sharing dashboard.",
