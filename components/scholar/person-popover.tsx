@@ -34,6 +34,7 @@ import {
 } from "@/components/scholar/person-card-role-pill";
 import { GrantRolePill } from "@/components/scholar/person-card-grant-role-pill";
 import { profilePath } from "@/lib/profile-url";
+import { identityImageEndpoint } from "@/lib/headshot";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { setScholarFilter, useScholarFilter } from "@/components/taxonomy/scholar-filter";
@@ -178,6 +179,30 @@ const ROLE_FROM_FLAGS = (
 ): AuthorshipRole =>
   authorshipRoleFromFlags(isFirst, isLast, firstCount, lastCount);
 
+// Shared across every popover on the page: one request per URL, in-flight
+// promises reused, so hovering the same scholar twice (or two cards for the same
+// scholar) never refetches. A failed request is evicted so the next hover retries.
+// ponytail: unbounded per page session; entries are ~1-2 KB, a page shows dozens.
+const popoverCache = new Map<string, Promise<ApiResponse>>();
+
+/** Tests only: the cache otherwise outlives a single render tree. */
+export function resetPopoverCache(): void {
+  popoverCache.clear();
+}
+
+function loadPopover(url: string): Promise<ApiResponse> {
+  let p = popoverCache.get(url);
+  if (!p) {
+    p = fetch(url).then(async (r) => {
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      return (await r.json()) as ApiResponse;
+    });
+    p.catch(() => popoverCache.delete(url));
+    popoverCache.set(url, p);
+  }
+  return p;
+}
+
 export function PersonPopover({
   cwid,
   surface,
@@ -199,20 +224,51 @@ export function PersonPopover({
   contextFamilyLabel,
   filterable = false,
 }: PersonPopoverProps) {
-  const [data, setData] = React.useState<ApiResponse | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const abortRef = React.useRef<AbortController | null>(null);
-  const fetchedKeyRef = React.useRef<string | null>(null);
+  // Keyed so a prop change never shows the previous scholar's result.
+  const [result, setResult] = React.useState<{
+    key: string;
+    data?: ApiResponse;
+    error?: string;
+  } | null>(null);
 
   const fetchKey = `${cwid}|${surface}|${contextScholarCwid ?? ""}|${contextPubPmid ?? ""}|${contextTopicSlug ?? ""}|${contextGrant?.projectId ?? ""}|${contextMethods ? "1" : ""}|${contextSupercategory ?? ""}|${contextFamilyLabel ?? ""}`;
+  const data = result?.key === fetchKey ? (result.data ?? null) : null;
+  const error = result?.key === fetchKey ? (result.error ?? null) : null;
+
+  // Starts on pointer-enter / focus, not on open: the HoverCard's 200 ms open
+  // delay then overlaps the request instead of preceding it, so the card usually
+  // opens with its content instead of "Loading…".
+  const load = React.useCallback(() => {
+    const params = new URLSearchParams({ surface });
+    if (contextScholarCwid) params.set("contextScholarCwid", contextScholarCwid);
+    if (contextPubPmid) params.set("contextPubPmid", contextPubPmid);
+    if (contextTopicSlug) params.set("contextTopicSlug", contextTopicSlug);
+    if (contextGrant?.projectId) params.set("contextGrantProjectId", contextGrant.projectId);
+    if (contextMethods) params.set("contextMethods", "1");
+    if (contextSupercategory) params.set("contextSupercategory", contextSupercategory);
+    if (contextFamilyLabel) params.set("contextFamilyLabel", contextFamilyLabel);
+    // The card header's headshot otherwise starts only after the JSON renders.
+    if (surface !== "taxonomy-card") new Image().src = identityImageEndpoint(cwid);
+    loadPopover(`/api/scholars/${cwid}/popover-context?${params.toString()}`).then(
+      (d) => setResult({ key: fetchKey, data: d }),
+      (e) => setResult({ key: fetchKey, error: e instanceof Error ? e.message : "fetch error" }),
+    );
+  }, [
+    cwid,
+    surface,
+    contextScholarCwid,
+    contextPubPmid,
+    contextTopicSlug,
+    contextGrant?.projectId,
+    contextMethods,
+    contextSupercategory,
+    contextFamilyLabel,
+    fetchKey,
+  ]);
 
   const handleOpenChange = React.useCallback(
     (open: boolean) => {
-      if (!open) {
-        abortRef.current?.abort();
-        return;
-      }
+      if (!open) return;
 
       // Telemetry — fire-and-forget on open.
       try {
@@ -233,40 +289,9 @@ export function PersonPopover({
         // Telemetry must never break the interaction.
       }
 
-      // Skip re-fetch if the same key already resolved.
-      if (data && fetchedKeyRef.current === fetchKey) return;
-
-      const ctl = new AbortController();
-      abortRef.current = ctl;
-      setLoading(true);
-      setError(null);
-
-      const params = new URLSearchParams({ surface });
-      if (contextScholarCwid) params.set("contextScholarCwid", contextScholarCwid);
-      if (contextPubPmid) params.set("contextPubPmid", contextPubPmid);
-      if (contextTopicSlug) params.set("contextTopicSlug", contextTopicSlug);
-      if (contextGrant?.projectId)
-        params.set("contextGrantProjectId", contextGrant.projectId);
-      if (contextMethods) params.set("contextMethods", "1");
-      if (contextSupercategory) params.set("contextSupercategory", contextSupercategory);
-      if (contextFamilyLabel) params.set("contextFamilyLabel", contextFamilyLabel);
-
-      fetch(`/api/scholars/${cwid}/popover-context?${params.toString()}`, {
-        signal: ctl.signal,
-      })
-        .then(async (r) => {
-          if (!r.ok) throw new Error(`status ${r.status}`);
-          return (await r.json()) as ApiResponse;
-        })
-        .then((d) => {
-          fetchedKeyRef.current = fetchKey;
-          setData(d);
-        })
-        .catch((e) => {
-          if (e instanceof DOMException && e.name === "AbortError") return;
-          setError(e instanceof Error ? e.message : "fetch error");
-        })
-        .finally(() => setLoading(false));
+      // Opened without a pointer-enter (touch, programmatic): load now. A cached
+      // or in-flight request resolves from the shared map.
+      if (!data) load();
     },
     [
       cwid,
@@ -275,11 +300,8 @@ export function PersonPopover({
       contextPubPmid,
       contextTopicSlug,
       contextGrant?.projectId,
-      contextMethods,
-      contextSupercategory,
-      contextFamilyLabel,
-      fetchKey,
       data,
+      load,
     ],
   );
 
@@ -287,7 +309,9 @@ export function PersonPopover({
 
   return (
     <HoverCard onOpenChange={handleOpenChange}>
-      <HoverCardTrigger asChild>{children}</HoverCardTrigger>
+      <HoverCardTrigger asChild onPointerEnter={load} onFocus={load}>
+        {children}
+      </HoverCardTrigger>
       <HoverCardContent
         align="start"
         side="bottom"
@@ -296,7 +320,7 @@ export function PersonPopover({
         // Keyboard: Escape on the content closes the popover and Radix returns
         // focus to the trigger automatically.
       >
-        {loading && !data ? (
+        {!data && !error ? (
           <div className={`text-xs text-muted-foreground ${surface === "taxonomy-card" ? "p-4" : ""}`}>
             Loading…
           </div>
