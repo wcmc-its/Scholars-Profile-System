@@ -249,6 +249,29 @@ describe("Confirmed tab as rendered", () => {
     expect(items).toEqual(["All confirmed1 evidence group1", "LLM readStrong band1"]);
   });
 
+  it("leaves the row's own paper out of its list strip: no Repeat for an only paper", () => {
+    const { container } = renderConfirmed([repeatRow], {
+      paperCounts: { zzz9001: { papers: 1, recent: 1, total: 20 } },
+    });
+    const strip = container.querySelector(
+      '[data-slot="core-queue-confirmed-row"] [data-slot="core-queue-strip"]',
+    ) as HTMLElement;
+    expect(
+      [...strip.querySelectorAll("[data-fired]")].map(
+        (c) => `${c.firstChild?.textContent}:${c.getAttribute("data-fired")}`,
+      ),
+    ).toEqual(["Ack:false", "Staff:false", "LLM:true", "Repeat:false"]);
+  });
+
+  it("leaves the paper sheet open on Escape while a dialog is open", () => {
+    renderConfirmed([ackRow, repeatRow]);
+    fireEvent.click(within(list()).getByText("Repeat beta"));
+    expect(pane().className).toContain("fixed");
+    fireEvent.click(screen.getByRole("button", { name: "Add PMIDs" }));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(pane().className).toContain("fixed");
+  });
+
   it("sorts Strongest first by default, and Newest by year", () => {
     renderConfirmed([llmOnly, repeatRow, ackRow]);
     expect(titles()).toEqual(["Acknowledged alpha", "Repeat beta", "Model gamma"]);
@@ -294,6 +317,19 @@ describe("Confirmed tab as rendered", () => {
     expect(pane().getAttribute("data-pmid")).toBe(repeatRow.pmid);
     // Already that person's list: no link back to itself.
     expect(within(pane()).queryByRole("button", { name: /^Review all/ })).toBeNull();
+  });
+
+  it("counts the repeat-user link as the rail does, less a paper revoked here", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    renderConfirmed([ackRow, repeatRow, row({ ...llmOnly, wcmAuthors: [PAT] })]);
+    fireEvent.click(within(list()).getByText("Model gamma"));
+    fireEvent.click(within(pane()).getByRole("button", { name: "Revoke" }));
+    await waitFor(() => expect(pane().textContent).toContain("Revoked"));
+    fireEvent.click(within(list()).getByText("Repeat beta"));
+    expect(
+      within(pane()).getByRole("button", { name: "Review all 1 confirmed paper by Pat Example" }),
+    ).toBeTruthy();
   });
 
   it("revokes an engine-only confirmation with 'rejected', and Undo puts it back", async () => {

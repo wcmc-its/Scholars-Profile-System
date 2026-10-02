@@ -1296,14 +1296,16 @@ export interface OpenSummary {
  * strip can never count a pile or a signal the list does not show. The caller
  * passes the rows AFTER the display floor (`applyDisplayFloor`): a candidate the
  * list hides is not an open candidate as far as this strip is concerned (owner,
- * decision 7). Decided rows are skipped — they are on screen only for their
- * Undo. Pure.
+ * decision 7). Decided rows are skipped: a paper decided this session has left
+ * the list. `groups` is the rail's own `buildEvidenceGroups` over the same
+ * arguments, passed in so it is not built twice. Pure.
  */
 export function summarizeOpen(
   rows: readonly CoreQueueRow[],
   decided: ReadonlyMap<string, unknown>,
   paperCounts: Readonly<Record<string, CoreClientPaperCount>> = {},
   clientCwids: ReadonlySet<string> = new Set(),
+  groups: readonly EvidenceGroup[] = buildEvidenceGroups(rows, decided, paperCounts, clientCwids),
 ): OpenSummary {
   const signals: Record<SignalKind, number> = { ack: 0, coauthor: 0, llm: 0, affinity: 0 };
   let total = 0;
@@ -1315,10 +1317,12 @@ export function summarizeOpen(
     if (fired.length >= 2) multiSignal++;
     for (const s of fired) signals[s.kind]++;
   }
-  const groups = buildEvidenceGroups(rows, decided, paperCounts, clientCwids)
-    .filter((g) => g.open > 0)
-    .map((g) => ({ key: g.key, count: g.open }));
-  return { total, multiSignal, groups, signals };
+  return {
+    total,
+    multiSignal,
+    groups: groups.filter((g) => g.open > 0).map((g) => ({ key: g.key, count: g.open })),
+    signals,
+  };
 }
 
 /**
@@ -2316,7 +2320,7 @@ export function CoreClaimQueue({
     setAddTextTracked("");
     setAddCheck(null);
     if ((data.added ?? 0) > 0) {
-      setView("review");
+      switchView("review");
       setMode("evidence");
       setGroupKey(ADDED_GROUP);
       resetForScope();
@@ -2665,7 +2669,6 @@ export function CoreClaimQueue({
 
   const focusIndex = resolveFocusIndex(visible, focusPmid, lastFocusIndex.current);
   const focused = focusIndex >= 0 ? visible[focusIndex] : null;
-  if (focusIndex >= 0) lastFocusIndex.current = focusIndex;
   // The Confirmed pane's paper. A revoked row is held in the list, so it keeps
   // its place and the pane keeps it for its Undo.
   const confFocusIndex =
@@ -2673,7 +2676,17 @@ export function CoreClaimQueue({
       ? resolveFocusIndex(historyShown, confFocusPmid, lastConfIndex.current)
       : -1;
   const confFocused = confFocusIndex >= 0 ? historyShown[confFocusIndex] : null;
-  if (confFocusIndex >= 0) lastConfIndex.current = confFocusIndex;
+  // After each render: remember where each pane sat (the place a paper that
+  // leaves the list falls back to); once the pane has moved on from a decided
+  // paper, point `focusPmid` at the row it shows, so a later sort or filter
+  // follows that row and not the decided paper's old index; and close the
+  // phone sheet when the last paper has been decided out from under it.
+  useEffect(() => {
+    if (focusIndex >= 0) lastFocusIndex.current = focusIndex;
+    if (confFocusIndex >= 0) lastConfIndex.current = confFocusIndex;
+    if (focusPmid !== null && focused && focused.pmid !== focusPmid) setFocusPmid(focused.pmid);
+    if (view === "review" && !focused && sheetOpen) setSheetOpen(false);
+  }, [focusIndex, confFocusIndex, focusPmid, focused, view, sheetOpen]);
 
   // The selection only ever acts on rows the reviewer can SEE: a row ticked and
   // then hidden by a facet or the search drops out of the batch. Acting on rows
@@ -2827,9 +2840,23 @@ export function CoreClaimQueue({
   // The summary strip counts the rows the list SHOWS (`reviewRows`, after the
   // display floor) across the whole queue, not the rail's current pile: it is
   // the queue's overview, and a signal click narrows whatever pile is open.
-  const summary = summarizeOpen(reviewRows, decided, paperCounts, clientCwids);
+  const summary = summarizeOpen(reviewRows, decided, paperCounts, clientCwids, groups);
 
   // ---- scope changes ------------------------------------------------------
+
+  /** A tab switch, from the tabs or from Add PMIDs landing on To review. */
+  const switchView = (v: QueueView) => {
+    if (v === view) return;
+    setView(v);
+    setArmed(null);
+    // The search and the facets are shared across tabs; a value ticked on one
+    // tab's rows means nothing on another's.
+    setFacets({});
+    setQuery("");
+    setHistSelected(new Set());
+    setHistArmed(false);
+    setSheetOpen(false);
+  };
 
   /** Any change of pile drops the selection and disarms the guard: both were
    *  about rows the reviewer is no longer looking at. */
@@ -2955,9 +2982,11 @@ export function CoreClaimQueue({
   // dialogs; and while either dialog is open, whose focus trap owns the keys.
   const onKey = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
+    // An open dialog owns the keys, Escape included.
+    if (addOpen || clientsOpen) return;
     // The Confirmed pane is a sheet below `lg` too; Escape closes it there.
     if (view === "confirmed" && e.key === "Escape") setSheetOpen(false);
-    if (view !== "review" || candidates.length === 0 || addOpen || clientsOpen) return;
+    if (view !== "review" || candidates.length === 0) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target as HTMLElement | null;
     if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
@@ -3347,18 +3376,7 @@ export function CoreClaimQueue({
         {hasHistory ? (
           <ViewTabs
             view={view}
-            onView={(v) => {
-              if (v === view) return;
-              setView(v);
-              setArmed(null);
-              // The search and the facets are shared across tabs; a value
-              // ticked on one tab's rows means nothing on another's.
-              setFacets({});
-              setQuery("");
-              setHistSelected(new Set());
-              setHistArmed(false);
-              setSheetOpen(false);
-            }}
+            onView={switchView}
             reviewCount={remaining}
             confirmedCount={confirmed.length}
             rejectedCount={rejected.length}
@@ -3626,7 +3644,14 @@ export function CoreClaimQueue({
                 count: confSummary.signals[s.kind],
                 active: (facets.signal ?? []).includes(s.facet),
               }))}
-              onSignal={(facet) => toggleFacet("signal", facet)}
+              onSignal={(facet) => {
+                // The counts cover the whole tab, so a click shows the whole
+                // tab: the rail goes back to All / Everyone first.
+                setConfGroup(ALL_SCOPE);
+                setConfPerson(ALL_SCOPE);
+                resetConfScope();
+                toggleFacet("signal", facet);
+              }}
               methodNote={methodTierNote(confSummary.methodTiers)}
               people={confPeople
                 .filter((p) => p.open > 0)
@@ -3770,7 +3795,7 @@ export function CoreClaimQueue({
                 repeatAction={confPersonAction(
                   repeatUser(confFocused, ownCounts(confFocused), clientCwids)?.scholar.cwid,
                   (p) =>
-                    `Review all ${plural(p.rows.length, "confirmed paper")} by ${displayName(p.scholar.name)}`,
+                    `Review all ${plural(p.open, "confirmed paper")} by ${displayName(p.scholar.name)}`,
                 )}
               />
             ) : null}
