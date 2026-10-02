@@ -37,6 +37,14 @@ import { ProfileView } from "@/components/profile/profile-view";
 export const revalidate = 21600;
 export const dynamicParams = true;
 
+// Without generateStaticParams a dynamic segment is never registered for ISR
+// (absent from prerender-manifest dynamicRoutes), so `revalidate` alone left
+// every view an origin render. An empty list prebuilds nothing; each slug is
+// rendered on first request and cached.
+export async function generateStaticParams() {
+  return [];
+}
+
 export async function generateMetadata({
   params,
 }: {

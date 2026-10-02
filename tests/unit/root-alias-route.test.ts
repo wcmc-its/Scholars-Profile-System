@@ -41,7 +41,7 @@ vi.mock("@/components/profile/profile-view", () => ({
 }));
 vi.mock("@/lib/profile-metadata", () => ({ buildProfileMetadata: vi.fn() }));
 
-import RootProfileRoute from "@/app/(public)/[slug]/page";
+import RootProfileRoute, { generateStaticParams } from "@/app/(public)/[slug]/page";
 
 function call(slug: string) {
   return RootProfileRoute({ params: Promise.resolve({ slug }) });
@@ -104,5 +104,13 @@ describe("root profile route — canonical", () => {
     await expect(call("nobody-here")).rejects.toThrow("NEXT_NOT_FOUND");
     expect(mockNotFound).toHaveBeenCalled();
     expect(mockPermanentRedirect).not.toHaveBeenCalled();
+  });
+});
+
+describe("root profile route — ISR registration", () => {
+  // Without generateStaticParams Next never registers the segment for ISR and
+  // `revalidate` is inert: every view renders at the origin (2026-10-02).
+  it("exports an empty generateStaticParams so slugs are cached on demand", async () => {
+    expect(await generateStaticParams()).toEqual([]);
   });
 });
