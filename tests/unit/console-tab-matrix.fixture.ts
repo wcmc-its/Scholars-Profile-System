@@ -127,6 +127,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "usage",
       "orcidCoverage",
       "coi",
+      "administrators",
     ],
     pins:
       "2026-10-01 — an observer sees every queue and dashboard read-only, COI " +
@@ -156,6 +157,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "usage",
       "orcidCoverage",
       "coi",
+      "administrators",
     ],
     pins: "2026-10-01 — a content editor reads what an observer reads; its writes are allowlisted",
   },

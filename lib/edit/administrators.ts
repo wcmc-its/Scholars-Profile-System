@@ -39,10 +39,17 @@ export function isAdministratorsTabEnabled(): boolean {
  * wiring it into the shipped nav is a separate, explicitly-gated change.
  */
 export function isAdministratorsTabVisible(
-  session: { isSuperuser: boolean },
+  session: { isSuperuser: boolean; isObserver?: boolean; isContentEditor?: boolean },
   ownerUnitCount: number,
 ): boolean {
-  return isAdministratorsTabEnabled() && (session.isSuperuser || ownerUnitCount > 0);
+  return (
+    isAdministratorsTabEnabled() &&
+    (session.isSuperuser ||
+      ownerUnitCount > 0 ||
+      // The read-only "All roles" tab (2026-10-01).
+      session.isObserver === true ||
+      session.isContentEditor === true)
+  );
 }
 
 /**

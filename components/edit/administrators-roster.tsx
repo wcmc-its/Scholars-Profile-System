@@ -51,6 +51,8 @@ import type {
 import type { DirectoryPerson } from "@/lib/sources/ldap";
 import { cn } from "@/lib/utils";
 import { INSTITUTIONS } from "@/lib/institutions";
+import { ROLE_CATALOG, type RoleHolderCounts } from "@/lib/edit/role-catalog";
+import { RolesCatalog } from "@/components/edit/roles-catalog";
 
 /** Two-letter initials for the roster avatar, e.g. "Alex Example" → "AE". */
 function initials(name: string): string {
@@ -193,9 +195,11 @@ export type AdministratorsRosterProps = {
     /** Current holders by the existing gates, for the parity line. */
     gateHolders?: ReadonlyArray<GateHolder>;
   };
+  /** Holder counts for the read-only "All roles" tab; absent hides the tab. */
+  roleCounts?: RoleHolderCounts;
 };
 
-type RosterTab = "units" | "roles";
+type RosterTab = "units" | "roles" | "catalog";
 
 /** A person's enriched display fields, in the resolved precedence order. */
 type ResolvedPerson = {
@@ -247,6 +251,7 @@ export function AdministratorsRoster({
   allCores = [],
   header,
   functionalRoles,
+  roleCounts,
 }: AdministratorsRosterProps) {
   const [tab, setTab] = React.useState<RosterTab>("units");
   const [functionalRows, setFunctionalRows] = React.useState<FunctionalRoleRow[]>(() => [
@@ -938,7 +943,7 @@ export function AdministratorsRoster({
     <div className="flex flex-col gap-6" data-slot="administrators-roster">
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex min-w-0 flex-1 basis-[300px] flex-col gap-1.5">{header}</div>
-        {tab === "roles" && functionalRoles ? (
+        {tab === "catalog" ? null : tab === "roles" && functionalRoles ? (
           <AssignFunctionalRoleDialog
             scopeOptions={functionalRoles.scopeOptions}
             onAssigned={setFunctionalRows}
@@ -949,7 +954,7 @@ export function AdministratorsRoster({
         )}
       </div>
 
-      {functionalRoles && (
+      {(functionalRoles || roleCounts) && (
         <div
           role="tablist"
           aria-label="Administrator kinds"
@@ -959,8 +964,9 @@ export function AdministratorsRoster({
           {(
             [
               ["units", "Org unit grants", resolved.length],
-              ["roles", "Functional roles", functionalRows.length],
-            ] as const
+              ...(functionalRoles ? [["roles", "Functional roles", functionalRows.length] as const] : []),
+              ...(roleCounts ? [["catalog", "All roles", ROLE_CATALOG.length] as const] : []),
+            ] as ReadonlyArray<readonly [RosterTab, string, number]>
           ).map(([value, label, n]) => (
             <button
               key={value}
@@ -990,7 +996,9 @@ export function AdministratorsRoster({
         </div>
       )}
 
-      {tab === "roles" && functionalRoles ? (
+      {tab === "catalog" && roleCounts ? (
+        <RolesCatalog counts={roleCounts} />
+      ) : tab === "roles" && functionalRoles ? (
         <>
           <p
             className="text-muted-foreground -mt-2 text-[13px]"

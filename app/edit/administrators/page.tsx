@@ -27,6 +27,8 @@ import {
   loadOwnerManagedUnitScope,
 } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
+import { RolesCatalog } from "@/components/edit/roles-catalog";
+import { loadRoleHolderCounts } from "@/lib/edit/role-catalog.server";
 import { isFunctionalRolesAuthzEnabled } from "@/lib/auth/functional-role-authz";
 import type {
   FunctionalRoleRow,
@@ -120,12 +122,32 @@ export default async function AdministratorsPage() {
     );
   }
 
-  // Scope (D5): superuser ⇒ all grants; Owner ⇒ their owned subtree; nobody ⇒ 403.
+  // The read-only "All roles" tab: superusers, and the observer/content editor
+  // read views (spec 2026-10-01; a content editor reads what an observer reads).
+  const seesRoleCatalog =
+    session.isSuperuser || session.isObserver === true || session.isContentEditor === true;
+
+  // Scope (D5): superuser ⇒ all grants; Owner ⇒ their owned subtree; an
+  // observer/content editor with no owned unit ⇒ the role catalog alone;
+  // nobody ⇒ 403.
   let scope: string[] | undefined;
   if (session.isSuperuser) {
     scope = undefined;
   } else {
     scope = await loadOwnerManagedUnitScope(session, db.read);
+    if (scope.length === 0 && seesRoleCatalog) {
+      const roleCounts = await loadRoleHolderCounts(db.read);
+      return (
+        <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <div className="flex flex-col gap-6">
+            <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
+              Administrators
+            </h1>
+            <RolesCatalog counts={roleCounts} />
+          </div>
+        </ConsoleShell>
+      );
+    }
     if (scope.length === 0) {
       logEditDenial({
         actorCwid: session.cwid,
@@ -143,11 +165,13 @@ export default async function AdministratorsPage() {
 
   // Parallelized: the roster load, the core catalog and (superuser only) the
   // functional-role registry are independent reads.
-  const [{ entries, nameResolutionDegraded }, allCores, functionalRoles] = await Promise.all([
-    loadUnitAdministratorRoster({ scope }, db.read),
-    getCoreList(db.read),
-    canManageFunctionalRoles(session) ? loadFunctionalRolesTab() : Promise.resolve(undefined),
-  ]);
+  const [{ entries, nameResolutionDegraded }, allCores, functionalRoles, roleCounts] =
+    await Promise.all([
+      loadUnitAdministratorRoster({ scope }, db.read),
+      getCoreList(db.read),
+      canManageFunctionalRoles(session) ? loadFunctionalRolesTab() : Promise.resolve(undefined),
+      seesRoleCatalog ? loadRoleHolderCounts(db.read) : Promise.resolve(undefined),
+    ]);
 
   // The "URL requests" admin tab + pending-count pill; `null` when the
   // slug-request feature is off (hides the tab).
@@ -205,6 +229,7 @@ export default async function AdministratorsPage() {
           canImpersonate={impersonationEnabled() && session.isSuperuser}
           allCores={allCores}
           functionalRoles={functionalRoles}
+          roleCounts={roleCounts}
         />
     </ConsoleShell>
   );
