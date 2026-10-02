@@ -17,8 +17,11 @@ import {
   likelihoodBand,
   llmChipTone,
   llmTier,
+  llmMeterSegments,
   llmVerdict,
   rowChips,
+  rowMetaParts,
+  rowSpine,
 } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
 
@@ -77,6 +80,28 @@ describe("band styling", () => {
     for (const b of bands) expect(b.tint).toMatch(/\bbg-\S+ border-\S+ text-\S+/);
   });
 
+  it("rowSpine: band colour off Strong only, none for Strong or a PMID add", () => {
+    expect(rowSpine(0.9, false)).toBe("border-l-transparent");
+    expect(rowSpine(0.85, false)).toBe("border-l-transparent");
+    expect(rowSpine(0.84, false)).toBe(likelihoodBand(0.84).spine);
+    expect(rowSpine(0.5, false)).toBe(likelihoodBand(0.5).spine);
+    expect(rowSpine(0.1, false)).toBe(likelihoodBand(0.1).spine);
+    expect(rowSpine(0.5, true)).toBe("border-l-transparent");
+  });
+
+  it("rowMetaParts: short journal title first, then year and PMID", () => {
+    expect(
+      rowMetaParts({ journal: "Synth Journal", journalAbbrev: "Synth J", year: 2020, pmid: "9" }),
+    ).toEqual({ journal: "Synth J", rest: "2020 · PMID 9" });
+    expect(
+      rowMetaParts({ journal: "Synth Journal", journalAbbrev: null, year: null, pmid: "9" }),
+    ).toEqual({ journal: "Synth Journal", rest: "PMID 9" });
+    expect(rowMetaParts({ journal: null, journalAbbrev: "", year: 2021, pmid: "9" })).toEqual({
+      journal: null,
+      rest: "2021 · PMID 9",
+    });
+  });
+
   it("bandDot takes the LOWEST band in the pile, neutral when empty", () => {
     expect(bandDot([0.95, 0.5])).toBe(likelihoodBand(0.5).fill);
     expect(bandDot([0.95])).toBe(likelihoodBand(0.95).fill);
@@ -99,6 +124,19 @@ describe("LLM chip tone", () => {
     expect(llmChipTone(7)).toBe("amber");
     expect(llmChipTone(4)).toBe("quiet");
     expect(llmVerdict(8)).toBe("reads as core work");
+  });
+
+  it("llmMeterSegments: 10 segments, `score` filled in the llmTier colour", () => {
+    const filled = (score: number) => llmMeterSegments(score).filter((c) => c !== "bg-apollo-rail");
+    for (const score of [0, 3, 6, 7, 8, 10]) {
+      expect(llmMeterSegments(score)).toHaveLength(10);
+      expect(filled(score)).toHaveLength(score);
+    }
+    expect(new Set(filled(8))).toEqual(new Set(["bg-apollo-slate"]));
+    expect(new Set(filled(7))).toEqual(new Set(["bg-apollo-amber"]));
+    expect(new Set(filled(6))).toEqual(new Set(["bg-apollo-amber"]));
+    expect(new Set(filled(5))).toEqual(new Set(["bg-muted-foreground"]));
+    expect(llmMeterSegments(12).filter((c) => c === "bg-apollo-rail")).toHaveLength(0);
   });
 
   it("rowChips: counted signals slate, uncounted context neutral", () => {
@@ -133,7 +171,7 @@ describe("the list and rail as rendered", () => {
   const STRONG = row({ pmid: "90000011", title: "Strong paper", likelihood: 0.9 });
   const SLIGHT = row({ pmid: "90000012", title: "Slight paper", likelihood: 0.5, llmScore: 6 });
 
-  it("spines each row in its band colour and the focused row in slate", () => {
+  it("spines non-Strong rows in their band colour, Strong rows not at all, focus in slate", () => {
     const { container } = render(
       <CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />,
     );
@@ -141,8 +179,20 @@ describe("the list and rail as rendered", () => {
     expect(listRow(container, "90000011").className).toContain("border-l-apollo-slate");
     expect(listRow(container, "90000012").className).toContain(likelihoodBand(0.5).spine);
     fireEvent.click(listRow(container, "90000012").querySelector("button") as HTMLElement);
-    expect(listRow(container, "90000011").className).toContain(likelihoodBand(0.9).spine);
+    expect(listRow(container, "90000011").className).toContain("border-l-transparent");
+    expect(listRow(container, "90000011").className).not.toContain(likelihoodBand(0.9).spine);
     expect(listRow(container, "90000012").className).toContain("border-l-apollo-slate");
+  });
+
+  it("puts the short journal, year and PMID on one meta line", () => {
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />,
+    );
+    const meta = listRow(container, "90000011").querySelector(
+      '[data-slot="core-queue-row-meta"]',
+    ) as HTMLElement;
+    expect(meta.textContent).toBe(`${STRONG.journalAbbrev} · ${STRONG.year} · PMID ${STRONG.pmid}`);
+    expect(meta.querySelector(".truncate")?.textContent).toBe(STRONG.journalAbbrev);
   });
 
   it("tints the band pill and the LLM chip", () => {

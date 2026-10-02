@@ -310,7 +310,9 @@ describe("CoreClaimQueue", () => {
     expect(metaLine(container)).toBe(
       "Synthetic Journal of Core Imaging Science·Added to PubMed Feb 18, 2026·PMID 30418319",
     );
-    expect(screen.queryByText("Synth J Core Imaging Sci")).toBeNull();
+    // The pane carries no abbreviation; the list row (one truncated line) does.
+    const pane = container.querySelector('[data-slot="core-queue-focus"]') as HTMLElement;
+    expect(within(pane).queryByText("Synth J Core Imaging Sci")).toBeNull();
   });
 
   it("falls back to the abbreviation when no full title is on file", () => {

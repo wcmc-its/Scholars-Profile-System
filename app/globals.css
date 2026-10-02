@@ -40,7 +40,11 @@
    * styling hook is the `.page-title` class, not the HTML tag, because the
    * page-subject is sometimes h1 and sometimes nested inside a structural
    * container (e.g. profile sidebar) where a wider-column h2 would otherwise
-   * out-weight it. Use `.page-title` exactly once per page. Charter is
+   * out-weight it. Use `.page-title` exactly once per page. One deliberate
+   * exception: the core review queue's summary-strip figures (the open-candidate
+   * headline and the session's Confirmed / Rejected counts in
+   * components/edit/core-queue-panels.tsx) set their big numbers in the serif
+   * too. They are numerals, not headers, so the one-header rule stands. Charter is
    * self-hosted via next/font/local (#2530) so it renders identically across
    * OS/browser instead of depending on whatever system font each resolves;
    * Georgia is the fallback while the face loads.
@@ -168,6 +172,9 @@
   --apollo-slate: #34506e;
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;
+  /* Mid slate — the middle step of the core queue's evidence bar, between
+     --apollo-slate and --apollo-slate-tint-border. */
+  --apollo-slate-mid: oklch(0.55 0.06 245);
   --apollo-notice-text: #274158; /* text + icon on the slate-tint editing notice */
   --apollo-done: #8f887d; /* grey check on a settled Home row (design round 3) */
   /* Facet-filter redesign (PROFILE_FACET_REDESIGN) — three facet hues, each a
@@ -226,6 +233,9 @@
   --apollo-coral-tint: #faece7;
   --apollo-coral-tint-border: #f0997b;
   --apollo-coral-foreground: #712b13;
+  /* Muted brick — the core queue's session "Rejected" count. A tally of the
+     reviewer's own decisions, not an error, so never the destructive red. */
+  --apollo-brick: oklch(0.5 0.13 30);
   /* Search evidence-row text ramp (#1912). Four steps, and every one clears WCAG
      AA 4.5:1 against BOTH grounds the row appears on: the white card face and the
      row's own #f0eeea hover/expanded fill. Ratios below are the #f0eeea case,
@@ -335,6 +345,7 @@
   --color-apollo-slate: var(--apollo-slate);
   --color-apollo-slate-tint: var(--apollo-slate-tint);
   --color-apollo-slate-tint-border: var(--apollo-slate-tint-border);
+  --color-apollo-slate-mid: var(--apollo-slate-mid);
   --color-apollo-notice-text: var(--apollo-notice-text);
   --color-apollo-done: var(--apollo-done);
   --color-apollo-green: var(--apollo-green);
@@ -349,6 +360,7 @@
   --color-apollo-coral-tint: var(--apollo-coral-tint);
   --color-apollo-coral-tint-border: var(--apollo-coral-tint-border);
   --color-apollo-coral-foreground: var(--apollo-coral-foreground);
+  --color-apollo-brick: var(--apollo-brick);
   /* Eligibility (teal) — bg-elig-fill / border-elig-border / text-elig-text / accent-elig-border. */
   --color-elig-fill: var(--elig-fill);
   --color-elig-border: var(--elig-border);
