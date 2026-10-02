@@ -76,7 +76,7 @@ export async function CenterProgramPage({
             </a>
           </span>
         </div>
-        <h1 className="page-title mb-[18px] text-[40px] font-medium leading-none tracking-[-0.01em]">
+        <h1 className="page-title mb-[18px] text-[40px] leading-none tracking-[-0.01em]">
           {detail.program.label}
         </h1>
         {detail.program.description && (

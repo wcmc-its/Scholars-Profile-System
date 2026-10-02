@@ -446,7 +446,7 @@ export function SciencvWorksheet({
               &larr; Back to the NIH biosketch tool
             </Link>
           </p>
-          <h1 className="page-title font-bold">SciENcv worksheet</h1>
+          <h1 className="page-title">SciENcv worksheet</h1>
           <p className="text-muted-foreground mt-2">
             {scholar.preferredName} — from the{" "}
             {isStatement ? "Personal Statement" : "Contributions"} draft generated {generatedOn}.

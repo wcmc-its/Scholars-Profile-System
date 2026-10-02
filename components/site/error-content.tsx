@@ -22,7 +22,7 @@ export function ErrorContent({
 }) {
   return (
     <main className="mx-auto max-w-2xl px-6 py-16 text-center">
-      <h1 className="page-title text-3xl font-semibold">{title}</h1>
+      <h1 className="page-title text-3xl">{title}</h1>
       <p className="mt-4 text-zinc-600 dark:text-zinc-400">{message}</p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
         {onRetry ? (

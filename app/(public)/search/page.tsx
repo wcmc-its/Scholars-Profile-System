@@ -1063,7 +1063,7 @@ function SearchMeta({
 }) {
   return (
     <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
-      <h1 className="page-title mb-1 text-[28px] leading-tight font-bold tracking-[-0.01em]">
+      <h1 className="page-title mb-1 text-[28px] leading-tight tracking-[-0.01em]">
         {q ? (
           <>
             {/* #638 (b) — query echoed in primary text (not an accent "link"

@@ -145,9 +145,7 @@ export default async function SupercategoryPage({
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
           Method category
         </div>
-        <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
-          {sc.label}
-        </h1>
+        <h1 className="page-title mt-2 text-3xl leading-tight tracking-tight">{sc.label}</h1>
         {sc.description && (
           <p className="mt-3 max-w-prose text-base text-muted-foreground">{sc.description}</p>
         )}

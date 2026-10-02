@@ -138,7 +138,7 @@ export default async function FamilyScholarsPage({
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
           METHOD
         </div>
-        <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
+        <h1 className="page-title mt-2 text-3xl leading-tight tracking-tight">
           Scholars using {resolved.familyLabel}
         </h1>
       </header>

@@ -176,7 +176,7 @@ export default async function FamilyPage({
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
           Method
         </div>
-        <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
+        <h1 className="page-title mt-2 text-3xl leading-tight tracking-tight">
           {resolved.familyLabel}
         </h1>
 

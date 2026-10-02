@@ -232,9 +232,7 @@ export async function CenterPage({
             label="Center website"
           />
         </div>
-        <h1 className="page-title mt-2 text-balance text-[40px] font-normal leading-[1.15]">
-          {detail.name}
-        </h1>
+        <h1 className="page-title mt-2 text-[40px] leading-[1.15] text-balance">{detail.name}</h1>
         {detail.description && (
           <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
             {detail.description}

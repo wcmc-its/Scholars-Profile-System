@@ -79,7 +79,7 @@ export default function HomePage() {
           }}
         >
           <div className="mx-auto max-w-[760px] text-center">
-            <h1 className="page-title text-4xl leading-[1.1] font-normal tracking-[-0.01em] text-balance sm:text-5xl">
+            <h1 className="page-title text-4xl leading-[1.1] tracking-[-0.01em] text-balance sm:text-5xl">
               Scholars at Weill Cornell Medicine
             </h1>
             <p className="text-muted-foreground mt-4 text-base">

@@ -381,10 +381,23 @@
    what the page is about (scholar name on profile, topic name on topic page,
    "Browse" on /browse, etc.). Class-only styling so the rule does not depend
    on h1-vs-h2 tag choice — see the typography rule comment in :root above.
-   Family only; size and weight stay on the element so each surface can size
+   Family and weight are set here, site-wide: 600, because at 400/500 Charter
+   read too slight. Charter has no semibold cut, so 600 resolves to the real
+   self-hosted Bold face (app/layout.tsx), never a synthesized one. This rule is
+   unlayered, so it outranks any weight utility; put no font-* weight class on
+   a .page-title element. Size stays on the element so each surface can size
    for its layout (sidebar names need different scale from a homepage hero). */
 .page-title {
   font-family: var(--font-serif);
+  font-weight: 600;
+}
+
+/* The page title's default line height. In the base layer, so a surface's own
+   leading-* (or a text-* size, which carries its own line height) still wins. */
+@layer base {
+  .page-title {
+    line-height: 1.2;
+  }
 }
 
 /* Unit pages (department / division / center, "Unit Page v2"): every link and
