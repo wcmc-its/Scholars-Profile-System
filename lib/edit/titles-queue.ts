@@ -25,9 +25,19 @@ import { loadTitleDashboard, titleTabOf } from "@/lib/edit/title-dashboard";
 
 type TitlesSession = Pick<EditSession, "isSuperuser" | "isCommsSteward">;
 
-/** Superuser or comms steward: the people who can pin a display title. */
+/** Superuser or comms steward, including the observer's and content editor's
+ *  synthetic steward read view: who can open the Titles queue. */
 export function canReviewTitles(session: TitlesSession): boolean {
   return session.isSuperuser || session.isCommsSteward === true;
+}
+
+/** Who can pin a display title: a reviewer whose steward flag is real. An
+ *  observer or content editor reads the queue but never pins (the pin write
+ *  refuses both regardless). */
+export function canPinTitles(
+  session: TitlesSession & Pick<EditSession, "isObserver" | "isContentEditor">,
+): boolean {
+  return canReviewTitles(session) && session.isObserver !== true && session.isContentEditor !== true;
 }
 
 /** How long a successful pending count is reused across requests. */

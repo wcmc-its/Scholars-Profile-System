@@ -112,6 +112,13 @@ describe("CoreEditSections — page shape", () => {
     );
   });
 
+  it("a content editor's role note names the role, not the curator floor", () => {
+    const view = renderSections({ actorRole: "curator", accessReadOnly: true });
+    const note = view.getByTestId("unit-edit-actor-note").textContent ?? "";
+    expect(note).toContain("Editing as content editor.");
+    expect(note).not.toContain("Curator");
+  });
+
   it("heading: core name, Core chip, role note, and a Cores crumb back to /edit/core", () => {
     const view = renderSections();
     expect(view.getByTestId("unit-edit-title").textContent).toBe("Example Imaging Core");

@@ -221,6 +221,7 @@ export function UnitEditPage({
         crumbHref={crumbHref(ctx, orgUnitsNavVisible)}
         orgUnitsNavVisible={orgUnitsNavVisible}
         actorRole={ctx.actorRole}
+        contentEditor={ctx.accessReadOnly === true}
         previewHref={previewHref}
         reportsHref={reportsHref}
         sections={unitSections(ctx, visible, basePath)}

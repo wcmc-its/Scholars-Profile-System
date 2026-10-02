@@ -610,6 +610,8 @@ export type EditPageProps = {
   /** Overrides the header's role pill text (`EditShell`'s `actorLabel`): a
    *  content editor edits in unit-admin mode with no conferring unit. */
   actorLabel?: string;
+  /** Overrides the unit-admin note under the header (`EditShell`'s `actorNote`). */
+  actorNote?: string;
   /** Self mode only: whether to mount the live ReCiter pending-articles nudge
    *  (`SELF_EDIT_RECITER_PENDING_HINT`). True only for a genuine, non-impersonating
    *  self viewer with the flag on; when true the Publications card + Home teaser
@@ -748,6 +750,7 @@ export function EditPage({
   unitAdminEditors = null,
   unitAdminBanner = null,
   actorLabel,
+  actorNote,
   reciterPendingEnabled = false,
   orcidTabEnabled = false,
   profileLinksEnabled = false,
@@ -992,6 +995,7 @@ export function EditPage({
       consoleNav={consoleNav}
       unitAdmin={unitAdminBanner ?? undefined}
       actorLabel={actorLabel}
+      actorNote={actorNote}
     >
       {renderPanel(
         active.key,

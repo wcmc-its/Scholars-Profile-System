@@ -333,6 +333,14 @@ export const TITLE_TAB_NOTE: Record<TitleTab, string> = {
   all: "Every scholar on this report.",
 };
 
+/** {@link TITLE_TAB_NOTE} for a viewer who can't pin (observer, content editor). */
+export const TITLE_TAB_NOTE_READ_ONLY: Record<TitleTab, string> = {
+  ...TITLE_TAB_NOTE,
+  review:
+    "Unverified working titles, conflicting roles, mismatched text, close contests and leadership titles that lost. Fix the source.",
+  pinned: "Pins override the ladder. A communications steward or superuser sets them.",
+};
+
 /** The reasons that put a row under "Needs review". */
 export const TITLE_REVIEW_REASONS: readonly TitleReason[] = [
   "unverifiedWorkingTitle",

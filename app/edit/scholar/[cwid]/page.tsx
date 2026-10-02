@@ -299,6 +299,11 @@ export default async function EditScholarPage({
       unitAdminEditors={unitAdminEditors}
       unitAdminBanner={unitAdminBanner}
       actorLabel={contentEditorView ? "Editing as content editor" : undefined}
+      actorNote={
+        contentEditorView
+          ? "You can edit this profile's content, request a title change, and hide items or whole sections; name and contact details come from WCM systems, and the profile URL is set by a Scholars administrator."
+          : undefined
+      }
       profilesNavVisible={consoleTabs?.profiles ?? false}
       reciterPendingEnabled={reciterPendingEnabled}
       orcidTabEnabled={isOrcidSuggestionEnabled()}

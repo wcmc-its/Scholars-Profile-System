@@ -74,6 +74,15 @@ describe("EditShell — page header role pill", () => {
     expect(screen.queryByTestId("edit-history-link")).toBeNull();
   });
 
+  it("actorNote replaces the unit-admin note (a content editor's wider reach)", () => {
+    render(
+      <EditShell {...base} mode="unit-admin" actorLabel="Editing as content editor" actorNote="CE note">
+        <div>panel</div>
+      </EditShell>,
+    );
+    expect(document.querySelector('[data-slot="edit-unit-admin-note"]')?.textContent).toBe("CE note");
+  });
+
   it("unit-admin mode adds the what-you-can-edit note; other modes don't", () => {
     const { unmount } = render(
       <EditShell
