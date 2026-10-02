@@ -170,7 +170,7 @@ run. **Do not infer the TBDs from the Observed column** — they are different r
 
 | Surface | Route | ISR TTL | Origin render (cache miss) | Edge (cache hit) | Source |
 |---|---|---|---|---|---|
-| Scholar profile | `/scholars/[slug]` | 24 h | **Observed ~150–800 ms** (prod, Prisma + render) | TBD (measure) | [`PRODUCTION.md`](./PRODUCTION.md) line 103 |
+| Scholar profile | `/[slug]` | `force-dynamic` | **Observed ~150–800 ms** (prod, Prisma + render); 0.5–2.3 s cold via CloudFront (2026-10-02 curl); up to 4.1 s under the 15-user staging load test | n/a: **every request hits origin** (`max-age=0`, see [§ Full-site load test](#full-site-load-test-ibm-rpt-2026-10-01)) | [`PRODUCTION.md`](./PRODUCTION.md) line 103 |
 | Topic page | `/topics/[slug]` | 6 h | TBD (measure) | TBD (measure) | — |
 | Department / Center | `/departments/[slug]`, `/centers/[slug]` | 6 h | TBD (measure) | TBD (measure) | — |
 | Home | `/` | 6 h | TBD (measure) | TBD (measure) | — |
@@ -316,6 +316,51 @@ non-empty map; the field is mapped `enabled: false`, so it is readable from `_so
 the flag-on reason counts are served correctly (#1404 resolved). The C-ramp can be re-run
 against prod to quantify the win.
 
+## Full-site load test, IBM RPT (2026-10-01)
+
+ITS ran an IBM Rational Performance Tester (RPT) schedule against **staging**: 15 virtual users, about 2.5 minutes, scripted flows covering home, people search with facets, a topic page with its publications feed and sort, and a profile with its publications/funding tabs. The schedule verdict was **fail** and the report showed page times of 21 s (topic), 14 s (home) and 13 s (search click). Those headline numbers mostly measure the test setup, not the app. The run did surface three real issues, fixed or queued below.
+
+The reference point for this test is the parallel Apollo (weillcornell.org) project, which was load-tested at **500+ users with at least 20 logins/s**. SPS public traffic does not log in (only `/edit` staff do), so the SPS equivalent is about 20 new visitors/s, roughly 72,000/hour. For scale, prod origin traffic over the 14 days before the test peaked at 454 requests/min (~7.5 req/s), with median 0 and p99 31 req/min (ALB `RequestCount`, 1-minute buckets).
+
+### What the run measured
+
+| Measure | Value | Source |
+|---|---|---|
+| Requests in the log | 4,054: 1,508 to SPS, 2,546 to the WCM directory headshot API | RPT log |
+| Peak load at the SPS ALB | 353 req/min (~6 req/s) | ALB `RequestCount` |
+| Errors | 2 × 502, both ELB-generated (`HTTPCode_ELB_502_Count` = 2, `HTTPCode_Target_5XX_Count` = 0, no app error logs) | ALB metrics, app logs |
+| Slowest single SPS request | 4.1 s (profile RSC prefetch, CloudFront Miss) | RPT log |
+| ALB `TargetResponseTime` | p50 ≤ 90 ms, p99 0.8–2.4 s per minute | ALB metrics |
+| App task (1 × 1 vCPU / 2 GB) | CPU max 48%, memory max 49% | ECS metrics |
+| Staging Aurora (max 4 ACU) | 45–67% CPU and ~3 ACU *before* the test; **100% CPU and 4.0 ACU** (ceiling) during it | RDS metrics |
+| Headshot requests | 54% returned 404 (no photo; `returnGenericOn404=false`) | RPT log |
+
+### Why the headline page times overstate the problem
+
+- **An RPT "page" is not a page load here.** SPS is a Next.js app: after the first load, clicks are client-side navigations, and visible links prefetch in the background. The recorder grouped several actions, their prefetches, and the recorded think time between them into one "page", whose time runs from the first request to the last. In the median 21 s topic-page instance, no single SPS request exceeded 1.9 s, and its requests started at +7.6 s, +8.8 s and +14 s.
+- **About 60% of requests went to a third party.** Headshots load from `directory.weill.cornell.edu`, so those timings aren't SPS's. More than half were 404s for scholars with no photo; the avatar shows initials either way.
+- **The script replays stale Next.js routing headers.** Recorded `x-deployment-id` and `_rsc` values from an earlier build are replayed on every run, while staging deploys several times a day.
+- **Staging is not prod-shaped**, and its database was already busy before the test began:
+
+| | Staging (tested) | Prod |
+|---|---|---|
+| App tasks | 1 × 1 vCPU / 2 GB (max 3) | 2–6 × 2 vCPU / 4 GB, autoscaling |
+| Aurora Serverless v2 | 0.5–4 ACU | 1–8 ACU; 24 h mean CPU ~6% at the time |
+
+Low TTFB (median ~40 ms) with 3–4 s total times means headers went out fast and the streamed body then waited on Aurora. That points at the database, not app CPU.
+
+### Real issues found
+
+1. **Profiles are never cached at CloudFront, in either environment.** `app/(public)/[slug]/page.tsx` is `force-dynamic` (the site header reads cookies) and the response carries `Cache-Control: public, max-age=0, must-revalidate`, which CloudFront honors. Repeated requests for the same profile were all `X-Cache: Miss` on staging and prod. The page's comment says "CloudFront caches the public response by path at the edge"; that is not true today. Every profile view and every profile prefetch is a full origin render plus Aurora queries. This is the largest remaining lever and needs a design first: cached HTML must never carry one viewer's signed-in header to another. **Open.**
+2. **Search results prefetched every visible profile.** Next's default viewport prefetch fired a full profile render for each result card on screen (~20 per results page) for at most one click, and these were the slowest requests in a search (3–4 s each). **Fixed in #3000:** `components/search/hover-prefetch-link.tsx` prefetches on hover/touch only. Profile-to-profile links still prefetch on viewport entry.
+3. **Sporadic ELB 502s from a keep-alive race.** Node's default `keepAliveTimeout` (5 s) is shorter than the ALB idle timeout (60 s), so the ALB occasionally sends a request down a socket Node just closed. **Fixed in #2999:** `KEEP_ALIVE_TIMEOUT=65000` in the app task env, which Next's standalone `server.js` applies to `server.keepAliveTimeout`. Like any task-env change, it is dark until `cdk deploy Sps-App-<env>`.
+
+Considered and deferred: skipping headshot requests for scholars without a photo. The weekly `etl:headshot` step already stores `scholar.has_headshot`, but about 27 call sites build the URL from the CWID alone. The 404s cost a third party, not SPS, so this waits unless the directory team raises it.
+
+### Next run
+
+Run it against prod-shaped capacity: prod in a quiet window, or staging temporarily raised to 2 tasks × 2 vCPU / 4 GB and Aurora max 8 ACU. Re-record the script after the latest deploy, and follow the [RPT checklist in `scripts/perf/README.md`](../scripts/perf/README.md#full-site-load-tests-ibm-rpt). Ramp from 15 users toward the Apollo target, and land profile edge caching before the 500-user step.
+
 ## Scaling characteristics
 
 - **App tier:** ECS Fargate. Per-task sizing: **staging 1024 CPU / 2048 MiB** (bumped from
@@ -364,6 +409,9 @@ alongside each number you write back.
    These fill the `/search` / autocomplete origin cells above — but a staging number
    under-reports prod (single `t3.medium` node); see the cluster-sizing caveat in
    [`search-people-concurrency-performance.md`](./search-people-concurrency-performance.md).
+7. **Full-site load (IBM RPT, run by ITS).** Multi-page user flows at N virtual users. Read
+   the results with the [RPT checklist](../scripts/perf/README.md#full-site-load-tests-ibm-rpt)
+   and the 2026-10-01 findings in [§ Full-site load test](#full-site-load-test-ibm-rpt-2026-10-01).
 
 ## Review cadence
 
@@ -374,7 +422,7 @@ moves the render path (a new heavy query, an ISR TTL change, an instance-size ch
 
 ---
 
-*Baseline last updated: 2026-07-02 — added item 4 (search/faceting audit #1415: taxonomy
+*Baseline last updated: 2026-10-02 — added § Full-site load test (ITS IBM RPT run, 15 users on staging; keep-alive 502 fix #2999, hover-only profile prefetch #3000; profile edge caching open) and corrected the profile row (`/[slug]`, `force-dynamic`, never edge-cached). 2026-07-02 — added item 4 (search/faceting audit #1415: taxonomy
 counts cached #1420, pubs/funding mesh-only #1421 → `taxonomy;dur=0` on staging,
 facet-split revived + staging-on #1423, wire size −80 % via #1416/#1428/#1433; prod
 pending image release). 2026-06-26: § Search performance findings (taxonomy-resolver
