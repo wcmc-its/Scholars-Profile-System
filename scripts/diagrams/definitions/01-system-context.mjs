@@ -24,7 +24,7 @@ const nodes = {
   onc:    { x: AX, y: 330, w: SW, h: SH, kind: "ext", title: "OnCore (CTMS)", sub: ["clinical-trial mgmt · investigators, status"], chip: { tone: "ondemand", text: "manual export" } },
   rai:    { x: BX, y: 330, w: SW, h: SH, kind: "ext", title: "ReciterAI", sub: ["DynamoDB + S3 · scores, topics, spotlights"], chip: { tone: "nightly", text: "nightly + weekly" } },
   asms:   { x: AX, y: 390, w: SW, h: SH, kind: "ext", title: "ASMS", sub: ["MS SQL · education, degrees"], chip: { tone: "nightly", text: "nightly" } },
-  ed:     { x: BX, y: 390, w: SW, h: SH, kind: "ext", title: "Enterprise Directory", sub: ["LDAPS · person types, appointments, headshots"], chip: { tone: "nightly", text: "nightly" } },
+  ed:     { x: BX, y: 390, w: SW, h: SH, kind: "ext", title: "Enterprise Directory", sub: ["LDAPS · appointments, headshots, HR postdoc mentors"], chip: { tone: "nightly", text: "nightly" } },
   ctsc:   { x: AX, y: 450, w: SW, h: SH, kind: "ext", title: "CTSC roster feed", sub: ["HTTPS · CTSC center roster (not publications)"], chip: { tone: "nightly", text: "nightly" } },
   pops:   { x: BX, y: 450, w: SW, h: SH, kind: "ext", title: "POPS directory", sub: ["HTTPS · board certs, specialties, expertise"], chip: { tone: "weekly", text: "weekly" } },
   // ----- left: external (public HTTPS) (2 cols × 3 rows) -----
@@ -118,6 +118,7 @@ export const meta = {
     "topic hierarchy on the annual run (Jul 1, behind a manual approval gate). Some ReciterDB-side " +
     "data (ed, mentoring, citations, clinical-trials) reaches the in-VPC ETL as NDJSON bridge files " +
     "in ReciterAI's S3 bucket rather than as direct reads. " +
+    "<b>Postdoc mentees</b> come from HR: Enterprise Directory carries the HR employee-SOR role records, and the nightly ED pass reads each postdoc's <code>manager</code> (the PI, or the PI named in the lab unit) into <code>postdoc_mentor_relationship</code>, alumni included. " +
     "<b>Faculty Review Tool</b> self-reported mentees are read weekly from the COI portal's SQL Server " +
     "(<code>etl/frt</code>) and feed /edit mentee suggestions. " +
     "<b>POPS</b> (the public <code>weillcornell.org</code> physician " +
