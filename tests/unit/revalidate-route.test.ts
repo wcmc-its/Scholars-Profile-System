@@ -111,6 +111,14 @@ describe("POST /api/revalidate", () => {
     expect(mockRevalidatePath).toHaveBeenCalledWith("/browse");
   });
 
+  it("200 + revalidates every profile via the route pattern (type page)", async () => {
+    const req = makeRequest({ path: "/(public)/[slug]", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(200);
+    // Without "page" Next ignores a dynamic route pattern.
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/(public)/[slug]", "page");
+  });
+
   it("200 + revalidates /scholars/{slug}", async () => {
     const req = makeRequest({ path: "/scholars/jane-smith", token: "test-token-abc" });
     const resp = await POST(req);
