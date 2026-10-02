@@ -22,6 +22,7 @@ import {
 } from "@/components/site/impersonation-switcher";
 import { ROLE_LINKS, subjectDescriptor } from "@/components/site/impersonation-banner";
 import type { ConsoleLink } from "@/lib/auth/console-links";
+import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
 
 /**
@@ -144,6 +145,8 @@ export function AccountMenu({
   const [open, setOpen] = useState(false);
   // The View-as target awaiting confirmation; the dialog lives outside the popover.
   const [pending, setPending] = useState<Candidate | null>(null);
+  // The headshot URL that 404'd, so a new target (View as) gets its own try.
+  const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   // Probe on mount, not on open: deferring it made the console rows and
   // "View as…" pop in a beat after the menu opened. The root-layout
   // ImpersonationBanner already probes /api/auth/session on every page, so
@@ -167,6 +170,10 @@ export function AccountMenu({
   const fullName = impersonating?.targetName ?? realName;
   const label = fullName ? shortName(fullName) : "Account";
   const initials = fullName ? nameInitials(fullName) : null;
+  // Directory headshot over the initials, for whoever the chip names. A 404
+  // (no photo) hides the img and the initials beneath show through.
+  const photoCwid = impersonating?.targetCwid ?? probe?.cwid ?? null;
+  const photoSrc = initials && photoCwid ? identityImageEndpoint(photoCwid) : null;
   // canImpersonate without superuser = an observer (read-only View as, #2946),
   // unless the probe names the viewer a content editor.
   const adminRole = probe?.isSuperuser
@@ -228,8 +235,9 @@ export function AccountMenu({
   return (
     <>
       <Popover open={open} onOpenChange={onOpenChange}>
-        {/* An outlined pill with an initials avatar (Front page tweaks mockup,
-            2026-09-30). The bare "Account" fallback has no name to initial. */}
+        {/* An outlined pill with a headshot avatar, initials as the no-photo
+            fallback (Front page tweaks mockup, 2026-09-30). The bare "Account"
+            fallback has no name to initial. */}
         <PopoverTrigger
           data-slot="account-menu-trigger"
           className={`inline-flex items-center gap-2 rounded-full border border-white/50 py-1 text-sm font-medium text-white/90 transition-colors hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 ${
@@ -241,11 +249,21 @@ export function AccountMenu({
           {initials ? (
             <span
               aria-hidden="true"
-              className={`flex size-6 shrink-0 items-center justify-center rounded-full bg-white text-[11px] font-semibold ${
+              className={`relative flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white text-[11px] font-semibold ${
                 isConsole ? "text-apollo-bar" : "text-[var(--color-primary-cornell-red)]"
               }`}
             >
               {initials}
+              {photoSrc && photoSrc !== failedPhoto ? (
+                // eslint-disable-next-line @next/next/no-img-element -- external directory image, 404 fallback
+                <img
+                  src={photoSrc}
+                  alt=""
+                  className="absolute inset-0 size-full object-cover"
+                  data-testid="account-menu-photo"
+                  onError={() => setFailedPhoto(photoSrc)}
+                />
+              ) : null}
             </span>
           ) : null}
           <span className="max-w-[18ch] truncate">{label}</span>

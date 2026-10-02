@@ -334,4 +334,38 @@ describe("AccountMenu — pill trigger", () => {
     render(<AccountMenu scholar={null} />);
     expect(screen.getByLabelText("Account menu").textContent).toBe("Account");
   });
+
+  it("overlays the directory headshot for the real cwid; a 404 drops back to initials", () => {
+    mockProbe({ cwid: "abc1234", scholar: { slug: "t", preferredName: "Terrie Rose Wheeler" } });
+    render(<AccountMenu />);
+    const img = screen.getByTestId("account-menu-photo");
+    expect(img.getAttribute("src")).toContain("/abc1234.png");
+    fireEvent.error(img);
+    expect(screen.queryByTestId("account-menu-photo")).toBeNull();
+    expect(screen.getByLabelText("Account menu").textContent).toBe("TWTerrie R. Wheeler");
+  });
+
+  it("shows the View-as target's headshot, not the real user's", () => {
+    mockProbe({
+      cwid: "abc1234",
+      scholar: { slug: "p", preferredName: "Paul Albert" },
+      canImpersonate: true,
+      isSuperuser: true,
+      impersonating: {
+        targetCwid: "own001",
+        targetName: "Jane Owner",
+        role: "owner",
+        unitKind: "department",
+        unit: "Cardiology",
+        startedAt: 0,
+      },
+    });
+    render(<AccountMenu />);
+    expect(screen.getByTestId("account-menu-photo").getAttribute("src")).toContain("/own001.png");
+  });
+
+  it("no headshot before the probe reports a cwid", () => {
+    render(<AccountMenu scholar={{ slug: "t", preferredName: "Jane Smith" }} />);
+    expect(screen.queryByTestId("account-menu-photo")).toBeNull();
+  });
 });
