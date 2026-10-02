@@ -615,14 +615,17 @@ export function ConfirmedSummaryStrip({
     >
       <div data-slot="core-queue-confirmed-summary-signals" className={pane}>
         <p className={EYEBROW}>Independent signals per paper</p>
-        <div className="flex items-baseline gap-2.5">
-          <span className="text-4xl leading-none font-semibold tabular-nums">{multiSignal}</span>
-          <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
-            {multiSignalText(total)}
-          </span>
-        </div>
+        {/* Every confirmation a manual add: no "0 of 0" line, just the note. */}
         {total > 0 ? (
           <>
+            <div className="flex items-baseline gap-2.5">
+              <span className="text-4xl leading-none font-semibold tabular-nums">
+                {multiSignal}
+              </span>
+              <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
+                {multiSignalText(total)}
+              </span>
+            </div>
             <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
               {counts.map((c) => (
                 <div

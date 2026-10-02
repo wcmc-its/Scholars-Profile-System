@@ -264,6 +264,22 @@ describe("Confirmed tab — summary strip", () => {
     ).toBe(true);
   });
 
+  it("says only the manual note when every confirmation is a manual add", () => {
+    renderConfirmed([MANUAL]);
+    const first = slot("core-queue-confirmed-summary-signals");
+    expect(first.textContent).not.toContain("of 0");
+    expect(first.textContent).toContain("1 manually added paper is unscored and not counted.");
+  });
+
+  it("a signal click from a rail pile shows the whole tab, which is what it counted", () => {
+    renderConfirmed([ACK, ACK_REPEAT, LLM_ONLY]);
+    const rail = slot("core-queue-rail");
+    fireEvent.click(within(rail).getByRole("button", { name: /^LLM read(?! \+)/ }));
+    expect(titles()).toEqual(["Model gamma"]);
+    fireEvent.click(strip().getByRole("button", { name: /^Repeat user/ }));
+    expect(titles()).toEqual(["Repeat beta"]);
+  });
+
   it("drops a revoked paper from the strip", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);

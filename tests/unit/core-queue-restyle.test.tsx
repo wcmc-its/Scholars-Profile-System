@@ -123,8 +123,10 @@ describe("LLM chip tone", () => {
   });
 });
 
-function listRow(pmid: string): HTMLElement {
-  return document.querySelector(`[data-slot="core-queue-row"][data-pmid="${pmid}"]`) as HTMLElement;
+function listRow(container: HTMLElement, pmid: string): HTMLElement {
+  return container.querySelector(
+    `[data-slot="core-queue-row"][data-pmid="${pmid}"]`,
+  ) as HTMLElement;
 }
 
 describe("the list and rail as rendered", () => {
@@ -132,30 +134,36 @@ describe("the list and rail as rendered", () => {
   const SLIGHT = row({ pmid: "90000012", title: "Slight paper", likelihood: 0.5, llmScore: 6 });
 
   it("spines each row in its band colour and the focused row in slate", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />);
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />,
+    );
     // the first row is focused on load
-    expect(listRow("90000011").className).toContain("border-l-apollo-slate");
-    expect(listRow("90000012").className).toContain(likelihoodBand(0.5).spine);
-    fireEvent.click(listRow("90000012").querySelector("button") as HTMLElement);
-    expect(listRow("90000011").className).toContain(likelihoodBand(0.9).spine);
-    expect(listRow("90000012").className).toContain("border-l-apollo-slate");
+    expect(listRow(container, "90000011").className).toContain("border-l-apollo-slate");
+    expect(listRow(container, "90000012").className).toContain(likelihoodBand(0.5).spine);
+    fireEvent.click(listRow(container, "90000012").querySelector("button") as HTMLElement);
+    expect(listRow(container, "90000011").className).toContain(likelihoodBand(0.9).spine);
+    expect(listRow(container, "90000012").className).toContain("border-l-apollo-slate");
   });
 
   it("tints the band pill and the LLM chip", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />);
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />,
+    );
     // the innermost span with the band text (its wrapper carries the same text)
-    const pill = [...listRow("90000012").querySelectorAll("span")]
+    const pill = [...listRow(container, "90000012").querySelectorAll("span")]
       .filter((s) => s.textContent === "Slight 50%")
       .pop();
     expect(pill?.className).toContain(likelihoodBand(0.5).tint);
-    const chip = listRow("90000012").querySelector("[data-tone]") as HTMLElement;
+    const chip = listRow(container, "90000012").querySelector("[data-tone]") as HTMLElement;
     expect(chip.textContent).toBe("LLM 6/10");
     expect(chip.dataset.tone).toBe("amber");
   });
 
   it("puts the lowest band's dot on each rail group's sub-line", () => {
-    render(<CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />);
-    const dots = [...document.querySelectorAll('[data-slot="core-queue-rail-dot"]')];
+    const { container } = render(
+      <CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />,
+    );
+    const dots = [...container.querySelectorAll('[data-slot="core-queue-rail-dot"]')];
     // "All candidates" (slate) + the one LLM-read group spanning Slight to Strong
     expect(dots).toHaveLength(2);
     expect(dots[0].className).toContain("bg-apollo-slate");
