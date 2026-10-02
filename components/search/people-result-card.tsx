@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { HoverPrefetchLink } from "@/components/search/hover-prefetch-link";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -574,13 +574,13 @@ export function PeopleResultCard({
           {/* The name IS the stretched profile link: `after:absolute inset-0`
               spans the whole card so clicking anywhere (outside a `z-10` control)
               navigates. The analytics beacon fires here. */}
-          <Link
+          <HoverPrefetchLink
             href={profilePath(hit.slug)}
             onClick={handleClick}
             className="text-[#1a1a1a] no-underline after:absolute after:inset-0 after:content-[''] hover:text-[#2c4f6e] hover:no-underline"
           >
             {hit.preferredName}
-          </Link>
+          </HoverPrefetchLink>
           {roleLabel ? <RoleTag role={roleLabel} /> : null}
         </div>
         {hit.primaryTitle ? (
