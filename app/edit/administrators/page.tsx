@@ -28,7 +28,7 @@ import {
 } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
 import { RolesCatalog } from "@/components/edit/roles-catalog";
-import { loadRoleHolderCounts } from "@/lib/edit/role-catalog.server";
+import { loadRoleHolderCounts, loadRoleMembers } from "@/lib/edit/role-catalog.server";
 import { isFunctionalRolesAuthzEnabled } from "@/lib/auth/functional-role-authz";
 import type {
   FunctionalRoleRow,
@@ -136,14 +136,17 @@ export default async function AdministratorsPage() {
   } else {
     scope = await loadOwnerManagedUnitScope(session, db.read);
     if (scope.length === 0 && seesRoleCatalog) {
-      const roleCounts = await loadRoleHolderCounts(db.read);
+      const [roleCounts, roleMembers] = await Promise.all([
+        loadRoleHolderCounts(db.read),
+        loadRoleMembers(),
+      ]);
       return (
         <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
           <div className="flex flex-col gap-6">
             <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
               Administrators
             </h1>
-            <RolesCatalog counts={roleCounts} />
+            <RolesCatalog counts={roleCounts} members={roleMembers} />
           </div>
         </ConsoleShell>
       );
@@ -165,12 +168,13 @@ export default async function AdministratorsPage() {
 
   // Parallelized: the roster load, the core catalog and (superuser only) the
   // functional-role registry are independent reads.
-  const [{ entries, nameResolutionDegraded }, allCores, functionalRoles, roleCounts] =
+  const [{ entries, nameResolutionDegraded }, allCores, functionalRoles, roleCounts, roleMembers] =
     await Promise.all([
       loadUnitAdministratorRoster({ scope }, db.read),
       getCoreList(db.read),
       canManageFunctionalRoles(session) ? loadFunctionalRolesTab() : Promise.resolve(undefined),
       seesRoleCatalog ? loadRoleHolderCounts(db.read) : Promise.resolve(undefined),
+      seesRoleCatalog ? loadRoleMembers() : Promise.resolve(undefined),
     ]);
 
   // The "URL requests" admin tab + pending-count pill; `null` when the
@@ -230,6 +234,7 @@ export default async function AdministratorsPage() {
           allCores={allCores}
           functionalRoles={functionalRoles}
           roleCounts={roleCounts}
+          roleMembers={roleMembers}
         />
     </ConsoleShell>
   );

@@ -143,8 +143,11 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
   },
 ];
 
-/** Holder counts by catalog key; absent = not countable (ED groups, proxies). */
+/** Holder counts by catalog key; absent = not countable (proxies, or a failed read). */
 export type RoleHolderCounts = Partial<Record<string, number>>;
+
+/** An ED-group role's members, by catalog key; absent = the group couldn't be read. */
+export type RoleMembers = Partial<Record<string, ReadonlyArray<{ cwid: string; name: string | null }>>>;
 
 export const ROLE_SOURCE_LABEL: Record<RoleSource, string> = {
   ed_group: "ED group",

@@ -203,7 +203,7 @@ dev-login route to a deployed environment.
 | Can a department Owner edit a faculty member's bio? | Only if that faculty member's **LDAP-primary** dept/division is in the Owner's subtree (proxy edit), not just because they're on a roster. |
 | Can a Curator add another Curator? | No — only Owners (or Superusers) grant roles. |
 | Can a content editor hide a whole section of someone's profile? | Yes (decision 2026-10-01). Not the whole profile, and not a takedown. |
-| Who is in an ED-group role? | Managed in MARIA. The app's directory account can only check one person against a group, so the All roles tab counts holders only for unit grants and functional roles. |
+| Who is in an ED-group role? | `/edit/administrators` → All roles lists each ED group's members (name and CWID), read from the group's `memberURL` values. Membership itself is managed in MARIA. |
 | Can the running app code read a Secrets Manager secret it wasn't started with? | No — the task role has zero secret access. |
 | Can a feature branch deploy to prod? | No — prod OIDC admits only `refs/heads/master`, and a human must approve. |
 | What happens to editing if Enterprise Directory is down? | All editing is denied (fail-closed); public reads are unaffected. |
