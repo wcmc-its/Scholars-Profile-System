@@ -270,15 +270,28 @@ export function StrengthGlyphs({ dots }: { dots: number }) {
 
 /**
  * The fill for evidence group `index` of `count` in the summary's stacked bar
- * and its legend: one slate ramp, darkest first. Groups arrive in
- * `buildEvidenceGroups` order (the pile holding the surest paper leads), so the
- * darkest segment is the strongest pile, as in the mockup. A ramp rather than
- * a fixed palette because the number of groups is the data's, not ours. Pure.
+ * and its legend: three slate steps that stay distinct side by side. Groups
+ * arrive in `buildEvidenceGroups` order (the pile holding the surest paper
+ * leads), so the strongest pile is dark slate, the last and weakest the light
+ * slate tint, and every pile between them mid slate. A smooth ramp across every
+ * group read as one blur once there were more than two. Pure.
  */
 export function groupShade(index: number, count: number): string {
-  const t = count > 1 ? index / (count - 1) : 0;
-  const lightness = 0.42 + t * (0.9 - 0.42);
-  return `oklch(${lightness.toFixed(3)} 0.06 250)`;
+  if (index === 0) return "var(--apollo-slate)";
+  if (index === count - 1) return "var(--apollo-slate-tint-border)";
+  return "var(--apollo-slate-mid)";
+}
+
+/** The summary strip's big figures: Charter at 600 (see the serif note in
+ *  app/globals.css), a step smaller on a phone. `font-semibold` is 500 in
+ *  this theme, hence the explicit weight. */
+const BIG_FIGURE = "font-serif font-[600] leading-none tabular-nums";
+const HEADLINE_FIGURE = `${BIG_FIGURE} text-[36px] sm:text-[44px]`;
+const SESSION_FIGURE = `${BIG_FIGURE} text-[28px] sm:text-[32px]`;
+
+/** A session count's colour: muted gray at 0, its own colour once > 0. Pure. */
+export function sessionCountTone(count: number, tone: string): string {
+  return count > 0 ? tone : "text-muted-foreground";
 }
 
 /** "candidates in 4 evidence groups. 543 have two or more signals." — the line
@@ -352,7 +365,7 @@ export function QueueSummary({
       <div data-slot="core-queue-summary-groups" className={pane}>
         <p className={EYEBROW}>Open candidates by evidence</p>
         <div className="flex items-baseline gap-2.5">
-          <span className="text-4xl leading-none font-semibold tabular-nums">{total}</span>
+          <span className={HEADLINE_FIGURE}>{total}</span>
           <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
             {openSummaryText(total, groups.length, multiSignal)}
           </span>
@@ -363,7 +376,7 @@ export function QueueSummary({
               {groups.map((g, i) => (
                 <div
                   key={g.key}
-                  className="min-w-1"
+                  className="min-w-[6px]"
                   style={{ flex: `${g.count} 1 0`, background: groupShade(i, groups.length) }}
                 />
               ))}
@@ -372,7 +385,7 @@ export function QueueSummary({
               {groups.map((g, i) => (
                 <li key={g.key} className="contents">
                   <span
-                    className="size-2 rounded-sm"
+                    className="size-2 rounded-[2px]"
                     style={{ background: groupShade(i, groups.length) }}
                     aria-hidden
                   />
@@ -410,7 +423,7 @@ export function QueueSummary({
           <p className="flex flex-col gap-0.5">
             <span
               data-slot="core-queue-session-confirmed"
-              className="text-apollo-green text-[32px] leading-none font-semibold tabular-nums"
+              className={`${SESSION_FIGURE} ${sessionCountTone(session.confirmed, "text-apollo-green")}`}
             >
               {session.confirmed}
             </span>
@@ -419,7 +432,7 @@ export function QueueSummary({
           <p className="flex flex-col gap-0.5">
             <span
               data-slot="core-queue-session-rejected"
-              className="text-[32px] leading-none font-semibold text-red-700 tabular-nums"
+              className={`${SESSION_FIGURE} ${sessionCountTone(session.rejected, "text-apollo-brick")}`}
             >
               {session.rejected}
             </span>
@@ -440,7 +453,10 @@ export function QueueSummary({
             ))}
           </ul>
         ) : null}
-        <p className="border-apollo-border mt-auto border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]">
+        {/* Straight under the counts (and the reason tally, once there is one),
+            not pinned to the foot of the pane, where it floated far from the
+            zeros it explains. */}
+        <p className="border-apollo-border border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]">
           {session.note}
         </p>
       </div>
@@ -475,35 +491,45 @@ export function SignalCoverage({
         <span className="text-muted-foreground text-[11px] whitespace-nowrap">Click to filter</span>
       </div>
       <div role="group" aria-label="Filter by signal" className="flex flex-col gap-0.5">
-        {signals.map((s) => (
-          <button
-            key={s.facet}
-            type="button"
-            aria-pressed={s.active}
-            disabled={s.count === 0 && !s.active}
-            onClick={() => onSignal(s.facet)}
-            className={`focus-visible:ring-apollo-maroon -mx-2 grid grid-cols-[minmax(0,1fr)_minmax(40px,110px)_34px] items-center gap-3 rounded-lg border px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 ${
-              s.active
-                ? "border-apollo-slate-tint-border bg-apollo-slate-tint"
-                : "hover:bg-apollo-surface-2 border-transparent"
-            }`}
-          >
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-foreground text-[13px]">{s.label}</span>
-              <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-                <StrengthGlyphs dots={s.dots} />
-                {s.strength}
+        {signals.map((s) => {
+          // A signal with no hits is dimmed, but its strength dots are not: the
+          // 4-dot scale is fixed per signal type and must read the same on
+          // every row, so the maroon never fades to pink.
+          const off = s.count === 0 && !s.active;
+          const dim = off ? "opacity-60" : "";
+          return (
+            <button
+              key={s.facet}
+              type="button"
+              aria-pressed={s.active}
+              disabled={off}
+              onClick={() => onSignal(s.facet)}
+              className={`focus-visible:ring-apollo-maroon -mx-2 grid grid-cols-[minmax(0,1fr)_minmax(40px,110px)_34px] items-center gap-3 rounded-lg border px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default ${
+                s.active
+                  ? "border-apollo-slate-tint-border bg-apollo-slate-tint"
+                  : "hover:bg-apollo-surface-2 border-transparent"
+              }`}
+            >
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className={`text-foreground text-[13px] ${dim}`}>{s.label}</span>
+                <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+                  <StrengthGlyphs dots={s.dots} />
+                  <span className={dim}>{s.strength}</span>
+                </span>
               </span>
-            </span>
-            <span className="bg-apollo-surface-2 h-1.5 overflow-hidden rounded-full" aria-hidden>
               <span
-                className="bg-apollo-slate block h-full rounded-full"
-                style={{ width: `${total > 0 ? Math.min(100, (s.count / total) * 100) : 0}%` }}
-              />
-            </span>
-            <span className="text-right text-[13px] tabular-nums">{s.count}</span>
-          </button>
-        ))}
+                className={`bg-apollo-surface-2 h-1.5 overflow-hidden rounded-full ${dim}`}
+                aria-hidden
+              >
+                <span
+                  className="bg-apollo-slate block h-full rounded-full"
+                  style={{ width: `${total > 0 ? Math.min(100, (s.count / total) * 100) : 0}%` }}
+                />
+              </span>
+              <span className={`text-right text-[13px] tabular-nums ${dim}`}>{s.count}</span>
+            </button>
+          );
+        })}
       </div>
       {footer ? (
         <p className="border-apollo-border mt-auto border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]">
@@ -619,9 +645,7 @@ export function ConfirmedSummaryStrip({
         {total > 0 ? (
           <>
             <div className="flex items-baseline gap-2.5">
-              <span className="text-4xl leading-none font-semibold tabular-nums">
-                {multiSignal}
-              </span>
+              <span className={HEADLINE_FIGURE}>{multiSignal}</span>
               <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
                 {multiSignalText(total)}
               </span>

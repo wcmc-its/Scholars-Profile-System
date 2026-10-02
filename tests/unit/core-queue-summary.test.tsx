@@ -18,7 +18,7 @@ import {
   SIGNAL_KINDS,
   summarizeOpen,
 } from "@/components/edit/core-claim-queue";
-import { groupShade, openSummaryText } from "@/components/edit/core-queue-panels";
+import { groupShade, openSummaryText, sessionCountTone } from "@/components/edit/core-queue-panels";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
 
 function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
@@ -163,10 +163,20 @@ describe("openSummaryText / groupShade", () => {
     );
   });
 
-  it("ramps darkest first, and a lone group gets the darkest shade", () => {
-    expect(groupShade(0, 1)).toBe(groupShade(0, 4));
-    expect(groupShade(0, 4)).toBe("oklch(0.420 0.06 250)");
-    expect(groupShade(3, 4)).toBe("oklch(0.900 0.06 250)");
+  it("steps dark, mid, light: strongest dark, weakest light, the rest mid", () => {
+    expect(groupShade(0, 1)).toBe("var(--apollo-slate)");
+    expect(groupShade(0, 4)).toBe("var(--apollo-slate)");
+    expect(groupShade(1, 4)).toBe("var(--apollo-slate-mid)");
+    expect(groupShade(2, 4)).toBe("var(--apollo-slate-mid)");
+    expect(groupShade(3, 4)).toBe("var(--apollo-slate-tint-border)");
+    expect(groupShade(1, 2)).toBe("var(--apollo-slate-tint-border)");
+    // three distinct shades across a 3-group bar
+    expect(new Set([0, 1, 2].map((i) => groupShade(i, 3))).size).toBe(3);
+  });
+
+  it("sessionCountTone is muted gray at 0 and colours only once > 0", () => {
+    expect(sessionCountTone(0, "text-apollo-brick")).toBe("text-muted-foreground");
+    expect(sessionCountTone(1, "text-apollo-brick")).toBe("text-apollo-brick");
   });
 });
 

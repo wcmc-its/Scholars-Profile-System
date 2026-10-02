@@ -606,6 +606,16 @@ export function likelihoodBand(likelihood: number): Band {
   return BANDS.find((b) => likelihood >= b.min) ?? BANDS[BANDS.length - 1];
 }
 
+/** A list row's left spine: the band colour on Moderate, Slight and Weak rows
+ *  only. When nearly every open row is Strong, a green edge on all of them says
+ *  nothing, so Strong rows go without and the colour marks the rows worth
+ *  slowing down on. A paper sent here by PMID has no band, so no spine either.
+ *  The focused row's slate is the caller's. Pure. */
+export function rowSpine(likelihood: number, queued = false): string {
+  const band = likelihoodBand(likelihood);
+  return queued || band.label === "Strong" ? "border-l-transparent" : band.spine;
+}
+
 /** The dense LLM triage score in three tiers — ONE set of cut-offs (8, 6) that
  *  both the pane's words (`llmVerdict`) and the list chip's tint (`llmChipTone`)
  *  read, so the two can never disagree about the same score. Pure. */
@@ -623,6 +633,22 @@ const LLM_VERDICT: Record<ReturnType<typeof llmTier>, string> = {
 /** What the dense LLM triage score means, in words a reviewer can act on. Pure. */
 export function llmVerdict(score: number): string {
   return LLM_VERDICT[llmTier(score)];
+}
+
+/** Fill per `llmTier` for the pane's 10-segment LLM meter: the same cut-offs as
+ *  the words and the list chip, so the meter can never disagree with them. */
+const LLM_METER_FILL: Record<ReturnType<typeof llmTier>, string> = {
+  core: "bg-apollo-slate",
+  possible: "bg-apollo-amber",
+  little: "bg-muted-foreground",
+};
+
+/** The 10 segments of the LLM meter beside "N/10": the first `score` (rounded,
+ *  clamped to 0-10) filled in the score's `llmTier` colour, the rest empty. Pure. */
+export function llmMeterSegments(score: number): string[] {
+  const filled = Math.max(0, Math.min(10, Math.round(score)));
+  const fill = LLM_METER_FILL[llmTier(score)];
+  return Array.from({ length: 10 }, (_, i) => (i < filled ? fill : "bg-apollo-rail"));
 }
 
 /** A list-row chip's tint: `signal` (slate) for a counted signal that fired,
@@ -4705,6 +4731,20 @@ export function rowChips(
 }
 
 /**
+ * A list row's meta line in two parts, so it can hold ONE line: the journal,
+ * which the row truncates with an ellipsis, then the year and PMID, which never
+ * truncate. The row takes the SHORT title (the NLM abbreviation) and falls back
+ * to the full one; the paper pane keeps the full title first. Pure.
+ */
+export function rowMetaParts(
+  row: Pick<CoreQueueRow, "journal" | "journalAbbrev" | "year" | "pmid">,
+): { journal: string | null; rest: string } {
+  const journal = row.journalAbbrev || row.journal || null;
+  const rest = [row.year, `PMID ${row.pmid}`].filter((v) => v !== null).join(" · ");
+  return { journal, rest };
+}
+
+/**
  * One compact row in the middle pane: checkbox, title, meta, signal chips, band
  * and — once decided this session — its status (mockup). Clicking anywhere but
  * the checkbox focuses the paper; below `lg` that also opens the sheet. The row
@@ -4734,21 +4774,19 @@ function QueueListRow({
 }) {
   const band = likelihoodBand(row.likelihood);
   const chips = rowChips(row, paperCounts, clientCwids, mode);
-  const meta = [row.journal ?? row.journalAbbrev, row.year, `PMID ${row.pmid}`]
-    .filter((v) => v !== null && v !== "")
-    .join(" · ");
+  const meta = rowMetaParts(row);
   return (
     <li
       data-slot="core-queue-row"
       data-pmid={row.pmid}
       aria-current={focused ? "true" : undefined}
-      // The spine (mockup): the row's band colour, slate when focused, none for
-      // a paper sent here by PMID — it has no band to show. pl is px-3.5 less
-      // the 3px spine, so titles stay aligned with the header checkbox.
+      // The spine: the row's band colour off Strong (`rowSpine`), slate when
+      // focused. pl is px-3.5 less the 3px spine, so titles stay aligned with
+      // the header checkbox.
       className={`border-apollo-border flex gap-2.5 border-t border-l-[3px] py-3 pr-3.5 pl-[11px] first:border-t-0 ${
         focused
           ? "bg-apollo-slate-tint border-l-apollo-slate"
-          : `bg-apollo-surface ${row.queued ? "border-l-transparent" : band.spine}`
+          : `bg-apollo-surface ${rowSpine(row.likelihood, row.queued)}`
       }`}
     >
       <input
@@ -4767,14 +4805,26 @@ function QueueListRow({
           <span className="text-foreground line-clamp-2 block text-sm leading-snug">
             {displayTitle(row.title)}
           </span>
-          <span className="text-muted-foreground mt-0.5 block text-xs">{meta}</span>
+          <span
+            data-slot="core-queue-row-meta"
+            className="text-muted-foreground mt-0.5 flex text-xs"
+          >
+            {meta.journal ? (
+              <>
+                <span className="min-w-0 truncate">{meta.journal}</span>
+                <span className="shrink-0 whitespace-pre"> · </span>
+              </>
+            ) : null}
+            <span className="shrink-0 whitespace-nowrap">{meta.rest}</span>
+          </span>
           {chips.length > 0 ? (
             <span className="mt-1.5 flex flex-wrap gap-1">
               {chips.map((c) => (
                 <span
                   key={c.label}
                   data-tone={c.tone}
-                  className={`rounded border px-[7px] py-px text-[11px] ${CHIP_TONE_CLASS[c.tone]}`}
+                  title={c.label}
+                  className={`max-w-full truncate rounded border px-[7px] py-px text-[11px] whitespace-nowrap ${CHIP_TONE_CLASS[c.tone]}`}
                 >
                   {c.label}
                 </span>
@@ -5201,6 +5251,7 @@ function SignalRow({
   let value: string | null = null;
   let detail: ReactNode = null;
   let quote: string | null = null;
+  let meter: string[] | null = null;
   switch (signal.kind) {
     case "ack":
       label = row.ackAlias ? "Named in the acknowledgments" : "Acknowledged in text";
@@ -5218,6 +5269,7 @@ function SignalRow({
       // can see HOW strongly the model read the paper, and the band word above
       // is about the combined score, not this one.
       value = `${row.llmScore}/10`;
+      if (row.llmScore !== null) meter = llmMeterSegments(row.llmScore);
       detail = row.llmRationale;
       break;
     case "affinity": {
@@ -5263,7 +5315,16 @@ function SignalRow({
       </div>
       <div className="min-w-0">
         {value ? (
-          <div className="text-foreground text-[12.5px] font-semibold">{value}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-foreground text-[12.5px] font-semibold">{value}</span>
+            {meter ? (
+              <span data-slot="core-queue-llm-meter" className="flex gap-0.5" aria-hidden>
+                {meter.map((fill, i) => (
+                  <span key={i} className={`h-1.5 w-2 rounded-[1px] ${fill}`} />
+                ))}
+              </span>
+            ) : null}
+          </div>
         ) : null}
         {detail ? (
           <div className="text-muted-foreground text-[12.5px] leading-relaxed">{detail}</div>
