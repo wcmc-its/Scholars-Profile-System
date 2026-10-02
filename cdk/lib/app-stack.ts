@@ -1332,6 +1332,12 @@ export class AppStack extends Stack {
       environment: {
         NODE_ENV: "production",
         PORT: "3000",
+        // Next standalone server.js reads this into server.keepAliveTimeout.
+        // Node's 5s default is shorter than the ALB idle timeout (60s), so the
+        // ALB occasionally reuses a socket Node just closed -> sporadic ELB 502
+        // with no app-side error (seen in the 2026-10-01 RPT load test). Must
+        // stay above the ALB idle timeout.
+        KEEP_ALIVE_TIMEOUT: "65000",
         // B24 -- OTel exporter target + service-identity env vars. The OTel
         // SDK boot in lib/tracing/init.ts honors these. Deliberately omitted:
         // OTEL_TRACES_SAMPLER and OTEL_TRACES_SAMPLER_ARG. The "5% baseline +
