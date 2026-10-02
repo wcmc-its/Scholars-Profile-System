@@ -11,7 +11,7 @@
  * Auth + targeting mirror the sibling POPS preview / CV download routes exactly:
  * `?cwid=` defaults to the session cwid (self); a foreign target is gated by the
  * SAME `authorizeCvExport` predicate (no drift) — the bio-write predicate
- * widened for the read-only `cv_generator` role (#2482), since this route never
+ * widened for the read-only observer role, since this route never
  * writes anything. Flag-gated behind `EDIT_CV_EXPORT` (off ⇒ 404). Mentees
  * re-apply the mentor's FERPA hide choices (the loader does not). Read-only;
  * nothing is persisted.

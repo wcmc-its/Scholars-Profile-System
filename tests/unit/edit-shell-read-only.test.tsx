@@ -1,5 +1,5 @@
 /**
- * `EditShell`'s `readOnly` / `contentInert` props (#2482, the `cv_generator`
+ * `EditShell`'s `readOnly` / `contentInert` props (the observer's read-only
  * role) — `readOnly` swaps the header role pill's "Editing as administrator"
  * for an honest "View only" (and drops "Changes are logged…");
  * `contentInert` (defaults to `readOnly`) makes the panel content native

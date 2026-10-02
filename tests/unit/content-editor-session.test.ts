@@ -22,7 +22,6 @@ vi.mock("@/lib/auth/config", () => ({
 }));
 vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
 vi.mock("@/lib/auth/comms-steward", () => ({ isCommsSteward: vi.fn(async () => false) }));
-vi.mock("@/lib/auth/cv-generator", () => ({ isCvGenerator: vi.fn(async () => false) }));
 vi.mock("@/lib/auth/data-sharing-viewer", () => ({ isDataSharingViewer: vi.fn(async () => false) }));
 vi.mock("@/lib/auth/development", () => ({ isDeveloper: vi.fn(async () => false) }));
 vi.mock("@/lib/auth/honors-curator", () => ({ isHonorsCurator: vi.fn(async () => false) }));

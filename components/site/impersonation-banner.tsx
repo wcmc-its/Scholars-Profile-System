@@ -51,7 +51,6 @@ export type SubjectRole =
   | "curator"
   | "scholar"
   | "comms_steward"
-  | "cv_generator"
   | "honors_curator"
   | "data_sharing_viewer"
   | "development"
@@ -62,7 +61,6 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
   curator: "Curator",
   scholar: "Scholar",
   comms_steward: "Communications Steward",
-  cv_generator: "CV Generator",
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
@@ -97,7 +95,6 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   // door; the steward's own AdminSubnav fans out to Method families and the
   // rest from there (incl. cores + access management since #2522).
   comms_steward: [{ label: "Admin console", href: "/edit/profiles" }],
-  cv_generator: [{ label: "Profiles (read-only)", href: "/edit/profiles" }],
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
   development: [{ label: "Grant Matcha", href: "/edit/grant-matcha" }],

@@ -1482,9 +1482,9 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
   });
 });
 
-describe("EditPage router — cv_generator mode (#2482, read-only)", () => {
+describe("EditPage router — read-only mode (an observer)", () => {
   it("?attr=overview is inert (write affordance blocked) and the role pill reads 'View only'", () => {
-    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="overview" />);
+    render(<EditPage ctx={superuserCtx} mode="read-only" attr="overview" />);
     expect(document.querySelector('[data-slot="edit-role-pill"]')?.textContent).toBe("View only");
     expect(document.body.textContent).not.toContain("Changes are logged");
     // The overview editor mount (mock-editor) renders inside the inert wrapper.
@@ -1492,7 +1492,7 @@ describe("EditPage router — cv_generator mode (#2482, read-only)", () => {
   });
 
   it("?attr=cv is the ONE exception — the Download CV button stays interactive", () => {
-    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="cv" cvEnabled />);
+    render(<EditPage ctx={superuserCtx} mode="read-only" attr="cv" cvEnabled />);
     // The pill still tells the truth even on the exempted panel.
     expect(document.querySelector('[data-slot="edit-role-pill"]')?.textContent).toBe("View only");
     // But the download control is NOT wrapped inert.
@@ -1500,7 +1500,7 @@ describe("EditPage router — cv_generator mode (#2482, read-only)", () => {
   });
 
   it("sees the CV rail item (superuser-parity content set) when cvEnabled", () => {
-    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="home" cvEnabled />);
+    render(<EditPage ctx={superuserCtx} mode="read-only" attr="home" cvEnabled />);
     expect(screen.getByText("CV (WCM format)")).toBeTruthy();
   });
 });

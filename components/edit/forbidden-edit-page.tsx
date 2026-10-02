@@ -37,15 +37,12 @@ import { GLOBAL_ROLE_HOME } from "@/lib/auth/global-roles";
 type OwnHomeSession = {
   isSuperuser?: boolean;
   isCommsSteward?: boolean;
-  isCvGenerator?: boolean;
   isHonorsCurator?: boolean;
   isDataSharingViewer?: boolean;
   isDeveloper?: boolean;
 };
 
-/** `/edit/profiles`, labeled for someone who can actually WRITE there — as
- *  opposed to `GLOBAL_ROLE_HOME.cv_generator`, the same href for a read-only
- *  visitor. Kept as its own constant so the two never drift apart. */
+/** `/edit/profiles`, for someone who can edit there. */
 const PROFILES_LINK = { href: "/edit/profiles", label: "Profiles" };
 
 /**
@@ -59,10 +56,6 @@ const PROFILES_LINK = { href: "/edit/profiles", label: "Profiles" };
  * comms-steward-profile-editing-spec.md §4d) — since that is the console's
  * daily-driver surface, the same reasoning `lib/auth/console-links.ts`'s own
  * docblock gives for putting "Profiles" ahead of "Org units" there.
- * `cv_generator`'s read-only variant of the same page is the fallback ONLY
- * when neither broader grant applies, so a superuser who also happens to be
- * `cv_generator` never sees a redundant second "(read-only)" link to the
- * href they already have full access to.
  *
  * (Deliberately NOT keyed on unit-admin/`managesUnits` — that verdict needs
  * its own DB read (`loadManageableUnits`), not a plain `EditSession` field,
@@ -82,7 +75,7 @@ const PROFILES_LINK = { href: "/edit/profiles", label: "Profiles" };
  * reason to make someone click through an interstitial to the only place
  * they can go. This mirrors `/edit`'s own profile-less fallthrough
  * (`app/edit/page.tsx`), which has always redirected `comms_steward` /
- * `cv_generator` / the other global roles straight through with no
+ * the other global roles straight through with no
  * interstitial of its own. A page IS still shown when there's more than one
  * destination (can't silently pick for the viewer) or none resolved at all
  * (the generic `/edit` single-entry case still redirects — `/edit` does its
@@ -93,8 +86,6 @@ function ownDestinations(session?: OwnHomeSession): ReadonlyArray<{ href: string
   const links: Array<{ href: string; label: string }> = [];
   if (session?.isSuperuser || session?.isCommsSteward) {
     links.push(PROFILES_LINK);
-  } else if (session?.isCvGenerator) {
-    links.push(GLOBAL_ROLE_HOME.cv_generator);
   }
   if (session?.isHonorsCurator) links.push(GLOBAL_ROLE_HOME.honors_curator);
   if (session?.isDataSharingViewer) links.push(GLOBAL_ROLE_HOME.data_sharing_viewer);

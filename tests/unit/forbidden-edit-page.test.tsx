@@ -42,7 +42,6 @@ beforeEach(() => {
 
 describe("ForbiddenEditPage — single destination redirects straight through (2026-08-19)", () => {
   it.each([
-    ["isCvGenerator", "/edit/profiles"],
     ["isHonorsCurator", "/edit/honors-queue"],
     ["isDataSharingViewer", "/edit/data-sharing"],
     ["isDeveloper", "/edit/grant-matcha"],
@@ -62,13 +61,6 @@ describe("ForbiddenEditPage — single destination redirects straight through (2
       );
     },
   );
-
-  it("a superuser who also happens to be cv_generator redirects to Profiles — no redundant read-only duplicate to choose between", () => {
-    expect(() =>
-      render(<ForbiddenEditPage session={{ isSuperuser: true, isCvGenerator: true }} />),
-    ).toThrow("__REDIRECT__:/edit/profiles");
-    expect(mockRedirect).toHaveBeenCalledWith("/edit/profiles");
-  });
 
   it("no session passed (the two bare-ConsoleTopBar detail pages) redirects to /edit, same as the old fallback link's target", () => {
     expect(() => render(<ForbiddenEditPage />)).toThrow("__REDIRECT__:/edit");

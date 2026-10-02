@@ -262,8 +262,8 @@ export async function GET(): Promise<NextResponse> {
           startedAt: session.impersonating.startedAt,
         };
       } else {
-        // A profile-less GLOBAL-ROLE target (cv_generator / honors_curator /
-        // data_sharing_viewer / development, `lib/auth/global-roles.ts`) — the
+        // A profile-less GLOBAL-ROLE target (honors_curator /
+        // data_sharing_viewer / development / content_editor, `lib/auth/global-roles.ts`) — the
         // same stranding hazard the steward/unit-admin branches above exist to
         // prevent. These roles have no name-resolution bridge of their own (no
         // steward_directory-equivalent), so the name degrades to the bare CWID —

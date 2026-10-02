@@ -25,7 +25,6 @@
 import { cache } from "react";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isContentEditor } from "@/lib/auth/content-editor";
-import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
@@ -78,18 +77,6 @@ export interface EditSession {
    * (`canViewDataSharingDashboard`) only ever reads a session from those.
    */
   isDataSharingViewer?: boolean;
-  /**
-   * Live `cv_generator` verdict — read-only access to every scholar's
-   * `/edit/scholar/[cwid]` and the `/edit/profiles` roster, no write
-   * capability anywhere (#2482). A superuser is a superset of this. Gates
-   * ONLY the read-admitting arm of `resolveScholarEditAccess` and the
-   * `/edit/profiles` roster scope — no write predicate in `lib/edit/authz.ts`
-   * reads it, so like `isDataSharingViewer` it is OPTIONAL: the synthetic
-   * `EditSession` shapes the field / unit authz helpers build need not carry
-   * a flag they never consume. The live resolvers (`getEditSession` /
-   * `getEffectiveEditSession`) always populate it.
-   */
-  isCvGenerator?: boolean;
   /**
    * `observer` (`lib/auth/observer.ts`): `true` ONLY when this session's
    * `isCommsSteward` is the observer's SYNTHETIC read grant, not a real one.
@@ -178,13 +165,12 @@ export async function getEditSession(): Promise<EditSession | null> {
   // #1514 — six independent LDAPS group checks; resolve concurrently so the
   // wall-clock cost is one directory round-trip, not six. All six are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc, dsv, cvg, obs, ce] = await Promise.all([
+  const [su, cs, dev, hc, dsv, obs, ce] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
     isHonorsCurator(session.cwid),
     isDataSharingViewer(session.cwid),
-    isCvGenerator(session.cwid),
     isObserver(session.cwid),
     isContentEditor(session.cwid),
   ]);
@@ -199,7 +185,6 @@ export async function getEditSession(): Promise<EditSession | null> {
         isDeveloper: dev,
         isHonorsCurator: hc,
         isDataSharingViewer: dsv,
-        isCvGenerator: cvg,
       },
       ce,
     ),

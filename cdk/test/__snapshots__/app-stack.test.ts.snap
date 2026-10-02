@@ -602,14 +602,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
               },
               {
-                "Name": "CV_GENERATOR_ENABLED",
-                "Value": "off",
-              },
-              {
-                "Name": "SCHOLARS_CV_GENERATOR_GROUP_CN",
-                "Value": "ITS:Library:Scholars/cv-generator-role",
-              },
-              {
                 "Name": "OBSERVER_ENABLED",
                 "Value": "on",
               },
@@ -5184,14 +5176,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN",
                 "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
-              },
-              {
-                "Name": "CV_GENERATOR_ENABLED",
-                "Value": "off",
-              },
-              {
-                "Name": "SCHOLARS_CV_GENERATOR_GROUP_CN",
-                "Value": "ITS:Library:Scholars/cv-generator-role",
               },
               {
                 "Name": "OBSERVER_ENABLED",

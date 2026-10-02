@@ -1881,23 +1881,6 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         DATA_SHARING_VIEWER_ENABLED: "on",
         SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
-        // `cv_generator` role (#2482) -- read-only access to every scholar's
-        // /edit/scholar/[cwid] (superuser-parity content, EditShell renders it
-        // `inert`) and the /edit/profiles roster. For Faculty Affairs staff who
-        // need to browse profiles to assemble CVs, and more broadly to open the
-        // tool to people who shouldn't get write rights ("socialize the app").
-        //   CV_GENERATOR_ENABLED -- master kill switch, same shape as
-        //     DATA_SHARING_VIEWER_ENABLED above. While not "on", isCvGenerator()
-        //     short-circuits to false before any directory work -- safe to
-        //     enable ahead of the ED group existing (fails closed, not broken).
-        //   SCHOLARS_CV_GENERATOR_GROUP_CN -- the ED group whose membership
-        //     confers the role. Same shape as its siblings (groupOfURLs under
-        //     `ou=application security`); see the LDIF handoff for creation.
-        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        // RETIRED 2026-10-02: its members moved to the observer role, which
-        // also downloads CVs. Off in both envs; the code is dormant.
-        CV_GENERATOR_ENABLED: "off",
-        SCHOLARS_CV_GENERATOR_GROUP_CN: "ITS:Library:Scholars/cv-generator-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
         // who need to understand the app and guide users through changes.

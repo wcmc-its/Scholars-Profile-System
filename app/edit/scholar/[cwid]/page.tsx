@@ -168,12 +168,11 @@ export default async function EditScholarPage({
   // request, so it matches /edit exactly. The superuser direct-set card is
   // unaffected (it has no flag).
   const slugRequestEnabled = isSelf && isSlugRequestEnabled();
-  // Superuser is checked before comms_steward/cv_generator so a viewer who is
-  // more than one of these gets the higher-privilege surface. `cv_generator`
-  // (#2482) is the LAST resort, never an implicit "else": `resolveScholarEditAccess`
-  // gate 5 only admits us past `forbidden` when isSelf/isProxy/isUnitAdmin/
-  // isCommsSteward/isCvGenerator/isSuperuser — one of the two is guaranteed true
-  // here, so this is exhaustive, not a fallback guess.
+  // Superuser is checked before comms_steward so a viewer who is both gets
+  // the higher-privilege surface. `read-only` is the observer's view:
+  // `resolveScholarEditAccess` gate 5 only admits us past `forbidden` when
+  // isSelf/isProxy/isUnitAdmin/isCommsSteward/isSuperuser, and an observer's
+  // isCommsSteward is synthetic, so this is exhaustive, not a fallback guess.
   // A content editor (`lib/auth/content-editor.ts`) edits in UNIT-ADMIN mode:
   // the scholar's own surface (bio, Highlights, one-profile hides, title
   // request) and no steward extras (title pin, takedown, whole-scholar hide,
@@ -192,8 +191,8 @@ export default async function EditScholarPage({
           : session.isCommsSteward && !session.isObserver
             ? "comms_steward"
             : // An observer's steward grant is read-only: render the
-              // cv-generator (superuser-parity, inert) view.
-              "cv-generator";
+              // read-only (superuser-parity, inert) view.
+              "read-only";
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set

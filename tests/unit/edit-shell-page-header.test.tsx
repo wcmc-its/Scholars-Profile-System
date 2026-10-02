@@ -52,7 +52,7 @@ describe("EditShell — page header role pill", () => {
     );
   });
 
-  it("readOnly (cv_generator) reads 'View only' with no 'Changes are logged'", () => {
+  it("readOnly (an observer) reads 'View only' with no 'Changes are logged'", () => {
     render(
       <EditShell {...base} mode="superuser" readOnly>
         <div>panel</div>

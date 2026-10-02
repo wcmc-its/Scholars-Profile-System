@@ -1742,7 +1742,7 @@ export const getScholarFullProfileBySlug = cache(
       // bypassed BOTH helpers. This payload has no role carve anywhere upstream:
       // `getScholarFullProfileBySlug` filters only on `deletedAt`/`status`, and
       // `authorizeCvExport` gates on self / superuser / assigned proxy / unit-admin /
-      // `cv_generator` — none of which is a role-category carve. So
+      // observer — none of which is a role-category carve. So
       // `POST /api/edit/cv` for an enrolled doctoral student printed
       // "<name>, Doctor of Philosophy" into the WCM CV signature block and the
       // PI line (`lib/edit/cv-export.ts`) — a document the scholar submits.

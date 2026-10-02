@@ -133,13 +133,12 @@ export async function resolveScholarEditAccess(
     }
   }
 
-  // Gate 5 — comms_steward / cv_generator / superuser / deny. `cv_generator`
-  // (#2482) is READ-ONLY: admitted here so the page renders, but never checked
-  // by any write predicate in lib/edit/authz.ts, so every mutation still 403s.
+  // Gate 5 — comms_steward (incl. the observer's and content editor's
+  // synthetic read grant) / superuser / deny.
   // The GET-time superuser re-check emits one `edit_authz_denied` line
   // (reason="not_superuser_get") so mid-session deauthorisation (SPEC edge
   // case 15) is logged.
-  if (!isSelf && !isProxy && !isUnitAdmin && !session.isCommsSteward && !session.isCvGenerator) {
+  if (!isSelf && !isProxy && !isUnitAdmin && !session.isCommsSteward) {
     const denial = requireSuperuserGet({
       session,
       path: `/edit/scholar/${targetCwid}${pathSuffix}`,

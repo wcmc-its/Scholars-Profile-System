@@ -85,7 +85,6 @@ vi.mock("@/lib/auth/global-roles", () => ({
   // Real values, not mocked-away — plain data, no I/O — so a redirect
   // assertion below catches a drifted href the same way it would in prod.
   GLOBAL_ROLE_HOME: {
-    cv_generator: { href: "/edit/profiles", label: "Profiles (read-only)" },
     honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
     data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
     development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
@@ -225,7 +224,6 @@ beforeEach(() => {
 
 describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () => {
   it.each([
-    ["cv_generator", "/edit/profiles"],
     ["honors_curator", "/edit/honors-queue"],
     ["data_sharing_viewer", "/edit/data-sharing"],
     ["development", "/edit/grant-matcha"],

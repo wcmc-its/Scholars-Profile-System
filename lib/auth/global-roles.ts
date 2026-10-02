@@ -5,7 +5,7 @@
  * impersonation routes and is deliberately NOT folded in here).
  *
  * Each role already has its own narrow `is<Role>` predicate
- * (`lib/auth/cv-generator.ts`, `honors-curator.ts`, `data-sharing-viewer.ts`,
+ * (`lib/auth/honors-curator.ts`, `data-sharing-viewer.ts`,
  * `development.ts`) — by design, per every one of those modules' own
  * docblocks: "a non-superuser global role is always added via a narrow
  * predicate at its own surface, never by widening a shared one." This module
@@ -26,13 +26,11 @@
  * never pull this into the Edge middleware bundle or a client component.
  */
 import { isContentEditor } from "@/lib/auth/content-editor";
-import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 
 export type GlobalRole =
-  | "cv_generator"
   | "honors_curator"
   | "data_sharing_viewer"
   | "development"
@@ -41,7 +39,6 @@ export type GlobalRole =
 /** Display label per role — reused by the session route; client components
  *  (banner) keep their own copy rather than import this Node-only module. */
 export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
-  cv_generator: "CV Generator",
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
@@ -59,7 +56,6 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
  *  actual page — by redirect in the first case, by a direct link in the
  *  second — instead of 404ing or bouncing through a generic `/edit`. */
 export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string }> = {
-  cv_generator: { href: "/edit/profiles", label: "Profiles (read-only)" },
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
   development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
@@ -67,7 +63,6 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
 };
 
 const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string) => Promise<boolean> }> = [
-  { role: "cv_generator", check: isCvGenerator },
   { role: "honors_curator", check: isHonorsCurator },
   { role: "data_sharing_viewer", check: isDataSharingViewer },
   { role: "development", check: isDeveloper },

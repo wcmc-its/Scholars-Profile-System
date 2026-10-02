@@ -4,7 +4,7 @@
  * opens so any roster or report can show it given just a cwid.
  *
  * Gate: the people who see person rows in /edit — anyone with a Profiles
- * roster scope (superuser / comms_steward / cv_generator / a unit admin) or a
+ * roster scope (superuser / comms_steward / a unit admin) or a
  * grant on any report. The email is released for an internal viewer
  * (`gateEmailForViewer` table A, internal = authenticated), so a `none`
  * release code is withheld here exactly as on the profile.
