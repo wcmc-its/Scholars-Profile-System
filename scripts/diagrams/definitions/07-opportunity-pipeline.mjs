@@ -8,6 +8,8 @@
  *         denoise,dedupe,exclusions,persist}.py · infra/grants_task_definition.json ·
  *         infra/eventbridge.json (cross-repo, applied + verified live 2026-08-20) —
  *         SPS: cdk/lib/etl-stack.ts · etl/dynamodb/grant-opportunity-etl.ts ·
+ *         etl/dynamodb/index.ts (grants manifest liveness read) ·
+ *         lib/etl/freshness-policy.ts · etl/opportunities/funding-digest.ts ·
  *         lib/search.ts (OPPORTUNITY_INDEX_WHERE).
  */
 import { A } from "../lib.mjs";
@@ -27,16 +29,18 @@ const nodes = {
   dr:   { x: 420, y: 558, w: 320, h: 62, kind: "app", title: "submission drain", sub: ["ingest_submissions · DynamoDB-only", "never publishes the S3 artifact"] },
 
   // ----- corpus stores + producer guardrail -----
-  ddb:  { x: 830, y: 168, w: 300, h: 84, kind: "data", title: "DynamoDB · reciterai", sub: ["GRANT# corpus items", "SUBMISSION intake queue (from SPS /edit)"] },
+  ddb:  { x: 830, y: 168, w: 300, h: 84, kind: "data", title: "DynamoDB · reciterai", sub: ["GRANT# corpus items", "SUBMISSION intake queue · two writers:", "SPS /edit panel + weekly funding digest"] },
   s3:   { x: 830, y: 300, w: 300, h: 72, kind: "data", title: "S3 · grants/latest", sub: ["sweep-only publish · shrink guard refuses", "a >20% count drop (force=True escape)"] },
   al:   { x: 830, y: 470, w: 300, h: 78, kind: "aws", title: "Log-error alarm", sub: ["reciterai-grants-ingest-errors", "ERROR / Traceback / ShrinkError lines", "-> SNS email topic (confirmed subscribers)"] },
 
-  // ----- SPS consumer + freshness guardrail -----
-  proj: { x: 1192, y: 168, w: 296, h: 56, kind: "app", title: "SPS nightly projection", sub: ["etl:dynamodb · cron(0 7 * * ? *)"], chip: { tone: "nightly", text: "07:00 UTC" } },
-  aur:  { x: 1192, y: 262, w: 296, h: 56, kind: "data", title: "Aurora · opportunity", sub: ["upsert never names suppress* columns"] },
-  osi:  { x: 1192, y: 356, w: 296, h: 62, kind: "data", title: "scholars-opportunities", sub: ["rebuilt nightly · OPPORTUNITY_INDEX_WHERE", "drops suppressed + non-research rows"] },
-  met:  { x: 1192, y: 496, w: 296, h: 62, kind: "aws", title: "Per-source age metric", sub: ["SPS/ETL · OpportunityCorpusIngestAgeDays", "{Env} corpus-wide + {Env, Source} dims"] },
-  al21: { x: 1192, y: 586, w: 296, h: 56, kind: "aws", title: "Alarm >= 21 days", sub: ["corpus-wide MAX -> etl-failures topic"] },
+  // ----- SPS: weekly queue writer, nightly consumer, freshness signals -----
+  dig:  { x: 1232, y: 146, w: 296, h: 62, kind: "app", title: "Funding digest", sub: ["etl:funding-digest · Research Dean emails", "new links only · prod submits, staging dry-runs"], chip: { tone: "weekly", text: "Sun 12:00 UTC" } },
+  proj: { x: 1232, y: 278, w: 296, h: 62, kind: "app", title: "Nightly projection", sub: ["etl:dynamodb · prod cron(0 7 * * ? *)", "staging cron(45 7 * * ? *)"], chip: { tone: "nightly", text: "prod 07:00 UTC" } },
+  aur:  { x: 1232, y: 372, w: 296, h: 56, kind: "data", title: "Aurora · opportunity", sub: ["upsert never names suppress* columns"] },
+  osi:  { x: 1232, y: 460, w: 296, h: 62, kind: "data", title: "scholars-opportunities", sub: ["rebuilt nightly · OPPORTUNITY_INDEX_WHERE", "drops suppressed + non-research rows"] },
+  met:  { x: 1232, y: 604, w: 296, h: 62, kind: "aws", title: "Per-source age metric", sub: ["SPS/ETL · OpportunityCorpusIngestAgeDays", "{Env} corpus-wide + {Env, Source} dims"] },
+  al21: { x: 1232, y: 694, w: 296, h: 56, kind: "aws", title: "Alarm >= 21 days", sub: ["corpus-wide MAX -> etl-failures topic"] },
+  live: { x: 1232, y: 778, w: 296, h: 62, kind: "app", title: "ReciterAI-grants liveness row", sub: ["written by etl:dynamodb (fail-soft read)", "/edit/etl-status · 54h SLA · status, no alarm"] },
 };
 
 const groups = [
@@ -44,8 +48,9 @@ const groups = [
   { x: 400, y: 118, w: 360, h: 526, kind: "app", title: "Fargate · reciterai-grants (daily 03:00 UTC)", fo: 0.05 },
   { x: 810, y: 118, w: 340, h: 278, kind: "data", title: "Shared corpus stores", fo: 0.08 },
   { x: 810, y: 438, w: 340, h: 134, kind: "aws", title: "Producer guardrail", fo: 0.05 },
-  { x: 1172, y: 118, w: 336, h: 324, kind: "edge", title: "SPS · nightly ETL" },
-  { x: 1172, y: 462, w: 336, h: 204, kind: "aws", title: "Freshness guardrail · SPS etl-stack", fo: 0.05 },
+  { x: 1212, y: 118, w: 336, h: 108, kind: "edge", title: "SPS · weekly ETL" },
+  { x: 1212, y: 250, w: 336, h: 290, kind: "edge", title: "SPS · nightly ETL" },
+  { x: 1212, y: 576, w: 336, h: 282, kind: "aws", title: "Freshness signals · SPS", fo: 0.05 },
 ];
 const gSrc = groups[0], gTask = groups[1];
 
@@ -64,11 +69,13 @@ const edges = [
   { p0: A(nodes.ddb, "r", 0.5), p1: A(nodes.proj, "l", 0.5), color: "teal" },
   { p0: A(nodes.proj, "b", 0.5), p1: A(nodes.aur, "t", 0.5), color: "teal", label: "upsert" },
   { p0: A(nodes.aur, "b", 0.5), p1: A(nodes.osi, "t", 0.5), color: "teal", label: "rebuild" },
-  { p0: A(nodes.proj, "l", 0.8), p1: A(nodes.met, "l", 0.3), color: "gray", dash: true, label: "emit ingest age", lp: { x: 1164, y: 336 }, points: [{ x: 1164, y: 212 }, { x: 1164, y: 515 }] },
+  { p0: A(nodes.proj, "l", 0.8), p1: A(nodes.met, "l", 0.3), color: "gray", dash: true, label: "ingest age", lp: { x: 1200, y: 557 }, points: [{ x: 1200, y: 327.6 }, { x: 1200, y: 622.6 }] },
+  { p0: A(nodes.dig, "l", 0.55), p1: A(nodes.ddb, "r", 0.15), color: "indigo", dash: true, route: "straight", label: "SUBMISSION", lp: { x: 1181, y: 160 } },
+  { p0: A(nodes.s3, "r", 0.5), p1: A(nodes.live, "l", 0.5), color: "gray", dash: true, label: "manifest.json generated_at", lp: { x: 1180, y: 764 }, points: [{ x: 1180, y: 336 }, { x: 1180, y: 809 }] },
   { p0: A(nodes.met, "b", 0.5), p1: A(nodes.al21, "t", 0.5), color: "violet" },
 ];
 
-export const spec = { id: "opportunity-pipeline", vb: [1540, 720], groups, nodes, edges };
+export const spec = { id: "opportunity-pipeline", vb: [1580, 880], groups, nodes, edges };
 
 export const meta = {
   nav: "⑦ Corpus pipeline",
@@ -78,9 +85,10 @@ export const meta = {
   blurb:
     "Inside the daily corpus run: every source funnels through one normalize → dedupe → gate → " +
     "<b>LLM judge</b> → persist chain in the <code>reciterai-grants</code> Fargate task, with the " +
-    "SPS submission drain chained after it. Two independent guardrails watch it: a <b>log-error " +
+    "SPS submission drain chained after it. Three independent signals watch it: a <b>log-error " +
     "alarm</b> on the producer (the <code>;</code> chain means a grants.gov failure never reaches the " +
-    "exit code) and the <b>per-source freshness metric</b> + ≥21-day alarm on the SPS side.",
+    "exit code), the <b>per-source freshness metric</b> + ≥21-day alarm on the SPS side, and the " +
+    "<b>manifest-age liveness row</b> on <code>/edit/etl-status</code> (a status row, not an alarm).",
   legend: [
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "Source" },
     { fill: "#e3faf3", stroke: "#0ca678", label: "Pipeline stage" },
@@ -93,7 +101,7 @@ export const meta = {
     { color: "amber", label: "persist / publish" },
     { color: "indigo", label: "submission queue round-trip" },
     { color: "violet", label: "LLM-judged output" },
-    { color: "gray", dash: true, label: "telemetry / sequencing" },
+    { color: "gray", dash: true, label: "telemetry / liveness / sequencing" },
   ],
   footnote:
     "<b>Why two alarms:</b> the freshness metric's corpus-wide series goes green when <i>any</i> " +
@@ -102,15 +110,18 @@ export const meta = {
     "log-error alarm covers failures the exit code can't (the <code>;</code> chain deliberately " +
     "lets the drain run after a grants.gov crash). <b>Drain is DynamoDB-only</b>: on 2026-08-20 the " +
     "old drain-side publish clobbered <code>grants/latest</code> with a 65-item subset — exactly what " +
-    "the shrink guard exists to refuse — so the drain no longer publishes at all; SPS reads the " +
-    "corpus from DynamoDB, never the artifact. <b>SPIN</b> runs manually until the license check on " +
+    "the shrink guard exists to refuse — so the drain no longer publishes at all. SPS reads the " +
+    "corpus from DynamoDB; from the artifact it reads only <code>grants/latest/manifest.json</code>, " +
+    "as the producer's liveness trace. <b>The queue has two writers:</b> the " +
+    "<code>/edit/grant-matcha</code> intake panel and the weekly Research Dean funding-digest step; " +
+    "only prod submits, because the table is shared. <b>SPIN</b> runs manually until the license check on " +
     "scheduled pulls clears (weekly rule spec'd, deliberately unshipped). The 03:00→07:00 UTC gap " +
-    "is a <b>launch</b> gap; first-tick wall-clock vs 07:00 is a monitored assumption, and Fargate " +
+    "(07:45 on staging) is a <b>launch</b> gap; first-tick wall-clock vs 07:00 is a monitored assumption, and Fargate " +
     "has no task timeout — a hung run runs until noticed.",
   seeAlso: [
     { id: "grant-matching-context", label: "⑥ Grant matching · context" },
     { id: "matching-engines", label: "⑧ Matching surfaces & engines" },
   ],
   source:
-    "ReciterAI: pipeline_grants/* · infra/{grants_task_definition,grants_task_iam_policy,eventbridge}.json · infra/README.md §Grants ingest launch path (cross-repo) — SPS: cdk/lib/etl-stack.ts:2073-2101 (metric + ≥21d alarm) · etl/dynamodb/grant-opportunity-etl.ts · etl/search-index/index.ts · lib/search.ts:102",
+    "ReciterAI: pipeline_grants/* · infra/{grants_task_definition,grants_task_iam_policy,eventbridge}.json · infra/README.md §Grants ingest launch path (cross-repo) — SPS: cdk/lib/etl-stack.ts OpportunityFreshnessAlarm (metric + ≥21d alarm), FundingDigestWeekly, NightlyScheduleRule · etl/dynamodb/grant-opportunity-etl.ts · etl/dynamodb/index.ts (grants manifest read) · lib/etl/freshness-policy.ts · etl/opportunities/funding-digest.ts · etl/search-index/index.ts · lib/search.ts (OPPORTUNITIES_INDEX, OPPORTUNITY_INDEX_WHERE)",
 };
