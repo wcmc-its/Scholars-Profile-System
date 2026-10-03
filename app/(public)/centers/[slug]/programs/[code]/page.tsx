@@ -6,6 +6,13 @@ import { isCenterProgramPagesEnabled } from "@/lib/profile/methods-lens-flags";
 export const revalidate = 21600;
 export const dynamicParams = true;
 
+// Without generateStaticParams Next renders this dynamic segment on every
+// request and `revalidate` is inert (see #3005). Empty list: nothing is
+// prebuilt; each path is cached on its first request.
+export async function generateStaticParams(): Promise<{ slug: string; code: string }[]> {
+  return [];
+}
+
 export async function generateMetadata({
   params,
 }: {
