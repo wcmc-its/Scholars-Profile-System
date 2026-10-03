@@ -30,6 +30,13 @@ import { profilePath } from "@/lib/profile-url";
 export const revalidate = 86400;
 export const dynamicParams = true;
 
+// Without generateStaticParams Next renders this dynamic segment on every
+// request and `revalidate` is inert (see #3005). Empty list: nothing is
+// prebuilt; each path is cached on its first request.
+export async function generateStaticParams(): Promise<{ slug: string }[]> {
+  return [];
+}
+
 type Params = { slug: string };
 
 // #2599 — `roleCategory` is already selected by `resolveMentor` (it feeds the
