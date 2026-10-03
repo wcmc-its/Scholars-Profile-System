@@ -91,6 +91,22 @@ describe("handler get/set/revalidateTag", () => {
     expect(await h.get("k", { tags: ["/p"] })).toBeNull();
   });
 
+  it("revalidatePath busts an APP_PAGE via its x-next-cache-tags header (Next 16 passes no ctx tags)", async () => {
+    // Shape of a real Next 16 profile entry: set() and get() carry no tags;
+    // the implicit path tag lives only in the stored value's header.
+    let t = 1000;
+    const h = createHandler({ client: fakeS3(), bucket: "b", now: () => t });
+    const page = {
+      kind: "APP_PAGE",
+      headers: { "x-next-cache-tags": "_N_T_/layout,_N_T_/(public)/[slug]/page,_N_T_/some-scholar" },
+    };
+    await h.set("/some-scholar", page, {});
+    expect((await h.get("/some-scholar", { kind: "APP_PAGE" }))?.value).toEqual(page);
+    t = 2000;
+    await h.revalidateTag("_N_T_/some-scholar");
+    expect(await h.get("/some-scholar", { kind: "APP_PAGE" })).toBeNull();
+  });
+
   it("propagates a revalidation across tasks after the in-process TTL", async () => {
     const s3 = fakeS3();
     const writer = createHandler({ client: s3, bucket: "b", now: () => 1000 });
