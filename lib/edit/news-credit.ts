@@ -95,13 +95,14 @@ export type CreditContext = {
   auditKey: string;
 };
 
-/** Credit `ctx.target` with one article and return their row's id. `leadId` is
- *  their row for the story's lead, which a CREATED copy row points at. */
+/** Credit `ctx.target` with one article: their row's id, and whether anything
+ *  was written (false when they already had it published and nothing changed).
+ *  `leadId` is their row for the story's lead, which a CREATED copy points at. */
 export async function creditMention(
   ctx: CreditContext,
   source: StoredRow,
   leadId: string | null,
-): Promise<string> {
+): Promise<{ id: string; wrote: boolean }> {
   const { tx, target, hide, realCwid, impersonatedCwid, decisionId, requestId, ts } = ctx;
   const audit = (id: string, fieldsChanged: string[], before: StoredRow | null, after: object) =>
     appendAuditRow(tx, {
@@ -132,8 +133,9 @@ export async function creditMention(
         },
       })) as StoredRow;
       await audit(existing.id, ["showOnProfile"], existing, snapshot(after));
+      return { id: existing.id, wrote: true };
     }
-    return existing.id;
+    return { id: existing.id, wrote: false };
   }
   if (existing) {
     ctx.overwritten.add(existing.decisionId);
@@ -147,7 +149,7 @@ export async function creditMention(
       },
     })) as StoredRow;
     await audit(existing.id, hide ? ["status", "showOnProfile"] : ["status"], existing, snapshot(after));
-    return existing.id;
+    return { id: existing.id, wrote: true };
   }
   const created = (await tx.newsMention.create({
     data: {
@@ -172,5 +174,5 @@ export async function creditMention(
     ...snapshot(created),
     source: "CURATOR",
   });
-  return created.id;
+  return { id: created.id, wrote: true };
 }

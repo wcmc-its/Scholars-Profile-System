@@ -147,13 +147,6 @@ describe("add a person to a clip", () => {
     });
   });
 
-  it("is a no-op 200 when they already have it published", async () => {
-    targetHas({ ...CLIP, id: "theirs", cwid: "zzz9001", status: "published" });
-    const res = await POST(request({ id: "clip-1", cwid: "zzz9001" }));
-    expect(res.status).toBe(200);
-    expect(h.tx.newsMention.create).not.toHaveBeenCalled();
-    expect(h.tx.newsMention.update).not.toHaveBeenCalled();
-  });
 
   it("carries the story's copies, each pointing at their row for the lead", async () => {
     h.tx.newsMention.findMany.mockResolvedValue([
@@ -200,6 +193,31 @@ describe("refusals write nothing", () => {
 
   it("409 contested while another candidate is pending for the detected name", async () => {
     targetHas(null, { ...CLIP, status: "pending" });
+    h.tx.newsMention.findFirst.mockResolvedValue({ id: "rival" });
+    const res = await POST(request({ id: "clip-1", cwid: "zzz9001" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("contested");
+    expectNoWrites();
+  });
+
+  it("409 already_credited when they already have it published (no empty Undo)", async () => {
+    targetHas({ ...CLIP, id: "theirs", cwid: "zzz9001", status: "published" });
+    const res = await POST(request({ id: "clip-1", cwid: "zzz9001" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("already_credited");
+    expectNoWrites();
+  });
+
+  it("409 contested when THEIR pending row competes with another candidate", async () => {
+    targetHas({
+      ...CLIP,
+      id: "theirs",
+      cwid: "zzz9001",
+      status: "pending",
+      enteredByCwid: null,
+      sourceRef: `${URL_}|casey example`,
+    });
+    // The clip's own row is published, so only their row's rival is found.
     h.tx.newsMention.findFirst.mockResolvedValue({ id: "rival" });
     const res = await POST(request({ id: "clip-1", cwid: "zzz9001" }));
     expect(res.status).toBe(409);

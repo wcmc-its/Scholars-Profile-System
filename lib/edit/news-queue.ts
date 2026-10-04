@@ -111,7 +111,7 @@ export type NewsQueueRow = {
   decidedAt: string;
   /** Competing candidates for the same detected name (contested groups only). */
   competingCwids: string[];
-  /** Media highlights: the OTHER scholars this article is published for (a
+  /** Media highlights: the OTHER scholars this article is published and shown for (a
    *  curator's "Add person", or a second matched name). Empty on the newsroom
    *  queue. */
   alsoCredited: { cwid: string; name: string; slug: string | null }[];
@@ -368,7 +368,11 @@ export async function loadNewsQueue(
   const coCredits =
     kind === "clips"
       ? await client.newsMention.findMany({
-          where: { url: { in: [...new Set(rows.map((r) => r.url))] }, status: "published" },
+          where: {
+            url: { in: [...new Set(rows.map((r) => r.url))] },
+            status: "published",
+            showOnProfile: true,
+          },
           select: { url: true, cwid: true },
         })
       : [];

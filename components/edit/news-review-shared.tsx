@@ -99,6 +99,9 @@ export function decisionErrorMessage(
   if (status === 409 && code === "source_rejected") {
     return `This ${noun} is rejected, so no one can be added to it. Nothing was changed.`;
   }
+  if (status === 409 && code === "already_credited") {
+    return `That scholar is already credited with this ${noun}. Nothing was changed.`;
+  }
   if (status === 400 && code === "same_scholar") {
     return `That scholar is already credited with this ${noun}.`;
   }

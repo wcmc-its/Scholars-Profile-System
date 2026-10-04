@@ -16,7 +16,10 @@
  *   - 409 `contested`: pick the right candidate for the detected name first;
  *   - 422 `unknown_cwid`: no live scholar row;
  *   - 409 `rejected_by_scholar` / `target_rejected`: they (or a reviewer)
- *     already rejected this article for them, never overridden from here.
+ *     already rejected this article for them, never overridden from here;
+ *   - 409 `contested`: also when THEIR pending row for the article competes
+ *     with another candidate (approving it here would skip the rival sweep);
+ *   - 409 `already_credited`: they already have it published, nothing to do.
  * Undo-stamped like a decision, so the queue's status-bar Undo
  * (POST /api/edit/news-mention/undo) deletes the created rows.
  */
@@ -85,6 +88,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const loaded = await loadTargetRows(tx, target, [row, ...copies]);
       if (loaded.kind === "rejected_by_scholar") return { kind: "rejected_by_scholar" as const };
       if (loaded.kind === "target_rejected") return { kind: "target_rejected" as const };
+      for (const theirs of loaded.rows.values()) {
+        if (theirs?.status !== "pending" || !theirs.sourceRef) continue;
+        const rival = await tx.newsMention.findFirst({
+          where: { sourceRef: theirs.sourceRef, status: "pending", cwid: { not: target } },
+          select: { id: true },
+        });
+        if (rival) return { kind: "contested" as const };
+      }
 
       const overwritten = new Set<string | null | undefined>();
       const ctx = {
@@ -100,8 +111,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         overwritten,
         auditKey: "addedFrom",
       };
-      const leadId = await creditMention(ctx, row, null);
-      for (const copy of copies) await creditMention(ctx, copy, leadId);
+      const lead = await creditMention(ctx, row, null);
+      let wrote = lead.wrote;
+      for (const copy of copies) wrote = (await creditMention(ctx, copy, lead.id)).wrote || wrote;
+      if (!wrote) return { kind: "already_credited" as const };
 
       overwritten.delete(decisionId);
       await invalidateDecisions(tx, overwritten);
@@ -116,6 +129,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (result.kind === "unknown_cwid") return editError(422, "unknown_cwid", "cwid");
     if (result.kind === "rejected_by_scholar") return editError(409, "rejected_by_scholar", "cwid");
     if (result.kind === "target_rejected") return editError(409, "target_rejected", "cwid");
+    if (result.kind === "already_credited") return editError(409, "already_credited", "cwid");
 
     // Post-commit: put it on their profile now (ISR + CloudFront), as an approve does.
     await reflectOwners([target], requestId);

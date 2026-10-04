@@ -342,7 +342,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           overwritten,
           auditKey: "reassignedFrom",
         };
-        const leadId = await creditMention(ctx, row, null);
+        const { id: leadId } = await creditMention(ctx, row, null);
         // The copies the original row carried go to the named scholar too, as
         // copies of their row for the lead: the whole story moves, not just the
         // lead's placement.
