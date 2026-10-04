@@ -234,6 +234,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "mentee-suggestions/[id]/restore": "deny",
   "methods/families/review": "allow",
   "methods/families/tier": "allow",
+  "news-mention/add-person": "allow",
   "news-mention/decision": "allow",
   "news-mention/group": "allow",
   "news-mention": "allow",
