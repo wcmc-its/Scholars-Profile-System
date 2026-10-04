@@ -96,46 +96,12 @@ import { type NextRequest, NextResponse } from "next/server";
 import { isCwid } from "@/lib/cwid";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import {
-  invalidateDecisions,
-  reflectOwners,
-  stampFor,
-  stampForCreated,
-} from "@/lib/edit/news-decision";
+import { creditMention, loadTargetRows, snapshot, type StoredRow } from "@/lib/edit/news-credit";
+import { invalidateDecisions, reflectOwners, stampFor } from "@/lib/edit/news-decision";
 import { isNewsQueueEnabled } from "@/lib/edit/news-queue";
 import { editError, editOk, readEditRequest } from "@/lib/edit/request";
 
 export const dynamic = "force-dynamic";
-
-type StoredRow = {
-  id: string;
-  cwid: string;
-  url: string;
-  status: string;
-  title: string;
-  publishedAt?: Date | null;
-  excerpt?: string | null;
-  thumbnailUrl?: string | null;
-  detectedName: string | null;
-  sourceRef: string | null;
-  showOnProfile: boolean;
-  enteredByCwid?: string | null;
-  decisionId?: string | null;
-  /** Set on a Media highlights clip; only a clip can have copies. */
-  outlet?: string | null;
-  creditedOutlet?: string | null;
-};
-
-function snapshot(row: StoredRow) {
-  return {
-    id: row.id,
-    cwid: row.cwid,
-    status: row.status,
-    title: row.title,
-    detectedName: row.detectedName,
-    showOnProfile: row.showOnProfile,
-  };
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isNewsQueueEnabled()) return new NextResponse(null, { status: 404 });
@@ -251,18 +217,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // is never silently flipped to published: it may be the scholar's own
       // "not me" (POST /api/edit/news-mention `reject`), which a reviewer must
       // never override, or a rejection someone made on purpose.
-      const targetRows = new Map<string, StoredRow | null>();
+      let targetRows = new Map<string, StoredRow | null>();
       if (target) {
-        for (const source of [row, ...copies]) {
-          const existing = (await tx.newsMention.findUnique({
-            where: { cwid_url: { cwid: target, url: source.url } },
-          })) as StoredRow | null;
-          if (existing && existing.status === "rejected") {
-            if (existing.enteredByCwid === target) return { kind: "rejected_by_scholar" as const };
-            return { kind: "target_rejected" as const };
-          }
-          targetRows.set(source.id, existing);
-        }
+        const loaded = await loadTargetRows(tx, target, [row, ...copies]);
+        if (loaded.kind === "rejected_by_scholar") return { kind: "rejected_by_scholar" as const };
+        if (loaded.kind === "target_rejected") return { kind: "target_rejected" as const };
+        targetRows = loaded.rows;
       }
 
       // Undo is all or nothing (lib/edit/news-decision.ts): a row this decision
@@ -365,107 +325,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
 
-      /** Credit the named scholar with one article (the lead, or a copy) and
-       *  return their row's id. `leadId` is the target's row for the lead, which
-       *  a CREATED copy row points at so the story stays grouped for them. */
-      const credit = async (source: StoredRow, leadId: string | null): Promise<string> => {
-        const existing = targetRows.get(source.id) ?? null;
-        if (existing && existing.status === "published") {
-          // Already credited to them (e.g. VIVO-linked). Approve-but-hide still
-          // hides it: the reviewer asked for the mention not to show.
-          if (hide && existing.showOnProfile) {
-            overwritten.add(existing.decisionId);
-            const after = (await tx.newsMention.update({
-              where: { id: existing.id },
-              data: {
-                showOnProfile: false,
-                enteredByCwid: realCwid,
-                ...stampFor(existing, decisionId, ts),
-              },
-            })) as StoredRow;
-            await appendAuditRow(tx, {
-              actorCwid: realCwid,
-              impersonatedCwid,
-              targetEntityType: "news_mention",
-              requestId,
-              targetEntityId: existing.id,
-              action: "news_mention_update",
-              fieldsChanged: ["showOnProfile"],
-              beforeValues: snapshot(existing),
-              afterValues: { ...snapshot(after), reassignedFrom: source.id },
-              ts,
-            });
-          }
-          return existing.id;
-        }
-        if (existing) {
-          overwritten.add(existing.decisionId);
-          const after = (await tx.newsMention.update({
-            where: { id: existing.id },
-            data: {
-              status: "published",
-              ...(hide ? { showOnProfile: false } : {}),
-              enteredByCwid: realCwid,
-              ...stampFor(existing, decisionId, ts),
-            },
-          })) as StoredRow;
-          await appendAuditRow(tx, {
-            actorCwid: realCwid,
-            impersonatedCwid,
-            targetEntityType: "news_mention",
-            requestId,
-            targetEntityId: existing.id,
-            action: "news_mention_update",
-            fieldsChanged: hide ? ["status", "showOnProfile"] : ["status"],
-            beforeValues: snapshot(existing),
-            afterValues: { ...snapshot(after), reassignedFrom: source.id },
-            ts,
-          });
-          return existing.id;
-        }
-        const created = (await tx.newsMention.create({
-          data: {
-            cwid: target as string,
-            url: source.url,
-            title: source.title,
-            publishedAt: source.publishedAt ?? null,
-            excerpt: source.excerpt ?? null,
-            thumbnailUrl: source.thumbnailUrl ?? null,
-            outlet: source.outlet ?? null,
-            creditedOutlet: source.creditedOutlet ?? null,
-            ...(leadId ? { duplicateOf: leadId } : {}),
-            status: "published",
-            // A human named this scholar; no name-match provenance applies.
-            source: "CURATOR",
-            showOnProfile: !hide,
-            enteredByCwid: realCwid,
-            ...stampForCreated(decisionId, ts),
-          },
-        })) as StoredRow;
-        await appendAuditRow(tx, {
-          actorCwid: realCwid,
-          impersonatedCwid,
-          targetEntityType: "news_mention",
-          requestId,
-          targetEntityId: created.id,
-          action: "news_mention_update",
-          fieldsChanged: ["cwid", "status", "showOnProfile"],
-          beforeValues: null,
-          afterValues: { ...snapshot(created), source: "CURATOR", reassignedFrom: source.id },
-          ts,
-        });
-        return created.id;
-      };
-
       // Credit the named scholar.
       let reassigned: { cwid: string; name: string } | null = null;
       if (target && targetScholar) {
         affectedCwids.add(target);
-        const leadId = await credit(row, null);
+        const ctx = {
+          tx,
+          target,
+          targetRows,
+          hide,
+          realCwid,
+          impersonatedCwid,
+          decisionId,
+          requestId,
+          ts,
+          overwritten,
+          auditKey: "reassignedFrom",
+        };
+        const { id: leadId } = await creditMention(ctx, row, null);
         // The copies the original row carried go to the named scholar too, as
         // copies of their row for the lead: the whole story moves, not just the
         // lead's placement.
-        for (const copy of copies) await credit(copy, leadId);
+        for (const copy of copies) await creditMention(ctx, copy, leadId);
         reassigned = { cwid: target, name: targetScholar.preferredName };
       }
 

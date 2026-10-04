@@ -42,6 +42,7 @@ function row(over: Partial<NewsQueueRow>): NewsQueueRow {
     createdAt: "2026-09-01T00:00:00.000Z",
     decidedAt: "2026-09-01T00:00:00.000Z",
     competingCwids: [],
+    alsoCredited: [],
     showOnProfile: true,
     prominence: 0,
     leadershipTier: 3,
@@ -396,6 +397,84 @@ describe("MediaHighlightsQueue", () => {
       await pickQuinn();
       expect((await screen.findByRole("alert")).textContent).toContain("has no scholar profile");
       expect(screen.queryByTestId("mh-queue-override")).toBeNull();
+    });
+  });
+
+  describe("Add person", () => {
+    function directory() {
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.startsWith("/api/directory/people")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              people: [{ cwid: "zzz9009", name: "Quinn Fictional", title: null, dept: null }],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.startsWith("/api/edit/scholar-card/")) {
+          return new Response(JSON.stringify({ cwid: "zzz9009", name: "Quinn Fictional" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ok: true, decisionId: "dec-7" }), { status: 200 });
+      });
+    }
+    const posted = (path: string) =>
+      fetchMock.mock.calls
+        .filter((c) => c[0] === path)
+        .map((c) => JSON.parse((c[1] as RequestInit).body as string));
+
+    it("credits the clip to one more scholar at once, without deciding the card", async () => {
+      directory();
+      renderQueue();
+      fireEvent.click(screen.getByTestId("mh-queue-add-person-clip-1-open"));
+      fireEvent.change(screen.getByTestId("mh-queue-add-person-clip-1-input"), {
+        target: { value: "Quinn" },
+      });
+      fireEvent.mouseDown(await screen.findByTestId("mh-queue-add-person-clip-1-option-zzz9009"));
+      await waitFor(() => expect(posted("/api/edit/news-mention/add-person")).toHaveLength(1));
+      expect(posted("/api/edit/news-mention/add-person")[0]).toEqual({ id: "clip-1", cwid: "zzz9009" });
+      expect(posted("/api/edit/news-mention/decision")).toHaveLength(0);
+      expect((await screen.findByTestId("mh-queue-toast")).textContent).toContain(
+        "to Quinn Fictional's profile",
+      );
+      expect(refresh).toHaveBeenCalled();
+      // Nothing was staged: the card still credits its own scholar.
+      expect(screen.queryByTestId("mh-queue-override")).toBeNull();
+    });
+
+    it("is offered on an Approved card", () => {
+      render(
+        <MediaHighlightsQueue
+          pending={[]}
+          approved={[single({ id: "clip-5" })]}
+          rejected={[]}
+          counts={COUNTS}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("mh-queue-tab-approved"));
+      expect(screen.getByTestId("mh-queue-add-person-clip-5-open")).toBeTruthy();
+    });
+
+    it("is not offered on a contested card", () => {
+      const a = row({ id: "clip-c1", sourceRef: "ref-1" });
+      const b = row({ id: "clip-c2", cwid: "def2002", scholarName: "Madeup Scholar", sourceRef: "ref-1" });
+      renderQueue([{ key: "ref-1", rows: [a, b], detectedName: a.detectedName, contested: true }]);
+      expect(screen.queryByTestId("mh-queue-add-person-ref-1-open")).toBeNull();
+    });
+
+    it("lists the other scholars the clip is already credited to", () => {
+      renderQueue([
+        single({
+          id: "clip-1",
+          alsoCredited: [
+            { cwid: "ghi3003", name: "Avery Invented", slug: "avery-invented" },
+            { cwid: "jkl4004", name: "Rowan Madeup", slug: null },
+          ],
+        }),
+      ]);
+      const line = screen.getByTestId("mh-queue-also-credited-clip-1");
+      expect(line.textContent).toBe("Also credited: Avery Invented, Rowan Madeup");
+      expect(within(line).getByText("Avery Invented").getAttribute("href")).toBe("/avery-invented");
     });
   });
 });

@@ -111,6 +111,10 @@ export type NewsQueueRow = {
   decidedAt: string;
   /** Competing candidates for the same detected name (contested groups only). */
   competingCwids: string[];
+  /** Media highlights: the OTHER scholars this article is published and shown for (a
+   *  curator's "Add person", or a second matched name). Empty on the newsroom
+   *  queue. */
+  alsoCredited: { cwid: string; name: string; slug: string | null }[];
   /** The EDITORIAL half of the decision: "do we want this on the profile?".
    *  Orthogonal to `status`, which is the CORRECTNESS half ("is this the right
    *  person?"). "Approved but don't publish" is `status='published'` +
@@ -360,10 +364,27 @@ export async function loadNewsQueue(
   // for a second query to resolve `entered_by_cwid`.
   const actorCwids = rows.map((r) => r.enteredByCwid).filter((c): c is string => c !== null);
 
+  // Clips: who else each article is published for ("Also credited").
+  const coCredits =
+    kind === "clips"
+      ? await client.newsMention.findMany({
+          where: {
+            url: { in: [...new Set(rows.map((r) => r.url))] },
+            status: "published",
+            showOnProfile: true,
+          },
+          select: { url: true, cwid: true },
+        })
+      : [];
+  const creditedByUrl = new Map<string, string[]>();
+  for (const c of coCredits) creditedByUrl.set(c.url, [...(creditedByUrl.get(c.url) ?? []), c.cwid]);
+
   // One query for every scholar, not one per row.
   const [scholars, prominenceByCwid] = await Promise.all([
     client.scholar.findMany({
-      where: { cwid: { in: [...new Set([...mentionCwids, ...actorCwids])] } },
+      where: {
+        cwid: { in: [...new Set([...mentionCwids, ...actorCwids, ...coCredits.map((c) => c.cwid)])] },
+      },
       select: {
         cwid: true,
         slug: true,
@@ -503,6 +524,12 @@ export async function loadNewsQueue(
           createdAt: r.createdAt.toISOString(),
           decidedAt: r.updatedAt.toISOString(),
           competingCwids: contested ? cwids.filter((c) => c !== r.cwid) : [],
+          alsoCredited: (creditedByUrl.get(r.url) ?? [])
+            .filter((c) => c !== r.cwid)
+            .map((c) => {
+              const o = byCwid.get(c);
+              return { cwid: c, name: o?.preferredName ?? o?.fullName ?? c, slug: o?.slug ?? null };
+            }),
           showOnProfile: r.showOnProfile,
           prominence: score?.prominence ?? 0,
           leadershipTier: score?.leadershipTier ?? LEADERSHIP_TIER.none,

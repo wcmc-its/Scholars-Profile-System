@@ -23,6 +23,11 @@
  *     right scholar; Approve / Approve but hide / A / H and the bulk bar then
  *     credit that scholar instead (the decision route's `cwid`). A staged pick
  *     is dropped when a refresh turns its group contested.
+ *   - "Add person" on an uncontested Pending card or an Approved card credits
+ *     the clip to one more scholar right away (POST
+ *     /api/edit/news-mention/add-person), published on their profile, without
+ *     deciding the card. The status bar offers Undo. "Also credited" lists the
+ *     other scholars the article is already published for.
  *
  * Everything filterable is ALREADY in the props: Pending is loaded unbounded
  * (only the history tabs are capped at NEWS_HISTORY_LIMIT), so filtering and
@@ -49,12 +54,14 @@ import {
   MATCH_BASIS,
   highlightName,
   lookupScholar,
+  postAddPerson,
   postDecision,
   postUndo,
   type DecisionStep,
   type ReviewDecision,
   type ScholarOverride,
 } from "@/components/edit/news-review-shared";
+import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { mapChunked } from "@/components/edit/selection-bar";
 import { NEWS_UNDO_MAX_DECISIONS } from "@/lib/edit/news-undo-limit";
 import { Button } from "@/components/ui/button";
@@ -338,6 +345,23 @@ export function MediaHighlightsQueue({
       dropOverrides([groupKey]);
       setFocusKey(nextFocusAfter([groupKey]));
     }
+    startTransition(() => router.refresh());
+  }
+
+  /** "Add person": credit the clip to one more scholar, now (not staged). */
+  async function addPerson(row: NewsQueueRow, o: ScholarOverride) {
+    setError(null);
+    markBusy([row.id], true);
+    const result = await postAddPerson(row.id, o.cwid);
+    markBusy([row.id], false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setToast({
+      text: `Added “${row.articleTitle}” to ${o.name ?? o.cwid}'s profile.`,
+      decisionIds: result.decisionId ? [result.decisionId] : [],
+    });
     startTransition(() => router.refresh());
   }
 
@@ -700,6 +724,7 @@ export function MediaHighlightsQueue({
                 pendingByCwid={pendingByCwid}
                 pendingBySourceRef={pendingBySourceRef}
                 decide={(row, d) => decideOne(row, d, g.key)}
+                addPerson={(row, o) => void addPerson(row, o)}
                 override={overrides[g.key] ?? null}
                 setOverride={(o) =>
                   setOverrides((prev) => {
@@ -910,6 +935,7 @@ function ClipCard({
   pendingByCwid,
   pendingBySourceRef,
   decide,
+  addPerson,
   override,
   setOverride,
   rejectGroup,
@@ -927,6 +953,7 @@ function ClipCard({
   pendingByCwid: ReadonlyMap<string, number>;
   pendingBySourceRef: ReadonlyMap<string, number>;
   decide: (row: NewsQueueRow, d: Decision) => void;
+  addPerson: (row: NewsQueueRow, o: ScholarOverride) => void;
   /** The staged "Wrong person? Reassign" scholar (pending, uncontested only). */
   override: ScholarOverride | null;
   setOverride: (o: ScholarOverride | null) => void;
@@ -1093,13 +1120,24 @@ function ClipCard({
               pendingCount={pendingByCwid.get(row.cwid) ?? 0}
               override={pendingUncontested && row === lead ? override : null}
             />
-            {pendingUncontested && row === lead ? (
-              <ReassignControl
-                override={override}
-                disabled={busy.has(lead.id)}
-                onPick={setOverride}
-                idPrefix={`mh-queue-reassign-${g.key}`}
-              />
+            {(pendingUncontested || tab === "approved") && row === lead ? (
+              <div className="flex flex-col gap-1.5">
+                {pendingUncontested && (
+                  <ReassignControl
+                    override={override}
+                    disabled={busy.has(lead.id)}
+                    onPick={setOverride}
+                    idPrefix={`mh-queue-reassign-${g.key}`}
+                  />
+                )}
+                <ReassignControl
+                  label="Add person"
+                  override={null}
+                  disabled={busy.has(lead.id)}
+                  onPick={(o) => o && addPerson(lead, o)}
+                  idPrefix={`mh-queue-add-person-${g.key}`}
+                />
+              </div>
             ) : null}
             {!single || (tab === "pending" && g.contested) ? rowActions(row) : null}
           </div>
@@ -1256,6 +1294,25 @@ function Scholar({
           <span className="text-apollo-amber text-xs">Reassigned from {row.scholarName}</span>
         )}
       </div>
+      {row.alsoCredited.length > 0 && (
+        <span className="text-muted-foreground text-xs" data-testid={`mh-queue-also-credited-${row.id}`}>
+          Also credited:{" "}
+          {row.alsoCredited.map((p, i) => (
+            <span key={p.cwid}>
+              {i > 0 ? ", " : ""}
+              <ScholarHoverCard cwid={p.cwid}>
+                {p.slug ? (
+                  <a href={`/${p.slug}`} target="_blank" rel="noopener noreferrer" className="hover:text-apollo-slate">
+                    {p.name}
+                  </a>
+                ) : (
+                  <span>{p.name}</span>
+                )}
+              </ScholarHoverCard>
+            </span>
+          ))}
+        </span>
+      )}
       {tab === "approved" && row.decidedByName && (
         <span className="text-muted-foreground text-xs">Last updated by {row.decidedByName}</span>
       )}
@@ -1278,11 +1335,14 @@ function Scholar({
  * but hide (or A / H, or the bulk bar) send it as the decision's `cwid`.
  */
 function ReassignControl({
+  label = "Wrong person? Reassign",
   override,
   disabled,
   onPick,
   idPrefix,
 }: {
+  /** The closed-state link. "Add person" reuses this control unstaged. */
+  label?: string;
   override: ScholarOverride | null;
   disabled: boolean;
   onPick: (o: ScholarOverride | null) => void;
@@ -1316,7 +1376,7 @@ function ReassignControl({
           className="text-apollo-slate hover:underline disabled:opacity-60"
           data-testid={`${idPrefix}-open`}
         >
-          Wrong person? Reassign
+          {label}
         </button>
         {override && (
           <button
