@@ -502,6 +502,25 @@ jobs:
             exit 1
           fi
 
+      # Post-deploy drift report (#1765, #1987) -- informational, never fails
+      # the deploy (the image has already rolled; a red job here would hide
+      # whether the deploy itself succeeded). scripts/release/drift-report.sh
+      # compares the just-pinned app task def's env and this env's deployed
+      # scholars-*-<env> state machines against the committed cdk snapshots,
+      # which match the master SHA just deployed. The ETL half needs
+      # states:ListStateMachines / DescribeStateMachine on the deploy role,
+      # which arrive with the next `cdk deploy Sps-App-<env>`; until then it
+      # self-skips with a ::notice:: on AccessDenied. Drift surfaces as a
+      # ::warning:: plus the job step summary; a check that could not run
+      # (flag-parity exit 2, e.g. zero machines) is a separate ::warning::.
+      # The daily drift-check.yml runs the same script in strict mode.
+      - name: Drift report (flags + ETL definitions, non-blocking)
+        continue-on-error: true
+        env:
+          TARGET_ENV: ${{ steps.target.outputs.env }}
+          APP_TASKDEF: ${{ steps.pin.outputs.app_taskdef }}
+        run: bash scripts/release/drift-report.sh "$TARGET_ENV" "$APP_TASKDEF"
+
       # Post-deploy search-eval canary (issue #1444 remainder) — staging only:
       # the checked-in baseline/pins (scripts/search-eval/) were captured
       # against staging's corpus; prod's is not yet fully populated (#445), so

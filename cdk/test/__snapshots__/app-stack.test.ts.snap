@@ -2516,6 +2516,27 @@ service:
                 },
               ],
             },
+            {
+              "Action": "states:ListStateMachines",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "states:DescribeStateMachine",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":states:us-east-1:123456789012:stateMachine:scholars-*-prod",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -7289,6 +7310,27 @@ service:
                 },
               ],
             },
+            {
+              "Action": "states:ListStateMachines",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "states:DescribeStateMachine",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":states:us-east-1:123456789012:stateMachine:scholars-*-staging",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -7296,6 +7338,105 @@ service:
         "Roles": [
           {
             "Ref": "DeployRole885297C3",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "DriftCheckRoleCC7F22A5": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:wcmc-its/Scholars-Profile-System:environment:drift-check",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Ref": "GithubOidcProviderD8241A88",
+                },
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS scheduled drift check (read-only). Assumed by the drift-check workflow via OIDC.",
+        "RoleName": "sps-drift-readonly",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "DriftCheckRoleDefaultPolicyEFEC7EB2": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecs:DescribeServices",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:service/sps-cluster-staging/sps-app-staging",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:service/sps-cluster-prod/sps-app-prod",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "ecs:DescribeTaskDefinition",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "states:ListStateMachines",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "states:DescribeStateMachine",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":states:us-east-1:123456789012:stateMachine:scholars-*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "DriftCheckRoleDefaultPolicyEFEC7EB2",
+        "Roles": [
+          {
+            "Ref": "DriftCheckRoleCC7F22A5",
           },
         ],
       },

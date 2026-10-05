@@ -1045,17 +1045,19 @@ describe("AppStack", () => {
         expect(deployPolicy).toBeDefined();
         const statements = deployPolicy?.Properties?.PolicyDocument
           ?.Statement as Array<Record<string, unknown>> | undefined;
-        // Two statements are allowed to use Resource=*, both AWS-mandated
-        // (neither action supports resource-level ARN scoping):
+        // Three statements are allowed to use Resource=*, all AWS-mandated
+        // (none of these actions support resource-level ARN scoping):
         // - ecr:GetAuthorizationToken, account-scoped at the API level.
         // - ecs:DescribeTaskDefinition / ecs:RegisterTaskDefinition (#2121)
         //   -- confirmed empirically: an ARN-scoped grant AccessDenied'd in
         //   a live staging dry run of the pinned-revision deploy flow.
+        // - states:ListStateMachines (#1987), which has no resource type.
         // Everything else must be a concrete ARN (or Fn::Join/Ref pointing
         // at one).
         const wildcardExemptActionSets = [
           ["ecr:GetAuthorizationToken"],
           ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"],
+          ["states:ListStateMachines"],
         ];
         for (const stmt of statements ?? []) {
           const action = stmt.Action as string | string[];
@@ -1110,6 +1112,21 @@ describe("AppStack", () => {
         expect(serialized).not.toMatch(/^"\*"$/);
         expect(serialized).toContain("stack/Sps-App-prod/*");
         expect(serialized).toContain("stack/Sps-Edge-prod/*");
+      });
+
+      it("the OIDC deploy role can describe only this env's scholars-* state machines (#1987 ETL drift report)", () => {
+        const statements = findDeployStatements();
+        const describe = statements.find((stmt) => stmt.Action === "states:DescribeStateMachine");
+        expect(describe).toBeDefined();
+        const serialized = JSON.stringify(describe?.Resource);
+        expect(serialized).not.toMatch(/^"\*"$/);
+        expect(serialized).toContain(":stateMachine:scholars-*-prod");
+        // read-only: no states action that starts, stops or edits a machine
+        const statesActions = statements.flatMap((stmt) => {
+          const action = stmt.Action as string | string[];
+          return (Array.isArray(action) ? action : [action]).filter((a) => a.startsWith("states:"));
+        });
+        expect(statesActions.sort()).toEqual(["states:DescribeStateMachine", "states:ListStateMachines"]);
       });
 
       it("the OIDC deploy role can push to both the app and ETL ECR repos (#460/#454)", () => {
@@ -2623,6 +2640,77 @@ describe("AppStack", () => {
       const sub =
         subClaim?.StringLike?.["token.actions.githubusercontent.com:sub"];
       expect(sub).toBe("repo:wcmc-its/Scholars-Profile-System:*");
+    });
+
+    describe("scheduled drift check role (#1765, #1987)", () => {
+      const findDriftRole = () => {
+        const roles = template.findResources("AWS::IAM::Role");
+        return Object.entries(roles).find(
+          ([, r]) => r.Properties?.RoleName === "sps-drift-readonly",
+        );
+      };
+      const driftStatements = () => {
+        const [logicalId] = findDriftRole() ?? [];
+        const policies = template.findResources("AWS::IAM::Policy");
+        return Object.values(policies)
+          .filter((p) =>
+            (p.Properties?.Roles as Array<{ Ref?: string }> | undefined)?.some(
+              (r) => r.Ref === logicalId,
+            ),
+          )
+          .flatMap(
+            (p) => p.Properties?.PolicyDocument?.Statement as Array<Record<string, unknown>>,
+          );
+      };
+
+      it("trusts ONLY the drift-check GitHub Environment subject, exact match", () => {
+        const role = findDriftRole()?.[1];
+        expect(role).toBeDefined();
+        const statements = role?.Properties?.AssumeRolePolicyDocument?.Statement as Array<
+          Record<string, unknown>
+        >;
+        expect(statements).toHaveLength(1);
+        expect(statements[0].Action).toBe("sts:AssumeRoleWithWebIdentity");
+        expect(statements[0].Condition).toEqual({
+          StringEquals: {
+            "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+            "token.actions.githubusercontent.com:sub":
+              "repo:wcmc-its/Scholars-Profile-System:environment:drift-check",
+          },
+        });
+      });
+
+      it("grants exactly the four read-only actions, scoped as documented", () => {
+        const statements = driftStatements();
+        const actions = statements.flatMap((s) =>
+          Array.isArray(s.Action) ? (s.Action as string[]) : [s.Action as string],
+        );
+        expect([...actions].sort()).toEqual([
+          "ecs:DescribeServices",
+          "ecs:DescribeTaskDefinition",
+          "states:DescribeStateMachine",
+          "states:ListStateMachines",
+        ]);
+        for (const s of statements) expect(s.Effect).toBe("Allow");
+        const byAction = (a: string) => statements.find((s) => s.Action === a);
+        const services = JSON.stringify(byAction("ecs:DescribeServices")?.Resource);
+        expect(services).toContain(":service/sps-cluster-staging/sps-app-staging");
+        expect(services).toContain(":service/sps-cluster-prod/sps-app-prod");
+        expect(services).not.toContain('"*"');
+        expect(byAction("ecs:DescribeTaskDefinition")?.Resource).toBe("*");
+        expect(byAction("states:ListStateMachines")?.Resource).toBe("*");
+        const describe = JSON.stringify(byAction("states:DescribeStateMachine")?.Resource);
+        expect(describe).toContain(":stateMachine:scholars-*");
+        expect(describe).not.toMatch(/^"\*"$/);
+      });
+
+      it("is created only by the staging stack (account-scoped, like the OIDC provider)", () => {
+        const { template: prodTemplate } = buildAppStack("prod");
+        const prodRoles = prodTemplate.findResources("AWS::IAM::Role");
+        expect(
+          Object.values(prodRoles).some((r) => r.Properties?.RoleName === "sps-drift-readonly"),
+        ).toBe(false);
+      });
     });
 
     it("the env-config bootstrap override drives desiredCount to 0 when -c appDesiredCount=0 is set", () => {

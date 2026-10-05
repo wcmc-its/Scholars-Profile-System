@@ -1,0 +1,58 @@
+name: Drift check
+
+# Daily deployed-vs-source drift check (#1765, #1987). For staging and prod:
+#   - flags: the running sps-app-<env> task def's env vs app-stack source
+#     (a merged flag is DARK until `cdk deploy Sps-App-<env>`)
+#   - ETL: step ids in the deployed scholars-*-<env> state machines vs
+#     etl-stack source (ETL steps ship only on `cdk deploy Sps-Etl-<env>`)
+# Both compare against the committed cdk jest snapshots on master
+# (scripts/release/drift-report.sh -> flag-parity.mjs). The run FAILS on drift
+# or when a check could not run, so GitHub emails the failure.
+#
+# Auth: the read-only sps-drift-readonly role (cdk/lib/app-stack.ts, created
+# by Sps-App-staging), whose OIDC trust admits only the `drift-check` GitHub
+# Environment subject. That environment's deployment-branch policy is master
+# only, with no reviewers. Never a deploy role.
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: drift-check
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "665083158573"
+
+jobs:
+  drift:
+    name: Flag + ETL drift (staging, prod)
+    runs-on: ubuntu-latest
+    environment: drift-check
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/sps-drift-readonly
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Drift (staging)
+        env:
+          DRIFT_STRICT: "1"
+        run: bash scripts/release/drift-report.sh staging
+
+      - name: Drift (prod)
+        if: ${{ !cancelled() }}
+        env:
+          DRIFT_STRICT: "1"
+        run: bash scripts/release/drift-report.sh prod
