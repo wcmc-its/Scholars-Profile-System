@@ -182,6 +182,15 @@ Stopgap before step 4: load a forwarded `.eml` by hand on the ETL task family wi
 
 The same stack receives the Research Dean's weekly funding digest at `funding@scholars-mail.weill.cornell.edu` (prefix `funding/`), read by the weekly `FundingDigestWeekly` step (`etl/opportunities/funding-digest.ts`). Adding a receipt rule is a redeploy of `Sps-InboundMail`; the rule set stays active. Ask the Research Dean's office to subscribe the address to their funding-announcements list, not ALLPROTOCOLS. The step submits new digest links to ReciterAI's `SUBMISSION` queue in **prod only**, because that table is shared with staging; staging logs a dry run. ReciterAI's daily `reciterai-grants-daily` drain then scores them. To preview a digest by hand, run `npm run etl:funding-digest -- <file.eml>` without `SCHOLARS_ENV=prod`.
 
+The same stack also receives CVs for CViche's email intake at `cv@scholars-mail.weill.cornell.edu` (rule `cviche-cv`, spam and virus scanning on, because CViche refuses any message whose `X-SES-Virus-Verdict` is not `PASS`). Those messages go to CViche's own bucket under `cviche/inbound/`, not to this stack's bucket. They hold CV attachments, so they follow CViche's retention. This is a stopgap: the plan is to move this stack into shared infrastructure. The bucket name is read at deploy time from the SSM String parameter `/cviche/inbound-mail-bucket` (`CVICHE_INBOUND_BUCKET_PARAM`), so it never appears in this public repo, and a deploy needs no extra flag. The bucket is imported, so this stack can't grant SES on it. CViche applies these **before the first deploy** of the rule, because SES test-writes when it creates the rule and the deploy fails without them:
+
+- the SSM parameter `/cviche/inbound-mail-bucket` (String, value = the bucket name);
+- a bucket-policy statement allowing `ses.amazonaws.com` to `s3:PutObject` on `cviche/inbound/*`, with condition `aws:SourceAccount` = this account;
+- a statement in the bucket's KMS key policy (default encryption is SSE-KMS with a customer key) allowing `ses.amazonaws.com` `kms:Decrypt` and `kms:GenerateDataKey*`, with conditions `aws:SourceAccount` = this account and `aws:SourceArn` = `arn:aws:ses:us-east-1:<account>:receipt-rule-set/sps-inbound-mail:receipt-rule/cviche-cv`;
+- a 30-day lifecycle expiry on `cviche/inbound/`.
+
+The rule's S3 action deliberately passes no `kmsKey`. That would make SES encrypt client-side, which CViche's reader can't decrypt; the bucket's default SSE-KMS applies instead. Run `cd cdk && npx cdk diff --exclusively Sps-InboundMail -c env=prod` before deploying.
+
 ## Bootstrap two-step (first deploy of an env)
 
 On the first deploy of `Sps-App-${env}`, ECR is empty and the ECS service can't pull an image. The first workflow run will fail at step "Build image" or "Push image" if the repo doesn't exist yet, or at step "Wait for service to stabilize" if ECR is empty. This is one-time setup per env, manual:
