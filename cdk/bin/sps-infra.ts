@@ -100,14 +100,16 @@ const etlStack = new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
 
-// InboundMailStack — SES receive-only mail for Media Highlights clips. An
+// InboundMailStack — SES receive-only mail: Media Highlights clips@, the
+// Research Dean's funding@ digest, and CViche's cv@ CV intake. An
 // ACCOUNT-wide singleton (one active SES receipt rule set per account+region,
 // and staging/prod share the account), so only the prod app declares it; both
 // envs' ETL read its bucket by name.
 if (envConfig.envName === "prod") {
   new InboundMailStack(app, "Sps-InboundMail", {
     env,
-    description: "SPS inbound mail — SES receipt for clips@scholars-mail.weill.cornell.edu to S3 (Media Highlights).",
+    description:
+      "SPS inbound mail — SES receipt for clips@ (Media Highlights), funding@ (funding digest) and cv@ (CViche CV intake, to CViche's bucket) at scholars-mail.weill.cornell.edu.",
   });
 }
 
