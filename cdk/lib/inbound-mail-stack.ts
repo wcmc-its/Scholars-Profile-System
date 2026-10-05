@@ -3,8 +3,11 @@ import * as route53 from "aws-cdk-lib/aws-route53";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sesActions from "aws-cdk-lib/aws-ses-actions";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubs from "aws-cdk-lib/aws-sns-subscriptions";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
+import { NOTIFY_SUBSCRIBER_EMAIL } from "./observability-stack";
 
 /** Receive-only mail domain. ITS delegates it to this stack's Route53 zone (NS). */
 export const INBOUND_MAIL_DOMAIN = "scholars-mail.weill.cornell.edu";
@@ -57,10 +60,29 @@ export class InboundMailStack extends Stack {
       values: [{ priority: 10, hostName: `inbound-smtp.${Aws.REGION}.amazonaws.com` }],
     });
 
+    // Bounce and complaint feedback for everything sent from the domain --
+    // today CViche's no-reply@ completion mail (wcmc-its/CViche#1470). SES
+    // production access was granted on the promise that a person sees these;
+    // without it, SES forwards them to no-reply@, which no rule receives.
+    const feedbackTopic = new sns.Topic(this, "SesFeedbackTopic", {
+      topicName: "sps-ses-feedback",
+      displayName: `SES bounces and complaints for ${INBOUND_MAIL_DOMAIN}`,
+    });
+    feedbackTopic.addSubscription(new snsSubs.EmailSubscription(NOTIFY_SUBSCRIBER_EMAIL));
+    const sendConfig = new ses.ConfigurationSet(this, "SendConfigurationSet", {
+      configurationSetName: "scholars-mail-default",
+    });
+    sendConfig.addEventDestination("BounceComplaintToSns", {
+      destination: ses.EventDestination.snsTopic(feedbackTopic),
+      events: [ses.EmailSendingEvent.BOUNCE, ses.EmailSendingEvent.COMPLAINT],
+    });
+
     // Domain identity (DKIM CNAMEs land in the zone automatically). Receiving
-    // needs the domain verified; nothing sends from it.
+    // needs the domain verified; CViche sends from no-reply@ through it, and
+    // the default configuration set routes that mail's feedback above.
     new ses.EmailIdentity(this, "Identity", {
       identity: ses.Identity.publicHostedZone(zone),
+      configurationSet: sendConfig,
     });
 
     const bucket = new s3.Bucket(this, "Bucket", {
