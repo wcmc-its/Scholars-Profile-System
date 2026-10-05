@@ -166,7 +166,7 @@ The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) liv
 | **ECS Fargate (ETL)** | Runs `npm run etl:<source>` per Step Functions step | family `sps-etl-${env}` | per-run 2048 / 8192 | same |
 | **ECS Fargate (migration)** | One-shot `npx prisma migrate deploy` in deploy pipeline | family `sps-migrate-${env}` | 512 / 1024 | same |
 | **ECS Fargate (db-bootstrap)** | One-shot `db-bootstrap.ts` (creates `scholars_audit`, grants) before migrate (#493) | family `sps-db-bootstrap-${env}` | — | — |
-| **Application Load Balancers** | Two ALBs, same target group: public (CloudFront origin) + internal (`/api/revalidate`) | `sps-public-${env}`, `sps-internal-${env}` | 2 | 2 |
+| **Application Load Balancers** | Two ALBs, same target group: public (CloudFront origin) + internal (`/api/revalidate`) | CDK-auto-named (`Sps-Ap-Publi-<hash>`, `Sps-Ap-Inter-<hash>`) since the shared-VPC move; `sps-public-${env}` / `sps-internal-${env}` only when `useSharedVpc` is off | 2 | 2 |
 | **Aurora MySQL Serverless v2** | Primary store; all page reads + `/api/edit` writes; holds `scholars_audit` DB; `VER_3_08_0`; RETAIN + deletion-protected | CDK-generated under `Sps-Data-${env}` | 1–8 ACU, writer + 1 reader | 0.5–2 ACU, writer-only |
 | **Amazon OpenSearch** | `/search` + suggest autocomplete only; alias `scholars` → `scholars_v{ts}` (atomic swap); OpenSearch 2.19 | prod `opensearch58799-fquptd67j2so`, staging `opensearch58799-9dwko5mxr7bu` | 2 × `m6g.large.search` (multi-AZ) | 1 × `t3.medium.search` |
 | **AWS Backup** | Daily plan + cross-region (us-west-2) copy | vault `sps-backup-vault-${env}`, plan `sps-aurora-daily-${env}` | 35-day archive (PITR 14 d) | 14-day |
