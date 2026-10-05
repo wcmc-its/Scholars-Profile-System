@@ -1743,6 +1743,52 @@ describe("EtlStack", () => {
         expect(stack.region).toBe("us-east-1");
       });
     });
+
+    // #2144 -- deploy.yml's pin step re-registers these families by
+    // (family, container) name, and AppStack's deploy-role iam:PassRole lists
+    // their roles by fixed roleName. Neither can import from this stack, so
+    // this pins the contract: renaming a family, container or role here
+    // without updating .github/workflows/deploy.yml and cdk/lib/app-stack.ts
+    // fails this test instead of failing the next deploy.
+    it("the deploy.yml-pinned ETL families keep their container and role names (#2144)", () => {
+      const expected: Record<string, string> = {
+        "sps-etl-prod": "etl",
+        "sps-etl-sources-prod": "etl",
+        "sps-etl-ldap-prod": "etl",
+        "sps-etl-reciter-api-prod": "etl",
+        "sps-etl-ctsc-prod": "etl",
+        "sps-reconcile-prod": "reconcile",
+        "sps-cdn-reconcile-prod": "cdn-reconcile",
+      };
+      const passRoleNames = new Set([
+        "sps-etl-task-prod",
+        "sps-etl-task-exec-prod",
+        "sps-etl-sources-task-exec-prod",
+        "sps-etl-ldap-task-exec-prod",
+        "sps-etl-reciter-api-task-exec-prod",
+        "sps-etl-ctsc-task-exec-prod",
+        "sps-reconcile-task-prod",
+        "sps-reconcile-task-exec-prod",
+        "sps-cdn-reconcile-task-prod",
+        "sps-cdn-reconcile-task-exec-prod",
+      ]);
+      const roles = template.findResources("AWS::IAM::Role");
+      const roleNameOf = (ref: unknown): string | undefined => {
+        const id = (ref as { "Fn::GetAtt"?: [string, string] })?.["Fn::GetAtt"]?.[0];
+        return id ? (roles[id]?.Properties?.RoleName as string | undefined) : undefined;
+      };
+      const taskDefs = Object.values(template.findResources("AWS::ECS::TaskDefinition"));
+      for (const [family, container] of Object.entries(expected)) {
+        const td = taskDefs.find((r) => r.Properties?.Family === family);
+        expect(td).toBeDefined();
+        const names = (td?.Properties?.ContainerDefinitions as Array<{ Name: string }>).map(
+          (c) => c.Name,
+        );
+        expect(names).toContain(container);
+        expect(passRoleNames).toContain(roleNameOf(td?.Properties?.TaskRoleArn));
+        expect(passRoleNames).toContain(roleNameOf(td?.Properties?.ExecutionRoleArn));
+      }
+    });
   });
 
   describe("staging", () => {

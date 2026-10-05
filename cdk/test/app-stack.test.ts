@@ -1204,6 +1204,42 @@ describe("AppStack", () => {
           "SearchEvalCanaryExecutionRole",
         );
       });
+
+      it("the deploy role's iam:PassRole covers the canary task role and every pinned ETL family's roles (#2144)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("DeployRole"),
+          );
+        });
+        const statements = deployPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const passRoleStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("iam:PassRole")
+            : action === "iam:PassRole";
+        });
+        const resources = JSON.stringify(passRoleStmt?.Resource);
+        expect(resources).toContain("SearchEvalCanaryTaskDefinitionTaskRole");
+        for (const roleName of [
+          "sps-etl-task-prod",
+          "sps-etl-task-exec-prod",
+          "sps-etl-sources-task-exec-prod",
+          "sps-etl-ldap-task-exec-prod",
+          "sps-etl-reciter-api-task-exec-prod",
+          "sps-etl-ctsc-task-exec-prod",
+          "sps-reconcile-task-prod",
+          "sps-reconcile-task-exec-prod",
+          "sps-cdn-reconcile-task-prod",
+          "sps-cdn-reconcile-task-exec-prod",
+        ]) {
+          expect(resources).toContain(`:role/${roleName}"`);
+        }
+      });
     });
 
     describe("Load balancers + target group", () => {
