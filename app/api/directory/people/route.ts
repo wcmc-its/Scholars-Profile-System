@@ -21,6 +21,10 @@
  * server-side with `wcmMatch: <cwid> | null` — the entry's `cornellEduCWID`
  * resolved against an ACTIVE Scholar, so the UI (PR 2) can steer a bridged
  * person to the normal WCM add instead of an external one.
+ *
+ * `?scholarsOnly=1` (WCM `?q=` mode) — drop directory people with no Scholar
+ * row, for pickers that can only credit a scholar (media highlights Reassign /
+ * Add person). A bare ED stub otherwise sorts above the real person.
  */
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -105,6 +109,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const trimmed = q.trim();
       if (trimmed.length < MIN_QUERY_LENGTH) return jsonError(400, "query_too_short");
       people = await searchDirectoryPeopleByName(trimmed);
+      if (searchParams.get("scholarsOnly") === "1" && people.length > 0) {
+        // ponytail: filters the 20-row LDAP page, so a scholar past row 20 is lost; type more of the name.
+        const scholars = await db.read.scholar.findMany({
+          where: { cwid: { in: people.map((p) => p.cwid) }, deletedAt: null },
+          select: { cwid: true },
+        });
+        const has = new Set(scholars.map((s) => s.cwid));
+        people = people.filter((p) => has.has(p.cwid));
+      }
     } else {
       const cwids = (cwidsParam ?? "")
         .split(",")

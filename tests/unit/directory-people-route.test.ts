@@ -7,11 +7,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockGetEditSession, mockSearchByName, mockFetchByCwid } = vi.hoisted(() => ({
+const { mockGetEditSession, mockSearchByName, mockFetchByCwid, mockScholarFindMany } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockSearchByName: vi.fn(),
   mockFetchByCwid: vi.fn(),
+  mockScholarFindMany: vi.fn(),
 }));
+
+vi.mock("@/lib/db", () => ({ db: { read: { scholar: { findMany: mockScholarFindMany } } } }));
 
 // Resolves identity through the #637 effective-identity seam (#2122) — a "View
 // as" impersonator must be gated as the target, not the real signed-in user.
@@ -80,6 +83,28 @@ describe("GET /api/directory/people — q mode", () => {
     expect(json.ok).toBe(true);
     expect(json.people).toEqual([PERSON]);
     expect(mockSearchByName).toHaveBeenCalledWith("ada");
+  });
+});
+
+describe("GET /api/directory/people — scholarsOnly", () => {
+  const STUB = { ...PERSON, cwid: "mag9320", name: "Matthew Greenblatt", title: null };
+
+  it("drops directory people with no Scholar row", async () => {
+    mockSearchByName.mockResolvedValue([STUB, PERSON]);
+    mockScholarFindMany.mockResolvedValue([{ cwid: "abc123" }]);
+    const json = (await (await get("?q=ada&scholarsOnly=1")).json()) as { people: { cwid: string }[] };
+    expect(json.people.map((p) => p.cwid)).toEqual(["abc123"]);
+    expect(mockScholarFindMany.mock.calls[0][0].where).toEqual({
+      cwid: { in: ["mag9320", "abc123"] },
+      deletedAt: null,
+    });
+  });
+
+  it("leaves results unfiltered without the flag", async () => {
+    mockSearchByName.mockResolvedValue([STUB, PERSON]);
+    const json = (await (await get("?q=ada")).json()) as { people: unknown[] };
+    expect(json.people).toHaveLength(2);
+    expect(mockScholarFindMany).not.toHaveBeenCalled();
   });
 });
 
