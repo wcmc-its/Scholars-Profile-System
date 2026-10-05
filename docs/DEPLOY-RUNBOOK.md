@@ -21,7 +21,7 @@ A typical end-to-end deploy looks like this:
 
 Total wall-clock for a staging deploy with no pending migrations: ~7-9 minutes. A migration adds whatever Prisma needs to apply it. The 3-minute rolling-replacement step is the constant cost of zero-downtime for ECS Fargate.
 
-> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The nightly Step Functions pull `scholars-etl-staging:latest`, so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474.)
+> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The run also pins the staging ETL task families to that branch's ETL image (#2144), so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474.)
 
 To promote a tested build to **production**:
 
@@ -107,7 +107,20 @@ npx cdk deploy --exclusively Sps-App-prod -c env=prod -c appImageDigest="$digest
 - **Escape hatch.** Pass `-c allowLatestAppImage=true` to synthesize on `:latest` on purpose. Use it for the bootstrap two-step (ECR empty, nothing running) and for CI's `Synth (prod)` step. The next `deploy.yml` run re-pins either way.
 - **Staging is not gated.** Every push to master re-pins it through `deploy.yml`. It honours `-c appImageDigest` too: `digest=$(../scripts/release/running-app-digest.sh staging)`.
 - **What the script reads.** It takes the digest from the service's current task definition when that revision is pinned. If an unpinned revision is live, it takes the `imageDigest` ECS recorded on the RUNNING app containers, but only when every task agrees. It never reads ECR `:latest`, because that is what the service would pull next, not what it is running. It exits non-zero instead of guessing, for example mid-rollout.
-- **Scope.** The pin applies to the app image families (`sps-app`, `sps-migrate`). The ETL-image families in the same stack (`sps-db-bootstrap`, `sps-verify-grants`, `sps-search-eval-canary`) stay on `:latest`: nothing long-running uses them, and `deploy.yml` registers a pinned revision of each right before it runs them. The `Sps-Etl-<env>` families ship on ECR push by design and are unchanged.
+- **Scope.** The pin applies to the app image families (`sps-app`, `sps-migrate`). The ETL-image families in the same stack (`sps-db-bootstrap`, `sps-verify-grants`, `sps-search-eval-canary`) stay on `:latest`: nothing long-running uses them, and `deploy.yml` registers a pinned revision of each right before it runs them.
+- **`Sps-Etl-<env>` families are pinned per `deploy.yml` run (#2144).** The Step Functions state machines reference each ETL family by bare name, so a step launches the family's newest ACTIVE revision. The `deploy.yml` pin step registers a revision of each of the seven families (`sps-etl`, `sps-etl-sources`, `sps-etl-ldap`, `sps-etl-reciter-api`, `sps-etl-ctsc`, `sps-reconcile`, `sps-cdn-reconcile`, all `-<env>`) pinned to that run's `scholars-etl-<env>@sha256:...` digest. ETL code still ships on the `deploy.yml` run with no `cdk deploy`, but a bare `docker push :latest` no longer changes what runs. Check a family with `aws ecs describe-task-definition --task-definition sps-etl-<env> --query 'taskDefinition.containerDefinitions[?name==`etl`].image'` (expect `@sha256:`). `sps-bulk-data-rule-<env>` uses its own repo and stays on `:latest`.
+- **Caveat: `cdk deploy Sps-Etl-<env>` unpins.** When that deploy changes a task definition, CloudFormation registers a new revision on `:latest`. It becomes the newest ACTIVE revision, so that family runs `:latest` until the next `deploy.yml` run. Re-run `deploy.yml` for the env after any `Sps-Etl` deploy that touches a task definition.
+- **ETL rollback.** Deregister the bad revision in each family. The previous ACTIVE revision, which is the previous deploy's digest, takes over at the next step launch. No rebuild is needed:
+
+  ```bash
+  env=staging   # or prod
+  for f in sps-etl sps-etl-sources sps-etl-ldap sps-etl-reciter-api sps-etl-ctsc sps-reconcile sps-cdn-reconcile; do
+    bad=$(aws ecs describe-task-definition --task-definition "$f-$env" --query 'taskDefinition.revision' --output text)
+    aws ecs deregister-task-definition --task-definition "$f-$env:$bad" --query 'taskDefinition.taskDefinitionArn' --output text
+  done
+  ```
+
+  This deregisters the newest revision of each family, so confirm first that the newest revision is the bad one (its image digest matches the bad build). Re-running `deploy.yml` for a known-good SHA also works. It pins that SHA's image as a new revision.
 
 ## EdgeStack (CloudFront) — MANUAL deploy, not in CI
 

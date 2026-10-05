@@ -3963,6 +3963,35 @@ export class AppStack extends Stack {
           // #1444: RunTask for the search-eval canary passes its own dedicated
           // execution role (never deployTaskExecutionRole -- see above).
           canaryTaskExecutionRole.roleArn,
+          // #2144: the canary task def sets no taskRole, so CDK auto-creates
+          // one, and RegisterTaskDefinition passes it too. Without this grant
+          // the deploy.yml pin step failed with AccessDenied on every run and
+          // the canary stayed dark from August.
+          this.searchEvalCanaryTaskDefinition.taskRole.roleArn,
+          // #2144: deploy.yml re-registers the seven Step Functions ETL
+          // families (Sps-Etl-<env>) pinned to this deploy's ETL image digest.
+          // Registering a clone passes the family's task + execution roles.
+          // Referenced by their fixed roleName (cdk/lib/etl-stack.ts) rather
+          // than a cross-stack import, so AppStack keeps no dependency on
+          // EtlStack.
+          ...[
+            `sps-etl-task-${env}`,
+            `sps-etl-task-exec-${env}`,
+            ...["sources", "ldap", "reciter-api", "ctsc"].map(
+              (unit) => `sps-etl-${unit}-task-exec-${env}`,
+            ),
+            `sps-reconcile-task-${env}`,
+            `sps-reconcile-task-exec-${env}`,
+            `sps-cdn-reconcile-task-${env}`,
+            `sps-cdn-reconcile-task-exec-${env}`,
+          ].map((roleName) =>
+            Stack.of(this).formatArn({
+              service: "iam",
+              region: "",
+              resource: "role",
+              resourceName: roleName,
+            }),
+          ),
         ],
         conditions: {
           StringEquals: {
