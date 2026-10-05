@@ -857,8 +857,8 @@ factor, the sparse decay, and the outer prominence sum — and you have measured
 matching. Explaining `{ bool: { must, filter } }` alone gives you the BM25 layer; the ratio between that
 and the displayed `_score` is the combined wrapper factor.
 
-Prod is intentionally not wired into the probe script (see its header). Add the `Sps-Network-prod` subnets
-and SG before pointing it there.
+The probe script also takes `prod` as a second argument. It reads the network config off the live
+`sps-app-<env>` service and runs SELECT-only in both envs (see its header).
 
 ### Black-box decomposition via `?match=`
 

@@ -4,6 +4,7 @@ import * as route53resolver from "aws-cdk-lib/aws-route53resolver";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+import { importSharedVpc } from "./shared-vpc-subnets";
 
 /** Props for {@link NetworkStack}. */
 export interface NetworkStackProps extends StackProps {
@@ -57,15 +58,7 @@ export class NetworkStack extends Stack {
     // shared (subnetType filtering is unreliable on an imported VPC); the VPC
     // attributes list every tier so the import is complete.
     if (envConfig.useSharedVpc) {
-      const sv = envConfig.sharedVpc;
-      // Only vpcId + AZs — every downstream placement selects explicit per-tier
-      // subnet ids (resolveTierSubnets), so the import needs no subnet lists,
-      // and omitting them avoids CDK's "privateSubnetIds must be a multiple of
-      // availabilityZones" pairing (which could mis-assign a subnet's AZ).
-      this.vpc = ec2.Vpc.fromVpcAttributes(this, "SharedVpc", {
-        vpcId: sv.vpcId,
-        availabilityZones: [...sv.availabilityZones],
-      });
+      this.vpc = importSharedVpc(this, envConfig);
     } else {
       // Two AZs — enough for an ALB and a Multi-AZ Aurora cluster, no more than
       // the workload needs. Public subnets carry the ALB and the NAT gateways;

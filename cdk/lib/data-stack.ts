@@ -22,14 +22,22 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
-import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
+import {
+  importSharedVpc,
+  resolveSharedSg,
+  resolveTierSubnets,
+} from "./shared-vpc-subnets";
 
 /** Props for {@link DataStack}. */
 export interface DataStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /** VPC the cluster and domain attach to (from NetworkStack). */
-  readonly vpc: ec2.IVpc;
+  /**
+   * VPC the cluster and domain attach to. Flag-off: the standalone NetworkStack VPC. Omitted when
+   * {@link SpsEnvConfig.useSharedVpc} is on (NetworkStack is not synthesized
+   * then); the stack imports the shared VPC itself via importSharedVpc.
+   */
+  readonly vpc?: ec2.IVpc;
   /**
    * DR-region {@link backup.IBackupVault} from {@link DrBackupVaultStack}.
    * The AWS Backup plan's `copyAction` writes recovery points here, closing
@@ -70,7 +78,8 @@ export class DataStack extends Stack {
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
-    const { envConfig, vpc, drBackupVault } = props;
+    const { envConfig, drBackupVault } = props;
+    const vpc = props.vpc ?? importSharedVpc(this, envConfig);
     // Item-3 pass 2a: import the app/etl SGs by id from the SSM params NetworkStack
     // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
     // exports that would lock the useSharedVpc flip (the SGs replace onto the
