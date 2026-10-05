@@ -3416,8 +3416,12 @@ export class AppStack extends Stack {
     // shared VPC. A fixed physical name blocks CFN create-before-delete
     // ("sps-public-<env> already exists" — the old one still holds the name).
     // Auto-generate the name when shared; keep the exact env-prefixed name when
-    // standalone so flag-off synth stays byte-identical. Names are not
-    // externally referenced (NetScaler reads the ALB DNS, not the name).
+    // standalone so flag-off synth stays byte-identical. The ALB NAME is not
+    // referenced anywhere, but the internal ALB's DNS name IS: the ETL reads it
+    // via the internal-alb-dns SSM param (picked up on the next Sps-Etl
+    // deploy), and Faculty Review / Research Informatics callers will hardcode
+    // it (#1855, #2363). Replacing the internal ALB changes that DNS name, so
+    // treat a replacement as a breaking change for those consumers (#1478).
     // #1942: the public ALB now has deletion protection on, so any change that
     // REPLACES it (e.g. flipping useSharedVpc back, which sets a fixed name)
     // fails at the CFN delete step and rolls the deploy back. That is

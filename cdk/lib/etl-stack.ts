@@ -796,6 +796,12 @@ export class EtlStack extends Stack {
       // env-var name is the contract. #447
       SCHOLARS_REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
     };
+    // Internal-ALB origin (http://<dns>), read once from the App stack's SSM
+    // param; feeds SCHOLARS_BASE_URL and SCHOLARS_INTERNAL_ALB_ORIGIN (#1478).
+    const internalAlbOrigin = `http://${ssm.StringParameter.valueForStringParameter(
+      this,
+      `/sps/${env}/app/internal-alb-dns`,
+    )}`;
     // Non-secret config the IAM-based sources read, shared by every ETL task
     // def (#442/#1508). Values match the source-script defaults; pinned here so
     // the deployed config is explicit rather than implicit in code. These
@@ -864,10 +870,12 @@ export class EtlStack extends Stack {
       // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
       // top of this stack. `etl/revalidate/index.ts` validates this origin
       // against its allowlist before sending the bearer token.
-      SCHOLARS_BASE_URL: `http://${ssm.StringParameter.valueForStringParameter(
-        this,
-        `/sps/${env}/app/internal-alb-dns`,
-      )}`,
+      SCHOLARS_BASE_URL: internalAlbOrigin,
+      // #1478 — the exact origin the revalidate allowlist accepts for the
+      // internal ALB. Same SSM value as SCHOLARS_BASE_URL, so an ALB
+      // replacement self-heals on the next Sps-Etl deploy (no name regex);
+      // a one-var run-task override of SCHOLARS_BASE_URL is still refused.
+      SCHOLARS_INTERNAL_ALB_ORIGIN: internalAlbOrigin,
       // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
       // this to deliver any deferred ReCiter rejects and fire the delayed,
       // per-uid feature-generator re-score. STAGING-FIRST: ON in staging, OFF
