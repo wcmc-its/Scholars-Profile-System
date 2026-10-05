@@ -118,7 +118,7 @@ npx cdk deploy --exclusively Sps-App-prod -c env=prod -c appImageDigest="$digest
 - **ETL rollback.** Deregistering the newest revision of a family hands the next step launch to revision N-1. That is a rollback **only if N-1 is itself a pinned `@sha256:` clone** from an earlier `deploy.yml` run. If N-1 is on `:latest`, deregistering N runs `:latest`, and `:latest` now points at the bad build, because the bad run pushed it. N-1 is on `:latest` on the first `deploy.yml` run after #2144 lands, and after any `cdk deploy Sps-Etl-<env>` that touched that family. Rules:
   - Only touch families the bad run actually pinned (its newest revision's image is the bad digest). A family the run skipped, or that a later `cdk deploy` re-registered, is not the bad revision.
   - Only deregister when N-1 is `@sha256:` and not the bad digest. Never deregister a family's last ACTIVE revision.
-  - Otherwise, or when unsure, re-run `deploy.yml` for a known-good SHA (`gh workflow run deploy.yml --ref <good-sha-or-branch> -f env=<env>`). It pins that SHA's image as a new newest revision. This is always safe.
+  - Otherwise, re-pin a known-good build: `gh run rerun <run-id-of-last-good-deploy>` (a re-run keeps that run's original commit, so it passes the prod master-only guard; `workflow_dispatch --ref` takes only a branch or tag, not a SHA), or land a revert on master and deploy that. Either path also rolls back the **app** image and re-runs bootstrap/migrate, so first check that the DB has no forward-only migrations newer than that build.
 
   The loop below prints the newest two revisions per family and deregisters N only when the first two rules hold. Run it with `dry=1` first:
 
@@ -136,7 +136,7 @@ npx cdk deploy --exclusively Sps-App-prod -c env=prod -c appImageDigest="$digest
     echo "$f-$env  N=$n_img  N-1=${p_img:-<none>}"
     if [[ "$n_img" != *"@$bad" ]]; then echo "  skip: newest is not the bad build"; continue; fi
     if [[ -z "$prev" || "$p_img" != *@sha256:* || "$p_img" == *"@$bad" ]]; then
-      echo "  skip: N-1 is missing, on :latest, or also bad; re-run deploy.yml for a known-good SHA"; continue
+      echo "  skip: N-1 is missing, on :latest, or also bad; re-run the last good deploy (gh run rerun) or deploy a revert"; continue
     fi
     if [[ "$dry" == 0 ]]; then
       aws ecs deregister-task-definition --task-definition "$newest" --query 'taskDefinition.taskDefinitionArn' --output text
