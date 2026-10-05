@@ -1854,6 +1854,20 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "off",
               },
@@ -2496,6 +2510,20 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "off",
               },
@@ -3086,6 +3114,20 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "off",
               },
@@ -3594,6 +3636,20 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
                 "Value": {
                   "Fn::Join": [
                     "",
@@ -4550,6 +4606,20 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
                 "Value": {
                   "Fn::Join": [
                     "",
@@ -13047,6 +13117,20 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
               },
@@ -13689,6 +13773,20 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
               },
@@ -14279,6 +14377,20 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
               },
@@ -14787,6 +14899,20 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
                 "Value": {
                   "Fn::Join": [
                     "",
@@ -15743,6 +15869,20 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INTERNAL_ALB_ORIGIN",
                 "Value": {
                   "Fn::Join": [
                     "",

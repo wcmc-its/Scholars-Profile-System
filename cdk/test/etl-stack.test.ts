@@ -1655,6 +1655,17 @@ describe("EtlStack", () => {
         // the env value); match the param's normalized logical-id fragment.
         expect(valueJson).toContain("internalalbdns");
       });
+
+      it("sets SCHOLARS_INTERNAL_ALB_ORIGIN to the same value as SCHOLARS_BASE_URL (#1478)", () => {
+        const envEntries = (etlContainerDef().Environment ?? []) as Array<{
+          Name?: string;
+          Value?: unknown;
+        }>;
+        const base = envEntries.find((e) => e.Name === "SCHOLARS_BASE_URL");
+        const origin = envEntries.find((e) => e.Name === "SCHOLARS_INTERNAL_ALB_ORIGIN");
+        expect(origin).toBeDefined();
+        expect(origin?.Value).toEqual(base?.Value);
+      });
     });
 
     describe("Footgun #5 -- EC2 property character-set safety", () => {
