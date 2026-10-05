@@ -27,7 +27,7 @@
  * transaction BEFORE the execution is started, so there is never an unaudited
  * run: if the audit insert fails, nothing starts. If starting then fails, the
  * run row is marked `failed` with the reason (the audit row stays: the request
- * was made) and the route answers 502.
+ * was made) and the route answers 500.
  */
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         },
       })
       .catch((e) => console.error("[honors run-now] could not mark the run failed", e));
-    return editError(502, "start_failed");
+    return editError(500, "start_failed");
   }
 
   return editOk({ runId: queued.id, status: "queued" });

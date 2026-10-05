@@ -22,8 +22,8 @@
  *
  * FAILURE POSTURE: any Bedrock error, timeout, or unusable output logs and returns []
  * — this function NEVER throws. The caller degrades to the v1 dictionary extractor on
- * [], so a Bedrock outage is a recall regression, not a 502. (Contrast the overview
- * generator, whose throws are mapped to 502 by design; here [] is the recovery path.)
+ * [], so a Bedrock outage is a recall regression, not a 500. (Contrast the overview
+ * generator, whose throws are mapped to 500 by design; here [] is the recovery path.)
  */
 import { createHash } from "node:crypto";
 import { generateObject } from "ai";
@@ -386,7 +386,7 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
         };
       } catch (err) {
         // NEVER throw — degrade to the v1 dictionary extractor (see caller). A Bedrock
-        // outage must cost recall, not return a 502.
+        // outage must cost recall, not return a 500.
         console.warn("[sponsor-match] concept extraction failed; falling back to dictionary", err);
         return { concepts: [] };
       }

@@ -77,7 +77,7 @@ describe("DirectoryPeopleTypeahead — search", () => {
   it("renders a failure state when the fetch is not ok", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ ok: false, error: "directory_unavailable" }), {
-        status: 503,
+        status: 500,
         headers: { "Content-Type": "application/json" },
       }),
     );

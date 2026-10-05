@@ -7,7 +7,7 @@
  * `mentorCwid` is the REAL signed-in human, no impersonation) OR a genuine
  * (non-impersonating) superuser. Any other actor gets a 404 — the same answer a
  * missing row gets, so the endpoint never confirms that another mentor's
- * suggestion exists. Dormant flag ⇒ 503 after authz, before the body is
+ * suggestion exists. Dormant flag ⇒ 500 after authz, before the body is
  * validated or anything is written.
  *
  * Writes `dismissedAt` / `dismissedBy` / `dismissReason` (columns the nightly
@@ -61,7 +61,7 @@ export async function POST(
     return editError(404, "not_found");
   }
 
-  if (!isMenteeSuggestionsEnabled()) return editError(503, "mentee_suggestions_disabled");
+  if (!isMenteeSuggestionsEnabled()) return editError(500, "mentee_suggestions_disabled");
 
   const reason = body.reason;
   if (!DISMISS_REASONS.includes(reason as DismissReason)) {

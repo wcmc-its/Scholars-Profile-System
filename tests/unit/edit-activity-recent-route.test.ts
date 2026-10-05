@@ -2,7 +2,7 @@
  * GET /api/edit/activity/recent — the "Load older" page of the /edit/activity
  * feed. Verifies the superuser gate (401 / 403 with a logged denial, the read
  * never runs), cursor validation (400, the read never runs), the decoded
- * cursor and the summary's `asOf` reaching the loader, and a 503 (not a 500) when the audit read fails.
+ * cursor and the summary's `asOf` reaching the loader, and a handled 500 `activity_unavailable` (not an uncaught throw) when the audit read fails.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
@@ -108,10 +108,10 @@ describe("GET /api/edit/activity/recent", () => {
     expect(await res.json()).toEqual({ ok: true, ...PAGE });
   });
 
-  it("503 (not a 500) when the audit read throws", async () => {
+  it("500 activity_unavailable (handled, not an uncaught throw) when the audit read throws", async () => {
     mockLoadOlder.mockRejectedValue(new Error("SELECT command denied"));
     const res = await GET(req(QS));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ ok: false, error: "activity_unavailable" });
   });
 });

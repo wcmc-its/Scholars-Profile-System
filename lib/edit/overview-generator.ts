@@ -15,7 +15,7 @@
  * profile id, NO tools (the model must not browse — it writes only from FACTS),
  * and credentials come from the AWS SDK chain — the ECS task role in deployment
  * (institutional AWS billing, no API key) and the operator's shell creds locally.
- * On any Bedrock throw the error propagates so the route maps it to a 502 and
+ * On any Bedrock throw the error propagates so the route maps it to a 500 and
  * NEVER writes the DB (SPEC § States & edge cases G8).
  */
 import { generateText } from "ai";
@@ -693,7 +693,7 @@ export type OverviewProgress = { phase: "drafting" | "faithfulness" | "done" };
  * gateway call (no tools — the model writes only from FACTS), then prose → `<p>`
  * paragraphs → `sanitizeOverviewHtml`. Returns the draft plus the resolved
  * gateway `model` string so the caller can surface / record which model ran.
- * Throws on any gateway failure so the caller can map it to a 502 without ever
+ * Throws on any gateway failure so the caller can map it to a 500 without ever
  * writing the DB.
  */
 export async function generateOverviewDraft(

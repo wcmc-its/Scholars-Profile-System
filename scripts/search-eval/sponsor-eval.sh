@@ -52,14 +52,14 @@ if [[ "$MODE" == "fetch" ]]; then
   # The sponsor route is auth-gated (/edit). Export SPONSOR_COOKIE='<your dev session cookie>'.
   # Retry budget for the OpenSearch parent circuit breaker. The sponsor fan-out issues ~40-60
   # sequential `searchPeople` calls per paste, which walks a heap-constrained node past its 95%
-  # parent-breaker limit; the node then refuses even a 2KB request and the route returns 502
+  # parent-breaker limit; the node then refuses even a 2KB request and the route returns 500
   # `match_unavailable`. It is TRANSIENT — the heap drops back once GC runs — so a fixture that
-  # 502s is a MEASUREMENT FAILURE, not a ranking of zero.
+  # 500s is a MEASUREMENT FAILURE, not a ranking of zero.
   #
   # This matters more than it looks. Without the retry the failure is silent: a 502 became `[]`,
   # `[]` scores nDCG 0.000, and a run where the box was merely busy reads as a catastrophic
   # ranking regression. A first local baseline scored 0.161 that way — 11 of 15 fixtures had
-  # simply 502'd. Never let infrastructure noise enter the scorecard as a ranking number.
+  # simply 502'd (the code at the time). Never let infrastructure noise enter the scorecard as a ranking number.
   #
   # So the two outcomes are kept DISTINGUISHABLE, and the difference is the whole point:
   #   []    the route answered and ranked nobody      → a legitimate nDCG of 0

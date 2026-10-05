@@ -17,7 +17,7 @@
  * re-score is deferred to `etl/reciter-refresh`, coalesced per uid.
  *
  * Dormant behind `RECITER_REJECT_SEND` (default off): when off the endpoint
- * `503`s and the client keeps the Publication-Manager off-ramp (today's
+ * `500`s and the client keeps the Publication-Manager off-ramp (today's
  * behavior). When on but the ReCiter API is unconfigured (no base URL / key),
  * the reject still commits locally and the goldstandard POST is left for the
  * scanner to deliver once the secret is provisioned.
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- dormant unless enabled: when off the client keeps the Publication-Manager
   //     off-ramp. Placed after authz (so a malformed/unauthorized call still gets
   //     the right 400/403) but before any DB work (a dormant feature does none). ---
-  if (!isReciterRejectEnabled()) return editError(503, "reject_disabled");
+  if (!isReciterRejectEnabled()) return editError(500, "reject_disabled");
 
   // --- the authorship must exist (400, mirrors the per-author hide gate) ---
   const exists = await publicationAuthorshipExists(pmid, uid, db.read);

@@ -305,7 +305,7 @@ describe("Load older", () => {
 
   it("a failed page shows an error and offers Try again without dropping rows", async () => {
     stubFetch(
-      { status: 503, body: { ok: false, error: "activity_unavailable" } },
+      { status: 500, body: { ok: false, error: "activity_unavailable" } },
       { status: 200, body: olderPage(null) },
     );
     render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);

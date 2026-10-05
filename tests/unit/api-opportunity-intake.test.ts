@@ -205,11 +205,11 @@ describe("GET", () => {
     expect((await res.json()).opportunityTitles).toEqual({});
   });
 
-  it("502s when the queue is unreachable", async () => {
+  it("500s when the queue is unreachable", async () => {
     mockGetEffectiveEditSession.mockResolvedValue({ isSuperuser: true, isDeveloper: false });
     mockListSubmissions.mockRejectedValue(new Error("ddb down"));
     const res = await GET();
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
     expect((await res.json()).error).toBe("queue_unavailable");
   });
 });
@@ -323,10 +323,10 @@ describe("POST", () => {
     );
   });
 
-  it("502s (and skips the audit) when the queue Put fails", async () => {
+  it("500s (and skips the audit) when the queue Put fails", async () => {
     mockPutSubmission.mockRejectedValue(new Error("denied"));
     const res = await POST(postRequest({ url: "https://x.org/grants" }));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
     expect((await res.json()).error).toBe("queue_write_failed");
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
   });
@@ -434,10 +434,10 @@ describe("DELETE", () => {
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
   });
 
-  it("502s on a queue failure, 500s on an audit failure", async () => {
+  it("500s on a queue failure, 500s on an audit failure", async () => {
     mockGetSubmission.mockResolvedValue(queueItem());
     mockDeleteSubmission.mockRejectedValue(new Error("denied"));
-    expect((await DELETE(postRequest({ submissionId: SK }))).status).toBe(502);
+    expect((await DELETE(postRequest({ submissionId: SK }))).status).toBe(500);
 
     mockDeleteSubmission.mockResolvedValue(undefined);
     mockTransaction.mockRejectedValue(new Error("mysql down"));
@@ -620,7 +620,7 @@ describe("PATCH (suppress)", () => {
     expect(mockOpportunityUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it("409s when the drain raced the condition, 502s on a queue failure", async () => {
+  it("409s when the drain raced the condition, 500s on a queue failure", async () => {
     mockGetSubmission.mockResolvedValue(queueItem({ status: "processed" }));
     mockSuppressSubmission.mockRejectedValue(conditionalCheckError());
     expect(
@@ -630,7 +630,7 @@ describe("PATCH (suppress)", () => {
     mockSuppressSubmission.mockRejectedValue(new Error("denied"));
     expect(
       (await PATCH(postRequest({ submissionId: SK, action: "suppress" }))).status,
-    ).toBe(502);
+    ).toBe(500);
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
   });
 });

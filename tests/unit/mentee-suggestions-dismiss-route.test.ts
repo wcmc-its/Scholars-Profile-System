@@ -3,7 +3,7 @@
  *
  * Mirrors `coi-gap-dismiss-route.test.ts`: the actor rule (genuine self OR a
  * genuine superuser; a non-owner and an impersonating superuser both 404 so
- * another mentor's row is never confirmed to exist), the dormant 503 placed
+ * another mentor's row is never confirmed to exist), the dormant 500 placed
  * after authz, reason validation, and the single-transaction write (dismissed_*
  * columns + a B03 `mentee_suggestion_dismiss` audit row keyed on
  * `{mentorCwid}:{menteeCwid}`).
@@ -144,10 +144,10 @@ describe("POST /api/edit/mentee-suggestions/[id]/dismiss", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("503 mentee_suggestions_disabled when the flag is off (after authz, before any write)", async () => {
+  it("500 mentee_suggestions_disabled when the flag is off (after authz, before any write)", async () => {
     mockEnabled.mockReturnValue(false);
     const res = await dismiss(post("7/dismiss"), ctx("7"));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "mentee_suggestions_disabled" });
     expect(mockTransaction).not.toHaveBeenCalled();
     // ...but a non-owner still 404s ahead of the dormant gate.
@@ -244,6 +244,6 @@ describe("POST /api/edit/mentee-suggestions/[id]/restore", () => {
     expect((await restore(post("7/restore", {}), ctx("7"))).status).toBe(404);
     mockFindUnique.mockResolvedValue({ ...ACTIVE, dismissedAt: new Date() });
     mockEnabled.mockReturnValue(false);
-    expect((await restore(post("7/restore", {}), ctx("7"))).status).toBe(503);
+    expect((await restore(post("7/restore", {}), ctx("7"))).status).toBe(500);
   });
 });

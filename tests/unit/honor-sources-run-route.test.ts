@@ -224,10 +224,10 @@ describe("run", () => {
     expect(h.store.rows).toHaveLength(0);
   });
 
-  it("a failed start marks the run failed, releases the list, and answers 502", async () => {
+  it("a failed start marks the run failed, releases the list, and answers 500", async () => {
     h.startHonorsRun.mockRejectedValueOnce(new Error("AccessDeniedException"));
     const res = await POST(request({ list: LIST }, SUPERUSER));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
     expect(h.store.rows[0]).toMatchObject({
       id: "run-1",
       status: "failed",

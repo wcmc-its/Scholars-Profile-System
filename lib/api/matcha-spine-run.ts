@@ -391,7 +391,7 @@ export function distinctiveGlossTerms(gloss: string, memberTerms: string[]): str
  *  representative resolution supplies the MeSH attribution signals; `meshDescendantUis`
  *  is the cluster's UNION so the boost spans all merged synonyms. Also returns the
  *  page hits so the caller can source display fields without a second round-trip.
- *  Any `searchPeople` throw propagates (the route maps it to 502 — no partial results). */
+ *  Any `searchPeople` throw propagates (the route maps it to 500 — no partial results). */
 async function retrieveCluster(
   clusterQuery: string,
   descendantUis: string[],
@@ -527,7 +527,7 @@ async function retrieveCluster(
  *
  * Short-circuits to empty candidates on an empty paste, no extracted terms, or
  * all-empty retrieval — the same posture as the bespoke engine. Any per-cluster
- * `searchPeople` failure throws out of here (the route's catch → 502); there are no
+ * `searchPeople` failure throws out of here (the route's catch → 500); there are no
  * silent partial results.
  *
  * There is deliberately NO concept-override parameter. The console re-ranks CLIENT-side

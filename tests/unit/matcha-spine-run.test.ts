@@ -1011,7 +1011,7 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(mockSearchPeople).not.toHaveBeenCalled();
   });
 
-  it("propagates a searchPeople failure (route maps it to 502 — no partial results)", async () => {
+  it("propagates a searchPeople failure (route maps it to 500 — no partial results)", async () => {
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
     mockSearchPeople.mockRejectedValue(new Error("opensearch down"));

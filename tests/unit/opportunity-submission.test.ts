@@ -177,7 +177,7 @@ describe("putSubmission", () => {
     expect(result.status).toBe("pending");
   });
 
-  it("propagates a DynamoDB failure (the route maps it to 502)", async () => {
+  it("propagates a DynamoDB failure (the route maps it to 500)", async () => {
     const send = vi.fn().mockRejectedValue(new Error("denied"));
     await expect(
       putSubmission(

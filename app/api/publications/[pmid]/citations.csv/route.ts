@@ -13,7 +13,7 @@ import {
  * (thousands of citers) export completely. Used by the "Download CSV"
  * affordance in the publication detail modal's Cited by section.
  *
- * Returns 400 for invalid pmid, 502 if reciterdb is unreachable.
+ * Returns 400 for invalid pmid, 500 if reciterdb is unreachable.
  */
 export async function GET(
   _request: Request,
@@ -25,7 +25,7 @@ export async function GET(
     rows = await getCitingPublicationsForCsv(pmid);
   } catch (err) {
     console.error("[citations.csv] reciterdb fetch failed", err);
-    return apiError("Citation source unavailable", 502);
+    return apiError("Citation source unavailable", 500);
   }
   if (rows === null) {
     return apiError("Invalid pmid", 400);
