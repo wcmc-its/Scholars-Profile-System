@@ -458,74 +458,22 @@ jobs:
 
       # Post-deploy drift report (#1765, #1987) -- informational, never fails
       # the deploy (the image has already rolled; a red job here would hide
-      # whether the deploy itself succeeded). Two checks against the committed
-      # cdk jest snapshots, which match the master SHA just deployed:
-      #   1. flag drift: the just-pinned app task def's env vs app-stack source.
-      #      The pin step clones env from the previous revision, so a merged
-      #      flag stays DARK until `cdk deploy Sps-App-<env>`.
-      #   2. ETL drift: step ids in the deployed scholars-*-<env> state
-      #      machines vs etl-stack source (ETL steps ship only on a manual
-      #      `cdk deploy Sps-Etl-<env>`). Needs states:ListStateMachines /
-      #      DescribeStateMachine on the deploy role, which arrive with the next
-      #      `cdk deploy Sps-App-<env>`; until then it self-skips on AccessDenied.
-      # Drift surfaces as a ::warning:: annotation plus the job step summary.
+      # whether the deploy itself succeeded). scripts/release/drift-report.sh
+      # compares the just-pinned app task def's env and this env's deployed
+      # scholars-*-<env> state machines against the committed cdk snapshots,
+      # which match the master SHA just deployed. The ETL half needs
+      # states:ListStateMachines / DescribeStateMachine on the deploy role,
+      # which arrive with the next `cdk deploy Sps-App-<env>`; until then it
+      # self-skips with a ::notice:: on AccessDenied. Drift surfaces as a
+      # ::warning:: plus the job step summary; a check that could not run
+      # (flag-parity exit 2, e.g. zero machines) is a separate ::warning::.
+      # The daily drift-check.yml runs the same script in strict mode.
       - name: Drift report (flags + ETL definitions, non-blocking)
         continue-on-error: true
         env:
           TARGET_ENV: ${{ steps.target.outputs.env }}
           APP_TASKDEF: ${{ steps.pin.outputs.app_taskdef }}
-        run: |
-          set -uo pipefail
-          summary() { echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
-          summary "### Drift report ($TARGET_ENV)"
-
-          if out=$(aws ecs describe-task-definition --task-definition "$APP_TASKDEF" \
-                | node scripts/release/flag-parity.mjs --drift "$TARGET_ENV" - 2>&1); then
-            summary "- Flags: OK"
-          else
-            echo "::warning::Flag drift on $APP_TASKDEF -- a merged flag is dark until 'cdk deploy Sps-App-$TARGET_ENV'."
-            summary "- Flags: **DRIFT** -- run \`cdk deploy Sps-App-$TARGET_ENV\` from master."
-          fi
-          echo "$out"
-          summary "$(printf '\n```\n%s\n```\n' "$out")"
-
-          if ! arns=$(aws stepfunctions list-state-machines \
-                --query "stateMachines[?starts_with(name,'scholars-') && ends_with(name,'-$TARGET_ENV')].stateMachineArn" \
-                --output text 2>/tmp/etl-drift.err); then
-            if grep -q 'AccessDenied' /tmp/etl-drift.err; then
-              echo "::notice::ETL drift check skipped: the deploy role lacks states:ListStateMachines until 'cdk deploy Sps-App-$TARGET_ENV' ships it (#1987)."
-              summary "- ETL definitions: skipped (deploy role not yet granted states:ListStateMachines)"
-            else
-              cat /tmp/etl-drift.err
-              echo "::warning::ETL drift check could not list state machines."
-              summary "- ETL definitions: check failed (see log)"
-            fi
-            exit 0
-          fi
-          machines=$(for arn in $arns; do
-              aws stepfunctions describe-state-machine --state-machine-arn "$arn" \
-                --query '{name:name,definition:definition}' --output json 2>>/tmp/etl-drift.err || exit 1
-            done | jq -s .)
-          if [ $? -ne 0 ]; then
-            if grep -q 'AccessDenied' /tmp/etl-drift.err; then
-              echo "::notice::ETL drift check skipped: the deploy role lacks states:DescribeStateMachine until 'cdk deploy Sps-App-$TARGET_ENV' ships it (#1987)."
-              summary "- ETL definitions: skipped (deploy role not yet granted states:DescribeStateMachine)"
-            else
-              cat /tmp/etl-drift.err
-              echo "::warning::ETL drift check could not describe state machines."
-              summary "- ETL definitions: check failed (see log)"
-            fi
-            exit 0
-          fi
-          if out=$(echo "$machines" | node scripts/release/flag-parity.mjs --etl-drift "$TARGET_ENV" - 2>&1); then
-            summary "- ETL definitions: OK"
-          else
-            echo "::warning::ETL definition drift in $TARGET_ENV -- run 'cdk diff Sps-Etl-$TARGET_ENV' then 'cdk deploy Sps-Etl-$TARGET_ENV' from master."
-            summary "- ETL definitions: **DRIFT** -- run \`cdk deploy Sps-Etl-$TARGET_ENV\` from master."
-          fi
-          echo "$out"
-          summary "$(printf '\n```\n%s\n```\n' "$out")"
-          exit 0
+        run: bash scripts/release/drift-report.sh "$TARGET_ENV" "$APP_TASKDEF"
 
       # Post-deploy search-eval canary (issue #1444 remainder) — staging only:
       # the checked-in baseline/pins (scripts/search-eval/) were captured

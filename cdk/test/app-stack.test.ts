@@ -2606,6 +2606,77 @@ describe("AppStack", () => {
       expect(sub).toBe("repo:wcmc-its/Scholars-Profile-System:*");
     });
 
+    describe("scheduled drift check role (#1765, #1987)", () => {
+      const findDriftRole = () => {
+        const roles = template.findResources("AWS::IAM::Role");
+        return Object.entries(roles).find(
+          ([, r]) => r.Properties?.RoleName === "sps-drift-readonly",
+        );
+      };
+      const driftStatements = () => {
+        const [logicalId] = findDriftRole() ?? [];
+        const policies = template.findResources("AWS::IAM::Policy");
+        return Object.values(policies)
+          .filter((p) =>
+            (p.Properties?.Roles as Array<{ Ref?: string }> | undefined)?.some(
+              (r) => r.Ref === logicalId,
+            ),
+          )
+          .flatMap(
+            (p) => p.Properties?.PolicyDocument?.Statement as Array<Record<string, unknown>>,
+          );
+      };
+
+      it("trusts ONLY the drift-check GitHub Environment subject, exact match", () => {
+        const role = findDriftRole()?.[1];
+        expect(role).toBeDefined();
+        const statements = role?.Properties?.AssumeRolePolicyDocument?.Statement as Array<
+          Record<string, unknown>
+        >;
+        expect(statements).toHaveLength(1);
+        expect(statements[0].Action).toBe("sts:AssumeRoleWithWebIdentity");
+        expect(statements[0].Condition).toEqual({
+          StringEquals: {
+            "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+            "token.actions.githubusercontent.com:sub":
+              "repo:wcmc-its/Scholars-Profile-System:environment:drift-check",
+          },
+        });
+      });
+
+      it("grants exactly the four read-only actions, scoped as documented", () => {
+        const statements = driftStatements();
+        const actions = statements.flatMap((s) =>
+          Array.isArray(s.Action) ? (s.Action as string[]) : [s.Action as string],
+        );
+        expect([...actions].sort()).toEqual([
+          "ecs:DescribeServices",
+          "ecs:DescribeTaskDefinition",
+          "states:DescribeStateMachine",
+          "states:ListStateMachines",
+        ]);
+        for (const s of statements) expect(s.Effect).toBe("Allow");
+        const byAction = (a: string) => statements.find((s) => s.Action === a);
+        const services = JSON.stringify(byAction("ecs:DescribeServices")?.Resource);
+        expect(services).toContain(":service/sps-cluster-staging/sps-app-staging");
+        expect(services).toContain(":service/sps-cluster-prod/sps-app-prod");
+        expect(services).not.toContain('"*"');
+        expect(byAction("ecs:DescribeTaskDefinition")?.Resource).toBe("*");
+        expect(byAction("states:ListStateMachines")?.Resource).toBe("*");
+        const describe = JSON.stringify(byAction("states:DescribeStateMachine")?.Resource);
+        expect(describe).toContain(":stateMachine:scholars-*");
+        expect(describe).not.toMatch(/^"\*"$/);
+      });
+
+      it("is created only by the staging stack (account-scoped, like the OIDC provider)", () => {
+        const { template: prodTemplate } = buildAppStack("prod");
+        const prodRoles = prodTemplate.findResources("AWS::IAM::Role");
+        expect(
+          Object.values(prodRoles).some((r) => r.Properties?.RoleName === "sps-drift-readonly"),
+        ).toBe(false);
+      });
+    });
+
     it("the env-config bootstrap override drives desiredCount to 0 when -c appDesiredCount=0 is set", () => {
       // Models the first-deploy two-step in the plan's § Deploy strategy.
       const fixture = makeFixture("staging");
