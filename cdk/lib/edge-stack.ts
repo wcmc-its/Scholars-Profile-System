@@ -15,6 +15,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
+import * as cr from "aws-cdk-lib/custom-resources";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
@@ -87,6 +88,18 @@ const EDGE_IP_PATH = "/edge-ip";
  *
  * `main` is everything inside `<main class="w">`; the caller closes it, so a
  * page can put a `<script>` after it (only OFF_NETWORK_HTML does).
+ *
+ * Third caller: ORIGIN_DOWN_HTML (#2503), the CloudFront 502/503/504 page.
+ *
+ * Duplication with `app/global-error.tsx` is DELIBERATE (#2503 decision). That
+ * boundary draws the same lockup with its own inline styles, and the two have
+ * drifted (subtitle gray, headline face/size, alignment). They cannot share
+ * code: this is a CFN template string in the `cdk/` package, that is a React
+ * component in the Next app, with no import path between them, and neither may
+ * depend on `app/globals.css` at its point of use. The edge pages (block,
+ * rate limit, origin down) are kept consistent WITH EACH OTHER by this one
+ * function; the app boundary is held to the brand tokens only. Revisit if a
+ * shared, dependency-free package for both ever exists.
  */
 const wafPage = (title: string, main: string): string =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>${title}</title><style>
@@ -136,6 +149,31 @@ const RATE_LIMITED_HTML = wafPage(
 <h1>Too many requests</h1>
 <p>Scholars has paused requests from your network because it received an unusually large number of them in a short time. This is automatic and temporary - access resumes on its own within a few minutes.</p>
 <p class="n">If this keeps happening, or you believe it is a mistake, email <a href="mailto:support@med.cornell.edu">support@med.cornell.edu</a>.</p>
+</main></body></html>`,
+);
+
+/**
+ * S3 key prefix for edge-served error pages (#2503). Its own prefix -- NOT
+ * under `_next/static/`, whose 14-day lifecycle rule would expire the page and
+ * whose behavior routes through `staticOriginGroup` (ALB fallback).
+ */
+const EDGE_ERROR_PREFIX = "_sps-errors/";
+/** Object key (and, with a leading `/`, the viewer path) of the origin-down page. */
+const ORIGIN_DOWN_KEY = `${EDGE_ERROR_PREFIX}origin-down.html`;
+
+/**
+ * Body CloudFront serves for 502/503/504 (#2503): the origin is unreachable --
+ * no healthy ECS targets, the ALB itself failing, or an origin timeout. Served
+ * from the static S3 bucket because the origin is, by definition, the thing
+ * that is down. No IP echo: the visitor's address is irrelevant to an outage
+ * and `/edge-ip` should not grow callers. No script, no external fetch.
+ */
+const ORIGIN_DOWN_HTML = wafPage(
+  "Temporarily unavailable - Scholars @ Weill Cornell Medicine",
+  `<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>
+<h1>Temporarily unavailable</h1>
+<p>Scholars @ Weill Cornell Medicine cannot be reached right now. This is usually brief - please try again in a few minutes.</p>
+<p class="n">If the problem persists, email <a href="mailto:support@med.cornell.edu">support@med.cornell.edu</a>.</p>
 </main></body></html>`,
 );
 
@@ -492,6 +530,54 @@ export class EdgeStack extends Stack {
       primaryOrigin: staticS3Origin,
       fallbackOrigin: origin,
       fallbackStatusCodes: [403, 404],
+    });
+
+    // ------------------------------------------------------------------
+    // #2503 -- branded origin-down page, written into the static bucket by
+    // THIS stack so it exists before `errorResponses` points at it (the
+    // distribution takes an explicit dependency on the write, below). A
+    // missing object would 403 at the S3 origin, and a 403 on the error
+    // page means CloudFront falls back to its stock page -- silently, and
+    // only during a real outage.
+    //
+    // A single-object PutObject custom resource rather than BucketDeployment:
+    // BucketDeployment grants its handler `grantReadWrite` on the WHOLE
+    // bucket (incl. DeleteObject on `_next/static/*`), which the additive
+    // asset sync exists to avoid. This handler can PutObject under
+    // `_sps-errors/*` and nothing else, so it cannot touch, prune, or delete
+    // a build asset. No onDelete: removing this construct leaves the object
+    // (harmless; the bucket is RETAIN anyway).
+    //
+    // Read access needs no new grant: the OAC statement CDK adds for
+    // `staticS3Origin` already allows this distribution s3:GetObject on the
+    // bucket's objects. The deploy role's PutObject stays `_next/static/*`.
+    // ------------------------------------------------------------------
+    const putOriginDownPage = {
+      service: "S3",
+      action: "putObject",
+      parameters: {
+        Bucket: staticBucket.bucketName,
+        Key: ORIGIN_DOWN_KEY,
+        Body: ORIGIN_DOWN_HTML,
+        ContentType: "text/html; charset=utf-8",
+        // Edge copy refreshes within 5 min of a copy change; the page is
+        // only fetched on a 5xx, so this is S3 load during an outage, not
+        // a staleness concern.
+        CacheControl: "public, max-age=300",
+      },
+      physicalResourceId: cr.PhysicalResourceId.of(`sps-origin-down-page-${env}`),
+    };
+    const originDownPage = new cr.AwsCustomResource(this, "OriginDownPage", {
+      onCreate: putOriginDownPage,
+      onUpdate: putOriginDownPage,
+      installLatestAwsSdk: false,
+      policy: cr.AwsCustomResourcePolicy.fromStatements([
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:PutObject"],
+          resources: [staticBucket.arnForObjects(`${EDGE_ERROR_PREFIX}*`)],
+        }),
+      ]),
     });
 
     // ------------------------------------------------------------------
@@ -961,6 +1047,20 @@ export class EdgeStack extends Stack {
       compress: true,
     };
 
+    // #2503 -- the origin-down page's path. Bound to `staticS3Origin`
+    // DIRECTLY, never `staticOriginGroup`: that group falls back to the ALB on
+    // 403/404, and the ALB is the thing that is down whenever this page is
+    // needed, so a fallback would hand the request straight back to CloudFront's
+    // stock error page. CachingOptimized honors the object's max-age=300.
+    additionalBehaviors[`/${EDGE_ERROR_PREFIX}*`] = {
+      origin: staticS3Origin,
+      cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+      responseHeadersPolicy: htmlHeaders,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      compress: true,
+    };
+
     // `/edge-ip` -- the IP echo the off-network block page fetches. A
     // viewer-request CloudFront Function answers it entirely at the POP:
     // `event.viewer.ip` is the TCP peer address, which is the SAME address the
@@ -1410,13 +1510,27 @@ export class EdgeStack extends Stack {
       //   Aurora/OpenSearch blip can't get pinned at the edge and turn a
       //   10-second hiccup into a multi-minute outage for cached paths.
       // The 5xx-never-cache invariant is ratcheted by edge-stack.test.ts.
+      //
+      // #2503 -- 502/503/504 serve the branded origin-down page from S3
+      // (ORIGIN_DOWN_HTML) with the ORIGINAL status, so monitors and crawlers
+      // still see a 5xx. These are the origin-unreachable codes: ALB with no
+      // healthy targets (503), connect/TLS failure or a bad ALB response
+      // (502), origin timeout (504). CloudFront applies this to origin-sent
+      // 502/503/504 too, so an API route's own JSON 502/503 body is replaced
+      // with this HTML (status kept) -- see the #2503 PR for that trade-off.
+      // 500 is left alone: a 500 means the app is UP and rendered its own
+      // branded error (app/global-error.tsx) or JSON body; replacing it with
+      // "cannot be reached" would be both wrong and lossy.
       // ------------------------------------------------------------------
       errorResponses: [
         { httpStatus: 404, ttl: Duration.seconds(60) },
         { httpStatus: 500, ttl: Duration.seconds(0) },
-        { httpStatus: 502, ttl: Duration.seconds(0) },
-        { httpStatus: 503, ttl: Duration.seconds(0) },
-        { httpStatus: 504, ttl: Duration.seconds(0) },
+        ...[502, 503, 504].map((httpStatus) => ({
+          httpStatus,
+          responseHttpStatus: httpStatus,
+          responsePagePath: `/${ORIGIN_DOWN_KEY}`,
+          ttl: Duration.seconds(0),
+        })),
       ],
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       enableLogging: true,
@@ -1442,6 +1556,9 @@ export class EdgeStack extends Stack {
       enableIpv6: false,
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
     });
+    // #2503 ordering: the page object must exist before `errorResponses`
+    // points at it, so the distribution update waits on the PutObject.
+    this.distribution.node.addDependency(originDownPage);
 
     // ------------------------------------------------------------------
     // Outputs.

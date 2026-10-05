@@ -43,6 +43,58 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
     },
   },
   "Resources": {
+    "AWS679f53fac002430cb0da5b7982bd22872D164C4C": {
+      "DependsOn": [
+        "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "56f7467bbde8a5efebcf57ae9e460027607099bab9f844669dcf5d800172ee5a.zip",
+        },
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 120,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
     "DefaultRscCacheCFC4DDE6": {
       "Properties": {
         "CachePolicyConfig": {
@@ -79,6 +131,10 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Type": "AWS::CloudFront::CachePolicy",
     },
     "Distribution830FAC52": {
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+        "OriginDownPage79DF4D6B",
+      ],
       "Properties": {
         "DistributionConfig": {
           "Aliases": [
@@ -98,6 +154,20 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "SecurityHeadersE66B69D3",
               },
               "TargetOriginId": "SpsEdgeprodDistributionOriginGroup145A7C8F1",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+              ],
+              "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+              "Compress": true,
+              "PathPattern": "/_sps-errors/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "HtmlHeadersD748949D",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin3FA8BF880",
               "ViewerProtocolPolicy": "redirect-to-https",
             },
             {
@@ -717,14 +787,20 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
             {
               "ErrorCachingMinTTL": 0,
               "ErrorCode": 502,
+              "ResponseCode": 502,
+              "ResponsePagePath": "/_sps-errors/origin-down.html",
             },
             {
               "ErrorCachingMinTTL": 0,
               "ErrorCode": 503,
+              "ResponseCode": 503,
+              "ResponsePagePath": "/_sps-errors/origin-down.html",
             },
             {
               "ErrorCachingMinTTL": 0,
               "ErrorCode": 504,
+              "ResponseCode": 504,
+              "ResponsePagePath": "/_sps-errors/origin-down.html",
             },
           ],
           "DefaultCacheBehavior": {
@@ -819,6 +895,24 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "OriginAccessIdentity": "",
               },
             },
+            {
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "StaticAssetsBucketC3095769",
+                  "RegionalDomainName",
+                ],
+              },
+              "Id": "SpsEdgeprodDistributionOrigin3FA8BF880",
+              "OriginAccessControlId": {
+                "Fn::GetAtt": [
+                  "DistributionOrigin2S3OriginAccessControlDC470594",
+                  "Id",
+                ],
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": "",
+              },
+            },
           ],
           "PriceClass": "PriceClass_100",
           "ViewerCertificate": {
@@ -837,6 +931,10 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Type": "AWS::CloudFront::Distribution",
     },
     "DistributionMonitoringSubscription2503EB92": {
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+        "OriginDownPage79DF4D6B",
+      ],
       "Properties": {
         "DistributionId": {
           "Ref": "Distribution830FAC52",
@@ -850,6 +948,10 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Type": "AWS::CloudFront::MonitoringSubscription",
     },
     "DistributionOrigin2S3OriginAccessControlDC470594": {
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+        "OriginDownPage79DF4D6B",
+      ],
       "Properties": {
         "OriginAccessControlConfig": {
           "Name": "SpsEdgeprodDistributionOrigin2S3OriginAccessControl50342575",
@@ -1320,6 +1422,81 @@ a{color:var(--slate)}
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "OriginDownPage79DF4D6B": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+      ],
+      "Properties": {
+        "Create": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"S3","action":"putObject","parameters":{"Bucket":"",
+              {
+                "Ref": "StaticAssetsBucketC3095769",
+              },
+              "","Key":"_sps-errors/origin-down.html","Body":"<!doctype html><html lang=\\"en\\"><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><link rel=\\"icon\\" href=\\"data:,\\"><title>Temporarily unavailable - Scholars @ Weill Cornell Medicine</title><style>\\n:root{color-scheme:light dark;--red:#B31B1B;--slate:#2c4f6e;--ink:#191919;--mut:#5a5f66;--bg:#fff;--chip:#fbf1ee;--line:rgba(0,0,0,.12)}\\n@media(prefers-color-scheme:dark){:root{--red:#e08585;--slate:#9dc0dd;--ink:#ededed;--mut:#a3a9b0;--bg:#151515;--chip:#241a1a;--line:rgba(255,255,255,.15)}}\\n*{box-sizing:border-box}\\nbody{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.6 -apple-system,BlinkMacSystemFont,\\"Segoe UI\\",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}\\n.w{max-width:560px;margin:0 auto;padding:72px 24px 56px}\\n.m{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:48px}\\n.m b{display:block;font:600 22px/1.1 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.005em;color:var(--red)}\\n.m span{display:block;margin-top:4px;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}\\nh1{margin:0 0 16px;font:600 34px/1.15 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.01em}\\np{margin:0 0 20px;color:var(--mut)}\\ndl{margin:36px 0;padding:16px 18px;background:var(--chip);border-left:3px solid var(--red);border-radius:4px}\\ndt{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--slate)}\\ndd{margin:6px 0 0;font:17px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--ink);word-break:break-all}\\n.n{margin:0;padding-top:20px;border-top:1px solid var(--line);font-size:13px}\\na{color:var(--slate)}\\n@media(max-width:420px){.w{padding:44px 18px 36px}h1{font-size:27px}}\\n</style></head><body><main class=\\"w\\">\\n<div class=\\"m\\"><b>Scholars</b><span>Weill Cornell Medicine</span></div>\\n<h1>Temporarily unavailable</h1>\\n<p>Scholars @ Weill Cornell Medicine cannot be reached right now. This is usually brief - please try again in a few minutes.</p>\\n<p class=\\"n\\">If the problem persists, email <a href=\\"mailto:support@med.cornell.edu\\">support@med.cornell.edu</a>.</p>\\n</main></body></html>","ContentType":"text/html; charset=utf-8","CacheControl":"public, max-age=300"},"physicalResourceId":{"id":"sps-origin-down-page-prod"}}",
+            ],
+          ],
+        },
+        "InstallLatestAwsSdk": false,
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
+            "Arn",
+          ],
+        },
+        "Update": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"S3","action":"putObject","parameters":{"Bucket":"",
+              {
+                "Ref": "StaticAssetsBucketC3095769",
+              },
+              "","Key":"_sps-errors/origin-down.html","Body":"<!doctype html><html lang=\\"en\\"><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><link rel=\\"icon\\" href=\\"data:,\\"><title>Temporarily unavailable - Scholars @ Weill Cornell Medicine</title><style>\\n:root{color-scheme:light dark;--red:#B31B1B;--slate:#2c4f6e;--ink:#191919;--mut:#5a5f66;--bg:#fff;--chip:#fbf1ee;--line:rgba(0,0,0,.12)}\\n@media(prefers-color-scheme:dark){:root{--red:#e08585;--slate:#9dc0dd;--ink:#ededed;--mut:#a3a9b0;--bg:#151515;--chip:#241a1a;--line:rgba(255,255,255,.15)}}\\n*{box-sizing:border-box}\\nbody{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.6 -apple-system,BlinkMacSystemFont,\\"Segoe UI\\",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}\\n.w{max-width:560px;margin:0 auto;padding:72px 24px 56px}\\n.m{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:48px}\\n.m b{display:block;font:600 22px/1.1 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.005em;color:var(--red)}\\n.m span{display:block;margin-top:4px;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}\\nh1{margin:0 0 16px;font:600 34px/1.15 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.01em}\\np{margin:0 0 20px;color:var(--mut)}\\ndl{margin:36px 0;padding:16px 18px;background:var(--chip);border-left:3px solid var(--red);border-radius:4px}\\ndt{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--slate)}\\ndd{margin:6px 0 0;font:17px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--ink);word-break:break-all}\\n.n{margin:0;padding-top:20px;border-top:1px solid var(--line);font-size:13px}\\na{color:var(--slate)}\\n@media(max-width:420px){.w{padding:44px 18px 36px}h1{font-size:27px}}\\n</style></head><body><main class=\\"w\\">\\n<div class=\\"m\\"><b>Scholars</b><span>Weill Cornell Medicine</span></div>\\n<h1>Temporarily unavailable</h1>\\n<p>Scholars @ Weill Cornell Medicine cannot be reached right now. This is usually brief - please try again in a few minutes.</p>\\n<p class=\\"n\\">If the problem persists, email <a href=\\"mailto:support@med.cornell.edu\\">support@med.cornell.edu</a>.</p>\\n</main></body></html>","ContentType":"text/html; charset=utf-8","CacheControl":"public, max-age=300"},"physicalResourceId":{"id":"sps-origin-down-page-prod"}}",
+            ],
+          ],
+        },
+      },
+      "Type": "Custom::AWS",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "OriginDownPageCustomResourcePolicyACCB4E66": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StaticAssetsBucketC3095769",
+                        "Arn",
+                      ],
+                    },
+                    "/_sps-errors/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OriginDownPageCustomResourcePolicyACCB4E66",
+        "Roles": [
+          {
+            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "PopoverContextCache904BCEC1": {
       "Properties": {
         "CachePolicyConfig": {
@@ -1688,6 +1865,58 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     },
   },
   "Resources": {
+    "AWS679f53fac002430cb0da5b7982bd22872D164C4C": {
+      "DependsOn": [
+        "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "56f7467bbde8a5efebcf57ae9e460027607099bab9f844669dcf5d800172ee5a.zip",
+        },
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 120,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
     "DefaultRscCacheCFC4DDE6": {
       "Properties": {
         "CachePolicyConfig": {
@@ -1724,6 +1953,10 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       "Type": "AWS::CloudFront::CachePolicy",
     },
     "Distribution830FAC52": {
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+        "OriginDownPage79DF4D6B",
+      ],
       "Properties": {
         "DistributionConfig": {
           "Aliases": [
@@ -1743,6 +1976,20 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "Ref": "SecurityHeadersE66B69D3",
               },
               "TargetOriginId": "SpsEdgestagingDistributionOriginGroup1AF3D484D",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+              ],
+              "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+              "Compress": true,
+              "PathPattern": "/_sps-errors/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "HtmlHeadersD748949D",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin398A143ED",
               "ViewerProtocolPolicy": "redirect-to-https",
             },
             {
@@ -2362,14 +2609,20 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
             {
               "ErrorCachingMinTTL": 0,
               "ErrorCode": 502,
+              "ResponseCode": 502,
+              "ResponsePagePath": "/_sps-errors/origin-down.html",
             },
             {
               "ErrorCachingMinTTL": 0,
               "ErrorCode": 503,
+              "ResponseCode": 503,
+              "ResponsePagePath": "/_sps-errors/origin-down.html",
             },
             {
               "ErrorCachingMinTTL": 0,
               "ErrorCode": 504,
+              "ResponseCode": 504,
+              "ResponsePagePath": "/_sps-errors/origin-down.html",
             },
           ],
           "DefaultCacheBehavior": {
@@ -2464,6 +2717,24 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "OriginAccessIdentity": "",
               },
             },
+            {
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "StaticAssetsBucketC3095769",
+                  "RegionalDomainName",
+                ],
+              },
+              "Id": "SpsEdgestagingDistributionOrigin398A143ED",
+              "OriginAccessControlId": {
+                "Fn::GetAtt": [
+                  "DistributionOrigin2S3OriginAccessControlDC470594",
+                  "Id",
+                ],
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": "",
+              },
+            },
           ],
           "PriceClass": "PriceClass_100",
           "ViewerCertificate": {
@@ -2482,6 +2753,10 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       "Type": "AWS::CloudFront::Distribution",
     },
     "DistributionMonitoringSubscription2503EB92": {
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+        "OriginDownPage79DF4D6B",
+      ],
       "Properties": {
         "DistributionId": {
           "Ref": "Distribution830FAC52",
@@ -2495,6 +2770,10 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       "Type": "AWS::CloudFront::MonitoringSubscription",
     },
     "DistributionOrigin2S3OriginAccessControlDC470594": {
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+        "OriginDownPage79DF4D6B",
+      ],
       "Properties": {
         "OriginAccessControlConfig": {
           "Name": "SpsEdgestagingDistributionOrigin2S3OriginAccessControlC52F88B4",
@@ -2964,6 +3243,81 @@ a{color:var(--slate)}
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "OriginDownPage79DF4D6B": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "OriginDownPageCustomResourcePolicyACCB4E66",
+      ],
+      "Properties": {
+        "Create": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"S3","action":"putObject","parameters":{"Bucket":"",
+              {
+                "Ref": "StaticAssetsBucketC3095769",
+              },
+              "","Key":"_sps-errors/origin-down.html","Body":"<!doctype html><html lang=\\"en\\"><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><link rel=\\"icon\\" href=\\"data:,\\"><title>Temporarily unavailable - Scholars @ Weill Cornell Medicine</title><style>\\n:root{color-scheme:light dark;--red:#B31B1B;--slate:#2c4f6e;--ink:#191919;--mut:#5a5f66;--bg:#fff;--chip:#fbf1ee;--line:rgba(0,0,0,.12)}\\n@media(prefers-color-scheme:dark){:root{--red:#e08585;--slate:#9dc0dd;--ink:#ededed;--mut:#a3a9b0;--bg:#151515;--chip:#241a1a;--line:rgba(255,255,255,.15)}}\\n*{box-sizing:border-box}\\nbody{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.6 -apple-system,BlinkMacSystemFont,\\"Segoe UI\\",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}\\n.w{max-width:560px;margin:0 auto;padding:72px 24px 56px}\\n.m{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:48px}\\n.m b{display:block;font:600 22px/1.1 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.005em;color:var(--red)}\\n.m span{display:block;margin-top:4px;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}\\nh1{margin:0 0 16px;font:600 34px/1.15 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.01em}\\np{margin:0 0 20px;color:var(--mut)}\\ndl{margin:36px 0;padding:16px 18px;background:var(--chip);border-left:3px solid var(--red);border-radius:4px}\\ndt{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--slate)}\\ndd{margin:6px 0 0;font:17px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--ink);word-break:break-all}\\n.n{margin:0;padding-top:20px;border-top:1px solid var(--line);font-size:13px}\\na{color:var(--slate)}\\n@media(max-width:420px){.w{padding:44px 18px 36px}h1{font-size:27px}}\\n</style></head><body><main class=\\"w\\">\\n<div class=\\"m\\"><b>Scholars</b><span>Weill Cornell Medicine</span></div>\\n<h1>Temporarily unavailable</h1>\\n<p>Scholars @ Weill Cornell Medicine cannot be reached right now. This is usually brief - please try again in a few minutes.</p>\\n<p class=\\"n\\">If the problem persists, email <a href=\\"mailto:support@med.cornell.edu\\">support@med.cornell.edu</a>.</p>\\n</main></body></html>","ContentType":"text/html; charset=utf-8","CacheControl":"public, max-age=300"},"physicalResourceId":{"id":"sps-origin-down-page-staging"}}",
+            ],
+          ],
+        },
+        "InstallLatestAwsSdk": false,
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
+            "Arn",
+          ],
+        },
+        "Update": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"S3","action":"putObject","parameters":{"Bucket":"",
+              {
+                "Ref": "StaticAssetsBucketC3095769",
+              },
+              "","Key":"_sps-errors/origin-down.html","Body":"<!doctype html><html lang=\\"en\\"><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><link rel=\\"icon\\" href=\\"data:,\\"><title>Temporarily unavailable - Scholars @ Weill Cornell Medicine</title><style>\\n:root{color-scheme:light dark;--red:#B31B1B;--slate:#2c4f6e;--ink:#191919;--mut:#5a5f66;--bg:#fff;--chip:#fbf1ee;--line:rgba(0,0,0,.12)}\\n@media(prefers-color-scheme:dark){:root{--red:#e08585;--slate:#9dc0dd;--ink:#ededed;--mut:#a3a9b0;--bg:#151515;--chip:#241a1a;--line:rgba(255,255,255,.15)}}\\n*{box-sizing:border-box}\\nbody{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.6 -apple-system,BlinkMacSystemFont,\\"Segoe UI\\",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}\\n.w{max-width:560px;margin:0 auto;padding:72px 24px 56px}\\n.m{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:48px}\\n.m b{display:block;font:600 22px/1.1 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.005em;color:var(--red)}\\n.m span{display:block;margin-top:4px;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}\\nh1{margin:0 0 16px;font:600 34px/1.15 Georgia,\\"Times New Roman\\",serif;letter-spacing:-.01em}\\np{margin:0 0 20px;color:var(--mut)}\\ndl{margin:36px 0;padding:16px 18px;background:var(--chip);border-left:3px solid var(--red);border-radius:4px}\\ndt{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--slate)}\\ndd{margin:6px 0 0;font:17px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--ink);word-break:break-all}\\n.n{margin:0;padding-top:20px;border-top:1px solid var(--line);font-size:13px}\\na{color:var(--slate)}\\n@media(max-width:420px){.w{padding:44px 18px 36px}h1{font-size:27px}}\\n</style></head><body><main class=\\"w\\">\\n<div class=\\"m\\"><b>Scholars</b><span>Weill Cornell Medicine</span></div>\\n<h1>Temporarily unavailable</h1>\\n<p>Scholars @ Weill Cornell Medicine cannot be reached right now. This is usually brief - please try again in a few minutes.</p>\\n<p class=\\"n\\">If the problem persists, email <a href=\\"mailto:support@med.cornell.edu\\">support@med.cornell.edu</a>.</p>\\n</main></body></html>","ContentType":"text/html; charset=utf-8","CacheControl":"public, max-age=300"},"physicalResourceId":{"id":"sps-origin-down-page-staging"}}",
+            ],
+          ],
+        },
+      },
+      "Type": "Custom::AWS",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "OriginDownPageCustomResourcePolicyACCB4E66": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StaticAssetsBucketC3095769",
+                        "Arn",
+                      ],
+                    },
+                    "/_sps-errors/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OriginDownPageCustomResourcePolicyACCB4E66",
+        "Roles": [
+          {
+            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "PopoverContextCache904BCEC1": {
       "Properties": {
