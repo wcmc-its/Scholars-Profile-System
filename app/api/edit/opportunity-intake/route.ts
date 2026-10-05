@@ -80,7 +80,7 @@ export async function GET(): Promise<NextResponse> {
     submissions = await listSubmissions();
   } catch (err) {
     logEditFailure(`${PATH}#list`, err);
-    return editError(502, "queue_unavailable");
+    return editError(500, "queue_unavailable");
   }
 
   // Redesign 2026-08: the panel's Created chips show each produced
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     existingSubmissions = await listSubmissions();
   } catch (err) {
     logEditFailure(`${PATH}#dedup-list`, err);
-    return editError(502, "queue_unavailable");
+    return editError(500, "queue_unavailable");
   }
   const corpus = await db.read.opportunity.findMany({
     // `suppressedAt` rides into the 409 payload so the panel can say
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   } catch (err) {
     logEditFailure(`${PATH}#put`, err);
-    return editError(502, "queue_write_failed");
+    return editError(500, "queue_write_failed");
   }
   try {
     await db.write.$transaction(async (tx) => {
@@ -260,7 +260,7 @@ async function readSubmissionMutation(
     existing = await getSubmission(submissionId);
   } catch (err) {
     logEditFailure(`${PATH}#get`, err);
-    return { ok: false, response: editError(502, "queue_unavailable") };
+    return { ok: false, response: editError(500, "queue_unavailable") };
   }
   if (!existing) return { ok: false, response: editError(404, "not_found") };
 
@@ -288,7 +288,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   } catch (err) {
     if (isConditionalCheckFailed(err)) return editError(409, "submission_processed");
     logEditFailure(`${PATH}#delete`, err);
-    return editError(502, "queue_write_failed");
+    return editError(500, "queue_write_failed");
   }
   // Same ordering contract as POST: the queue write lands first, then the
   // audit row; an audit failure returns 500 while the delete persists (loudly
@@ -451,7 +451,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   } catch (err) {
     if (isConditionalCheckFailed(err)) return editError(409, "not_processed");
     logEditFailure(`${PATH}#suppress`, err);
-    return editError(502, "queue_write_failed");
+    return editError(500, "queue_write_failed");
   }
 
   try {

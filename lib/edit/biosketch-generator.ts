@@ -874,7 +874,7 @@ export type BiosketchProgress =
  * tools — the model writes only from FACTS), then parse into entries; when the faithfulness
  * pass is on, each entry is run through verify→revise with `permitSignificance` so an
  * anchored implication survives while an invented entity/superlative/external-uptake claim
- * is stripped. Throws on any gateway failure so the caller maps it to a 502 and never
+ * is stripped. Throws on any gateway failure so the caller maps it to a 500 and never
  * persists. Length caps are validated (flagged), never silently trimmed.
  */
 export async function generateBiosketch(

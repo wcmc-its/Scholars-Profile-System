@@ -1,7 +1,7 @@
 /**
  * POST /api/edit/reject — the self-edit "Not mine" → ReCiter gold-standard
  * reject endpoint (#746, #570). Mirrors the edit-suppress / request-change
- * route mocking. Verifies body/authz gates, the dormant 503, the per-author
+ * route mocking. Verifies body/authz gates, the dormant 500, the per-author
  * self-only authorization, the no-authorship gate, idempotency (a repeated
  * reject does not re-fire ReCiter), the single-transaction write (suppression +
  * pending-refresh + B03 audit `publication_reject`), and the best-effort
@@ -141,10 +141,10 @@ describe("POST /api/edit/reject", () => {
     expect(mockPostGoldStandard).not.toHaveBeenCalled();
   });
 
-  it("503 reject_disabled when the feature is dormant (client keeps the off-ramp)", async () => {
+  it("500 reject_disabled when the feature is dormant (client keeps the off-ramp)", async () => {
     mockIsRejectEnabled.mockReturnValue(false);
     const res = await POST(post(SELF_REJECT));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "reject_disabled" });
     // Dormant ⇒ no DB work at all.
     expect(mockPublicationAuthorshipExists).not.toHaveBeenCalled();

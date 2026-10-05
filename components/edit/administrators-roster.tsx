@@ -15,7 +15,7 @@
  * `GET /api/directory/people?cwids=…` to enrich each person with first/last name,
  * primary title, and email — mirroring how `unit-access-card.tsx` hydrates
  * grantee names. LDAP is unreachable in deployed envs until #443, so this fetch
- * is the ONLY directory access and it must never throw: a 503 / network failure
+ * is the ONLY directory access and it must never throw: a 500 / network failure
  * just falls back to the server-provided Scholar name + the #443 note.
  *
  * Sort, search and the rail filters are client-only UI state over the roster
@@ -443,7 +443,7 @@ export function AdministratorsRoster({
 
   // Recompute the #443 note from the post-enrichment state. If the directory
   // fetch failed entirely, trust the server's seed instead of the (un-enriched)
-  // recomputed value so a transient 503 doesn't hide the note prematurely.
+  // recomputed value so a transient 500 doesn't hide the note prematurely.
   const anyBareCwid = resolved.some((r) => r.person.isBareCwid);
   const showDegradedNote = fetchOk === false ? nameResolutionDegraded : anyBareCwid;
 

@@ -18,7 +18,7 @@ export function GET(): NextResponse {
     // SAML_* not yet configured — the SP cannot be registered until it is.
     return NextResponse.json(
       { error: "SAML SP is not configured" },
-      { status: 503 },
+      { status: 500 },
     );
   }
   return new NextResponse(xml, {

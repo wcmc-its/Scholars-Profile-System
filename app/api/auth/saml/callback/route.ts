@@ -54,7 +54,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     result = await validateSamlResponse(samlResponse);
   } catch {
     // getSamlEnv() threw — SAML is not configured on this deployment.
-    return errorPage(503, "Sign-in is temporarily unavailable.");
+    return errorPage(500, "Sign-in is temporarily unavailable.");
   }
 
   if (!result.ok) {
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         reason: "assertion_store_unavailable",
       }),
     );
-    return errorPage(503, "Sign-in is temporarily unavailable.");
+    return errorPage(500, "Sign-in is temporarily unavailable.");
   }
   if (consumed.duplicate) {
     console.warn(

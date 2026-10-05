@@ -94,7 +94,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }));
       return NextResponse.json({ ok: true, people: annotated }, { headers: NO_STORE });
     } catch {
-      return jsonError(503, "directory_unavailable");
+      return jsonError(500, "directory_unavailable");
     }
   }
 
@@ -129,9 +129,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       people = await fetchDirectoryPeopleByCwid(cwids);
     }
   } catch {
-    // The LDAP module throws on unset config or an unreachable directory. A 503
+    // The LDAP module throws on unset config or an unreachable directory. A 500
     // lets the typeahead show a "Search failed" state without leaking detail.
-    return jsonError(503, "directory_unavailable");
+    return jsonError(500, "directory_unavailable");
   }
 
   return NextResponse.json({ ok: true, people }, { headers: NO_STORE });

@@ -114,7 +114,7 @@ function targetKindOf(
  * mirroring the funding search's concept-OR-text query (`searchFunding`), so a grant tagged with the
  * cluster's descriptor is found even without a literal text hit. Returns the ranked ids AND their
  * hydration hits so the caller needs no second round-trip. Any `searchClient` throw propagates (the
- * route maps it to 502 — no partial results, matching the people spine's posture).
+ * route maps it to 500 — no partial results, matching the people spine's posture).
  */
 async function retrieveClusterGrants(
   clusterQuery: string,

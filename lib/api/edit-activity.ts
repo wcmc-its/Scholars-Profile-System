@@ -485,7 +485,7 @@ export type EditActivityPage = {
  * `asOf` is the summary's `generatedAt` ({@link parseAsOf}), so the window
  * start is the one the page was rendered with, not one recomputed per request.
  * Reads one look-ahead row to know whether another page exists. Throws if the
- * audit table is unreadable (the route answers 503); name lookups fail soft.
+ * audit table is unreadable (the route answers 500); name lookups fail soft.
  */
 export async function loadOlderEdits(
   client: EditActivityClient,

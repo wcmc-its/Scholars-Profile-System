@@ -26,7 +26,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // getSamlEnv() threw — SAML is not configured on this deployment.
     return NextResponse.json(
       { error: "SAML SP is not configured" },
-      { status: 503 },
+      { status: 500 },
     );
   }
   return NextResponse.redirect(redirectUrl, 302);

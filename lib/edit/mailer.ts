@@ -4,7 +4,7 @@
  *
  * Dormant until the flag is on AND a verified sender identity is configured —
  * exactly as the CloudFront invalidation in `lib/edit/revalidation.ts` is dormant
- * without its distribution id. While dormant the endpoint returns `503` and the
+ * without its distribution id. While dormant the endpoint returns `500` and the
  * dialog falls back to the Phase-1 client `mailto:` (#494), so nothing changes
  * for users until ops verify the identity, exit the SES sandbox, and flip the
  * flag on.
@@ -23,7 +23,7 @@ function sanitizeHeader(value: string): string {
 /**
  * The server send is live only when it is both **enabled** (`SELF_EDIT_REQUEST_
  * CHANGE_SEND=on`) and **configured** (a verified `SCHOLARS_MAIL_FROM` identity).
- * Off ⇒ the endpoint `503`s `send_disabled` and the client uses the `mailto:`.
+ * Off ⇒ the endpoint `500`s `send_disabled` and the client uses the `mailto:`.
  */
 export function isMailerConfigured(): boolean {
   return (
@@ -51,7 +51,7 @@ export type OutboundMail = {
 
 /**
  * Send one plain-text email via SESv2. Throws on a send failure; the caller maps
- * that to the HTTP status (the endpoint returns `502 send_failed`). The subject
+ * that to the HTTP status (the endpoint returns `500 send_failed`). The subject
  * and recipients are CR/LF-stripped before the command is built.
  */
 export async function sendMail(mail: OutboundMail): Promise<{ messageId: string }> {

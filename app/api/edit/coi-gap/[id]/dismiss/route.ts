@@ -71,9 +71,9 @@ export async function POST(
     return editError(403, "not_self");
   }
 
-  // --- dormant unless enabled: 503 after authz, before any write (a dormant
+  // --- dormant unless enabled: 500 after authz, before any write (a dormant
   //     feature does no DB work). Mirrors the reject route's ordering. ---
-  if (!isCoiGapHintEnabled()) return editError(503, "coi_gap_disabled");
+  if (!isCoiGapHintEnabled()) return editError(500, "coi_gap_disabled");
 
   // --- idempotency: an already-dismissed candidate returns ok without
   //     re-writing (the daily ETL has already stopped surfacing it). ---

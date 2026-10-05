@@ -56,6 +56,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         error: err instanceof Error ? err.message : String(err),
       }),
     );
-    return editError(503, "activity_unavailable");
+    return editError(500, "activity_unavailable");
   }
 }

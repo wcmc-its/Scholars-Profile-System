@@ -7,7 +7,7 @@
  * is resolved server-side from the trusted `REQUEST_A_CHANGE` config (the client
  * never names an address); only `route` / `fallbackEmail` issues send. Dormant
  * behind `SELF_EDIT_REQUEST_CHANGE_SEND` + `SCHOLARS_MAIL_FROM` — when off it
- * returns `503` and the dialog falls back to the Phase-1 `mailto:` (#494).
+ * returns `500` and the dialog falls back to the Phase-1 `mailto:` (#494).
  *
  * Ordering (decision 2026-05-26): **send first, then a best-effort B03 audit
  * row**. The audit INSERT does NOT gate the send — the `scholars_audit` INSERT
@@ -89,10 +89,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (resolved.kind === "no-send") return editError(400, "not_routable", "issueId");
 
   // --- dormant unless enabled + configured: the client falls back to mailto: ---
-  if (!isMailerConfigured()) return editError(503, "send_disabled");
+  if (!isMailerConfigured()) return editError(500, "send_disabled");
 
   // --- per-cwid rate limit (SPEC § 5 abuse controls / § 6 threat model). Placed
-  //     AFTER the dormant gate so a 503 consumes no quota (no rows accrue until
+  //     AFTER the dormant gate so a 500 consumes no quota (no rows accrue until
   //     the feature is live) and BEFORE the send so the count actually gates it.
   //     Superusers — trusted staff who may legitimately triage many scholars —
   //     are exempt. Every 429 is logged with cwid + count so the env-tuned limit
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     messageId = sent.messageId;
   } catch (err) {
     logEditFailure(PATH, err);
-    return editError(502, "send_failed");
+    return editError(500, "send_failed");
   }
 
   // --- best-effort B03 audit AFTER the send (must not roll back a sent email).

@@ -919,7 +919,7 @@ describe("getCitingPublicationsForCsv", () => {
     expect(params[1]).toBeGreaterThanOrEqual(10_000);
   });
 
-  it("throws (does not soft-fail) when reciterdb is unavailable so the route can return 502", async () => {
+  it("throws (does not soft-fail) when reciterdb is unavailable so the route can return 500", async () => {
     mocks.withReciterConnection.mockImplementationOnce(async () => {
       throw new Error("reciterdb down");
     });

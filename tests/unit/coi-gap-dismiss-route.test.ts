@@ -5,7 +5,7 @@
  * Mirrors `reject-route.test.ts`. Verifies: the GENUINE-self authorization
  * (403 when the candidate belongs to someone else, 403 while impersonating even
  * the owner — a superuser "View as" must NOT be able to dismiss), the 404 for a
- * missing candidate, the dormant 503 (placed after authz, before any write), the
+ * missing candidate, the dormant 500 (placed after authz, before any write), the
  * single-transaction write (status→dismissed + reviewedAt + a B03
  * `coi_gap_dismiss` audit row), and idempotency.
  */
@@ -161,10 +161,10 @@ describe("POST /api/edit/coi-gap/[id]/dismiss", () => {
     expect(row.impersonatedCwid).toBeNull();
   });
 
-  it("503 coi_gap_disabled when the flag is off (after authz, before any write)", async () => {
+  it("500 coi_gap_disabled when the flag is off (after authz, before any write)", async () => {
     mockIsCoiGapEnabled.mockReturnValue(false);
     const res = await POST(post("gap-1"), ctx("gap-1"));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "coi_gap_disabled" });
     expect(mockTransaction).not.toHaveBeenCalled();
   });

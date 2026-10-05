@@ -26,11 +26,11 @@ function stubDirectory(people: unknown[]) {
   );
 }
 
-/** Mock `/api/directory/people` returning a 503 (directory unreachable). */
+/** Mock `/api/directory/people` returning a 500 (directory unreachable). */
 function stub503() {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify({ ok: false, error: "directory_unavailable" }), {
-      status: 503,
+      status: 500,
       headers: { "Content-Type": "application/json" },
     }),
   );
@@ -151,7 +151,7 @@ describe("AdministratorsRoster — directory enrichment", () => {
     expect(screen.queryByTestId("administrators-name-degraded-note")).toBeNull();
   });
 
-  it("keeps the server names + note when the directory fetch fails (503)", async () => {
+  it("keeps the server names + note when the directory fetch fails (500)", async () => {
     stub503();
     render(
       <AdministratorsRoster
@@ -161,7 +161,7 @@ describe("AdministratorsRoster — directory enrichment", () => {
         nameResolutionDegraded={true}
       />,
     );
-    // 503 ⇒ trust the server seed; the note stays.
+    // 500 ⇒ trust the server seed; the note stays.
     await waitFor(() =>
       expect(screen.getByTestId("administrators-name-degraded-note")).toBeTruthy(),
     );

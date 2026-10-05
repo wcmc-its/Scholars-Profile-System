@@ -266,9 +266,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // --- BUFFERED path (default / un-flipped env). Unchanged response shape: a gateway
-  //     throw is a 502 (SPEC G8), every other outcome a single editOk JSON body. ---
+  //     throw is a 500 (SPEC G8), every other outcome a single editOk JSON body. ---
   const r = await runGeneration();
-  if (!r.ok) return editError(502, r.error);
+  if (!r.ok) return editError(500, r.error);
   return editOk({
     draft: r.draft,
     model: r.model,

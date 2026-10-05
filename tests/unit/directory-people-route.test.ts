@@ -1,6 +1,6 @@
 /**
  * `app/api/directory/people/route.ts` — SSO gate, q-mode + cwids-mode
- * validation, and the 503 LDAP-unavailable path (#540 Phase 7 § 13). The LDAP
+ * validation, and the 500 LDAP-unavailable path (#540 Phase 7 § 13). The LDAP
  * helpers are mocked at the module boundary (cleaner than a raw ldapts client
  * stub and equally faithful to the route's contract).
  */
@@ -127,10 +127,10 @@ describe("GET /api/directory/people — cwids mode", () => {
 });
 
 describe("GET /api/directory/people — failures", () => {
-  it("503 when the directory is unreachable", async () => {
+  it("500 when the directory is unreachable", async () => {
     mockSearchByName.mockRejectedValue(new Error("SCHOLARS_LDAP_URL is not set"));
     const res = await get("?q=ada");
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     const json = (await res.json()) as { ok: boolean; error: string };
     expect(json.error).toBe("directory_unavailable");
   });

@@ -563,8 +563,8 @@ describe("OverviewCard — generator affordance", () => {
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
   });
 
-  it("on a 502 shows the inline generation error and leaves the editor unchanged (G8)", async () => {
-    stubGenerateError(502, "generation_failed");
+  it("on a 500 shows the inline generation error and leaves the editor unchanged (G8)", async () => {
+    stubGenerateError(500, "generation_failed");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
