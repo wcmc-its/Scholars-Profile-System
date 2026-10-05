@@ -1,8 +1,9 @@
 /**
  * The Administrators page's "All roles" tab: every role, how it's granted,
  * and what it can and can't do (`lib/edit/role-catalog.ts`). Read-only.
- * Holder counts show where the grants live in our tables; ED-group roles say
- * where membership is managed instead.
+ * Holders: an expandable list of names for every role we can read (our own
+ * tables, and ED groups via `memberURL`); an unreadable ED group says where
+ * membership is managed instead.
  */
 import {
   ROLE_CATALOG,
@@ -46,26 +47,26 @@ function Holders({
   members: RoleMembers;
 }) {
   if (role.source === "scholar") return <>Set by each scholar</>;
-  if (role.source === "ed_group") {
-    const list = members[role.key];
-    if (!list) return <>Managed in MARIA</>;
-    if (list.length === 0) return <>No one</>;
-    return (
-      <details>
-        <summary className="cursor-pointer">{people(list.length)}</summary>
-        <ul className="mt-1.5 flex flex-col gap-0.5" data-testid={`role-members-${role.key}`}>
-          {list.map((m) => (
-            <li key={m.cwid} className="whitespace-nowrap">
-              <span className="text-foreground">{m.name ?? m.cwid}</span>
-              {m.name && <span className="font-mono"> {m.cwid}</span>}
-            </li>
-          ))}
-        </ul>
-      </details>
-    );
+  const list = members[role.key];
+  if (!list) {
+    if (role.source === "ed_group") return <>Managed in MARIA</>;
+    const n = counts[role.key];
+    return <>{n === undefined ? "—" : people(n)}</>;
   }
-  const n = counts[role.key];
-  return <>{n === undefined ? "—" : people(n)}</>;
+  if (list.length === 0) return <>No one</>;
+  return (
+    <details>
+      <summary className="cursor-pointer">{people(list.length)}</summary>
+      <ul className="mt-1.5 flex flex-col gap-0.5" data-testid={`role-members-${role.key}`}>
+        {list.map((m) => (
+          <li key={m.cwid} className="whitespace-nowrap">
+            <span className="text-foreground">{m.name ?? m.cwid}</span>
+            {m.name && <span className="font-mono"> {m.cwid}</span>}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 }
 
 export function RolesCatalog({

@@ -33,7 +33,7 @@ vi.mock("@/components/ui/hover-card", () => ({
     React.createElement("div", { "data-testid": "hovercard-content" }, children),
 }));
 
-import { PersonPopover } from "@/components/scholar/person-popover";
+import { PersonPopover, resetPopoverCache } from "@/components/scholar/person-popover";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
 import {
   ScholarCardPickState,
@@ -108,6 +108,7 @@ function renderPopover(props: Partial<React.ComponentProps<typeof PersonPopover>
 }
 
 beforeEach(() => {
+  resetPopoverCache();
   act(() => setScholarFilter(null));
 });
 afterEach(() => {

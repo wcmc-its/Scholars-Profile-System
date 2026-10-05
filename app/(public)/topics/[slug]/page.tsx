@@ -38,6 +38,13 @@ import {
 export const revalidate = 7200;
 export const dynamicParams = true;
 
+// Without generateStaticParams Next renders this dynamic segment on every
+// request and `revalidate` is inert (see #3005). Empty list: nothing is
+// prebuilt; each path is cached on its first request.
+export async function generateStaticParams(): Promise<{ slug: string }[]> {
+  return [];
+}
+
 // #1514 — dedupe the loaders shared by generateMetadata + the page body within
 // a single request/regeneration. Without React `cache()` each ran twice per
 // render; `getDistinctScholarCountForTopic` is the known-heavy groupBy called

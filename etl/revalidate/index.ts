@@ -31,6 +31,7 @@
 import { db } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
 import { buildSitemapEntries, sitemapChunkCount } from "@/lib/sitemap";
+import { ALL_PROFILES_ROUTE } from "@/lib/revalidate-allowlist";
 
 /**
  * Origins from which `/api/revalidate` may be reached. Each entry matches an
@@ -111,21 +112,12 @@ async function requestRevalidate(p: string): Promise<void> {
  * dirtied: the home page, every topic page, the browse hub, every department
  * page, and the dynamic sitemap.
  *
- * Profile pages are deliberately absent, and no source-system ETL emits a
- * per-scholar revalidation either (grep `revalidat` under etl/ — only this
- * script, freshness, integrity, and orchestrate mention it). That is correct,
- * not a gap: the canonical profile route is `app/(public)/[slug]/page.tsx`,
- * which is `export const dynamic = "force-dynamic"` — it re-renders from the
- * DB on every request, so there is no ISR entry to bust. An ETL data change is
- * visible on the next page view with no revalidation at all.
- *
- * This ONLY holds while profiles stay force-dynamic. If a profile route is ever
- * made static/ISR (for latency — see the cold-start work), an ETL-driven change
- * would go stale with nothing to refresh it, and per-scholar revalidation must
- * be added at the same time. Note it would need the CANONICAL path: since #671
- * (`PROFILE_CANONICAL=root`, live in both envs) the profile is `/{slug}` and
- * `/scholars/{slug}` is a permanent redirect — revalidating the latter busts a
- * redirect, not a page.
+ * Profiles: the canonical profile route `app/(public)/[slug]/page.tsx` is ISR
+ * (6 h, since the 2026-10-01 load test; it was force-dynamic before). One
+ * request for the route pattern `ALL_PROFILES_ROUTE` marks every cached profile
+ * stale, so an ETL data change shows on the next view instead of waiting out the
+ * TTL; no per-scholar loop. Each stale profile regenerates lazily on its next
+ * request (stale-while-revalidate), so this costs no burst of origin renders.
  *
  * The shared Prisma read client is disconnected on every exit path so the
  * process can terminate cleanly.
@@ -142,6 +134,9 @@ export async function runRevalidate(): Promise<void> {
 
     await requestRevalidate("/browse");
     console.log("[Revalidate] queued /browse");
+
+    await requestRevalidate(ALL_PROFILES_ROUTE);
+    console.log("[Revalidate] queued all profiles");
 
     const depts = await db.read.department.findMany({ select: { slug: true } });
     for (const d of depts) {

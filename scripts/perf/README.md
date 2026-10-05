@@ -33,3 +33,16 @@ Interpreting results: staging OpenSearch is a single burstable `t3.medium.search
 node and saturates at ~5 concurrent, so its C=10 number **under-reports** prod
 (`m6g.large.search ×2`, Multi-AZ). Cross-reference the cluster-sizing table in the
 concurrency doc before reading a staging number as a go-live number.
+
+## Full-site load tests (IBM RPT)
+
+ITS runs multi-page user-flow load tests with IBM Rational Performance Tester (RPT). The first run (2026-10-01, 15 users on staging) and its findings are in [`docs/performance-baseline.md` § Full-site load test](../../docs/performance-baseline.md#full-site-load-test-ibm-rpt-2026-10-01). The target for later runs comes from the parallel Apollo (weillcornell.org) project: 500+ users with at least 20 logins/s. SPS public visitors don't log in, so read that as about 20 new visitors/s.
+
+Before trusting an RPT number:
+
+1. **Test prod-shaped capacity.** Staging runs 1 app task at 1 vCPU and Aurora at max 4 ACU; prod runs 2–6 tasks at 2 vCPU and max 8 ACU. Test prod in a quiet window, or raise staging to match for the test window and put it back afterwards. Check that staging Aurora is idle before starting.
+2. **Re-record after the latest deploy.** The script captures Next.js routing headers (`x-deployment-id`, `_rsc`) that change on every build. Re-record, or treat them as variables in RPT.
+3. **One transaction per user action.** SPS is a Next.js app: after the first load, clicks are client-side navigations plus background prefetches. RPT's default "page" grouping lumps several actions and their think time into one timer, and that produced the 21 s "page" times in the first run. Wrap each click in its own transaction and leave think time out of the timings.
+4. **Report the third-party host separately.** Headshots load from `directory.weill.cornell.edu`; about 60% of requests in the first run went there, and half of those were expected 404s (scholars with no photo).
+5. **Watch the server side during the run:** ALB `RequestCount`, `TargetResponseTime`, `HTTPCode_ELB_502_Count` vs `HTTPCode_Target_5XX_Count`; ECS service CPU/memory; Aurora `CPUUtilization`, `ServerlessDatabaseCapacity`, `DatabaseConnections`. Low TTFB with a slow total means the streamed body is waiting on Aurora.
+6. **Ramp up.** 15 users, then 50, 100, 250, 500. Land profile edge caching (open, see the baseline doc) before the 500-user step.

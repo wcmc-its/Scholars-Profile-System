@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverPrefetchLink } from "@/components/search/hover-prefetch-link";
 import { profilePath } from "@/lib/profile-url";
 import { phaseLabel, sponsorTypeLabel, type SponsorTypeKey } from "@/lib/edit/clinical-trials-report";
 import type { TrialHit, TrialMatchField } from "@/lib/api/search-trials";
@@ -119,9 +119,9 @@ export function TrialResultRow({
   const ctgovHref = hit.nctNumber ? `https://clinicaltrials.gov/study/${hit.nctNumber}` : null;
   const piLink = (p: TrialHit["pis"][number]) => (
     <span key={p.cwid} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <Link href={profilePath(p.slug)} className="text-[#2c4f6e] hover:underline">
+      <HoverPrefetchLink href={profilePath(p.slug)} className="text-[#2c4f6e] hover:underline">
         {p.name}
-      </Link>
+      </HoverPrefetchLink>
       <span className="inline-flex h-[18px] items-center rounded-sm bg-[#f1efe8] px-1.5 text-[10px] font-semibold tracking-wide text-[#444441] uppercase">
         PI
       </span>

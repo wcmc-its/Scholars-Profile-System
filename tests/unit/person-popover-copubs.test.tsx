@@ -31,7 +31,7 @@ vi.mock("@/components/ui/hover-card", () => ({
     React.createElement("div", { "data-testid": "hovercard-content" }, children),
 }));
 
-import { PersonPopover } from "@/components/scholar/person-popover";
+import { PersonPopover, resetPopoverCache } from "@/components/scholar/person-popover";
 
 type ApiPayload = Parameters<typeof JSON.stringify>[0];
 
@@ -65,7 +65,10 @@ function mockFetch(p: ApiPayload) {
   })) as unknown as typeof fetch;
 }
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  resetPopoverCache();
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("PersonPopover — primary institution line (non-WCMC only)", () => {
@@ -80,6 +83,7 @@ describe("PersonPopover — primary institution line (non-WCMC only)", () => {
     expect(await screen.findByText("Hospital for Special Surgery")).toBeTruthy();
     unmount();
 
+    resetPopoverCache(); // same URL: the page-wide cache would serve the HSS payload
     mockFetch(payload({ header: { ...payload().header, primaryOrgCode: "WCMC" } }));
     render(
       <PersonPopover cwid="mentee1" surface="facet">

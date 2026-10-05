@@ -125,20 +125,21 @@ export async function fetchPopoverHeader(
   // out-of-band value the enum hasn't caught up with hides rather than leaks.
   if (!isPubliclyDisplayed(scholar.roleCategory)) return null;
 
+  // Independent reads, run together (hover latency):
   // #356 — a per-author hide lowers the scholar's public publication count.
-  const hiddenPubs =
-    (await loadHiddenAuthorshipCounts([cwid], prisma)).get(cwid) ?? 0;
-
   // Resolve the topic slug to its human-readable label so the popover doesn't
   // render the slug verbatim ("melanoma_skin_cancer" → "Melanoma & Skin Cancer").
-  let topTopicLabel: string | null = null;
   const topTopicSlug = scholar.topicAssignments[0]?.topic ?? null;
-  if (topTopicSlug) {
-    const topic = await prisma.topic
-      .findUnique({ where: { id: topTopicSlug }, select: { label: true } })
-      .catch(() => null);
-    topTopicLabel = topic?.label ?? topTopicSlug;
-  }
+  const [hiddenCounts, topic] = await Promise.all([
+    loadHiddenAuthorshipCounts([cwid], prisma),
+    topTopicSlug
+      ? prisma.topic
+          .findUnique({ where: { id: topTopicSlug }, select: { label: true } })
+          .catch(() => null)
+      : null,
+  ]);
+  const hiddenPubs = hiddenCounts.get(cwid) ?? 0;
+  const topTopicLabel = topTopicSlug ? (topic?.label ?? topTopicSlug) : null;
 
   const { identityImageEndpoint } = await import("@/lib/headshot");
   return {

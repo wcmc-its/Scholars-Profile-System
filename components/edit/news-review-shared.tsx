@@ -93,6 +93,18 @@ export function decisionErrorMessage(
       "from the Rejected tab instead. Nothing was changed."
     );
   }
+  if (status === 409 && code === "contested") {
+    return `Pick the right scholar for this ${noun} first, then add anyone else. Nothing was changed.`;
+  }
+  if (status === 409 && code === "source_rejected") {
+    return `This ${noun} is rejected, so no one can be added to it. Nothing was changed.`;
+  }
+  if (status === 409 && code === "already_credited") {
+    return `That scholar is already credited with this ${noun}. Nothing was changed.`;
+  }
+  if (status === 400 && code === "same_scholar") {
+    return `That scholar is already credited with this ${noun}.`;
+  }
   return "We couldn't record that decision. Please try again.";
 }
 
@@ -166,6 +178,26 @@ export async function postDecision(
     };
   } catch {
     return { ok: false, message: "We couldn't record that decision. Please try again." };
+  }
+}
+
+/** POST a Media highlights "Add person": credit clip `id` to `cwid` too. Never
+ *  throws; never refreshes. Undo it with the returned `decisionId`. */
+export async function postAddPerson(
+  id: string,
+  cwid: string,
+): Promise<{ ok: true; decisionId: string | null } | { ok: false; message: string }> {
+  try {
+    const res = await fetch("/api/edit/news-mention/add-person", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, cwid }),
+    });
+    const data = (await res.json().catch(() => null)) as { error?: string; decisionId?: string } | null;
+    if (!res.ok) return { ok: false, message: decisionErrorMessage(res.status, data?.error, "clip") };
+    return { ok: true, decisionId: data?.decisionId ?? null };
+  } catch {
+    return { ok: false, message: "We couldn't add that person. Please try again." };
   }
 }
 

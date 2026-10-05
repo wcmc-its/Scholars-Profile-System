@@ -138,7 +138,7 @@ export default async function AdministratorsPage() {
     if (scope.length === 0 && seesRoleCatalog) {
       const [roleCounts, roleMembers] = await Promise.all([
         loadRoleHolderCounts(db.read),
-        loadRoleMembers(),
+        loadRoleMembers({ client: db.read }),
       ]);
       return (
         <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
@@ -174,7 +174,7 @@ export default async function AdministratorsPage() {
       getCoreList(db.read),
       canManageFunctionalRoles(session) ? loadFunctionalRolesTab() : Promise.resolve(undefined),
       seesRoleCatalog ? loadRoleHolderCounts(db.read) : Promise.resolve(undefined),
-      seesRoleCatalog ? loadRoleMembers() : Promise.resolve(undefined),
+      seesRoleCatalog ? loadRoleMembers({ client: db.read }) : Promise.resolve(undefined),
     ]);
 
   // The "URL requests" admin tab + pending-count pill; `null` when the

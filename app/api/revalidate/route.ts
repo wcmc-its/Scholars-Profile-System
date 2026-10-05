@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { getRevalidateTokens, isAuthorizedBearer } from "@/lib/revalidate-auth";
-import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
+import { ALL_PROFILES_ROUTE, isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
 import { apiError } from "@/lib/api/error-response";
 
 /**
@@ -57,6 +57,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return apiError("path not allowed", 400);
   }
 
-  revalidatePath(path);
+  // A route pattern needs type "page" or Next ignores it.
+  if (path === ALL_PROFILES_ROUTE) revalidatePath(path, "page");
+  else revalidatePath(path);
   return NextResponse.json({ revalidated: path });
 }

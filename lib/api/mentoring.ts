@@ -225,7 +225,7 @@ export type MenteesResult = {
  * hiccup degrades to "no AOC chips", exactly the in-VPC behavior the bridge
  * replaces (no regression).
  */
-async function loadAocRows(mentorCwid: string): Promise<AocRow[]> {
+async function loadAocRows(mentorCwid: string, strict = false): Promise<AocRow[]> {
   try {
     if (process.env.MENTORING_COPUB_BRIDGE === "on") {
       try {
@@ -247,6 +247,7 @@ async function loadAocRows(mentorCwid: string): Promise<AocRow[]> {
           programType: r.programType,
         }));
       } catch (err) {
+        if (strict) throw err;
         console.error(
           `[mentoring] aoc bridge read failed for mentor ${mentorCwid}`,
           err,
@@ -262,7 +263,8 @@ async function loadAocRows(mentorCwid: string): Promise<AocRow[]> {
         [mentorCwid],
       )) as AocRow[];
     })) as AocRow[];
-  } catch {
+  } catch (err) {
+    if (strict) throw err;
     return [];
   }
 }
@@ -335,6 +337,7 @@ function localAuthors(fullAuthorsString: string | null): CoPublicationAuthor[] {
 async function localCoPublications(
   mentorCwid: string,
   menteeCwids: string[],
+  strict = false,
 ): Promise<Map<string, CoPublicationFull[]>> {
   const out = new Map<string, CoPublicationFull[]>();
   const targets = [...new Set(menteeCwids)].filter(
@@ -429,6 +432,7 @@ async function localCoPublications(
     }
     return out;
   } catch (err) {
+    if (strict) throw err;
     console.error(
       `[mentoring] local co-pub computation failed for mentor ${mentorCwid}`,
       err,
@@ -469,16 +473,22 @@ async function localCoPublications(
  * mentee identity + program (the `/edit` Mentees panel, #955 finding #5) use
  * this to avoid the per-mentee count/preview work on every load; every
  * `copublicationCount` is then 0 and `copubSourceAvailable` is false.
+ *
+ * `options.strict` (default `false`) — rethrow source read failures instead of
+ * degrading. The public profile is ISR: a degraded Mentoring section would be
+ * cached for the whole revalidate window, while a thrown render makes Next keep
+ * serving the last good page. Per-request `/edit` callers keep the degrade.
  */
 export async function getMenteesForMentor(
   mentorCwid: string,
-  options?: { sort?: MenteeSort; includeCopubs?: boolean },
+  options?: { sort?: MenteeSort; includeCopubs?: boolean; strict?: boolean },
 ): Promise<MenteesResult> {
   if (!mentorCwid) return { mentees: [], copubSourceAvailable: true };
+  const strict = options?.strict ?? false;
 
   const [aocRows, jenzabarRows, postdocRows, manualRows] = await Promise.all([
     // #928 — AOC source switches on MENTORING_COPUB_BRIDGE inside the helper.
-    loadAocRows(mentorCwid),
+    loadAocRows(mentorCwid, strict),
     prisma.phdMentorRelationship.findMany({
       where: { mentorCwid },
       select: {
@@ -506,6 +516,7 @@ export async function getMenteesForMentor(
     // /edit. Additive to the three ETL sources. Best-effort: a read failure
     // must not take down a Mentoring section the ETL sources can still fill.
     getManualMentees(mentorCwid, prisma).catch((err) => {
+      if (strict) throw err;
       console.error(`[mentoring] manual mentee read failed for mentor ${mentorCwid}`, err);
       return [];
     }),
@@ -757,6 +768,7 @@ export async function getMenteesForMentor(
           select: { mentorCwid: true },
         })) !== null;
     } catch (err) {
+      if (strict) throw err;
       console.error(
         `[mentoring] copub bridge read failed for mentor ${mentorCwid}`,
         err,
@@ -804,6 +816,7 @@ export async function getMenteesForMentor(
       }
       copubSourceAvailable = true;
     }).catch((err) => {
+      if (strict) throw err;
       // Issue #843 — DE-SILENCE: this was a silent `.catch(() => {})`, which
       // gave operators zero visibility when ReciterDB was unreachable and left
       // every mentee's co-pub count a misleading zero. Log with the mentor cwid
@@ -831,7 +844,7 @@ export async function getMenteesForMentor(
   // #2047 — sourced mentees the bridge has no row for join the same local ask.
   const localCwids = [...manualOnlyCwids, ...bridgeGapCwids];
   if (includeCopubs && localCwids.length > 0) {
-    const local = await localCoPublications(mentorCwid, localCwids);
+    const local = await localCoPublications(mentorCwid, localCwids, strict);
     for (const [cwid, pubs] of local) {
       copubCountByCwid.set(cwid, pubs.length);
       // Top 3, same order the bridge preview uses (#185). One source for both the

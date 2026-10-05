@@ -40,6 +40,7 @@ function row(over: Partial<NewsQueueRow>): NewsQueueRow {
     createdAt: "2026-09-01T00:00:00.000Z",
     decidedAt: "2026-09-01T00:00:00.000Z",
     competingCwids: [],
+    alsoCredited: [],
     showOnProfile: true,
     prominence: 0,
     leadershipTier: 3,

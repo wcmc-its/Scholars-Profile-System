@@ -25,7 +25,10 @@ type CountClient = {
   };
 };
 
-export async function loadRoleHolderCounts(client: CountClient): Promise<RoleHolderCounts> {
+/** The CWIDs holding each role granted in our own tables (unit roles,
+ *  Reporting), lowercased and de-duplicated. A failed read leaves that
+ *  table's roles out, never empty. */
+async function tableRoleCwids(client: CountClient): Promise<Map<string, string[]>> {
   const [admins, reporting] = await Promise.all([
     Promise.resolve()
       .then(() => client.unitAdmin.findMany({ select: { cwid: true, role: true, entityType: true } }))
@@ -36,38 +39,51 @@ export async function loadRoleHolderCounts(client: CountClient): Promise<RoleHol
       )
       .catch(() => null),
   ]);
-  const counts: RoleHolderCounts = {};
+  const out = new Map<string, string[]>();
+  const distinct = (rows: Array<{ cwid: string }>) => [
+    ...new Set(rows.map((r) => r.cwid.toLowerCase())),
+  ];
   if (admins) {
-    type Admin = { cwid: string; role: string; entityType: string };
-    const people = (pred: (a: Admin) => boolean) =>
-      new Set(admins.filter(pred).map((a) => a.cwid.toLowerCase())).size;
-    counts.unit_owner = people((a) => a.entityType !== "institution" && a.role === "owner");
-    counts.unit_curator = people((a) => a.entityType !== "institution" && a.role === "curator");
-    counts.institution_admin = people((a) => a.entityType === "institution");
+    const units = admins.filter((a) => a.entityType !== "institution");
+    out.set("unit_owner", distinct(units.filter((a) => a.role === "owner")));
+    out.set("unit_curator", distinct(units.filter((a) => a.role === "curator")));
+    out.set("institution_admin", distinct(admins.filter((a) => a.entityType === "institution")));
   }
-  if (reporting) counts.reporting = new Set(reporting.map((r) => r.cwid.toLowerCase())).size;
+  if (reporting) out.set("reporting", distinct(reporting));
+  return out;
+}
+
+export async function loadRoleHolderCounts(client: CountClient): Promise<RoleHolderCounts> {
+  const counts: RoleHolderCounts = {};
+  for (const [key, cwids] of await tableRoleCwids(client)) counts[key] = cwids.length;
   return counts;
 }
 
 type MemberDeps = {
+  /** Also list the roles granted in our own tables (unit roles, Reporting). */
+  client?: CountClient;
   listMembers?: typeof listGroupMemberCwids;
   resolveNames?: (cwids: Iterable<string>) => Promise<Map<string, string>>;
 };
 
 /**
- * Members of every ED-group role in the catalog, with ED display names, keyed
- * by catalog key. The superuser row also lists the interim allowlist, which
+ * Members of every ED-group role in the catalog, plus (given `client`) the
+ * roles granted in our own tables, with ED display names, keyed by catalog
+ * key. The superuser row also lists the interim allowlist, which
  * confers the role without the group. Names fall back to null (the CWID shows).
  */
 export async function loadRoleMembers(deps: MemberDeps = {}): Promise<RoleMembers> {
   const listMembers = deps.listMembers ?? listGroupMemberCwids;
   const resolveNames = deps.resolveNames ?? ((c: Iterable<string>) => resolveDirectoryNames(c));
   const edRoles = ROLE_CATALOG.filter((r) => r.source === "ed_group" && r.groupCn);
-  const byCn = await listMembers(
-    edRoles.map((r) => r.groupCn!),
-    (reason) => console.warn(JSON.stringify({ event: "role_members_read_failed", reason })),
-  );
-  const cwidsByKey = new Map<string, string[]>();
+  const [byCn, tables] = await Promise.all([
+    listMembers(
+      edRoles.map((r) => r.groupCn!),
+      (reason) => console.warn(JSON.stringify({ event: "role_members_read_failed", reason })),
+    ),
+    deps.client ? tableRoleCwids(deps.client) : new Map<string, string[]>(),
+  ]);
+  const cwidsByKey = new Map<string, string[]>(tables);
   for (const r of edRoles) {
     const cwids = byCn.get(r.groupCn!);
     if (!cwids) continue;

@@ -169,3 +169,24 @@ describe("popover-context route — taxonomy-card scope", () => {
     expect(mockTopicScopePmids).not.toHaveBeenCalled();
   });
 });
+
+describe("popover-context route — edge caching", () => {
+  it("lets CloudFront cache a complete response briefly", async () => {
+    const res = await call("?surface=top-scholar&contextMethods=1");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=300");
+  });
+
+  it("never caches a degraded response (a lookup fell back)", async () => {
+    mockGetScholarMethodFamilies.mockRejectedValue(new Error("aurora blip"));
+    const res = await call("?surface=top-scholar&contextMethods=1");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("never caches a 404", async () => {
+    mockFetchPopoverHeader.mockResolvedValue(null);
+    const res = await call("?surface=top-scholar");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});

@@ -220,6 +220,14 @@ describe("getMenteesForMentor — AOC bridge read failure is non-fatal", () => {
     expect(mentees.map((m) => m.cwid)).toContain("phd1");
     expect(mentees.some((m) => m.cwid === "aoc1")).toBe(false);
   });
+
+  it("strict (the ISR profile) rethrows instead of caching a degraded section", async () => {
+    aocMenteeFindMany.mockRejectedValue(new Error("aurora down"));
+
+    await expect(getMenteesForMentor("mentor01", { strict: true })).rejects.toThrow(
+      "aurora down",
+    );
+  });
 });
 
 describe("getMentorMenteePair — AOC source switch (issue #928)", () => {

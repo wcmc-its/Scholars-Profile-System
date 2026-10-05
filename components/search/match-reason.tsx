@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { HoverPrefetchLink } from "@/components/search/hover-prefetch-link";
 import { ChevronDown, FileText, Shapes, Waypoints } from "lucide-react";
 import { PubTitle } from "@/components/publication/pub-html";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
@@ -878,13 +879,13 @@ export function RepresentativePapers({
         ))}
       </ul>
       {more > 0 ? (
-        <Link
+        <HoverPrefetchLink
           href={profileHref}
           onClick={(e) => e.stopPropagation()}
           className="relative z-10 mt-1.5 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
         >
           +{more} more in profile →
-        </Link>
+        </HoverPrefetchLink>
       ) : null}
     </div>
   );
@@ -984,13 +985,13 @@ export function KeyFunding({
         })}
       </ul>
       {more > 0 ? (
-        <Link
+        <HoverPrefetchLink
           href={profileHref}
           onClick={(e) => e.stopPropagation()}
           className="relative z-10 mt-1.5 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
         >
           +{more} more in profile →
-        </Link>
+        </HoverPrefetchLink>
       ) : null}
     </div>
   );

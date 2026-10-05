@@ -27,11 +27,20 @@ const SLUG_RE_SOURCE = "[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?";
 const TOPIC_SLUG_RE_SOURCE = "[a-zA-Z0-9](?:[a-zA-Z0-9_-]*[a-zA-Z0-9])?";
 
 /** Exact paths eligible for revalidation. */
+/**
+ * The profile route PATTERN (not a URL). Revalidated with type "page", it marks
+ * every cached `/{slug}` profile stale in one call: Next tags each ISR entry with
+ * its app page path, route group included (`/(public)/[slug]/page`). The nightly
+ * sweep uses it so ETL changes don't wait out the 6 h TTL.
+ */
+export const ALL_PROFILES_ROUTE = "/(public)/[slug]";
+
 export const ALLOWED_EXACT: ReadonlySet<string> = new Set([
   "/",
   "/about",
   "/browse",
   "/sitemap.xml",
+  ALL_PROFILES_ROUTE,
 ]);
 
 /** Dynamic-path patterns eligible for revalidation. */
@@ -40,9 +49,8 @@ export const ALLOWED_PATTERNS: readonly RegExp[] = [
   // 2026-07-14; the `PROFILE_CANONICAL` rollback flag has since been removed)
   // this is the LEGACY path — `/scholars/{slug}` permanently redirects to the
   // canonical `/{slug}`. Revalidating it busts a redirect, not a profile.
-  // Harmless either way: the canonical profile route is force-dynamic, so it
-  // holds no ISR entry to bust. Anything that needs to refresh a profile
-  // should re-render it, not revalidate it. Left on the allow-list so a stale
+  // Refresh a profile via its canonical `/{slug}` (or every profile via
+  // ALL_PROFILES_ROUTE), never this path. Left on the allow-list so a stale
   // caller still asking for the legacy path doesn't hit the reject-and-warn
   // branch below.
   new RegExp(`^/scholars/${SLUG_RE_SOURCE}$`),
