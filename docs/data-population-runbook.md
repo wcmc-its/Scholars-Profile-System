@@ -238,9 +238,9 @@ aws ecs run-task --cluster sps-cluster-$ENV \
 ```
 
 (`ETL_SUBNETS` = the env's two `private` subnets, `ETL_SG` = its `EtlSecurityGroup`,
-resolved live from the deployed nightly state machine so this never rots. As of
-2026-07-04: staging = shared VPC `vpc-08a1873fc8eebae28` (`10.x.x.x/25` internal); prod =
-`vpc-0d0209cbfd298c892` (`10.x.0.0/16` internal) until its cutover.)
+resolved live from the deployed nightly state machine so this never rots. Both envs
+run in the shared VPC `vpc-08a1873fc8eebae28` (`10.x.x.x/25` internal) since the
+2026-07 cutover; the old per-env Sps VPCs are retired.)
 
 Watch the task's `/aws/ecs/sps-etl-$ENV` log stream to completion (the indexer
 logs people/publication/funding counts and the alias swap).
@@ -440,8 +440,8 @@ Aurora writer. Tear it down when done.
 export ENV=staging   # then repeat for prod -- see §7.4
 
 # Resolve the env's private subnets + EtlSecurityGroup live (rot-proof -- never
-# hardcode; the 2026-07-02 staging cutover to the shared VPC changed both, and the
-# old `Sps-Network-$ENV` stack no longer owns them). Same resolver as §3:
+# hardcode; the 2026-07 cutover to the shared VPC changed both, and the retired
+# `Sps-Network-$ENV` stack is no longer synthesized). Same resolver as §3:
 read ETL_SUBNETS ETL_SG < <(aws stepfunctions describe-state-machine \
   --state-machine-arn "$(aws stepfunctions list-state-machines \
      --query "stateMachines[?contains(name,'scholars-nightly-$ENV')].stateMachineArn|[0]" --output text)" \

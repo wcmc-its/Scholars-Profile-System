@@ -3,6 +3,31 @@ import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
+/**
+ * Import the shared its-reciter VPC by attributes (no context lookup, so synth
+ * is deterministic). Only vpcId + AZs: every downstream placement selects
+ * explicit per-tier subnet ids (resolveTierSubnets), so the import needs no
+ * subnet lists, and omitting them avoids CDK's "privateSubnetIds must be a
+ * multiple of availabilityZones" pairing (which could mis-assign a subnet's AZ).
+ * Emits no resources and no cross-stack reference, so it can be called in any
+ * stack scope. Call once per stack (the construct id is fixed).
+ *
+ * Throws when {@link SpsEnvConfig.useSharedVpc} is off: the standalone topology
+ * gets its VPC from NetworkStack, which bin/sps-infra.ts only creates flag-off.
+ */
+export function importSharedVpc(scope: Construct, cfg: SpsEnvConfig): ec2.IVpc {
+  if (!cfg.useSharedVpc) {
+    throw new Error(
+      `importSharedVpc: env="${cfg.envName}" has useSharedVpc=false; pass the ` +
+        `standalone NetworkStack vpc instead.`,
+    );
+  }
+  return ec2.Vpc.fromVpcAttributes(scope, "SharedVpc", {
+    vpcId: cfg.sharedVpc.vpcId,
+    availabilityZones: [...cfg.sharedVpc.availabilityZones],
+  });
+}
+
 /** A placement tier in the estate-consolidation subnet layout (plan §4.4). */
 export type SharedTier = "app" | "data" | "alb";
 

@@ -18,10 +18,11 @@ const app = new App();
 const envConfig = resolveEnvConfig(app.node.tryGetContext("env"));
 
 // Estate-consolidation cutover gate (docs/sps-vpc-consolidation-plan.md
-// §6.2/§8.5/§8.6; #1370): useSharedVpc is not yet deployable — flipping it would
-// CFN-replace Aurora/OpenSearch in place into empty datastores. Hard-throws while
-// the flag is on (shipped config is false → inert today; also fails CI on any
-// premature useSharedVpc:true commit). Lifted by the snapshot-restore cutover task.
+// §6.2/§8.5/§8.6; #1370): refuses to synth an env with useSharedVpc on but no
+// auroraSnapshotIdentifier, which would CFN-replace Aurora/OpenSearch in place
+// into empty datastores. Both envs now ship useSharedVpc:true WITH a snapshot
+// id (cutover complete), so the gate passes; it still fails any config that
+// flips the flag without the snapshot-restore data path.
 assertCutoverGate(envConfig);
 
 // ADR-008: staging and production are separate AWS accounts. The account id is
@@ -35,11 +36,18 @@ const account = app.node.tryGetContext(`${envConfig.envName}Account`) as
 const env: Environment = { account, region: envConfig.region };
 const drEnv: Environment = { account, region: envConfig.drRegion };
 
-const networkStack = new NetworkStack(app, `Sps-Network-${envConfig.envName}`, {
-  env,
-  envConfig,
-  description: `SPS network — VPC and security groups, ${envConfig.envName} (ADR-008).`,
-});
+// NetworkStack owns the standalone Sps VPC and is synthesized only flag-off.
+// With useSharedVpc on (both envs since the cutover) Data/App/Etl import the
+// shared VPC themselves (importSharedVpc), so Sps-Network-<env> is no longer in
+// the app: a `cdk deploy --all` can no longer recreate the retired stack or
+// write SGs/SSM params into the shared VPC (#1458).
+const networkStack = envConfig.useSharedVpc
+  ? undefined
+  : new NetworkStack(app, `Sps-Network-${envConfig.envName}`, {
+      env,
+      envConfig,
+      description: `SPS network — VPC and security groups, ${envConfig.envName} (ADR-008).`,
+    });
 
 // DR-region BackupVault — referenced cross-region by DataStack's BackupPlan
 // copyAction (B10). `crossRegionReferences: true` on both stacks lets CDK
@@ -59,7 +67,7 @@ const dataStack = new DataStack(app, `Sps-Data-${envConfig.envName}`, {
   env,
   envConfig,
   crossRegionReferences: true,
-  vpc: networkStack.vpc,
+  vpc: networkStack?.vpc,
   drBackupVault: drBackupVaultStack.vault,
   description: `SPS data — Aurora MySQL, OpenSearch, AWS Backup, ${envConfig.envName} (ADR-008).`,
 });
@@ -79,7 +87,7 @@ new SecretsStack(app, `Sps-Secrets-${envConfig.envName}`, {
 const appStack = new AppStack(app, `Sps-App-${envConfig.envName}`, {
   env,
   envConfig,
-  vpc: networkStack.vpc,
+  vpc: networkStack?.vpc,
   description: `SPS application plane — ECR, ECS Fargate, ALBs, VPC endpoints, ${envConfig.envName} (ADR-008).`,
 });
 
@@ -93,7 +101,7 @@ const appStack = new AppStack(app, `Sps-App-${envConfig.envName}`, {
 const etlStack = new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   env,
   envConfig,
-  vpc: networkStack.vpc,
+  vpc: networkStack?.vpc,
   ecsCluster: appStack.ecsCluster,
   etlEcrRepository: appStack.etlEcrRepository,
   bulkDataRuleEcrRepository: appStack.bulkDataRuleEcrRepository,

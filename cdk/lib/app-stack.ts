@@ -23,7 +23,11 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
-import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
+import {
+  importSharedVpc,
+  resolveSharedSg,
+  resolveTierSubnets,
+} from "./shared-vpc-subnets";
 
 /**
  * ADOT collector image, pinned by digest.
@@ -94,8 +98,12 @@ const SCHOLARS_MAIL_FROM = "no-reply-scholars@weill.cornell.edu";
 export interface AppStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /** VPC every workload runs in (from NetworkStack). */
-  readonly vpc: ec2.IVpc;
+  /**
+   * VPC every workload runs in. Flag-off: the standalone NetworkStack VPC. Omitted when
+   * {@link SpsEnvConfig.useSharedVpc} is on (NetworkStack is not synthesized
+   * then); the stack imports the shared VPC itself via importSharedVpc.
+   */
+  readonly vpc?: ec2.IVpc;
 }
 
 /**
@@ -190,7 +198,8 @@ export class AppStack extends Stack {
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
 
-    const { envConfig, vpc } = props;
+    const { envConfig } = props;
+    const vpc = props.vpc ?? importSharedVpc(this, envConfig);
     const env = envConfig.envName;
     // `scholars-honors-<env>` (EtlStack HonorsStateMachine), by name -- see
     // TaskRoleHonorsRunNowPolicy below.

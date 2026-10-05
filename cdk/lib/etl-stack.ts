@@ -23,8 +23,13 @@ import { CLIPS_PREFIX, FUNDING_PREFIX, inboundMailBucketName } from "./inbound-m
 export interface EtlStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /** VPC every workload runs in (from NetworkStack). */
-  readonly vpc: ec2.IVpc;
+  /**
+   * VPC every workload runs in. Flag-off: the standalone NetworkStack VPC.
+   * Optional and currently unused (ECS RunTask resolves the VPC from
+   * `ecsCluster`); omitted when {@link SpsEnvConfig.useSharedVpc} is on, since
+   * NetworkStack is not synthesized then.
+   */
+  readonly vpc?: ec2.IVpc;
   /** ECS cluster the ETL task family runs in (from AppStack). */
   readonly ecsCluster: ecs.ICluster;
   /**

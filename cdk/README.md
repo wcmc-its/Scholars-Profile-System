@@ -15,7 +15,7 @@ ESLint.
 | ------------------------------- | -------------------------------------------------------------------- |
 | `bin/sps-infra.ts`              | CDK app entry — instantiates the stacks per environment              |
 | `lib/config.ts`                 | Per-environment configuration (`staging`, `prod`)                    |
-| `lib/network-stack.ts`          | `NetworkStack` — VPC and security groups (Phase 0)                   |
+| `lib/network-stack.ts`          | `NetworkStack` — standalone VPC + SGs; not synthesized when `useSharedVpc` is on (#1458) |
 | `lib/dr-backup-vault-stack.ts`  | `DrBackupVaultStack` — DR-region BackupVault, `us-west-2` (Phase 1)  |
 | `lib/data-stack.ts`             | `DataStack` — Aurora, OpenSearch, AWS Backup plan (Phase 1)          |
 | `lib/secrets-stack.ts`          | `SecretsStack` — empty Secrets Manager entries (Phase 1)             |
