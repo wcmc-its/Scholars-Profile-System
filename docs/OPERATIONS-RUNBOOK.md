@@ -188,7 +188,7 @@ The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) liv
 
 ### The CDK stacks (`../cdk/bin/sps-infra.ts`)
 
-Nine stack classes, each `Sps-{X}-${env}` (e.g. `Sps-App-prod`). `Sps-Network-<env>` is **not synthesized while `useSharedVpc` is on** (both envs today); Data and App import the shared VPC directly, so eight stacks deploy per env. Selected via `-c env=staging|prod`; account via `-c <envName>Account=<id>` (never committed). `DataStack` and `NetworkStack` (flag-off only) carry `RemovalPolicy.RETAIN` + deletion protection so a bad `AppStack` deploy can't tear down the database.
+Ten stack classes, mostly `Sps-{X}-${env}` (e.g. `Sps-App-prod`). `Sps-Network-<env>` is **not synthesized while `useSharedVpc` is on** (both envs today); Data and App import the shared VPC directly, so eight stacks deploy in staging and nine in prod (prod adds the account-singleton `Sps-InboundMail`). Selected via `-c env=staging|prod`; account via `-c <envName>Account=<id>` (never committed). `DataStack` and `NetworkStack` (flag-off only) carry `RemovalPolicy.RETAIN` + deletion protection so a bad `AppStack` deploy can't tear down the database.
 
 | Stack | Provisions |
 |---|---|
