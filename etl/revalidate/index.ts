@@ -18,9 +18,9 @@
  * keep the token from leaking if `SCHOLARS_BASE_URL` is misconfigured or
  * injected, every effective origin is checked against a small fixed allowlist
  * before the fetch fires. The allowlist intentionally avoids a wildcard ELB
- * pattern — it pins to our exact internal-ALB naming convention so that any
- * accidental redirect to an arbitrary `*.elb.amazonaws.com` host (someone
- * else's tenant ALB) is refused, not allowed.
+ * pattern — the internal ALB is accepted only by exact origin equality with
+ * `SCHOLARS_INTERNAL_ALB_ORIGIN`, so any accidental redirect to an arbitrary
+ * `*.elb.amazonaws.com` host (someone else's tenant ALB) is refused.
  *
  * Failure model
  * -------------
@@ -34,38 +34,47 @@ import { buildSitemapEntries, sitemapChunkCount } from "@/lib/sitemap";
 import { ALL_PROFILES_ROUTE } from "@/lib/revalidate-allowlist";
 
 /**
- * Origins from which `/api/revalidate` may be reached. Each entry matches an
- * EXACT URL.origin (scheme + host + port). The internal-ALB pattern is pinned
- * to our own load-balancer naming convention (`sps-internal-{env}-...`); a
- * generic `*.elb.amazonaws.com` would accept any tenant's ALB and is rejected.
+ * Fixed origins from which `/api/revalidate` may be reached. Each entry matches
+ * an EXACT URL.origin (scheme + host + port).
  */
 const ALLOWED_BASE_ORIGINS: ReadonlyArray<RegExp> = [
   /^http:\/\/localhost:3000$/,
   /^https:\/\/scholars\.weill\.cornell\.edu$/,
-  // The VPC-private internal ALB the ETL task talks to (HTTP on :80; the
-  // internal listener has no TLS). The trailing `\d+` is the LB suffix the
-  // ALB construct appends to keep the name unique within an account/region.
-  /^http:\/\/sps-internal-(?:staging|prod)-\d+\.[a-z0-9-]+\.elb\.amazonaws\.com$/,
-  // Post-VPC-consolidation the app stack's internal ALB is CDK-auto-named
-  // (`internal-Sps-Ap-Inter-<hash>-<num>`) instead of the older custom
-  // `sps-internal-{env}` name, so the pattern above no longer matched and every
-  // revalidation was skipped. Both env stacks share the same ALB construct path,
-  // so this construct-derived prefix covers staging and prod; the random
-  // `<hash>`/`<num>` are wildcarded so an ALB replacement won't re-break it.
-  // (Still specific to our own construct prefix — not a generic `*.elb`.)
-  // Matched lowercase: `new URL(baseUrl).origin` lower-cases the host.
-  /^http:\/\/internal-sps-ap-inter-[a-z0-9]+-\d+\.[a-z0-9-]+\.elb\.amazonaws\.com$/,
 ];
 
-/** Whether `baseUrl` parses + matches one of the allowed origins. */
-export function isAllowedBaseUrl(baseUrl: string): boolean {
-  let origin: string;
+/**
+ * ponytail: transitional fallback for the CDK-auto-named internal ALB, used ONLY
+ * when SCHOLARS_INTERNAL_ALB_ORIGIN is unset (#1473 band-aid). ETL code ships on
+ * ECR push before the Sps-Etl cdk deploy that sets the var, so dropping it
+ * outright would skip revalidations in that gap. Remove after Sps-Etl is
+ * deployed in both envs (#1478). Matched lowercase: URL.origin lower-cases.
+ */
+const LEGACY_INTERNAL_ALB_ORIGIN =
+  /^http:\/\/internal-sps-ap-inter-[a-z0-9]+-\d+\.[a-z0-9-]+\.elb\.amazonaws\.com$/;
+
+/** Lowercased URL.origin of `url`, or null when it does not parse. */
+function originOf(url: string): string | null {
   try {
-    origin = new URL(baseUrl).origin;
+    return new URL(url).origin.toLowerCase();
   } catch {
-    return false;
+    return null;
   }
-  return ALLOWED_BASE_ORIGINS.some((re) => re.test(origin));
+}
+
+/**
+ * Whether `baseUrl` parses + matches one of the allowed origins. The internal
+ * ALB is accepted only on exact origin equality with
+ * SCHOLARS_INTERNAL_ALB_ORIGIN (set by EtlStack from the same SSM param as
+ * SCHOLARS_BASE_URL, #1478): any other `*.elb.amazonaws.com` host is refused,
+ * and an ALB replacement self-heals on the next Sps-Etl deploy.
+ */
+export function isAllowedBaseUrl(baseUrl: string): boolean {
+  const origin = originOf(baseUrl);
+  if (!origin) return false;
+  if (ALLOWED_BASE_ORIGINS.some((re) => re.test(origin))) return true;
+  const internal = process.env.SCHOLARS_INTERNAL_ALB_ORIGIN;
+  if (!internal) return LEGACY_INTERNAL_ALB_ORIGIN.test(origin);
+  return origin === originOf(internal);
 }
 
 /**
