@@ -356,7 +356,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "EdgeOriginDownAlarm6F2DF616": {
       "Properties": {
-        "AlarmDescription": "The CloudFront origin leg is failing (prod): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.",
+        "AlarmDescription": "The CloudFront origin leg is failing (prod): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout (VIP -> ALB): docs/network-security-topology.md, section Origin backout.",
         "AlarmName": "sps-edge-origin-down-prod",
         "ComparisonOperator": "LessThanThreshold",
         "DatapointsToAlarm": 3,
@@ -372,6 +372,37 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginLatencyP99AlarmF5F17DCA": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "CloudFront OriginLatency p99 > 20000ms in 2 of 3 5-minute windows (prod). The origin read timeout is CloudFront's 30s default, so requests this slow are close to becoming CloudFront 504s that the app logs as successes. Next: compare with the ALB latency panel -- if the ALB is fast, the delay is the NetScaler hop; if the ALB is also slow, find the slow route (Bedrock-backed API routes first). Do not raise OriginReadTimeout until the NetScaler timeout is confirmed with the network team (#1936).",
+        "AlarmName": "sps-edge-origin-latency-p99-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "Dimensions": [
+          {
+            "Name": "DistributionId",
+            "Value": "E28NKDFXC7K2ZL",
+          },
+          {
+            "Name": "Region",
+            "Value": "Global",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "ExtendedStatistic": "p99",
+        "MetricName": "OriginLatency",
+        "Namespace": "AWS/CloudFront",
+        "Period": 300,
+        "Threshold": 20000,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
@@ -1795,7 +1826,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "EdgeOriginDownAlarm6F2DF616": {
       "Properties": {
-        "AlarmDescription": "The CloudFront origin leg is failing (staging): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.",
+        "AlarmDescription": "The CloudFront origin leg is failing (staging): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout (VIP -> ALB): docs/network-security-topology.md, section Origin backout.",
         "AlarmName": "sps-edge-origin-down-staging",
         "ComparisonOperator": "LessThanThreshold",
         "DatapointsToAlarm": 3,
@@ -1811,6 +1842,37 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginLatencyP99AlarmF5F17DCA": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "CloudFront OriginLatency p99 > 20000ms in 2 of 3 5-minute windows (staging). The origin read timeout is CloudFront's 30s default, so requests this slow are close to becoming CloudFront 504s that the app logs as successes. Next: compare with the ALB latency panel -- if the ALB is fast, the delay is the NetScaler hop; if the ALB is also slow, find the slow route (Bedrock-backed API routes first). Do not raise OriginReadTimeout until the NetScaler timeout is confirmed with the network team (#1936).",
+        "AlarmName": "sps-edge-origin-latency-p99-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "Dimensions": [
+          {
+            "Name": "DistributionId",
+            "Value": "E17NRWINXLP3B3",
+          },
+          {
+            "Name": "Region",
+            "Value": "Global",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "ExtendedStatistic": "p99",
+        "MetricName": "OriginLatency",
+        "Namespace": "AWS/CloudFront",
+        "Period": 300,
+        "Threshold": 20000,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",

@@ -58,6 +58,13 @@ const COST_ANOMALY_THRESHOLD_USD = 50;
 const LATENCY_P99_THRESHOLD_MS = 1500;
 
 /**
+ * CloudFront OriginLatency p99 warn threshold in milliseconds (#1936). Sits
+ * 10s under CloudFront's default 30s OriginReadTimeout, which the dynamic
+ * origin uses. Rationale at the alarm.
+ */
+const ORIGIN_LATENCY_P99_THRESHOLD_MS = 20000;
+
+/**
  * Minimum absolute target-5xx count in a 5-minute window before the 5xx *rate*
  * alarm is allowed to evaluate. Without a floor, a single stray 5xx in a
  * low-traffic window reads as a huge rate and pages: this is what produced the
@@ -648,7 +655,7 @@ export class SpsObservabilityStack extends Stack {
     // should wake someone as a serving outage.
     const originDownAlarm = new cloudwatch.Alarm(this, "EdgeOriginDownAlarm", {
       alarmName: `sps-edge-origin-down-${env}`,
-      alarmDescription: `The CloudFront origin leg is failing (${env}): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.`,
+      alarmDescription: `The CloudFront origin leg is failing (${env}): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout (VIP -> ALB): docs/network-security-topology.md, section Origin backout.`,
       metric: probeMetric("OriginProbeSuccess", "Minimum"),
       threshold: 1,
       evaluationPeriods: 3,
@@ -1511,6 +1518,61 @@ export class SpsObservabilityStack extends Stack {
         region: "us-east-1",
         label,
       });
+
+    // (8) CloudFront OriginLatency p99 approaching the origin read timeout
+    // (#1936). The dynamic origin runs on CloudFront's DEFAULT
+    // OriginReadTimeout of 30s (edge-stack.ts sets none). A response slower
+    // than that becomes a CloudFront 504 while the app logs a success, and the
+    // ALB latency alarm above cannot see the NetScaler hop at all. This is the
+    // early warning: p99 origin round-trip > 20s means requests are getting
+    // within ~10s of the cutoff.
+    //
+    // Threshold rationale, from live data (read-only probe 2026-10-05, 5-min
+    // p99 over 2026-09-30..10-05): prod max 8.6s, zero windows > 10s; staging
+    // max 24.4s, one window > 20s, four > 10s (the eval/batch workload). 20s
+    // stays clear of normal prod and leaves 10s of headroom under 30s. 2 of 3
+    // 5-minute datapoints so a single slow window (one extraction run on a
+    // quiet distribution, where p99 is effectively the max) does not fire.
+    //
+    // treatMissingData NOT_BREACHING: at SPS traffic most 5-minute windows have
+    // no requests at all (~9% of prod windows carried a datapoint over that
+    // span), and no traffic is not slowness. An origin that stops answering is
+    // the origin-down alarm's job, not this one's.
+    //
+    // Warn tier, both envs, NOT a composite child: it is a leading indicator of
+    // 504s, not an outage, and it mirrors the other direct-action CloudFront
+    // alarm (origin-cert expiry).
+    //
+    // Same metric shape as the dashboard's cfMetric (us-east-1, DistributionId
+    // + Region=Global); this stack is in us-east-1 for both envs, so the alarm
+    // and metric regions match. No `label`, so the alarm renders flat.
+    // OriginLatency is in milliseconds.
+    const originLatencyAlarm = new cloudwatch.Alarm(
+      this,
+      "EdgeOriginLatencyP99Alarm",
+      {
+        alarmName: `sps-edge-origin-latency-p99-${env}`,
+        alarmDescription: `CloudFront OriginLatency p99 > ${ORIGIN_LATENCY_P99_THRESHOLD_MS}ms in 2 of 3 5-minute windows (${env}). The origin read timeout is CloudFront's 30s default, so requests this slow are close to becoming CloudFront 504s that the app logs as successes. Next: compare with the ALB latency panel -- if the ALB is fast, the delay is the NetScaler hop; if the ALB is also slow, find the slow route (Bedrock-backed API routes first). Do not raise OriginReadTimeout until the NetScaler timeout is confirmed with the network team (#1936).`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/CloudFront",
+          metricName: "OriginLatency",
+          dimensionsMap: {
+            DistributionId: envConfig.cloudFrontDistributionId,
+            Region: "Global",
+          },
+          statistic: "p99",
+          period: Duration.minutes(5),
+          region: "us-east-1",
+        }),
+        threshold: ORIGIN_LATENCY_P99_THRESHOLD_MS,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 2,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    originLatencyAlarm.addAlarmAction(warnAction);
 
     const dashboard = new cloudwatch.Dashboard(this, "ReliabilityDashboard", {
       dashboardName: `sps-reliability-${env}`,
