@@ -597,8 +597,16 @@ describe("AppStack", () => {
         expect(dependsOn.some((d) => d.startsWith("InternalAlbInternalHttpListener"))).toBe(true);
         // Public listener (its child rule below carries the TG association).
         expect(dependsOn.some((d) => d.startsWith("PublicAlbPublicHttpListener"))).toBe(true);
-        // The priority-1 rule that forwards public traffic to the TG.
-        expect(dependsOn.some((d) => d.startsWith("OriginVerifiedForward"))).toBe(true);
+        // The priority-1 rule that forwards public :80 traffic to the TG.
+        // Exact-prefix regexes: a bare startsWith("OriginVerifiedForward")
+        // would also match the :443 rule (OriginVerifiedForwardHttps<hash>).
+        expect(dependsOn.some((d) => /^OriginVerifiedForward[0-9A-F]{8}$/.test(d))).toBe(true);
+        // #1938: the :443 listener + its forward rule (edgeOriginCertArn is
+        // seeded for both envs) also bind the TG, so the service waits on them.
+        expect(dependsOn.some((d) => /^PublicAlbPublicHttpsListener[0-9A-F]{8}$/.test(d))).toBe(
+          true,
+        );
+        expect(dependsOn.some((d) => /^OriginVerifiedForwardHttps[0-9A-F]{8}$/.test(d))).toBe(true);
       });
 
       it("wires the ECS service to BOTH target groups via the loadBalancers mapping (manual L1 attach)", () => {
@@ -2740,6 +2748,106 @@ describe("AppStack", () => {
 
 // #2343 -- a manual `cdk deploy Sps-App-<env>` must be able to keep the
 // pipeline's digest pin instead of re-registering the family on :latest.
+describe("AppStack public ALB hardening (#1942)", () => {
+  describe.each(["staging", "prod"] as const)("%s", (envName) => {
+    const { template } = buildAppStack(envName);
+
+    function publicAlbAttributes(): Array<{ Key: string; Value: unknown }> {
+      const albs = template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer", {
+        Properties: { Scheme: "internet-facing" },
+      });
+      expect(Object.keys(albs)).toHaveLength(1);
+      return Object.values(albs)[0]!.Properties.LoadBalancerAttributes;
+    }
+
+    it("pins deletion protection, invalid-header drop and preserve-host on the public ALB", () => {
+      expect(publicAlbAttributes()).toEqual(
+        expect.arrayContaining([
+          { Key: "deletion_protection.enabled", Value: "true" },
+          { Key: "routing.http.drop_invalid_header_fields.enabled", Value: "true" },
+          { Key: "routing.http.preserve_host_header.enabled", Value: "false" },
+        ]),
+      );
+    });
+
+    it("ships access + connection logs to the dedicated AlbLogsBucket under per-env prefixes", () => {
+      const attrs = publicAlbAttributes();
+      expect(attrs).toEqual(
+        expect.arrayContaining([
+          { Key: "access_logs.s3.enabled", Value: "true" },
+          { Key: "access_logs.s3.prefix", Value: `alb-access/${envName}` },
+          { Key: "connection_logs.s3.enabled", Value: "true" },
+          { Key: "connection_logs.s3.prefix", Value: `alb-conn/${envName}` },
+        ]),
+      );
+      for (const key of ["access_logs.s3.bucket", "connection_logs.s3.bucket"]) {
+        expect(attrs.find((a) => a.Key === key)?.Value).toEqual({
+          Ref: expect.stringMatching(/^AlbLogsBucket[0-9A-F]{8}$/),
+        });
+      }
+    });
+
+    it("leaves the internal ALB attributes alone (no deletion protection / logs)", () => {
+      const albs = template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer", {
+        Properties: { Scheme: "internal" },
+      });
+      expect(Object.keys(albs)).toHaveLength(1);
+      const attrs = (Object.values(albs)[0]!.Properties.LoadBalancerAttributes ?? []) as Array<{
+        Key: string;
+        Value: unknown;
+      }>;
+      expect(attrs.find((a) => a.Key === "deletion_protection.enabled")?.Value).not.toBe("true");
+      expect(attrs.some((a) => a.Key === "access_logs.s3.enabled")).toBe(false);
+    });
+
+    it("AlbLogsBucket is SSE-S3, block-public, RETAIN, with a 90-day expiry", () => {
+      const buckets = template.findResources("AWS::S3::Bucket");
+      const ids = Object.keys(buckets).filter((id) => /^AlbLogsBucket[0-9A-F]{8}$/.test(id));
+      expect(ids).toHaveLength(1);
+      const bucket = buckets[ids[0]!]!;
+      expect(bucket.DeletionPolicy).toBe("Retain");
+      expect(bucket.UpdateReplacePolicy).toBe("Retain");
+      expect(bucket.Properties.BucketEncryption).toEqual({
+        ServerSideEncryptionConfiguration: [
+          { ServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" } },
+        ],
+      });
+      expect(bucket.Properties.PublicAccessBlockConfiguration).toEqual({
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      });
+      expect(bucket.Properties.LifecycleConfiguration.Rules).toEqual([
+        expect.objectContaining({
+          Id: `sps-alb-logs-expire-${envName}`,
+          Status: "Enabled",
+          ExpirationInDays: 90,
+        }),
+      ]);
+    });
+
+    it("AlbLogsBucket policy enforces SSL and grants ELB log delivery PutObject", () => {
+      const policies = Object.values(template.findResources("AWS::S3::BucketPolicy")).filter((p) =>
+        (p.Properties?.Bucket as { Ref?: string })?.Ref?.startsWith("AlbLogsBucket"),
+      );
+      expect(policies).toHaveLength(1);
+      const statements = policies[0]!.Properties.PolicyDocument.Statement as Array<
+        Record<string, unknown>
+      >;
+      expect(statements).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            Effect: "Deny",
+            Condition: { Bool: { "aws:SecureTransport": "false" } },
+          }),
+          expect.objectContaining({ Effect: "Allow", Action: "s3:PutObject" }),
+        ]),
+      );
+    });
+  });
+});
+
 describe("AppStack app image digest pin (#2343)", () => {
   const DIGEST = `sha256:${"ab12".repeat(16)}`;
 

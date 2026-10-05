@@ -3423,8 +3423,32 @@ export class AppStack extends Stack {
     // deploy), and Faculty Review / Research Informatics callers will hardcode
     // it (#1855, #2363). Replacing the internal ALB changes that DNS name, so
     // treat a replacement as a breaking change for those consumers (#1478).
+    // #1942: the public ALB now has deletion protection on, so any change that
+    // REPLACES it (e.g. flipping useSharedVpc back, which sets a fixed name)
+    // fails at the CFN delete step and rolls the deploy back. That is
+    // intended: a replacement mints a new DNS name, which breaks the NetScaler
+    // pool, alarms and the backout path. Disable protection out-of-band first
+    // if a replacement is ever deliberate.
     const sharedReplaceName = (fixed: string): string | undefined =>
       envConfig.useSharedVpc ? undefined : fixed;
+
+    // #1942: ALB access + connection logs. A dedicated bucket rather than
+    // EdgeStack.logsBucket: that bucket's policy is owned by the manually
+    // deployed EdgeStack, so AppStack could not add the ELB delivery grant.
+    // ALB log delivery supports SSE-S3 only (no KMS).
+    const albLogsBucket = new s3.Bucket(this, "AlbLogsBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          id: `sps-alb-logs-expire-${env}`,
+          enabled: true,
+          expiration: Duration.days(90),
+        },
+      ],
+    });
 
     this.publicAlb = new elbv2.ApplicationLoadBalancer(this, "PublicAlb", {
       loadBalancerName: sharedReplaceName(`sps-public-${env}`),
@@ -3432,7 +3456,19 @@ export class AppStack extends Stack {
       internetFacing: true,
       vpcSubnets: albSubnets,
       securityGroup: albSecurityGroup,
+      // #1942: a recreate means a new DNS name (NetScaler pool, alarms and
+      // the backout all key on it), so block deletes.
+      deletionProtection: true,
+      // #1942: origin auth is a header match (X-Origin-Verify); drop headers
+      // with invalid names rather than pass them to the app.
+      dropInvalidHeaderFields: true,
     });
+    // #1942: pin preserve_host_header to the live value (false). Redirects
+    // are built from SITE_URL (#1935), not the Host header. Set explicitly:
+    // the L2 `preserveHostHeader: false` prop emits nothing, leaving it unpinned.
+    this.publicAlb.setAttribute("routing.http.preserve_host_header.enabled", "false");
+    this.publicAlb.logAccessLogs(albLogsBucket, `alb-access/${env}`);
+    this.publicAlb.logConnectionLogs(albLogsBucket, `alb-conn/${env}`);
 
     this.internalAlb = new elbv2.ApplicationLoadBalancer(this, "InternalAlb", {
       loadBalancerName: sharedReplaceName(`sps-internal-${env}`),
@@ -3546,8 +3582,12 @@ export class AppStack extends Stack {
     // follow-up) so CloudFront's origin leg can run over TLS. Same 403-default
     // + X-Origin-Verify-forward shape as :80, onto the same target group. Added
     // only once the ALB-region cert (edgeOriginCertArn) is seeded; ships dark.
+    // #1938: handles for the :443 listener + rule, so the ECS service can
+    // depend on them (below) the same way it depends on the :80 pair.
+    let publicHttpsListener: elbv2.ApplicationListener | undefined;
+    let originVerifiedHttpsRule: elbv2.ApplicationListenerRule | undefined;
     if (envConfig.edgeOriginCertArn.length > 0) {
-      const publicHttpsListener = this.publicAlb.addListener("PublicHttpsListener", {
+      publicHttpsListener = this.publicAlb.addListener("PublicHttpsListener", {
         port: 443,
         protocol: elbv2.ApplicationProtocol.HTTPS,
         certificates: [elbv2.ListenerCertificate.fromArn(envConfig.edgeOriginCertArn)],
@@ -3563,16 +3603,20 @@ export class AppStack extends Stack {
           messageBody: "Forbidden",
         }),
       });
-      new elbv2.ApplicationListenerRule(this, "OriginVerifiedForwardHttps", {
-        listener: publicHttpsListener,
-        priority: 1,
-        conditions: [
-          elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
-            originSharedSecretValue.unsafeUnwrap(),
-          ]),
-        ],
-        action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
-      });
+      originVerifiedHttpsRule = new elbv2.ApplicationListenerRule(
+        this,
+        "OriginVerifiedForwardHttps",
+        {
+          listener: publicHttpsListener,
+          priority: 1,
+          conditions: [
+            elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+              originSharedSecretValue.unsafeUnwrap(),
+            ]),
+          ],
+          action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
+        },
+      );
     }
     const internalListener = this.internalAlb.addListener("InternalHttpListener", {
       port: 80,
@@ -3722,6 +3766,12 @@ export class AppStack extends Stack {
     this.ecsService.node.addDependency(publicListener);
     this.ecsService.node.addDependency(originVerifiedRule);
     this.ecsService.node.addDependency(internalListener);
+    // #1938: the :443 listener + its priority-1 forward rule also bind the
+    // public TG to the ALB. Added alongside (not instead of) the :80 deps so
+    // :80 can later be removed without a dependency-ordering gap.
+    if (publicHttpsListener && originVerifiedHttpsRule) {
+      this.ecsService.node.addDependency(publicHttpsListener, originVerifiedHttpsRule);
+    }
 
     // ------------------------------------------------------------------
     // Application autoscaling (#596).
