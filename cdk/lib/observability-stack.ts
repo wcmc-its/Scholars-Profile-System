@@ -29,7 +29,7 @@ import { type EtlStack } from "./etl-stack";
  * ADR-008 records the address in the secrets-stack convention; this is the
  * operator's work email for live ops traffic, not the harness identity.
  */
-const NOTIFY_SUBSCRIBER_EMAIL = "paa2013@med.cornell.edu";
+export const NOTIFY_SUBSCRIBER_EMAIL = "paa2013@med.cornell.edu";
 
 /**
  * Account-wide monthly budget ceiling. Calibrated to roughly 40% headroom

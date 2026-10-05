@@ -46,6 +46,30 @@ describe("InboundMailStack", () => {
     });
   });
 
+  it("sends bounces and complaints from the domain to an emailed SNS topic", () => {
+    const { template } = synth();
+    const sets = Object.keys(template.findResources("AWS::SES::ConfigurationSet"));
+    expect(sets).toHaveLength(1);
+    template.hasResourceProperties("AWS::SES::EmailIdentity", {
+      EmailIdentity: "scholars-mail.weill.cornell.edu",
+      ConfigurationSetAttributes: { ConfigurationSetName: { Ref: sets[0] } },
+    });
+    const topics = Object.keys(template.findResources("AWS::SNS::Topic"));
+    expect(topics).toHaveLength(1);
+    template.hasResourceProperties("AWS::SES::ConfigurationSetEventDestination", {
+      ConfigurationSetName: { Ref: sets[0] },
+      EventDestination: {
+        Enabled: true,
+        MatchingEventTypes: Match.arrayEquals(["bounce", "complaint"]),
+        SnsDestination: { TopicARN: { Ref: topics[0] } },
+      },
+    });
+    template.hasResourceProperties("AWS::SNS::Subscription", {
+      Protocol: "email",
+      TopicArn: { Ref: topics[0] },
+    });
+  });
+
   it("acknowledges the imported-bucket permissions warning", () => {
     Annotations.fromStack(synth().stack).hasNoWarning("*", Match.stringLikeRegexp("imported bucket"));
   });
