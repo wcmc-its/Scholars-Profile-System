@@ -1045,17 +1045,19 @@ describe("AppStack", () => {
         expect(deployPolicy).toBeDefined();
         const statements = deployPolicy?.Properties?.PolicyDocument
           ?.Statement as Array<Record<string, unknown>> | undefined;
-        // Two statements are allowed to use Resource=*, both AWS-mandated
-        // (neither action supports resource-level ARN scoping):
+        // Three statements are allowed to use Resource=*, all AWS-mandated
+        // (none of these actions support resource-level ARN scoping):
         // - ecr:GetAuthorizationToken, account-scoped at the API level.
         // - ecs:DescribeTaskDefinition / ecs:RegisterTaskDefinition (#2121)
         //   -- confirmed empirically: an ARN-scoped grant AccessDenied'd in
         //   a live staging dry run of the pinned-revision deploy flow.
+        // - states:ListStateMachines (#1987), which has no resource type.
         // Everything else must be a concrete ARN (or Fn::Join/Ref pointing
         // at one).
         const wildcardExemptActionSets = [
           ["ecr:GetAuthorizationToken"],
           ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"],
+          ["states:ListStateMachines"],
         ];
         for (const stmt of statements ?? []) {
           const action = stmt.Action as string | string[];
@@ -1110,6 +1112,21 @@ describe("AppStack", () => {
         expect(serialized).not.toMatch(/^"\*"$/);
         expect(serialized).toContain("stack/Sps-App-prod/*");
         expect(serialized).toContain("stack/Sps-Edge-prod/*");
+      });
+
+      it("the OIDC deploy role can describe only this env's scholars-* state machines (#1987 ETL drift report)", () => {
+        const statements = findDeployStatements();
+        const describe = statements.find((stmt) => stmt.Action === "states:DescribeStateMachine");
+        expect(describe).toBeDefined();
+        const serialized = JSON.stringify(describe?.Resource);
+        expect(serialized).not.toMatch(/^"\*"$/);
+        expect(serialized).toContain(":stateMachine:scholars-*-prod");
+        // read-only: no states action that starts, stops or edits a machine
+        const statesActions = statements.flatMap((stmt) => {
+          const action = stmt.Action as string | string[];
+          return (Array.isArray(action) ? action : [action]).filter((a) => a.startsWith("states:"));
+        });
+        expect(statesActions.sort()).toEqual(["states:DescribeStateMachine", "states:ListStateMachines"]);
       });
 
       it("the OIDC deploy role can push to both the app and ETL ECR repos (#460/#454)", () => {

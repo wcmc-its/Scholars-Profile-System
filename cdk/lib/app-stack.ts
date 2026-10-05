@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   Annotations,
+  ArnFormat,
   CfnOutput,
   Duration,
   Fn,
@@ -3806,10 +3807,11 @@ export class AppStack extends Stack {
     // two task-side roles, and cloudformation:DescribeStacks on this stack
     // (the deploy workflow reads the AppStack outputs to discover the ECR
     // URIs, cluster, service, and migration family). The only `*` resources
-    // are ecr:GetAuthorizationToken and ecs:DescribeTaskDefinition /
-    // ecs:RegisterTaskDefinition (#2121) -- none of the three support
-    // resource-level ARNs (confirmed empirically for the ECS pair: an
-    // ARN-scoped grant AccessDenied'd in a live staging dry run).
+    // are ecr:GetAuthorizationToken, ecs:DescribeTaskDefinition /
+    // ecs:RegisterTaskDefinition (#2121) and states:ListStateMachines
+    // (#1987) -- none of them support resource-level ARNs (confirmed
+    // empirically for the ECS pair: an ARN-scoped grant AccessDenied'd in a
+    // live staging dry run).
     // ------------------------------------------------------------------
     const githubOidcIssuerHost = "token.actions.githubusercontent.com";
     const githubOidcProviderArnContext = this.node.tryGetContext("githubOidcProviderArn") as
@@ -3992,6 +3994,32 @@ export class AppStack extends Stack {
             service: "cloudformation",
             resource: "stack",
             resourceName: `Sps-Edge-${env}/*`,
+          }),
+        ],
+      }),
+    );
+    // Post-deploy ETL definition drift check (#1987): the deploy workflow
+    // reads this env's deployed `scholars-*-<env>` state-machine definitions
+    // and diffs their step ids against the committed etl-stack snapshot
+    // (scripts/release/flag-parity.mjs --etl-drift). Read-only.
+    // ListStateMachines has no resource-level ARN, hence `*`.
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["states:ListStateMachines"],
+        resources: ["*"],
+      }),
+    );
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["states:DescribeStateMachine"],
+        resources: [
+          Stack.of(this).formatArn({
+            service: "states",
+            resource: "stateMachine",
+            resourceName: `scholars-*-${env}`,
+            arnFormat: ArnFormat.COLON_RESOURCE_NAME,
           }),
         ],
       }),

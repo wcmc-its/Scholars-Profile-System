@@ -2390,6 +2390,27 @@ service:
                 },
               ],
             },
+            {
+              "Action": "states:ListStateMachines",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "states:DescribeStateMachine",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":states:us-east-1:123456789012:stateMachine:scholars-*-prod",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -7036,6 +7057,27 @@ service:
                   ],
                 },
               ],
+            },
+            {
+              "Action": "states:ListStateMachines",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "states:DescribeStateMachine",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":states:us-east-1:123456789012:stateMachine:scholars-*-staging",
+                  ],
+                ],
+              },
             },
           ],
           "Version": "2012-10-17",

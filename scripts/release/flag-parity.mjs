@@ -10,6 +10,9 @@
 //   node scripts/release/flag-parity.mjs                 # CI check (exit 1 on violations)
 //   node scripts/release/flag-parity.mjs --dump staging  # JSON of app-container env synthesized for an env
 //   node scripts/release/flag-parity.mjs --write-inventory  # regenerate lib/diagnostics/flag-inventory.generated.ts
+//   node scripts/release/flag-parity.mjs --drift <env> -     # running app task def (stdin) vs cdk source (#1765)
+//   node scripts/release/flag-parity.mjs --etl-drift <env> - # deployed ETL state machines (stdin) vs cdk source (#1987)
+//   node scripts/release/flag-parity.mjs --selfcheck         # self-test of the two drift classifiers
 //
 // Run from the repo root. No dependencies.
 
@@ -34,7 +37,10 @@ const WIRED_ENTRY = /"Name": "([A-Z][A-Z0-9_]+)",\n\s+"Value(?:From)?":/g;
 const LITERAL_ENTRY = /"Name": "([A-Z][A-Z0-9_]+)",\n\s+"Value": "((?:[^"\\]|\\.)*)"/g;
 
 function snapshotBlocks(snapPath) {
-  const text = readFileSync(join(ROOT, snapPath), "utf8");
+  return blocksFromText(readFileSync(join(ROOT, snapPath), "utf8"));
+}
+
+function blocksFromText(text) {
   const blocks = {};
   const re = /^exports\[`\w+ (prod|staging) matches the snapshot 1`\] = `/gm;
   let m;
@@ -167,6 +173,12 @@ if (dumpAt !== -1) {
 // Select the app container by `name === "app"`, NEVER containerDefinitions[0]:
 // the otel-collector sidecar reorders between revisions, so [0] silently reads
 // the sidecar's env and every flag looks "missing".
+// The jest snapshot synthesizes with the placeholder account 123456789012, so
+// any literal ARN in the source env (e.g. HONORS_STATE_MACHINE_ARN) differs
+// from the running value only by account id. Normalize the 12-digit account
+// field on both sides so that is not reported as drift.
+const normAccount = (v) => (typeof v === "string" ? v.replace(/:\d{12}:/g, ":ACCOUNT:") : v);
+
 function classifyDrift(synth, containers) {
   const app = Array.isArray(containers) ? containers.find((c) => c.name === "app") : undefined;
   if (!app) return { appFound: false, names: (containers ?? []).map((c) => c.name) };
@@ -175,7 +187,7 @@ function classifyDrift(synth, containers) {
   const diff = [];    // in both, value differs              → flipped-but-stale
   for (const [k, v] of Object.entries(synth)) {
     if (!(k in running)) missing.push(k);
-    else if (running[k] !== v) diff.push({ key: k, running: running[k], source: v });
+    else if (normAccount(running[k]) !== normAccount(v)) diff.push({ key: k, running: running[k], source: v });
   }
   const extra = Object.keys(running).filter((k) => !(k in synth)).sort(); // removed from source
   return { appFound: true, missing: missing.sort(), diff, extra };
@@ -219,7 +231,93 @@ if (driftAt !== -1) {
   process.exit(0);
 }
 
-// --- self-check for the drift classifier (no framework): node flag-parity.mjs --selfcheck ---
+// --- ETL drift mode: deployed state machines vs the etl-stack snapshot (#1987) ---
+// ETL changes ship only on a manual `cdk deploy Sps-Etl-<env>`, so a step merged
+// to etl-stack.ts can sit undeployed with nothing alarming (TaskNewsWeekly,
+// TaskRosterProminenceNightly). This compares the per-env set of "Task<Id>"
+// state ids in the committed etl-stack jest snapshot against the UNION of the
+// deployed `scholars-*-<env>` state-machine definitions. It sees added/removed
+// steps only; a changed command or env on an existing step is invisible.
+// Feed it a JSON array of {name, definition} (describe-state-machine output):
+//   aws stepfunctions list-state-machines \
+//     --query "stateMachines[?starts_with(name,'scholars-') && ends_with(name,'-staging')].stateMachineArn" --output text \
+//     | tr '\t' '\n' | while read -r arn; do aws stepfunctions describe-state-machine \
+//         --state-machine-arn "$arn" --query '{name:name,definition:definition}' --output json; done \
+//     | jq -s . | node scripts/release/flag-parity.mjs --etl-drift staging -
+// Definitions in the snapshot are compact JSON (Fn::Join fragments), so a state
+// key always reads `"TaskX":{`; pretty-printed CFN logical ids read `"TaskX": {`
+// and are not matched. Deployed definitions are re-serialized compactly first.
+const TASK_STATE = /"(Task[A-Za-z0-9_]+)":\{/g;
+
+function taskStateIds(text) {
+  const ids = new Set();
+  let m;
+  TASK_STATE.lastIndex = 0;
+  while ((m = TASK_STATE.exec(text))) ids.add(m[1]);
+  return ids;
+}
+
+function compactDefinition(def) {
+  if (typeof def !== "string") return JSON.stringify(def ?? "");
+  try {
+    return JSON.stringify(JSON.parse(def));
+  } catch {
+    return def;
+  }
+}
+
+function classifyEtlDrift(sourceIds, machines, env) {
+  const nameRe = new RegExp(`^scholars-.+-${env}$`);
+  const used = (Array.isArray(machines) ? machines : []).filter((m) => nameRe.test(m?.name ?? ""));
+  const deployed = new Set();
+  for (const m of used) for (const id of taskStateIds(compactDefinition(m.definition))) deployed.add(id);
+  return {
+    machines: used.map((m) => m.name).sort(),
+    sourceCount: sourceIds.size,
+    deployedCount: deployed.size,
+    missing: [...sourceIds].filter((id) => !deployed.has(id)).sort(), // merged, not deployed
+    extra: [...deployed].filter((id) => !sourceIds.has(id)).sort(),   // deployed, gone from source
+  };
+}
+
+const etlDriftAt = process.argv.indexOf("--etl-drift");
+if (etlDriftAt !== -1) {
+  const env = process.argv[etlDriftAt + 1];
+  const src = process.argv[etlDriftAt + 2];
+  if (!["staging", "prod"].includes(env) || !src) {
+    console.error("usage: flag-parity.mjs --etl-drift <staging|prod> <machines.json|->  (JSON array of {name, definition})");
+    process.exit(2);
+  }
+  let machines;
+  try {
+    machines = JSON.parse(src === "-" ? readFileSync(0, "utf8") : readFileSync(src, "utf8"));
+  } catch {
+    console.error("etl-drift: input is not valid JSON");
+    process.exit(2);
+  }
+  const block = snapshotBlocks(SNAPS[1])[env];
+  const sourceIds = taskStateIds(block ?? "");
+  if (!sourceIds.size) {
+    console.error(`etl-drift: no "Task<Id>" states found in the ${env} block of ${SNAPS[1]} (snapshot format changed?)`);
+    process.exit(2);
+  }
+  const r = classifyEtlDrift(sourceIds, machines, env);
+  if (!r.machines.length) {
+    console.error(`etl-drift: no scholars-*-${env} state machines in the input`);
+    process.exit(2);
+  }
+  const head = `(${env}) source=${r.sourceCount} deployed=${r.deployedCount} across ${r.machines.length} state machines (${r.machines.join(", ")})`;
+  if (r.missing.length || r.extra.length) {
+    console.error(`ETL DRIFT ${head}: the deployed Step Functions definitions differ from cdk source -- run \`cdk diff Sps-Etl-${env}\` then \`cdk deploy Sps-Etl-${env}\` from master.`);
+    if (r.missing.length) console.error(`  in source, not deployed (${r.missing.length}): ${r.missing.join(", ")}`);
+    if (r.extra.length) console.error(`  deployed, not in source (${r.extra.length}): ${r.extra.join(", ")}`);
+    process.exit(1);
+  }
+  console.log(`etl-drift OK ${head}: no step-id drift.`);
+  process.exit(0);
+}
+
+// --- self-check for the drift classifiers (no framework): node flag-parity.mjs --selfcheck ---
 if (process.argv.includes("--selfcheck")) {
   const assert = (cond, msg) => { if (!cond) { console.error(`selfcheck FAIL: ${msg}`); process.exit(1); } };
   // otel sidecar deliberately FIRST — proves selection is by name, not [0].
@@ -238,6 +336,50 @@ if (process.argv.includes("--selfcheck")) {
   assert(clean.missing.length === 0 && clean.diff.length === 0, "identical env must report no drift");
   // missing 'app' container is a hard error, not a silent pass
   assert(!classifyDrift(synth, [{ name: "otel-collector", environment: [] }]).appFound, "no 'app' container must be flagged");
+  // the jest placeholder account in a source ARN is not drift (#1765 false positive)...
+  const arn = (acct) => `arn:aws:states:us-east-1:${acct}:stateMachine:scholars-honors-staging`;
+  const acct = classifyDrift({ X_ARN: arn("123456789012") }, [{ name: "app", environment: [{ name: "X_ARN", value: arn("000000000000") }] }]);
+  assert(acct.diff.length === 0, `account-only ARN difference must not be drift, got ${JSON.stringify(acct.diff)}`);
+  // ...but a real difference elsewhere in the ARN still is
+  const realArn = classifyDrift({ X_ARN: arn("123456789012") }, [{ name: "app", environment: [{ name: "X_ARN", value: arn("000000000000").replace("staging", "prod") }] }]);
+  assert(realArn.diff.length === 1, "an ARN differing beyond the account id must still be drift");
+
+  // ETL drift: a fixture shaped like the jest serializer's etl-stack snapshot.
+  const fixture = [
+    "exports[`EtlStack prod matches the snapshot 1`] = `",
+    '  "TaskRoleABC123": {',
+    '    "Type": "AWS::IAM::Role",',
+    '  "DefinitionString": {"Fn::Join": ["", [',
+    '    "{"StartAt":"TaskEd","States":{"TaskEd":{"Next":"TaskNew","Resource":"arn:aws:states:::ecs:runTask.sync"},"TaskNew":{"End":true}}}",',
+    "`;",
+    "exports[`EtlStack staging matches the snapshot 1`] = `",
+    '    "{"StartAt":"TaskEd","States":{"TaskEd":{"End":true}}}",',
+    "`;",
+  ].join("\n");
+  const fb = blocksFromText(fixture);
+  const prodIds = taskStateIds(fb.prod);
+  assert(JSON.stringify([...prodIds].sort()) === JSON.stringify(["TaskEd", "TaskNew"]), `fixture prod ids should be [TaskEd, TaskNew] (not the pretty-printed TaskRoleABC123), got ${JSON.stringify([...prodIds])}`);
+  assert(JSON.stringify([...taskStateIds(fb.staging)]) === JSON.stringify(["TaskEd"]), "fixture staging block must not bleed into prod");
+  const deployedProd = [
+    // pretty-printed JSON proves deployed definitions are compacted before matching
+    { name: "scholars-nightly-prod", definition: JSON.stringify({ StartAt: "TaskEd", States: { TaskEd: { End: true } } }, null, 2) },
+    { name: "scholars-weekly-prod", definition: '{"States":{"TaskOld":{"End":true}}}' },
+    // other env and non-SPS machines are ignored
+    { name: "scholars-nightly-staging", definition: '{"States":{"TaskNew":{"End":true}}}' },
+    { name: "reciterai-hot-path", definition: '{"States":{"TaskNew":{"End":true}}}' },
+  ];
+  const e = classifyEtlDrift(prodIds, deployedProd, "prod");
+  assert(JSON.stringify(e.machines) === JSON.stringify(["scholars-nightly-prod", "scholars-weekly-prod"]), `machines filter wrong: ${JSON.stringify(e.machines)}`);
+  assert(JSON.stringify(e.missing) === JSON.stringify(["TaskNew"]), `etl missing should be [TaskNew], got ${JSON.stringify(e.missing)}`);
+  assert(JSON.stringify(e.extra) === JSON.stringify(["TaskOld"]), `etl extra should be [TaskOld], got ${JSON.stringify(e.extra)}`);
+  const etlClean = classifyEtlDrift(prodIds, [{ name: "scholars-nightly-prod", definition: '{"States":{"TaskEd":{"Next":"TaskNew"},"TaskNew":{"End":true}}}' }], "prod");
+  assert(!etlClean.missing.length && !etlClean.extra.length, "matching definitions must report no ETL drift");
+  // the committed snapshot still parses (guards a jest-serializer format change)
+  const real = snapshotBlocks(SNAPS[1]);
+  for (const env of ["staging", "prod"]) {
+    const ids = taskStateIds(real[env] ?? "");
+    assert(ids.size > 10 && ids.has("TaskEd"), `committed etl-stack ${env} snapshot yielded ${ids.size} Task ids (expected >10 incl. TaskEd)`);
+  }
   console.log("flag-parity drift selfcheck OK");
   process.exit(0);
 }
