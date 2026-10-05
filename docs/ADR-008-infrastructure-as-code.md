@@ -28,14 +28,14 @@ ADR-008 decides structure; it does not provision anything. The six stacks are bu
 
 | Stack | Owns | Change cadence |
 |---|---|---|
-| `NetworkStack` | VPC, subnets, security groups, VPC endpoints (B17) | rare |
+| `NetworkStack` | VPC, subnets, security groups, VPC endpoints (B17). *Update: not synthesized while `useSharedVpc` is on (both envs); Data/App import the shared VPC directly.* | rare |
 | `DataStack` | Aurora MySQL — PITR / snapshots / cross-region copy (B10) — and the OpenSearch domain | rare; deletion-protected |
 | `SecretsStack` | Secrets Manager secret *definitions* and RDS rotation (B06) | rare |
 | `AppStack` | ECR, ECS cluster / service / task definitions with the role split (B06), public + internal ALB listeners (B05), CloudFront + WAF (B07, B26), the one-shot migration task (B09) | every deploy |
 | `EtlStack` | ETL Lambdas, the ETL security group, Step Functions state machines (B08), EventBridge schedules, the `etl-failures` SNS topic | per ETL change |
 | `ObservabilityStack` | CloudWatch alarms, log retention, cost alarms (B20 / B22), SNS → on-call (B23), X-Ray (B24) | occasional |
 
-The frequently-deployed `AppStack` is structurally isolated from the stateful `DataStack`: a bad application deploy operates on a different CloudFormation stack than the one that owns the database, so it cannot tear the database down. `DataStack` and `NetworkStack` carry `RemovalPolicy.RETAIN` and deletion protection.
+The frequently-deployed `AppStack` is structurally isolated from the stateful `DataStack`: a bad application deploy operates on a different CloudFormation stack than the one that owns the database, so it cannot tear the database down. `DataStack` and `NetworkStack` carry `RemovalPolicy.RETAIN` and deletion protection (`NetworkStack` only where it is still synthesized, i.e. `useSharedVpc` off).
 
 **5. Environments — staging and production, in separate AWS accounts.** The same stack code is parameterized by CDK context (`-c env=staging|prod`); per `ADR-004`, staging gates the production deploy. The two environments are deployed to **separate AWS accounts** — not one account holding two stack sets. The primary region is `us-east-1`; the named disaster-recovery region, for B10's cross-region Aurora snapshot copy, is `us-west-2`. Account IDs are supplied as CDK context at deploy time and are never committed; with context absent, `cdk synth` runs environment-agnostic — which is what CI does.
 
@@ -52,7 +52,7 @@ ADR-008 governs *infrastructure definition*. The controls below are the ones the
 - **Egress confinement.** VPC endpoints (B17) keep Secrets Manager, S3, and OpenSearch traffic on the AWS network rather than traversing the public internet via the NAT gateway.
 - **Edge filtering.** AWS WAF is attached to the CloudFront distribution (B26).
 - **Environment isolation at the account boundary.** Staging and production are separate AWS accounts (decision 5). A misconfigured IAM grant, an over-broad resource policy, or a `cdk deploy` run against the wrong context cannot reach production resources from a staging operation — the blast radius of any staging mistake is the staging account.
-- **Blast-radius isolation within an account.** The stateful stacks (`DataStack`, `NetworkStack`) are deletion-protected and are separate CloudFormation stacks from the deploy-frequently `AppStack`.
+- **Blast-radius isolation within an account.** The stateful stacks (`DataStack`, and `NetworkStack` where synthesized) are deletion-protected and are separate CloudFormation stacks from the deploy-frequently `AppStack`.
 - **No long-lived cloud credentials in CI.** The deploy pipeline authenticates by OIDC federation (decision 6); the AWS IAM deploy role's trust policy admits only this repository's GitHub Actions workflows. There is no static `AWS_ACCESS_KEY_ID` in repository or organization secrets to leak.
 - **Drift detection.** CDK is the single source of truth for infrastructure; `cdk diff` surfaces any change made directly in the AWS console.
 

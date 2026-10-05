@@ -81,10 +81,10 @@ SG-referenced.
 
 | SG | Ingress (who can reach it) | Owned/added by |
 |---|---|---|
-| `alb` (public ALB) | `:80` from `0.0.0.0/0` **but** the listener default action is `403`; a priority-1 rule forwards only when `X-Origin-Verify` matches the CloudFront-injected secret | NetworkStack (SG) / AppStack + EdgeStack (rule) |
+| `alb` (public ALB) | `:80` from `0.0.0.0/0` **but** the listener default action is `403`; a priority-1 rule forwards only when `X-Origin-Verify` matches the CloudFront-injected secret | NetworkStack (SG; flag-off) or `sharedVpc.albSgId` (flag-on) / AppStack + EdgeStack (rule) |
 | `alb` (internal ALB listener) | `:80` from the `etl` SG only (the `/api/revalidate` path) | EtlStack |
 | `app` (ECS app tasks) | from the `alb` SG only | AppStack |
-| `etl` (ETL tasks) | none inbound (egress only) | NetworkStack |
+| `etl` (ETL tasks) | none inbound (egress only) | NetworkStack (flag-off) or `sharedVpc.etlSgId` (flag-on) |
 | `aurora` | from `app` SG + `etl` SG only | DataStack |
 | `opensearch` | from `app` SG + `etl` SG only (private ENI, data plane) | DataStack |
 | Secrets Manager interface-endpoint SG | `:443` from `app` SG + `etl` SG only (CDK's default `:443 from VPC CIDR` is suppressed) | AppStack (B17) |
@@ -112,7 +112,9 @@ two halves:
 1. **DNS resolution** — three RAM-shared Route 53 Resolver FORWARD rules (for
    `weill.cornell.edu`, `med.cornell.edu`, `wcmc.ad.net`) from the Central Services account
    (`091981818184`) are associated to this VPC, sending those domains to the shared
-   outbound resolver — the same wiring ReCiter's EKS VPC uses. Codified in NetworkStack.
+   outbound resolver — the same wiring ReCiter's EKS VPC uses. Codified in NetworkStack,
+   which is not synthesized while `useSharedVpc` is on; the shared VPC's associations are
+   owned outside SPS.
 2. **Routing** — reaching the resolved IPs additionally needs the Central Services Transit
    Gateway attachment + the WCM-side firewall opened for this VPC's CIDR. **Those are owned
    by the Central Services account / WCM network, not by SPS**, and are tracked separately.

@@ -80,10 +80,10 @@ export class DataStack extends Stack {
 
     const { envConfig, drBackupVault } = props;
     const vpc = props.vpc ?? importSharedVpc(this, envConfig);
-    // Item-3 pass 2a: import the app/etl SGs by id from the SSM params NetworkStack
-    // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
-    // exports that would lock the useSharedVpc flip (the SGs replace onto the
-    // imported VPC). Flag-agnostic; the Aurora/OpenSearch ingress rules below
+    // Item-3 pass 2a: import the app/etl SGs by id instead of the cross-stack
+    // handle. Flag-on, resolveSharedSg reads the committed `sharedVpc.*SgId`
+    // config (no SSM; NetworkStack is not synthesized). Flag-off, it reads the
+    // SSM params NetworkStack publishes. The Aurora/OpenSearch ingress rules below
     // reference these by `.securityGroupId` (L1, id-keyed), so nothing drops.
     const appSecurityGroup = resolveSharedSg(this, envConfig, "app", "AppSg");
     const etlSecurityGroup = resolveSharedSg(this, envConfig, "etl", "EtlSg");

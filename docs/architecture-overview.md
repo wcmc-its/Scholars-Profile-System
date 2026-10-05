@@ -132,7 +132,7 @@ change cadence ([`ADR-008`](./ADR-008-infrastructure-as-code.md)):
 
 | Stack | Owns | Cadence | Key doc |
 |---|---|---|---|
-| `NetworkStack` | VPC, subnets, security groups, VPC endpoints | rare | [`network-security-topology.md`](./network-security-topology.md) |
+| `NetworkStack` | VPC, subnets, security groups, VPC endpoints. Not synthesized while `useSharedVpc` is on (both envs); Data/App import the shared VPC directly | rare | [`network-security-topology.md`](./network-security-topology.md) |
 | `DataStack` | Aurora (PITR + cross-region backup), OpenSearch | rare; deletion-protected | [`restore-drill-runbook.md`](./restore-drill-runbook.md) |
 | `SecretsStack` | Secrets Manager definitions, RDS rotation | rare | [`access-control-rbac.md`](./access-control-rbac.md) |
 | `AppStack` | ECR, ECS cluster/service/tasks, public + internal ALB, migration task, IAM role split | every deploy | [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) |
@@ -142,7 +142,7 @@ change cadence ([`ADR-008`](./ADR-008-infrastructure-as-code.md)):
 | `AnalyticsStack` | Glue + Athena over CloudFront access logs, nightly usage-rollup Lambda, durable (no-expiry) analytics bucket | occasional | — |
 
 (A standalone `dr-backup-vault-stack` provisions the us-west-2 DR vault that DataStack
-copies into.) `DataStack` and `NetworkStack` carry `RemovalPolicy.RETAIN` + deletion
+copies into.) `DataStack` and `NetworkStack` (flag-off only) carry `RemovalPolicy.RETAIN` + deletion
 protection, so a bad `AppStack` deploy — which happens often — cannot tear down the database.
 
 ## Environments

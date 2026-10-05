@@ -188,11 +188,11 @@ The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) liv
 
 ### The CDK stacks (`../cdk/bin/sps-infra.ts`)
 
-Nine stacks, each `Sps-{X}-${env}` (e.g. `Sps-App-prod`). Selected via `-c env=staging|prod`; account via `-c <envName>Account=<id>` (never committed). `DataStack` and `NetworkStack` carry `RemovalPolicy.RETAIN` + deletion protection so a bad `AppStack` deploy can't tear down the database.
+Nine stack classes, each `Sps-{X}-${env}` (e.g. `Sps-App-prod`). `Sps-Network-<env>` is **not synthesized while `useSharedVpc` is on** (both envs today); Data and App import the shared VPC directly, so eight stacks deploy per env. Selected via `-c env=staging|prod`; account via `-c <envName>Account=<id>` (never committed). `DataStack` and `NetworkStack` (flag-off only) carry `RemovalPolicy.RETAIN` + deletion protection so a bad `AppStack` deploy can't tear down the database.
 
 | Stack | Provisions |
 |---|---|
-| **NetworkStack** | VPC, public + private-with-egress subnets (2 AZs), base SGs, Route 53 Resolver FORWARD rules for WCM DNS |
+| **NetworkStack** | Flag-off only (not synthesized while `useSharedVpc` is on): VPC, public + private-with-egress subnets (2 AZs), base SGs, Route 53 Resolver FORWARD rules for WCM DNS |
 | **DrBackupVaultStack** | us-west-2 DR BackupVault that DataStack's copyAction writes into (B10) |
 | **DataStack** | Aurora MySQL Serverless v2 (writer + reader, PITR, RETAIN) + OpenSearch domain + AWS Backup plan/vault |
 | **SecretsStack** | Secrets Manager secret *definitions* (empty) + RDS rotation Lambda |
