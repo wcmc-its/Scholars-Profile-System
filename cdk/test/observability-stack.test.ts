@@ -146,8 +146,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 17 CloudWatch alarms (12 platform + 1 B27 relay-errors + 4 edge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 17);
+    it("creates exactly 18 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 18);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -155,13 +155,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(17);
+      expect(names).toHaveLength(18);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the twelve platform surfaces, the B27 relay-errors alarm, and the four #1934 edge alarms", () => {
+    it("alarm names cover the twelve platform surfaces, the B27 relay-errors alarm, the four #1934 edge alarms, and the #1936 origin-latency alarm", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -179,6 +179,7 @@ describe("SpsObservabilityStack", () => {
           "sps-ecs-task-shortfall-prod",
           "sps-edge-origin-cert-expiring-prod",
           "sps-edge-origin-down-prod",
+          "sps-edge-origin-latency-p99-prod",
           "sps-edge-probe-stalled-prod",
           "sps-edge-unreachable-prod",
           "sps-edit-authz-denied-prod",
@@ -360,6 +361,9 @@ describe("SpsObservabilityStack", () => {
         "sps-edge-origin-cert-expiring-prod": warnId,
         // The dead-detector signal: a monitoring failure, not a serving outage.
         "sps-edge-probe-stalled-prod": warnId,
+        // #1936 -- origin latency near the 30s read timeout is a leading
+        // indicator of 504s, not an outage: warn tier, not a composite child.
+        "sps-edge-origin-latency-p99-prod": warnId,
         "sps-alb-5xx-rate-prod": undefined,
         "sps-alb-unhealthy-hosts-prod": undefined,
         "sps-ecs-task-shortfall-prod": undefined,
@@ -387,7 +391,7 @@ describe("SpsObservabilityStack", () => {
         }
       }
       // 17 in prod; staging is 16 — it gets no ACU alarm (see the note above).
-      expect(seen).toBe(17);
+      expect(seen).toBe(18);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -801,6 +805,40 @@ describe("SpsObservabilityStack", () => {
       expect(props?.AlarmActions).toHaveLength(1);
     });
 
+    it("the origin-latency alarm reads CloudFront OriginLatency p99 under the 30s read timeout (#1936)", () => {
+      // CloudFront publishes only in us-east-1 under DistributionId +
+      // Region=Global; missing either dimension yields an alarm with no data.
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-edge-origin-latency-p99-prod" },
+      });
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.Namespace).toBe("AWS/CloudFront");
+      expect(props?.MetricName).toBe("OriginLatency");
+      expect(props?.ExtendedStatistic).toBe("p99");
+      expect(props?.Dimensions).toEqual(
+        expect.arrayContaining([
+          { Name: "DistributionId", Value: expect.any(String) },
+          { Name: "Region", Value: "Global" },
+        ]),
+      );
+      expect(props?.Dimensions).toHaveLength(2);
+      // ms; must stay below CloudFront's default 30s OriginReadTimeout.
+      expect(props?.Threshold).toBe(20000);
+      expect(props?.Threshold).toBeLessThan(30000);
+      expect(props?.ComparisonOperator).toBe("GreaterThanThreshold");
+      expect(props?.EvaluationPeriods).toBe(3);
+      expect(props?.DatapointsToAlarm).toBe(2);
+      expect(props?.TreatMissingData).toBe("notBreaching");
+      expect(props?.AlarmActions).toHaveLength(1);
+      const composites = template.findResources(
+        "AWS::CloudWatch::CompositeAlarm",
+      );
+      const rule = JSON.stringify(
+        Object.values(composites)[0]?.Properties?.AlarmRule as unknown,
+      );
+      expect(rule).not.toContain("EdgeOriginLatencyP99Alarm");
+    });
+
     it("the app-unavailable composite includes both edge leaves", () => {
       // Regression guard for the 2026-07-25 finding: the composite ORed three
       // ALB/ECS leaves, every one of which stays OK when the NetScaler VIP
@@ -1142,8 +1180,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 16 CloudWatch alarms (11 platform + 1 B27 relay-errors + 4 edge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 16);
+    it("creates exactly 17 CloudWatch alarms (11 platform + 1 B27 relay-errors + 5 edge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 17);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -1151,7 +1189,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(16);
+      expect(names).toHaveLength(17);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -1242,6 +1280,7 @@ describe("SpsObservabilityStack", () => {
         // outage leaves page through the composite.
         "sps-edge-origin-cert-expiring-staging": warnId,
         "sps-edge-probe-stalled-staging": warnId,
+        "sps-edge-origin-latency-p99-staging": warnId,
         "sps-alb-5xx-rate-staging": undefined,
         "sps-alb-unhealthy-hosts-staging": undefined,
         "sps-ecs-task-shortfall-staging": undefined,
@@ -1266,7 +1305,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(16);
+      expect(seen).toBe(17);
     });
 
     it("creates the app-unavailable composite in staging too", () => {

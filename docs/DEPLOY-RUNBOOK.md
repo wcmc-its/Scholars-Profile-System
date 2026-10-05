@@ -113,6 +113,8 @@ npx cdk deploy --exclusively Sps-App-prod -c env=prod -c appImageDigest="$digest
 
 `Sps-Edge-${env}` (the CloudFront distribution) is **deliberately not in `deploy.yml`**. Pushing to `master` deploys only AppStack's app image (staging); the distribution is changed by a human running `cdk deploy` from the repo. The app deploy and the EdgeStack deploy are **two separate mechanisms** — a change touching both (e.g. the #700 static-asset split) is rolled out as: merge → `cdk deploy` the stacks → app deploy populates anything CI-side.
 
+Emergency origin backout (NetScaler VIP down, move CloudFront back onto the ALB): see [`network-security-topology.md` § Origin backout](./network-security-topology.md#origin-backout-netscaler-vip-to-alb-1936). It is a `config.ts` change plus an `--exclusively Sps-Edge-<env>` deploy, and it lands `http-only` on ALB :80.
+
 ### Alias + cert are committed; the WAF sources its CIDRs from SSM (#1506)
 
 The bare-deploy footgun (alias/cert/WAF stripped when the `-c` flags were omitted) is **fixed**:
