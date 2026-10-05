@@ -1402,6 +1402,7 @@ function ReassignControl({
             placeholder="Search scholar name…"
             disabled={checking}
             idPrefix={idPrefix}
+            scholarsOnly
           />
         </div>
         <button
