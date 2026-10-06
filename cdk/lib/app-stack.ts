@@ -785,7 +785,9 @@ export class AppStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["secretsmanager:GetSecretValue"],
-        resources: [originSharedSecretForCanary.secretArn],
+        // `-??????`: the real ARN carries Secrets Manager's random suffix
+        // (the task def reaches it by name via the SSM reference below).
+        resources: [`${originSharedSecretForCanary.secretArn}-??????`],
       }),
     );
     canaryTaskExecutionRole.addToPolicy(
@@ -3681,7 +3683,22 @@ export class AppStack extends Stack {
         streamPrefix: "search-eval-canary",
       }),
       secrets: {
-        CANARY_ORIGIN_VERIFY: ecs.Secret.fromSecretsManager(originSharedSecretForCanary),
+        // #3021: NOT ecs.Secret.fromSecretsManager. That puts a partial ARN in
+        // valueFrom, and because this secret's name ends in a hyphen plus six
+        // characters ("-secret"), Secrets Manager parses it as a COMPLETE ARN
+        // with suffix "secret" and the lookup fails (surfaces as AccessDenied;
+        // the canary task never starts). The SSM reference path resolves by
+        // name, needs no suffix in this public repo, and fromSsmParameter
+        // grants ssm:GetParameters on it to the execution role.
+        CANARY_ORIGIN_VERIFY: ecs.Secret.fromSsmParameter(
+          ssm.StringParameter.fromSecureStringParameterAttributes(
+            this,
+            "OriginSharedSecretRefForCanary",
+            {
+              parameterName: `/aws/reference/secretsmanager/scholars/${env}/edge/origin-shared-secret`,
+            },
+          ),
+        ),
       },
     });
 
