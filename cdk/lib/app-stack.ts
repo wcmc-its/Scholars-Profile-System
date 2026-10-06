@@ -3629,11 +3629,34 @@ export class AppStack extends Stack {
         },
       );
     }
+    // #1943 item 2: with the flag off, CDK's listener default (`open: true`)
+    // admits 0.0.0.0/0 on :80 -- internal-scheme, so "anyone" means anything
+    // routed into the shared VPC (WCM campus over the TGW, co-tenants, other
+    // TGW attachments). With it on, only the ETL SG (EtlStack) and the
+    // out-of-band consumer prefix list get in. The SG's description still says
+    // "intra-VPC /api/revalidate"; it is NOT corrected here because
+    // GroupDescription is immutable and a replaced SG would drop the
+    // out-of-band NetScaler SG attachment on this ALB.
+    const narrowInternalAlb = envConfig.internalAlbConsumerPrefixList === true;
     const internalListener = this.internalAlb.addListener("InternalHttpListener", {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
       defaultTargetGroups: [internalAppTargetGroup],
+      open: !narrowInternalAlb,
     });
+    if (narrowInternalAlb) {
+      new ec2.CfnSecurityGroupIngress(this, "InternalAlbIngressFromConsumerPrefixList", {
+        groupId: internalAlbSecurityGroup.securityGroupId,
+        ipProtocol: "tcp",
+        fromPort: 80,
+        toPort: 80,
+        sourcePrefixListId: ssm.StringParameter.valueForStringParameter(
+          this,
+          `/sps/${env}/app/internal-alb-consumer-prefix-list-id`,
+        ),
+        description: "Internal ALB consumers (campus/VPN, FRT, RI) via managed prefix list",
+      });
+    }
 
     // ------------------------------------------------------------------
     // search-eval canary task definition (#1444 remainder).
