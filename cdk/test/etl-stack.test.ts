@@ -8,11 +8,12 @@ import { makeFixture } from "./test-utils";
 function buildEtlStack(
   envName: "staging" | "prod",
   envConfigOverride: Partial<SpsEnvConfig> = {},
+  context?: Record<string, unknown>,
 ): {
   template: Template;
   stack: EtlStack;
 } {
-  const fixture = makeFixture(envName);
+  const fixture = makeFixture(envName, context);
   const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
@@ -1790,6 +1791,32 @@ describe("EtlStack", () => {
       }
     });
   });
+
+    // deploy.yml registers a fresh digest-pinned revision of every ETL family
+    // on each deploy (#2144), so a state-machine role must be able to RunTask
+    // any revision of its family. With cdk.json's
+    // fixRunEcsTaskPolicy flag on, CDK grants only the revision it synthesised
+    // and every cadence fails with AccessDenied after the next deploy. The
+    // other tests here use a bare App, which never reads cdk.json, so this one
+    // synthesises with the real context.
+    it("state-machine roles can RunTask any revision of their family (cdk.json flags)", () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { context } = require("../cdk.json") as { context: Record<string, unknown> };
+      const { template: real } = buildEtlStack("prod", {}, context);
+      const runTaskResources = Object.values(real.findResources("AWS::IAM::Policy")).flatMap(
+        (p) =>
+          (
+            p.Properties.PolicyDocument.Statement as Array<{ Action: unknown; Resource: unknown }>
+          )
+            .filter((s) => s.Action === "ecs:RunTask")
+            .flatMap((s) => (Array.isArray(s.Resource) ? s.Resource : [s.Resource])),
+      );
+      expect(runTaskResources.length).toBeGreaterThan(0);
+      for (const r of runTaskResources) {
+        // Family-wide grants end in ":*"; a revision grant is a bare {Ref}.
+        expect(JSON.stringify(r)).toContain(':*"');
+      }
+    });
 
   describe("staging", () => {
     const { template } = buildEtlStack("staging");

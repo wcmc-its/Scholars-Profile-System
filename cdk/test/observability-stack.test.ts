@@ -1017,22 +1017,23 @@ describe("SpsObservabilityStack", () => {
       expect(sub?.Endpoint?.["Fn::GetAtt"]?.[0]).toMatch(/^OncallRelayFunction/);
     });
 
-    it("OncallRelayErrors alarm watches Errors + Throttles (#2302) via a MathExpression, threshold >= 1 over 1m, routes to the NOTIFY topic", () => {
+    it("OncallRelayErrors alarm watches DLQ depth + Throttles (#2302) via a MathExpression, threshold >= 1 over 5m, routes to the NOTIFY topic", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm", {
         Properties: { AlarmName: "sps-oncall-relay-errors-prod" },
       });
       expect(Object.keys(alarms)).toHaveLength(1);
       const props = Object.values(alarms)[0]?.Properties;
 
-      // A throttled async invocation increments Throttles, not Errors, so an
-      // Errors-only alarm produces zero signal on a sustained throttle --
-      // even though this Lambda IS the paging path. Both metrics must be
-      // present and summed, not just Errors.
+      // DLQ depth = a page lost after all three attempts; a retried-then-
+      // delivered 5xx must NOT fire (the Errors metric did). A throttled async
+      // invocation sits in Lambda's retry queue for up to 6h before the DLQ,
+      // so Throttles must stay summed in (#2302).
       const shape = alarmMetricShape(props);
-      expect(shape.names).toEqual(["Errors", "Throttles"]);
-      expect(shape.expression).toBe("errors + throttles");
-      expect(shape.stats).toEqual(["Sum", "Sum"]);
-      expect(shape.periods).toEqual([60, 60]);
+      expect(shape.names).toEqual(["ApproximateNumberOfMessagesVisible", "Throttles"]);
+      expect(shape.names).not.toContain("Errors");
+      expect(shape.expression).toBe("lost + throttles");
+      expect(shape.stats).toEqual(["Maximum", "Sum"]);
+      expect(shape.periods).toEqual([300, 300]);
 
       expect(props?.Threshold).toBe(1);
       expect(props?.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");

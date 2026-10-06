@@ -877,34 +877,37 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "NotifyTopic5FFA0016",
           },
         ],
-        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (prod). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmDescription": "A Teams alert (prod) could not be delivered after 3 attempts, or the relay is being throttled. Lost alerts are kept in the SQS queue sps-oncall-relay-dlq-prod -- read them there; each message is the original alarm. This alarm clears once that queue is empty. Check /aws/lambda/sps-oncall-relay-prod for the cause (usually the Teams workflow URL in Secrets Manager).",
         "AlarmName": "sps-oncall-relay-errors-prod",
         "ComparisonOperator": "GreaterThanOrEqualToThreshold",
         "DatapointsToAlarm": 1,
         "EvaluationPeriods": 1,
         "Metrics": [
           {
-            "Expression": "errors + throttles",
+            "Expression": "lost + throttles",
             "Id": "expr_1",
             "ReturnData": true,
           },
           {
-            "Id": "errors",
+            "Id": "lost",
             "MetricStat": {
               "Metric": {
                 "Dimensions": [
                   {
-                    "Name": "FunctionName",
+                    "Name": "QueueName",
                     "Value": {
-                      "Ref": "OncallRelayFunction9974C7E1",
+                      "Fn::GetAtt": [
+                        "OncallRelayDlq06D1281A",
+                        "QueueName",
+                      ],
                     },
                   },
                 ],
-                "MetricName": "Errors",
-                "Namespace": "AWS/Lambda",
+                "MetricName": "ApproximateNumberOfMessagesVisible",
+                "Namespace": "AWS/SQS",
               },
-              "Period": 60,
-              "Stat": "Sum",
+              "Period": 300,
+              "Stat": "Maximum",
             },
             "ReturnData": false,
           },
@@ -923,7 +926,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                 "MetricName": "Throttles",
                 "Namespace": "AWS/Lambda",
               },
-              "Period": 60,
+              "Period": 300,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -942,7 +945,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "40a6c38be9bee368944553200381739485999215aa5da304a54ed77717dcb3e2.zip",
+          "S3Key": "49a90ec0e6636e5ad51c79c8d75b8c991158e25aef941224dcc09cdb4b80aa58.zip",
         },
         "DeadLetterConfig": {
           "TargetArn": {
@@ -2261,34 +2264,37 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "NotifyTopic5FFA0016",
           },
         ],
-        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (staging). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmDescription": "A Teams alert (staging) could not be delivered after 3 attempts, or the relay is being throttled. Lost alerts are kept in the SQS queue sps-oncall-relay-dlq-staging -- read them there; each message is the original alarm. This alarm clears once that queue is empty. Check /aws/lambda/sps-oncall-relay-staging for the cause (usually the Teams workflow URL in Secrets Manager).",
         "AlarmName": "sps-oncall-relay-errors-staging",
         "ComparisonOperator": "GreaterThanOrEqualToThreshold",
         "DatapointsToAlarm": 1,
         "EvaluationPeriods": 1,
         "Metrics": [
           {
-            "Expression": "errors + throttles",
+            "Expression": "lost + throttles",
             "Id": "expr_1",
             "ReturnData": true,
           },
           {
-            "Id": "errors",
+            "Id": "lost",
             "MetricStat": {
               "Metric": {
                 "Dimensions": [
                   {
-                    "Name": "FunctionName",
+                    "Name": "QueueName",
                     "Value": {
-                      "Ref": "OncallRelayFunction9974C7E1",
+                      "Fn::GetAtt": [
+                        "OncallRelayDlq06D1281A",
+                        "QueueName",
+                      ],
                     },
                   },
                 ],
-                "MetricName": "Errors",
-                "Namespace": "AWS/Lambda",
+                "MetricName": "ApproximateNumberOfMessagesVisible",
+                "Namespace": "AWS/SQS",
               },
-              "Period": 60,
-              "Stat": "Sum",
+              "Period": 300,
+              "Stat": "Maximum",
             },
             "ReturnData": false,
           },
@@ -2307,7 +2313,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
                 "MetricName": "Throttles",
                 "Namespace": "AWS/Lambda",
               },
-              "Period": 60,
+              "Period": 300,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -2326,7 +2332,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "40a6c38be9bee368944553200381739485999215aa5da304a54ed77717dcb3e2.zip",
+          "S3Key": "49a90ec0e6636e5ad51c79c8d75b8c991158e25aef941224dcc09cdb4b80aa58.zip",
         },
         "DeadLetterConfig": {
           "TargetArn": {
