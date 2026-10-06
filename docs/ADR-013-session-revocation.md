@@ -1,6 +1,6 @@
 # docs/ADR-013 — Session revocation: stateless sessions stay, with an 8h cap and secret rotation as the emergency kill switch
 
-**Status:** Proposed
+**Status:** Accepted (2026-10-06)
 **Date:** 2026-10-05
 **Revision:** 1
 **Authors:** Scholars Profile System development team
