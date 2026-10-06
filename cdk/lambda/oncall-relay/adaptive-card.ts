@@ -118,6 +118,26 @@ function reliabilityDashboardUrl(
   return `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}#dashboards:name=sps-reliability-${env}`;
 }
 
+/**
+ * Plain-text line for the card's `fallbackText`. Teams shows it wherever the
+ * card itself cannot render -- notification banners, the missed-activity email,
+ * mobile previews -- which otherwise read "Card - access it on
+ * https://go.skype.com/cards.unsupported" and say nothing about the alert.
+ */
+function fallbackLine(parts: ReadonlyArray<string | undefined>): string {
+  return truncate(
+    parts.filter((p): p is string => p !== undefined && p.length > 0).join(" \u{2014} "),
+    300,
+  );
+}
+
+/** First sentence of an alarm description: the "what", without the runbook. */
+function firstSentence(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  const m = /^.*?[.!?](\s|$)/.exec(text);
+  return (m ? m[0] : text).trim();
+}
+
 /** Human-readable severity label for the card fact. */
 function severityLabel(severity: AlertSeverity): string {
   return severity === "warn" ? "P2 (warn)" : "P1 (page)";
@@ -211,6 +231,10 @@ export function buildAdaptiveCard(
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
           type: "AdaptiveCard",
           version: ADAPTIVE_CARD_VERSION,
+          fallbackText: fallbackLine([
+            `SPS ${alarm.NewStateValue}: ${alarm.AlarmName}`,
+            firstSentence(alarm.AlarmDescription),
+          ]),
           body,
           actions,
         },
@@ -339,6 +363,13 @@ function errorFact(error: unknown): string {
   }
 }
 
+/** Just the error name ("ECS.AccessDeniedException"), for one-line previews. */
+function errorName(error: unknown): string | undefined {
+  if (typeof error === "string") return truncate(error, 120);
+  const name = (error as { readonly Error?: unknown } | null)?.Error;
+  return typeof name === "string" ? name : undefined;
+}
+
 function stepFunctionsConsoleUrl(region: string): string {
   return `https://${region}.console.aws.amazon.com/states/home?region=${region}#/statemachines`;
 }
@@ -376,6 +407,12 @@ export function buildEtlCard(
   const what = payload.step ?? payload.action ?? "event";
   const env = payload.env ?? "(unknown)";
   const leadEmoji = severity === "warn" ? WARN_EMOJI : "\u{1F6A8}";
+  // Say what happened, not just which step: "Reconcile failed (prod)" reads
+  // on its own; "SPS ETL prod -- Reconcile" did not say whether it broke.
+  const failed = payload.step !== undefined && payload.error !== undefined;
+  const headline = failed
+    ? `SPS ETL step ${what} failed (${env})`
+    : `SPS ETL ${env} \u{2014} ${what}`;
 
   const facts: Array<{ title: string; value: string }> = [
     { title: "Env", value: env },
@@ -419,7 +456,7 @@ export function buildEtlCard(
   const body: Array<Record<string, unknown>> = [
     {
       type: "TextBlock",
-      text: `${leadEmoji} SPS ETL ${env} \u{2014} ${what}`,
+      text: `${leadEmoji} ${headline}`,
       weight: "Bolder",
       size: "Medium",
       wrap: true,
@@ -436,6 +473,10 @@ export function buildEtlCard(
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
           type: "AdaptiveCard",
           version: ADAPTIVE_CARD_VERSION,
+          fallbackText: fallbackLine([
+            headline,
+            failed ? errorName(payload.error) : undefined,
+          ]),
           body,
           actions,
         },

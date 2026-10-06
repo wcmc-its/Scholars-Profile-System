@@ -1220,8 +1220,8 @@ export class SpsObservabilityStack extends Stack {
     // replayed. 14 days is the SQS maximum -- a page lost on a Friday must
     // still be recoverable after a holiday.
     //
-    // Deliberately NO alarm on queue depth: it would fire on precisely the
-    // condition the errors alarm already covers, i.e. page twice for one fault.
+    // Queue depth IS the relay watchdog's signal (below): a message here is a
+    // page that was actually lost, not an attempt that a retry later delivered.
     const relayDlq = new sqs.Queue(this, "OncallRelayDlq", {
       queueName: `sps-oncall-relay-dlq-${env}`,
       retentionPeriod: Duration.days(14),
@@ -1306,29 +1306,34 @@ export class SpsObservabilityStack extends Stack {
     // itself either silently flaps or recursively masks the original alarm.
     // Email is the out-of-band fallback.
     //
-    // Watches Errors + Throttles, not just Errors (#2302). A throttled async
-    // invocation (concurrency limit hit, or the relay's own reserved-
-    // concurrency cap) increments the separate Throttles metric and leaves
-    // Errors at zero, so an Errors-only alarm produces no signal on a
-    // sustained throttle -- even though the on-call relay is the paging path
-    // itself. Mirrors the `unsuccessfulMetric` MathExpression pattern in
-    // etl-stack.ts.
+    // Fires on a page that was actually LOST, not on a failed attempt. A
+    // single Teams 5xx throws, ticks Errors, and the async retry a minute later
+    // usually delivers it (2026-10-06 05:07 UTC: 502, delivered 05:08) -- an
+    // Errors >= 1 alarm emailed "paging-path delivery is at risk" for an alert
+    // that arrived. The DLQ only receives an event after all three attempts
+    // fail, so its depth is the real failure. The alarm stays ALARM until the
+    // queue is emptied, i.e. until someone has read the lost page.
+    //
+    // Throttles stay in (#2302): a throttled async invocation is retried for up
+    // to 6 hours before it reaches the DLQ, so a sustained throttle (including
+    // the reserved-concurrency mute in docs/oncall.md) must signal on its own.
+    // 5-minute period: SQS publishes queue metrics at 5-minute granularity.
     const relayErrorsAlarm = new cloudwatch.Alarm(this, "OncallRelayErrors", {
       alarmName: `sps-oncall-relay-errors-${env}`,
-      alarmDescription: `On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (${env}). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.`,
+      alarmDescription: `A Teams alert (${env}) could not be delivered after 3 attempts, or the relay is being throttled. Lost alerts are kept in the SQS queue sps-oncall-relay-dlq-${env} -- read them there; each message is the original alarm. This alarm clears once that queue is empty. Check /aws/lambda/sps-oncall-relay-${env} for the cause (usually the Teams workflow URL in Secrets Manager).`,
       metric: new cloudwatch.MathExpression({
-        expression: "errors + throttles",
+        expression: "lost + throttles",
         usingMetrics: {
-          errors: relay.metricErrors({
-            period: Duration.minutes(1),
-            statistic: "Sum",
+          lost: relayDlq.metricApproximateNumberOfMessagesVisible({
+            period: Duration.minutes(5),
+            statistic: "Maximum",
           }),
           throttles: relay.metricThrottles({
-            period: Duration.minutes(1),
+            period: Duration.minutes(5),
             statistic: "Sum",
           }),
         },
-        period: Duration.minutes(1),
+        period: Duration.minutes(5),
       }),
       threshold: 1,
       evaluationPeriods: 1,

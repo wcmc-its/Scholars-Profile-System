@@ -362,7 +362,7 @@ P1 → **page** topic `sps-alarms-${env}` (on-call Teams channel); P2 → **warn
 > **† No direct action** — these three feed the `sps-app-unavailable` composite (the single P1 page for a serving cascade); they still evaluate, so the dashboard and the composite rule see them. All ETL/reconciler alarms (`etl-failures-${env}`) are P2.
 > **Count note: code is authoritative — 10 alarms + 1 composite** (`cdk/lib/observability-stack.ts`; the cdk test asserts the exact inventory, so it cannot silently drift). The 10th is `sps-db-pool-timeout` (2026-07-13). An older note here claimed `SLOs.md` undercounted at "eight"; `SLOs.md` now lists the full set.
 
-A separate **relay watchdog** `sps-oncall-relay-errors-${env}` (Lambda `Errors` ≥ 1/min, 1m 1/1) routes to the **notify** topic (email), not page — because the page topic flows through the relay Lambda itself.
+A separate **relay watchdog** `sps-oncall-relay-errors-${env}` fires when an alert was actually lost: a message in the dead-letter queue `sps-oncall-relay-dlq-${env}` (all three delivery attempts failed) or any relay throttle, over 5 minutes. A single failed attempt that a retry later delivered does not fire it. It routes to the **notify** topic (email), not page — because the page topic flows through the relay Lambda itself — and stays in ALARM until the DLQ is emptied; each DLQ message is the original lost alert.
 
 ### Alerting path
 
