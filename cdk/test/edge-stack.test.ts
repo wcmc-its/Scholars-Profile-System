@@ -292,7 +292,7 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus thirty-four additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus thirty-six additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -308,8 +308,9 @@ describe("EdgeStack", () => {
         // + the GrantRecs slice-3 browse list (/api/opportunities)
         // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher
         // + `/edge-ip`, the off-network block page's IP echo (CloudFront
-        // Function only, never reaches the origin).
-        expect(cacheBehaviors).toHaveLength(35);
+        // Function only, never reaches the origin)
+        // + `/_sps-errors/*`, the #2503 origin-down page (S3 origin, direct).
+        expect(cacheBehaviors).toHaveLength(36);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -320,6 +321,8 @@ describe("EdgeStack", () => {
         expect(paths).toEqual([
           // -- Immutable build assets (long-cache, CachingOptimized) ------
           "/_next/static/*",
+          // -- #2503 origin-down page (S3 origin directly, no ALB fallback) -
+          "/_sps-errors/*",
           // -- Off-network block page IP echo (CloudFront Function only) ---
           "/edge-ip",
           // -- Uncacheable (CachingDisabled + AllViewer) ------------------
@@ -445,9 +448,10 @@ describe("EdgeStack", () => {
         expect(searchPolicyLogicalId).toBeDefined();
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
-          if (path === "/_next/static/*") {
+          if (path === "/_next/static/*" || path === "/_sps-errors/*") {
             // Immutable build assets -- Managed-CachingOptimized id (long TTL,
-            // respects the origin's `immutable, max-age=1y`).
+            // respects the origin's `immutable, max-age=1y`). The #2503
+            // origin-down page uses it too, honoring its object max-age=300.
             expect(behavior.CachePolicyId).toBe(
               "658327ea-f89d-4fab-a63d-7e88639e58f6",
             );
@@ -501,6 +505,7 @@ describe("EdgeStack", () => {
           const path = behavior.PathPattern as string;
           if (
             path === "/_next/static/*" ||
+            path === "/_sps-errors/*" ||
             path === "/edge-ip" ||
             QUERY_KEYED_PATTERNS.has(path)
           ) {
@@ -562,9 +567,11 @@ describe("EdgeStack", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const ods = dc.Origins as Array<Record<string, unknown>>;
-        // Two origins: the NetScaler VIP (custom, HTTPS-only, #1507 cutover) +
-        // the static-asset S3 bucket (OAC, primary of /_next/static/*, #700).
-        expect(ods).toHaveLength(2);
+        // Three origins: the NetScaler VIP (custom, HTTPS-only, #1507 cutover) +
+        // the static-asset S3 bucket twice -- once as the primary of the
+        // /_next/static/* origin group (#700), once bound directly to the
+        // #2503 /_sps-errors/* behavior. Both S3 entries share one OAC.
+        expect(ods).toHaveLength(3);
         const albOrigin = ods.find((o) => o.CustomOriginConfig !== undefined);
         expect(albOrigin?.DomainName).toBe("cf-ns-scholars.weill.cornell.edu");
         const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
@@ -767,6 +774,118 @@ describe("EdgeStack", () => {
             (e.ErrorCachingMinTTL as number) !== 0,
         );
         expect(cachedFiveXx).toEqual([]);
+      });
+    });
+
+    describe("#2503 branded origin-down page", () => {
+      const PAGE_PATH = "/_sps-errors/origin-down.html";
+      const distConfig = (): Record<string, unknown> =>
+        (
+          Object.values(template.findResources("AWS::CloudFront::Distribution"))[0]
+            .Properties as Record<string, unknown>
+        ).DistributionConfig as Record<string, unknown>;
+      const errorResponses = (): Array<Record<string, unknown>> =>
+        (distConfig().CustomErrorResponses as Array<Record<string, unknown>>) ?? [];
+      const pageWriter = (): [string, Record<string, unknown>] => {
+        const writers = Object.entries(template.findResources("Custom::AWS")).filter(
+          ([, r]) => JSON.stringify(r.Properties).includes("origin-down.html"),
+        );
+        expect(writers).toHaveLength(1);
+        return writers[0] as [string, Record<string, unknown>];
+      };
+
+      it("502/503/504 serve the page with their ORIGINAL status and ttl 0; 404 and 500 untouched", () => {
+        const byCode = new Map(errorResponses().map((e) => [e.ErrorCode as number, e]));
+        for (const code of [502, 503, 504]) {
+          const r = byCode.get(code);
+          expect(r?.ResponsePagePath).toBe(PAGE_PATH);
+          // Status preserved: monitors and crawlers must still see a 5xx.
+          expect(Number(r?.ResponseCode)).toBe(code);
+          expect(r?.ErrorCachingMinTTL).toBe(0);
+        }
+        // 500 = the app is up and rendered its own error; never "cannot be reached".
+        expect(byCode.get(500)?.ResponsePagePath).toBeUndefined();
+        expect(byCode.get(500)?.ResponseCode).toBeUndefined();
+        expect(byCode.get(404)?.ResponsePagePath).toBeUndefined();
+      });
+
+      it("the page path is served by a behavior bound DIRECTLY to the S3 origin, never the ALB-fallback origin group", () => {
+        const dc = distConfig();
+        const behaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
+        // First match wins: the first behavior covering the page path decides.
+        const matching = behaviors.find((b) => behaviorCovers(b.PathPattern as string, PAGE_PATH));
+        expect(matching?.PathPattern).toBe("/_sps-errors/*");
+        const target = matching?.TargetOriginId as string;
+        const groupIds = (
+          (dc.OriginGroups as Record<string, unknown>).Items as Array<Record<string, unknown>>
+        ).map((g) => g.Id);
+        expect(groupIds).not.toContain(target);
+        const origin = (dc.Origins as Array<Record<string, unknown>>).find((o) => o.Id === target);
+        expect(origin?.S3OriginConfig).toBeDefined();
+        expect(origin?.OriginAccessControlId).toBeDefined();
+        expect(origin?.CustomOriginConfig).toBeUndefined();
+      });
+
+      it("adds NO bucket-policy grant: CloudFront read is the existing OAC statement; the deploy role is not widened", () => {
+        const statements = Object.values(template.findResources("AWS::S3::BucketPolicy")).flatMap(
+          (r) =>
+            (
+              (r.Properties as Record<string, unknown>).PolicyDocument as {
+                Statement: Array<Record<string, unknown>>;
+              }
+            ).Statement,
+        );
+        // Nothing in any bucket policy names the error prefix -- the page's
+        // only writer is the custom resource's identity policy (next test).
+        expect(JSON.stringify(statements)).not.toContain("_sps-errors");
+        // Exactly one CloudFront-service grant, read-only, pinned to THIS
+        // distribution by SourceArn (the CDK OAC statement for staticS3Origin).
+        const cfGrants = statements.filter(
+          (s) => (s.Principal as Record<string, unknown> | undefined)?.Service === "cloudfront.amazonaws.com",
+        );
+        expect(cfGrants).toHaveLength(1);
+        expect(cfGrants[0].Action).toBe("s3:GetObject");
+        expect(JSON.stringify(cfGrants[0].Condition)).toContain("Distribution830FAC52");
+      });
+
+      it("the page writer may PutObject under _sps-errors/* ONLY (cannot touch or prune _next/static)", () => {
+        const [, writer] = pageWriter();
+        const policies = Object.values(template.findResources("AWS::IAM::Policy")).filter((p) =>
+          JSON.stringify(p.Properties).includes("_sps-errors/*"),
+        );
+        expect(policies).toHaveLength(1);
+        const stmts = (
+          (policies[0].Properties as Record<string, unknown>).PolicyDocument as {
+            Statement: Array<Record<string, unknown>>;
+          }
+        ).Statement;
+        expect(stmts).toHaveLength(1);
+        expect(stmts[0].Action).toBe("s3:PutObject");
+        const resource = JSON.stringify(stmts[0].Resource);
+        expect(resource).toContain("/_sps-errors/*");
+        expect(resource).not.toContain("_next/static");
+        // No delete anywhere in the writer's grant.
+        expect(JSON.stringify(stmts)).not.toMatch(/Delete/);
+        // Writes the exact key the error responses point at, as HTML.
+        const props = JSON.stringify(writer.Properties);
+        expect(props).toContain("_sps-errors/origin-down.html");
+        expect(props).toContain("text/html; charset=utf-8");
+      });
+
+      it("the distribution DependsOn the page write, so the object exists before errorResponses points at it", () => {
+        const [writerId] = pageWriter();
+        const dist = Object.values(template.findResources("AWS::CloudFront::Distribution"))[0];
+        expect(dist.DependsOn).toEqual(expect.arrayContaining([writerId]));
+      });
+
+      it("the page body is the shared edge chrome with no IP echo and no script", () => {
+        const [, writer] = pageWriter();
+        const props = JSON.stringify(writer.Properties);
+        expect(props).toContain("Temporarily unavailable");
+        expect(props).toContain("Weill Cornell Medicine");
+        expect(props).toContain("support@med.cornell.edu");
+        expect(props).not.toContain("edge-ip");
+        expect(props).not.toContain("<script");
       });
     });
 
