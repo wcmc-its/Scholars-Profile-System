@@ -606,6 +606,12 @@ export function likelihoodBand(likelihood: number): Band {
   return BANDS.find((b) => likelihood >= b.min) ?? BANDS[BANDS.length - 1];
 }
 
+/** A band label's place in `BANDS`, strongest first (0). For sorting the Score
+ *  facet's options in band order rather than by count. Pure. */
+function bandRank(label: string): number {
+  return BANDS.findIndex((b) => b.label === label);
+}
+
 /** A list row's left spine: the band colour on Moderate, Slight and Weak rows
  *  only. When nearly every open row is Strong, a green edge on all of them says
  *  nothing, so Strong rows go without and the colour marks the rows worth
@@ -1134,8 +1140,9 @@ export function applyDisplayFloor(
 }
 
 /** The Filters panel's groups, in the mockup's order. */
-export type FacetKey = "signal" | "llm" | "mstr" | "method" | "person" | "year";
+export type FacetKey = "score" | "signal" | "llm" | "mstr" | "method" | "person" | "year";
 export const FACET_GROUPS: ReadonlyArray<{ key: FacetKey; label: string }> = [
+  { key: "score", label: "Score" },
   { key: "signal", label: "Signals fired" },
   { key: "llm", label: "LLM score" },
   { key: "mstr", label: "Method match" },
@@ -1150,6 +1157,10 @@ export type FacetSelection = Partial<Record<FacetKey, readonly string[]>>;
  * Every facet value one row carries, per group, in the words the Filters panel
  * prints. Built off the same functions the card uses, so a facet can never
  * claim a signal the paper pane does not show:
+ *   - score — the row's `likelihoodBand` label (Strong / Moderate / Slight /
+ *     Weak), the word its band chip prints. A paper sent here by PMID
+ *     (`queued`) or added by hand (`isManual`) has no band on the card, so it
+ *     carries no value here either and drops out when a Score is ticked;
  *   - signal — `buildSignals` (so the repeat-user de-dup applies), plus a known
  *     client on the byline, which is not a counted signal but is evidence a
  *     reviewer filters on;
@@ -1198,6 +1209,7 @@ export function facetValues(
     person = [who ? displayName(who.scholar.name) : "Unnamed author"];
   }
   return {
+    score: row.queued || row.isManual ? [] : [likelihoodBand(row.likelihood).label],
     signal,
     llm: [llm],
     mstr: [tier],
@@ -2683,7 +2695,10 @@ export function CoreClaimQueue({
       .sort(
         key === "year"
           ? (a, b) => b[0].localeCompare(a[0])
-          : (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+          : key === "score"
+            ? // Strongest band first, whatever the counts (BANDS' own order).
+              (a, b) => bandRank(a[0]) - bandRank(b[0])
+            : (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
       )
       .map(([value, count]) => ({ value, count, selected: ticked.includes(value) }));
     return { key, label, options };

@@ -226,6 +226,21 @@ describe("CoreClaimQueue — display floor", () => {
     expect(q.getByRole("checkbox", { name: /^2021/ }).textContent).toBe("2021 2");
   });
 
+  it("the Score facet offers no Weak pill while the Weak rows are hidden; Show brings it", () => {
+    const { q, titles } = renderQueue();
+    fireEvent.click(q.getByRole("button", { name: /^Filters/ }));
+    const score = () => q.getByRole("group", { name: "Score" });
+    expect(within(score()).queryByRole("checkbox", { name: /^Weak/ })).toBeNull();
+    expect(within(score()).getByRole("checkbox", { name: /^Slight/ }).textContent).toBe("Slight 1");
+    // ticking Slight narrows to the at-floor row; the hidden Weak rows stay hidden
+    fireEvent.click(within(score()).getByRole("checkbox", { name: /^Slight/ }));
+    expect(titles()).toEqual(["90000002"]);
+    fireEvent.click(q.getByRole("button", { name: "Show" }));
+    expect(within(score()).getByRole("checkbox", { name: /^Weak/ }).textContent).toBe("Weak 3");
+    // still filtered to Slight: Show does not leak Weak rows past the tick
+    expect(titles()).toEqual(["90000002"]);
+  });
+
   it("Show reveals them (every count follows), Hide puts them back", () => {
     const { q, titles, floorLine } = renderQueue();
     fireEvent.click(q.getByRole("button", { name: "Show" }));

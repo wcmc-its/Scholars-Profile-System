@@ -5227,6 +5227,68 @@ describe("v2 pure helpers", () => {
     expect(facetValues(row(), {}, new Set(["ccc1003"])).signal).toContain("Client co-author");
   });
 
+  it("facetValues: Score is the row's likelihoodBand label; queued and manual rows carry none", () => {
+    expect(facetValues(row({ likelihood: 0.9 })).score).toEqual(["Strong"]);
+    expect(facetValues(row({ likelihood: 0.85 })).score).toEqual(["Strong"]);
+    expect(facetValues(row({ likelihood: 0.7 })).score).toEqual(["Moderate"]);
+    expect(facetValues(row({ likelihood: 0.4 })).score).toEqual(["Slight"]);
+    expect(facetValues(row({ likelihood: 0.1 })).score).toEqual(["Weak"]);
+    // the same words the band chip prints
+    expect(facetValues(row({ likelihood: 0.5 })).score).toEqual([likelihoodBand(0.5).label]);
+    // no band on the card, so no Score value, and a ticked Score drops them
+    expect(facetValues(row({ likelihood: 0.5, queued: true })).score).toEqual([]);
+    expect(facetValues(row({ likelihood: 0.5, isManual: true })).score).toEqual([]);
+    expect(
+      matchesFacets(facetValues(row({ likelihood: 0.5, queued: true })), { score: ["Slight"] }),
+    ).toBe(false);
+  });
+
+  it("Score facet: band order, 0-count values absent, ticking Slight narrows across evidence and feeds Reject all", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Strong paper", likelihood: 0.9 }),
+          // two Slight rows with DIFFERENT evidence: one acked, one LLM-only
+          row({ pmid: "2", title: "Slight acked", likelihood: 0.5 }),
+          row({
+            pmid: "3",
+            title: "Slight llm only",
+            likelihood: 0.45,
+            signalAck: false,
+            ackAlias: null,
+            ackSnippet: null,
+            coauthors: [],
+            coauthorScholars: [],
+          }),
+          row({ pmid: "4", title: "Moderate paper", likelihood: 0.7 }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    openFilters();
+    const group = screen.getByRole("group", { name: "Score" });
+    // strongest first regardless of count; no Weak pill (0 rows)
+    expect(
+      within(group)
+        .getAllByRole("checkbox")
+        .map((c) => c.textContent),
+    ).toEqual(["Strong 1", "Moderate 1", "Slight 2"]);
+    expect(within(group).queryByRole("checkbox", { name: /^Weak/ })).toBeNull();
+
+    fireEvent.click(within(group).getByRole("checkbox", { name: /^Slight/ }));
+    expect(listTitles().sort()).toEqual(["Slight acked", "Slight llm only"]);
+    fireEvent.click(screen.getByRole("button", { name: "Reject all 2…" }));
+    const guard = document.querySelector('[data-slot="core-queue-reject-guard"]') as HTMLElement;
+    fireEvent.click(within(guard).getByRole("button", { name: "Reject 2" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body);
+    expect(body.status).toBe("rejected");
+    expect([...body.pmids].sort()).toEqual(["2", "3"]);
+  });
+
   it("matchesFacets: OR within a group, AND across, empty matches everything", () => {
     const v = facetValues(row({ llmScore: 2 }));
     expect(matchesFacets(v, {})).toBe(true);
