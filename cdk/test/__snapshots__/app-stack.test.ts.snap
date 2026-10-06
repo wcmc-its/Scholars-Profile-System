@@ -6812,7 +6812,7 @@ service:
             ],
           },
         ],
-        "Cpu": "1024",
+        "Cpu": "2048",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
             "TaskExecutionRole250D2532",
@@ -6820,7 +6820,7 @@ service:
           ],
         },
         "Family": "sps-app-staging",
-        "Memory": "2048",
+        "Memory": "4096",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
           "FARGATE",
@@ -7963,7 +7963,7 @@ service:
         "DeploymentController": {
           "Type": "ECS",
         },
-        "DesiredCount": 1,
+        "DesiredCount": 2,
         "EnableECSManagedTags": false,
         "EnableExecuteCommand": false,
         "HealthCheckGracePeriodSeconds": 120,
@@ -8016,8 +8016,8 @@ service:
         "TaskRole30FC0FBB",
       ],
       "Properties": {
-        "MaxCapacity": 3,
-        "MinCapacity": 1,
+        "MaxCapacity": 6,
+        "MinCapacity": 2,
         "ResourceId": {
           "Fn::Join": [
             "",
