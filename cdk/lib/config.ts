@@ -343,6 +343,17 @@ export interface SpsEnvConfig {
    */
   readonly useSharedVpc: boolean;
   /**
+   * #1943 item 2: narrow the INTERNAL ALB's :80 ingress from 0.0.0.0/0 (CDK's
+   * listener default) to the ETL SG (EtlStack's InternalAlbIngressFromEtl)
+   * plus ONE managed prefix list of consumer ranges (WCM campus + VPN pool,
+   * Faculty Review Tool / Research Informatics hosts). The list is created
+   * out-of-band and its id read from SSM
+   * `/sps/<env>/app/internal-alb-consumer-prefix-list-id`, so no CIDR or
+   * pl- id lands in this public repo. Turn on per env ONLY after that
+   * parameter exists and the list is populated, or consumers time out.
+   */
+  readonly internalAlbConsumerPrefixList?: boolean;
+  /**
    * The shared its-reciter-vpc01 (`vpc-08a1873fc8eebae28`, acct 665083158573,
    * us-east-1), imported by attributes — no `fromLookup`, so synth stays
    * deterministic without account creds. Subnet ids were discovered 2026-06-30
