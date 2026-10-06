@@ -3649,7 +3649,7 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret",
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret-??????",
                   ],
                 ],
               },
@@ -3698,8 +3698,10 @@ service:
             },
             {
               "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
               ],
               "Effect": "Allow",
               "Resource": {
@@ -3710,7 +3712,7 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret-??????",
+                    ":ssm:us-east-1:123456789012:parameter/aws/reference/secretsmanager/scholars/prod/edge/origin-shared-secret",
                   ],
                 ],
               },
@@ -3836,7 +3838,7 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret",
+                      ":ssm:us-east-1:123456789012:parameter/aws/reference/secretsmanager/scholars/prod/edge/origin-shared-secret",
                     ],
                   ],
                 },
@@ -8756,7 +8758,7 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret",
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret-??????",
                   ],
                 ],
               },
@@ -8805,8 +8807,10 @@ service:
             },
             {
               "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
               ],
               "Effect": "Allow",
               "Resource": {
@@ -8817,7 +8821,7 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret-??????",
+                    ":ssm:us-east-1:123456789012:parameter/aws/reference/secretsmanager/scholars/staging/edge/origin-shared-secret",
                   ],
                 ],
               },
@@ -8943,7 +8947,7 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret",
+                      ":ssm:us-east-1:123456789012:parameter/aws/reference/secretsmanager/scholars/staging/edge/origin-shared-secret",
                     ],
                   ],
                 },

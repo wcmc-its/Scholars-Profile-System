@@ -1206,6 +1206,39 @@ describe("AppStack", () => {
         expect(serialized).not.toContain("db/app-ro");
       });
 
+      it("the canary reads the origin secret by NAME via the SSM reference path, never a partial Secrets Manager ARN (#3021)", () => {
+        // A partial ARN of a secret named "...-secret" is parsed as a complete
+        // ARN with suffix "secret", so the canary could never start.
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const canary = Object.entries(taskDefs).find(([id]) =>
+          id.startsWith("SearchEvalCanaryTaskDefinition"),
+        )?.[1];
+        const secrets = (canary?.Properties?.ContainerDefinitions as Array<{
+          Secrets?: Array<{ Name: string; ValueFrom: unknown }>;
+        }>)[0].Secrets;
+        const ref = JSON.stringify(
+          secrets?.find((x) => x.Name === "CANARY_ORIGIN_VERIFY")?.ValueFrom,
+        );
+        expect(ref).toContain(
+          ":parameter/aws/reference/secretsmanager/scholars/prod/edge/origin-shared-secret",
+        );
+        expect(ref).not.toContain(":secretsmanager:");
+
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = JSON.stringify(
+          Object.values(policies).find((p) =>
+            (p.Properties?.Roles as Array<{ Ref?: string }> | undefined)?.some(
+              (r) => r.Ref?.includes("SearchEvalCanaryExecutionRole"),
+            ),
+          ),
+        );
+        expect(execPolicy).toContain("ssm:GetParameters");
+        expect(execPolicy).toContain(
+          "parameter/aws/reference/secretsmanager/scholars/prod/edge/origin-shared-secret",
+        );
+        expect(execPolicy).toContain("edge/origin-shared-secret-??????");
+      });
+
       it("the deploy role's iam:PassRole covers the search-eval canary execution role (#1444)", () => {
         const policies = template.findResources("AWS::IAM::Policy");
         const deployPolicy = Object.values(policies).find((p) => {
