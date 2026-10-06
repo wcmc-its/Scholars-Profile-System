@@ -21,7 +21,7 @@ A typical end-to-end deploy looks like this:
 
 Total wall-clock for a staging deploy with no pending migrations: ~7-9 minutes. A migration adds whatever Prisma needs to apply it. The 3-minute rolling-replacement step is the constant cost of zero-downtime for ECS Fargate.
 
-> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The nightly Step Functions pull `scholars-etl-staging:latest`, so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474.)
+> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The run also pins the staging ETL task families to that branch's ETL image (#2144), so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474.)
 
 To promote a tested build to **production**:
 
@@ -107,11 +107,48 @@ npx cdk deploy --exclusively Sps-App-prod -c env=prod -c appImageDigest="$digest
 - **Escape hatch.** Pass `-c allowLatestAppImage=true` to synthesize on `:latest` on purpose. Use it for the bootstrap two-step (ECR empty, nothing running) and for CI's `Synth (prod)` step. The next `deploy.yml` run re-pins either way.
 - **Staging is not gated.** Every push to master re-pins it through `deploy.yml`. It honours `-c appImageDigest` too: `digest=$(../scripts/release/running-app-digest.sh staging)`.
 - **What the script reads.** It takes the digest from the service's current task definition when that revision is pinned. If an unpinned revision is live, it takes the `imageDigest` ECS recorded on the RUNNING app containers, but only when every task agrees. It never reads ECR `:latest`, because that is what the service would pull next, not what it is running. It exits non-zero instead of guessing, for example mid-rollout.
-- **Scope.** The pin applies to the app image families (`sps-app`, `sps-migrate`). The ETL-image families in the same stack (`sps-db-bootstrap`, `sps-verify-grants`, `sps-search-eval-canary`) stay on `:latest`: nothing long-running uses them, and `deploy.yml` registers a pinned revision of each right before it runs them. The `Sps-Etl-<env>` families ship on ECR push by design and are unchanged.
+- **Scope.** The pin applies to the app image families (`sps-app`, `sps-migrate`). The ETL-image families in the same stack (`sps-db-bootstrap`, `sps-verify-grants`, `sps-search-eval-canary`) stay on `:latest`: nothing long-running uses them, and `deploy.yml` registers a pinned revision of each right before it runs them.
+- **`Sps-Etl-<env>` families are pinned per `deploy.yml` run (#2144).** The Step Functions state machines reference each ETL family by bare name, so a step launches the family's newest ACTIVE revision. The `deploy.yml` pin step registers a revision of each of the seven families (`sps-etl`, `sps-etl-sources`, `sps-etl-ldap`, `sps-etl-reciter-api`, `sps-etl-ctsc`, `sps-reconcile`, `sps-cdn-reconcile`, all `-<env>`) pinned to that run's `scholars-etl-<env>@sha256:...` digest. ETL code still ships on the `deploy.yml` run with no `cdk deploy`, but a bare `docker push :latest` no longer changes what runs. `sps-bulk-data-rule-<env>` uses its own repo and stays on `:latest`. Check a family's image (expect `@sha256:`):
+
+  ```bash
+  aws ecs describe-task-definition --task-definition sps-etl-<env> \
+    --query "taskDefinition.containerDefinitions[?name=='etl'].image" --output text
+  ```
+- **Caveat: `cdk deploy Sps-Etl-<env>` unpins.** When that deploy changes a task definition, CloudFormation registers a new revision on `:latest`. It becomes the newest ACTIVE revision, so that family runs `:latest` until the next `deploy.yml` run. Re-run `deploy.yml` for the env after any `Sps-Etl` deploy that touches a task definition.
+- **ETL rollback.** Deregistering the newest revision of a family hands the next step launch to revision N-1. That is a rollback **only if N-1 is itself a pinned `@sha256:` clone** from an earlier `deploy.yml` run. If N-1 is on `:latest`, deregistering N runs `:latest`, and `:latest` now points at the bad build, because the bad run pushed it. N-1 is on `:latest` on the first `deploy.yml` run after #2144 lands, and after any `cdk deploy Sps-Etl-<env>` that touched that family. Rules:
+  - Only touch families the bad run actually pinned (its newest revision's image is the bad digest). A family the run skipped, or that a later `cdk deploy` re-registered, is not the bad revision.
+  - Only deregister when N-1 is `@sha256:` and not the bad digest. Never deregister a family's last ACTIVE revision.
+  - Otherwise, re-pin a known-good build: `gh run rerun <run-id-of-last-good-deploy>` (a re-run keeps that run's original commit, so it passes the prod master-only guard; `workflow_dispatch --ref` takes only a branch or tag, not a SHA), or land a revert on master and deploy that. Either path also rolls back the **app** image and re-runs bootstrap/migrate, so first check that the DB has no forward-only migrations newer than that build.
+
+  The loop below prints the newest two revisions per family and deregisters N only when the first two rules hold. Run it with `dry=1` first:
+
+  ```bash
+  env=staging                       # or prod
+  bad=sha256:<bad-etl-image-digest> # from the bad run's pin step or ECR
+  dry=1                             # set dry=0 to deregister
+  for f in sps-etl sps-etl-sources sps-etl-ldap sps-etl-reciter-api sps-etl-ctsc sps-reconcile sps-cdn-reconcile; do
+    case "$f" in sps-reconcile) c=reconcile ;; sps-cdn-reconcile) c=cdn-reconcile ;; *) c=etl ;; esac
+    read -r newest prev <<<"$(aws ecs list-task-definitions --family-prefix "$f-$env" --status ACTIVE --sort DESC \
+      --query 'taskDefinitionArns[0:2]' --output text)"
+    img() { aws ecs describe-task-definition --task-definition "$1" \
+      --query "taskDefinition.containerDefinitions[?name=='$c'].image | [0]" --output text; }
+    n_img=$(img "$newest"); p_img=${prev:+$(img "$prev")}
+    echo "$f-$env  N=$n_img  N-1=${p_img:-<none>}"
+    if [[ "$n_img" != *"@$bad" ]]; then echo "  skip: newest is not the bad build"; continue; fi
+    if [[ -z "$prev" || "$p_img" != *@sha256:* || "$p_img" == *"@$bad" ]]; then
+      echo "  skip: N-1 is missing, on :latest, or also bad; re-run the last good deploy (gh run rerun) or deploy a revert"; continue
+    fi
+    if [[ "$dry" == 0 ]]; then
+      aws ecs deregister-task-definition --task-definition "$newest" --query 'taskDefinition.taskDefinitionArn' --output text
+    else echo "  would deregister $newest"; fi
+  done
+  ```
 
 ## EdgeStack (CloudFront) — MANUAL deploy, not in CI
 
 `Sps-Edge-${env}` (the CloudFront distribution) is **deliberately not in `deploy.yml`**. Pushing to `master` deploys only AppStack's app image (staging); the distribution is changed by a human running `cdk deploy` from the repo. The app deploy and the EdgeStack deploy are **two separate mechanisms** — a change touching both (e.g. the #700 static-asset split) is rolled out as: merge → `cdk deploy` the stacks → app deploy populates anything CI-side.
+
+Emergency origin backout (NetScaler VIP down, move CloudFront back onto the ALB): see [`network-security-topology.md` § Origin backout](./network-security-topology.md#origin-backout-netscaler-vip-to-alb-1936). It is a `config.ts` change plus an `--exclusively Sps-Edge-<env>` deploy, and it lands `http-only` on ALB :80.
 
 ### Alias + cert are committed; the WAF sources its CIDRs from SSM (#1506)
 

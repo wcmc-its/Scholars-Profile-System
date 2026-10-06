@@ -18,8 +18,11 @@ export interface TestFixture {
  * comparison (cross-region references hash the producer's account into the
  * generated SSM parameter name).
  */
-export function makeFixture(envName: "staging" | "prod"): TestFixture {
-  const app = new App();
+export function makeFixture(
+  envName: "staging" | "prod",
+  context?: Record<string, unknown>,
+): TestFixture {
+  const app = new App({ context });
   const envConfig = resolveEnvConfig(envName);
   return {
     app,

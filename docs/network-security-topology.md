@@ -81,10 +81,10 @@ SG-referenced.
 
 | SG | Ingress (who can reach it) | Owned/added by |
 |---|---|---|
-| `alb` (public ALB) | `:80` from `0.0.0.0/0` **but** the listener default action is `403`; a priority-1 rule forwards only when `X-Origin-Verify` matches the CloudFront-injected secret | NetworkStack (SG) / AppStack + EdgeStack (rule) |
+| `alb` (public ALB) | `:80` from `0.0.0.0/0` **but** the listener default action is `403`; a priority-1 rule forwards only when `X-Origin-Verify` matches the CloudFront-injected secret | NetworkStack (SG; flag-off) or `sharedVpc.albSgId` (flag-on) / AppStack + EdgeStack (rule) |
 | `alb` (internal ALB listener) | `:80` from the `etl` SG only (the `/api/revalidate` path) | EtlStack |
 | `app` (ECS app tasks) | from the `alb` SG only | AppStack |
-| `etl` (ETL tasks) | none inbound (egress only) | NetworkStack |
+| `etl` (ETL tasks) | none inbound (egress only) | NetworkStack (flag-off) or `sharedVpc.etlSgId` (flag-on) |
 | `aurora` | from `app` SG + `etl` SG only | DataStack |
 | `opensearch` | from `app` SG + `etl` SG only (private ENI, data plane) | DataStack |
 | Secrets Manager interface-endpoint SG | `:443` from `app` SG + `etl` SG only (CDK's default `:443 from VPC CIDR` is suppressed) | AppStack (B17) |
@@ -112,7 +112,9 @@ two halves:
 1. **DNS resolution** — three RAM-shared Route 53 Resolver FORWARD rules (for
    `weill.cornell.edu`, `med.cornell.edu`, `wcmc.ad.net`) from the Central Services account
    (`091981818184`) are associated to this VPC, sending those domains to the shared
-   outbound resolver — the same wiring ReCiter's EKS VPC uses. Codified in NetworkStack.
+   outbound resolver — the same wiring ReCiter's EKS VPC uses. Codified in NetworkStack,
+   which is not synthesized while `useSharedVpc` is on; the shared VPC's associations are
+   owned outside SPS.
 2. **Routing** — reaching the resolved IPs additionally needs the Central Services Transit
    Gateway attachment + the WCM-side firewall opened for this VPC's CIDR. **Those are owned
    by the Central Services account / WCM network, not by SPS**, and are tracked separately.
@@ -147,6 +149,80 @@ two halves:
   full cookie/header forwarding only on the uncacheable writer routes
   ([`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md)).
 
+### Origin backout: NetScaler VIP to ALB (#1936)
+
+The dynamic origin has **no failover**. The default behavior and every ordered behavior
+target one custom origin, the NetScaler VIP. The only origin group is `/_next/static/*`
+(S3 primary). If the VIP stops forwarding, the whole dynamic site is down until an operator
+moves the origin. The `sps-edge-origin-down-<env>` alarm (inside the
+`sps-app-unavailable-<env>` composite) is what detects this.
+
+**How the origin is built.** `cdk/lib/edge-stack.ts` picks one of two origins:
+
+- `edgeOriginCertArn` **and** `edgeOriginHostname` both non-empty (today, both envs): the
+  origin is `edgeOriginHostname` (the NetScaler VIP), `HTTPS_ONLY` on :443, TLS 1.2.
+- `edgeOriginHostname` empty: the origin is the public ALB DNS name read from SSM
+  `/sps/<env>/app/public-alb-dns`, **`HTTP_ONLY` on :80**.
+
+`X-Origin-Verify` is sent on both paths. The edge-stack test "with the cert seeded but NO
+origin hostname, CloudFront stays HTTP_ONLY on the ALB DNS name" pins the second path.
+
+**Do not repoint the origin to the ALB DNS name in the console with `https-only`.** The
+ALB's :443 cert names the public hostname only, with no SAN for the
+`*.elb.amazonaws.com` name. CloudFront checks a custom origin's cert against the origin
+domain name, so that check fails and every dynamic request returns 502. The backout looks
+applied while the site stays down. The CDK path below avoids this because it lands on
+`http-only` :80.
+
+**Procedure** (run from a fresh `origin/master` checkout, per
+[`DEPLOY-RUNBOOK.md` § EdgeStack](./DEPLOY-RUNBOOK.md)):
+
+1. In `cdk/lib/config.ts`, in the affected env's block, set `edgeOriginHostname: ""`.
+   **Leave `edgeOriginCertArn` as it is.** It gates only the ALB :443 listener and its SG
+   ingress (AppStack). Keeping it means the NetScaler path is still there when you roll
+   forward, and `Sps-App-<env>` does not need a deploy.
+2. Diff, then deploy, the Edge stack alone:
+
+   ```sh
+   cd cdk
+   npx cdk diff --method=template --exclusively Sps-Edge-<env> -c env=<env>
+   # expect ONLY the origin to change: DomainName -> the SSM-resolved ALB DNS,
+   # OriginProtocolPolicy https-only -> http-only, HTTPPort 80.
+   # NO destroy/Removed of WebACL / IPSet / Aliases / ViewerCertificate.
+   npx cdk deploy --require-approval never --exclusively Sps-Edge-<env> -c env=<env>
+   ```
+
+   CloudFront takes about 5-15 minutes to propagate. Background the deploy.
+3. Check: the edge serves a dynamic page from a WCM network, and the ALB `RequestCount`
+   rises again. The `sps-edge-origin-down-<env>` probe dials the VIP hostname baked into
+   its Lambda env at the last `Sps-Observability-<env>` deploy, so it keeps alarming while
+   the VIP is down, even after the backout works. Use the ALB metrics to confirm recovery.
+   Do not deploy `Sps-Observability-<env>` while backed out: with an empty hostname the
+   probe refuses to report and the origin alarm goes blind.
+4. Roll forward once the VIP is healthy again: restore the hostname from git and deploy
+   `Sps-Edge-<env>` the same way.
+
+**The ALB :80 listener is load-bearing.** This procedure is the only recovery path, and it
+lands on `HTTP_ONLY` :80 (listener `PublicHttpListener` plus the `0.0.0.0/0` :80 SG
+ingress in `cdk/lib/app-stack.ts`). Do not remove :80 while this is the backout. A
+dedicated ALB hostname with its own ACM cert, pre-staged as an HTTPS failover member of a
+dynamic origin group, would remove both the SPOF and the :80 dependency (#1936, not
+built).
+
+**Not rehearsed.** This procedure has **not** been run on staging. Rehearse it once on
+staging (VIP -> ALB -> VIP) before relying on it in prod. Until then, plan on a recovery
+time of 30-60+ minutes (config edit, diff, deploy, propagation), not "minutes".
+
+**Open questions for the WCM network team (unanswered, record the answers here):**
+
+- Is the VIP highly available (two appliances behind one address) or a single node? That
+  decides whether the missing failover is accepted risk or an open gap.
+- What is the NetScaler's idle/read timeout on this vserver? CloudFront's
+  `OriginReadTimeout` is the 30s default (`edge-stack.ts` sets none). The NetScaler
+  timeout must be at least as long. **Do not raise `OriginReadTimeout`** (for example, for
+  the Bedrock-backed routes) until this is known. `sps-edge-origin-latency-p99-<env>`
+  (warn tier, p99 > 20s) is the early warning for requests nearing the 30s cutoff.
+
 ## Secrets posture (network-relevant slice)
 
 - All credentials live in **Secrets Manager**; referenced by ARN only — **no secret value
@@ -171,12 +247,10 @@ is SAML + RBAC, see [`access-control-rbac.md`](./access-control-rbac.md)), secre
   (accepted; raise EIP quota and bump to 2 post-launch).
 - **TGW + WCM firewall are not SPS-owned** — the ETL connectivity path depends on another
   team; resolver associations are codified but routing is external.
-- **NetScaler in the request path on staging only** (#502, RITM0801140) — the WAF topology is
-  resolved (CloudFront + AWS WAF → NetScaler → ALB → Fargate). Staging is cut over and live
-  (2026-07-21, PR #1852); prod still points straight at its ALB because its NetScaler VIP does
-  not exist yet (NetScaler-team task, follow-up 2026-07-24). The #461 WCM-only gate stays until
-  the NetScaler enforces equivalent filtering. Note: **do not deploy the Edge stack (either env)
-  until #1856** — its WAF allow-list sources a missing SSM param, so a deploy would strip the
-  live IPSet.
+- **NetScaler VIP is a single dynamic origin with no failover** (#1936). Both envs route
+  every dynamic request through it (staging 2026-07-21, prod 2026-07-24; see § Edge & WAF).
+  Recovery is the manual [origin backout](#origin-backout-netscaler-vip-to-alb-1936), which
+  has not been rehearsed. Whether the VIP is HA is an open question to the network team.
+  The #461 WCM-only gate stays until the NetScaler enforces equivalent filtering.
 - **`cdk diff` is the only drift detector** — there is no continuous config-drift scanner;
   console changes are caught at the next diff, not in real time.

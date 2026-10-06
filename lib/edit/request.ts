@@ -72,6 +72,11 @@ export function editOk(payload: Record<string, unknown>): NextResponse {
 /**
  * An error body `{ ok: false, error, field? }` at `status`. Never echoes a
  * session token or another scholar's data (`self-edit-spec.md` § Surfaces).
+ *
+ * Never pass 502/503/504: CloudFront replaces the body of those codes with
+ * its origin-down page (#2503), so the `error` code would never reach the
+ * client. A dependency failure or a dormant feature is a `500` carrying a
+ * specific `error` code. `tests/unit/edge-safe-status-codes.test.ts` enforces it.
  */
 export function editError(status: number, error: string, field?: string): NextResponse {
   return NextResponse.json(

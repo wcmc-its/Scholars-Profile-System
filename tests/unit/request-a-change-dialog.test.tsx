@@ -183,7 +183,7 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("falls back to the mailto: client on a non-2xx (no regression while the mailer is dark)", async () => {
-    mockFetch({ ok: false, status: 503 });
+    mockFetch({ ok: false, status: 500 });
     render(<RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D." />);
     open();
     pickIssue("education-wrong");
@@ -195,7 +195,7 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("the fallback mailto carries cc + item label (funding → OSRA)", async () => {
-    mockFetch({ ok: false, status: 503 });
+    mockFetch({ ok: false, status: 500 });
     render(<RequestAChangeDialog attribute="funding" cwid="abc1001" scholarName="Jane Scholar" itemLabel="R01 Test Grant" />);
     open();
     pickIssue("funding-wrong");
@@ -207,7 +207,7 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("the fallback mailto names the scholar + links back to their profile (#2480)", async () => {
-    mockFetch({ ok: false, status: 503 });
+    mockFetch({ ok: false, status: 500 });
     render(
       <RequestAChangeDialog
         attribute="education"
@@ -268,7 +268,7 @@ describe("RequestAChangeDialog", () => {
   });
 
   it("strips CRLF from detail in the fallback mailto (edge 9 — injection guard)", async () => {
-    mockFetch({ ok: false, status: 503 });
+    mockFetch({ ok: false, status: 500 });
     render(<RequestAChangeDialog attribute="education" cwid="abc1001" scholarName="Jane Scholar" itemLabel="Ph.D." />);
     open();
     pickIssue("education-wrong");

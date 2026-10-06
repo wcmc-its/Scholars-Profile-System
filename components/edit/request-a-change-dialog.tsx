@@ -276,7 +276,7 @@ export function RequestAChangeDialog({
 
   /**
    * Submit a `route` request. Phase 2: POST to the server mailer; on success the
-   * confirmation reads "Request sent." On ANY non-2xx (incl. `503 send_disabled`
+   * confirmation reads "Request sent." On ANY non-2xx (incl. `500 send_disabled`
    * while the mailer is dark) or a network error, fall back to the Phase-1
    * `mailto:` + its banner — so behavior never regresses before the flag flips.
    */

@@ -152,7 +152,7 @@ describe("oncall-relay handler", () => {
       (fetchMock.mock.calls[0]![1] as { body: string }).body,
     ) as { attachments: Array<{ content: { body: Array<{ text?: string }> } }> };
     expect(body.attachments[0]!.content.body[0]!.text).toBe(
-      "\u{1F6A8} SPS ETL staging \u{2014} Ed",
+      "\u{1F6A8} SPS ETL step Ed failed (staging)",
     );
     const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
     const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
@@ -346,7 +346,7 @@ describe("oncall-relay handler", () => {
 
     const { text, facts, actions } = cardFromFetch(fetchMock.mock.calls[0]!);
     // Terminal nightly step failure -> severity refined to "page".
-    expect(text).toBe("\u{1F6A8} SPS ETL prod \u{2014} Infoed");
+    expect(text).toBe("\u{1F6A8} SPS ETL step Infoed failed (prod)");
     expect(facts.find((f) => f.title === "Severity")?.value).toBe("P1 (page)");
     expect(actions[0]!.url).toBe(
       "https://us-east-1.console.aws.amazon.com/states/v2/home?region=us-east-1#/executions/details/arn:aws:states:us-east-1:0:execution:scholars-nightly-prod:abc-123",
@@ -374,7 +374,7 @@ describe("oncall-relay handler", () => {
     );
 
     const { text, facts, actions } = cardFromFetch(fetchMock.mock.calls[0]!);
-    expect(text).toBe("\u{26A0}\u{FE0F} SPS ETL prod \u{2014} News");
+    expect(text).toBe("\u{26A0}\u{FE0F} SPS ETL step News failed (prod)");
     expect(facts.find((f) => f.title === "Severity")?.value).toBe("P2 (warn)");
     // Execution link still fires regardless of severity tier.
     expect(actions[0]!.url).toContain("/executions/details/");

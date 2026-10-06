@@ -5,7 +5,7 @@
  *
  * Same contract as the dismiss route: genuine self OR a genuine superuser, any
  * other actor 404s (never confirms another mentor's row exists), dormant flag
- * ⇒ 503 after authz. Nulls `dismissedAt` / `dismissedBy` / `dismissReason` and
+ * ⇒ 500 after authz. Nulls `dismissedAt` / `dismissedBy` / `dismissReason` and
  * writes a B03 `mentee_suggestion_restore` audit row, one transaction. An
  * already-active row returns ok without a write.
  */
@@ -55,7 +55,7 @@ export async function POST(
     return editError(404, "not_found");
   }
 
-  if (!isMenteeSuggestionsEnabled()) return editError(503, "mentee_suggestions_disabled");
+  if (!isMenteeSuggestionsEnabled()) return editError(500, "mentee_suggestions_disabled");
 
   if (row.dismissedAt === null) return editOk({ status: "active", alreadyActive: true });
 

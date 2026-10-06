@@ -314,7 +314,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return editOk({ target: "grants", concepts, candidates, ask, titleSummary, culled });
     } catch (err) {
       logEditFailure(`${PATH}#grants`, err);
-      return editError(502, "match_unavailable");
+      return editError(500, "match_unavailable");
     }
   }
 
@@ -448,7 +448,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   } catch (err) {
     logEditFailure(PATH, err);
-    return editError(502, "match_unavailable");
+    return editError(500, "match_unavailable");
   }
 }
 
@@ -569,7 +569,7 @@ export async function GET(): Promise<NextResponse> {
     return editOk({ submissions, scope: session.isSuperuser ? "all" : "own" });
   } catch (err) {
     logEditFailure(`${PATH}#list`, err);
-    return editError(502, "submissions_unavailable");
+    return editError(500, "submissions_unavailable");
   }
 }
 
@@ -644,6 +644,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     return editOk({ deleted: submissionId, count });
   } catch (err) {
     logEditFailure(`${PATH}#delete`, err);
-    return editError(502, "submissions_unavailable");
+    return editError(500, "submissions_unavailable");
   }
 }

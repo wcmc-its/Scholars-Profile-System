@@ -20,7 +20,7 @@
  * are both refused (IS-1). The UI nags superusers before this action; the audit
  * row records the real admin as the actor.
  *
- * Dormant behind `SELF_EDIT_COI_GAP_HINT` (default off): 503 after authz, before
+ * Dormant behind `SELF_EDIT_COI_GAP_HINT` (default off): 500 after authz, before
  * any write — and before the `reason` shape is validated, so a dark feature never
  * reveals its body contract.
  */
@@ -68,9 +68,9 @@ export async function POST(
     return editError(403, "not_self");
   }
 
-  // --- dormant unless enabled: 503 after authz, before any write (and before
+  // --- dormant unless enabled: 500 after authz, before any write (and before
   //     the body contract is validated, so a dark feature stays opaque). ---
-  if (!isCoiGapHintEnabled()) return editError(503, "coi_gap_disabled");
+  if (!isCoiGapHintEnabled()) return editError(500, "coi_gap_disabled");
 
   // --- body shape: a known reason is required (only reached once authorized +
   //     enabled, so an unauthorized/dark caller never probes the contract). ---

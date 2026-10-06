@@ -356,7 +356,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "EdgeOriginDownAlarm6F2DF616": {
       "Properties": {
-        "AlarmDescription": "The CloudFront origin leg is failing (prod): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.",
+        "AlarmDescription": "The CloudFront origin leg is failing (prod): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout (VIP -> ALB): docs/network-security-topology.md, section Origin backout.",
         "AlarmName": "sps-edge-origin-down-prod",
         "ComparisonOperator": "LessThanThreshold",
         "DatapointsToAlarm": 3,
@@ -372,6 +372,37 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginLatencyP99AlarmF5F17DCA": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "CloudFront OriginLatency p99 > 20000ms in 2 of 3 5-minute windows (prod). The origin read timeout is CloudFront's 30s default, so requests this slow are close to becoming CloudFront 504s that the app logs as successes. Next: compare with the ALB latency panel -- if the ALB is fast, the delay is the NetScaler hop; if the ALB is also slow, find the slow route (Bedrock-backed API routes first). Do not raise OriginReadTimeout until the NetScaler timeout is confirmed with the network team (#1936).",
+        "AlarmName": "sps-edge-origin-latency-p99-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "Dimensions": [
+          {
+            "Name": "DistributionId",
+            "Value": "E28NKDFXC7K2ZL",
+          },
+          {
+            "Name": "Region",
+            "Value": "Global",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "ExtendedStatistic": "p99",
+        "MetricName": "OriginLatency",
+        "Namespace": "AWS/CloudFront",
+        "Period": 300,
+        "Threshold": 20000,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
@@ -846,34 +877,37 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "NotifyTopic5FFA0016",
           },
         ],
-        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (prod). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmDescription": "A Teams alert (prod) could not be delivered after 3 attempts, or the relay is being throttled. Lost alerts are kept in the SQS queue sps-oncall-relay-dlq-prod -- read them there; each message is the original alarm. This alarm clears once that queue is empty. Check /aws/lambda/sps-oncall-relay-prod for the cause (usually the Teams workflow URL in Secrets Manager).",
         "AlarmName": "sps-oncall-relay-errors-prod",
         "ComparisonOperator": "GreaterThanOrEqualToThreshold",
         "DatapointsToAlarm": 1,
         "EvaluationPeriods": 1,
         "Metrics": [
           {
-            "Expression": "errors + throttles",
+            "Expression": "lost + throttles",
             "Id": "expr_1",
             "ReturnData": true,
           },
           {
-            "Id": "errors",
+            "Id": "lost",
             "MetricStat": {
               "Metric": {
                 "Dimensions": [
                   {
-                    "Name": "FunctionName",
+                    "Name": "QueueName",
                     "Value": {
-                      "Ref": "OncallRelayFunction9974C7E1",
+                      "Fn::GetAtt": [
+                        "OncallRelayDlq06D1281A",
+                        "QueueName",
+                      ],
                     },
                   },
                 ],
-                "MetricName": "Errors",
-                "Namespace": "AWS/Lambda",
+                "MetricName": "ApproximateNumberOfMessagesVisible",
+                "Namespace": "AWS/SQS",
               },
-              "Period": 60,
-              "Stat": "Sum",
+              "Period": 300,
+              "Stat": "Maximum",
             },
             "ReturnData": false,
           },
@@ -892,7 +926,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                 "MetricName": "Throttles",
                 "Namespace": "AWS/Lambda",
               },
-              "Period": 60,
+              "Period": 300,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -911,7 +945,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "40a6c38be9bee368944553200381739485999215aa5da304a54ed77717dcb3e2.zip",
+          "S3Key": "49a90ec0e6636e5ad51c79c8d75b8c991158e25aef941224dcc09cdb4b80aa58.zip",
         },
         "DeadLetterConfig": {
           "TargetArn": {
@@ -1795,7 +1829,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "EdgeOriginDownAlarm6F2DF616": {
       "Properties": {
-        "AlarmDescription": "The CloudFront origin leg is failing (staging): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.",
+        "AlarmDescription": "The CloudFront origin leg is failing (staging): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout (VIP -> ALB): docs/network-security-topology.md, section Origin backout.",
         "AlarmName": "sps-edge-origin-down-staging",
         "ComparisonOperator": "LessThanThreshold",
         "DatapointsToAlarm": 3,
@@ -1811,6 +1845,37 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginLatencyP99AlarmF5F17DCA": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "CloudFront OriginLatency p99 > 20000ms in 2 of 3 5-minute windows (staging). The origin read timeout is CloudFront's 30s default, so requests this slow are close to becoming CloudFront 504s that the app logs as successes. Next: compare with the ALB latency panel -- if the ALB is fast, the delay is the NetScaler hop; if the ALB is also slow, find the slow route (Bedrock-backed API routes first). Do not raise OriginReadTimeout until the NetScaler timeout is confirmed with the network team (#1936).",
+        "AlarmName": "sps-edge-origin-latency-p99-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "Dimensions": [
+          {
+            "Name": "DistributionId",
+            "Value": "E17NRWINXLP3B3",
+          },
+          {
+            "Name": "Region",
+            "Value": "Global",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "ExtendedStatistic": "p99",
+        "MetricName": "OriginLatency",
+        "Namespace": "AWS/CloudFront",
+        "Period": 300,
+        "Threshold": 20000,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
@@ -2199,34 +2264,37 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "NotifyTopic5FFA0016",
           },
         ],
-        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (staging). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmDescription": "A Teams alert (staging) could not be delivered after 3 attempts, or the relay is being throttled. Lost alerts are kept in the SQS queue sps-oncall-relay-dlq-staging -- read them there; each message is the original alarm. This alarm clears once that queue is empty. Check /aws/lambda/sps-oncall-relay-staging for the cause (usually the Teams workflow URL in Secrets Manager).",
         "AlarmName": "sps-oncall-relay-errors-staging",
         "ComparisonOperator": "GreaterThanOrEqualToThreshold",
         "DatapointsToAlarm": 1,
         "EvaluationPeriods": 1,
         "Metrics": [
           {
-            "Expression": "errors + throttles",
+            "Expression": "lost + throttles",
             "Id": "expr_1",
             "ReturnData": true,
           },
           {
-            "Id": "errors",
+            "Id": "lost",
             "MetricStat": {
               "Metric": {
                 "Dimensions": [
                   {
-                    "Name": "FunctionName",
+                    "Name": "QueueName",
                     "Value": {
-                      "Ref": "OncallRelayFunction9974C7E1",
+                      "Fn::GetAtt": [
+                        "OncallRelayDlq06D1281A",
+                        "QueueName",
+                      ],
                     },
                   },
                 ],
-                "MetricName": "Errors",
-                "Namespace": "AWS/Lambda",
+                "MetricName": "ApproximateNumberOfMessagesVisible",
+                "Namespace": "AWS/SQS",
               },
-              "Period": 60,
-              "Stat": "Sum",
+              "Period": 300,
+              "Stat": "Maximum",
             },
             "ReturnData": false,
           },
@@ -2245,7 +2313,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
                 "MetricName": "Throttles",
                 "Namespace": "AWS/Lambda",
               },
-              "Period": 60,
+              "Period": 300,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -2264,7 +2332,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "40a6c38be9bee368944553200381739485999215aa5da304a54ed77717dcb3e2.zip",
+          "S3Key": "49a90ec0e6636e5ad51c79c8d75b8c991158e25aef941224dcc09cdb4b80aa58.zip",
         },
         "DeadLetterConfig": {
           "TargetArn": {

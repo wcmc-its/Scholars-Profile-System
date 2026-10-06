@@ -64,10 +64,10 @@ describe("GET /api/auth/saml/login", () => {
     expect(mockedLoginUrl).toHaveBeenCalledWith("/edit");
   });
 
-  it("returns 503 when SAML is not configured", async () => {
+  it("returns 500 when SAML is not configured", async () => {
     mockedLoginUrl.mockRejectedValue(new Error("not configured"));
     const res = await loginGET(new NextRequest(LOGIN));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
   });
 });
 
@@ -120,13 +120,13 @@ describe("POST /api/auth/saml/callback", () => {
     expect(res.cookies.get("__Secure-sps_session")).toBeUndefined();
   });
 
-  it("503s and writes no cookie when the single-use store is unavailable (fail closed)", async () => {
+  it("500s and writes no cookie when the single-use store is unavailable (fail closed)", async () => {
     mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234", assertion: ASSERTION });
     mockedConsume.mockRejectedValue(new Error("db unreachable"));
     const res = await callbackPOST(
       callbackRequest({ SAMLResponse: "valid", RelayState: "/edit" }),
     );
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     expect(res.cookies.get("__Secure-sps_session")).toBeUndefined();
   });
 
@@ -138,10 +138,10 @@ describe("POST /api/auth/saml/callback", () => {
     expect(res.headers.get("location")).toBe("/edit");
   });
 
-  it("503s when SAML is not configured", async () => {
+  it("500s when SAML is not configured", async () => {
     mockedValidate.mockRejectedValue(new Error("not configured"));
     const res = await callbackPOST(callbackRequest({ SAMLResponse: "x" }));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
   });
 });
 

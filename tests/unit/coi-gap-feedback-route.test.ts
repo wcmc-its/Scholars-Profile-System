@@ -5,7 +5,7 @@
  *
  * Verifies: the GENUINE-self authorization (403 for another scholar's candidate,
  * 403 while impersonating even the owner — a superuser "View as" must NOT record
- * feedback), 404 for a missing candidate, the dormant 503 (after authz, before
+ * feedback), 404 for a missing candidate, the dormant 500 (after authz, before
  * any write AND before the reason is validated), 400 invalid_reason for a
  * garbage/absent reason, the reason→(status, feedbackReason) mapping in a single
  * transaction (status + feedbackReason + reviewedAt + a B03 `coi_gap_feedback`
@@ -158,10 +158,11 @@ describe("POST /api/edit/coi-gap/[id]/feedback", () => {
     expect(row.impersonatedCwid).toBeNull();
   });
 
-  it("503 coi_gap_disabled when the flag is off (after authz, before any write or reason check)", async () => {
+  it("500 coi_gap_disabled when the flag is off (after authz, before any write or reason check)", async () => {
     mockIsCoiGapEnabled.mockReturnValue(false);
     const res = await POST(post("gap-1", { reason: "garbage" }), ctx("gap-1"));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "coi_gap_disabled" });
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 

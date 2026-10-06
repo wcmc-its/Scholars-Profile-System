@@ -126,9 +126,11 @@ describe("POST /api/edit/frt-mentees/[id]", () => {
     expect((await POST(post({ op: "dismiss" }), ctx)).status).toBe(200);
   });
 
-  it("503 when the flag is off, 400 for an unknown op", async () => {
+  it("500 when the flag is off, 400 for an unknown op", async () => {
     expect((await POST(post({ op: "explode" }), ctx)).status).toBe(400);
     h.enabled.mockReturnValue(false);
-    expect((await POST(post({ op: "dismiss" }), ctx)).status).toBe(503);
+    const res = await POST(post({ op: "dismiss" }), ctx);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "mentee_suggestions_disabled" });
   });
 });

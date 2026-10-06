@@ -29,7 +29,7 @@ import { type EtlStack } from "./etl-stack";
  * ADR-008 records the address in the secrets-stack convention; this is the
  * operator's work email for live ops traffic, not the harness identity.
  */
-const NOTIFY_SUBSCRIBER_EMAIL = "paa2013@med.cornell.edu";
+export const NOTIFY_SUBSCRIBER_EMAIL = "paa2013@med.cornell.edu";
 
 /**
  * Account-wide monthly budget ceiling. Calibrated to roughly 40% headroom
@@ -56,6 +56,13 @@ const COST_ANOMALY_THRESHOLD_USD = 50;
 
 /** Latency SLO target in milliseconds. Mirrored from docs/SLOs.md. */
 const LATENCY_P99_THRESHOLD_MS = 1500;
+
+/**
+ * CloudFront OriginLatency p99 warn threshold in milliseconds (#1936). Sits
+ * 10s under CloudFront's default 30s OriginReadTimeout, which the dynamic
+ * origin uses. Rationale at the alarm.
+ */
+const ORIGIN_LATENCY_P99_THRESHOLD_MS = 20000;
 
 /**
  * Minimum absolute target-5xx count in a 5-minute window before the 5xx *rate*
@@ -648,7 +655,7 @@ export class SpsObservabilityStack extends Stack {
     // should wake someone as a serving outage.
     const originDownAlarm = new cloudwatch.Alarm(this, "EdgeOriginDownAlarm", {
       alarmName: `sps-edge-origin-down-${env}`,
-      alarmDescription: `The CloudFront origin leg is failing (${env}): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.`,
+      alarmDescription: `The CloudFront origin leg is failing (${env}): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout (VIP -> ALB): docs/network-security-topology.md, section Origin backout.`,
       metric: probeMetric("OriginProbeSuccess", "Minimum"),
       threshold: 1,
       evaluationPeriods: 3,
@@ -1213,8 +1220,8 @@ export class SpsObservabilityStack extends Stack {
     // replayed. 14 days is the SQS maximum -- a page lost on a Friday must
     // still be recoverable after a holiday.
     //
-    // Deliberately NO alarm on queue depth: it would fire on precisely the
-    // condition the errors alarm already covers, i.e. page twice for one fault.
+    // Queue depth IS the relay watchdog's signal (below): a message here is a
+    // page that was actually lost, not an attempt that a retry later delivered.
     const relayDlq = new sqs.Queue(this, "OncallRelayDlq", {
       queueName: `sps-oncall-relay-dlq-${env}`,
       retentionPeriod: Duration.days(14),
@@ -1299,29 +1306,34 @@ export class SpsObservabilityStack extends Stack {
     // itself either silently flaps or recursively masks the original alarm.
     // Email is the out-of-band fallback.
     //
-    // Watches Errors + Throttles, not just Errors (#2302). A throttled async
-    // invocation (concurrency limit hit, or the relay's own reserved-
-    // concurrency cap) increments the separate Throttles metric and leaves
-    // Errors at zero, so an Errors-only alarm produces no signal on a
-    // sustained throttle -- even though the on-call relay is the paging path
-    // itself. Mirrors the `unsuccessfulMetric` MathExpression pattern in
-    // etl-stack.ts.
+    // Fires on a page that was actually LOST, not on a failed attempt. A
+    // single Teams 5xx throws, ticks Errors, and the async retry a minute later
+    // usually delivers it (2026-10-06 05:07 UTC: 502, delivered 05:08) -- an
+    // Errors >= 1 alarm emailed "paging-path delivery is at risk" for an alert
+    // that arrived. The DLQ only receives an event after all three attempts
+    // fail, so its depth is the real failure. The alarm stays ALARM until the
+    // queue is emptied, i.e. until someone has read the lost page.
+    //
+    // Throttles stay in (#2302): a throttled async invocation is retried for up
+    // to 6 hours before it reaches the DLQ, so a sustained throttle (including
+    // the reserved-concurrency mute in docs/oncall.md) must signal on its own.
+    // 5-minute period: SQS publishes queue metrics at 5-minute granularity.
     const relayErrorsAlarm = new cloudwatch.Alarm(this, "OncallRelayErrors", {
       alarmName: `sps-oncall-relay-errors-${env}`,
-      alarmDescription: `On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (${env}). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.`,
+      alarmDescription: `A Teams alert (${env}) could not be delivered after 3 attempts, or the relay is being throttled. Lost alerts are kept in the SQS queue sps-oncall-relay-dlq-${env} -- read them there; each message is the original alarm. This alarm clears once that queue is empty. Check /aws/lambda/sps-oncall-relay-${env} for the cause (usually the Teams workflow URL in Secrets Manager).`,
       metric: new cloudwatch.MathExpression({
-        expression: "errors + throttles",
+        expression: "lost + throttles",
         usingMetrics: {
-          errors: relay.metricErrors({
-            period: Duration.minutes(1),
-            statistic: "Sum",
+          lost: relayDlq.metricApproximateNumberOfMessagesVisible({
+            period: Duration.minutes(5),
+            statistic: "Maximum",
           }),
           throttles: relay.metricThrottles({
-            period: Duration.minutes(1),
+            period: Duration.minutes(5),
             statistic: "Sum",
           }),
         },
-        period: Duration.minutes(1),
+        period: Duration.minutes(5),
       }),
       threshold: 1,
       evaluationPeriods: 1,
@@ -1511,6 +1523,61 @@ export class SpsObservabilityStack extends Stack {
         region: "us-east-1",
         label,
       });
+
+    // (8) CloudFront OriginLatency p99 approaching the origin read timeout
+    // (#1936). The dynamic origin runs on CloudFront's DEFAULT
+    // OriginReadTimeout of 30s (edge-stack.ts sets none). A response slower
+    // than that becomes a CloudFront 504 while the app logs a success, and the
+    // ALB latency alarm above cannot see the NetScaler hop at all. This is the
+    // early warning: p99 origin round-trip > 20s means requests are getting
+    // within ~10s of the cutoff.
+    //
+    // Threshold rationale, from live data (read-only probe 2026-10-05, 5-min
+    // p99 over 2026-09-30..10-05): prod max 8.6s, zero windows > 10s; staging
+    // max 24.4s, one window > 20s, four > 10s (the eval/batch workload). 20s
+    // stays clear of normal prod and leaves 10s of headroom under 30s. 2 of 3
+    // 5-minute datapoints so a single slow window (one extraction run on a
+    // quiet distribution, where p99 is effectively the max) does not fire.
+    //
+    // treatMissingData NOT_BREACHING: at SPS traffic most 5-minute windows have
+    // no requests at all (~9% of prod windows carried a datapoint over that
+    // span), and no traffic is not slowness. An origin that stops answering is
+    // the origin-down alarm's job, not this one's.
+    //
+    // Warn tier, both envs, NOT a composite child: it is a leading indicator of
+    // 504s, not an outage, and it mirrors the other direct-action CloudFront
+    // alarm (origin-cert expiry).
+    //
+    // Same metric shape as the dashboard's cfMetric (us-east-1, DistributionId
+    // + Region=Global); this stack is in us-east-1 for both envs, so the alarm
+    // and metric regions match. No `label`, so the alarm renders flat.
+    // OriginLatency is in milliseconds.
+    const originLatencyAlarm = new cloudwatch.Alarm(
+      this,
+      "EdgeOriginLatencyP99Alarm",
+      {
+        alarmName: `sps-edge-origin-latency-p99-${env}`,
+        alarmDescription: `CloudFront OriginLatency p99 > ${ORIGIN_LATENCY_P99_THRESHOLD_MS}ms in 2 of 3 5-minute windows (${env}). The origin read timeout is CloudFront's 30s default, so requests this slow are close to becoming CloudFront 504s that the app logs as successes. Next: compare with the ALB latency panel -- if the ALB is fast, the delay is the NetScaler hop; if the ALB is also slow, find the slow route (Bedrock-backed API routes first). Do not raise OriginReadTimeout until the NetScaler timeout is confirmed with the network team (#1936).`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/CloudFront",
+          metricName: "OriginLatency",
+          dimensionsMap: {
+            DistributionId: envConfig.cloudFrontDistributionId,
+            Region: "Global",
+          },
+          statistic: "p99",
+          period: Duration.minutes(5),
+          region: "us-east-1",
+        }),
+        threshold: ORIGIN_LATENCY_P99_THRESHOLD_MS,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 2,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    originLatencyAlarm.addAlarmAction(warnAction);
 
     const dashboard = new cloudwatch.Dashboard(this, "ReliabilityDashboard", {
       dashboardName: `sps-reliability-${env}`,

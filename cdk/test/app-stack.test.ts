@@ -597,8 +597,16 @@ describe("AppStack", () => {
         expect(dependsOn.some((d) => d.startsWith("InternalAlbInternalHttpListener"))).toBe(true);
         // Public listener (its child rule below carries the TG association).
         expect(dependsOn.some((d) => d.startsWith("PublicAlbPublicHttpListener"))).toBe(true);
-        // The priority-1 rule that forwards public traffic to the TG.
-        expect(dependsOn.some((d) => d.startsWith("OriginVerifiedForward"))).toBe(true);
+        // The priority-1 rule that forwards public :80 traffic to the TG.
+        // Exact-prefix regexes: a bare startsWith("OriginVerifiedForward")
+        // would also match the :443 rule (OriginVerifiedForwardHttps<hash>).
+        expect(dependsOn.some((d) => /^OriginVerifiedForward[0-9A-F]{8}$/.test(d))).toBe(true);
+        // #1938: the :443 listener + its forward rule (edgeOriginCertArn is
+        // seeded for both envs) also bind the TG, so the service waits on them.
+        expect(dependsOn.some((d) => /^PublicAlbPublicHttpsListener[0-9A-F]{8}$/.test(d))).toBe(
+          true,
+        );
+        expect(dependsOn.some((d) => /^OriginVerifiedForwardHttps[0-9A-F]{8}$/.test(d))).toBe(true);
       });
 
       it("wires the ECS service to BOTH target groups via the loadBalancers mapping (manual L1 attach)", () => {
@@ -1045,17 +1053,19 @@ describe("AppStack", () => {
         expect(deployPolicy).toBeDefined();
         const statements = deployPolicy?.Properties?.PolicyDocument
           ?.Statement as Array<Record<string, unknown>> | undefined;
-        // Two statements are allowed to use Resource=*, both AWS-mandated
-        // (neither action supports resource-level ARN scoping):
+        // Three statements are allowed to use Resource=*, all AWS-mandated
+        // (none of these actions support resource-level ARN scoping):
         // - ecr:GetAuthorizationToken, account-scoped at the API level.
         // - ecs:DescribeTaskDefinition / ecs:RegisterTaskDefinition (#2121)
         //   -- confirmed empirically: an ARN-scoped grant AccessDenied'd in
         //   a live staging dry run of the pinned-revision deploy flow.
+        // - states:ListStateMachines (#1987), which has no resource type.
         // Everything else must be a concrete ARN (or Fn::Join/Ref pointing
         // at one).
         const wildcardExemptActionSets = [
           ["ecr:GetAuthorizationToken"],
           ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"],
+          ["states:ListStateMachines"],
         ];
         for (const stmt of statements ?? []) {
           const action = stmt.Action as string | string[];
@@ -1110,6 +1120,21 @@ describe("AppStack", () => {
         expect(serialized).not.toMatch(/^"\*"$/);
         expect(serialized).toContain("stack/Sps-App-prod/*");
         expect(serialized).toContain("stack/Sps-Edge-prod/*");
+      });
+
+      it("the OIDC deploy role can describe only this env's scholars-* state machines (#1987 ETL drift report)", () => {
+        const statements = findDeployStatements();
+        const describe = statements.find((stmt) => stmt.Action === "states:DescribeStateMachine");
+        expect(describe).toBeDefined();
+        const serialized = JSON.stringify(describe?.Resource);
+        expect(serialized).not.toMatch(/^"\*"$/);
+        expect(serialized).toContain(":stateMachine:scholars-*-prod");
+        // read-only: no states action that starts, stops or edits a machine
+        const statesActions = statements.flatMap((stmt) => {
+          const action = stmt.Action as string | string[];
+          return (Array.isArray(action) ? action : [action]).filter((a) => a.startsWith("states:"));
+        });
+        expect(statesActions.sort()).toEqual(["states:DescribeStateMachine", "states:ListStateMachines"]);
       });
 
       it("the OIDC deploy role can push to both the app and ETL ECR repos (#460/#454)", () => {
@@ -1181,6 +1206,39 @@ describe("AppStack", () => {
         expect(serialized).not.toContain("db/app-ro");
       });
 
+      it("the canary reads the origin secret by NAME via the SSM reference path, never a partial Secrets Manager ARN (#3021)", () => {
+        // A partial ARN of a secret named "...-secret" is parsed as a complete
+        // ARN with suffix "secret", so the canary could never start.
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const canary = Object.entries(taskDefs).find(([id]) =>
+          id.startsWith("SearchEvalCanaryTaskDefinition"),
+        )?.[1];
+        const secrets = (canary?.Properties?.ContainerDefinitions as Array<{
+          Secrets?: Array<{ Name: string; ValueFrom: unknown }>;
+        }>)[0].Secrets;
+        const ref = JSON.stringify(
+          secrets?.find((x) => x.Name === "CANARY_ORIGIN_VERIFY")?.ValueFrom,
+        );
+        expect(ref).toContain(
+          ":parameter/aws/reference/secretsmanager/scholars/prod/edge/origin-shared-secret",
+        );
+        expect(ref).not.toContain(":secretsmanager:");
+
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = JSON.stringify(
+          Object.values(policies).find((p) =>
+            (p.Properties?.Roles as Array<{ Ref?: string }> | undefined)?.some(
+              (r) => r.Ref?.includes("SearchEvalCanaryExecutionRole"),
+            ),
+          ),
+        );
+        expect(execPolicy).toContain("ssm:GetParameters");
+        expect(execPolicy).toContain(
+          "parameter/aws/reference/secretsmanager/scholars/prod/edge/origin-shared-secret",
+        );
+        expect(execPolicy).toContain("edge/origin-shared-secret-??????");
+      });
+
       it("the deploy role's iam:PassRole covers the search-eval canary execution role (#1444)", () => {
         const policies = template.findResources("AWS::IAM::Policy");
         const deployPolicy = Object.values(policies).find((p) => {
@@ -1203,6 +1261,42 @@ describe("AppStack", () => {
         expect(JSON.stringify(passRoleStmt?.Resource)).toContain(
           "SearchEvalCanaryExecutionRole",
         );
+      });
+
+      it("the deploy role's iam:PassRole covers the canary task role and every pinned ETL family's roles (#2144)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("DeployRole"),
+          );
+        });
+        const statements = deployPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const passRoleStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("iam:PassRole")
+            : action === "iam:PassRole";
+        });
+        const resources = JSON.stringify(passRoleStmt?.Resource);
+        expect(resources).toContain("SearchEvalCanaryTaskDefinitionTaskRole");
+        for (const roleName of [
+          "sps-etl-task-prod",
+          "sps-etl-task-exec-prod",
+          "sps-etl-sources-task-exec-prod",
+          "sps-etl-ldap-task-exec-prod",
+          "sps-etl-reciter-api-task-exec-prod",
+          "sps-etl-ctsc-task-exec-prod",
+          "sps-reconcile-task-prod",
+          "sps-reconcile-task-exec-prod",
+          "sps-cdn-reconcile-task-prod",
+          "sps-cdn-reconcile-task-exec-prod",
+        ]) {
+          expect(resources).toContain(`:role/${roleName}"`);
+        }
       });
     });
 
@@ -2244,9 +2338,9 @@ describe("AppStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("uses staging desiredCount = 1", () => {
+    it("uses staging desiredCount = 2 (prod-sized for load test)", () => {
       template.hasResourceProperties("AWS::ECS::Service", {
-        DesiredCount: 1,
+        DesiredCount: 2,
       });
     });
 
@@ -2455,13 +2549,13 @@ describe("AppStack", () => {
       expect(envByName.get("SELF_EDIT_ORCID_SUGGESTION")).toBe("on");
     });
 
-    it("autoscales between min=1 and max=3 for staging (#596)", () => {
+    it("autoscales between min=2 and max=6 for staging (prod-sized for load test)", () => {
       template.hasResourceProperties(
         "AWS::ApplicationAutoScaling::ScalableTarget",
         {
           ScalableDimension: "ecs:service:DesiredCount",
-          MinCapacity: 1,
-          MaxCapacity: 3,
+          MinCapacity: 2,
+          MaxCapacity: 6,
         },
       );
     });
@@ -2510,7 +2604,7 @@ describe("AppStack", () => {
       expect(json).toContain("scholars/staging/saml/idp-cert");
     });
 
-    it("uses staging Fargate sizing 1024 cpu / 2048 MiB on the app task definition", () => {
+    it("uses staging Fargate sizing 2048 cpu / 4096 MiB on the app task definition", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-app-staging",
@@ -2518,8 +2612,9 @@ describe("AppStack", () => {
       expect(appTaskDef).toBeDefined();
       // 2026-06-26 — bumped 512→1024 (0.5→1 vCPU) after a §6 load-test showed the
       // per-request taxonomy resolve saturating the app-tier CPU under concurrency.
-      expect(appTaskDef?.Properties?.Cpu).toBe("1024");
-      expect(appTaskDef?.Properties?.Memory).toBe("2048");
+      // 2026-10-06 — prod-sized for the RPT load test (temporary).
+      expect(appTaskDef?.Properties?.Cpu).toBe("2048");
+      expect(appTaskDef?.Properties?.Memory).toBe("4096");
     });
 
     it("grants the audit INSERT to `'app_rw'@'10.46.160.%'` on staging (item-3 cutover)", () => {
@@ -2589,6 +2684,77 @@ describe("AppStack", () => {
       expect(sub).toBe("repo:wcmc-its/Scholars-Profile-System:*");
     });
 
+    describe("scheduled drift check role (#1765, #1987)", () => {
+      const findDriftRole = () => {
+        const roles = template.findResources("AWS::IAM::Role");
+        return Object.entries(roles).find(
+          ([, r]) => r.Properties?.RoleName === "sps-drift-readonly",
+        );
+      };
+      const driftStatements = () => {
+        const [logicalId] = findDriftRole() ?? [];
+        const policies = template.findResources("AWS::IAM::Policy");
+        return Object.values(policies)
+          .filter((p) =>
+            (p.Properties?.Roles as Array<{ Ref?: string }> | undefined)?.some(
+              (r) => r.Ref === logicalId,
+            ),
+          )
+          .flatMap(
+            (p) => p.Properties?.PolicyDocument?.Statement as Array<Record<string, unknown>>,
+          );
+      };
+
+      it("trusts ONLY the drift-check GitHub Environment subject, exact match", () => {
+        const role = findDriftRole()?.[1];
+        expect(role).toBeDefined();
+        const statements = role?.Properties?.AssumeRolePolicyDocument?.Statement as Array<
+          Record<string, unknown>
+        >;
+        expect(statements).toHaveLength(1);
+        expect(statements[0].Action).toBe("sts:AssumeRoleWithWebIdentity");
+        expect(statements[0].Condition).toEqual({
+          StringEquals: {
+            "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+            "token.actions.githubusercontent.com:sub":
+              "repo:wcmc-its/Scholars-Profile-System:environment:drift-check",
+          },
+        });
+      });
+
+      it("grants exactly the four read-only actions, scoped as documented", () => {
+        const statements = driftStatements();
+        const actions = statements.flatMap((s) =>
+          Array.isArray(s.Action) ? (s.Action as string[]) : [s.Action as string],
+        );
+        expect([...actions].sort()).toEqual([
+          "ecs:DescribeServices",
+          "ecs:DescribeTaskDefinition",
+          "states:DescribeStateMachine",
+          "states:ListStateMachines",
+        ]);
+        for (const s of statements) expect(s.Effect).toBe("Allow");
+        const byAction = (a: string) => statements.find((s) => s.Action === a);
+        const services = JSON.stringify(byAction("ecs:DescribeServices")?.Resource);
+        expect(services).toContain(":service/sps-cluster-staging/sps-app-staging");
+        expect(services).toContain(":service/sps-cluster-prod/sps-app-prod");
+        expect(services).not.toContain('"*"');
+        expect(byAction("ecs:DescribeTaskDefinition")?.Resource).toBe("*");
+        expect(byAction("states:ListStateMachines")?.Resource).toBe("*");
+        const describe = JSON.stringify(byAction("states:DescribeStateMachine")?.Resource);
+        expect(describe).toContain(":stateMachine:scholars-*");
+        expect(describe).not.toMatch(/^"\*"$/);
+      });
+
+      it("is created only by the staging stack (account-scoped, like the OIDC provider)", () => {
+        const { template: prodTemplate } = buildAppStack("prod");
+        const prodRoles = prodTemplate.findResources("AWS::IAM::Role");
+        expect(
+          Object.values(prodRoles).some((r) => r.Properties?.RoleName === "sps-drift-readonly"),
+        ).toBe(false);
+      });
+    });
+
     it("the env-config bootstrap override drives desiredCount to 0 when -c appDesiredCount=0 is set", () => {
       // Models the first-deploy two-step in the plan's § Deploy strategy.
       const fixture = makeFixture("staging");
@@ -2616,6 +2782,106 @@ describe("AppStack", () => {
 
 // #2343 -- a manual `cdk deploy Sps-App-<env>` must be able to keep the
 // pipeline's digest pin instead of re-registering the family on :latest.
+describe("AppStack public ALB hardening (#1942)", () => {
+  describe.each(["staging", "prod"] as const)("%s", (envName) => {
+    const { template } = buildAppStack(envName);
+
+    function publicAlbAttributes(): Array<{ Key: string; Value: unknown }> {
+      const albs = template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer", {
+        Properties: { Scheme: "internet-facing" },
+      });
+      expect(Object.keys(albs)).toHaveLength(1);
+      return Object.values(albs)[0]!.Properties.LoadBalancerAttributes;
+    }
+
+    it("pins deletion protection, invalid-header drop and preserve-host on the public ALB", () => {
+      expect(publicAlbAttributes()).toEqual(
+        expect.arrayContaining([
+          { Key: "deletion_protection.enabled", Value: "true" },
+          { Key: "routing.http.drop_invalid_header_fields.enabled", Value: "true" },
+          { Key: "routing.http.preserve_host_header.enabled", Value: "false" },
+        ]),
+      );
+    });
+
+    it("ships access + connection logs to the dedicated AlbLogsBucket under per-env prefixes", () => {
+      const attrs = publicAlbAttributes();
+      expect(attrs).toEqual(
+        expect.arrayContaining([
+          { Key: "access_logs.s3.enabled", Value: "true" },
+          { Key: "access_logs.s3.prefix", Value: `alb-access/${envName}` },
+          { Key: "connection_logs.s3.enabled", Value: "true" },
+          { Key: "connection_logs.s3.prefix", Value: `alb-conn/${envName}` },
+        ]),
+      );
+      for (const key of ["access_logs.s3.bucket", "connection_logs.s3.bucket"]) {
+        expect(attrs.find((a) => a.Key === key)?.Value).toEqual({
+          Ref: expect.stringMatching(/^AlbLogsBucket[0-9A-F]{8}$/),
+        });
+      }
+    });
+
+    it("leaves the internal ALB attributes alone (no deletion protection / logs)", () => {
+      const albs = template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer", {
+        Properties: { Scheme: "internal" },
+      });
+      expect(Object.keys(albs)).toHaveLength(1);
+      const attrs = (Object.values(albs)[0]!.Properties.LoadBalancerAttributes ?? []) as Array<{
+        Key: string;
+        Value: unknown;
+      }>;
+      expect(attrs.find((a) => a.Key === "deletion_protection.enabled")?.Value).not.toBe("true");
+      expect(attrs.some((a) => a.Key === "access_logs.s3.enabled")).toBe(false);
+    });
+
+    it("AlbLogsBucket is SSE-S3, block-public, RETAIN, with a 90-day expiry", () => {
+      const buckets = template.findResources("AWS::S3::Bucket");
+      const ids = Object.keys(buckets).filter((id) => /^AlbLogsBucket[0-9A-F]{8}$/.test(id));
+      expect(ids).toHaveLength(1);
+      const bucket = buckets[ids[0]!]!;
+      expect(bucket.DeletionPolicy).toBe("Retain");
+      expect(bucket.UpdateReplacePolicy).toBe("Retain");
+      expect(bucket.Properties.BucketEncryption).toEqual({
+        ServerSideEncryptionConfiguration: [
+          { ServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" } },
+        ],
+      });
+      expect(bucket.Properties.PublicAccessBlockConfiguration).toEqual({
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      });
+      expect(bucket.Properties.LifecycleConfiguration.Rules).toEqual([
+        expect.objectContaining({
+          Id: `sps-alb-logs-expire-${envName}`,
+          Status: "Enabled",
+          ExpirationInDays: 90,
+        }),
+      ]);
+    });
+
+    it("AlbLogsBucket policy enforces SSL and grants ELB log delivery PutObject", () => {
+      const policies = Object.values(template.findResources("AWS::S3::BucketPolicy")).filter((p) =>
+        (p.Properties?.Bucket as { Ref?: string })?.Ref?.startsWith("AlbLogsBucket"),
+      );
+      expect(policies).toHaveLength(1);
+      const statements = policies[0]!.Properties.PolicyDocument.Statement as Array<
+        Record<string, unknown>
+      >;
+      expect(statements).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            Effect: "Deny",
+            Condition: { Bool: { "aws:SecureTransport": "false" } },
+          }),
+          expect.objectContaining({ Effect: "Allow", Action: "s3:PutObject" }),
+        ]),
+      );
+    });
+  });
+});
+
 describe("AppStack app image digest pin (#2343)", () => {
   const DIGEST = `sha256:${"ab12".repeat(16)}`;
 

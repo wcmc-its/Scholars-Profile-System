@@ -5,7 +5,7 @@
  *
  * Verifies: 403 when the candidate belongs to someone else, 403 while
  * impersonating even the owner (a "View as" superuser must NOT be able to undo),
- * 404 for a missing candidate, the dormant 503 (after authz, before any write),
+ * 404 for a missing candidate, the dormant 500 (after authz, before any write),
  * the single-transaction write (status→new + a B03 `coi_gap_restore` audit row),
  * and idempotency when the candidate is not currently dismissed.
  */
@@ -140,10 +140,11 @@ describe("POST /api/edit/coi-gap/[id]/restore", () => {
     expect(res.status).toBe(404);
   });
 
-  it("503 coi_gap_disabled when the flag is off (after authz, before any write)", async () => {
+  it("500 coi_gap_disabled when the flag is off (after authz, before any write)", async () => {
     mockIsCoiGapEnabled.mockReturnValue(false);
     const res = await POST(post("gap-1"), ctx("gap-1"));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "coi_gap_disabled" });
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 

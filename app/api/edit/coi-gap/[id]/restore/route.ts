@@ -13,7 +13,7 @@
  * Authorization, identical to dismiss (operator decision, #836 follow-on):
  * genuine self OR a genuine (non-impersonating) superuser. A superuser
  * impersonating the scholar via "View as" (#637) and a non-superuser
- * curator/proxy are refused. Dormant behind `SELF_EDIT_COI_GAP_HINT`: 503 after
+ * curator/proxy are refused. Dormant behind `SELF_EDIT_COI_GAP_HINT`: 500 after
  * authz, before any write.
  */
 import { type NextRequest, type NextResponse } from "next/server";
@@ -59,8 +59,8 @@ export async function POST(
     return editError(403, "not_self");
   }
 
-  // --- dormant unless enabled: 503 after authz, before any write. ---
-  if (!isCoiGapHintEnabled()) return editError(503, "coi_gap_disabled");
+  // --- dormant unless enabled: 500 after authz, before any write. ---
+  if (!isCoiGapHintEnabled()) return editError(500, "coi_gap_disabled");
 
   // --- only an ACTED candidate can be undone — a "Not relevant" (dismissed) OR
   //     an "I intend to update" (acknowledged) feedback. Anything else is already

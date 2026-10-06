@@ -21,7 +21,7 @@
  *
  * The client mirrors `lib/cores/claim-writeback.ts` (SPS's first DynamoDB
  * write) — but unlike that best-effort mirror, the Put here IS the write the
- * user asked for, so failures propagate to the route as a 502.
+ * user asked for, so failures propagate to the route as a 500.
  */
 import { randomUUID } from "node:crypto";
 
@@ -142,7 +142,7 @@ function defaultDdb(): SubmissionDdbClient {
  * Append one pending submission. The sort key is time-prefixed so the list
  * Query is naturally newest-first; the condition expression turns a (already
  * astronomically unlikely) key collision into a loud failure instead of a
- * silent overwrite. Throws on any DynamoDB failure — the route maps it to 502.
+ * silent overwrite. Throws on any DynamoDB failure — the route maps it to 500.
  */
 export async function putSubmission(
   input: { url: string; normalizedUrl: string; note: string | null; submittedBy: string },
@@ -263,7 +263,7 @@ export async function getSubmission(
 /**
  * `true` when a DynamoDB write was refused by its `ConditionExpression` — the
  * route maps this to a `409` (the drain raced us and changed the status, or
- * the item vanished) rather than a `502`.
+ * the item vanished) rather than a `500`.
  */
 export function isConditionalCheckFailed(err: unknown): boolean {
   return err instanceof Error && err.name === "ConditionalCheckFailedException";

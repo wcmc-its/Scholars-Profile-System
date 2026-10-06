@@ -1,17 +1,20 @@
 /**
  * `app/api/directory/people/route.ts` — SSO gate, q-mode + cwids-mode
- * validation, and the 503 LDAP-unavailable path (#540 Phase 7 § 13). The LDAP
+ * validation, and the 500 LDAP-unavailable path (#540 Phase 7 § 13). The LDAP
  * helpers are mocked at the module boundary (cleaner than a raw ldapts client
  * stub and equally faithful to the route's contract).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockGetEditSession, mockSearchByName, mockFetchByCwid } = vi.hoisted(() => ({
+const { mockGetEditSession, mockSearchByName, mockFetchByCwid, mockScholarFindMany } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockSearchByName: vi.fn(),
   mockFetchByCwid: vi.fn(),
+  mockScholarFindMany: vi.fn(),
 }));
+
+vi.mock("@/lib/db", () => ({ db: { read: { scholar: { findMany: mockScholarFindMany } } } }));
 
 // Resolves identity through the #637 effective-identity seam (#2122) — a "View
 // as" impersonator must be gated as the target, not the real signed-in user.
@@ -83,6 +86,28 @@ describe("GET /api/directory/people — q mode", () => {
   });
 });
 
+describe("GET /api/directory/people — scholarsOnly", () => {
+  const STUB = { ...PERSON, cwid: "mag9320", name: "Matthew Greenblatt", title: null };
+
+  it("drops directory people with no Scholar row", async () => {
+    mockSearchByName.mockResolvedValue([STUB, PERSON]);
+    mockScholarFindMany.mockResolvedValue([{ cwid: "abc123" }]);
+    const json = (await (await get("?q=ada&scholarsOnly=1")).json()) as { people: { cwid: string }[] };
+    expect(json.people.map((p) => p.cwid)).toEqual(["abc123"]);
+    expect(mockScholarFindMany.mock.calls[0][0].where).toEqual({
+      cwid: { in: ["mag9320", "abc123"] },
+      deletedAt: null,
+    });
+  });
+
+  it("leaves results unfiltered without the flag", async () => {
+    mockSearchByName.mockResolvedValue([STUB, PERSON]);
+    const json = (await (await get("?q=ada")).json()) as { people: unknown[] };
+    expect(json.people).toHaveLength(2);
+    expect(mockScholarFindMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("GET /api/directory/people — cwids mode", () => {
   it("hydrates a batch of valid cwids", async () => {
     const res = await get("?cwids=abc123,def456");
@@ -102,10 +127,10 @@ describe("GET /api/directory/people — cwids mode", () => {
 });
 
 describe("GET /api/directory/people — failures", () => {
-  it("503 when the directory is unreachable", async () => {
+  it("500 when the directory is unreachable", async () => {
     mockSearchByName.mockRejectedValue(new Error("SCHOLARS_LDAP_URL is not set"));
     const res = await get("?q=ada");
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     const json = (await res.json()) as { ok: boolean; error: string };
     expect(json.error).toBe("directory_unavailable");
   });

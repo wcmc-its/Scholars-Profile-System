@@ -8,11 +8,12 @@ import { makeFixture } from "./test-utils";
 function buildEtlStack(
   envName: "staging" | "prod",
   envConfigOverride: Partial<SpsEnvConfig> = {},
+  context?: Record<string, unknown>,
 ): {
   template: Template;
   stack: EtlStack;
 } {
-  const fixture = makeFixture(envName);
+  const fixture = makeFixture(envName, context);
   const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
@@ -1655,6 +1656,17 @@ describe("EtlStack", () => {
         // the env value); match the param's normalized logical-id fragment.
         expect(valueJson).toContain("internalalbdns");
       });
+
+      it("sets SCHOLARS_INTERNAL_ALB_ORIGIN to the same value as SCHOLARS_BASE_URL (#1478)", () => {
+        const envEntries = (etlContainerDef().Environment ?? []) as Array<{
+          Name?: string;
+          Value?: unknown;
+        }>;
+        const base = envEntries.find((e) => e.Name === "SCHOLARS_BASE_URL");
+        const origin = envEntries.find((e) => e.Name === "SCHOLARS_INTERNAL_ALB_ORIGIN");
+        expect(origin).toBeDefined();
+        expect(origin?.Value).toEqual(base?.Value);
+      });
     });
 
     describe("Footgun #5 -- EC2 property character-set safety", () => {
@@ -1732,7 +1744,79 @@ describe("EtlStack", () => {
         expect(stack.region).toBe("us-east-1");
       });
     });
+
+    // #2144 -- deploy.yml's pin step re-registers these families by
+    // (family, container) name, and AppStack's deploy-role iam:PassRole lists
+    // their roles by fixed roleName. Neither can import from this stack, so
+    // this pins the contract: renaming a family, container or role here
+    // without updating .github/workflows/deploy.yml and cdk/lib/app-stack.ts
+    // fails this test instead of failing the next deploy.
+    it("the deploy.yml-pinned ETL families keep their container and role names (#2144)", () => {
+      const expected: Record<string, string> = {
+        "sps-etl-prod": "etl",
+        "sps-etl-sources-prod": "etl",
+        "sps-etl-ldap-prod": "etl",
+        "sps-etl-reciter-api-prod": "etl",
+        "sps-etl-ctsc-prod": "etl",
+        "sps-reconcile-prod": "reconcile",
+        "sps-cdn-reconcile-prod": "cdn-reconcile",
+      };
+      const passRoleNames = new Set([
+        "sps-etl-task-prod",
+        "sps-etl-task-exec-prod",
+        "sps-etl-sources-task-exec-prod",
+        "sps-etl-ldap-task-exec-prod",
+        "sps-etl-reciter-api-task-exec-prod",
+        "sps-etl-ctsc-task-exec-prod",
+        "sps-reconcile-task-prod",
+        "sps-reconcile-task-exec-prod",
+        "sps-cdn-reconcile-task-prod",
+        "sps-cdn-reconcile-task-exec-prod",
+      ]);
+      const roles = template.findResources("AWS::IAM::Role");
+      const roleNameOf = (ref: unknown): string | undefined => {
+        const id = (ref as { "Fn::GetAtt"?: [string, string] })?.["Fn::GetAtt"]?.[0];
+        return id ? (roles[id]?.Properties?.RoleName as string | undefined) : undefined;
+      };
+      const taskDefs = Object.values(template.findResources("AWS::ECS::TaskDefinition"));
+      for (const [family, container] of Object.entries(expected)) {
+        const td = taskDefs.find((r) => r.Properties?.Family === family);
+        expect(td).toBeDefined();
+        const names = (td?.Properties?.ContainerDefinitions as Array<{ Name: string }>).map(
+          (c) => c.Name,
+        );
+        expect(names).toContain(container);
+        expect(passRoleNames).toContain(roleNameOf(td?.Properties?.TaskRoleArn));
+        expect(passRoleNames).toContain(roleNameOf(td?.Properties?.ExecutionRoleArn));
+      }
+    });
   });
+
+    // deploy.yml registers a fresh digest-pinned revision of every ETL family
+    // on each deploy (#2144), so a state-machine role must be able to RunTask
+    // any revision of its family. With cdk.json's
+    // fixRunEcsTaskPolicy flag on, CDK grants only the revision it synthesised
+    // and every cadence fails with AccessDenied after the next deploy. The
+    // other tests here use a bare App, which never reads cdk.json, so this one
+    // synthesises with the real context.
+    it("state-machine roles can RunTask any revision of their family (cdk.json flags)", () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { context } = require("../cdk.json") as { context: Record<string, unknown> };
+      const { template: real } = buildEtlStack("prod", {}, context);
+      const runTaskResources = Object.values(real.findResources("AWS::IAM::Policy")).flatMap(
+        (p) =>
+          (
+            p.Properties.PolicyDocument.Statement as Array<{ Action: unknown; Resource: unknown }>
+          )
+            .filter((s) => s.Action === "ecs:RunTask")
+            .flatMap((s) => (Array.isArray(s.Resource) ? s.Resource : [s.Resource])),
+      );
+      expect(runTaskResources.length).toBeGreaterThan(0);
+      for (const r of runTaskResources) {
+        // Family-wide grants end in ":*"; a revision grant is a bare {Ref}.
+        expect(JSON.stringify(r)).toContain(':*"');
+      }
+    });
 
   describe("staging", () => {
     const { template } = buildEtlStack("staging");

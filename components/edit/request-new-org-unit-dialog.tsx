@@ -10,7 +10,7 @@
  * justification in `detail`, and — crucially — **omits `targetCwid`** so the
  * route defaults `target = session.cwid` (§ 4.6.1: the self-gate is satisfied
  * for any authenticated user; the recipient resolves server-side to ITS
- * Support; no route-logic change). On any non-2xx (incl. `503 send_disabled`
+ * Support; no route-logic change). On any non-2xx (incl. `500 send_disabled`
  * while the mailer is dark) or a network error it falls back to a composed
  * `mailto:` exactly like the scholar-bound dialog — so the affordance works
  * before `SELF_EDIT_REQUEST_CHANGE_SEND` flips on.
@@ -134,7 +134,7 @@ export function RequestNewOrgUnitDialog() {
       setSending(false);
     }
     // Phase-1 fallback: the user's own mail client (works while the mailer is
-    // dark, i.e. SELF_EDIT_REQUEST_CHANGE_SEND off → 503).
+    // dark, i.e. SELF_EDIT_REQUEST_CHANGE_SEND off → 500).
     window.location.href = buildMailto({
       email: route.email,
       issueLabel: issue.label,

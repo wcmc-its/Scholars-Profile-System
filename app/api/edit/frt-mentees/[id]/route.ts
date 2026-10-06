@@ -51,7 +51,7 @@ export async function POST(
     return editError(404, "not_found");
   }
 
-  if (!isMenteeSuggestionsEnabled()) return editError(503, "mentee_suggestions_disabled");
+  if (!isMenteeSuggestionsEnabled()) return editError(500, "mentee_suggestions_disabled");
 
   const now = new Date();
   let data: Record<string, unknown>;

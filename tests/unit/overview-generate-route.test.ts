@@ -2,7 +2,7 @@
  * POST /api/edit/overview/generate (#742). Mirrors the slug-request route's
  * mocking: the facts assembly, the generator, and the rate-limit are unit-tested
  * elsewhere; here they are mocked so the test exercises the route's gates only
- * (flag, owner-authz, rate-limit, scholar-not-found, sparse, success, 502). No
+ * (flag, owner-authz, rate-limit, scholar-not-found, sparse, success, 500). No
  * network, no DB.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -339,10 +339,10 @@ describe("POST /api/edit/overview/generate", () => {
     expect(mockGenerateDraft).toHaveBeenCalledWith(FACTS, NORMALIZED_EMPTY);
   });
 
-  it("502 generation_failed when the gateway throws — and persists a FAILED run (buffered)", async () => {
+  it("500 generation_failed when the gateway throws — and persists a FAILED run (buffered)", async () => {
     mockGenerateDraft.mockRejectedValue(new Error("gateway timeout"));
     const res = await POST(post({ entityId: "self01" }));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "generation_failed" });
     // persist-every-run: the failed attempt is recorded (text null, status "failed"),
     // attributed to the real actor — a complete audit/debug trail.

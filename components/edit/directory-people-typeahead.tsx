@@ -78,6 +78,8 @@ export type DirectoryPeopleTypeaheadProps = {
    *  directory instead (dark until `CORNELL_DIRECTORY_MEMBERS` is on — the
    *  route 404s off, surfaced here as the existing "Search failed" state). */
   source?: "wcm" | "cornell";
+  /** Only people with a Scholar profile (WCM source). */
+  scholarsOnly?: boolean;
 };
 
 const DEBOUNCE_MS = 300;
@@ -90,6 +92,7 @@ export function DirectoryPeopleTypeahead({
   disabled = false,
   idPrefix = "directory",
   source = "wcm",
+  scholarsOnly = false,
 }: DirectoryPeopleTypeaheadProps) {
   const reactId = React.useId();
   const listboxId = `${idPrefix}-${reactId}-listbox`;
@@ -124,7 +127,7 @@ export function DirectoryPeopleTypeahead({
         const url =
           source === "cornell"
             ? `/api/directory/people?source=cornell&q=${encodeURIComponent(trimmed)}`
-            : `/api/directory/people?q=${encodeURIComponent(trimmed)}`;
+            : `/api/directory/people?q=${encodeURIComponent(trimmed)}${scholarsOnly ? "&scholarsOnly=1" : ""}`;
         const res = await fetch(url, { signal: controller.signal });
         const data = (await res.json().catch(() => null)) as
           | { ok: true; people: DirectoryResult[] | CornellApiPerson[] }
@@ -153,7 +156,7 @@ export function DirectoryPeopleTypeahead({
       }
     }, DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [query, value]);
+  }, [query, value, source, scholarsOnly]);
 
   function select(result: DirectoryResult) {
     onChange(

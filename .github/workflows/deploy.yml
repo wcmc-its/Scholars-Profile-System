@@ -247,32 +247,78 @@ jobs:
               --query 'taskDefinition.taskDefinitionArn' --output text
           }
 
+          # #2144: capture each ARN in a variable BEFORE echoing it.
+          # `echo "x=$(register_pinned ...)"` swallows a failed registration
+          # (set -e ignores a command substitution inside an echo argument),
+          # which is how the canary pin failed silently from August on.
           app_family="sps-app-${{ steps.target.outputs.env }}"
           migrate_family="sps-migrate-${{ steps.target.outputs.env }}"
           app_image="${{ steps.app_image.outputs.image_uri }}"
-          echo "app_taskdef=$(register_pinned "$app_family" app "$app_image")" >> "$GITHUB_OUTPUT"
-          echo "migrate_taskdef=$(register_pinned "$migrate_family" migrate "$app_image")" >> "$GITHUB_OUTPUT"
+          td=$(register_pinned "$app_family" app "$app_image")
+          echo "app_taskdef=$td" >> "$GITHUB_OUTPUT"
+          td=$(register_pinned "$migrate_family" migrate "$app_image")
+          echo "migrate_taskdef=$td" >> "$GITHUB_OUTPUT"
 
           etl_image="${{ steps.etl_image.outputs.image_uri }}"
           bootstrap_family="${{ steps.outputs.outputs.bootstrap_family }}"
           if [ -n "$etl_image" ] && [ -n "$bootstrap_family" ]; then
-            echo "bootstrap_taskdef=$(register_pinned "$bootstrap_family" db-bootstrap "$etl_image")" >> "$GITHUB_OUTPUT"
+            td=$(register_pinned "$bootstrap_family" db-bootstrap "$etl_image")
+            echo "bootstrap_taskdef=$td" >> "$GITHUB_OUTPUT"
           else
             echo "bootstrap_taskdef=$bootstrap_family" >> "$GITHUB_OUTPUT"
           fi
 
           verify_family="${{ steps.outputs.outputs.verify_family }}"
           if [ -n "$etl_image" ] && [ -n "$verify_family" ]; then
-            echo "verify_taskdef=$(register_pinned "$verify_family" verify-grants "$etl_image")" >> "$GITHUB_OUTPUT"
+            td=$(register_pinned "$verify_family" verify-grants "$etl_image")
+            echo "verify_taskdef=$td" >> "$GITHUB_OUTPUT"
           else
             echo "verify_taskdef=$verify_family" >> "$GITHUB_OUTPUT"
           fi
 
           canary_family="${{ steps.outputs.outputs.canary_family }}"
           if [ -n "$etl_image" ] && [ -n "$canary_family" ]; then
-            echo "canary_taskdef=$(register_pinned "$canary_family" search-eval-canary "$etl_image")" >> "$GITHUB_OUTPUT"
+            td=$(register_pinned "$canary_family" search-eval-canary "$etl_image")
+            echo "canary_taskdef=$td" >> "$GITHUB_OUTPUT"
           else
             echo "canary_taskdef=$canary_family" >> "$GITHUB_OUTPUT"
+          fi
+
+          # #2144: pin the Step Functions ETL families (Sps-Etl-<env>) too.
+          # The state machines reference each family by bare name, so every
+          # step launches the newest ACTIVE revision; registering a pinned
+          # clone here makes that revision run this deploy's exact ETL digest
+          # instead of whatever `:latest` points to at launch time. The ship
+          # timing is unchanged (code still ships on this workflow's run, no
+          # cdk deploy). Family -> container names must match
+          # cdk/lib/etl-stack.ts (pinned by an etl-stack.test.ts contract
+          # test). A family that doesn't exist yet is skipped with a warning;
+          # a registration failure fails the step.
+          # Caveat: a later `cdk deploy Sps-Etl-<env>` that changes a task def
+          # registers a fresh `:latest` revision, which unpins that family
+          # until the next run of this workflow.
+          if [ -n "$etl_image" ]; then
+            env_name="${{ steps.target.outputs.env }}"
+            for pair in \
+              "sps-etl-$env_name:etl" \
+              "sps-etl-sources-$env_name:etl" \
+              "sps-etl-ldap-$env_name:etl" \
+              "sps-etl-reciter-api-$env_name:etl" \
+              "sps-etl-ctsc-$env_name:etl" \
+              "sps-reconcile-$env_name:reconcile" \
+              "sps-cdn-reconcile-$env_name:cdn-reconcile"; do
+              family="${pair%%:*}"
+              container="${pair#*:}"
+              if ! aws ecs describe-task-definition --task-definition "$family" \
+                  --query 'taskDefinition.family' --output text > /dev/null 2>&1; then
+                echo "::warning::ETL task family $family not found. Not pinned (#2144); its Step Functions steps keep running :latest. Run 'cdk deploy Sps-Etl-$env_name' to provision it, then re-run this workflow."
+                continue
+              fi
+              td=$(register_pinned "$family" "$container" "$etl_image")
+              echo "Pinned $family -> $td"
+            done
+          else
+            echo "::warning::No ETL image digest this run. Step Functions ETL families NOT pinned (#2144); they keep their current revisions."
           fi
 
       # Static-asset sync to S3 (#700) — make old content-hashed chunks survive a
@@ -455,6 +501,25 @@ jobs:
             echo "::error::Service not fully running after rollout (desired=$desired running=$running)."
             exit 1
           fi
+
+      # Post-deploy drift report (#1765, #1987) -- informational, never fails
+      # the deploy (the image has already rolled; a red job here would hide
+      # whether the deploy itself succeeded). scripts/release/drift-report.sh
+      # compares the just-pinned app task def's env and this env's deployed
+      # scholars-*-<env> state machines against the committed cdk snapshots,
+      # which match the master SHA just deployed. The ETL half needs
+      # states:ListStateMachines / DescribeStateMachine on the deploy role,
+      # which arrive with the next `cdk deploy Sps-App-<env>`; until then it
+      # self-skips with a ::notice:: on AccessDenied. Drift surfaces as a
+      # ::warning:: plus the job step summary; a check that could not run
+      # (flag-parity exit 2, e.g. zero machines) is a separate ::warning::.
+      # The daily drift-check.yml runs the same script in strict mode.
+      - name: Drift report (flags + ETL definitions, non-blocking)
+        continue-on-error: true
+        env:
+          TARGET_ENV: ${{ steps.target.outputs.env }}
+          APP_TASKDEF: ${{ steps.pin.outputs.app_taskdef }}
+        run: bash scripts/release/drift-report.sh "$TARGET_ENV" "$APP_TASKDEF"
 
       # Post-deploy search-eval canary (issue #1444 remainder) — staging only:
       # the checked-in baseline/pins (scripts/search-eval/) were captured

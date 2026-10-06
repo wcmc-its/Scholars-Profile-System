@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   Annotations,
+  ArnFormat,
   CfnOutput,
   Duration,
   Fn,
@@ -22,7 +23,11 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
-import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
+import {
+  importSharedVpc,
+  resolveSharedSg,
+  resolveTierSubnets,
+} from "./shared-vpc-subnets";
 
 /**
  * ADOT collector image, pinned by digest.
@@ -93,8 +98,12 @@ const SCHOLARS_MAIL_FROM = "no-reply-scholars@weill.cornell.edu";
 export interface AppStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /** VPC every workload runs in (from NetworkStack). */
-  readonly vpc: ec2.IVpc;
+  /**
+   * VPC every workload runs in. Flag-off: the standalone NetworkStack VPC. Omitted when
+   * {@link SpsEnvConfig.useSharedVpc} is on (NetworkStack is not synthesized
+   * then); the stack imports the shared VPC itself via importSharedVpc.
+   */
+  readonly vpc?: ec2.IVpc;
 }
 
 /**
@@ -189,7 +198,8 @@ export class AppStack extends Stack {
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
 
-    const { envConfig, vpc } = props;
+    const { envConfig } = props;
+    const vpc = props.vpc ?? importSharedVpc(this, envConfig);
     const env = envConfig.envName;
     // `scholars-honors-<env>` (EtlStack HonorsStateMachine), by name -- see
     // TaskRoleHonorsRunNowPolicy below.
@@ -775,7 +785,9 @@ export class AppStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["secretsmanager:GetSecretValue"],
-        resources: [originSharedSecretForCanary.secretArn],
+        // `-??????`: the real ARN carries Secrets Manager's random suffix
+        // (the task def reaches it by name via the SSM reference below).
+        resources: [`${originSharedSecretForCanary.secretArn}-??????`],
       }),
     );
     canaryTaskExecutionRole.addToPolicy(
@@ -3416,10 +3428,38 @@ export class AppStack extends Stack {
     // shared VPC. A fixed physical name blocks CFN create-before-delete
     // ("sps-public-<env> already exists" — the old one still holds the name).
     // Auto-generate the name when shared; keep the exact env-prefixed name when
-    // standalone so flag-off synth stays byte-identical. Names are not
-    // externally referenced (NetScaler reads the ALB DNS, not the name).
+    // standalone so flag-off synth stays byte-identical. The ALB NAME is not
+    // referenced anywhere, but the internal ALB's DNS name IS: the ETL reads it
+    // via the internal-alb-dns SSM param (picked up on the next Sps-Etl
+    // deploy), and Faculty Review / Research Informatics callers will hardcode
+    // it (#1855, #2363). Replacing the internal ALB changes that DNS name, so
+    // treat a replacement as a breaking change for those consumers (#1478).
+    // #1942: the public ALB now has deletion protection on, so any change that
+    // REPLACES it (e.g. flipping useSharedVpc back, which sets a fixed name)
+    // fails at the CFN delete step and rolls the deploy back. That is
+    // intended: a replacement mints a new DNS name, which breaks the NetScaler
+    // pool, alarms and the backout path. Disable protection out-of-band first
+    // if a replacement is ever deliberate.
     const sharedReplaceName = (fixed: string): string | undefined =>
       envConfig.useSharedVpc ? undefined : fixed;
+
+    // #1942: ALB access + connection logs. A dedicated bucket rather than
+    // EdgeStack.logsBucket: that bucket's policy is owned by the manually
+    // deployed EdgeStack, so AppStack could not add the ELB delivery grant.
+    // ALB log delivery supports SSE-S3 only (no KMS).
+    const albLogsBucket = new s3.Bucket(this, "AlbLogsBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          id: `sps-alb-logs-expire-${env}`,
+          enabled: true,
+          expiration: Duration.days(90),
+        },
+      ],
+    });
 
     this.publicAlb = new elbv2.ApplicationLoadBalancer(this, "PublicAlb", {
       loadBalancerName: sharedReplaceName(`sps-public-${env}`),
@@ -3427,7 +3467,19 @@ export class AppStack extends Stack {
       internetFacing: true,
       vpcSubnets: albSubnets,
       securityGroup: albSecurityGroup,
+      // #1942: a recreate means a new DNS name (NetScaler pool, alarms and
+      // the backout all key on it), so block deletes.
+      deletionProtection: true,
+      // #1942: origin auth is a header match (X-Origin-Verify); drop headers
+      // with invalid names rather than pass them to the app.
+      dropInvalidHeaderFields: true,
     });
+    // #1942: pin preserve_host_header to the live value (false). Redirects
+    // are built from SITE_URL (#1935), not the Host header. Set explicitly:
+    // the L2 `preserveHostHeader: false` prop emits nothing, leaving it unpinned.
+    this.publicAlb.setAttribute("routing.http.preserve_host_header.enabled", "false");
+    this.publicAlb.logAccessLogs(albLogsBucket, `alb-access/${env}`);
+    this.publicAlb.logConnectionLogs(albLogsBucket, `alb-conn/${env}`);
 
     this.internalAlb = new elbv2.ApplicationLoadBalancer(this, "InternalAlb", {
       loadBalancerName: sharedReplaceName(`sps-internal-${env}`),
@@ -3541,8 +3593,12 @@ export class AppStack extends Stack {
     // follow-up) so CloudFront's origin leg can run over TLS. Same 403-default
     // + X-Origin-Verify-forward shape as :80, onto the same target group. Added
     // only once the ALB-region cert (edgeOriginCertArn) is seeded; ships dark.
+    // #1938: handles for the :443 listener + rule, so the ECS service can
+    // depend on them (below) the same way it depends on the :80 pair.
+    let publicHttpsListener: elbv2.ApplicationListener | undefined;
+    let originVerifiedHttpsRule: elbv2.ApplicationListenerRule | undefined;
     if (envConfig.edgeOriginCertArn.length > 0) {
-      const publicHttpsListener = this.publicAlb.addListener("PublicHttpsListener", {
+      publicHttpsListener = this.publicAlb.addListener("PublicHttpsListener", {
         port: 443,
         protocol: elbv2.ApplicationProtocol.HTTPS,
         certificates: [elbv2.ListenerCertificate.fromArn(envConfig.edgeOriginCertArn)],
@@ -3558,16 +3614,20 @@ export class AppStack extends Stack {
           messageBody: "Forbidden",
         }),
       });
-      new elbv2.ApplicationListenerRule(this, "OriginVerifiedForwardHttps", {
-        listener: publicHttpsListener,
-        priority: 1,
-        conditions: [
-          elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
-            originSharedSecretValue.unsafeUnwrap(),
-          ]),
-        ],
-        action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
-      });
+      originVerifiedHttpsRule = new elbv2.ApplicationListenerRule(
+        this,
+        "OriginVerifiedForwardHttps",
+        {
+          listener: publicHttpsListener,
+          priority: 1,
+          conditions: [
+            elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+              originSharedSecretValue.unsafeUnwrap(),
+            ]),
+          ],
+          action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
+        },
+      );
     }
     const internalListener = this.internalAlb.addListener("InternalHttpListener", {
       port: 80,
@@ -3623,7 +3683,22 @@ export class AppStack extends Stack {
         streamPrefix: "search-eval-canary",
       }),
       secrets: {
-        CANARY_ORIGIN_VERIFY: ecs.Secret.fromSecretsManager(originSharedSecretForCanary),
+        // #3021: NOT ecs.Secret.fromSecretsManager. That puts a partial ARN in
+        // valueFrom, and because this secret's name ends in a hyphen plus six
+        // characters ("-secret"), Secrets Manager parses it as a COMPLETE ARN
+        // with suffix "secret" and the lookup fails (surfaces as AccessDenied;
+        // the canary task never starts). The SSM reference path resolves by
+        // name, needs no suffix in this public repo, and fromSsmParameter
+        // grants ssm:GetParameters on it to the execution role.
+        CANARY_ORIGIN_VERIFY: ecs.Secret.fromSsmParameter(
+          ssm.StringParameter.fromSecureStringParameterAttributes(
+            this,
+            "OriginSharedSecretRefForCanary",
+            {
+              parameterName: `/aws/reference/secretsmanager/scholars/${env}/edge/origin-shared-secret`,
+            },
+          ),
+        ),
       },
     });
 
@@ -3717,6 +3792,12 @@ export class AppStack extends Stack {
     this.ecsService.node.addDependency(publicListener);
     this.ecsService.node.addDependency(originVerifiedRule);
     this.ecsService.node.addDependency(internalListener);
+    // #1938: the :443 listener + its priority-1 forward rule also bind the
+    // public TG to the ALB. Added alongside (not instead of) the :80 deps so
+    // :80 can later be removed without a dependency-ordering gap.
+    if (publicHttpsListener && originVerifiedHttpsRule) {
+      this.ecsService.node.addDependency(publicHttpsListener, originVerifiedHttpsRule);
+    }
 
     // ------------------------------------------------------------------
     // Application autoscaling (#596).
@@ -3806,10 +3887,11 @@ export class AppStack extends Stack {
     // two task-side roles, and cloudformation:DescribeStacks on this stack
     // (the deploy workflow reads the AppStack outputs to discover the ECR
     // URIs, cluster, service, and migration family). The only `*` resources
-    // are ecr:GetAuthorizationToken and ecs:DescribeTaskDefinition /
-    // ecs:RegisterTaskDefinition (#2121) -- none of the three support
-    // resource-level ARNs (confirmed empirically for the ECS pair: an
-    // ARN-scoped grant AccessDenied'd in a live staging dry run).
+    // are ecr:GetAuthorizationToken, ecs:DescribeTaskDefinition /
+    // ecs:RegisterTaskDefinition (#2121) and states:ListStateMachines
+    // (#1987) -- none of them support resource-level ARNs (confirmed
+    // empirically for the ECS pair: an ARN-scoped grant AccessDenied'd in a
+    // live staging dry run).
     // ------------------------------------------------------------------
     const githubOidcIssuerHost = "token.actions.githubusercontent.com";
     const githubOidcProviderArnContext = this.node.tryGetContext("githubOidcProviderArn") as
@@ -3963,6 +4045,35 @@ export class AppStack extends Stack {
           // #1444: RunTask for the search-eval canary passes its own dedicated
           // execution role (never deployTaskExecutionRole -- see above).
           canaryTaskExecutionRole.roleArn,
+          // #2144: the canary task def sets no taskRole, so CDK auto-creates
+          // one, and RegisterTaskDefinition passes it too. Without this grant
+          // the deploy.yml pin step failed with AccessDenied on every run and
+          // the canary stayed dark from August.
+          this.searchEvalCanaryTaskDefinition.taskRole.roleArn,
+          // #2144: deploy.yml re-registers the seven Step Functions ETL
+          // families (Sps-Etl-<env>) pinned to this deploy's ETL image digest.
+          // Registering a clone passes the family's task + execution roles.
+          // Referenced by their fixed roleName (cdk/lib/etl-stack.ts) rather
+          // than a cross-stack import, so AppStack keeps no dependency on
+          // EtlStack.
+          ...[
+            `sps-etl-task-${env}`,
+            `sps-etl-task-exec-${env}`,
+            ...["sources", "ldap", "reciter-api", "ctsc"].map(
+              (unit) => `sps-etl-${unit}-task-exec-${env}`,
+            ),
+            `sps-reconcile-task-${env}`,
+            `sps-reconcile-task-exec-${env}`,
+            `sps-cdn-reconcile-task-${env}`,
+            `sps-cdn-reconcile-task-exec-${env}`,
+          ].map((roleName) =>
+            Stack.of(this).formatArn({
+              service: "iam",
+              region: "",
+              resource: "role",
+              resourceName: roleName,
+            }),
+          ),
         ],
         conditions: {
           StringEquals: {
@@ -3996,6 +4107,110 @@ export class AppStack extends Stack {
         ],
       }),
     );
+    // Post-deploy ETL definition drift check (#1987): the deploy workflow
+    // reads this env's deployed `scholars-*-<env>` state-machine definitions
+    // and diffs their step ids against the committed etl-stack snapshot
+    // (scripts/release/flag-parity.mjs --etl-drift). Read-only.
+    // ListStateMachines has no resource-level ARN, hence `*`.
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["states:ListStateMachines"],
+        resources: ["*"],
+      }),
+    );
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["states:DescribeStateMachine"],
+        resources: [
+          Stack.of(this).formatArn({
+            service: "states",
+            resource: "stateMachine",
+            resourceName: `scholars-*-${env}`,
+            arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+          }),
+        ],
+      }),
+    );
+
+    // ------------------------------------------------------------------
+    // Scheduled drift check role (#1765, #1987).
+    //
+    // `.github/workflows/drift-check.yml` runs daily and compares BOTH envs'
+    // deployed app task-def env and scholars-* state-machine definitions
+    // against the committed cdk snapshots, failing the run on drift. It
+    // assumes this read-only role, never a deploy role.
+    //
+    // Account-scoped like the OIDC provider (one role covers staging + prod
+    // in the shared account), so exactly one AppStack creates it: staging,
+    // the provider's owner. Trust admits only the `drift-check` GitHub
+    // Environment subject (exact match, no wildcard); that environment's
+    // deployment-branch policy pins it to master. Permissions are describe /
+    // list only: the two app services, task definitions (`*` -- ECS does not
+    // honor resource-level scoping for DescribeTaskDefinition, #2121),
+    // ListStateMachines (`*` -- no resource type), and DescribeStateMachine
+    // on scholars-* machines.
+    // ------------------------------------------------------------------
+    if (env === "staging") {
+      const driftCheckRole = new iam.Role(this, "DriftCheckRole", {
+        roleName: "sps-drift-readonly",
+        assumedBy: new iam.FederatedPrincipal(
+          githubOidcProvider.openIdConnectProviderArn,
+          {
+            StringEquals: {
+              "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+              "token.actions.githubusercontent.com:sub":
+                "repo:wcmc-its/Scholars-Profile-System:environment:drift-check",
+            },
+          },
+          "sts:AssumeRoleWithWebIdentity",
+        ),
+        description:
+          "SPS scheduled drift check (read-only). Assumed by the drift-check workflow via OIDC.",
+      });
+      driftCheckRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ecs:DescribeServices"],
+          resources: (["staging", "prod"] as const).map((e) =>
+            Stack.of(this).formatArn({
+              service: "ecs",
+              resource: "service",
+              resourceName: `sps-cluster-${e}/sps-app-${e}`,
+            }),
+          ),
+        }),
+      );
+      driftCheckRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ecs:DescribeTaskDefinition"],
+          resources: ["*"],
+        }),
+      );
+      driftCheckRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["states:ListStateMachines"],
+          resources: ["*"],
+        }),
+      );
+      driftCheckRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["states:DescribeStateMachine"],
+          resources: [
+            Stack.of(this).formatArn({
+              service: "states",
+              resource: "stateMachine",
+              resourceName: "scholars-*",
+              arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+            }),
+          ],
+        }),
+      );
+    }
 
     // ------------------------------------------------------------------
     // VPC endpoints (B17).

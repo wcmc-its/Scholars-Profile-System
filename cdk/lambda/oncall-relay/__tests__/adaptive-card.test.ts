@@ -297,6 +297,19 @@ describe("buildAdaptiveCard", () => {
   });
 });
 
+describe("buildAdaptiveCard fallbackText", () => {
+  it("is the state + alarm name + first sentence of the description", () => {
+    const c = buildAdaptiveCard({
+      AlarmName: "sps-reconcile-status-prod",
+      NewStateValue: "ALARM",
+      AlarmDescription: "The search reconcile job failed twice in a row. Next: check the execution.",
+    }).attachments[0]!.content as { fallbackText: string };
+    expect(c.fallbackText).toBe(
+      "SPS ALARM: sps-reconcile-status-prod \u{2014} The search reconcile job failed twice in a row.",
+    );
+  });
+});
+
 describe("isCloudWatchAlarmPayload", () => {
   it("true only when a string AlarmName is present", () => {
     expect(isCloudWatchAlarmPayload({ AlarmName: "x", NewStateValue: "ALARM" })).toBe(true);
@@ -318,13 +331,26 @@ describe("buildEtlCard", () => {
         error: { Error: "States.TaskFailed", Cause: "exit 1" },
       }),
     );
-    expect(header(c)).toBe("\u{1F6A8} SPS ETL staging \u{2014} Ed");
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL step Ed failed (staging)");
     expect(fact(c, "Env")).toBe("staging");
     expect(fact(c, "Step")).toBe("Ed");
     expect(fact(c, "State machine")).toBe("scholars-nightly-staging");
     expect(fact(c, "Execution")).toBe("abc-123");
     expect(fact(c, "Error")).toContain("States.TaskFailed");
     expect(c.actions[0]!.url).toContain("states/home");
+  });
+
+  it("fallbackText says what failed in plain text (Teams previews/email show it instead of 'Card - access it on go.skype.com')", () => {
+    const c = content(
+      buildEtlCard({
+        env: "prod",
+        step: "Reconcile",
+        error: { Error: "ECS.AccessDeniedException", Cause: "not authorized" },
+      }),
+    ) as unknown as { fallbackText: string };
+    expect(c.fallbackText).toBe(
+      "SPS ETL step Reconcile failed (prod) \u{2014} ECS.AccessDeniedException",
+    );
   });
 
   it("string error renders verbatim; missing optional fields are omitted", () => {
@@ -416,7 +442,7 @@ describe("buildEtlCard", () => {
     const c = content(
       buildEtlCard({ env: "staging", step: "Ed", error: "boom" }),
     );
-    expect(header(c)).toBe("\u{1F6A8} SPS ETL staging \u{2014} Ed");
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL step Ed failed (staging)");
     expect(fact(c, "Severity")).toBeUndefined();
   });
 
@@ -424,7 +450,7 @@ describe("buildEtlCard", () => {
     const c = content(
       buildEtlCard({ env: "staging", step: "Ed", error: "boom" }, "warn"),
     );
-    expect(header(c)).toBe("\u{26A0}\u{FE0F} SPS ETL staging \u{2014} Ed");
+    expect(header(c)).toBe("\u{26A0}\u{FE0F} SPS ETL step Ed failed (staging)");
     expect(fact(c, "Severity")).toBe("P2 (warn)");
   });
 
@@ -432,7 +458,7 @@ describe("buildEtlCard", () => {
     const c = content(
       buildEtlCard({ env: "prod", step: "Infoed", error: "boom" }, "page"),
     );
-    expect(header(c)).toBe("\u{1F6A8} SPS ETL prod \u{2014} Infoed");
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL step Infoed failed (prod)");
     expect(fact(c, "Severity")).toBe("P1 (page)");
   });
 

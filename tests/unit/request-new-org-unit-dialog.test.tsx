@@ -87,7 +87,7 @@ describe("RequestNewOrgUnitDialog", () => {
   });
 
   it("falls back to a mailto: on a non-2xx (mailer dark) — support@ + structured body", async () => {
-    mockFetch({ ok: false, status: 503 });
+    mockFetch({ ok: false, status: 500 });
     render(<RequestNewOrgUnitDialog />);
     open();
     fireEvent.change(screen.getByTestId("rnou-name"), { target: { value: "Center of Bar" } });
@@ -102,7 +102,7 @@ describe("RequestNewOrgUnitDialog", () => {
   });
 
   it("strips CR/LF from the justification before the mailto (injection guard)", async () => {
-    mockFetch({ ok: false, status: 503 });
+    mockFetch({ ok: false, status: 500 });
     render(<RequestNewOrgUnitDialog />);
     open();
     fireEvent.change(screen.getByTestId("rnou-name"), { target: { value: "Center of Bar" } });

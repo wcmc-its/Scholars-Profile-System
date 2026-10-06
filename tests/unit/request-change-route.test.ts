@@ -1,6 +1,6 @@
 /**
  * POST /api/edit/request-change — the server mailer endpoint (#160 Phase 2).
- * Mirrors the edit-suppress-route mocking. Verifies the dormant 503, server-side
+ * Mirrors the edit-suppress-route mocking. Verifies the dormant 500, server-side
  * recipient resolution, the non-routable + authz gates, send-first ordering, the
  * best-effort audit that never rolls back a sent email (#493 grant gap), and the
  * per-cwid rate limit (SPEC § 5 abuse controls). The rate-limit *mechanism* is
@@ -89,13 +89,13 @@ beforeEach(() => {
 });
 
 describe("POST /api/edit/request-change", () => {
-  it("503 send_disabled when the mailer is dark (client falls back to mailto)", async () => {
+  it("500 send_disabled when the mailer is dark (client falls back to mailto)", async () => {
     mockIsMailerConfigured.mockReturnValue(false);
     const res = await POST(post({ attribute: "education", issueId: "education-wrong" }));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "send_disabled" });
     expect(mockSendMail).not.toHaveBeenCalled();
-    // The 503 gate precedes the limiter, so a dormant endpoint consumes no quota.
+    // The 500 gate precedes the limiter, so a dormant endpoint consumes no quota.
     expect(mockRecordAttempt).not.toHaveBeenCalled();
   });
 
@@ -195,10 +195,10 @@ describe("POST /api/edit/request-change", () => {
     expect(mockSendMail).toHaveBeenCalledTimes(1);
   });
 
-  it("502 send_failed when the mailer throws (no audit row)", async () => {
+  it("500 send_failed when the mailer throws (no audit row)", async () => {
     mockSendMail.mockRejectedValue(new Error("SES throttled"));
     const res = await POST(post({ attribute: "education", issueId: "education-wrong" }));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "send_failed" });
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
   });
@@ -312,7 +312,7 @@ describe("POST /api/edit/request-change", () => {
   // change: `targetCwid` is OMITTED, so the route defaults `target = session.cwid`
   // and the self-gate (`session.cwid === target`) passes for any authenticated
   // user; the recipient resolves server-side to ITS Support; rate-limited as
-  // usual; 503 → client mailto: fallback while the mailer is dark.
+  // usual; 500 → client mailto: fallback while the mailer is dark.
   describe("self-targeted org-unit request (#728 Phase D)", () => {
     it("a non-superuser sends with targetCwid omitted → routes to ITS support, 200", async () => {
       const res = await POST(
@@ -337,10 +337,10 @@ describe("POST /api/edit/request-change", () => {
       expect(mockRecordAttempt).toHaveBeenCalledWith("self01");
     });
 
-    it("503 send_disabled while the mailer is dark → client mailto: fallback", async () => {
+    it("500 send_disabled while the mailer is dark → client mailto: fallback", async () => {
       mockIsMailerConfigured.mockReturnValue(false);
       const res = await POST(post({ attribute: "org-unit", issueId: "request-new-org-unit" }));
-      expect(res.status).toBe(503);
+      expect(res.status).toBe(500);
       expect(await res.json()).toMatchObject({ error: "send_disabled" });
       expect(mockSendMail).not.toHaveBeenCalled();
     });
