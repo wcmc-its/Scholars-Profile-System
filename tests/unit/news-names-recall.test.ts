@@ -38,7 +38,7 @@ const sources = (over: Partial<MentionSources> = {}): MentionSources => ({
 const ROSTER = [
   scholar("zzr0001", "Samira R Vellacott"),
   scholar("zzr0002", "Dorian Avi Quellmark"),
-  scholar("zzr0003", "Kestrel Ragusa Penhallow"),
+  scholar("zzr0003", "Kestrel Ravello Penhallow"),
   scholar("zzr0004", "Annika Strathorne"),
   scholar("zzr0005", "Marisol Elspeth Thornquist"),
   scholar("zzr0006", "Teodora Valcarce Brennhold"),

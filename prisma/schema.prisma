@@ -549,10 +549,6 @@ model FrtMentee {
   /// and never overwritten by the name match.
   cwidAssignedAt  DateTime? @map("cwid_assigned_at")
   cwidAssignedBy  String?   @map("cwid_assigned_by") @db.VarChar(32)
-  /// A person the FRT name reaches ONLY through a nickname ("Bob" = "Robert"),
-  /// set by the ETL while `menteeCwid` is null. A suggestion shown on /edit,
-  /// never a link: linking it is the mentor's own assignment.
-  suggestedCwid   String?   @map("suggested_cwid") @db.VarChar(32)
 
   @@unique([mentorCwid, nameKey])
   @@index([menteeCwid])

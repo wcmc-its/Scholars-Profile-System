@@ -5,7 +5,7 @@
  * `manualMentees`).
  *
  * FRT names mentees in free text. A CWID (name match, or linked here through
- * the directory picker or a nickname-match suggestion) is what makes the mentee's co-publications show on the
+ * the directory picker) is what makes the mentee's co-publications show on the
  * profile and counts the pair in the Mentored publications report, so a
  * name-only row says so and offers the picker first.
  */
@@ -327,36 +327,6 @@ function FrtRow({
           </span>
         )}
       </p>
-      {!r.menteeCwid && r.suggestedCwid && (
-        <div
-          className="flex flex-wrap items-center gap-2 text-sm"
-          data-testid={`frt-mentee-suggested-${r.id}`}
-        >
-          <span>
-            Possible match:{" "}
-            <span className="font-medium">{r.suggestedCwidName ?? r.suggestedCwid}</span>{" "}
-            <span className="text-muted-foreground text-xs">
-              {r.suggestedCwid} · nickname match
-            </span>
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              void onAssign({
-                cwid: r.suggestedCwid!,
-                name: r.suggestedCwidName ?? r.suggestedCwid!,
-                title: null,
-              })
-            }
-            data-testid={`frt-mentee-suggested-link-${r.id}`}
-          >
-            Link
-          </Button>
-        </div>
-      )}
       {coPubs !== null && (
         <p className="text-sm" data-testid={`frt-mentee-coauthor-${r.id}`}>
           Also a co-author: {coPubs} co-authored {coPubs === 1 ? "publication" : "publications"}

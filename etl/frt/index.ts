@@ -5,16 +5,14 @@
  * free-text name. Reads the current review year and the historic table, keeps
  * one row per (mentor, name key) with the latest year's name/type, and resolves
  * a CWID only for an internal mentee whose first+last key matches exactly one
- * person (scholar + the PhD/postdoc/AOC mentee rosters). A name that reaches one
- * person only through a nickname is stored as `suggested_cwid` for the mentor
- * to confirm on /edit, never as the link. Runs weekly so a new
+ * person (scholar + the PhD/postdoc/AOC mentee rosters). Runs weekly so a new
  * review year shows up whenever FRT publishes it.
  *
  * Usage: `npm run etl:frt`
  */
 import { db } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
-import { frtNameKey, resolveFrtMentee } from "@/lib/frt/mentee-name";
+import { frtNameKey, frtNicknameCandidate } from "@/lib/frt/mentee-name";
 import { closeCoiFrtPool, getCoiFrtPool } from "@/lib/sources/mssql-coi-frt";
 
 type Row = {
@@ -124,21 +122,26 @@ async function main() {
 
     let matched = 0;
     // Unlinked internal mentees whose name reaches exactly one person only via a
-    // nickname: stored as a suggestion for the mentor, never as the link.
-    let suggested = 0;
+    // nickname. Counted, never linked: see frtNicknameCandidate.
+    let nicknameOnly = 0;
     const inserts = [...byPair.entries()].map(([id, a]) => {
       const external = a.row.external_mentee === "Yes";
       const d = decided.get(id);
       let menteeCwid: string | null;
-      let suggestedCwid: string | null = null;
       if (d?.cwidAssignedAt) menteeCwid = d.menteeCwid;
-      else ({ menteeCwid, suggestedCwid } = resolveFrtMentee(idx, a.key, a.row.cwid, external));
-      if (suggestedCwid) suggested++;
+      else {
+        const hits = external ? undefined : idx.get(a.key);
+        const cwid = hits?.size === 1 ? [...hits][0] : null;
+        menteeCwid = cwid && cwid !== a.row.cwid ? cwid : null;
+        if (!external && !menteeCwid) {
+          const nick = frtNicknameCandidate(idx, a.key);
+          if (nick && nick !== a.row.cwid) nicknameOnly++;
+        }
+      }
       if (menteeCwid) matched++;
       return {
         mentorCwid: a.row.cwid,
         menteeCwid,
-        suggestedCwid,
         menteeName: clip(a.row.external_mentee_name)!,
         nameKey: a.key,
         mentoringType: clip(a.row.external_mentee_type),
@@ -154,7 +157,7 @@ async function main() {
     });
     console.log(
       `Mentor/mentee pairs: ${inserts.length} (CWID-matched: ${matched}; ` +
-        `nickname-only suggestions, not linked: ${suggested}).`,
+        `nickname-only candidates, not linked: ${nicknameOnly}).`,
     );
 
     assertSourceVolume("frt:mentees", {
