@@ -405,7 +405,7 @@ export async function upsertMentions(rows: MentionUpsert[]): Promise<{
  * reconcile()'s "never resurrect a rejected row" invariant is url-keyed and is
  * bypassed wholesale rather than violated.
  *
- * This is a code gate rather than a runbook line on purpose: NewsWeekly is a
+ * This is a code gate rather than a runbook line on purpose: NewsNightly is a
  * scheduled Step Functions step and NEWS_ORIGIN is a hardcoded constant, not a
  * task-def flag — so there is no "merged but dark until cdk deploy" window in
  * which to do the data step. Merging alone would arm it.

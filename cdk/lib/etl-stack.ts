@@ -1675,6 +1675,14 @@ export class EtlStack extends Stack {
       // continue-tier so a bad digest alarms this step, never the chain. Before
       // Sps-InboundMail is deployed (or any mail arrives) the run is a 0-row success.
       { id: "ClipsNightly", npmScript: "etl:news-clips", external: false, tier: "continue" },
+      // News mentions — reads the WCM Newsroom feed for scholar mentions. Nightly
+      // so new stories reach /edit/news-queue within a day (was weekly). No LDAP
+      // (external:false), and tier:"continue" so a newsroom outage warns and
+      // proceeds rather than aborting the chain. Incremental by default: it stops
+      // after the first feed page that is fully ingested (a page or two per run);
+      // a full backfill is an operator run with NEWS_BACKFILL=1. Before
+      // SearchIndexNightly/RevalidateNightly so new mentions render the same night.
+      { id: "NewsNightly", npmScript: "etl:news", external: false, tier: "continue" },
       // #2596 — materialize Scholar.rosterProminence/rosterLeadershipTier from
       // lib/api/prominence.ts. After Ed (titles), Infoed (PI grants) and
       // Dynamodb (scored pubs, h-index), whose outputs it scores. SPS-DB only,
@@ -1826,12 +1834,6 @@ export class EtlStack extends Stack {
       // or markup change must never abort the chain; its volume guard aborts the
       // step itself rather than blanking the section.
       { id: "TechnologyWeekly", npmScript: "etl:technologies", external: false, tier: "continue" },
-      // News mentions — scrapes the WCM Research news feed for scholar mentions.
-      // Same shape as TechnologyWeekly: no LDAP (external:false), and tier:"continue"
-      // so a WCM newsroom outage warns and proceeds rather than aborting the chain.
-      // Incremental by default (upserts new articles, preserves the review queue);
-      // a full backfill is an operator run with NEWS_BACKFILL=1.
-      { id: "NewsWeekly", npmScript: "etl:news", external: false, tier: "continue" },
       // Research Dean funding digest — submits new digest links to the ReciterAI
       // SUBMISSION queue (etl/opportunities/funding-digest.ts); ReciterAI's daily
       // drain scores them. Prod submits; staging is a logged dry run (the queue
