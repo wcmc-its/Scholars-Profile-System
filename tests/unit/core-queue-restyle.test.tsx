@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 import {
   bandDot,
   CoreClaimQueue,
+  evidenceGroupColor,
   likelihoodBand,
   llmChipTone,
   llmTier,
@@ -209,14 +210,14 @@ describe("the list and rail as rendered", () => {
     expect(chip.dataset.tone).toBe("amber");
   });
 
-  it("puts the lowest band's dot on each rail group's sub-line", () => {
+  it("puts each rail group's own evidence colour on its sub-line", () => {
     const { container } = render(
       <CoreClaimQueue core={CORE} candidates={[STRONG, SLIGHT]} confirmed={[]} />,
     );
-    const dots = [...container.querySelectorAll('[data-slot="core-queue-rail-dot"]')];
-    // "All candidates" (slate) + the one LLM-read group spanning Slight to Strong
+    const dots = [...container.querySelectorAll<HTMLElement>('[data-slot="core-queue-rail-dot"]')];
+    // "All candidates" (slate) + the one LLM-read group, in its strip colour
     expect(dots).toHaveLength(2);
     expect(dots[0].className).toContain("bg-apollo-slate");
-    expect(dots[1].className).toContain(likelihoodBand(0.5).fill);
+    expect(dots[1].style.background).toBe(evidenceGroupColor("llm"));
   });
 });

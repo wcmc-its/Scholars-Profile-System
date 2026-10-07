@@ -20,9 +20,12 @@ export interface RailItem {
   label: string;
   sub: string;
   /** Tailwind background for the sub-line's 7px dot (mockup) — the caller
-   *  picks it (a band colour, or slate for a pile with no band). No dot when
-   *  absent. */
+   *  picks it (a band colour for a person, slate for "All"). No dot when both
+   *  this and `dotColor` are absent. */
   dot?: string;
+  /** The dot as a CSS colour instead: an evidence group's own colour
+   *  (`evidenceGroupColor`), the one its summary bar and legend draw. */
+  dotColor?: string;
   /** Open (undecided) papers in this scope. */
   count: number;
 }
@@ -123,11 +126,12 @@ export function ScopeRail({
                     <span className="min-w-0">
                       <span className="text-foreground block text-[13px]">{i.label}</span>
                       <span className="text-muted-foreground mt-0.5 flex items-center gap-[5px] text-xs">
-                        {i.dot ? (
+                        {i.dot || i.dotColor ? (
                           <span
                             aria-hidden
                             data-slot="core-queue-rail-dot"
-                            className={`size-[7px] shrink-0 rounded-full ${i.dot}`}
+                            className={`size-[7px] shrink-0 rounded-full ${i.dot ?? ""}`}
+                            style={i.dotColor ? { background: i.dotColor } : undefined}
                           />
                         ) : null}
                         {i.sub}
@@ -268,20 +272,6 @@ export function StrengthGlyphs({ dots }: { dots: number }) {
   );
 }
 
-/**
- * The fill for evidence group `index` of `count` in the summary's stacked bar
- * and its legend: three slate steps that stay distinct side by side. Groups
- * arrive in `buildEvidenceGroups` order (the pile holding the surest paper
- * leads), so the strongest pile is dark slate, the last and weakest the light
- * slate tint, and every pile between them mid slate. A smooth ramp across every
- * group read as one blur once there were more than two. Pure.
- */
-export function groupShade(index: number, count: number): string {
-  if (index === 0) return "var(--apollo-slate)";
-  if (index === count - 1) return "var(--apollo-slate-tint-border)";
-  return "var(--apollo-slate-mid)";
-}
-
 /** The summary strip's big figures: Charter at 600 (see the serif note in
  *  app/globals.css), a step smaller on a phone. `font-semibold` is 500 in
  *  this theme, hence the explicit weight. */
@@ -306,6 +296,8 @@ export function openSummaryText(total: number, groups: number, multiSignal: numb
 export interface SummaryGroupView {
   key: string;
   label: string;
+  /** The pile's fill in the bar and legend (`evidenceGroupColor`). */
+  color: string;
   count: number;
 }
 
@@ -315,6 +307,9 @@ export interface SummarySignalView {
   label: string;
   strength: string;
   dots: number;
+  /** The coverage bar's fill: this signal's own colour, the one a pile whose
+   *  strongest signal it is starts from (`evidenceGroupColor`). */
+  color: string;
   count: number;
   /** Already ticked in the Filters panel. */
   active: boolean;
@@ -331,6 +326,43 @@ export interface SessionView {
 }
 
 const EYEBROW = "text-muted-foreground text-[11px] tracking-[0.1em] uppercase";
+
+/**
+ * The stacked bar of evidence groups and its legend, shared by both summary
+ * strips so the two tabs colour a pile the same way: each segment and legend
+ * square is the group's own `color`, in the order the groups arrive
+ * (`buildEvidenceGroups`).
+ */
+export function EvidenceGroupBar({ groups }: { groups: SummaryGroupView[] }) {
+  return (
+    <>
+      <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+        {groups.map((g) => (
+          <div
+            key={g.key}
+            data-slot="core-queue-group-segment"
+            className="min-w-[6px]"
+            style={{ flex: `${g.count} 1 0`, background: g.color }}
+          />
+        ))}
+      </div>
+      <ul className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-xs text-[var(--evidence-body)]">
+        {groups.map((g) => (
+          <li key={g.key} className="contents">
+            <span
+              data-slot="core-queue-group-swatch"
+              className="size-2 rounded-[2px]"
+              style={{ background: g.color }}
+              aria-hidden
+            />
+            <span className="min-w-0">{g.label}</span>
+            <span className="tabular-nums">{g.count}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
 
 /**
  * The To review summary strip (mockup): open candidates by evidence group,
@@ -370,32 +402,7 @@ export function QueueSummary({
             {openSummaryText(total, groups.length, multiSignal)}
           </span>
         </div>
-        {total > 0 ? (
-          <>
-            <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
-              {groups.map((g, i) => (
-                <div
-                  key={g.key}
-                  className="min-w-[6px]"
-                  style={{ flex: `${g.count} 1 0`, background: groupShade(i, groups.length) }}
-                />
-              ))}
-            </div>
-            <ul className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-xs text-[var(--evidence-body)]">
-              {groups.map((g, i) => (
-                <li key={g.key} className="contents">
-                  <span
-                    className="size-2 rounded-[2px]"
-                    style={{ background: groupShade(i, groups.length) }}
-                    aria-hidden
-                  />
-                  <span className="min-w-0">{g.label}</span>
-                  <span className="tabular-nums">{g.count}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
+        {total > 0 ? <EvidenceGroupBar groups={groups} /> : null}
       </div>
 
       <SignalCoverage
@@ -522,8 +529,11 @@ export function SignalCoverage({
                 aria-hidden
               >
                 <span
-                  className="bg-apollo-slate block h-full rounded-full"
-                  style={{ width: `${total > 0 ? Math.min(100, (s.count / total) * 100) : 0}%` }}
+                  className="block h-full rounded-full"
+                  style={{
+                    width: `${total > 0 ? Math.min(100, (s.count / total) * 100) : 0}%`,
+                    background: s.color,
+                  }}
                 />
               </span>
               <span className={`text-right text-[13px] tabular-nums ${dim}`}>{s.count}</span>
@@ -578,7 +588,7 @@ export const CONFIRMED_PEOPLE_SHOWN = 6;
 export function ConfirmedSummaryStrip({
   total,
   manual,
-  bySignals,
+  groups,
   multiSignal,
   band,
   signals,
@@ -593,8 +603,9 @@ export function ConfirmedSummaryStrip({
 }: {
   total: number;
   manual: number;
-  /** Papers per number of signals fired, indexed 0–4. */
-  bySignals: number[];
+  /** Confirmed papers per evidence group (not revoked), rail order, empty
+   *  groups dropped — the same piles, and colours, as To review's bar. */
+  groups: SummaryGroupView[];
   multiSignal: number;
   band: { low: BandWordView; high: BandWordView; pct: string } | null;
   signals: SummarySignalView[];
@@ -613,17 +624,6 @@ export function ConfirmedSummaryStrip({
   const footnote =
     "border-apollo-border mt-auto border-t pt-3 text-xs leading-normal text-[var(--evidence-body)]";
   const note = "text-muted-foreground text-[11px] leading-snug";
-  // Light to dark by signal count: the mockup's rail / slate / bar for one to
-  // three, with a step either side for none and all four.
-  const countShade = [
-    "bg-apollo-surface-2",
-    "bg-apollo-rail",
-    "bg-apollo-slate",
-    "bg-apollo-bar",
-    "bg-apollo-maroon",
-  ];
-  const shade = (n: number) => countShade[Math.min(n, countShade.length - 1)];
-  const counts = bySignals.map((count, n) => ({ n, count })).filter((c) => c.count > 0);
   const llmShade: Record<string, string> = {
     core: "bg-apollo-slate",
     possible: "bg-apollo-slate-tint-border",
@@ -650,26 +650,7 @@ export function ConfirmedSummaryStrip({
                 {multiSignalText(total)}
               </span>
             </div>
-            <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
-              {counts.map((c) => (
-                <div
-                  key={c.n}
-                  className={`min-w-1 ${shade(c.n)}`}
-                  style={{ flex: `${c.count} 1 0` }}
-                />
-              ))}
-            </div>
-            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--evidence-body)]">
-              {counts.map((c) => (
-                <li key={c.n} className="flex items-center gap-1.5">
-                  <span
-                    className={`border-apollo-border-strong size-2 rounded-sm border ${shade(c.n)}`}
-                    aria-hidden
-                  />
-                  {c.n === 1 ? "1 signal" : `${c.n} signals`} · {c.count}
-                </li>
-              ))}
-            </ul>
+            <EvidenceGroupBar groups={groups} />
           </>
         ) : null}
         {manual > 0 ? (

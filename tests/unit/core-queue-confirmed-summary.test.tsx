@@ -218,9 +218,25 @@ describe("Confirmed tab — summary strip", () => {
     expect(first.textContent).toContain(
       "2of 3 confirmed papers rest on two or more independent signals",
     );
-    expect(first.textContent).toContain("1 signal · 1");
-    expect(first.textContent).toContain("2 signals · 1");
-    expect(first.textContent).toContain("3 signals · 1");
+    // The bar and legend are the rail's evidence groups, coloured as on To
+    // review: strongest signal's hue, deeper for more signals, a manual pile slate.
+    expect(first.textContent).toContain("Acknowledgment + LLM read1");
+    expect(first.textContent).toContain("Acknowledgment + LLM read + repeat user1");
+    expect(first.textContent).toContain("LLM read1");
+    expect(first.textContent).toContain("Added by you1");
+    const swatches = [
+      ...first.querySelectorAll<HTMLElement>('[data-slot="core-queue-group-swatch"]'),
+    ].map((e) => e.style.background);
+    expect(swatches).toEqual([
+      "var(--apollo-slate)",
+      "var(--apollo-signal-ack-2)",
+      "var(--apollo-signal-ack-3)",
+      "var(--apollo-signal-llm-1)",
+    ]);
+    const segments = [
+      ...first.querySelectorAll<HTMLElement>('[data-slot="core-queue-group-segment"]'),
+    ].map((e) => e.style.background);
+    expect(segments).toEqual(swatches);
     expect(first.textContent).toContain("1 manually added paper is unscored and not counted.");
     expect(slot("core-queue-confirmed-band").textContent).toBe(
       "Confirmations run from the Moderate to the Strong band, 70–100%.",

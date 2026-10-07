@@ -11,14 +11,16 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import {
+  ADDED_GROUP,
   CoreClaimQueue,
+  evidenceGroupColor,
   facetValues,
   reasonTally,
   sessionNote,
   SIGNAL_KINDS,
   summarizeOpen,
 } from "@/components/edit/core-claim-queue";
-import { groupShade, openSummaryText, sessionCountTone } from "@/components/edit/core-queue-panels";
+import { openSummaryText, sessionCountTone } from "@/components/edit/core-queue-panels";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
 
 function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
@@ -153,7 +155,7 @@ describe("sessionNote", () => {
   });
 });
 
-describe("openSummaryText / groupShade", () => {
+describe("openSummaryText", () => {
   it("is singular-safe", () => {
     expect(openSummaryText(1, 1, 1)).toBe(
       "candidate in 1 evidence group. 1 has two or more signals.",
@@ -162,18 +164,6 @@ describe("openSummaryText / groupShade", () => {
       "candidates in 4 evidence groups. 0 have two or more signals.",
     );
   });
-
-  it("steps dark, mid, light: strongest dark, weakest light, the rest mid", () => {
-    expect(groupShade(0, 1)).toBe("var(--apollo-slate)");
-    expect(groupShade(0, 4)).toBe("var(--apollo-slate)");
-    expect(groupShade(1, 4)).toBe("var(--apollo-slate-mid)");
-    expect(groupShade(2, 4)).toBe("var(--apollo-slate-mid)");
-    expect(groupShade(3, 4)).toBe("var(--apollo-slate-tint-border)");
-    expect(groupShade(1, 2)).toBe("var(--apollo-slate-tint-border)");
-    // three distinct shades across a 3-group bar
-    expect(new Set([0, 1, 2].map((i) => groupShade(i, 3))).size).toBe(3);
-  });
-
   it("sessionCountTone is muted gray at 0 and colours only once > 0", () => {
     expect(sessionCountTone(0, "text-apollo-brick")).toBe("text-muted-foreground");
     expect(sessionCountTone(1, "text-apollo-brick")).toBe("text-apollo-brick");
@@ -246,5 +236,72 @@ describe("CoreClaimQueue — summary strip", () => {
     await waitFor(() =>
       expect(screen.queryByRole("list", { name: "Reject reasons this session" })).toBeNull(),
     );
+  });
+});
+
+describe("evidenceGroupColor — a pile takes its strongest signal's hue", () => {
+  it("picks the strongest signal by the fixed ranking, whatever the key order", () => {
+    expect(evidenceGroupColor("ack")).toBe("var(--apollo-signal-ack-1)");
+    expect(evidenceGroupColor("coauthor")).toBe("var(--apollo-signal-coauthor-1)");
+    expect(evidenceGroupColor("llm")).toBe("var(--apollo-signal-llm-1)");
+    expect(evidenceGroupColor("affinity")).toBe("var(--apollo-signal-affinity)");
+    // the ranking, not the position in the key, decides
+    expect(evidenceGroupColor("affinity+coauthor")).toBe(evidenceGroupColor("coauthor+affinity"));
+    expect(evidenceGroupColor("llm+ack")).toBe("var(--apollo-signal-ack-2)");
+  });
+
+  it("goes a step deeper for every further signal, within the same hue", () => {
+    expect(evidenceGroupColor("ack+coauthor")).toBe("var(--apollo-signal-ack-2)");
+    expect(evidenceGroupColor("ack+coauthor+llm")).toBe("var(--apollo-signal-ack-3)");
+    expect(evidenceGroupColor("ack+coauthor+llm+affinity")).toBe("var(--apollo-signal-ack-4)");
+    expect(evidenceGroupColor("coauthor+llm")).toBe("var(--apollo-signal-coauthor-2)");
+    expect(evidenceGroupColor("coauthor+llm+affinity")).toBe("var(--apollo-maroon)");
+    expect(evidenceGroupColor("llm+affinity")).toBe("var(--apollo-amber)");
+  });
+
+  it("gives every distinct (strongest signal, signal count) pile its own colour", () => {
+    const keys = [
+      "ack",
+      "ack+coauthor",
+      "ack+coauthor+llm",
+      "ack+coauthor+llm+affinity",
+      "coauthor",
+      "coauthor+llm",
+      "coauthor+llm+affinity",
+      "llm",
+      "llm+affinity",
+      "affinity",
+      "none",
+      ADDED_GROUP,
+    ];
+    expect(new Set(keys.map(evidenceGroupColor)).size).toBe(keys.length);
+  });
+
+  it("paints a pile a person added slate, and a pile with no counted signal grey", () => {
+    expect(evidenceGroupColor(ADDED_GROUP)).toBe("var(--apollo-slate)");
+    expect(evidenceGroupColor("none")).toBe("var(--apollo-signal-none)");
+  });
+
+  it("colours the bar segment, its legend square and the rail dot alike", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "90000101", signalAck: false, llmScore: 8 }),
+          row({ pmid: "90000102", signalAck: true, llmScore: 8 }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const fills = (slot: string) =>
+      [...container.querySelectorAll<HTMLElement>(`[data-slot="${slot}"]`)].map(
+        (e) => e.style.background,
+      );
+    const segments = fills("core-queue-group-segment");
+    expect(segments).toHaveLength(2);
+    expect(new Set(segments).size).toBe(2);
+    expect(fills("core-queue-group-swatch")).toEqual(segments);
+    // the rail lists "All candidates" (a class, no inline colour) then the groups
+    expect(fills("core-queue-rail-dot").slice(1)).toEqual(segments);
   });
 });
