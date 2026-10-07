@@ -296,10 +296,12 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.
   Technology: { cadence: "weekly" },
-  // #2200 — deployed weekly step (cdk/lib/etl-stack.ts NewsWeekly, tier:"continue")
-  // that writes source "News" (etl/news/index.ts). This entry is load-bearing for
-  // the #2038/#2188 volume-guard fix: that fix stops the nightly grading a weekly
-  // source once its sample goes stale, and justifies the skip by delegating
+  // #2200 — deployed step (cdk/lib/etl-stack.ts NewsNightly, tier:"continue"; was
+  // NewsWeekly) that writes source "News" (etl/news/index.ts). Cadence stays
+  // "weekly" on purpose: the app ships on merge but the nightly schedule only
+  // after a manual Sps-Etl deploy, and "weekly" still catches a dead step.
+  // This entry is load-bearing for the #2038/#2188 volume-guard fix: that fix
+  // stops the nightly grading a weekly source once its sample goes stale, and justifies the skip by delegating
   // "a source stopped running entirely" to THIS guard (see the comment above
   // MAX_SAMPLE_AGE_HOURS in etl/integrity/index.ts). News was absent here, so
   // that delegate did not exist and a silent News death alarmed nobody.
