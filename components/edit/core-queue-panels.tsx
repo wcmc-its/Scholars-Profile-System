@@ -396,7 +396,7 @@ export function QueueSummary({
     >
       <div data-slot="core-queue-summary-groups" className={pane}>
         <p className={EYEBROW}>Open candidates by evidence</p>
-        <div className="flex items-baseline gap-2.5">
+        <div className="flex items-baseline-last gap-2.5">
           <span className={HEADLINE_FIGURE}>{total}</span>
           <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
             {openSummaryText(total, groups.length, multiSignal)}
@@ -645,7 +645,7 @@ export function ConfirmedSummaryStrip({
         {/* Every confirmation a manual add: no "0 of 0" line, just the note. */}
         {total > 0 ? (
           <>
-            <div className="flex items-baseline gap-2.5">
+            <div className="flex items-baseline-last gap-2.5">
               <span className={HEADLINE_FIGURE}>{multiSignal}</span>
               <span className="text-[13px] leading-snug text-[var(--evidence-body)]">
                 {multiSignalText(total)}
