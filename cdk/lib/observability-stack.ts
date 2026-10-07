@@ -1069,8 +1069,9 @@ export class SpsObservabilityStack extends Stack {
 
     // (8b) Parent circuit-breaker trips. There is no CloudWatch metric for
     // these -- OpenSearch only surfaces them as a `circuit_breaking_exception`
-    // in the *app* log when a query is refused, and the app turns that into a
-    // 502. The JVM-pressure alarm above is blind to them: it needs 15 minutes
+    // in the *app* log when a query is refused, and that request fails with a
+    // 500 (an app-level dependency failure is a 500, never a 502/503/504 --
+    // #3014). The JVM-pressure alarm above is blind to them: it needs 15 minutes
     // sustained >85%, while a breaker trip is a ~2-minute burst (staging sat in
     // OK through a 97% spike, 2026-07-12). This filter is the direct signal --
     // one refused query is already a user-visible failure, so alarm on the
@@ -1090,7 +1091,7 @@ export class SpsObservabilityStack extends Stack {
       "OpenSearchBreakerAlarm",
       {
         alarmName: `sps-opensearch-breaker-${env}`,
-        alarmDescription: `OpenSearch refused a query with circuit_breaking_exception (${env}) -- the parent breaker tripped at 95% of heap and the app returned 502. Next: check JVMMemoryPressure Maximum on the domain; the node is undersized or a query burst (e.g. the sponsor-match fan-out) is too heavy for the heap.`,
+        alarmDescription: `OpenSearch refused a query with circuit_breaking_exception (${env}) -- the parent breaker tripped at 95% of heap and the request failed with a 500. The metric counts app-log lines containing circuit_breaking_exception, not HTTP status codes. Next: check JVMMemoryPressure Maximum on the domain; the node is undersized or a query burst (e.g. the sponsor-match fan-out) is too heavy for the heap.`,
         metric: new cloudwatch.Metric({
           namespace: `SPS/Search/${env}`, // env-scoped -- see (6b)
           metricName: "OpenSearchCircuitBreaker",

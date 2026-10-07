@@ -567,10 +567,21 @@ export class EdgeStack extends Stack {
       },
       physicalResourceId: cr.PhysicalResourceId.of(`sps-origin-down-page-${env}`),
     };
+    // Explicit log group for the provider Lambda (the same convention as
+    // OncallRelayLogGroup / EdgeOriginProbeLogGroup), NOT the legacy
+    // `logRetention` prop, which adds a second custom-resource Lambda + Role.
+    // Without it the provider logs to a CDK-default group with no expiry. No
+    // fixed name: the provider is a SingletonFunction with a generated name.
+    // Changing only the provider's logging config does not touch this
+    // resource's properties, so it does not re-run the putObject.
+    const originDownPageLogGroup = new logs.LogGroup(this, "OriginDownPageLogGroup", {
+      retention: logs.RetentionDays.ONE_MONTH,
+    });
     const originDownPage = new cr.AwsCustomResource(this, "OriginDownPage", {
       onCreate: putOriginDownPage,
       onUpdate: putOriginDownPage,
       installLatestAwsSdk: false,
+      logGroup: originDownPageLogGroup,
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
