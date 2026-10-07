@@ -53,6 +53,11 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           "S3Key": "56f7467bbde8a5efebcf57ae9e460027607099bab9f844669dcf5d800172ee5a.zip",
         },
         "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "OriginDownPageLogGroupCC768F39",
+          },
+        },
         "Role": {
           "Fn::GetAtt": [
             "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
@@ -1497,6 +1502,14 @@ a{color:var(--slate)}
       },
       "Type": "AWS::IAM::Policy",
     },
+    "OriginDownPageLogGroupCC768F39": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
     "PopoverContextCache904BCEC1": {
       "Properties": {
         "CachePolicyConfig": {
@@ -1875,6 +1888,11 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
           "S3Key": "56f7467bbde8a5efebcf57ae9e460027607099bab9f844669dcf5d800172ee5a.zip",
         },
         "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "OriginDownPageLogGroupCC768F39",
+          },
+        },
         "Role": {
           "Fn::GetAtt": [
             "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
@@ -3318,6 +3336,14 @@ a{color:var(--slate)}
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "OriginDownPageLogGroupCC768F39": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
     },
     "PopoverContextCache904BCEC1": {
       "Properties": {

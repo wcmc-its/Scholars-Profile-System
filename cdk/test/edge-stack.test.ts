@@ -1722,7 +1722,16 @@ describe("EdgeStack", () => {
       });
 
       it("logs the WebACL to an aws-waf-logs- CloudWatch group with Authorization + Cookie redacted (#1939)", () => {
-        template.resourceCountIs("AWS::Logs::LogGroup", 1);
+        // Two log groups: this WAF group + the OriginDownPage provider
+        // Lambda's (#2503). Exactly one of them is a WAF log destination.
+        template.resourceCountIs("AWS::Logs::LogGroup", 2);
+        expect(
+          Object.keys(
+            template.findResources("AWS::Logs::LogGroup", {
+              Properties: { LogGroupName: Match.stringLikeRegexp("^aws-waf-logs-") },
+            }),
+          ),
+        ).toHaveLength(1);
         template.hasResourceProperties("AWS::Logs::LogGroup", {
           LogGroupName: "aws-waf-logs-sps-staging",
           RetentionInDays: 90,
