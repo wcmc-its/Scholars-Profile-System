@@ -17,6 +17,8 @@ const frt = (
   menteeCwid: null,
   menteeCwidName: null,
   cwidAssigned: false,
+  suggestedCwid: null,
+  suggestedCwidName: null,
   mentoringType: "Research",
   external: false,
   firstReviewYear: 2023,
@@ -170,6 +172,40 @@ describe("FRT mentee suggestions", () => {
       "Also a co-author: 3 co-authored publications",
     );
     expect(screen.queryByTestId("frt-mentee-coauthor-11")).toBeNull();
+  });
+
+  it("offers a nickname-only match as a one-click link, never as already linked", async () => {
+    render(
+      <MenteeSuggestionsCard
+        cwid="self01"
+        suggestions={[]}
+        frtMentees={[
+          ...ROWS,
+          frt({
+            id: 14,
+            menteeName: "Bob Wexley",
+            suggestedCwid: "zzf0001",
+            suggestedCwidName: "Robert Wexley",
+          }),
+        ]}
+        manualMentees={[]}
+      />,
+    );
+    expect(screen.queryByTestId("frt-mentee-suggested-11")).toBeNull();
+    expect(screen.getByTestId("frt-mentee-match-14").textContent).toContain("Not linked");
+    expect(
+      within(screen.getByTestId("frt-mentees-unlinked")).getByTestId("frt-mentee-14"),
+    ).toBeTruthy();
+    expect(screen.getByTestId("frt-mentee-suggested-14").textContent).toContain(
+      "Possible match: Robert Wexley zzf0001 · nickname match",
+    );
+    fireEvent.click(screen.getByTestId("frt-mentee-suggested-link-14"));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+    expect(body(0)).toEqual({ op: "assign", cwid: "zzf0001" });
+    await waitFor(() =>
+      expect(screen.getByTestId("frt-mentee-match-14").textContent).toContain("Robert Wexley"),
+    );
+    expect(screen.queryByTestId("frt-mentee-suggested-14")).toBeNull();
   });
 
   it("Not a mentee POSTs dismiss and moves the row to the dismissed footer", async () => {

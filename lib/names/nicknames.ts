@@ -4,17 +4,22 @@
  * (etl/honors/lists/match.ts) and Faculty Review mentees (lib/frt/mentee-name.ts).
  *
  * A FIXED table, not a fuzzy rule, and deliberately conservative. Each group is a
- * formal name plus the diminutives that almost always mean it. Left out on
- * purpose:
+ * formal name (first) plus the diminutives that almost always mean it. Left out
+ * on purpose:
  *   - cross-gender diminutives ("Chris", "Alex", "Sam", "Pat", "Terry", "Jess",
  *     "Kim", "Jackie", "Charlie"): one token, two unrelated formal names;
- *   - names that are their own name, not a short form ("Lisa", "Liam", "Nora");
+ *   - short forms that are now mostly given names in their own right ("Jack",
+ *     "Max", "Theo", "Tessa", "Lily", "Eliza", "Molly", "Sally", "Sadie",
+ *     "Tori", "Evie"), and names that never were one ("Lisa", "Liam", "Nora");
  *   - transliteration short forms ("Effie"/"Eftychia", "Amir"/"Amirhossein"),
  *     which no table can enumerate safely.
  *
- * Equivalence is PAIRWISE WITHIN A GROUP, never transitive across groups: "Ted"
- * sits in both the Edward and the Theodore group, so Ted ~ Edward and Ted ~
- * Theodore, but Edward is not ~ Theodore.
+ * Equivalence is FORMAL <-> DIMINUTIVE only: one side must be the group's formal
+ * name. Two diminutives never match each other ("Hank" is not "Harry", "Ned" is
+ * not "Ted"), and nothing is transitive across groups: "Ted" sits in both the
+ * Edward and the Theodore group, so Ted ~ Edward and Ted ~ Theodore, but Edward
+ * is not ~ Theodore. A spelling variant of the formal name is listed as one of
+ * its forms ("Steven" under "Stephen").
  *
  * Every caller still gates a nickname hit harder than an exact one (unique on
  * the roster, capped confidence, or labelled as a nickname match for a human).
@@ -25,7 +30,7 @@ const GROUPS: readonly (readonly string[])[] = [
   ["william", "will", "bill", "billy", "willie", "willy"],
   ["richard", "rich", "rick", "ricky", "richie", "dick"],
   ["james", "jim", "jimmy", "jimmie"],
-  ["john", "jack", "johnny"],
+  ["john", "johnny"],
   ["jonathan", "jon", "jonny"],
   ["joseph", "joe", "joey"],
   ["thomas", "tom", "tommy"],
@@ -35,10 +40,10 @@ const GROUPS: readonly (readonly string[])[] = [
   ["daniel", "dan", "danny"],
   ["matthew", "matt", "matty"],
   ["anthony", "tony"],
-  ["stephen", "steve"],
+  ["stephen", "steven", "steve"],
   ["steven", "steve"],
   ["edward", "ed", "eddie", "ted", "ned"],
-  ["theodore", "ted", "teddy", "theo"],
+  ["theodore", "ted", "teddy"],
   ["timothy", "tim", "timmy"],
   ["kenneth", "ken", "kenny"],
   ["ronald", "ron"],
@@ -92,12 +97,10 @@ const GROUPS: readonly (readonly string[])[] = [
   ["reginald", "reggie"],
   ["clifford", "cliff"],
   ["oliver", "ollie"],
-  ["maximilian", "max"],
-  ["maxwell", "max"],
   ["bartholomew", "bart"],
   ["montgomery", "monty"],
   // Female
-  ["elizabeth", "liz", "lizzie", "lizzy", "beth", "betsy", "betty", "eliza", "libby", "liza"],
+  ["elizabeth", "liz", "lizzie", "lizzy", "beth", "betsy", "betty", "libby"],
   ["margaret", "maggie", "peggy", "meg", "marge", "margie"],
   ["katherine", "kate", "katie", "kathy", "kat", "kitty"],
   ["catherine", "cate", "kate", "katie", "cathy", "cat"],
@@ -110,7 +113,7 @@ const GROUPS: readonly (readonly string[])[] = [
   ["deborah", "deb", "debbie", "debby"],
   ["debra", "deb", "debbie"],
   ["rebecca", "becky", "becca"],
-  ["victoria", "vicky", "vicki", "tori"],
+  ["victoria", "vicky", "vicki"],
   ["barbara", "barb"],
   ["pamela", "pam"],
   ["cynthia", "cindy"],
@@ -119,8 +122,8 @@ const GROUPS: readonly (readonly string[])[] = [
   ["amanda", "mandy"],
   ["dorothy", "dot", "dottie"],
   ["judith", "judy"],
-  ["theresa", "tess", "tessa"],
-  ["teresa", "tess", "tessa"],
+  ["theresa", "tess"],
+  ["teresa", "tess"],
   ["eleanor", "ellie", "nell", "nellie"],
   ["gabrielle", "gabby"],
   ["gabriela", "gabby"],
@@ -132,10 +135,7 @@ const GROUPS: readonly (readonly string[])[] = [
   ["madeleine", "maddie", "maddy"],
   ["gwendolyn", "gwen"],
   ["cassandra", "cassie"],
-  ["lillian", "lily", "lil"],
-  ["evelyn", "evie"],
-  ["mary", "molly", "polly"],
-  ["sarah", "sally", "sadie"],
+  ["lillian", "lil"],
   ["rosemary", "rosie"],
   ["antonia", "toni"],
   ["josephine", "josie"],
@@ -147,12 +147,21 @@ const GROUPS: readonly (readonly string[])[] = [
   ["harriet", "hattie"],
 ];
 
-/** Folded name -> indices of every group it belongs to. */
-const GROUPS_OF: ReadonlyMap<string, readonly number[]> = (() => {
-  const m = new Map<string, number[]>();
-  GROUPS.forEach((g, i) => {
-    for (const n of g) m.set(n, [...(m.get(n) ?? []), i]);
-  });
+/** Folded name -> every name it is equivalent to: a formal name maps to its
+ *  diminutives, a diminutive to its formal name(s). Never diminutive -> diminutive. */
+const EQUIVALENTS: ReadonlyMap<string, ReadonlySet<string>> = (() => {
+  const m = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (a === b) return;
+    if (!m.has(a)) m.set(a, new Set());
+    m.get(a)!.add(b);
+  };
+  for (const [formal, ...short] of GROUPS) {
+    for (const n of short) {
+      link(formal, n);
+      link(n, formal);
+    }
+  }
   return m;
 })();
 
@@ -174,16 +183,11 @@ export function nicknamesEquivalent(a: string, b: string): boolean {
   const fa = fold(a);
   const fb = fold(b);
   if (!fa || !fb || fa === fb) return false;
-  const ga = GROUPS_OF.get(fa);
-  const gb = GROUPS_OF.get(fb);
-  return !!ga && !!gb && ga.some((i) => gb.includes(i));
+  return EQUIVALENTS.get(fa)?.has(fb) ?? false;
 }
 
-/** Every OTHER name equivalent to `name` (folded), for keyed lookups. Empty
- *  when the name is not in the table. */
+/** Every name equivalent to `name` (folded), for keyed lookups — the same
+ *  relation as `nicknamesEquivalent`. Empty when the name is not in the table. */
 export function nicknameVariants(name: string): string[] {
-  const f = fold(name);
-  const out = new Set<string>();
-  for (const i of GROUPS_OF.get(f) ?? []) for (const n of GROUPS[i]) if (n !== f) out.add(n);
-  return [...out];
+  return [...(EQUIVALENTS.get(fold(name)) ?? [])];
 }

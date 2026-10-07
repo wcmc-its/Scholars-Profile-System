@@ -569,6 +569,11 @@ export type EditContextFrtMentee = {
   /** Display name of `menteeCwid` when it is a Scholars profile. */
   menteeCwidName: string | null;
   cwidAssigned: boolean;
+  /** A person the FRT name reaches only through a nickname ("Bob" = "Robert"),
+   *  offered as a one-click link while `menteeCwid` is null. Null otherwise. */
+  suggestedCwid: string | null;
+  /** Display name of `suggestedCwid` when it is a Scholars profile. */
+  suggestedCwidName: string | null;
   mentoringType: string | null;
   external: boolean;
   firstReviewYear: number;
@@ -1929,7 +1934,13 @@ export async function loadEditContext(
       (r) =>
         !listedNames.has(r.nameKey) && !(r.menteeCwid !== null && listedCwids.has(r.menteeCwid)),
     );
-    const matchedCwids = [...new Set(rows.map((r) => r.menteeCwid).filter((c): c is string => !!c))];
+    const matchedCwids = [
+      ...new Set(
+        rows
+          .flatMap((r) => [r.menteeCwid, r.menteeCwid ? null : r.suggestedCwid])
+          .filter((c): c is string => !!c),
+      ),
+    ];
     const names = new Map(
       matchedCwids.length > 0
         ? (
@@ -1947,6 +1958,9 @@ export async function loadEditContext(
         menteeCwid: r.menteeCwid,
         menteeCwidName: r.menteeCwid ? (names.get(r.menteeCwid) ?? null) : null,
         cwidAssigned: r.cwidAssignedAt !== null,
+        suggestedCwid: r.menteeCwid ? null : r.suggestedCwid,
+        suggestedCwidName:
+          !r.menteeCwid && r.suggestedCwid ? (names.get(r.suggestedCwid) ?? null) : null,
         mentoringType: r.mentoringType,
         external: r.external,
         firstReviewYear: r.firstReviewYear,

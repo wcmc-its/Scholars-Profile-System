@@ -150,10 +150,25 @@ describe("tags: weak rules are MEDIUM and need a unique roster match", () => {
 
   it("two roster people reachable by the same nickname -> no hit", () => {
     const idx = buildNameIndex([
-      scholar("zzr0201", "William Tavernor"),
-      scholar("zzr0202", "Billy Tavernor"),
+      scholar("zzr0201", "Gerald Tavernor"),
+      scholar("zzr0202", "Jerome Tavernor"),
     ]);
-    expect(tagged(["Dr. Will Tavernor"], idx)).toEqual([]);
+    expect(tagged(["Dr. Jerry Tavernor"], idx)).toEqual([]);
+  });
+
+  it("a short form that is a given name in its own right is not a nickname", () => {
+    const idx = buildNameIndex([scholar("zzr0203", "John Plimmwood")]);
+    expect(tagged(["Dr. Jack Plimmwood"], idx)).toEqual([]);
+  });
+
+  it("an initial-only first name never reaches a roster middle initial", () => {
+    const idx = buildNameIndex([scholar("zzr0204", "Mary J Ploverdale")]);
+    expect(tagged(["Dr. J. Ploverdale"], idx)).toEqual([]);
+  });
+
+  it("a name particle used as the first word is not a roster middle name", () => {
+    const idx = buildNameIndex([scholar("zzr0205", "Liam De Grootveld")]);
+    expect(tagged(["Dr. De Grootveld"], idx)).toEqual([]);
   });
 
   it("two people matched by DIFFERENT weak rules -> no hit", () => {
@@ -185,7 +200,109 @@ describe("tags: weak rules are MEDIUM and need a unique roster match", () => {
   });
 });
 
+describe("tags: a strong hit from one tag beats a weak hit from another", () => {
+  const idx = buildNameIndex([scholar("zzr0501", "Robert Plimmwick")]);
+  it.each([
+    [["Dr. Rob Plimmwick", "Dr. Robert Plimmwick"]],
+    [["Dr. Robert Plimmwick", "Dr. Rob Plimmwick"]],
+  ])("%j -> HIGH", (tags) => {
+    expect(tagged(tags, idx)).toMatchObject([{ cwid: "zzr0501", likelihood: "HIGH" }]);
+  });
+});
+
+describe("tags: a VIVO-linked namesake still contests the shared first+last", () => {
+  const idx = buildNameIndex([
+    scholar("zzr0601", "Jane Q Zorblax"),
+    scholar("zzr0602", "Jane R Zorblax"),
+  ]);
+  it("the unlinked namesake is capped at MEDIUM, not an uncontested HIGH", () => {
+    expect(
+      detectMentions(sources({ tags: ["Dr. Jane Zorblax"] }), idx, new Set(["zzr0601"])),
+    ).toMatchObject([{ cwid: "zzr0602", basis: "TAG", likelihood: "MEDIUM" }]);
+  });
+  it("an exact full-name duplicate is capped the same way", () => {
+    const dup = buildNameIndex([
+      scholar("zzr0603", "Jane Zorblax"),
+      scholar("zzr0604", "Jane Zorblax"),
+    ]);
+    expect(
+      detectMentions(sources({ tags: ["Dr. Jane Zorblax"] }), dup, new Set(["zzr0603"])),
+    ).toMatchObject([{ cwid: "zzr0604", likelihood: "MEDIUM" }]);
+  });
+});
+
+describe("tags: apostrophe and hyphenated names are one word, never a middle", () => {
+  it("an apostrophe surname's prefix letter does not veto a tag middle initial", () => {
+    const idx = buildNameIndex([
+      scholar("zzr0701", "Jane O'Quarrelby"),
+      scholar("zzr0702", "Jane D'Avolinto"),
+      scholar("zzr0703", "Mara T O'Quessly"),
+    ]);
+    expect(tagged(["Dr. Jane A. O'Quarrelby"], idx)).toMatchObject([
+      { cwid: "zzr0701", likelihood: "HIGH" },
+    ]);
+    expect(tagged(["Dr. Jane M. D'Avolinto"], idx)).toMatchObject([
+      { cwid: "zzr0702", likelihood: "HIGH" },
+    ]);
+    expect(tagged(["Dr. Mara O'Quessly"], idx)).toMatchObject([
+      { cwid: "zzr0703", likelihood: "HIGH" },
+    ]);
+  });
+
+  it("half of a hyphenated surname is not the surname", () => {
+    const idx = buildNameIndex([scholar("zzr0801", "Jane Smorth-Quillan")]);
+    expect(tagged(["Dr. Jane Quillan"], idx)).toEqual([]);
+    expect(tagged(["Dr. Jane Smorth"], idx)).toEqual([]);
+    expect(detectMentions(sources({ text: "Remarks by Jane Quillan." }), idx)).toEqual([]);
+    expect(tagged(["Dr. Jane Smorth-Quillan"], idx)).toMatchObject([
+      { cwid: "zzr0801", likelihood: "HIGH" },
+    ]);
+  });
+
+  it("half of a hyphenated first name is not the first name", () => {
+    const idx = buildNameIndex([scholar("zzr0802", "Jean-Pierre Vauclairon")]);
+    expect(tagged(["Dr. Jean Vauclairon"], idx)).toEqual([]);
+    expect(tagged(["Dr. Jean Pierre"], idx)).toEqual([]);
+    expect(detectMentions(sources({ text: "Remarks by Jean Vauclairon." }), idx)).toEqual([]);
+    expect(tagged(["Dr. Jean-Pierre Vauclairon"], idx)).toMatchObject([
+      { cwid: "zzr0802", likelihood: "HIGH" },
+    ]);
+  });
+});
+
+describe("tags: exact matches the old rule accepted are never vetoed", () => {
+  it("a second roster middle shares the tag's middle initial", () => {
+    const idx = buildNameIndex([scholar("zzr0901", "Jane Ann Marie Dovecote")]);
+    expect(tagged(["Dr. Jane M. Dovecote"], idx)).toMatchObject([
+      { cwid: "zzr0901", likelihood: "HIGH" },
+    ]);
+  });
+
+  it("a preferred name without the middle still matches a tag with another initial", () => {
+    const idx = buildNameIndex([scholar("zzr0902", "Robert B Harrowgate", "Robert Harrowgate")]);
+    expect(tagged(["Dr. Robert A. Harrowgate"], idx)).toMatchObject([
+      { cwid: "zzr0902", likelihood: "HIGH" },
+    ]);
+  });
+});
+
 describe("prose: first+last of a middle-bearing name, when unique on the roster", () => {
+  it("never derives a pair from an initial first name or a suffix", () => {
+    const [initial] = buildNameIndex([scholar("zzr1001", "J Marcus Threnody")]);
+    expect(initial.sequences).toEqual([["j", "marcus", "threnody"]]);
+    expect(
+      detectMentions(
+        sources({ text: "Earlier work by J. Threnody and colleagues." }),
+        buildNameIndex([scholar("zzr1001", "J Marcus Threnody")]),
+      ),
+    ).toEqual([]);
+    const [suffixed] = buildNameIndex([scholar("zzr1002", "Arlo Q Pennick Jr")]);
+    expect(suffixed.sequences).toEqual([
+      ["arlo", "q", "pennick", "jr"],
+      ["arlo", "pennick"],
+    ]);
+  });
+
   it("matches the bare first+last in the body", () => {
     const hits = detectMentions(
       sources({ text: "The study was led by Samira Vellacott and colleagues." }),
