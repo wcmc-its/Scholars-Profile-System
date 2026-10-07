@@ -245,6 +245,50 @@ describe("matcher — conservative gates", () => {
   });
 });
 
+describe("matcher — nickname fallback", () => {
+  const scholars = [
+    { cwid: "zzq9201", preferredName: "Robert Thistlewood", fullName: "Robert K Thistlewood" },
+    { cwid: "zzq9202", preferredName: "Margaret Ostrander", fullName: "Margaret Ostrander" },
+    { cwid: "zzq9203", preferredName: "Peggy Ostrander", fullName: "Peggy Ostrander" },
+  ];
+  const idx = buildScholarIndex(scholars);
+
+  it("a table nickname finds the scholar, and the evidence says it was a nickname", () => {
+    expect(matchEntry(entry({ given: "Bob", family: "Thistlewood" }), idx)).toEqual([
+      {
+        cwid: "zzq9201",
+        evidence:
+          "Nickname match (Bob = Robert); Name and institution match: listed at Weill Cornell Medicine",
+      },
+    ]);
+  });
+
+  it("an exact given name wins: the nickname is only a fallback", () => {
+    expect(matchEntry(entry({ given: "Peggy", family: "Ostrander" }), idx)).toEqual([
+      { cwid: "zzq9203", evidence: "Name and institution match: listed at Weill Cornell Medicine" },
+    ]);
+  });
+
+  it("keeps every gate: affiliation, initials, non-table short forms", () => {
+    expect(
+      matchEntry(entry({ given: "Bob", family: "Thistlewood", affiliation: "Cornell University" }), idx),
+    ).toEqual([]);
+    expect(matchEntry(entry({ given: "B", family: "Thistlewood" }), idx)).toEqual([]);
+    expect(matchEntry(entry({ given: "Robbo", family: "Thistlewood" }), idx)).toEqual([]);
+  });
+
+  it("the breadth gate applies to the nickname union", () => {
+    const crowd = buildScholarIndex(
+      Array.from({ length: MAX_CANDIDATES_PER_LINE + 1 }, (_, i) => ({
+        cwid: `zzq93${i}`,
+        preferredName: "Robert Thistlewood",
+        fullName: "Robert Thistlewood",
+      })),
+    );
+    expect(matchEntry(entry({ given: "Bob", family: "Thistlewood" }), crowd)).toEqual([]);
+  });
+});
+
 describe("planList — a scrape never overrules a curator", () => {
   const META = HONOR_LISTS[0];
   const scrape = (entries: RosterEntry[]) => ({ entries, complete: true, warning: null });

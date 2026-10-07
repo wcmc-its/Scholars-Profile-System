@@ -13,6 +13,9 @@
  *      both equal the scholar's, after folding case, accents and punctuation. An
  *      initial ("J. Doe") never matches a first name. Middle names are ignored
  *      on both sides, so "Jane Q. Doe" matches "Jane Doe".
+ *      A NICKNAME ("Bob Doe" vs "Robert Doe", lib/names/nicknames.ts) is a
+ *      fallback only when the exact given name finds nobody, and its evidence
+ *      says so, so the curator sees it was not an exact name match.
  *   3. BREADTH. A line that matches more than MAX_CANDIDATES_PER_LINE scholars
  *      is too common a name to be worth a curator's pick; it is dropped.
  *
@@ -21,6 +24,7 @@
  * is an identifier join, so the candidate is exactly that scholar, but it still
  * lands as pending.
  */
+import { nicknameVariants } from "@/lib/names/nicknames";
 
 export type RosterEntry = {
   /** The name exactly as the roster printed it, for "Listed as". */
@@ -173,7 +177,25 @@ export function matchEntry(entry: RosterEntry, index: ScholarIndex): Candidate[]
   const family = foldToken(entry.family);
   if (!isFullGiven(given) || family.length === 0) return [];
   const hits = index.byKey.get(key(given, family));
-  if (!hits || hits.size === 0 || hits.size > MAX_CANDIDATES_PER_LINE) return [];
-  const evidence = affiliationEvidence(entry);
-  return [...hits].sort().map((cwid) => ({ cwid, evidence }));
+  if (hits && hits.size > 0) {
+    if (hits.size > MAX_CANDIDATES_PER_LINE) return [];
+    const evidence = affiliationEvidence(entry);
+    return [...hits].sort().map((cwid) => ({ cwid, evidence }));
+  }
+  // Exact given name found nobody: try its table nicknames, same breadth gate
+  // over the union. Each candidate's evidence names the equivalence it rests on.
+  const byNick = new Map<string, string>();
+  for (const v of nicknameVariants(given)) {
+    for (const cwid of index.byKey.get(key(v, family)) ?? []) if (!byNick.has(cwid)) byNick.set(cwid, v);
+  }
+  if (byNick.size === 0 || byNick.size > MAX_CANDIDATES_PER_LINE) return [];
+  return [...byNick.keys()].sort().map((cwid) => ({
+    cwid,
+    evidence: clip(
+      `Nickname match (${entry.given} = ${capitalize(byNick.get(cwid)!)}); ${affiliationEvidence(entry)}`,
+      EVIDENCE_MAX,
+    ),
+  }));
 }
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);

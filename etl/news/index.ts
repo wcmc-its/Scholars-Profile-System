@@ -31,7 +31,7 @@ import { resolve } from "node:path";
 import { db } from "@/lib/db";
 import { processStartedAt } from "@/lib/etl-run";
 import { scrapeNews } from "./scrape";
-import { buildNameIndex, detectMentions } from "./names";
+import { buildNameIndex, countUnmatchedPersonTags, detectMentions } from "./names";
 import {
   NEWS_ORIGIN,
   NEWS_PATH_PREFIX,
@@ -470,6 +470,11 @@ async function main(): Promise<void> {
   }
 
   const rows = articlesToMentions(articles, scholars);
+  const nameIndex = buildNameIndex(scholars);
+  const unmatchedPersonTags = articles.reduce(
+    (n, a) => n + countUnmatchedPersonTags(a.tags, nameIndex),
+    0,
+  );
   const { inserted, updated, preserved, deduped } = await upsertMentions(rows);
   await recordRun({ status: "success", rowsProcessed: inserted + updated });
 
@@ -486,6 +491,10 @@ async function main(): Promise<void> {
       // the feed's other slug. Logged so a silent rise is visible upstream drift.
       deduped,
       pending: rows.filter((r) => r.status === "pending").length,
+      // "Dr. …" feed tags that named no scholar under any tag rule — the name
+      // matcher's visible recall gap (departed faculty, non-WCM speakers, and
+      // the shapes it still cannot match).
+      unmatchedPersonTags,
       durationMs: Date.now() - startedAt,
     })}`,
   );
