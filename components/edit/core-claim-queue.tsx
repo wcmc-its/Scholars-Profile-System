@@ -2669,6 +2669,15 @@ export function CoreClaimQueue({
   const confOpen = confirmed.length - confirmed.filter((r) => revokedConfirmed.has(r.pmid)).length;
   // The Confirmed summary strip covers the whole tab, as To review's does.
   const confSummary = summarizeConfirmed(confirmed, revokedConfirmed, paperCounts, clientCwids);
+  // Its bar and legend count what its headline counts: a manual add is unscored
+  // and left out of `total` (the strip notes it instead), so it is left out of
+  // the piles too, or the legend would sum past the headline.
+  const confStripGroups = buildEvidenceGroups(
+    confirmed.filter((r) => !r.isManual),
+    revokedConfirmed,
+    ownCounts,
+    clientCwids,
+  );
   const confBand = confirmedBandSpan(confSummary.low, confSummary.high);
   const bandWord = (label: BandLabel) => ({
     label,
@@ -3706,7 +3715,7 @@ export function CoreClaimQueue({
             <ConfirmedSummaryStrip
               total={confSummary.total}
               manual={confSummary.manual}
-              groups={confGroups
+              groups={confStripGroups
                 .filter((g) => g.open > 0)
                 .map((g) => ({
                   key: g.key,

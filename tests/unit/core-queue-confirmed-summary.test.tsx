@@ -218,17 +218,22 @@ describe("Confirmed tab — summary strip", () => {
     expect(first.textContent).toContain(
       "2of 3 confirmed papers rest on two or more independent signals",
     );
+    expect(first.textContent).toContain("Confirmed papers by evidence");
     // The bar and legend are the rail's evidence groups, coloured as on To
-    // review: strongest signal's hue, deeper for more signals, a manual pile slate.
+    // review: strongest signal's hue, deeper for more signals. The manual add
+    // is not a pile: the headline leaves it out, so the legend does too.
     expect(first.textContent).toContain("Acknowledgment + LLM read1");
     expect(first.textContent).toContain("Acknowledgment + LLM read + repeat user1");
     expect(first.textContent).toContain("LLM read1");
-    expect(first.textContent).toContain("Added by you1");
+    expect(first.textContent).not.toContain("Added by you");
+    const legendCounts = [
+      ...first.querySelectorAll<HTMLElement>('[data-slot="core-queue-group-swatch"]'),
+    ].map((sw) => Number(sw.parentElement?.textContent?.match(/(\d+)$/)?.[1]));
+    expect(legendCounts.reduce((a, b) => a + b, 0)).toBe(3);
     const swatches = [
       ...first.querySelectorAll<HTMLElement>('[data-slot="core-queue-group-swatch"]'),
     ].map((e) => e.style.background);
     expect(swatches).toEqual([
-      "var(--apollo-slate)",
       "var(--apollo-signal-ack-2)",
       "var(--apollo-signal-ack-3)",
       "var(--apollo-signal-llm-1)",

@@ -603,8 +603,9 @@ export function ConfirmedSummaryStrip({
 }: {
   total: number;
   manual: number;
-  /** Confirmed papers per evidence group (not revoked), rail order, empty
-   *  groups dropped — the same piles, and colours, as To review's bar. */
+  /** Confirmed papers per evidence group (not revoked, not manual adds), rail
+   *  order, empty groups dropped — the same piles, and colours, as To review's
+   *  bar. Sums to `total`; manual adds are the `manual` note, not a pile. */
   groups: SummaryGroupView[];
   multiSignal: number;
   band: { low: BandWordView; high: BandWordView; pct: string } | null;
@@ -640,7 +641,7 @@ export function ConfirmedSummaryStrip({
       className="border-apollo-border bg-apollo-surface mt-4 grid grid-cols-1 rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)] lg:grid-cols-3"
     >
       <div data-slot="core-queue-confirmed-summary-signals" className={pane}>
-        <p className={EYEBROW}>Independent signals per paper</p>
+        <p className={EYEBROW}>Confirmed papers by evidence</p>
         {/* Every confirmation a manual add: no "0 of 0" line, just the note. */}
         {total > 0 ? (
           <>
