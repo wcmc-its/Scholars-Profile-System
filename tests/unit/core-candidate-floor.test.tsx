@@ -25,6 +25,9 @@ import { partitionCoreQueue, type CoreQueueRow } from "@/lib/api/core-queue";
 import {
   CANDIDATE_DISPLAY_FLOOR,
   CANDIDATE_DISPLAY_FLOOR_PCT,
+  CORE_DISPLAY_FLOOR_OVERRIDES,
+  displayFloorFor,
+  displayFloorPctFor,
   FLOOR_EXEMPT_METHOD_TIERS,
   hasOnlyRepeatUserOrWeakMethod,
   isBelowDisplayFloor,
@@ -100,33 +103,73 @@ function renderQueue(props: Partial<Parameters<typeof CoreClaimQueue>[0]> = {}) 
 }
 
 describe("isBelowDisplayFloor", () => {
-  it("is the one global 0.40 floor, inclusive at the floor", () => {
+  it("is the default 0.40 floor, inclusive at the floor", () => {
     expect(CANDIDATE_DISPLAY_FLOOR).toBe(0.4);
     expect(CANDIDATE_DISPLAY_FLOOR_PCT).toBe(40);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.4 }))).toBe(false);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.3999 }))).toBe(true);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.4 }), "2")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.3999 }), "2")).toBe(true);
   });
 
   it("exempts queued, manual and claimed rows, and anything not an engine candidate", () => {
-    expect(isBelowDisplayFloor(row({ likelihood: 0, status: "unscored", queued: true }))).toBe(
+    expect(isBelowDisplayFloor(row({ likelihood: 0, status: "unscored", queued: true }), "2")).toBe(
       false,
     );
     // an engine below_threshold row sent to review by hand
     expect(
-      isBelowDisplayFloor(row({ likelihood: 0.2, status: "below_threshold", queued: true })),
+      isBelowDisplayFloor(row({ likelihood: 0.2, status: "below_threshold", queued: true }), "2"),
     ).toBe(false);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.2, queued: true }))).toBe(false);
-    expect(isBelowDisplayFloor(row({ likelihood: 0, isManual: true }))).toBe(false);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.2, claimed: true }))).toBe(false);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.2, status: "confirmed" }))).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.2, queued: true }), "2")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0, isManual: true }), "2")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.2, claimed: true }), "2")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.2, status: "confirmed" }), "2")).toBe(false);
   });
 
   it("exempts a strong or moderate method tier; weak or none stays below", () => {
     expect(FLOOR_EXEMPT_METHOD_TIERS).toEqual(["strong", "moderate"]);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "strong" }))).toBe(false);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "moderate" }))).toBe(false);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "weak" }))).toBe(true);
-    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: null }))).toBe(true);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "strong" }), "2")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "moderate" }), "2")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: "weak" }), "2")).toBe(true);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.36, methodTier: null }), "2")).toBe(true);
+  });
+});
+
+describe("per-core display floors", () => {
+  it("core 14 sits at 0.50; every other core keeps the 0.40 default", () => {
+    expect(CORE_DISPLAY_FLOOR_OVERRIDES).toEqual({ "14": 0.5 });
+    expect(displayFloorFor("14")).toBe(0.5);
+    expect(displayFloorPctFor("14")).toBe(50);
+    for (const id of ["1", "2", "13", "15", "140", "constructor"]) {
+      expect(displayFloorFor(id)).toBe(0.4);
+      expect(displayFloorPctFor(id)).toBe(40);
+    }
+  });
+
+  it("a 0.45 row is hidden on core 14 but shown on core 2; inclusive at 0.50", () => {
+    expect(isBelowDisplayFloor(row({ likelihood: 0.45 }), "14")).toBe(true);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.45 }), "2")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.5 }), "14")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.4999 }), "14")).toBe(true);
+  });
+
+  it("the method-tier and queued/manual/claimed exemptions still apply on core 14", () => {
+    expect(isBelowDisplayFloor(row({ likelihood: 0.45, methodTier: "strong" }), "14")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.45, methodTier: "moderate" }), "14")).toBe(
+      false,
+    );
+    expect(isBelowDisplayFloor(row({ likelihood: 0.45, methodTier: "weak" }), "14")).toBe(true);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.45, claimed: true }), "14")).toBe(false);
+    expect(isBelowDisplayFloor(row({ likelihood: 0.45, queued: true }), "14")).toBe(false);
+  });
+
+  it("applyDisplayFloor and countReviewSuggestions use the core's own floor", () => {
+    const mid = row({ pmid: "1", likelihood: 0.45 });
+    const high = row({ pmid: "2", likelihood: 0.55 });
+    const none = new Set<string>();
+    const opts = { showLow: false, decided: none, searched: none };
+    expect(applyDisplayFloor([mid, high], { ...opts, coreId: "14" }).hidden).toBe(1);
+    expect(applyDisplayFloor([mid, high], { ...opts, coreId: "2" }).hidden).toBe(0);
+    expect(countReviewSuggestions([mid, high], "14")).toBe(1);
+    expect(countReviewSuggestions([mid, high], "2")).toBe(2);
   });
 });
 
@@ -151,7 +194,12 @@ describe("hasOnlyRepeatUserOrWeakMethod", () => {
 describe("applyDisplayFloor / searchedPmids", () => {
   const none = new Set<string>();
   it("hides below-floor rows and counts them, order kept", () => {
-    const f = applyDisplayFloor(MIXED, { showLow: false, decided: none, searched: none });
+    const f = applyDisplayFloor(MIXED, {
+      coreId: "2",
+      showLow: false,
+      decided: none,
+      searched: none,
+    });
     expect(f.shown.map((r) => r.pmid)).toEqual(["90000001", "90000002"]);
     expect(f.hidden).toBe(3);
     expect(f.belowFloor).toBe(3);
@@ -169,6 +217,7 @@ describe("applyDisplayFloor / searchedPmids", () => {
     const weak = row({ ...REPEAT_USER_ONLY, pmid: "3", likelihood: 0.36, methodTier: "weak" });
     const bare = row({ ...REPEAT_USER_ONLY, pmid: "4", likelihood: 0.36 });
     const f = applyDisplayFloor([strong, moderate, weak, bare], {
+      coreId: "2",
       showLow: false,
       decided: none,
       searched: none,
@@ -179,9 +228,10 @@ describe("applyDisplayFloor / searchedPmids", () => {
   });
   it("showLow, a session decision, or a searched PMID brings a row back", () => {
     expect(
-      applyDisplayFloor(MIXED, { showLow: true, decided: none, searched: none }).shown,
+      applyDisplayFloor(MIXED, { coreId: "2", showLow: true, decided: none, searched: none }).shown,
     ).toHaveLength(5);
     const f = applyDisplayFloor(MIXED, {
+      coreId: "2",
       showLow: false,
       decided: new Set(["90000003"]),
       searched: new Set(["90000005"]),
@@ -260,6 +310,21 @@ describe("CoreClaimQueue — display floor", () => {
     expect(titles()).toEqual(["90000001"]);
     expect(floorLine()).toBe(
       "1,200 lower-confidence candidates hidden (likelihood below 40%) · Show",
+    );
+  });
+
+  it("core 14's line says 50% and hides a 0.45 row core 2 would show", () => {
+    const mid = row({ pmid: "90000031", title: "Mid paper", likelihood: 0.45 });
+    const core14 = renderQueue({ core: { ...CORE, id: "14" }, candidates: [HIGH, mid, LOW_A] });
+    expect(core14.titles()).toEqual(["90000001"]);
+    expect(core14.floorLine()).toBe(
+      "2 lower-confidence candidates hidden (likelihood below 50%) · Show",
+    );
+    core14.view.unmount();
+    const core2 = renderQueue({ candidates: [HIGH, mid, LOW_A] });
+    expect(core2.titles()).toEqual(["90000001", "90000031"]);
+    expect(core2.floorLine()).toBe(
+      "1 lower-confidence candidate hidden (likelihood below 40%) · Show",
     );
   });
 
@@ -412,6 +477,6 @@ describe("index and editor counts agree on the floor", () => {
     const [indexRow] = buildCoreConsoleRows(inputs);
 
     expect(indexRow.reviewTotal).toBe(4); // pmids 1, 2, 3, 9
-    expect(countReviewSuggestions(candidates)).toBe(indexRow.reviewTotal);
+    expect(countReviewSuggestions(candidates, "2")).toBe(indexRow.reviewTotal);
   });
 });

@@ -9,8 +9,8 @@
  *     `candidate` row with no active CoreClaim, the review queue's own
  *     `candidates` partition. Counted with a grouped query rather than loading
  *     every candidate row, then corrected for the (few) claimed/rejected pairs.
- *     Only candidates the queue shows by default count — at or above
- *     CANDIDATE_DISPLAY_FLOOR, or carrying a FLOOR_EXEMPT_METHOD_TIERS tier
+ *     Only candidates the queue shows by default count — at or above the
+ *     core's floor (`displayFloorFor`), or carrying a FLOOR_EXEMPT_METHOD_TIERS tier
  *     (`isBelowDisplayFloor`, lib/cores/review-thresholds.ts).
  *   - "Confirmed" is `loadConfirmedCorePmidsByCore` (lib/api/cores.ts).
  *   - Clients are active `CoreClient` rows (`removedAt IS NULL`), split into
@@ -23,6 +23,7 @@ import { claimKey } from "@/lib/api/core-merge";
 import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
 import {
   CANDIDATE_DISPLAY_FLOOR,
+  CORE_DISPLAY_FLOOR_OVERRIDES,
   FLOOR_EXEMPT_METHOD_TIERS,
   HIGH_CONFIDENCE_LIKELIHOOD,
   isBelowDisplayFloor,
@@ -46,15 +47,15 @@ export function countHighConfidence(candidates: ReadonlyArray<{ likelihood: numb
  *  but is not an engine suggestion, so neither page counts it. */
 export function countReviewSuggestions(
   candidates: ReadonlyArray<{ likelihood: number; status: string; methodTier: string | null }>,
+  coreId: string,
 ): number {
   return candidates.filter(
     (c) =>
       c.status === "candidate" &&
-      !isBelowDisplayFloor({
-        likelihood: c.likelihood,
-        status: c.status,
-        methodTier: c.methodTier,
-      }),
+      !isBelowDisplayFloor(
+        { likelihood: c.likelihood, status: c.status, methodTier: c.methodTier },
+        coreId,
+      ),
   ).length;
 }
 
@@ -131,7 +132,7 @@ export function buildCoreConsoleRows(input: CoreConsoleInputs): CoreConsoleRow[]
   for (const c of input.claimedCandidates) {
     // `candidateTotals` only counts rows the floor does not hide, so only those
     // are subtracted back out.
-    if (isBelowDisplayFloor({ ...c, status: "candidate" })) continue;
+    if (isBelowDisplayFloor({ ...c, status: "candidate" }, c.coreId)) continue;
     claimedTotal.set(c.coreId, (claimedTotal.get(c.coreId) ?? 0) + 1);
     if (c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD) {
       claimedHigh.set(c.coreId, (claimedHigh.get(c.coreId) ?? 0) + 1);
@@ -182,6 +183,20 @@ export function buildCoreConsoleRows(input: CoreConsoleInputs): CoreConsoleRow[]
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
 
+/** `isBelowDisplayFloor`'s likelihood cut as `publicationCore` where-clauses
+ *  (OR'd): each overridden core at its own floor, every other core at the
+ *  default. Exported for the test. */
+export function displayFloorWhere() {
+  const overridden = Object.keys(CORE_DISPLAY_FLOOR_OVERRIDES);
+  return [
+    ...overridden.map((coreId) => ({
+      coreId,
+      likelihood: { gte: CORE_DISPLAY_FLOOR_OVERRIDES[coreId] },
+    })),
+    { coreId: { notIn: overridden }, likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
+  ];
+}
+
 type CoreConsoleReader = Pick<
   typeof db.read,
   | "core"
@@ -228,10 +243,7 @@ export async function loadCoreConsoleIndex(
       by: ["coreId"],
       where: {
         status: "candidate",
-        OR: [
-          { likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
-          { methodTier: { in: [...FLOOR_EXEMPT_METHOD_TIERS] } },
-        ],
+        OR: [...displayFloorWhere(), { methodTier: { in: [...FLOOR_EXEMPT_METHOD_TIERS] } }],
       },
       _count: { _all: true },
     }),
