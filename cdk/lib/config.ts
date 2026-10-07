@@ -604,8 +604,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // less, since more headroom lets the ETL finish sooner rather than run wider.
     // MinCapacity stays 0.5 so the idle floor -- which is what actually dominates
     // the monthly bill -- is unchanged.
-    // 2026-10-06 — prod-sized (8) for the RPT load test; revert to 4 after.
-    auroraMaxCapacity: 8,
+    auroraMaxCapacity: 4,
     auroraReaderCount: 0,
     auroraBackupRetentionDays: 14,
     opensearchDataNodes: 1,
@@ -622,21 +621,18 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     opensearchMasterNodes: 0,
     opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 14,
-    // 2026-10-06 — app tier prod-sized (2-6 x 2 vCPU/4 GB) for the RPT load
-    // test so results reflect prod capacity. TEMPORARY: revert to 1 / 3 /
-    // 1024 / 2048 after the test.
-    appDesiredCount: 2,
+    appDesiredCount: 1,
     // #596 — staging is low-traffic (internal QA + VPN circulation); a small
     // ceiling proves the scaling path works without provisioning prod-sized
     // headroom. Revisit with #554 numbers.
-    appMaxCount: 6,
+    appMaxCount: 3,
     // 2026-06-26 — bumped 512→1024 (0.5→1 vCPU; memory follows to the Fargate
     // minimum for 1024 CPU). A §6 concurrency load-test showed the app-tier CPU
     // saturating on the per-request taxonomy resolve (matchQueryToTaxonomy,
     // request-scoped-cache-only) well before OpenSearch — the 0.5 vCPU task was
     // the binding constraint under ~3-5 concurrent searches.
-    appCpu: 2048,
-    appMemoryMiB: 4096,
+    appCpu: 1024,
+    appMemoryMiB: 2048,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
     // Item-3 cutover (2026-07-02): the app now connects from the shared VPC's

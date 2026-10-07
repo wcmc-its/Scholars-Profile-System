@@ -2338,9 +2338,9 @@ describe("AppStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("uses staging desiredCount = 2 (prod-sized for load test)", () => {
+    it("uses staging desiredCount = 1", () => {
       template.hasResourceProperties("AWS::ECS::Service", {
-        DesiredCount: 2,
+        DesiredCount: 1,
       });
     });
 
@@ -2549,13 +2549,13 @@ describe("AppStack", () => {
       expect(envByName.get("SELF_EDIT_ORCID_SUGGESTION")).toBe("on");
     });
 
-    it("autoscales between min=2 and max=6 for staging (prod-sized for load test)", () => {
+    it("autoscales between min=1 and max=3 for staging (#596)", () => {
       template.hasResourceProperties(
         "AWS::ApplicationAutoScaling::ScalableTarget",
         {
           ScalableDimension: "ecs:service:DesiredCount",
-          MinCapacity: 2,
-          MaxCapacity: 6,
+          MinCapacity: 1,
+          MaxCapacity: 3,
         },
       );
     });
@@ -2604,7 +2604,7 @@ describe("AppStack", () => {
       expect(json).toContain("scholars/staging/saml/idp-cert");
     });
 
-    it("uses staging Fargate sizing 2048 cpu / 4096 MiB on the app task definition", () => {
+    it("uses staging Fargate sizing 1024 cpu / 2048 MiB on the app task definition", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-app-staging",
@@ -2612,9 +2612,8 @@ describe("AppStack", () => {
       expect(appTaskDef).toBeDefined();
       // 2026-06-26 — bumped 512→1024 (0.5→1 vCPU) after a §6 load-test showed the
       // per-request taxonomy resolve saturating the app-tier CPU under concurrency.
-      // 2026-10-06 — prod-sized for the RPT load test (temporary).
-      expect(appTaskDef?.Properties?.Cpu).toBe("2048");
-      expect(appTaskDef?.Properties?.Memory).toBe("4096");
+      expect(appTaskDef?.Properties?.Cpu).toBe("1024");
+      expect(appTaskDef?.Properties?.Memory).toBe("2048");
     });
 
     it("grants the audit INSERT to `'app_rw'@'10.46.160.%'` on staging (item-3 cutover)", () => {
