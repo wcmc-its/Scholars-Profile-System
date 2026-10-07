@@ -67,13 +67,24 @@
  * The queue keys its single-select on the shared `groupKey`, unchanged. Measured
  * over the same 1,500-article sample: the cap fires on only 0.4–0.8% of rows.
  *
+ * MIDDLE TOKENS. Measured on prod 10-07 (1,509 stories), the matcher found only
+ * 67.5% of VIVO-linked scholars by name, mostly because a roster middle name or
+ * initial the article omits ("Dr. Jane Doe" vs roster "Jane Q Doe") blocked the
+ * match. Now, all still deterministic (no NER/LLM):
+ *   - TAG ignores middle tokens on BOTH sides, first == first and last == last
+ *     (HIGH, contested-capped by groupKey "first last"); see tagHits for the
+ *     org-tag guards and three narrower MEDIUM rules (roster middle used as
+ *     first, compound surname, nickname) that fire only when the roster has
+ *     exactly one such scholar;
+ *   - PROSE gets the bare first+last sequence of a middle-bearing name, only
+ *     when that pair is unique on the roster (see buildNameIndex).
+ *
  * ponytail: naive per-surname candidate scan (see detectMentions) — fast enough
- * for the weekly delta (a few dozen new articles). A full name with a middle
- * token the article omits ("Xiaojing Q. Ma" vs "Xiaojing Ma") will miss in PROSE;
- * matching both `fullName` and `preferredName` covers most of it, and the tag
- * pass is deliberately looser (see tagMatchesSequence). Upgrade path if recall
- * matters: NER. False positives are the queue's job.
+ * for the weekly delta (a few dozen new articles). False positives are the
+ * queue's job.
  */
+
+import { nicknamesEquivalent } from "@/lib/names/nicknames";
 
 export type NameIndexEntry = {
   cwid: string;
@@ -198,19 +209,47 @@ export type ScholarNameInput = {
   primaryDepartment: string | null;
 };
 
-/** Build the searchable name index from Scholar rows. */
+/** "first last" of a folded sequence — the key the middle-free rules share. */
+const firstLast = (seq: readonly string[]) => `${seq[0]} ${seq[seq.length - 1]}`;
+
+/**
+ * Build the searchable name index from Scholar rows.
+ *
+ * A name with middle tokens ("Jane Q Doe") also gets its bare first+last
+ * sequence ("jane doe"), because articles mostly drop the middle — but ONLY when
+ * that pair is unique across the whole roster. If two scholars fold to the same
+ * first+last, the bare pair would name either of them, so neither gets it and
+ * prose needs the middle to tell them apart, as before.
+ */
 export function buildNameIndex(scholars: ScholarNameInput[]): NameIndexEntry[] {
+  const named = scholars.map((s) => ({
+    s,
+    seqs: [s.fullName, s.preferredName ?? ""].map(nameSequence).filter((q): q is string[] => !!q),
+  }));
+  const pairOwners = new Map<string, Set<string>>();
+  for (const { s, seqs } of named) {
+    for (const seq of seqs) {
+      const k = firstLast(seq);
+      if (!pairOwners.has(k)) pairOwners.set(k, new Set());
+      pairOwners.get(k)!.add(s.cwid);
+    }
+  }
+
   const out: NameIndexEntry[] = [];
-  for (const s of scholars) {
+  for (const { s, seqs: raw } of named) {
     const seqs: string[][] = [];
     const seen = new Set<string>();
-    for (const name of [s.fullName, s.preferredName ?? ""]) {
-      const seq = nameSequence(name);
-      if (!seq) continue;
+    const add = (seq: string[]) => {
       const key = seq.join(" ");
-      if (seen.has(key)) continue;
+      if (seen.has(key)) return;
       seen.add(key);
       seqs.push(seq);
+    };
+    for (const seq of raw) add(seq);
+    for (const seq of raw) {
+      if (seq.length > 2 && pairOwners.get(firstLast(seq))?.size === 1) {
+        add([seq[0], seq[seq.length - 1]]);
+      }
     }
     if (seqs.length === 0) continue;
     out.push({
@@ -299,6 +338,171 @@ function tagMatchesSequence(tagTokens: string[], seq: string[]): boolean {
   }
   // The whole name matched and nothing trails the surname.
   return s === seq.length && i === tagTokens.length;
+}
+
+/** Leading honorifics and trailing suffixes/credentials a feed tag wraps a name
+ *  in. No token here may also be a plausible surname: "Ma" and "Do" are absent. */
+const TAG_HONORIFICS = new Set(["dr", "prof", "professor", "mr", "mrs", "ms"]);
+const TAG_SUFFIXES = new Set([
+  "jr", "sr", "ii", "iii", "iv", "md", "phd", "mph", "mba", "msc", "dphil", "scd",
+  "pharmd", "mbbs", "dds", "dmd", "dnp", "facs", "facp",
+]);
+/** Words that make a tag a phrase ("Sandra and Edward Meyer …"), not a name. */
+const TAG_STOPWORDS = new Set(["and", "of", "for", "the"]);
+/** Non-initial, non-particle tokens a person tag may carry between first and
+ *  last ("Dr. Anna Ada Dattoli"-shaped). More than this reads as a phrase. */
+const MAX_TAG_MIDDLE_WORDS = 2;
+
+type PersonTag = { first: string; middles: string[]; last: string };
+
+/**
+ * A feed tag reduced to first / middles / last when it is shaped like a person's
+ * name, else null. The same guards as `tagMatchesSequence`, restated for the
+ * middle-free rules: the name ends the tag (after suffixes), no stopword or "&"
+ * inside it, and at most MAX_TAG_MIDDLE_WORDS full words between first and last
+ * (initials and particles are free). The first name must be a full word.
+ */
+function parsePersonTag(raw: string): PersonTag | null {
+  if (/[&+]/.test(raw)) return null; // "Sandra & Edward Meyer" tokenizes without its "&"
+  const toks = tokenize(raw);
+  let a = 0;
+  let b = toks.length;
+  while (a < b && TAG_HONORIFICS.has(toks[a])) a++;
+  while (b > a && TAG_SUFFIXES.has(toks[b - 1])) b--;
+  const name = toks.slice(a, b);
+  if (name.length < 2 || name[0].length < 2) return null;
+  const middles = name.slice(1, -1);
+  if (middles.some((t) => TAG_STOPWORDS.has(t))) return null;
+  const words = middles.filter((t) => t.length > 1 && !NAME_PARTICLES.has(t));
+  if (words.length > MAX_TAG_MIDDLE_WORDS) return null;
+  return { first: name[0], middles, last: name[name.length - 1] };
+}
+
+/** Do the two sides' FIRST middle tokens agree on their initial? Only fires when
+ *  both sides carry one — "Jane A. Doe" vs roster "Jane B Doe" is two people,
+ *  while a middle on just one side is simply omitted by the other. */
+function middleInitialsAgree(tagMiddles: string[], seq: readonly string[]): boolean {
+  const t = tagMiddles.find((m) => !NAME_PARTICLES.has(m));
+  const r = seq.slice(1, -1).find((m) => !NAME_PARTICLES.has(m));
+  return !t || !r || t[0] === r[0];
+}
+
+/** `middleInitialsAgree` against a scholar rather than one sequence: true unless
+ *  every one of their middle-bearing names disagrees. Checked per scholar so the
+ *  bare first+last sequence `buildNameIndex` derives cannot slip a "Jane A. Doe"
+ *  tag past a roster "Jane B Doe". */
+function scholarMiddlesAgree(tagMiddles: string[], seqs: readonly string[][]): boolean {
+  const withMiddle = seqs.filter((q) => q.length > 2);
+  return withMiddle.length === 0 || withMiddle.some((q) => middleInitialsAgree(tagMiddles, q));
+}
+
+type RosterRef = { cwid: string; seq: string[] };
+/** Roster-wide lookups for the tag rules, built once per index. */
+type RosterLookup = {
+  /** Last token of each sequence -> the sequences ending on it. */
+  bySurname: Map<string, RosterRef[]>;
+  /** Each token strictly between first and last -> the sequences holding it. */
+  byInner: Map<string, RosterRef[]>;
+  /** Every sequence of a scholar, for the per-scholar middle-initial check. */
+  seqsByCwid: Map<string, string[][]>;
+};
+const rosterLookups = new WeakMap<readonly NameIndexEntry[], RosterLookup>();
+
+function rosterLookup(index: readonly NameIndexEntry[]): RosterLookup {
+  const cached = rosterLookups.get(index);
+  if (cached) return cached;
+  const bySurname = new Map<string, RosterRef[]>();
+  const byInner = new Map<string, RosterRef[]>();
+  const push = (m: Map<string, RosterRef[]>, k: string, r: RosterRef) => {
+    if (!m.has(k)) m.set(k, []);
+    m.get(k)!.push(r);
+  };
+  const seqsByCwid = new Map<string, string[][]>();
+  for (const e of index) {
+    seqsByCwid.set(e.cwid, [...(seqsByCwid.get(e.cwid) ?? []), ...e.sequences]);
+    for (const seq of e.sequences) {
+      const ref = { cwid: e.cwid, seq };
+      push(bySurname, seq[seq.length - 1], ref);
+      for (const t of new Set(seq.slice(1, -1))) push(byInner, t, ref);
+    }
+  }
+  const out = { bySurname, byInner, seqsByCwid };
+  rosterLookups.set(index, out);
+  return out;
+}
+
+type TagHit = { tier: "HIGH" | "MEDIUM"; groupKey: string };
+
+/**
+ * Who one feed tag names, across the WHOLE roster (VIVO exclusion is the
+ * caller's job — uniqueness must count everyone). Strong rules, tier HIGH:
+ *
+ *   EXACT  `tagMatchesSequence` (groupKey = the roster sequence, as before);
+ *   FIRST+LAST  tag first == roster first and tag last == roster last, middle
+ *          tokens ignored on BOTH sides ("Dr. Jane Doe" = roster "Jane Q Doe",
+ *          "Dr. Jane Ann Doe" = roster "Jane Doe"), unless both sides carry a
+ *          middle whose initials disagree. groupKey = "first last", so two
+ *          roster people sharing it come out contested and capped at MEDIUM.
+ *
+ * Weak rules, tier MEDIUM, tried only when NO strong rule names anybody, and
+ * kept only when exactly ONE scholar on the roster satisfies them together:
+ *
+ *   MIDDLE   tag first is a roster middle token ("Dr. Ann Doe" = "Mary Ann Doe");
+ *   COMPOUND tag last is a non-final roster token after the first ("Dr. Rosa
+ *            Vela" = "Rosa Vela Quintero");
+ *   NICKNAME tag first is a table equivalent of roster first ("Dr. Bob Doe" =
+ *            "Robert Doe"), see lib/names/nicknames.ts.
+ */
+function tagHits(raw: string, tokens: string[], lookup: RosterLookup): Map<string, TagHit> {
+  const out = new Map<string, TagHit>();
+  for (const r of lookup.bySurname.get(tokens[tokens.length - 1]) ?? []) {
+    if (!out.has(r.cwid) && tagMatchesSequence(tokens, r.seq)) {
+      out.set(r.cwid, { tier: "HIGH", groupKey: r.seq.join(" ") });
+    }
+  }
+  const p = parsePersonTag(raw);
+  if (!p) return out;
+  const agrees = (cwid: string) => scholarMiddlesAgree(p.middles, lookup.seqsByCwid.get(cwid) ?? []);
+  for (const cwid of out.keys()) if (!agrees(cwid)) out.delete(cwid);
+  const key = `${p.first} ${p.last}`;
+  const ending = lookup.bySurname.get(p.last) ?? [];
+  for (const r of ending) {
+    if (!out.has(r.cwid) && r.seq[0] === p.first && agrees(r.cwid)) {
+      out.set(r.cwid, { tier: "HIGH", groupKey: key });
+    }
+  }
+  if (out.size > 0) return out;
+
+  const weak = new Set<string>();
+  for (const r of ending) {
+    if (r.seq.slice(1, -1).includes(p.first) || nicknamesEquivalent(p.first, r.seq[0])) {
+      weak.add(r.cwid);
+    }
+  }
+  for (const r of lookup.byInner.get(p.last) ?? []) {
+    if (r.seq[0] === p.first && r.seq.length > 2) weak.add(r.cwid);
+  }
+  if (weak.size === 1) out.set([...weak][0], { tier: "MEDIUM", groupKey: key });
+  return out;
+}
+
+/** A tag the feed writes for a person ("Dr. …"), as opposed to a topic/org. */
+const PERSON_TAG = /^\s*dr\b/i;
+
+/**
+ * How many "Dr. …" tags name NO scholar on the roster under any tag rule — the
+ * recall gap the news ETL logs as `unmatchedPersonTags`. Counted against the
+ * whole roster (a VIVO-linked scholar's tag is matched, not a miss).
+ */
+export function countUnmatchedPersonTags(tags: string[], index: readonly NameIndexEntry[]): number {
+  const lookup = rosterLookup(index);
+  let n = 0;
+  for (const raw of tags) {
+    if (!PERSON_TAG.test(raw)) continue;
+    const tokens = tokenize(raw);
+    if (tokens.length === 0 || tagHits(raw, tokens, lookup).size === 0) n++;
+  }
+  return n;
 }
 
 /**
@@ -504,8 +708,20 @@ export function detectMentions(
 
   const tokenSet = new Set(tokens);
   const captionSet = new Set(captionTokens);
-  const tagSet = new Set(tagTokens.flat());
   const honorifics = honorificNamePhrases(sources.text);
+  // Who the tags name, resolved against the whole roster once per article (the
+  // weak tag rules need roster-wide uniqueness, so this cannot run per entry).
+  // A HIGH from any tag beats a MEDIUM from another.
+  const lookup = rosterLookup(index);
+  const tagged = new Map<string, TagHit>();
+  sources.tags.forEach((raw) => {
+    const toks = tokenize(raw);
+    if (toks.length === 0) return;
+    for (const [cwid, h] of tagHits(raw, toks, lookup)) {
+      const prev = tagged.get(cwid);
+      if (!prev || (prev.tier === "MEDIUM" && h.tier === "HIGH")) tagged.set(cwid, h);
+    }
+  });
 
   /**
    * The prose snippet for the first of `seqs` that appears in the article text,
@@ -538,21 +754,24 @@ export function detectMentions(
   }[] = [];
   for (const entry of index) {
     if (excludeCwids.has(entry.cwid)) continue;
-    // Cheap pre-filter: only consider a scholar whose surname appears somewhere.
-    if (!entry.surnames.some((sn) => tokenSet.has(sn) || tagSet.has(sn) || captionSet.has(sn))) {
+    const tag = tagged.get(entry.cwid);
+    // Cheap pre-filter: only consider a scholar whose surname appears somewhere
+    // (or whom a tag already named — the COMPOUND rule ends on an inner token).
+    if (!tag && !entry.surnames.some((sn) => tokenSet.has(sn) || captionSet.has(sn))) {
       continue;
     }
 
-    let match: string[] | undefined;
+    let groupKey: string | undefined;
     let basis: MatchBasis | undefined;
     let tier: "HIGH" | "MEDIUM" | "LOW" | undefined;
     let contextSnippet: string | null = null;
 
-    // 1. TAG — the feed's own answer to "who is this story about". Unscored.
-    match = entry.sequences.find((seq) => tagTokens.some((t) => tagMatchesSequence(t, seq)));
-    if (match) {
+    // 1. TAG — the feed's own answer to "who is this story about". Unscored;
+    //    HIGH, or MEDIUM for a weak (middle/compound/nickname) rule. See tagHits.
+    if (tag) {
+      groupKey = tag.groupKey;
       basis = "TAG";
-      tier = BASIS_TIER.TAG;
+      tier = tag.tier;
       contextSnippet = proseSnippet(entry.sequences);
     }
 
@@ -569,7 +788,7 @@ export function detectMentions(
         const positions = sequenceIndices(tokens, seq);
         if (positions.length === 0) continue;
         const inTitles = honorifics.filter((h) => containsSequence(h, seq)).length;
-        match = seq;
+        groupKey = seq.join(" ");
         const firstTokenIndex = positions[0];
         contextSnippet = extractSnippet(
           sources.text,
@@ -603,18 +822,19 @@ export function detectMentions(
     //    out of bodyText, so this tier is pure recall: without it these scholars
     //    are not proposed at all. No prose position, so no context snippet.
     if (!basis) {
-      match = entry.sequences.find((seq) => containsSequence(captionTokens, seq));
+      const match = entry.sequences.find((seq) => containsSequence(captionTokens, seq));
       if (match) {
+        groupKey = match.join(" ");
         basis = "CAPTION";
         tier = BASIS_TIER.CAPTION;
       }
     }
 
-    if (!basis || !match || !tier) continue;
+    if (!basis || !groupKey || !tier) continue;
     hits.push({
       cwid: entry.cwid,
       displayName: entry.displayName,
-      groupKey: match.join(" "),
+      groupKey,
       basis,
       tier,
       // BODY/TITLE take it from the scored occurrence; TAG takes it from

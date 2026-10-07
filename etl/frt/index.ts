@@ -12,7 +12,7 @@
  */
 import { db } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
-import { frtNameKey } from "@/lib/frt/mentee-name";
+import { frtNameKey, frtNicknameCandidate } from "@/lib/frt/mentee-name";
 import { closeCoiFrtPool, getCoiFrtPool } from "@/lib/sources/mssql-coi-frt";
 
 type Row = {
@@ -121,6 +121,9 @@ async function main() {
     );
 
     let matched = 0;
+    // Unlinked internal mentees whose name reaches exactly one person only via a
+    // nickname. Counted, never linked: see frtNicknameCandidate.
+    let nicknameOnly = 0;
     const inserts = [...byPair.entries()].map(([id, a]) => {
       const external = a.row.external_mentee === "Yes";
       const d = decided.get(id);
@@ -130,6 +133,10 @@ async function main() {
         const hits = external ? undefined : idx.get(a.key);
         const cwid = hits?.size === 1 ? [...hits][0] : null;
         menteeCwid = cwid && cwid !== a.row.cwid ? cwid : null;
+        if (!external && !menteeCwid) {
+          const nick = frtNicknameCandidate(idx, a.key);
+          if (nick && nick !== a.row.cwid) nicknameOnly++;
+        }
       }
       if (menteeCwid) matched++;
       return {
@@ -148,7 +155,10 @@ async function main() {
         cwidAssignedBy: d?.cwidAssignedBy ?? null,
       };
     });
-    console.log(`Mentor/mentee pairs: ${inserts.length} (CWID-matched: ${matched}).`);
+    console.log(
+      `Mentor/mentee pairs: ${inserts.length} (CWID-matched: ${matched}; ` +
+        `nickname-only candidates, not linked: ${nicknameOnly}).`,
+    );
 
     assertSourceVolume("frt:mentees", {
       incoming: inserts.length,
