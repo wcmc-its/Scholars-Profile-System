@@ -196,7 +196,7 @@ export default async function EditCorePage({
       actorRole={actorRole}
       pending={{
         // The /edit/core index's own "To review" count (display floor applied).
-        total: countReviewSuggestions(candidates),
+        total: countReviewSuggestions(candidates, coreId),
         strong: countHighConfidence(candidates),
       }}
       previewHref={previewHref}

@@ -101,6 +101,29 @@ describe("buildCoreConsoleRows", () => {
     expect(alpha.reviewTotal).toBe(8);
   });
 
+  it("subtracts claimed candidates against each core's OWN floor (core 14 = 0.50)", () => {
+    const base = inputs();
+    const core14 = { ...base.cores[1], id: "14", name: "Core Fourteen" };
+    const rows = buildCoreConsoleRows({
+      ...base,
+      cores: [base.cores[1], core14],
+      candidateTotals: new Map([
+        ["2", 10],
+        ["14", 10],
+      ]),
+      candidateHighs: new Map(),
+      claimedCandidates: [
+        // 0.45: above the default floor, below core 14's
+        { coreId: "2", likelihood: 0.45, methodTier: null },
+        { coreId: "14", likelihood: 0.45, methodTier: null },
+        // exempt tier on core 14 still counts
+        { coreId: "14", likelihood: 0.45, methodTier: "strong" },
+      ],
+    });
+    expect(rows.find((r) => r.id === "2")?.reviewTotal).toBe(9);
+    expect(rows.find((r) => r.id === "14")?.reviewTotal).toBe(9);
+  });
+
   it("never reports negative or high > total", () => {
     const [alpha] = buildCoreConsoleRows(
       inputs({
@@ -156,7 +179,8 @@ describe("loadCoreConsoleIndex", () => {
         {
           status: "candidate",
           OR: [
-            { likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
+            { coreId: "14", likelihood: { gte: 0.5 } },
+            { coreId: { notIn: ["14"] }, likelihood: { gte: CANDIDATE_DISPLAY_FLOOR } },
             { methodTier: { in: ["strong", "moderate"] } },
           ],
         },

@@ -90,6 +90,11 @@ describe("CoreFacilitiesIndex", () => {
     expect(rowNames()[1]).toContain("Gamma Core");
   });
 
+  it("states the per-core display floor in the To review footnote", () => {
+    const { container } = render(<CoreFacilitiesIndex cores={CORES} offFlags={[]} />);
+    expect(container.textContent).toContain("likelihood ≥ 40% (50% on core 14) or a strong");
+  });
+
   it("links the review pill to the core's review queue", () => {
     render(<CoreFacilitiesIndex cores={CORES} offFlags={[]} />);
     const link = screen.getByText("5 high →").closest("a");
