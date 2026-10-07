@@ -873,6 +873,44 @@ export const ADDED_GROUP = "added";
 /** Its rail sub-line and list-row band slot (mockup: "Unscored"). */
 const ADDED_SUB = "Unscored · added by PMID";
 
+/** Each signal's colour steps, lightest first: step N is a pile whose strongest
+ *  signal is this one and which carries N signals in all. A signal can only
+ *  share a pile with weaker ones, so its ramp is exactly as long as the number
+ *  of signals at or below it. Tokens and their contrast: app/globals.css. */
+const SIGNAL_RAMPS: Record<SignalKind, readonly string[]> = {
+  ack: [
+    "var(--apollo-signal-ack-1)",
+    "var(--apollo-signal-ack-2)",
+    "var(--apollo-signal-ack-3)",
+    "var(--apollo-signal-ack-4)",
+  ],
+  coauthor: [
+    "var(--apollo-signal-coauthor-1)",
+    "var(--apollo-signal-coauthor-2)",
+    "var(--apollo-maroon)",
+  ],
+  llm: ["var(--apollo-signal-llm-1)", "var(--apollo-amber)"],
+  affinity: ["var(--apollo-signal-affinity)"],
+};
+
+/**
+ * The colour of an evidence group, wherever a pile is drawn (both summary
+ * strips' bars and legends, both rails' dots): the hue of its STRONGEST signal
+ * by the fixed `SIGNAL_KINDS` strength, a step deeper for every further signal
+ * the pile carries. "Added by you" is slate (a person's pile, not the engine's),
+ * and a pile with no counted signal a neutral grey. Read off the key's kinds,
+ * never its label. Pure.
+ */
+export function evidenceGroupColor(key: string): string {
+  if (key === ADDED_GROUP) return "var(--apollo-slate)";
+  const kinds = key.split("+");
+  const fired = SIGNAL_KINDS.filter((s) => kinds.includes(s.kind));
+  if (fired.length === 0) return "var(--apollo-signal-none)";
+  const strongest = fired.reduce((a, b) => (b.dots > a.dots ? b : a));
+  const ramp = SIGNAL_RAMPS[strongest.kind];
+  return ramp[Math.min(fired.length, ramp.length) - 1];
+}
+
 /** "3 papers · acknowledgment + staff co-author" — singular-safe. Pure. */
 export function evidenceGroupLabel(key: string, count: number): string {
   const kinds = key
@@ -2631,6 +2669,15 @@ export function CoreClaimQueue({
   const confOpen = confirmed.length - confirmed.filter((r) => revokedConfirmed.has(r.pmid)).length;
   // The Confirmed summary strip covers the whole tab, as To review's does.
   const confSummary = summarizeConfirmed(confirmed, revokedConfirmed, paperCounts, clientCwids);
+  // Its bar and legend count what its headline counts: a manual add is unscored
+  // and left out of `total` (the strip notes it instead), so it is left out of
+  // the piles too, or the legend would sum past the headline.
+  const confStripGroups = buildEvidenceGroups(
+    confirmed.filter((r) => !r.isManual),
+    revokedConfirmed,
+    ownCounts,
+    clientCwids,
+  );
   const confBand = confirmedBandSpan(confSummary.low, confSummary.high);
   const bandWord = (label: BandLabel) => ({
     label,
@@ -2770,9 +2817,8 @@ export function CoreClaimQueue({
             // "Added by you" has no band: the engine did not score these papers
             // onto the queue, so a band word would put its verdict in its mouth.
             sub: g.key === ADDED_GROUP ? ADDED_SUB : groupBandText(g.rows.map((r) => r.likelihood)),
-            // The dot reads the same pile as the band words beside it.
-            dot:
-              g.key === ADDED_GROUP ? "bg-apollo-slate" : bandDot(g.rows.map((r) => r.likelihood)),
+            // The pile's own colour, as the summary bar and legend draw it.
+            dotColor: evidenceGroupColor(g.key),
             count: g.open,
           })),
         ]
@@ -2828,8 +2874,7 @@ export function CoreClaimQueue({
             key: g.key,
             label: evidenceGroupName(g.key),
             sub: g.key === ADDED_GROUP ? ADDED_SUB : groupBandText(g.rows.map((r) => r.likelihood)),
-            dot:
-              g.key === ADDED_GROUP ? "bg-apollo-slate" : bandDot(g.rows.map((r) => r.likelihood)),
+            dotColor: evidenceGroupColor(g.key),
             count: g.open,
           })),
         ]
@@ -3456,6 +3501,7 @@ export function CoreClaimQueue({
             groups={summary.groups.map((g) => ({
               key: g.key,
               label: evidenceGroupName(g.key),
+              color: evidenceGroupColor(g.key),
               count: g.count,
             }))}
             signals={SIGNAL_KINDS.map((s) => ({
@@ -3463,6 +3509,7 @@ export function CoreClaimQueue({
               label: s.label,
               strength: s.strength,
               dots: s.dots,
+              color: evidenceGroupColor(s.kind),
               count: summary.signals[s.kind],
               active: (facets.signal ?? []).includes(s.facet),
             }))}
@@ -3668,7 +3715,14 @@ export function CoreClaimQueue({
             <ConfirmedSummaryStrip
               total={confSummary.total}
               manual={confSummary.manual}
-              bySignals={confSummary.bySignals}
+              groups={confStripGroups
+                .filter((g) => g.open > 0)
+                .map((g) => ({
+                  key: g.key,
+                  label: evidenceGroupName(g.key),
+                  color: evidenceGroupColor(g.key),
+                  count: g.open,
+                }))}
               multiSignal={confSummary.multiSignal}
               band={
                 confBand && {
@@ -3682,6 +3736,7 @@ export function CoreClaimQueue({
                 label: s.label,
                 strength: s.strength,
                 dots: s.dots,
+                color: evidenceGroupColor(s.kind),
                 count: confSummary.signals[s.kind],
                 active: (facets.signal ?? []).includes(s.facet),
               }))}

@@ -172,9 +172,24 @@
   --apollo-slate: #34506e;
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;
-  /* Mid slate — the middle step of the core queue's evidence bar, between
-     --apollo-slate and --apollo-slate-tint-border. */
-  --apollo-slate-mid: oklch(0.55 0.06 245);
+  /* Core review queue evidence colours — a pile takes the hue of its STRONGEST
+     signal (the "Which signals fired" ranking: acknowledgment > staff co-author
+     > LLM read > repeat user) and a deeper step of it for every further signal
+     (evidenceGroupColor, core-claim-queue.tsx). Steps 3 of co-author and 2 of
+     LLM read are --apollo-maroon and --apollo-amber themselves; a pile a person
+     added is --apollo-slate. Every value clears the 3:1 non-text threshold on
+     the white card (lightest: affinity 3.05:1). Like the rest of the --apollo-*
+     set these are not redefined under .dark: --apollo-surface stays white there
+     too, so the light values are the ones that keep contrast. */
+  --apollo-signal-ack-1: #772151;
+  --apollo-signal-ack-2: #5c153d;
+  --apollo-signal-ack-3: #440e2c;
+  --apollo-signal-ack-4: #2e071d;
+  --apollo-signal-coauthor-1: #d86357;
+  --apollo-signal-coauthor-2: #ba3e3c;
+  --apollo-signal-llm-1: #c77000;
+  --apollo-signal-affinity: #a4935d;
+  --apollo-signal-none: #777a80;
   --apollo-notice-text: #274158; /* text + icon on the slate-tint editing notice */
   --apollo-done: #8f887d; /* grey check on a settled Home row (design round 3) */
   /* Facet-filter redesign (PROFILE_FACET_REDESIGN) — three facet hues, each a
@@ -345,7 +360,6 @@
   --color-apollo-slate: var(--apollo-slate);
   --color-apollo-slate-tint: var(--apollo-slate-tint);
   --color-apollo-slate-tint-border: var(--apollo-slate-tint-border);
-  --color-apollo-slate-mid: var(--apollo-slate-mid);
   --color-apollo-notice-text: var(--apollo-notice-text);
   --color-apollo-done: var(--apollo-done);
   --color-apollo-green: var(--apollo-green);
