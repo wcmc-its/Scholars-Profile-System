@@ -209,9 +209,7 @@ dedicated ALB hostname with its own ACM cert, pre-staged as an HTTPS failover me
 dynamic origin group, would remove both the SPOF and the :80 dependency (#1936, not
 built).
 
-**Not rehearsed.** This procedure has **not** been run on staging. Rehearse it once on
-staging (VIP -> ALB -> VIP) before relying on it in prod. Until then, plan on a recovery
-time of 30-60+ minutes (config edit, diff, deploy, propagation), not "minutes".
+**Rehearsed on staging 2026-10-07** (VIP -> ALB -> VIP), following the steps above. The backout `cdk diff` matched the expectation exactly (origin only: SSM ALB DNS, `http-only`, :80). With the origin on the ALB, uncached `/api/health` and `/api/search` returned 200 and `/edit` its 302 SSO redirect, with no 502s. The roll-forward from a clean `origin/master` restored `https-only` to the VIP, and the same checks passed. Not yet rehearsed in prod. Plan on 30-60 minutes for a real backout: config edit, diff, deploy, then CloudFront propagation.
 
 **Open questions for the WCM network team (unanswered, record the answers here):**
 
