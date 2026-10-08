@@ -57,6 +57,7 @@ const {
 vi.mock("@/lib/sources/reciterdb", () => ({ withReciterConnection }));
 vi.mock("@/lib/headshot", () => ({
   identityImageEndpoint: (cwid: string) => `https://img.example/${cwid}`,
+  headshotUrl: (cwid: string) => `https://img.example/${cwid}`,
 }));
 // Publication-level suppression is pass-through: nothing dark, no hidden
 // authors. The mentee-level hide is what this suite exercises.

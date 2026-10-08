@@ -37,7 +37,7 @@
  * client component.
  */
 import { prisma } from "@/lib/db";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
 import { publicRoleWhere } from "@/lib/eligibility";
@@ -314,6 +314,7 @@ export async function buildHits(
     overview: string | null;
     primaryDepartment: string | null;
     primaryOrgCode: string | null;
+    hasHeadshot: boolean | null;
     department: { name: string } | null;
     division: { name: string } | null;
   }>;
@@ -339,7 +340,7 @@ export async function buildHits(
       primaryTitle: s.primaryTitle,
       divisionName: s.division?.name ?? null,
       departmentName: s.department?.name ?? s.primaryDepartment ?? "",
-      identityImageEndpoint: identityImageEndpoint(s.cwid),
+      identityImageEndpoint: headshotUrl(s.cwid, s.hasHeadshot),
       roleCategory: formatRoleCategory(s.roleCategory),
       roleCategoryRaw: s.roleCategory,
       overview: s.overview

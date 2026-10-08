@@ -24,7 +24,7 @@ export {
   isCenterMembershipActive,
   type CenterMemberCountClient,
 } from "@/lib/api/center-member-count";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl, identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
@@ -473,6 +473,7 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
         roleCategory: true,
         deletedAt: true,
         status: true,
+        hasHeadshot: true,
       },
     });
     // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
@@ -501,7 +502,7 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
             preferredName: d.preferredName,
             primaryTitle: d.primaryTitle,
             slug: d.slug,
-            identityImageEndpoint: identityImageEndpoint(d.cwid),
+            identityImageEndpoint: headshotUrl(d.cwid, d.hasHeadshot),
             roleLabel: s.roleLabel,
             isInterim: s.interim,
           },
@@ -598,6 +599,7 @@ type CenterScholarRow = {
   overview: string | null;
   professorialRank: string | null;
   primaryOrgCode: string | null;
+  hasHeadshot: boolean | null;
   department: { name: string } | null;
   division: { name: string } | null;
 };
@@ -641,7 +643,7 @@ async function buildCenterMemberHits(
     primaryTitle: s.primaryTitle,
     divisionName: s.division?.name ?? null,
     departmentName: s.department?.name ?? s.primaryDepartment ?? "",
-    identityImageEndpoint: identityImageEndpoint(s.cwid),
+    identityImageEndpoint: headshotUrl(s.cwid, s.hasHeadshot),
     roleCategory: formatRoleCategory(s.roleCategory),
     roleCategoryRaw: s.roleCategory,
     overview: s.overview,
@@ -841,6 +843,7 @@ async function getCenterMembersUncached(
       overview: true,
       professorialRank: true,
       primaryOrgCode: true,
+      hasHeadshot: true,
       department: { select: { name: true } },
       division: { select: { name: true } },
     },
@@ -1272,6 +1275,7 @@ export async function getCenterMembersFiltered(
             overview: true,
             professorialRank: true,
             primaryOrgCode: true,
+            hasHeadshot: true,
             department: { select: { name: true } },
             division: { select: { name: true } },
           },
@@ -1422,6 +1426,7 @@ export async function getCenterProgram(
         roleCategory: true,
         deletedAt: true,
         status: true,
+        hasHeadshot: true,
       },
     });
     const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
@@ -1444,7 +1449,7 @@ export async function getCenterProgram(
             preferredName: scholar.preferredName,
             slug: scholar.slug,
             primaryTitle: scholar.primaryTitle,
-            identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+            identityImageEndpoint: headshotUrl(scholar.cwid, scholar.hasHeadshot),
             isInterim: row.interim,
             role,
             roleLabel,
@@ -1558,12 +1563,24 @@ async function getCenterPublicationsListUncached(
   const cwids = Array.from(
     new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid!))),
   );
-  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
+  type Sl = {
+    cwid: string;
+    preferredName: string;
+    slug: string;
+    roleCategory: string | null;
+    hasHeadshot: boolean | null;
+  };
   const scholars =
     cwids.length > 0
       ? ((await prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
+          select: {
+            cwid: true,
+            preferredName: true,
+            slug: true,
+            roleCategory: true,
+            hasHeadshot: true,
+          },
         })) as Sl[])
       : [];
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
@@ -1585,7 +1602,7 @@ async function getCenterPublicationsListUncached(
           name: s.preferredName,
           cwid: s.cwid,
           slug: s.slug,
-          identityImageEndpoint: identityImageEndpoint(s.cwid),
+          identityImageEndpoint: headshotUrl(s.cwid, s.hasHeadshot),
           isFirst: a.isFirst,
           isLast: a.isLast,
           roleCategory: s.roleCategory,

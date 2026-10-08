@@ -23,7 +23,7 @@
  */
 
 import { prisma } from "@/lib/db";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import {
   isAuthorHidden,
   loadPublicationSuppressions,
@@ -418,7 +418,15 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
             scholar: { deletedAt: null, status: "active" },
           },
           include: {
-            scholar: { select: { cwid: true, slug: true, preferredName: true, roleCategory: true } },
+            scholar: {
+              select: {
+                cwid: true,
+                slug: true,
+                preferredName: true,
+                roleCategory: true,
+                hasHeadshot: true,
+              },
+            },
           },
           orderBy: { position: "asc" },
         })
@@ -437,7 +445,7 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
     list.push({
       cwid: row.scholar.cwid,
       displayName: row.scholar.preferredName,
-      identityImageEndpoint: identityImageEndpoint(row.scholar.cwid),
+      identityImageEndpoint: headshotUrl(row.scholar.cwid, row.scholar.hasHeadshot),
       profileSlug: row.scholar.slug,
       roleCategory: row.scholar.roleCategory,
     });

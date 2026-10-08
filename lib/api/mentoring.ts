@@ -26,7 +26,7 @@
  * section on researcher profiles).
  */
 import { prisma } from "@/lib/db";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import {
   getManualMentees,
@@ -908,6 +908,7 @@ export async function getMenteesForMentor(
       postnominal: true,
       primaryDepartment: true,
       roleCategory: true,
+      hasHeadshot: true,
     },
   });
   const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
@@ -929,7 +930,7 @@ export async function getMenteesForMentor(
       // JSDoc) and falls back to initials, so skip the pointless request. A
       // SOURCED id keeps its endpoint even if oddly shaped — that request is
       // the pre-existing behaviour and not ours to second-guess.
-      identityImageEndpoint: isManualMenteeId(c.cwid) ? "" : identityImageEndpoint(c.cwid),
+      identityImageEndpoint: isManualMenteeId(c.cwid) ? "" : headshotUrl(c.cwid, s?.hasHeadshot),
       manualOnly: !sourcedCwids.has(c.cwid),
       scholar: s
         ? {

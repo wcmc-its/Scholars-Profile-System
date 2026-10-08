@@ -697,6 +697,10 @@ export const PEOPLE_INDEX_SELECT = {
   // `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, ...).
   // Plain scalar, direct copy onto the doc in `buildPeopleDoc` below.
   primaryOrgCode: true,
+  // Avatar gate — the persisted directory-photo verdict (etl/headshot). Copied
+  // onto the doc so a people hit can skip the directory request for a scholar
+  // known to have no photo (`headshotUrl`, lib/headshot.ts).
+  hasHeadshot: true,
 } satisfies Prisma.ScholarSelect;
 
 export type ScholarForIndex = Prisma.ScholarGetPayload<{
@@ -1748,6 +1752,8 @@ export async function buildPeopleDoc(
     aoiTermCount: s.topicAssignments.length,
     publicationAbstracts: abstractParts.join(" "),
     hasActiveGrants,
+    // null = never probed / indeterminate → the hit keeps the live photo URL.
+    hasHeadshot: s.hasHeadshot,
     piRoleEver,
     activePiGrantCount,
     isComplete,

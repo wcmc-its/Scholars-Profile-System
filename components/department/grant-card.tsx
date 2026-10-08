@@ -106,7 +106,7 @@ export function GrantCard({
                   className="chip chip-first flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground"
                   style={{ textDecoration: "none" }}
                 >
-                  {p.identityImageEndpoint && p.cwid ? (
+                  {p.identityImageEndpoint != null && p.cwid ? (
                     <HeadshotAvatar
                       size="sm"
                       cwid={p.cwid}

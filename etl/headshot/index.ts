@@ -15,6 +15,14 @@
  *   npm run etl:headshot           incremental — never-checked + stale
  *                                  (older than HEADSHOT_STALE_DAYS)
  *   npm run etl:headshot -- --full re-probe every active scholar
+ *   npm run etl:headshot:missing   (`--missing`) re-probe ONLY rows persisted
+ *                                  `has_headshot = false`, ignoring staleness.
+ *                                  Nightly: the app emits no photo URL for those
+ *                                  rows (lib/headshot.ts headshotUrl), so this is
+ *                                  what makes a newly uploaded photo appear
+ *                                  within about a day. Records its own etl_run
+ *                                  source ("HeadshotMissing") so a nightly
+ *                                  success never masks the weekly run's freshness.
  *
  * Exits 0 on success, 1 on failure. STDOUT carries one structured result line.
  */
@@ -32,6 +40,8 @@ const CONCURRENCY = 12;
 
 async function main(): Promise<void> {
   const full = process.argv.includes("--full");
+  const missing = process.argv.includes("--missing");
+  if (full && missing) throw new Error("[Headshot] --full and --missing are exclusive");
   // Incremental mode re-probes a scholar whose last check is older than this.
   // The threshold is pinned against the weekly cadence in `lib/headshot-presence.ts`
   // — see HEADSHOT_STALE_DAYS (13, deliberately above the 7-day period, #2210).
@@ -40,10 +50,12 @@ async function main(): Promise<void> {
   const scholars = await db.write.scholar.findMany({
     where: full
       ? { deletedAt: null }
-      : {
-          deletedAt: null,
-          OR: [{ headshotCheckedAt: null }, { headshotCheckedAt: { lt: staleBefore } }],
-        },
+      : missing
+        ? { deletedAt: null, hasHeadshot: false }
+        : {
+            deletedAt: null,
+            OR: [{ headshotCheckedAt: null }, { headshotCheckedAt: { lt: staleBefore } }],
+          },
     select: { cwid: true, hasHeadshot: true },
   });
 
@@ -107,7 +119,7 @@ async function main(): Promise<void> {
   console.log(
     JSON.stringify({
       event: "headshot_presence",
-      mode: full ? "full" : "incremental",
+      mode: full ? "full" : missing ? "missing" : "incremental",
       scanned: scholars.length,
       present,
       absent,
@@ -131,7 +143,10 @@ async function main(): Promise<void> {
   }
 }
 
-withEtlRun("Headshot", main)
+// The missing-only pass has no previously-true rows, so the absent-flip cap
+// above can never trip for it; its indeterminate limit keeps the min-25 floor,
+// so a few transient blips on a small batch never fail the nightly step.
+withEtlRun(process.argv.includes("--missing") ? "HeadshotMissing" : "Headshot", main)
   .catch((err) => {
     console.error("[Headshot] failed:", err);
     process.exit(1);

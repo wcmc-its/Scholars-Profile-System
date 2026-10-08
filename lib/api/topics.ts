@@ -33,7 +33,7 @@
  */
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import {
   HIDDEN_ROLE_CATEGORIES,
@@ -151,6 +151,7 @@ export async function getTopScholarsForTopic(
           preferredName: true,
           primaryTitle: true,
           roleCategory: true,
+          hasHeadshot: true,
         },
       },
       publication: {
@@ -171,6 +172,7 @@ export async function getTopScholarsForTopic(
       slug: string;
       preferredName: string;
       primaryTitle: string | null;
+      hasHeadshot: boolean | null;
     };
     total: number;
   };
@@ -227,7 +229,7 @@ export async function getTopScholarsForTopic(
     slug: e.scholar.slug,
     preferredName: e.scholar.preferredName,
     primaryTitle: e.scholar.primaryTitle,
-    identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
+    identityImageEndpoint: headshotUrl(e.scholar.cwid, e.scholar.hasHeadshot),
     rank: i + 1,
   }));
 }
@@ -434,6 +436,7 @@ export async function getSubtopicScholars(
           primaryTitle: true,
           primaryDepartment: true,
           roleCategory: true,
+          hasHeadshot: true,
         },
       },
       publication: {
@@ -451,6 +454,7 @@ export async function getSubtopicScholars(
       preferredName: string;
       primaryTitle: string | null;
       primaryDepartment: string | null;
+      hasHeadshot: boolean | null;
     };
     total: number;
   };
@@ -529,7 +533,7 @@ export async function getSubtopicScholars(
     preferredName: e.scholar.preferredName,
     primaryTitle: e.scholar.primaryTitle,
     primaryDepartment: e.scholar.primaryDepartment,
-    identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
+    identityImageEndpoint: headshotUrl(e.scholar.cwid, e.scholar.hasHeadshot),
     pubCountInSubtopic: subtopicCountByCwid.get(e.scholar.cwid) ?? 0,
     pubCountTotal: totalCountByCwid.get(e.scholar.cwid) ?? 0,
     rank: i + 1,
@@ -1248,7 +1252,13 @@ export async function fetchWcmAuthorsForPmids(
         isLast: true,
         position: true,
         scholar: {
-          select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
+          select: {
+            cwid: true,
+            slug: true,
+            preferredName: true,
+            roleCategory: true,
+            hasHeadshot: true,
+          },
         },
       },
     }),
@@ -1288,7 +1298,7 @@ export async function fetchWcmAuthorsForPmids(
       name: row.scholar.preferredName,
       cwid: row.scholar.cwid,
       slug: row.scholar.slug,
-      identityImageEndpoint: identityImageEndpoint(row.scholar.cwid),
+      identityImageEndpoint: headshotUrl(row.scholar.cwid, row.scholar.hasHeadshot),
       isFirst: row.isFirst,
       isLast: row.isLast,
       position: row.position,
@@ -1523,6 +1533,7 @@ export async function getTopicScholars(
         postnominal: true,
         primaryTitle: true,
         roleCategory: true,
+        hasHeadshot: true,
       },
     }),
   ]);
@@ -1577,7 +1588,7 @@ export async function getTopicScholars(
       preferredName: s.preferredName,
       postnominal: s.postnominal,
       primaryTitle: s.primaryTitle,
-      identityImageEndpoint: identityImageEndpoint(s.cwid),
+      identityImageEndpoint: headshotUrl(s.cwid, s.hasHeadshot),
       roleCategory: s.roleCategory,
       subtopics: subtopicsByCwid.get(s.cwid) ?? [],
     })),

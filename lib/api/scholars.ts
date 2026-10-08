@@ -6,7 +6,7 @@
  */
 import { prisma } from "@/lib/db";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import { institutionDisplayName } from "@/lib/institutions";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
@@ -100,7 +100,7 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
       isEmailReleaseGateEnabled(),
     ),
     overview: scholar.overview,
-    identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+    identityImageEndpoint: headshotUrl(scholar.cwid, scholar.hasHeadshot),
     appointments: scholar.appointments.map((a) => ({
       title: a.title,
       organization: a.organization,

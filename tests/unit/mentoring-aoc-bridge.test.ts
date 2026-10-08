@@ -57,6 +57,7 @@ const {
 vi.mock("@/lib/sources/reciterdb", () => ({ withReciterConnection }));
 vi.mock("@/lib/headshot", () => ({
   identityImageEndpoint: (cwid: string) => `https://img.example/${cwid}`,
+  headshotUrl: (cwid: string) => `https://img.example/${cwid}`,
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {

@@ -41,7 +41,7 @@
  * would drift from `/search?type=funding` again.
  */
 import { prisma } from "@/lib/db";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
@@ -366,12 +366,24 @@ export async function buildUnitGrantCards(
   const siblingRows = await loadProjectSiblingRows(pageSlice);
 
   const cwids = Array.from(new Set(pageSlice.flatMap((g) => g.cwids)));
-  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
+  type Sl = {
+    cwid: string;
+    preferredName: string;
+    slug: string;
+    roleCategory: string | null;
+    hasHeadshot: boolean | null;
+  };
   const [scholars, siblingSuppressed] = await Promise.all([
     cwids.length > 0
       ? (prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
+          select: {
+            cwid: true,
+            preferredName: true,
+            slug: true,
+            roleCategory: true,
+            hasHeadshot: true,
+          },
         }) as Promise<Sl[]>)
       : Promise.resolve([] as Sl[]),
     // #160 on a SIBLING's row. The unit-scoped suppression load inside
@@ -403,7 +415,7 @@ export async function buildUnitGrantCards(
           name: s.preferredName,
           cwid: s.cwid,
           slug: linkable ? s.slug : null,
-          identityImageEndpoint: linkable ? identityImageEndpoint(s.cwid) : null,
+          identityImageEndpoint: linkable ? headshotUrl(s.cwid, s.hasHeadshot) : null,
           // Unread on this path — see the note on this function. The card
           // component hardcodes its own chip class.
           isFirst: false,

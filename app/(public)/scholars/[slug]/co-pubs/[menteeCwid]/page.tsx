@@ -16,7 +16,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { resolvePair } from "./resolve-pair";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import { getCoPublications, type CoPublicationFull } from "@/lib/api/mentoring";
 import { AuthorChipRow, type AuthorChip } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
@@ -88,7 +88,13 @@ export default async function CoPubsPage({
       ? []
       : await prisma.scholar.findMany({
           where: { cwid: { in: [...authorCwids] }, deletedAt: null, status: "active" },
-          select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
+          select: {
+            cwid: true,
+            slug: true,
+            preferredName: true,
+            roleCategory: true,
+            hasHeadshot: true,
+          },
         });
   const scholarByCwid = new Map(wcmScholars.map((s) => [s.cwid, s]));
 
@@ -181,7 +187,12 @@ function CoPubCitation({
   pub: CoPublicationFull;
   scholarByCwid: Map<
     string,
-    { slug: string; preferredName: string; roleCategory: string | null }
+    {
+      slug: string;
+      preferredName: string;
+      roleCategory: string | null;
+      hasHeadshot: boolean | null;
+    }
   >;
   pinnedCwids: ReadonlyArray<string>;
   currentProfileCwid: string;
@@ -203,7 +214,7 @@ function CoPubCitation({
       name,
       cwid: a.personIdentifier,
       slug: s?.slug ?? null,
-      identityImageEndpoint: identityImageEndpoint(a.personIdentifier),
+      identityImageEndpoint: headshotUrl(a.personIdentifier, s?.hasHeadshot),
       isFirst: a.rank === minWcmRank,
       isLast: a.rank === maxRank,
       roleCategory: s?.roleCategory ?? null,

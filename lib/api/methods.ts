@@ -32,7 +32,7 @@
  * and only depend on the master lens.
  */
 import { prisma } from "@/lib/db";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import {
   TOP_SCHOLARS_ELIGIBLE_ROLES,
   isPubliclyDisplayed,
@@ -1281,7 +1281,13 @@ export async function getFamilyScholars(
     select: {
       pmidCount: true,
       scholar: {
-        select: { cwid: true, slug: true, preferredName: true, primaryTitle: true },
+        select: {
+          cwid: true,
+          slug: true,
+          preferredName: true,
+          primaryTitle: true,
+          hasHeadshot: true,
+        },
       },
     },
   });
@@ -1292,7 +1298,7 @@ export async function getFamilyScholars(
     slug: r.scholar!.slug,
     preferredName: r.scholar!.preferredName,
     primaryTitle: r.scholar!.primaryTitle,
-    identityImageEndpoint: identityImageEndpoint(r.scholar!.cwid),
+    identityImageEndpoint: headshotUrl(r.scholar!.cwid, r.scholar!.hasHeadshot),
     rank: i + 1,
   }));
 }
@@ -1329,13 +1335,25 @@ export async function getTopScholarsForSupercategory(
       familyLabel: true,
       pmidCount: true,
       scholar: {
-        select: { cwid: true, slug: true, preferredName: true, primaryTitle: true },
+        select: {
+          cwid: true,
+          slug: true,
+          preferredName: true,
+          primaryTitle: true,
+          hasHeadshot: true,
+        },
       },
     },
   });
 
   type Agg = {
-    scholar: { cwid: string; slug: string; preferredName: string; primaryTitle: string | null };
+    scholar: {
+      cwid: string;
+      slug: string;
+      preferredName: string;
+      primaryTitle: string | null;
+      hasHeadshot: boolean | null;
+    };
     total: number;
     families: Array<{ label: string; pmidCount: number }>;
   };
@@ -1359,7 +1377,7 @@ export async function getTopScholarsForSupercategory(
     slug: e.scholar.slug,
     preferredName: e.scholar.preferredName,
     primaryTitle: e.scholar.primaryTitle,
-    identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
+    identityImageEndpoint: headshotUrl(e.scholar.cwid, e.scholar.hasHeadshot),
     rank: i + 1,
     families: [...e.families]
       .sort((a, b) => b.pmidCount - a.pmidCount || a.label.localeCompare(b.label))
@@ -1416,6 +1434,7 @@ export async function getFamilyScholarRows(
           primaryTitle: true,
           primaryDepartment: true,
           roleCategory: true,
+          hasHeadshot: true,
         },
       },
     },
@@ -1462,7 +1481,7 @@ export async function getFamilyScholarRows(
     preferredName: r.scholar!.preferredName,
     primaryTitle: r.scholar!.primaryTitle,
     primaryDepartment: r.scholar!.primaryDepartment,
-    identityImageEndpoint: identityImageEndpoint(r.scholar!.cwid),
+    identityImageEndpoint: headshotUrl(r.scholar!.cwid, r.scholar!.hasHeadshot),
     pubCountInSubtopic: r.pmidCount,
     pubCountTotal: totalByCwid.get(r.scholar!.cwid) ?? 0,
     rank: i + 1,
@@ -2122,6 +2141,7 @@ export async function getMethodScholars(
           postnominal: true,
           primaryTitle: true,
           roleCategory: true,
+          hasHeadshot: true,
         },
       },
     },
@@ -2179,7 +2199,7 @@ export async function getMethodScholars(
       preferredName: s.preferredName,
       postnominal: s.postnominal,
       primaryTitle: s.primaryTitle,
-      identityImageEndpoint: identityImageEndpoint(s.cwid),
+      identityImageEndpoint: headshotUrl(s.cwid, s.hasHeadshot),
       roleCategory: s.roleCategory,
       pubCountInFamily: s.pubCountInFamily,
     })),
