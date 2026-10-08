@@ -22,7 +22,7 @@
  *   F6 — prime/direct sponsor + isSubaward
  */
 import { prisma } from "@/lib/db";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import {
   FUNDING_INDEX,
   FUNDING_FIELD_BOOSTS,
@@ -1113,9 +1113,11 @@ export async function searchFunding(opts: {
     personCwids.length > 0
       ? prisma.scholar.findMany({
           where: { cwid: { in: personCwids } },
-          select: { cwid: true, roleCategory: true },
+          select: { cwid: true, roleCategory: true, hasHeadshot: true },
         })
-      : Promise.resolve([] as { cwid: string; roleCategory: string | null }[]),
+      : Promise.resolve(
+          [] as { cwid: string; roleCategory: string | null; hasHeadshot: boolean | null }[],
+        ),
     facetCwidList.length === 0
       ? Promise.resolve(
           [] as {
@@ -1146,6 +1148,7 @@ export async function searchFunding(opts: {
         }),
   ]);
   const roleByCwid = new Map(roleRows.map((s) => [s.cwid, s.roleCategory]));
+  const hasHeadshotByCwid = new Map(roleRows.map((s) => [s.cwid, s.hasHeadshot]));
 
   // PLAN P4 — funded-outputs count X (per project), at QUERY TIME, no reindex.
   // The funding hit already carries each grant's funded pmids (`publications[]`),
@@ -1276,7 +1279,7 @@ export async function searchFunding(opts: {
         slug: p.slug,
         preferredName: p.preferredName,
         role: p.role,
-        identityImageEndpoint: identityImageEndpoint(p.cwid),
+        identityImageEndpoint: headshotUrl(p.cwid, hasHeadshotByCwid.get(p.cwid)),
         roleCategory: roleByCwid.get(p.cwid) ?? null,
       })),
     };

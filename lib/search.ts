@@ -274,6 +274,9 @@ export const peopleIndexMapping = {
       publicationAbstracts: { type: "text", analyzer: "scholar_text" },
       // Filter facets.
       hasActiveGrants: { type: "boolean" },
+      // Avatar gate (lib/headshot.ts headshotUrl) — read back via `_source`,
+      // never queried.
+      hasHeadshot: { type: "boolean", index: false },
       // Issue #233 — PI facet derived fields.
       piRoleEver: { type: "boolean" },
       activePiGrantCount: { type: "integer" },

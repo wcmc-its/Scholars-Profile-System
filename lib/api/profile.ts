@@ -30,7 +30,7 @@ import { isProfileLinksEnabled, type ProfileLinks } from "@/lib/edit/profile-lin
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
 import { profileFundingRows } from "@/lib/grants/project-count";
@@ -1128,6 +1128,7 @@ export const getScholarFullProfileBySlug = cache(
             deletedAt: true,
             status: true,
             roleCategory: true,
+            hasHeadshot: true,
           },
         },
       },
@@ -1231,6 +1232,7 @@ export const getScholarFullProfileBySlug = cache(
                       deletedAt: true,
                       status: true,
                       roleCategory: true,
+                      hasHeadshot: true,
                     },
                   },
                 },
@@ -1630,7 +1632,7 @@ export const getScholarFullProfileBySlug = cache(
               name: au.scholar!.preferredName,
               cwid: au.scholar!.cwid,
               slug: au.scholar!.slug,
-              identityImageEndpoint: identityImageEndpoint(au.scholar!.cwid),
+              identityImageEndpoint: headshotUrl(au.scholar!.cwid, au.scholar!.hasHeadshot),
               isFirst: au.isFirst,
               isLast: au.isLast,
               position: au.position,
@@ -1797,7 +1799,7 @@ export const getScholarFullProfileBySlug = cache(
         isEmailReleaseGateEnabled() &&
         scholar.email != null &&
         scholar.emailVisibility !== "public",
-      identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+      identityImageEndpoint: headshotUrl(scholar.cwid, scholar.hasHeadshot),
       hasClinicalProfile: scholar.hasClinicalProfile,
       clinicalProfileUrl: scholar.clinicalProfileUrl,
       orcid: scholar.orcid,
@@ -2109,7 +2111,10 @@ export const getScholarFullProfileBySlug = cache(
                 scholar.postdoctoralMentor.roleCategory,
               ),
               primaryTitle: scholar.postdoctoralMentor.primaryTitle ?? null,
-              identityImageEndpoint: identityImageEndpoint(scholar.postdoctoralMentor.cwid),
+              identityImageEndpoint: headshotUrl(
+                scholar.postdoctoralMentor.cwid,
+                scholar.postdoctoralMentor.hasHeadshot,
+              ),
               roleCategory: scholar.postdoctoralMentor.roleCategory,
             }
           : null,

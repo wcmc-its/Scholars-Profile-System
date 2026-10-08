@@ -36,7 +36,7 @@ type Source = { name: string; data: string; cad: Cadence };
 
 const WCM: Source[] = [
   { name: "Enterprise Directory", data: "Name, degrees, titles, appointments, department, NYP positions, postdoc supervisors", cad: "nightly" },
-  { name: "Web Directory", data: "Photo, shown live; email and who can see it; where you edit your name", cad: "live" },
+  { name: "Web Directory", data: "Photo, shown live (a new one within a day); email and who can see it; where you edit your name", cad: "live" },
   { name: "ASMS", data: "Education and training", cad: "nightly" },
   { name: "InfoEd (Weill Research Gateway)", data: "Grants and grant roles", cad: "nightly" },
   { name: "External Relationships / COI (WRG)", data: "Disclosures, which you manage in the Weill Research Gateway", cad: "nightly" },
@@ -113,7 +113,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     rows: [
       { field: "Name", detail: "Your preferred name", source: "Enterprise Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change Preferred Name in the {WebDir}. It appears the next day.</> },
       { field: "Degrees after your name", source: "Enterprise Directory, from ASMS", cadence: "Nightly", tag: "Request a change", how: "Routes to the Office of Faculty Affairs." },
-      { field: "Photo", source: "Web Directory", cadence: "Live", tag: "Yours · Web Directory", how: <>Add, change or remove it in the {WebDir}. It shows right away.</> },
+      { field: "Photo", source: "Web Directory", cadence: "Live", tag: "Yours · Web Directory", how: <>Add, change or remove it in the {WebDir}. A change shows right away; a new photo within about a day.</> },
       { field: "Email and who can see it", source: "Web Directory", cadence: "Nightly", tag: "Yours · Web Directory", how: <>Change the address or its &ldquo;Publish to&rdquo; setting in the {WebDir}.</> },
       { field: "ORCID iD", source: "Scholars (copied to ReCiter nightly)", cadence: "On save", tag: "Yours to edit", how: "Confirm or enter it under Identifiers & profiles." },
       { field: "Profile links", detail: "LinkedIn, X, Bluesky, Google Scholar, ResearchGate", source: "Scholars", cadence: "On save", tag: "Yours to edit", how: "Add or remove them under Identifiers & profiles." },
@@ -496,8 +496,8 @@ export function SystemContext() {
         </div>
       </div>
       <div className="text-xs text-[var(--apollo-ink-2)]">
-        Photos are shown live from the Web Directory rather than copied, so a new photo appears
-        right away. &ldquo;Occasional&rdquo; means someone runs an export by hand, with no
+        Photos are shown live from the Web Directory rather than copied, so a changed photo
+        appears right away and a new one within about a day. &ldquo;Occasional&rdquo; means someone runs an export by hand, with no
         schedule.
       </div>
     </div>

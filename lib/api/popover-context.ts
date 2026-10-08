@@ -101,6 +101,7 @@ export async function fetchPopoverHeader(
       status: true,
       deletedAt: true,
       roleCategory: true,
+      hasHeadshot: true,
       _count: {
         select: {
           authorships: true,
@@ -141,7 +142,7 @@ export async function fetchPopoverHeader(
   const hiddenPubs = hiddenCounts.get(cwid) ?? 0;
   const topTopicLabel = topTopicSlug ? (topic?.label ?? topTopicSlug) : null;
 
-  const { identityImageEndpoint } = await import("@/lib/headshot");
+  const { headshotUrl } = await import("@/lib/headshot");
   return {
     cwid: scholar.cwid,
     preferredName: scholar.preferredName,
@@ -150,7 +151,7 @@ export async function fetchPopoverHeader(
     primaryDepartment: scholar.primaryDepartment,
     primaryOrgCode: scholar.primaryOrgCode ?? null,
     slug: scholar.status === "active" ? scholar.slug : null,
-    identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+    identityImageEndpoint: headshotUrl(scholar.cwid, scholar.hasHeadshot),
     totalPubCount: Math.max(0, scholar._count.authorships - hiddenPubs),
     totalGrantCount: scholar._count.grants,
     topTopic: topTopicLabel,

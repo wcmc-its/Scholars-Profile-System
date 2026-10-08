@@ -198,6 +198,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Checks which scholars are missing a photo in the campus directory.",
     origin: "external", // directory.weill.cornell.edu
   },
+  HeadshotMissing: {
+    label: "New Profile Photo Check",
+    description: "Nightly re-check of scholars with no photo, so a newly added one appears.",
+    origin: "external", // directory.weill.cornell.edu
+  },
   CancerCenterCollabReport: {
     label: "Cancer Center Collaboration Report",
     description: "Weekly collaboration and cancer-relevance numbers behind a Cancer Center's Reports tab.",

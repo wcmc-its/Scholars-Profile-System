@@ -19,7 +19,7 @@
  * page and /api/search) leave it unset.
  */
 import { cache } from "react";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import type { AuthorRole } from "@/lib/search-index-docs";
 import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
@@ -3482,6 +3482,8 @@ export async function searchPeople(opts: {
       "publicationCount",
       "grantCount",
       "hasActiveGrants",
+      // Avatar gate — `false` emits "" so the card skips the directory request.
+      "hasHeadshot",
       "publicationMeshUi",
       // #1959 — the gate-dropped ancestors of the field above, requested ONLY when
       // a descriptor with descendants resolved (the necessary condition for the
@@ -3698,6 +3700,9 @@ export async function searchPeople(opts: {
       publicationCount: number;
       grantCount: number;
       hasActiveGrants: boolean;
+      /** Directory-photo verdict (etl/headshot); absent on docs indexed before
+       *  the field existed, null when never probed. */
+      hasHeadshot?: boolean | null;
       // Issue #688 — descriptor UIs the scholar is tagged with (omit-on-empty
       // in the ETL). Read only for the match-provenance path; the field is
       // already in `_source` (no `_source` include-list trims it).
@@ -4649,7 +4654,7 @@ export async function searchPeople(opts: {
         // sort can place absent deliberately instead of inferring it from an absent key. Callers
         // that didn't ask keep today's byte-identical hit.
         ...(includeLastName ? { lastNameSort: h._source.lastNameSort ?? null } : {}),
-        identityImageEndpoint: identityImageEndpoint(h._source.cwid),
+        identityImageEndpoint: headshotUrl(h._source.cwid, h._source.hasHeadshot),
         // #824 follow-up Phase 1 — the single typed evidence object. Present
         // only under `SEARCH_RESULT_EVIDENCE`; when present the card renders it
         // via `<ResultEvidence>`.
@@ -5831,7 +5836,9 @@ export async function searchPublications(opts: {
     (wcmAuthorsByPmid.get(pmid) ?? []).some(
       (a) =>
         a.cwid &&
-        a.identityImageEndpoint &&
+        // `!= null`, not truthy: "" is a known no-photo author (headshotUrl),
+        // still a displayable chip that renders initials.
+        a.identityImageEndpoint != null &&
         (a.slug || !isPubliclyDisplayed(a.roleCategory)),
     );
   const authorsFallbackByPmid = await fetchAuthorBylineForPmids(
@@ -5870,7 +5877,7 @@ export async function searchPublications(opts: {
       // NON-LINKED. Flag-off → no such author is hydrated, so the predicate is
       // equivalent to the prior `cwid && slug && img`.
       const wcmAuthors = enriched.flatMap((a) =>
-        a.cwid && a.identityImageEndpoint && (a.slug || !isPubliclyDisplayed(a.roleCategory))
+        a.cwid && a.identityImageEndpoint != null && (a.slug || !isPubliclyDisplayed(a.roleCategory))
           ? [
               {
                 name: a.name,

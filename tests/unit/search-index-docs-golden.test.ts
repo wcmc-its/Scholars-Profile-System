@@ -276,6 +276,8 @@ describe("buildPeopleDoc — golden snapshots", () => {
       professorialRank: "Associate Professor",
       // Institution facet — direct-copy scalar, exercises the populated branch.
       primaryOrgCode: "WCMC",
+      // Avatar gate — direct-copy scalar (lib/headshot.ts headshotUrl).
+      hasHeadshot: true,
       deptCode: "MED",
       divCode: "CARD",
       department: { name: "Medicine" },
@@ -372,6 +374,7 @@ describe("buildPeopleDoc — golden snapshots", () => {
       // (OMIT-on-empty for professorialRank — see the "no rank" branch).
       hasClinicalProfile: false,
       professorialRank: null,
+      hasHeadshot: false,
       deptCode: null,
       divCode: null,
       department: null,

@@ -1694,6 +1694,15 @@ export class EtlStack extends Stack {
         external: false,
         tier: "continue",
       },
+      // Avatar gate (lib/headshot.ts headshotUrl): the app emits no photo URL for
+      // a scholar persisted has_headshot=false, so it never asks the directory
+      // for a photo it knows is missing. This re-probes ONLY those rows nightly
+      // (etl/headshot --missing) so a newly uploaded photo appears within about
+      // a day. Same shape as the weekly HeadshotPresence step: public directory
+      // over NAT egress, no credential, SPS-DB only. Placed BEFORE
+      // SearchIndexNightly so the people index (which carries hasHeadshot) and
+      // the revalidated pages pick up a flipped verdict the same night.
+      { id: "HeadshotMissingNightly", npmScript: "etl:headshot:missing", external: false, tier: "continue" },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Reliability-audit PR-5 — terminal volume gate. Reads etl_run

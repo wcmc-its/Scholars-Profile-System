@@ -13,7 +13,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { resolveMentor } from "../resolve-mentor";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import {
   menteeProgramLabel,
   getAllMentorCoPublications,
@@ -96,7 +96,13 @@ export default async function MentorCoPubsRollupPage({
       ? []
       : await prisma.scholar.findMany({
           where: { cwid: { in: [...authorCwids] }, deletedAt: null, status: "active" },
-          select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
+          select: {
+            cwid: true,
+            slug: true,
+            preferredName: true,
+            roleCategory: true,
+            hasHeadshot: true,
+          },
         });
   const scholarByCwid = new Map(wcmScholars.map((s) => [s.cwid, s]));
 
@@ -215,7 +221,12 @@ function CoPubCitation({
   mentorSlug: string;
   scholarByCwid: Map<
     string,
-    { slug: string; preferredName: string; roleCategory: string | null }
+    {
+      slug: string;
+      preferredName: string;
+      roleCategory: string | null;
+      hasHeadshot: boolean | null;
+    }
   >;
 }) {
   const pub = entry.publication;
@@ -236,7 +247,7 @@ function CoPubCitation({
       name,
       cwid: a.personIdentifier,
       slug: s?.slug ?? null,
-      identityImageEndpoint: identityImageEndpoint(a.personIdentifier),
+      identityImageEndpoint: headshotUrl(a.personIdentifier, s?.hasHeadshot),
       isFirst: a.rank === minWcmRank,
       isLast: a.rank === maxRank,
       roleCategory: s?.roleCategory ?? null,

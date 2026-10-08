@@ -16,7 +16,7 @@ import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { attachTopMesh } from "@/lib/api/roster-mesh";
 import type { RosterMeshChip } from "@/lib/roster-row-tags";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import {
   buildUnitGrantCards,
   loadUnitGrantProjects,
@@ -225,6 +225,7 @@ async function getDivisionUncached(
         roleCategory: true,
         deletedAt: true,
         status: true,
+        hasHeadshot: true,
       },
     });
     // #2260 — a hidden identity class (#536), soft-deleted or inactive leader
@@ -248,7 +249,7 @@ async function getDivisionUncached(
         slug: chiefScholar.slug,
         chiefTitle: chiefAppt?.title ?? resolvedLeader.roleLabel,
         primaryTitle: chiefScholar.primaryTitle,
-        identityImageEndpoint: identityImageEndpoint(chiefScholar.cwid),
+        identityImageEndpoint: headshotUrl(chiefScholar.cwid, chiefScholar.hasHeadshot),
         role: resolvedLeader.roleLabel,
         isInterim: resolvedLeader.interim,
       };
@@ -516,6 +517,7 @@ async function getDivisionFacultyUncached(
     overview: string | null;
     roleCategory: string | null;
     primaryOrgCode: string | null;
+    hasHeadshot: boolean | null;
     department: { name: string } | null;
     division: { name: string } | null;
   };
@@ -539,7 +541,7 @@ async function getDivisionFacultyUncached(
       primaryTitle: r.primaryTitle,
       divisionName: r.division?.name ?? null,
       departmentName: r.department?.name ?? "",
-      identityImageEndpoint: identityImageEndpoint(r.cwid),
+      identityImageEndpoint: headshotUrl(r.cwid, r.hasHeadshot),
       // #974 Phase 2 — normalize to the display label (mirrors departments.ts +
       // the filtered API in unit-members.ts) so the Role chip actually matches on
       // the division SSR view, not just after a method is selected.
@@ -673,12 +675,24 @@ async function getDivisionPublicationsListUncached(
   const cwids = Array.from(
     new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid!))),
   );
-  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
+  type Sl = {
+    cwid: string;
+    preferredName: string;
+    slug: string;
+    roleCategory: string | null;
+    hasHeadshot: boolean | null;
+  };
   const scholars =
     cwids.length > 0
       ? ((await prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
+          select: {
+            cwid: true,
+            preferredName: true,
+            slug: true,
+            roleCategory: true,
+            hasHeadshot: true,
+          },
         })) as Sl[])
       : [];
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
@@ -700,7 +714,7 @@ async function getDivisionPublicationsListUncached(
           name: s.preferredName,
           cwid: s.cwid,
           slug: s.slug,
-          identityImageEndpoint: identityImageEndpoint(s.cwid),
+          identityImageEndpoint: headshotUrl(s.cwid, s.hasHeadshot),
           isFirst: a.isFirst,
           isLast: a.isLast,
           roleCategory: s.roleCategory,

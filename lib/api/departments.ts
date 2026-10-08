@@ -24,7 +24,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { attachTopMesh } from "@/lib/api/roster-mesh";
 import type { RosterMeshChip } from "@/lib/roster-row-tags";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl, identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { isPublicLeader, publicRoleWhere } from "@/lib/eligibility";
@@ -194,6 +194,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
         roleCategory: true,
         deletedAt: true,
         status: true,
+        hasHeadshot: true,
       },
     });
     if (chairScholar && !isPublicLeader(chairScholar)) {
@@ -228,7 +229,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
         slug: chairScholar.slug,
         chairTitle: chairAppt?.title ?? leaderRole,
         primaryTitle: chairScholar.primaryTitle ?? null,
-        identityImageEndpoint: identityImageEndpoint(chairScholar.cwid),
+        identityImageEndpoint: headshotUrl(chairScholar.cwid, chairScholar.hasHeadshot),
         role: leaderRole,
         isInterim: resolvedLeader.interim,
       };

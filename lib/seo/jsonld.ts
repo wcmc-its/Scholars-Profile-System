@@ -161,7 +161,8 @@ export function buildPersonJsonLd(
     // Declare this page as the canonical home of the Person entity — a name
     // signal that helps consolidate the bare-name query onto the profile (#684).
     mainEntityOfPage: url,
-    image: profile.identityImageEndpoint,
+    // "" = known no-photo (lib/headshot.ts headshotUrl); undefined drops the key.
+    image: profile.identityImageEndpoint || undefined,
     affiliation: {
       "@type": "Organization",
       name: "Weill Cornell Medicine",

@@ -493,8 +493,9 @@ export default function DocsPage() {
           </li>
           <li>
             A copy can lag its source. A correction you make today appears only after the next
-            refresh, and for an occasional source, only after the next export. Your photo is the
-            exception: it is shown live from the Web Directory, so a change appears right away.
+            refresh, and for an occasional source, only after the next export. Your photo comes
+            from the Web Directory: a new photo appears within about a day, and a change to an
+            existing one appears right away.
           </li>
           <li>
             A correction to directory or appointment data (department, title, an appointment, a

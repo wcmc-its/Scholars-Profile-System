@@ -16,7 +16,7 @@
  */
 import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
-import { identityImageEndpoint } from "@/lib/headshot";
+import { headshotUrl } from "@/lib/headshot";
 import {
   buildUnitGrantCards,
   loadUnitGrantProjects,
@@ -117,12 +117,24 @@ async function getDeptPublicationsListUncached(
   const cwids = Array.from(
     new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid!))),
   );
-  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
+  type Sl = {
+    cwid: string;
+    preferredName: string;
+    slug: string;
+    roleCategory: string | null;
+    hasHeadshot: boolean | null;
+  };
   const scholars =
     cwids.length > 0
       ? ((await prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
+          select: {
+            cwid: true,
+            preferredName: true,
+            slug: true,
+            roleCategory: true,
+            hasHeadshot: true,
+          },
         })) as Sl[])
       : [];
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
@@ -144,7 +156,7 @@ async function getDeptPublicationsListUncached(
           name: s.preferredName,
           cwid: s.cwid,
           slug: s.slug,
-          identityImageEndpoint: identityImageEndpoint(s.cwid),
+          identityImageEndpoint: headshotUrl(s.cwid, s.hasHeadshot),
           isFirst: a.isFirst,
           isLast: a.isLast,
           roleCategory: s.roleCategory,
