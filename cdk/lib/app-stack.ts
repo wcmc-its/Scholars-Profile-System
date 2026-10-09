@@ -2368,7 +2368,8 @@ export class AppStack extends Stack {
         //   results today is byte-identical. resolveSearchTypoFallback reads === "on".
         //   Query-time, no reindex. DARK everywhere -- flip staging first and eval the
         //   typo set (oncolgy / cardiolgy / Harrigton) + a no-false-rescue set, then prod.
-        SEARCH_TYPO_FALLBACK: "off",
+        //   On in both envs 2026-10-09 (fires only on total=0).
+        SEARCH_TYPO_FALLBACK: "on",
         // #1345 -- full-time-faculty prominence lever. "off" drops the #513 flat +1.0
         //   full_time_faculty prominence term (the expertise-independent employment
         //   prior) so genuine affiliated/clinical subspecialty experts aren't buried.
