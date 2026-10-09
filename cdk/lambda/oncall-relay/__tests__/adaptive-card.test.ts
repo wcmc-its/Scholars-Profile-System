@@ -353,6 +353,22 @@ describe("buildEtlCard", () => {
     );
   });
 
+  it("an acked step failure says what is acknowledged, until when, and why (#2196)", () => {
+    const c = content(
+      buildEtlCard({
+        env: "prod",
+        step: "Infoed",
+        error: "boom",
+        ackUntil: "2026-12-31",
+        ackReason: "InfoEd upstream migration",
+      }),
+    );
+    expect(fact(c, "Acknowledged")).toBe("until 2026-12-31 \u{2014} InfoEd upstream migration");
+    expect(
+      fact(content(buildEtlCard({ env: "prod", step: "Infoed", error: "boom" })), "Acknowledged"),
+    ).toBeUndefined();
+  });
+
   it("string error renders verbatim; missing optional fields are omitted", () => {
     const c = content(buildEtlCard({ env: "prod", step: "Reciter", error: "boom" }));
     expect(fact(c, "Error")).toBe("boom");
