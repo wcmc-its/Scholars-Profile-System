@@ -361,6 +361,26 @@ Considered and deferred: skipping headshot requests for scholars without a photo
 
 Run it against prod-shaped capacity: prod in a quiet window, or staging temporarily raised to 2 tasks × 2 vCPU / 4 GB and Aurora max 8 ACU. Re-record the script after the latest deploy, and follow the [RPT checklist in `scripts/perf/README.md`](../scripts/perf/README.md#full-site-load-tests-ibm-rpt). Ramp from 15 users toward the Apollo target, and land profile edge caching before the 500-user step.
 
+### 150-user run: directory headshot API overloaded (2026-10-06)
+
+ITS re-ran the RPT schedule at 150 virtual users against staging, which was temporarily raised to prod-shaped capacity for the window (#3024). Some virtual users failed with 503 and 502 responses. **Every failure looked at came from the WCM directory headshot API, not SPS**. SPS requests in the same traces (for example `/api/scholars/<cwid>/popover-context`) succeeded.
+
+| Response | Headers | Meaning |
+|---|---|---|
+| 503 Service Unavailable, 339 bytes | `Server: Apache/2.4.68 (Amazon Linux)` | Apache's stock capacity page: the directory web server itself was out of workers. |
+| 502 Bad Gateway, 524 bytes | no `Server`, `AWSALB` cookies | The directory's own AWS load balancer could not get a response from the Apache target behind it. |
+
+Both arrived in the same second (02:49:55 GMT on 2026-10-07, 10:49 PM ET on 10-06), on `directory.weill.cornell.edu/api/v1/person/profile/<cwid>.png?returnGenericOn404=…`.
+
+Why: SPS hot-links headshots from the browser straight to the directory (`lib/headshot.ts`, allowed by the CSP `img-src`), and a search or list page renders about 20 of them. Real browsers cache those images; the RPT replay re-requests every image on every iteration, so 150 virtual users send the directory far more traffic than real visitors would. The RPT page verdicts (Publications, funding, NCI, …) also turn red when one embedded headshot fails, so they overstate SPS failures.
+
+Two consequences:
+
+- **A staging load test hits the production directory.** There is no staging directory. Running at this scale degraded a shared production service for real WCM users during the window.
+- **Directory capacity is out of scope for SPS load tests.** 150 concurrent users already exceeds the concurrency SPS is likely to see. If real SPS traffic ever approaches that, directory capacity becomes a conversation with the IDM team, which owns the directory; it is not an SPS fix.
+
+No SPS change was made. Before the next run, exclude `directory.weill.cornell.edu` from the script (or turn off response-code verification on it and leave it out of page verdicts), and give the IDM team notice if it stays in.
+
 ## Scaling characteristics
 
 - **App tier:** ECS Fargate. Per-task sizing: **staging 1024 CPU / 2048 MiB** (bumped from
@@ -422,7 +442,7 @@ moves the render path (a new heavy query, an ISR TTL change, an instance-size ch
 
 ---
 
-*Baseline last updated: 2026-10-02 — added § Full-site load test (ITS IBM RPT run, 15 users on staging; keep-alive 502 fix #2999, hover-only profile prefetch #3000; profile edge caching open) and corrected the profile row (`/[slug]`, `force-dynamic`, never edge-cached). 2026-07-02 — added item 4 (search/faceting audit #1415: taxonomy
+*Baseline last updated: 2026-10-07 — added § 150-user run (RPT failures were the directory headshot API overloading, not SPS; staging load tests hit the production directory; directory capacity belongs to IDM). 2026-10-02 — added § Full-site load test (ITS IBM RPT run, 15 users on staging; keep-alive 502 fix #2999, hover-only profile prefetch #3000; profile edge caching open) and corrected the profile row (`/[slug]`, `force-dynamic`, never edge-cached). 2026-07-02 — added item 4 (search/faceting audit #1415: taxonomy
 counts cached #1420, pubs/funding mesh-only #1421 → `taxonomy;dur=0` on staging,
 facet-split revived + staging-on #1423, wire size −80 % via #1416/#1428/#1433; prod
 pending image release). 2026-06-26: § Search performance findings (taxonomy-resolver
