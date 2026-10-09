@@ -2293,16 +2293,16 @@ export class AppStack extends Stack {
         // Clinical trials as People-search evidence: trialText in the topic ladder,
         // trialMeshUi in the concept boost + concept-scope gate. Needs the nightly
         // reindex that writes the fields; before it, the clauses match nothing.
-        // resolveSearchPeopleTrialEvidence reads === "on". Staging-first.
-        SEARCH_PEOPLE_TRIAL_EVIDENCE: env === "staging" ? "on" : "off",
+        // resolveSearchPeopleTrialEvidence reads === "on". Prod flipped 2026-10-09.
+        SEARCH_PEOPLE_TRIAL_EVIDENCE: "on",
         // Multiplier for a PI trial MeSH-tagged in the searched concept, stacked on the
         // concept attribution boost. resolveSearchPeopleTrialMeshWeight: 1 = off, (1, 3].
-        // Staging-first for the A/B; prod inert (trial evidence is off there).
-        SEARCH_PEOPLE_TRIAL_MESH_WEIGHT: env === "staging" ? "1.2" : "1",
+        // 1.2 approved after the 09-29 staging A/B; prod flipped 2026-10-09.
+        SEARCH_PEOPLE_TRIAL_MESH_WEIGHT: "1.2",
         // Clinical trials search tab over the scholars-trials index (built nightly by
-        // search:index). resolveTrialsTab reads === "on". Staging-first; a missing
-        // index hides the tab rather than erroring the page.
-        SEARCH_TRIALS_TAB: env === "staging" ? "on" : "off",
+        // search:index). resolveTrialsTab reads === "on". A missing index hides the
+        // tab rather than erroring the page. Prod flipped 2026-10-09.
+        SEARCH_TRIALS_TAB: "on",
         // #2018 -- concept-arm precedence for the concentration boost above. That boost has
         //   two arms: a CURATED one keyed on taxonomyMatch.areas[0] (area membership) and a
         //   CONCEPT one keyed on the resolved MeSH descendantUis (the query). On master the
