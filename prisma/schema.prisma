@@ -823,6 +823,37 @@ model Opportunity {
   @@map("opportunity")
 }
 
+/// #1609 — a scholar's feedback on one "Grants for me" recommendation (the
+/// GrantRecs forward matcher, `SELF_EDIT_GRANT_RECS`). One row per
+/// (scholar, opportunity) while feedback is live; clearing it (Undo / un-save)
+/// deletes the row, and the B03 `grant_rec_feedback` audit row keeps the
+/// history. `not_relevant` drops the opportunity from that scholar's list;
+/// `saved` pins + badges it. The accumulated rows are the labelled calibration
+/// set the matcher's hand-set blend weights defer to
+/// (`lib/api/match-opportunities.ts`), and the do-not-contact signal for admin
+/// outreach (#1603). No FKs: `opportunityId` is a soft reference (corpus rows
+/// can be suppressed / re-ingested and the label must survive that); cwids
+/// follow the `mentee_suggestion` precedent.
+model GrantRecFeedback {
+  id            Int      @id @default(autoincrement())
+  cwid          String   @db.VarChar(32)
+  opportunityId String   @map("opportunity_id") @db.VarChar(128)
+  /// `GrantRecFeedbackStatus`: saved | not_relevant — lib/grant-recs/feedback.ts.
+  status        String   @db.VarChar(16)
+  /// Optional `NotRelevantReason` (off_topic | not_eligible | wrong_stage | other),
+  /// only with `not_relevant`; null otherwise.
+  reason        String?  @db.VarChar(24)
+  /// The REAL signed-in human who set it: the scholar, or a superuser acting on
+  /// their behalf (QA / "View as"). The calibration set filters on actor = cwid.
+  actorCwid     String   @map("actor_cwid") @db.VarChar(32)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([cwid, opportunityId])
+  @@index([opportunityId])
+  @@map("grant_rec_feedback")
+}
+
 /// Issue #195 — Per-CWID PhD program record sourced from ED's
 /// `weillCornellEduSORRoleRecord` class under `ou=students,ou=sors` filtered
 /// to `weillCornellEduDegreeCode=PHD`. Includes expired rows so alumni

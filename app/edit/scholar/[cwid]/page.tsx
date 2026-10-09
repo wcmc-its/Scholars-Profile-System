@@ -308,6 +308,10 @@ export default async function EditScholarPage({
       orcidTabEnabled={isOrcidSuggestionEnabled()}
       profileLinksEnabled={isProfileLinksEnabled()}
       grantRecsEnabled={isGrantRecsEnabled()}
+      // #1609 — Save / Not relevant: same actor rule as mentee suggestions (self
+      // or a genuine superuser; never a steward / proxy / unit-admin), which
+      // `/api/edit/grant-recs/feedback` re-enforces.
+      grantRecsFeedbackEnabled={isGrantRecsEnabled() && (isSelf || session.isSuperuser)}
       biosketchEnabled={isBiosketchGenerateEnabled()}
       cvEnabled={isCvEnabled()}
       railRestructureEnabled={isRailRestructureEnabled()}

@@ -235,6 +235,10 @@ export default async function EditSelfPage({
   // GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`) — gates the "Grants for me" rail
   // item + panel. Sync env read, like `slugRequestEnabled`.
   const grantRecsEnabled = isGrantRecsEnabled();
+  // #1609 — Save / Not relevant on "Grants for me": genuine self only on this
+  // surface (never under a "View as" overlay), the mentee-suggestion actor rule
+  // that `/api/edit/grant-recs/feedback` re-enforces.
+  const grantRecsFeedbackEnabled = grantRecsEnabled && genuineSelf;
   // #917 v5 (`EDIT_BIOSKETCH_GENERATE`) — gates the "NIH biosketch" Services rail
   // item + panel. Sync env read, mirroring grantRecsEnabled.
   const biosketchEnabled = isBiosketchGenerateEnabled();
@@ -464,6 +468,7 @@ export default async function EditSelfPage({
       orcidTabEnabled={isOrcidSuggestionEnabled()}
       profileLinksEnabled={isProfileLinksEnabled()}
       grantRecsEnabled={grantRecsEnabled}
+      grantRecsFeedbackEnabled={grantRecsFeedbackEnabled}
       biosketchEnabled={biosketchEnabled}
       cvEnabled={cvEnabled}
       railRestructureEnabled={railRestructureEnabled}

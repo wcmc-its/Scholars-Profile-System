@@ -307,7 +307,14 @@ export type AuditAction =
    *  `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
   | "frt_mentee_dismiss"
   | "frt_mentee_restore"
-  | "frt_mentee_assign_cwid";
+  | "frt_mentee_assign_cwid"
+  /** #1609 — a scholar (or a genuine superuser on their behalf) Saved, marked
+   *  Not relevant, or cleared a "Grants for me" recommendation
+   *  (`POST /api/edit/grant-recs/feedback`, `grant_rec_feedback`).
+   *  `targetEntityType='scholar'`, `targetEntityId` the cwid; before/after carry
+   *  `{ opportunityId, status, reason }` (status null = no feedback). Requires
+   *  the `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
+  | "grant_rec_feedback";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
