@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 const methodHit = makeHit({
-  evidence: { kind: "method", family: "Confocal microscopy", tools: ["CCM"] },
+  evidenceLines: [{ kind: "method", family: "Confocal microscopy", tools: ["CCM"] }],
 });
 
 describe("PeopleResultCard — stretched-link structure", () => {
@@ -126,7 +126,7 @@ describe("PeopleResultCard — method/topic rep-papers disclosure (click)", () =
       <PeopleResultCard
         {...props}
         hit={makeHit({
-          evidence: { kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+          evidenceLines: [{ kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" }],
         })}
       />,
     );
@@ -146,7 +146,7 @@ describe("PeopleResultCard — method/topic rep-papers disclosure (click)", () =
       <PeopleResultCard
         {...props}
         hit={makeHit({
-          evidence: { kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+          evidenceLines: [{ kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" }],
         })}
       />,
     );
@@ -166,7 +166,7 @@ describe("PeopleResultCard — non-method/topic evidence never fetches a method-
       <PeopleResultCard
         {...props}
         hit={makeHit({
-          evidence: {
+          evidenceLines: [{
             kind: "publications",
             strength: "mention",
             text: "2 of 100 publications mention “confocal”",
@@ -175,7 +175,7 @@ describe("PeopleResultCard — non-method/topic evidence never fetches a method-
               { pmid: "5", title: "Inline mention paper one", year: 2022 },
               { pmid: "6", title: "Inline mention paper two", year: 2021 },
             ],
-          },
+          }],
         })}
       />,
     );
@@ -193,7 +193,7 @@ describe("PeopleResultCard — non-method/topic evidence never fetches a method-
       <PeopleResultCard
         {...props}
         hit={makeHit({
-          evidence: { kind: "publications", strength: "tagged", text: "5 of 9 publications tagged X", count: 5 },
+          evidenceLines: [{ kind: "publications", strength: "tagged", text: "5 of 9 publications tagged X", count: 5 }],
         })}
       />,
     );

@@ -98,7 +98,6 @@ import {
   resolveFundingMeshGateField,
   resolvePeopleConceptGrantAxis,
   resolvePeopleConceptPrecount,
-  resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
   resolveSearchPeopleTrialEvidence,
   resolveSearchPeopleTrialMeshWeight,
@@ -122,9 +121,6 @@ import {
   resolveSearchPubInstitutionFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
-  resolveSearchResultEvidence,
-  resolveSearchEvidenceReasonCounts,
-  resolveSearchEvidenceRows,
   resolveFundingConceptGrants,
   type PubRecencyMode,
   type Scope,
@@ -376,7 +372,7 @@ export type PeopleHit = {
   hasActiveGrants: boolean;
   /** #1412 — this scholar's count of grants matching the query, from ONE page-level
    *  funding agg (replaces the per-card `/api/scholar/[cwid]/grants` fan-out). Present
-   *  only under `SEARCH_EVIDENCE_ROWS` with a non-empty query and a matching grant;
+   *  only with a non-empty query and a matching grant;
    *  gates the card's Funding evidence row + supplies its `N of M` summary. The top-N
    *  records stay lazy (fetched from `/grants` on expand). Absent ⇒ no Funding row. */
   grantMatchCount?: number;
@@ -407,31 +403,16 @@ export type PeopleHit = {
   grantIndexedCount?: number;
   identityImageEndpoint: string;
   /**
-   * #824 follow-up Phase 1 — the coherent `ResultEvidence` object (one typed
-   * "why this matched", selected by one precedence function; see
-   * `lib/api/result-evidence.ts`). Present only when `SEARCH_RESULT_EVIDENCE` is
-   * on; the card renders it via `<ResultEvidence>`. Serializable.
-   */
-  evidence?: ResultEvidence;
-  /**
    * #1366 — the STACKED evidence lines (method / concept / research-area as
    * first-class peers, each "N of M publications"; keyword fallback; clinical an
-   * independent label-only line). Present INSTEAD of `evidence` only when
-   * `SEARCH_EVIDENCE_REASON_COUNTS` is on; the card renders the list. Absent ⇒
-   * the single `evidence` drives the card. Serializable.
+   * independent label-only line), selected by one precedence function (see
+   * `lib/api/result-evidence.ts`). `searchPeople` always emits at least one line
+   * (the ladder terminates in `{ kind: "none" }`); optional on the type so
+   * hand-built hits may omit it. Serializable.
    */
   evidenceLines?: ResultEvidence[];
 };
 
-/**
- * The PLAN R4 (#688/#702/#967) reason variant `composeMatchReason` produces: a
- * leading icon + a text line, optionally carrying a representative pub.
- */
-export type LegacyMatchReason = {
-  icon: "publications" | "concept" | "area";
-  text: string;
-  pub?: RepresentativePub;
-};
 
 /**
  * Issue #967 — a single representative publication surfaced inside a People
@@ -483,34 +464,11 @@ type ReasonTopHitsAgg = {
 };
 
 /**
- * Issue #967 — pull the single representative publication out of a reason
- * filter's `top` (top_hits) sub-agg. Returns undefined when the sub-agg is
- * absent (flag off), the filter matched no pub, or the hit lacks a pmid/title.
- * `titleHtml` is set only when the literal query produced a `<mark>` fragment
- * in the title.
- */
-export function parseReasonTopHit(
-  agg: ReasonTopHitsAgg | undefined,
-): RepresentativePub | undefined {
-  const hit = agg?.top?.hits?.hits?.[0];
-  const src = hit?._source;
-  if (!src || src.pmid == null || !src.title) return undefined;
-  const titleHtml = hit?.highlight?.title?.[0];
-  return {
-    pmid: String(src.pmid),
-    title: src.title,
-    ...(titleHtml ? { titleHtml } : {}),
-    ...(src.year != null ? { year: src.year } : {}),
-  };
-}
-
-/**
- * Rep-papers disclosure — the array form of {@link parseReasonTopHit}. Map every
- * hit in a reason filter's `top` (top_hits) sub-agg through the same
- * pmid/title/year/titleHtml logic, dropping any hit that lacks a pmid/title, and
- * keep at most `limit` (3). Empty / absent sub-agg ⇒ `[]`. Used by the evidence
- * model (the disclosure shows up to 3 representative papers); `parseReasonTopHit`
- * stays for the legacy `composeMatchReason` single-pub path.
+ * Rep-papers disclosure — map every hit in a reason filter's `top` (top_hits)
+ * sub-agg to a {@link RepresentativePub} (pmid/title/year/titleHtml), dropping any
+ * hit that lacks a pmid/title, and keep at most `limit` (3). Empty / absent
+ * sub-agg ⇒ `[]`. Used by the evidence model (the disclosure shows up to 3
+ * representative papers).
  */
 const AUTHOR_ROLES: readonly string[] = ["sole", "first", "last", "middle"];
 
@@ -657,51 +615,6 @@ export function methodIndexedPubCounts(
   return out;
 }
 
-/**
- * PLAN R4 / #967 — the per-scholar reason line. Strongest signal first:
- * pub-evidence count (tagged → mention) then the resolved-concept fallback.
- * When `rep` carries a representative pub for the firing pub-evidence branch
- * (`SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB`), it rides along as `pub`. The
- * concept fallback never carries a pub. Pure — extracted so the precedence and
- * the count cap (`Math.min(count, pubCount)`) are unit-testable without a live
- * cluster.
- */
-export function composeMatchReason(args: {
-  counts: { tagged: number; mention: number } | undefined;
-  rep: { tagged?: RepresentativePub; mention?: RepresentativePub } | undefined;
-  pubCount: number;
-  hasProvenance: boolean;
-  provenanceParent: string;
-  contentQuery: string;
-}): LegacyMatchReason | undefined {
-  const { counts: c, rep, pubCount, hasProvenance, provenanceParent, contentQuery } = args;
-  if (c && c.tagged > 0)
-    return {
-      icon: "publications",
-      // #1960 — "tagged UNDER X", not "tagged X". The count is a SUBTREE total:
-      // `taggedCountFromDoc` reads `meshSubtreeCounts[resolvedConceptUi]`, which the
-      // people-doc builder folds up each pub's full ancestor chain, so it counts every
-      // publication tagged with the resolved descriptor OR any narrower one. Naming only
-      // the parent asserted that all N carry that exact tag, and measured on staging 71%
-      // of the scholars this renders for carry no parent tag at all — so for most of them
-      // the sentence named a tag none of the counted publications held.
-      // "under" rather than "or a narrower term": it keeps the phrase's own verb (`tagged`),
-      // which the via-line's "also tagged X" depends on for its subject (#1955/#1957), and
-      // it does not repeat "narrower term" on the line directly above one that already says
-      // it in the ~71% case. Width is not a constraint here since #1963 made the phrase wrap.
-      text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged under ${provenanceParent}`,
-      ...(rep?.tagged ? { pub: rep.tagged } : {}),
-    };
-  if (c && c.mention > 0)
-    return {
-      icon: "publications",
-      text: `${Math.min(c.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
-      ...(rep?.mention ? { pub: rep.mention } : {}),
-    };
-  if (hasProvenance)
-    return { icon: "concept", text: `via related concept ${provenanceParent}` };
-  return undefined;
-}
 
 /**
  * Search reason-from-doc (lazy key papers, §5) — fetch the single concept-tagged,
@@ -1856,19 +1769,20 @@ async function searchPeopleCore(opts: {
    */
   scope?: Scope;
   /**
-   * Issue #702 / PLAN R4 — `SEARCH_PEOPLE_MATCH_EXPLAIN` resolved at request time
-   * by the route. When true (and a concept resolved against the topic template),
-   * `searchPeople` runs ONE extra publications-index aggregation to count each
-   * page scholar's on-topic publications (the `reasonCounts` distinct-pmid agg),
-   * which feeds the per-row `matchReason` line. Pure presentation metadata: no
-   * effect on the people query predicate, scoring, or result set. Headless
-   * callers default to `false`.
+   * Issue #702 / PLAN R4 — build the per-row publication reason counts. The
+   * /search route and page always pass `true` (#1440 retired the
+   * `SEARCH_PEOPLE_MATCH_EXPLAIN` env lever, on in both envs). When true (and the
+   * query is content-shaped), `searchPeople` counts each page scholar's on-topic
+   * publications (the `reasonCounts` distinct-pmid agg, or the doc-sourced count
+   * under `reasonFromDoc`), which feeds the per-row evidence lines. Pure
+   * presentation metadata: no effect on the people query predicate, scoring, or
+   * result set. Headless callers default to `false`.
    */
   matchExplain?: boolean;
   /**
    * Issue #967 — when true (and `matchExplain` is on), the `reasonCounts`
-   * aggregation also fetches a representative publication per page cwid via a
-   * `top_hits` sub-agg, surfaced as `matchReason.pub`. Pure presentation; no
+   * aggregation also fetches representative publications per page cwid via a
+   * `top_hits` sub-agg, surfaced on the evidence line's `pubs`. Pure presentation; no
    * effect on ranking or the result set. Headless callers default to `false`.
    */
   representativePub?: boolean;
@@ -2024,8 +1938,8 @@ async function searchPeopleCore(opts: {
   /**
    * #824 follow-up (match-aware snippet) — resolved-match context the page/route
    * derives from the already-computed `taxonomyMatch` (so there is no added
-   * taxonomy resolution inside `searchPeople`). Consumed ONLY when
-   * `resolvePeopleMatchAwareSnippet()` is on; absent/ignored otherwise.
+   * taxonomy resolution inside `searchPeople`). Absent ⇒ no method/topic
+   * evidence is derived (headless callers).
    *
    *   - `methodFamily` — the resolved method family's stable
    *     `(supercategory, familyLabel)` identity (from `taxonomyMatch.methodMatches[0]`).
@@ -2142,10 +2056,8 @@ async function searchPeopleCore(opts: {
     opts.contentQuery !== trimmed;
   const contentQuery = demoteGeneric ? (opts.contentQuery as string) : trimmed;
 
-  // Issue #702 — match-explainability. When on, widen the highlight request so a
-  // pub-only match has something to show ("Matched in publications: …") and the
-  // card can derive a "Matched on …" chip. Default-off ⇒ the highlight block and
-  // hit emission below are byte-identical to the pre-#702 shape.
+  // Issue #702 — match-explainability: build the per-row publication reason
+  // counts (see `opts.matchExplain`).
   const matchExplain = opts.matchExplain === true;
   const representativePub = opts.representativePub === true;
   const includeMostRecentPub = opts.includeMostRecentPub === true;
@@ -2158,26 +2070,17 @@ async function searchPeopleCore(opts: {
   const reasonFromDoc =
     opts.reasonFromDoc === true && resolvedConceptUi.length > 0;
 
-  // #824 follow-up — match-aware snippet. When on, `searchPeople` may derive a
-  // method/topic reason and a humanized-areas fallback (all from query-time data,
-  // no reindex). Gating on the flag here keeps the off path byte-identical: no
-  // extra `_source` field, no extra `scholar_family` query, no new reason kinds.
-  // The Phase-1 `ResultEvidence` redesign IMPLIES the match-aware derivation
-  // (method/topic/areas), so either flag turns it on; `resultEvidence` then also
-  // emits the single typed `evidence` object per hit and bumps the overview
-  // highlight fragment_size for the Case-D sentence trim.
-  const resultEvidence = resolveSearchResultEvidence();
-  // #1366 — counted, STACKED evidence reason lines. Only meaningful under
-  // `resultEvidence` (the evidence object is only built then); when on, the hit
-  // carries `evidenceLines` (a list) instead of the single `evidence`.
-  const reasonCountsStacked = resultEvidence && resolveSearchEvidenceReasonCounts();
+  // #824 / #1056 / #1366 — the ResultEvidence model: every hit carries the
+  // counted, STACKED `evidenceLines` (method / topic / pub / clinical / areas,
+  // derived from query-time data, no reindex). Unconditional since #1440 retired
+  // SEARCH_RESULT_EVIDENCE / SEARCH_EVIDENCE_REASON_COUNTS /
+  // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET (on in both envs) together with the legacy
+  // `matchReason` snippet chain they gated (#967 Phase 3).
   // People-tab "concepts" hint — when on, the evidence TAIL surfaces the
   // scholar's top MeSH descriptors (`topMeshTerms`) instead of the sparse
-  // self-reported areas. Only relevant under `resultEvidence` (the evidence
-  // object is only built then). Flag-OFF ⇒ today's `areas` tail (no-op).
+  // self-reported areas. Flag-OFF ⇒ today's `areas` tail (no-op).
   const conceptHint = resolveSearchPeopleConceptHint();
-  const matchAwareSnippet = resolvePeopleMatchAwareSnippet() || resultEvidence;
-  const matchAwareContext = matchAwareSnippet ? opts.matchAwareContext : undefined;
+  const matchAwareContext = opts.matchAwareContext;
 
   // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
   // over high-evidence fields, abstracts in a scoring-only should). It was a
@@ -3561,11 +3464,10 @@ async function searchPeopleCore(opts: {
       // provenance `narrower` branch, and so for the only predicate that reads
       // it), so every other search keeps today's `_source` shape.
       ...(meshDescendantUis.length > 1 ? ["publicationMeshUiBelowThreshold"] : []),
-      // #824 follow-up — the topic-slug rollup, returned ONLY when the
-      // match-aware snippet flag is on, so the topic-reason match and the
+      // #824 follow-up — the topic-slug rollup, so the topic-reason match and the
       // humanized-areas fallback can read the scholar's areas without a highlight
-      // round-trip. Off ⇒ the field is not requested (today's `_source` shape).
-      ...(matchAwareSnippet ? ["areasOfInterest"] : []),
+      // round-trip.
+      "areasOfInterest",
       // People-tab "concepts" hint — the scholar's top MeSH descriptor labels,
       // requested only when SEARCH_PEOPLE_CONCEPT_HINT is on so the off path
       // keeps today's `_source` shape (no extra field).
@@ -3577,12 +3479,12 @@ async function searchPeopleCore(opts: {
       // path keeps today's `_source` shape. The count is then an O(1) `_source`
       // lookup instead of a publications-index agg.
       ...(reasonFromDoc && opts.skipReasonAgg !== true ? ["meshSubtreeCounts"] : []),
-      // #1366 — the precomputed method-family reason-line count, requested ONLY
-      // when the stacked-lines flag is on so the off path keeps today's
-      // `_source` shape. An O(1) `_source` lookup (no agg). The research-area
-      // sibling (`areaCounts`) is no longer read here — #2071 (E1b) moved it to
-      // a query-time aggregation (`areaCountsByCwid`), so it is never fetched.
-      ...(reasonCountsStacked && opts.skipReasonAgg !== true ? ["methodFamilyCounts"] : []),
+      // #1366 — the precomputed method-family reason-line count, requested only
+      // when this call builds the reason lines (`!skipReasonAgg`). An O(1)
+      // `_source` lookup (no agg). The research-area sibling (`areaCounts`) is no
+      // longer read here — #2071 (E1b) moved it to a query-time aggregation
+      // (`areaCountsByCwid`), so it is never fetched.
+      ...(opts.skipReasonAgg !== true ? ["methodFamilyCounts"] : []),
       // POPS clinical fields — the matchable specialty set + the board-cert-only
       // subset (for the `boardCertified` label), requested ONLY when
       // SEARCH_PEOPLE_CLINICAL_FN is on so the off path keeps today's `_source`
@@ -3686,11 +3588,11 @@ async function searchPeopleCore(opts: {
       fields: {
         preferredName: {},
         ...(matchAwareContext ? {} : { areasOfInterest: {} }),
-        // #824 follow-up Phase 1 — under the ResultEvidence redesign the bio
+        // #824 follow-up Phase 1 — under the ResultEvidence model the bio
         // snippet is trimmed to the first MATCHING SENTENCE (handoff Case D), so
         // ask OpenSearch for a larger single fragment instead of the default
-        // ~100-char one that cuts mid-word. Off-flag ⇒ default fragmenting.
-        overview: resultEvidence ? { fragment_size: 320, number_of_fragments: 1 } : {},
+        // ~100-char one that cuts mid-word.
+        overview: { fragment_size: 320, number_of_fragments: 1 },
         // MATCHA_GLOSS_INWORDS used to highlight the gloss here, on the person-level
         // `publicationTitles` rollup. REMOVED: that field is every title the scholar has, so a mark
         // proved only "this word appears somewhere in this person's corpus" — ~50% of fragments
@@ -3802,8 +3704,8 @@ async function searchPeopleCore(opts: {
       // doc lacks the field and degrades to 0 (concept fallback), never a 500.
       meshSubtreeCounts?: Record<string, number>;
       // #1366 — precomputed method reason-line count. `methodFamilyCounts[familyLabel]`
-      // = distinct method-tagged pub count, read O(1). Present only when
-      // SEARCH_EVIDENCE_REASON_COUNTS is on (added to `_source` above); a
+      // = distinct method-tagged pub count, read O(1). Requested only when this
+      // call builds the reason lines (added to `_source` above); a
       // not-yet-reindexed doc lacks it → no count, never a 500. The research-area
       // sibling this used to sit beside (`areaCounts`) is gone from this type —
       // #2071 (E1b) replaced it with the query-time `areaCountsByCwid`.
@@ -3938,8 +3840,7 @@ async function searchPeopleCore(opts: {
   >();
   // Issue #967 / rep-papers disclosure — representative pubs per cwid, keyed by
   // which reason branch they belong to (tagged vs mention), up to 3 each.
-  // Populated only under `representativePub`; empty otherwise, so the legacy
-  // `composeMatchReason` (which takes a single pub) attaches none.
+  // Populated only under `representativePub`; empty otherwise.
   const reasonReps = new Map<
     string,
     { tagged?: RepresentativePub[]; mention?: RepresentativePub[] }
@@ -3953,21 +3854,9 @@ async function searchPeopleCore(opts: {
   // a department query, which carry no pub-mention evidence. When there is no
   // resolved descriptor (`meshDescendantUis` empty) the `tagged` sub-agg is
   // OMITTED below, so only `mention` is computed.
-  //
-  // The content-shape widening is GATED on `resultEvidence`: only the evidence
-  // path renders the new free-text mention disclosure, so this is where the
-  // broadened agg may fire. When `resultEvidence` is OFF (default/prod posture,
-  // with `matchExplain` still default-ON) the gate falls back to the original
-  // pre-disclosure predicate (`applyTopicTemplate && a resolved descriptor && a
-  // framed parent`), keeping the legacy `composeMatchReason` reason line — and
-  // the agg request itself — byte-identical to commit 259018be. Without this the
-  // widening would emit a brand-new "N of M publications mention …" legacy line
-  // (and an extra OpenSearch round-trip) on the flag-off path.
   const contentShape =
     applyTopicTemplate || applyHybridTemplate || queryShape === "restructured_msm";
-  const runReasonAgg = resultEvidence
-    ? contentShape
-    : applyTopicTemplate && meshDescendantUis.length > 0 && provenanceParent.length > 0;
+  const runReasonAgg = contentShape;
   // The shared eligibility predicate for BOTH the doc-sourced and the
   // publications-index reason paths. (B's `skipReasonAgg` defers the reason line
   // entirely on the fast first paint, regardless of which source feeds it.)
@@ -4059,7 +3948,7 @@ async function searchPeopleCore(opts: {
     // Relevance panels read the API, so they get years; do not conclude from the
     // rendered page that years are missing. Closing the gap means indexing years
     // into `meshSubtreeCounts` — a reindex, deliberately out of scope here.
-    // 1) Doc-sourced tagged counts. Cap is applied in `composeMatchReason`.
+    // 1) Doc-sourced tagged counts. Capped at pubCount in `buildHitEvidenceInput`.
     for (const h of r.hits.hits) {
       const taggedSecondary = opts.meshSecondary
         ? taggedCountFromDoc(h._source.meshSubtreeCounts, opts.meshSecondary.descriptorUi)
@@ -4073,7 +3962,7 @@ async function searchPeopleCore(opts: {
     // 2) Mention-only fallback. The literal-query title/abstract scan can't be
     //    precomputed (unbounded input), but it's the cheap symmetric scan and is
     //    only worth running for cwids whose tagged count is 0 (the tagged branch
-    //    already wins otherwise — `composeMatchReason` prefers tagged). A mention
+    //    already wins otherwise — the evidence ladder prefers tagged). A mention
     //    is "possible" only for a content-shaped query whose literal differs from
     //    the resolved concept; reuse the same `contentShape` gate. NO tagged
     //    filter, NO top_hits (key papers come lazily, §5).
@@ -4282,8 +4171,8 @@ async function searchPeopleCore(opts: {
   //     #801-sensitive family NEVER surfaces (same invariant as the index emit).
   //   matchedTopicSlugs / topicLabelByMatchedSlug — drive { kind:"topic" }.
   //   topicLabelBySlug — slug→`Topic.label` map for the humanized-areas fallback.
-  // Guarded by `matchAwareContext` (already null when the flag is off), so the
-  // off path runs none of this and adds no query.
+  // Guarded by `matchAwareContext` (absent for headless callers), so those run
+  // none of this and add no query.
   const methodReasonByCwid = new Map<string, { family: string; rawTools: unknown }>();
   //   methodPubCountByCwid — the method-INDEXED pub count that a method reason line
   //     is measured against (see `methodIndexedPubCounts`). Populated only when a
@@ -4404,9 +4293,8 @@ async function searchPeopleCore(opts: {
 
   // #824 follow-up Phase 1 — the ResultEvidence redesign. Resolves the per-hit
   // method/topic/pub/concept signals and hands them to the one precedence
-  // function (`selectEvidence`) so priority lives in exactly one place. Only
-  // called when `resultEvidence` is on (and then `matchAwareContext` is set, so
-  // method/topic/areas are derived). Keyed `hl` (NOT a flattened highlight list)
+  // function (`selectEvidenceLines`) so priority lives in exactly one place.
+  // Keyed `hl` (NOT a flattened highlight list)
   // is required so name vs affiliation can be told apart (handoff Edge G).
   const buildHitEvidenceInput = (
     cwid: string,
@@ -4463,8 +4351,7 @@ async function searchPeopleCore(opts: {
 
     // Publication-evidence parts — tagged and mention split out so the
     // precedence can rank `tagged` above the bio and `mention` below it (handoff
-    // §5.0C); same text format as `composeMatchReason`. Concept is the folded
-    // text variant (Case F).
+    // §5.0C). Concept is the folded text variant (Case F).
     const counts = countsFor(cwid);
     const reps = reasonReps.get(cwid);
     const pub: NonNullable<Parameters<typeof selectEvidence>[0]["pub"]> = {};
@@ -4486,8 +4373,8 @@ async function searchPeopleCore(opts: {
     if (counts && counts.tagged > 0 && provenanceParent.length > 0)
       pub.tagged = {
         // #1960 — the prefix ends "tagged under" because `term` is appended to it by the
-        // renderer with a leading space. Same reasoning as `composeMatchReason` above: the
-        // count is the folded SUBTREE total, so naming the bare parent over-claimed which
+        // renderer with a leading space. The count is the folded SUBTREE total
+        // (`taggedCountFromDoc`), so naming the bare parent over-claimed which
         // tag the counted publications carry.
         text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged under`,
         term: provenanceParent,
@@ -4627,13 +4514,13 @@ async function searchPeopleCore(opts: {
 
   // #1412 perf — ONE page-level funding agg replaces the per-card
   // `/api/scholar/[cwid]/grants` fan-out (worst exactly on a multi-grant-PI result
-  // set — every card is grant-heavy). Only under SEARCH_EVIDENCE_ROWS with a non-empty
+  // set — every card is grant-heavy). Only with a non-empty
   // query. `evidenceGrantQuery` mirrors the /grants route's `stripDeprioritized` input,
   // and the minimal MeshResolution mirrors what the card passed to /grants — so the
   // eager count matches the records the card later fetches on expand.
   const evidenceGrantQuery = opts.contentQuery?.trim() || trimmed;
   const grantMatchByCwid =
-    resolveSearchEvidenceRows() && evidenceGrantQuery.length > 0 && r.hits.hits.length > 0
+    evidenceGrantQuery.length > 0 && r.hits.hits.length > 0
       ? await investigatorGrantMatchCounts({
           q: evidenceGrantQuery,
           cwids: r.hits.hits.map((h) => h._source.cwid),
@@ -4700,8 +4587,7 @@ async function searchPeopleCore(opts: {
         grantCount: h._source.grantCount,
         hasActiveGrants: h._source.hasActiveGrants,
         // #1412 — eager Funding-row count/strength from the page-level agg above.
-        // Emitted only for a scholar with ≥1 matching grant, so the flag-off /
-        // no-match response stays byte-identical to today.
+        // Emitted only for a scholar with ≥1 matching grant.
         ...(() => {
           const gm = grantMatchByCwid.get(h._source.cwid);
           return gm && gm.count > 0
@@ -4726,36 +4612,28 @@ async function searchPeopleCore(opts: {
         // that didn't ask keep today's byte-identical hit.
         ...(includeLastName ? { lastNameSort: h._source.lastNameSort ?? null } : {}),
         identityImageEndpoint: headshotUrl(h._source.cwid, h._source.hasHeadshot),
-        // #824 follow-up Phase 1 — the single typed evidence object. Present
-        // only under `SEARCH_RESULT_EVIDENCE`; when present the card renders it
-        // via `<ResultEvidence>`.
-        ...(resultEvidence
-          ? (() => {
-              const evInput = buildHitEvidenceInput(
-                h._source.cwid,
-                h._source.areasOfInterest,
-                h._source.publicationCount,
-                prov,
-                hl,
-                h._source.topMeshTerms,
-                h._source.clinicalSpecialties,
-                h._source.clinicalBoardSet,
-                h._source.clinicalAnchors,
-                h._source.clinicalOnTopicCounts,
-                h._source.meshTaggedPubCount,
-                h._source.clinicalExpertise,
-                h._source.methodFamilyCounts,
-                // #2071 (E1b) — query-time, not `h._source.areaCounts` (the
-                // index-time total the issue is closing).
-                areaCountsByCwid.get(h._source.cwid),
-              );
-              // #1366 — flag on ⇒ the stacked list; off ⇒ today's single object
-              // (byte-identical, `selectEvidenceLines` is never called).
-              return reasonCountsStacked
-                ? { evidenceLines: selectEvidenceLines(evInput) }
-                : { evidence: selectEvidence(evInput) };
-            })()
-          : {}),
+        // #1366 — the stacked, counted evidence lines; the card renders them
+        // via `<EvidenceLine>`.
+        evidenceLines: selectEvidenceLines(
+          buildHitEvidenceInput(
+            h._source.cwid,
+            h._source.areasOfInterest,
+            h._source.publicationCount,
+            prov,
+            hl,
+            h._source.topMeshTerms,
+            h._source.clinicalSpecialties,
+            h._source.clinicalBoardSet,
+            h._source.clinicalAnchors,
+            h._source.clinicalOnTopicCounts,
+            h._source.meshTaggedPubCount,
+            h._source.clinicalExpertise,
+            h._source.methodFamilyCounts,
+            // #2071 (E1b) — query-time, not `h._source.areaCounts` (the
+            // index-time total the issue is closing).
+            areaCountsByCwid.get(h._source.cwid),
+          ),
+        ),
       };
     }),
     total: r.hits.total.value,

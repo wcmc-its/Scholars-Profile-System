@@ -15,7 +15,7 @@
  *   - `concept`  — a direct match on the resolved descriptor itself (#702; the
  *     case #688 deliberately skipped, which is the most common topical match).
  *
- * The result drives the People-tab per-row `matchReason` (`buildMatchReason`,
+ * The result drives the People-tab per-row evidence lines (`buildHitEvidenceInput`,
  * `lib/api/search.ts`) and the Publications-tab "via related concept" note.
  *
  * Pure and side-effect-free so it unit-tests without OpenSearch/Prisma. The

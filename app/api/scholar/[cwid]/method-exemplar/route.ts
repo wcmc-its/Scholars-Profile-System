@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { resolveSearchResultEvidence } from "@/lib/api/search-flags";
 import { loadMethodExemplar, loadTopicExemplar } from "@/lib/api/method-exemplar";
 
 /**
@@ -18,9 +17,6 @@ import { loadMethodExemplar, loadTopicExemplar } from "@/lib/api/method-exemplar
  * search-results derive so the cacheable page isn't tainted and the per-row pub
  * lookups only run when a row is actually hovered/focused.
  *
- * - Gated behind `SEARCH_RESULT_EVIDENCE` (the snippet flag): off ⇒
- *   `{ pubs: [], total: 0 }` so prod (flag-off) is inert and the route can't be
- *   probed for data early.
  * - Public surface: the scholar / family / publication gates run INSIDE the
  *   loaders. Never cached; default-safe empty on any error (a disclosure fetch
  *   must never 500).
@@ -36,10 +32,6 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ cwid: string }> },
 ): Promise<NextResponse> {
-  if (!resolveSearchResultEvidence()) {
-    return NextResponse.json(EMPTY, { headers: NO_STORE });
-  }
-
   const { cwid } = await params;
   const sp = request.nextUrl.searchParams;
   const family = sp.get("family")?.trim();

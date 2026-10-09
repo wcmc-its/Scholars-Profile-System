@@ -282,13 +282,12 @@ const PUB_COUNT = 40;
  * THE DEFAULT HIT — what `searchPeople({ matchExplain: true })` ACTUALLY EMITS, which is what
  * the spine actually reads, and which is NOT what this helper used to return.
  *
- * It used to be display fields and nothing else: no `pubCount`, no `evidence`, no
- * `evidenceLines`. THE REAL EMITTER CANNOT PRODUCE THAT SHAPE with the deployed flags on, and a
- * suite built on it was blind by construction — 7172 tests passed while the spine shipped
- * fabricated evidence to prod.
+ * It used to be display fields and nothing else: no `pubCount`, no `evidenceLines`. THE REAL
+ * EMITTER CANNOT PRODUCE THAT SHAPE, and a suite built on it was blind by construction — 7172
+ * tests passed while the spine shipped fabricated evidence to prod.
  *
- * `searchPeople` with SEARCH_RESULT_EVIDENCE + SEARCH_EVIDENCE_REASON_COUNTS (both ON in staging
- * and prod) returns `{ evidenceLines: selectEvidenceLines(evInput) }`, and `selectEvidenceLines`
+ * `searchPeople` returns `{ evidenceLines: selectEvidenceLines(evInput) }` (unconditionally since
+ * #1440 retired SEARCH_RESULT_EVIDENCE / SEARCH_EVIDENCE_REASON_COUNTS), and `selectEvidenceLines`
  * ENDS with `if (lines.length === 0) lines.push(selectEvidence(input))`, whose own last line is
  * `return { kind: "none" }`. So `evidenceLines` is NEVER empty and never absent — a hit that
  * matched nothing still comes back carrying the IDENTITY TAIL. `areas` is the realistic default
@@ -296,7 +295,7 @@ const PUB_COUNT = 40;
  * the concept but has NOTHING to say about WHY.
  *
  * Tests that need a hit whose concept genuinely matched use `hitWithEvidenceLines`; the
- * genuinely-evidence-less flag-off shape is `hitNoEvidence`.
+ * genuinely-evidence-less (hand-built) shape is `hitNoEvidence`.
  */
 function hit(cwid: string) {
   return {
@@ -1218,12 +1217,10 @@ describe("rankResearchersForDescriptionSpine", () => {
 
 // ── Evidence (#1689) ────────────────────────────────────────────────────────
 /**
- * A hit in the shape `searchPeople` ACTUALLY emits in staging and prod: the TIERED
- * `evidenceLines[]`, not the singular `evidence`.
+ * A hit in the shape `searchPeople` emits: the TIERED `evidenceLines[]`.
  *
- * Which field is emitted is a FLAG DECISION (`SEARCH_EVIDENCE_REASON_COUNTS`), and it is ON in
- * both deployed environments — so `evidence` is never populated there. The first cut of #1689
- * read only `evidence`, passed every test, and returned 0 evidence for 160 real hits on
+ * The first cut of #1689 read a singular `evidence` field that only the (since-retired, #1440)
+ * flag-off path emitted, passed every test, and returned 0 evidence for 160 real hits on
  * staging. This factory exists so the suite tests the shape production actually sends.
  */
 function hitWithEvidenceLines(cwid: string, term: string, count: number, pubCount: number) {
@@ -1243,18 +1240,6 @@ function taggedEvidence(term: string, count: number, pubCount: number) {
     text: `${count} of ${pubCount} publications tagged`,
     term,
     count,
-  };
-}
-
-/** The LEGACY single-object shape (emitted only with the reason-counts flag off). Built from
- *  `displayFields`, NOT from `hit()`: a hit carrying BOTH `evidenceLines` and `evidence` is a
- *  shape no flag combination produces, and the spine prefers `evidenceLines`, so inheriting the
- *  default hit's identity tail here would silently test the wrong branch. */
-function hitWithEvidence(cwid: string, term: string, count: number, pubCount: number) {
-  return {
-    ...displayFields(cwid),
-    pubCount,
-    evidence: taggedEvidence(term, count, pubCount),
   };
 }
 
@@ -1289,8 +1274,9 @@ function hitWithTailEvidence(
   return { ...displayFields(cwid), pubCount: PUB_COUNT, evidenceLines: [line] };
 }
 
-/** The GENUINELY evidence-less hit — neither field. Only `SEARCH_RESULT_EVIDENCE` OFF produces
- *  this, which no deployed environment does; the spine's `!hitEvidence` guard is for it alone. */
+/** The GENUINELY evidence-less hit — no `evidenceLines`. `searchPeople` never produces this
+ *  (the retired SEARCH_RESULT_EVIDENCE=off path did); the spine's `!hitEvidence` guard is for it
+ *  alone. */
 function hitNoEvidence(cwid: string) {
   return { ...displayFields(cwid), pubCount: PUB_COUNT };
 }
@@ -1328,7 +1314,7 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
     mockSearchPeople.mockResolvedValue({
-      hits: [hitWithEvidence("a", "Cancer", 12, 40)],
+      hits: [hitWithEvidenceLines("a", "Cancer", 12, 40)],
       total: 1,
       pageSize: 20,
     });
@@ -1375,16 +1361,16 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
         ? {
             // `a` is 3rd here.
             hits: [
-              hitWithEvidence("x", "Cancer", 9, 30),
-              hitWithEvidence("y", "Cancer", 8, 30),
-              hitWithEvidence("a", "Cancer", 1, 50),
+              hitWithEvidenceLines("x", "Cancer", 9, 30),
+              hitWithEvidenceLines("y", "Cancer", 8, 30),
+              hitWithEvidenceLines("a", "Cancer", 1, 50),
             ],
             total: 3,
             pageSize: 20,
           }
         : {
             // `a` is 1st here — the concept that actually carried them.
-            hits: [hitWithEvidence("a", "Munchausen", 22, 50)],
+            hits: [hitWithEvidenceLines("a", "Munchausen", 22, 50)],
             total: 1,
             pageSize: 20,
           },
@@ -1645,11 +1631,11 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
     expect(a.searchEvidence?.map((e) => e.term)).not.toContain("c2");
   });
 
-  it("reads the TIERED `evidenceLines` shape production actually emits, not just `evidence`", async () => {
-    // THE REGRESSION THIS FILE EXISTS FOR. `searchPeople` emits `evidenceLines[]` whenever
-    // SEARCH_EVIDENCE_REASON_COUNTS is on — which it is, in staging AND prod — and then never
-    // populates `evidence`. Reading only `evidence` yields a candidate list with no evidence at
-    // all in every environment that matters, while every mocked test still passes.
+  it("reads the TIERED `evidenceLines` shape production actually emits", async () => {
+    // THE REGRESSION THIS FILE EXISTS FOR. `searchPeople` emits `evidenceLines[]` (and, since
+    // #1440, nothing else). The first cut read a singular `evidence` field and yielded a
+    // candidate list with no evidence at all in every environment that mattered, while every
+    // mocked test still passed.
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
     mockSearchPeople.mockResolvedValue({
@@ -1694,8 +1680,8 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
   });
 
   it("leaves evidence ABSENT when the hit carries NEITHER field — never a zeroed count, never an empty array", async () => {
-    // The `!hitEvidence` half of the guard, which only `SEARCH_RESULT_EVIDENCE` OFF can trigger
-    // (no deployed environment does — hence `hitNoEvidence`, a shape prod cannot emit). Absent
+    // The `!hitEvidence` half of the guard, which `searchPeople` cannot trigger (hence
+    // `hitNoEvidence`, a shape prod cannot emit). Absent
     // means "not computed"; a `{ count: 0 }` would assert the scholar has no matching papers,
     // and an empty `[]` is the same lie in list form. The field is omitted outright.
     //

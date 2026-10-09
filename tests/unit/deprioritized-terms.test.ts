@@ -6,7 +6,7 @@
  * the caution group. Real anchor: "Microbiome Research" → content "Microbiome"
  * (which is what lets it resolve to Microbiota and fire #688).
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import groups from "@/data/search/deprioritized-terms.json";
 import { normalizeForMatch } from "@/lib/api/normalize";
 import {
@@ -15,7 +15,6 @@ import {
   stripDeprioritizedUnlessResolved,
   _resetDeprioritizedCacheForTests,
 } from "@/lib/api/deprioritized-terms";
-import { resolveGenericTermMode } from "@/lib/api/search-flags";
 
 describe("stripDeprioritized (#692)", () => {
   it("strips a trailing generic term (the Microbiome Research case)", () => {
@@ -181,29 +180,5 @@ describe("loadDeprioritizedSet (#692)", () => {
     expect(def.size).toBe(expected.size);
     expect(def.has("research")).toBe(true);
     expect(def.has("study")).toBe(true);
-  });
-});
-
-describe("resolveGenericTermMode (#692)", () => {
-  const original = process.env.SEARCH_GENERIC_TERM_DEMOTE;
-  beforeEach(() => delete process.env.SEARCH_GENERIC_TERM_DEMOTE);
-  afterEach(() => {
-    if (original === undefined) delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
-    else process.env.SEARCH_GENERIC_TERM_DEMOTE = original;
-  });
-
-  it("defaults to off", () => {
-    expect(resolveGenericTermMode()).toBe("off");
-  });
-
-  it("accepts resolve and on; rejects anything else (case-sensitive)", () => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
-    expect(resolveGenericTermMode()).toBe("resolve");
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "on";
-    expect(resolveGenericTermMode()).toBe("on");
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "ON";
-    expect(resolveGenericTermMode()).toBe("off");
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "true";
-    expect(resolveGenericTermMode()).toBe("off");
   });
 });

@@ -10,9 +10,8 @@
  * Mycobiome-only scholar reads "Mycobiome — narrower term of Microbiota", a
  * Microbiota-tagged scholar reads "publications tagged Microbiota".
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { computeMatchProvenance } from "@/lib/api/match-provenance";
-import { resolvePeopleMatchExplain } from "@/lib/api/search-flags";
 
 // Microbiota (D064307) descendant set (real tree-walk order from mesh_descriptor).
 const MICROBIOTA = "D064307";
@@ -246,29 +245,5 @@ describe("computeMatchProvenance — nothing to explain", () => {
         labels: LABELS,
       }),
     ).toBeUndefined();
-  });
-});
-
-describe("resolvePeopleMatchExplain (#702)", () => {
-  const original = process.env.SEARCH_PEOPLE_MATCH_EXPLAIN;
-  beforeEach(() => {
-    delete process.env.SEARCH_PEOPLE_MATCH_EXPLAIN;
-  });
-  afterEach(() => {
-    if (original === undefined) delete process.env.SEARCH_PEOPLE_MATCH_EXPLAIN;
-    else process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = original;
-  });
-
-  it("defaults to on when the env is unset", () => {
-    expect(resolvePeopleMatchExplain()).toBe(true);
-  });
-
-  it("is off only for the exact value 'off'", () => {
-    process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = "off";
-    expect(resolvePeopleMatchExplain()).toBe(false);
-    process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = "on";
-    expect(resolvePeopleMatchExplain()).toBe(true);
-    process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = "true";
-    expect(resolvePeopleMatchExplain()).toBe(true);
   });
 });

@@ -855,16 +855,13 @@ export async function rankResearchersForDescriptionSpine(
     // any cluster) but WRONG for evidence: it would tell an officer that a candidate matched
     // on whichever concept happened to be retrieved first, and say nothing about the others.
     for (const h of hits) {
-      // #1689 follow-up — READ BOTH SHAPES, and prefer `evidenceLines`.
-      //
-      // `searchPeople` emits ONE of two fields, and which one is a FLAG DECISION, not a
-      // property of the data: with `SEARCH_EVIDENCE_REASON_COUNTS` on it emits the tiered
-      // `evidenceLines[]` (primary lead first, then "Also matched" rows) and NEVER `evidence`;
-      // with it off it emits the single `evidence`. Both flags are ON in staging and prod, so
-      // reading only `evidence` — which is what the first cut of this did — found nothing in
+      // #1689 follow-up — read `evidenceLines`, the tiered list `searchPeople` emits
+      // (primary lead first, then "Also matched" rows). The first cut of this read a
+      // single `evidence` field that only the flag-off path emitted: it found nothing in
       // every deployed environment while passing every test, because the tests mock
-      // `searchPeople` and hand it whichever shape the test author had in mind. A green suite
-      // said yes; an in-VPC probe against real staging OpenSearch said 0 of 160 hits.
+      // `searchPeople` and hand it whichever shape the test author had in mind (an
+      // in-VPC probe against real staging OpenSearch said 0 of 160 hits). #1440 retired
+      // that flag and the single field, so there is now exactly one shape.
       //
       // `evidenceLines[0]` is the PRIMARY lead — the strongest reason, by the search's own
       // precedence ladder. That is the one the People card renders large, and the one the
@@ -877,12 +874,11 @@ export async function rankResearchersForDescriptionSpine(
       // matched" rows for the SAME concept query — a weaker restatement of a reason the officer
       // already has. A second concept's primary lead is a genuinely new reason; that is the axis
       // worth spending the card's vertical space on.
-      const hitEvidence = h.evidenceLines?.[0] ?? h.evidence;
-      // TWO guards, and the first one alone is a LIE IN BOTH DEPLOYED ENVIRONMENTS.
+      const hitEvidence = h.evidenceLines?.[0];
+      // TWO guards, and the first one alone would never fire.
       //
-      // `!hitEvidence` only fires with SEARCH_RESULT_EVIDENCE off, when `searchPeople` emits
-      // NEITHER field. That flag is ON in staging and prod, and with it on the emitter cannot
-      // produce an evidence-less hit: `selectEvidenceLines` ends with
+      // `!hitEvidence` only covers a hand-built hit with no lines: the emitter cannot
+      // produce an evidence-less hit, because `selectEvidenceLines` ends with
       // `if (lines.length === 0) lines.push(selectEvidence(input))`, and `selectEvidence`
       // terminates in `return { kind: "none" }`. So every (concept, cwid) pair in the fan-out
       // comes back carrying SOMETHING — including the pairs that matched on nothing.

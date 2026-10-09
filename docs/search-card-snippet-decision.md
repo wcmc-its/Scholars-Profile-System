@@ -17,16 +17,14 @@ Source of truth: `lib/api/result-evidence.ts` (`selectEvidence`), `components/se
 
 ## 1. Which evidence kind wins (the priority ladder)
 
-All disclosures require `SEARCH_RESULT_EVIDENCE=on`. With the flag off, the card takes
-the legacy path: an inline `— incl. <representative paper>` (eager, `pubs[0]`), no chevrons.
+The evidence ladder is the only path (#1440 retired `SEARCH_RESULT_EVIDENCE`, which was on in
+both envs, and deleted the legacy inline `— incl. <representative paper>` path it gated).
 
 `selectEvidence` returns the **first** matching kind, top to bottom:
 
 ```mermaid
 flowchart TD
-    A[Search hit] --> B{SEARCH_RESULT_EVIDENCE on?}
-    B -- no --> L["Legacy: inline '— incl. rep paper'<br/>(eager pubs[0]), no disclosure"]
-    B -- yes --> P[selectEvidence ladder]
+    A[Search hit] --> P[selectEvidence ladder]
 
     P --> M{method family matched?}
     M -- yes --> Rm[["kind: method"]]

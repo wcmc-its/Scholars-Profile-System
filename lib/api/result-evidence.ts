@@ -6,7 +6,8 @@ import type { AuthorRole } from "@/lib/search-index-docs";
  * chain in `people-result-card.tsx` (method > topic > legacy reason > bio
  * highlight > humanized areas — accreted across ~7 issues) with ONE typed
  * evidence object per result, selected by ONE documented precedence function
- * server-side, rendered by ONE component. Behind `SEARCH_RESULT_EVIDENCE`.
+ * server-side, rendered by ONE component. Unconditional since #1440 retired
+ * `SEARCH_RESULT_EVIDENCE` (on in both envs).
  *
  * Design (handoff §4):
  *   1. One typed `ResultEvidence` per result; the card never re-derives priority.
@@ -118,8 +119,7 @@ export type ResultEvidence =
   /** Matched method family + ≤3 cleaned exemplar tools (#824 §4c derive).
    *  `count` (#1366) — the family's distinct-pub count `N` for the "N of M
    *  publications" reason-line prefix; set ONLY on the stacked-lines path
-   *  (`selectEvidenceLines`, behind SEARCH_EVIDENCE_REASON_COUNTS). Absent on the
-   *  single-evidence `selectEvidence` path, so the off-flag render is unchanged. */
+   *  (`selectEvidenceLines`). Absent from the bare `selectEvidence` tail. */
   | { kind: "method"; family: string; tools: string[]; count?: number }
   /** Clinical specialty match (exact tier only — see {@link clinicalExactMatch}).
    *  `boardCertified` true iff the specialty is in the scholar's board-cert set;
@@ -786,8 +786,8 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
  * tail (concept-text / bio / affiliation / identity hints / honest-empty) so a
  * card never loses its existing evidence.
  *
- * Behind SEARCH_EVIDENCE_REASON_COUNTS — the caller uses this instead of
- * `selectEvidence` only when the flag is on, so the off-flag path is unchanged.
+ * The People search path always uses this (#1440 retired
+ * SEARCH_EVIDENCE_REASON_COUNTS, which once chose between it and `selectEvidence`).
  * `count` on method/topic drives the "N of M publications" prefix (the renderer
  * pairs it with the hit's `pubCount`). Pure + client-safe.
  *

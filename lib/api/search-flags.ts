@@ -243,7 +243,8 @@ export function resolveFundingMeshGateField(): "meshDescriptorUi" | "fundedPubMe
  * off and gets a staging A/B before prod — same posture as the #1336/#1339 funding
  * recall changes. Off ⇒ the route stays text-only (today's behavior), byte-identical.
  *
- * Independent of `SEARCH_EVIDENCE_ROWS` (which gates the row's existence): this only
+ * Independent of the Funding evidence row's existence (always on since
+ * `SEARCH_EVIDENCE_ROWS` retired, #1440): this only
  * changes HOW the row matches, so the A/B can toggle concept matching without
  * toggling the whole row.
  */
@@ -446,29 +447,6 @@ export function resolvePeopleTopicPhraseBoost(): boolean {
   return (ovr("SEARCH_PEOPLE_PHRASE_BOOST") ?? process.env.SEARCH_PEOPLE_PHRASE_BOOST) === "on";
 }
 
-/**
- * Issue #702 — People-result match explainability. People highlighting is keyed
- * to only three self-reported fields (`preferredName` / `areasOfInterest` /
- * `overview`), but topic relevance scores heavily on publication-derived fields
- * (`publicationTitles^6` / `publicationMesh^4`). A scholar admitted purely on
- * publication evidence therefore has nothing to highlight in the bio fields and
- * the card renders bare (≈86% of top topic-query results, measured). With this
- * on, `searchPeople`:
- *   - also highlights `publicationTitles` / `publicationMesh` so the card can
- *     render a "Matched in publications: …" snippet (`pubHighlight`), and
- *   - emits `matchedOnFields` (derived from which fields actually produced a
- *     highlight fragment) so the card can render a last-resort "Matched on …"
- *     chip when there is no snippet and no MeSH provenance note.
- * `publicationAbstracts` is deliberately NOT highlighted — a long, raw,
- * possibly-sensitive blob makes a poor snippet.
- *
- * Pure presentation metadata — no effect on the query predicate, scoring, or
- * result set. Default on (`SEARCH_PEOPLE_MATCH_EXPLAIN=off` rolls back); a separate
- * lever from `SEARCH_GENERIC_TERM_DEMOTE`, with an independent rollback trigger.
- */
-export function resolvePeopleMatchExplain(): boolean {
-  return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN !== "off";
-}
 
 /**
  * Issue #967 — surface a representative matching publication inside the People
@@ -479,8 +457,8 @@ export function resolvePeopleMatchExplain(): boolean {
  * count (`reasonCounts`) — no people-index field, no reindex.
  *
  * Pure presentation metadata: no effect on the query predicate, scoring, or
- * result set. Layered on top of `SEARCH_PEOPLE_MATCH_EXPLAIN` (inert when that is
- * off — there is no reason line to enrich). Default OFF; `=on` to enable.
+ * result set. Inert unless the caller passes `matchExplain` (the /search route
+ * always does). Default OFF; `=on` to enable.
  */
 export function resolvePeopleSnippetRepresentativePub(): boolean {
   return process.env.SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB === "on";
@@ -499,8 +477,8 @@ export function resolvePeopleSnippetRepresentativePub(): boolean {
  * REINDEX PREREQ: the people index must be rebuilt so docs carry
  * `meshSubtreeCounts` before this serves a non-zero count; a not-yet-reindexed
  * cluster degrades to count 0 (the per-hit reason falls through to the concept
- * fallback), never a 500. Layered on top of `SEARCH_PEOPLE_MATCH_EXPLAIN` (inert
- * when that is off — there is no reason line to source). Default OFF both envs
+ * fallback), never a 500. Inert unless the caller passes `matchExplain` (the
+ * /search route always does). Default OFF both envs
  * (staging-first A/B, instant rollback); `=on` to enable.
  *
  * NOT count-identical to the legacy agg for BROAD concepts: the doc count is the
@@ -512,32 +490,6 @@ export function resolvePeopleReasonFromDoc(): boolean {
   return process.env.SEARCH_PEOPLE_REASON_FROM_DOC === "on";
 }
 
-export type GenericTermMode = "off" | "resolve" | "on";
-
-/**
- * Issue #692 — generic/filler-term demotion mode. A trailing generic word
- * ("Microbiome Research") breaks MeSH resolution and pollutes ranking/highlight.
- *
- *   - `off` (default): no change.
- *   - `resolve`: on a full-query resolution MISS, retry against the query with
- *     deprioritized terms stripped (recovers resolution + #688 provenance on
- *     multi-word queries). No ranking/result-set/highlight change. Safe — only
- *     fires after the full query already failed to resolve.
- *   - `on`: `resolve` plus BM25 down-weight (content gates, full query
- *     discounted) and highlight de-marking of the stripped terms.
- *
- * Staged like `resolveConceptMode` (off|strict|expanded); unknown value → `off`.
- */
-export function resolveGenericTermMode(): GenericTermMode {
-  const v = process.env.SEARCH_GENERIC_TERM_DEMOTE;
-  if (v === "resolve" || v === "on") return v;
-  if (v !== undefined && v !== "off") {
-    console.warn(
-      `[search] ignoring unrecognized SEARCH_GENERIC_TERM_DEMOTE="${v}"; using "off"`,
-    );
-  }
-  return "off";
-}
 
 /**
  * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
@@ -611,8 +563,7 @@ export function resolvePubRecencyMode(): PubRecencyMode {
  * effect on the query predicate, scoring, or result set.
  *
  * Default on (`SEARCH_PUB_HIGHLIGHT=off` rolls back); a separate lever from the `SEARCH_PUB_TAB_*`
- * ranking flags and from the People-tab `SEARCH_PEOPLE_MATCH_EXPLAIN`, each with
- * an independent rollback trigger.
+ * ranking flags, each with an independent rollback trigger.
  */
 export function resolvePublicationHighlight(): boolean {
   return process.env.SEARCH_PUB_HIGHLIGHT !== "off";
@@ -878,96 +829,9 @@ export function resolvePeopleMethodFamilyTier(): boolean {
   );
 }
 
-/**
- * #824 follow-up — match-aware People snippet. Replaces the per-scholar snippet
- * line — today a raw underscore-slug dump of `areasOfInterest` rendered with
- * mid-word bolding (e.g. "single_cell_spatial_biology cell_molecular_biology")
- * — with a clean, MATCH-AWARE "why" line. In priority order the card renders a
- * matched method family (+ exemplar tools), else the matched research-area topic
- * as a clean human label, else the scholar's bio highlight, else a HUMANIZED
- * comma-separated research-areas line (no under_scores). See the approved mockup
- * `docs/mockups/search-snippet/match-aware-snippet.html`.
- *
- * App-only: NO reindex. The method/topic reasons are DERIVED at query time from
- * `scholar_family` (the #1045 index `methodFamily` field is NOT required for this
- * surface) + the already-resolved topic taxonomy, and the humanized fallback is a
- * pure render of the existing `areasOfInterest` highlight against a topic
- * slug→label map. Staging-first.
- *
- * Default OFF (`SEARCH_PEOPLE_MATCH_AWARE_SNIPPET=on` enables) — an `=== "on"`
- * opt-in gate, opposite the `!== "off"` default-on presentation flags above, so
- * the feature ships dark for a staging soak. Flag-OFF ⇒ `searchPeople` runs no
- * new query, emits no new reason kinds, and the card render is byte-identical to
- * today.
- *
- * Flag-parity note: when enabling later, wire the env var in BOTH `.env.local`
- * AND `cdk/lib/app-stack.ts` per environment — a local-on / deployed-off split
- * silently ships nothing. (NOT wired now; cdk wiring is the operator rollout
- * step.) A separate lever from `SEARCH_PEOPLE_METHOD_FAMILY` (the reindex-gated
- * ranking BOOST) and `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB`, each with an
- * independent rollback trigger.
- */
-export function resolvePeopleMatchAwareSnippet(): boolean {
-  return process.env.SEARCH_PEOPLE_MATCH_AWARE_SNIPPET === "on";
-}
 
-/**
- * #824 follow-up Phase 1 — the coherent `ResultEvidence` snippet model
- * (`docs/search-snippet-handoff.md` §4). When on, `searchPeople` derives a
- * single typed `evidence` object per hit via one precedence function and the
- * card renders it through one `<ResultEvidence>` component, SUPERSEDING the
- * accreted `matchReason` / `humanizedAreas` priority chain. Implies the
- * match-aware derivation (method/topic/areas) so it works on its own.
- *
- * App-only, NO reindex (same query-time derive as the match-aware snippet).
- * Default OFF (`SEARCH_RESULT_EVIDENCE=on` enables) — an `=== "on"` opt-in gate
- * so the redesign ships dark for a staging soak alongside the still-live
- * `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET`. Flag-OFF ⇒ no `evidence` field and the
- * card render is byte-identical to today.
- *
- * Flag-parity note: NOT wired in `cdk/lib/app-stack.ts` yet — enabling later is
- * the operator rollout step (wire the env var per environment + `cdk deploy`,
- * the same recipe as the match-aware flag above).
- */
-export function resolveSearchResultEvidence(): boolean {
-  return process.env.SEARCH_RESULT_EVIDENCE === "on";
-}
 
-/**
- * #1366 — counted, STACKED evidence reason lines on the People card. When on
- * (and `SEARCH_RESULT_EVIDENCE` is on), `searchPeople` emits `evidenceLines` (an
- * ordered list) instead of a single `evidence`: method, a tagged-concept match,
- * and the matched research area each appear as their own line — each prefixed
- * with "N of M publications" — with keyword as the fallback and clinical as an
- * independent label-only line. Flag-OFF ⇒ no `evidenceLines`, the single
- * `evidence` field is unchanged, and the card render is byte-identical to today.
- *
- * App-only EXCEPT the method count, which reads the precomputed people-doc
- * `methodFamilyCounts` (a reindex populates it; a not-yet-reindexed doc simply
- * shows no method count — graceful). Default OFF (`=== "on"` opt-in), STAGING-
- * FIRST. Wired per-env in `cdk/lib/app-stack.ts` (staging-on / prod-off);
- * enabling in prod is the operator `cdk deploy` step.
- */
-export function resolveSearchEvidenceReasonCounts(): boolean {
-  return process.env.SEARCH_EVIDENCE_REASON_COUNTS === "on";
-}
 
-/**
- * Generalized evidence rows on the scholar search card — surfaces a scholar's
- * topic-matching grants as a "Funding" disclosure row (`[Funding badge] claim ⌄ →
- * Key funding`) and badges the publications flavor (Research area / Concept /
- * Keyword) on the Scholars card only. The Funding row is lazy: a card with
- * `grantCount > 0` fetches `/api/scholar/[cwid]/grants?q=…` and renders the row
- * only when ≥1 grant matched (hide-when-empty), so flag-OFF ⇒ no fetch, no row,
- * and the pub row keeps its shipped muted treatment.
- *
- * App-only, NO reindex. Default OFF (`SEARCH_EVIDENCE_ROWS=on` enables) — an
- * `=== "on"` opt-in gate, STAGING-FIRST. Wired per-env in `cdk/lib/app-stack.ts`
- * (staging-on / prod-off); enabling in prod is the operator `cdk deploy` step.
- */
-export function resolveSearchEvidenceRows(): boolean {
-  return process.env.SEARCH_EVIDENCE_ROWS === "on";
-}
 
 /**
  * People-tab "concepts" hint — replace the often-sparse self-reported
@@ -983,7 +847,7 @@ export function resolveSearchEvidenceRows(): boolean {
  * derive is query-time). Default OFF (`SEARCH_PEOPLE_CONCEPT_HINT=on` enables) —
  * an `=== "on"` opt-in gate. STAGING-FIRST. Flag-OFF ⇒ `searchPeople` keeps
  * today's `areas` population and never sets `concepts`, so the evidence output
- * is byte-identical to the `SEARCH_RESULT_EVIDENCE` path on master.
+ * is byte-identical to the shipped evidence path.
  */
 export function resolveSearchPeopleConceptHint(): boolean {
   return process.env.SEARCH_PEOPLE_CONCEPT_HINT === "on";

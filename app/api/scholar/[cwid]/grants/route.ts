@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import {
   resolveFundingConceptGrants,
-  resolveSearchEvidenceRows,
   resolveSearchPeopleTrialEvidence,
 } from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
@@ -27,9 +26,6 @@ import { loadConceptTrials } from "@/lib/api/search-trials";
  * scholar-existence lookup on a per-card path to serve only a hand-probing human. The guard
  * against that failure mode is contract E4 — take the identifier from the payload, never
  * construct one from a name.
- *
- * Gated behind SEARCH_EVIDENCE_ROWS: off ⇒ { grants: [], total: 0 } so prod is inert
- * and the route can't be probed for data early.
  *
  * ponytail: eager per-card fetch (one searchFunding call per grant-having card).
  * searchFunding also runs facet aggs + Prisma hydration, so it is heavier than a
@@ -98,10 +94,6 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ cwid: string }> },
 ): Promise<NextResponse> {
-  if (!resolveSearchEvidenceRows()) {
-    return NextResponse.json(EMPTY, { headers: NO_STORE });
-  }
-
   const { cwid } = await params;
   const query = request.nextUrl.searchParams.get("q")?.trim();
   // Funding row is topic-scoped: no query ⇒ no topic to match ⇒ no row. (Also avoids
@@ -185,7 +177,7 @@ export async function GET(
       matchedConcept: h.matchedConcept,
     }));
     // Row-level reason strength: "tagged" when the concept axis admitted ≥1 surfaced
-    // grant (mirrors composeMatchReason's tagged>mention precedence), else "mention".
+    // grant (mirrors the People evidence ladder's tagged>mention precedence), else "mention".
     // ponytail: read off the returned page hits' `matchedConcept` — a concept-only
     // grant ranked below the page could leave a mixed row labeled "mention". A display
     // label, not the admission set; upgrade by returning a concept count from

@@ -1,9 +1,8 @@
 /**
  * Generalized evidence rows — GET /api/scholar/[cwid]/grants?q=… lazily returns a
  * scholar's TOP topic-matching grants for the Scholars-card Funding row. Default-safe:
- *   - flag off → { grants: [], total: 0 } (searchFunding never called)
  *   - no query → { grants: [], total: 0 } (no topic to match; never called)
- *   - flag on + query → maps FundingHit[] → EvidenceGrant[] (capped at 3) + total,
+ *   - query → maps FundingHit[] → EvidenceGrant[] (capped at 3) + total,
  *     filtered to investigator=[cwid]
  *   - searchFunding throws → empty 200 (a disclosure fetch must never 500)
  */
@@ -13,14 +12,12 @@ import { NextRequest } from "next/server";
 import { GET } from "@/app/api/scholar/[cwid]/grants/route";
 import {
   resolveFundingConceptGrants,
-  resolveSearchEvidenceRows,
   resolveSearchPeopleTrialEvidence,
 } from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
 import { loadConceptTrials } from "@/lib/api/search-trials";
 
 vi.mock("@/lib/api/search-flags", () => ({
-  resolveSearchEvidenceRows: vi.fn(),
   resolveFundingConceptGrants: vi.fn(),
   resolveSearchPeopleTrialEvidence: vi.fn(),
 }));
@@ -55,7 +52,6 @@ function hit(over: Record<string, unknown>) {
 }
 
 afterEach(() => {
-  vi.mocked(resolveSearchEvidenceRows).mockReset();
   vi.mocked(resolveFundingConceptGrants).mockReset();
   vi.mocked(searchFunding).mockReset();
   vi.mocked(resolveSearchPeopleTrialEvidence).mockReset();
@@ -63,22 +59,13 @@ afterEach(() => {
 });
 
 describe("GET /api/scholar/[cwid]/grants", () => {
-  it("returns empty and never calls searchFunding when the flag is off", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(false);
-    const body = await (await call("abc1234", "diabetes")).json();
-    expect(body).toEqual({ grants: [], total: 0 });
-    expect(searchFunding).not.toHaveBeenCalled();
-  });
-
   it("returns empty and never calls searchFunding when there is no query", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     const body = await (await call("abc1234")).json();
     expect(body).toEqual({ grants: [], total: 0 });
     expect(searchFunding).not.toHaveBeenCalled();
   });
 
   it("maps the top matching grants (capped at 3) filtered to the cwid", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
       hits: [
         hit({ projectId: "p1", title: "Beta-cell regeneration", startDate: "2020-01-01", endDate: "2024-12-31" }),
@@ -108,7 +95,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   });
 
   it("maps THIS scholar's investigator role from the hit's people list", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
       hits: [
         hit({
@@ -130,7 +116,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   // throw it away at the API boundary, leaving a renderer unable to tell a sole PI from
   // the contact PI of an MPI award.
   it("passes the hit's isMultiPi through to the mapped grant", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
       hits: [
         hit({
@@ -152,7 +137,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   });
 
   it("omits role when the hit carries none for this scholar (absent ≠ a default role)", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
       hits: [hit({ projectId: "p1", people: [{ cwid: "someone-else", role: "PI" }] })],
       total: 1,
@@ -162,7 +146,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   });
 
   it("#1339: matches on the generic-stripped significant query, not raw q", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({ hits: [], total: 0 } as never);
     await call("abc1234", "children's health");
     // "health" is deprioritized → searchFunding sees only the significant token, so a
@@ -171,7 +154,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   });
 
   it("#1359: carries the grant title highlight through to the EvidenceGrant", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
       hits: [
         hit({ projectId: "p1", title: "Beta-cell regeneration in diabetes", titleHighlight: "Beta-cell regeneration in <mark>diabetes</mark>" }),
@@ -185,7 +167,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   });
 
   it("null start/end dates degrade to null years (no NaN)", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
       hits: [hit({ projectId: "p1", startDate: null, endDate: null, primeSponsor: null })],
       total: 1,
@@ -195,7 +176,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   });
 
   it("returns empty 200 (never 500s) when searchFunding throws, and SAYS it failed", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockRejectedValue(new Error("OpenSearch down"));
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await call("abc1234", "diabetes");
@@ -210,23 +190,18 @@ describe("GET /api/scholar/[cwid]/grants", () => {
   });
 
   it("a genuine no-match carries NO error discriminator", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({ hits: [], total: 0 } as never);
     const body = await (await call("abc1234", "diabetes")).json();
     expect(body).not.toHaveProperty("error");
     expect(body.total).toBe(0);
   });
 
-  it("the flag-off and no-query inert paths are not failures either", async () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(false);
-    expect(await (await call("abc1234", "diabetes")).json()).not.toHaveProperty("error");
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+  it("the no-query inert path is not a failure either", async () => {
     expect(await (await call("abc1234")).json()).not.toHaveProperty("error");
   });
 
   describe("#1359 Tier 2 — concept threading", () => {
     it("threads the resolved concept into searchFunding when the flag is on", async () => {
-      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
       vi.mocked(resolveFundingConceptGrants).mockReturnValue(true);
       vi.mocked(searchFunding).mockResolvedValue({
         hits: [hit({ projectId: "p1", matchedConcept: true })],
@@ -245,7 +220,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     });
 
     it("strength is 'mention' when no surfaced grant matched via the concept axis", async () => {
-      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
       vi.mocked(resolveFundingConceptGrants).mockReturnValue(true);
       vi.mocked(searchFunding).mockResolvedValue({
         hits: [hit({ projectId: "p1", matchedConcept: false })],
@@ -258,7 +232,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     });
 
     it("stays text-only (no meshResolution) when the flag is off, even with descriptorUis", async () => {
-      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
       vi.mocked(resolveFundingConceptGrants).mockReturnValue(false);
       vi.mocked(searchFunding).mockResolvedValue({ hits: [hit({ matchedConcept: true })], total: 1 } as never);
       const body = await (
@@ -269,7 +242,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     });
 
     it("stays text-only when the flag is on but no concept resolved (no descriptorUis)", async () => {
-      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
       vi.mocked(resolveFundingConceptGrants).mockReturnValue(true);
       vi.mocked(searchFunding).mockResolvedValue({ hits: [hit({ matchedConcept: false })], total: 1 } as never);
       const body = await (await call("abc1234", "heart attack")).json();
@@ -282,7 +254,6 @@ describe("GET /api/scholar/[cwid]/grants", () => {
 describe("GET /api/scholar/[cwid]/grants — Matcha trials (trials=1)", () => {
   const trial = { trialId: "NCT1", nctNumber: "NCT1", title: "A trial", titleHighlight: null, status: "Recruiting", isActive: true, startYear: 2024 };
   const on = () => {
-    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({ hits: [], total: 0 } as never);
   };
 

@@ -27,7 +27,7 @@ function makeHit(overrides: Partial<PeopleHit>): PeopleHit {
     grantCount: 0,
     hasActiveGrants: false,
     identityImageEndpoint: "https://example.com/abc1234.png",
-    evidence: { kind: "none" },
+    evidenceLines: [{ kind: "none" }],
     ...overrides,
   };
 }

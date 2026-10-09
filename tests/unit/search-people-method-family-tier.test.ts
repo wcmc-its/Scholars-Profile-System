@@ -13,8 +13,26 @@ import { FIXTURE_CWID } from "../fixtures/scholar";
 
 const { groupByMock } = vi.hoisted(() => ({ groupByMock: vi.fn() }));
 
+// The page-level funding agg (#1412) runs on every query-bearing searchPeople call
+// since #1440 retired its SEARCH_EVIDENCE_ROWS gate; it has its own suite
+// (investigator-grant-match-counts.test.ts). Stub it to "no matching grants" so the
+// `@/lib/search` mock need not carry the funding-index surface.
+vi.mock("@/lib/api/search-funding", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/search-funding")>();
+  return { ...actual, investigatorGrantMatchCounts: async () => new Map() };
+});
+
 vi.mock("@/lib/db", () => ({
-  prisma: { publicationTopic: { groupBy: groupByMock } },
+  prisma: {
+    publicationTopic: { groupBy: groupByMock },
+    // The match-aware evidence derive (method/topic reasons) consumes
+    // `matchAwareContext` unconditionally since #1440 retired its flags; stub its
+    // reads empty so this body-shape suite stays focused on the tier factor.
+    scholarFamily: { findMany: async () => [] },
+    topic: { findMany: async () => [] },
+    familySuppressionOverlay: { findMany: async () => [] },
+    familySensitivityOverlay: { findMany: async () => [] },
+  },
 }));
 
 const capturedBodies: Array<Record<string, unknown>> = [];
