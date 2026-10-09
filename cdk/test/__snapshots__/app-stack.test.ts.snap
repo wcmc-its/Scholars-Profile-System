@@ -1023,15 +1023,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_TRIAL_EVIDENCE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_TRIAL_MESH_WEIGHT",
-                "Value": "1",
+                "Value": "1.2",
               },
               {
                 "Name": "SEARCH_TRIALS_TAB",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_ARM_FIRST",
