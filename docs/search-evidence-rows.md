@@ -48,7 +48,7 @@ Three properties that matter to anyone consuming them:
 
 ## Evidence rows — the three disclosures
 
-Flag: `SEARCH_EVIDENCE_ROWS` (`resolveSearchEvidenceRows`, `lib/api/search-flags.ts`). Env state: **`"on"` in BOTH envs** (`cdk/lib/app-stack.ts:1873` — an unconditional literal, not the `env === "staging" ? "on" : "off"` ternary this line used to describe). Off ⇒ the fetchers return empty and the rows never render.
+Flag: none. `SEARCH_EVIDENCE_ROWS` was `"on"` in both envs and was retired in #1440 — the fetchers and the rows are unconditional (see `docs/flag-inventory.md`, Retired).
 
 | Disclosure | Fetch | Query it matches on | Admission |
 |---|---|---|---|

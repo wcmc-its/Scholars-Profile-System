@@ -43,9 +43,7 @@ import {
   resolveFundingConceptEnabled,
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
-  resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
-  resolveGenericTermMode,
   resolveSearchPeopleDivisionShape,
   resolveSearchPeopleFacultyProminence,
   resolveSearchPeoplePubCountDampen,
@@ -127,13 +125,13 @@ async function handleSearch(request: NextRequest) {
   // the resolver in isolation so a resolver regression doesn't dilute the
   // §3.1 (c) +10ms p95 guardrail (which targets the rebalance's body
   // construction + OpenSearch round-trip, not the resolver).
-  // Issue #692 — generic-term demotion. Strip deprioritized filler tokens once
-  // up front; `removed` is empty when nothing was stripped (incl. the
-  // never-strip-to-empty case), so `genericDemote` and the resolution retry are
-  // both inert unless there is a real content/full split.
-  const genericTermMode = resolveGenericTermMode();
+  // Issue #692 — generic-term demotion (always on; #1440 retired the
+  // SEARCH_GENERIC_TERM_DEMOTE off|resolve|on selector at its deployed `on` mode).
+  // Strip deprioritized filler tokens once up front; `removed` is empty when
+  // nothing was stripped (incl. the never-strip-to-empty case), so `genericDemote`
+  // and the resolution retry are both inert unless there is a real content/full split.
   const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
-  const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
+  const genericStripped = genericRemoved.length > 0;
   // #1980 — did the strip keep enough of the query for its result to be adopted when
   // NOTHING resolved? Counted off `q` rather than `contentQuery` so the denominator is
   // what the user actually typed, independent of `stripDeprioritized`'s internals.
@@ -197,7 +195,7 @@ async function handleSearch(request: NextRequest) {
   // matching a fragment ("Climate"). Otherwise the strip above stands.
   const { contentQuery: searchContentQuery, removed: searchGenericRemoved } =
     stripDeprioritizedUnlessResolved(q, fullQueryMeshConfidence);
-  const genericDemote = genericTermMode === "on" && searchGenericRemoved.length > 0;
+  const genericDemote = searchGenericRemoved.length > 0;
   const taxonomyMatchMs = Date.now() - taxonomyStart;
   // Server-Timing `taxonomy` span desc — names the resolver actually run
   // (#1406: mesh-only on the publications/funding branches). The span name
@@ -730,11 +728,11 @@ async function handleSearch(request: NextRequest) {
     // matched via a descendant; the descriptor name frames the "… narrower term
     // of {name}" string.
     meshDescriptorName: taxonomyMatch.meshResolution?.name,
-    // Issue #702 — env-gated pub-evidence highlighting + "Matched on" chip so a
-    // publication-only match isn't left bare. Pure presentation metadata.
-    matchExplain: resolvePeopleMatchExplain(),
+    // Issue #702 — the per-row reason line (always on for /search; #1440 retired
+    // SEARCH_PEOPLE_MATCH_EXPLAIN). Pure presentation metadata.
+    matchExplain: true,
     // Issue #967 — surface a representative matching publication inside the
-    // reason line. Inert unless matchExplain is also on.
+    // reason line.
     representativePub: resolvePeopleSnippetRepresentativePub(),
     // #2094 — project each hit's OVERALL most-recent publication year
     // (`mostRecentYear`, from the precomputed `mostRecentPubDate`) into the payload.
@@ -747,7 +745,7 @@ async function handleSearch(request: NextRequest) {
     // max over the index's `year` (= `Publication.year`). They skew by 0-2 years
     // and MUST NOT be differenced to judge whether on-topic work is stale.
     includeMostRecentPub: true,
-    // Issue #692 — generic-term demotion (mode `on`). Topic/hybrid bodies score
+    // Issue #692 — generic-term demotion. Topic/hybrid bodies score
     // and highlight on the content query (full query discounted); inert
     // otherwise and never applied to name/department shapes.
     genericDemote,
@@ -764,8 +762,7 @@ async function handleSearch(request: NextRequest) {
     pubCountDampen: resolveSearchPeoplePubCountDampen(),
     // #824 follow-up — match-aware snippet context so client tab-nav / pagination
     // (this route) keeps the method/topic reason the SSR page produced. Built off
-    // the taxonomyMatch already resolved at the top of the handler; inert unless
-    // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
+    // the taxonomyMatch already resolved at the top of the handler.
     matchAwareContext: buildMatchAwareContext(taxonomyMatch),
     // Track B — Research-Area concentration boost. Inert unless the flag resolved a
     // non-empty area ranking above; searchPeople applies it only on topic/hybrid shapes.

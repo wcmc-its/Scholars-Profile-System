@@ -49,7 +49,7 @@ const baseProps = {
 // reappears on the same evidence line across the navigation — the persistence
 // the bug needs.
 const methodHit = makeHit({
-  evidence: { kind: "method", family: "Confocal microscopy", tools: ["CCM"] },
+  evidenceLines: [{ kind: "method", family: "Confocal microscopy", tools: ["CCM"] }],
 });
 
 const chevron = () => screen.getByRole("button", { name: /key papers/i });

@@ -74,13 +74,12 @@ async function main() {
   if (process.env.MATCHA_GLOSS_INWORDS == null) process.env.MATCHA_GLOSS_INWORDS = "on";
   console.error(`MATCHA_GLOSS_INWORDS=${process.env.MATCHA_GLOSS_INWORDS}`);
 
-  // Reproduce the staging APP's search-evidence flag env. The eval runs on the sps-etl-<env> task
-  // def, which carries NONE of these (verified: its env has zero SEARCH_* flags) — so `searchPeople`
-  // gates OUT all evidence (`SEARCH_RESULT_EVIDENCE` off ⇒ no `evidence`/`evidenceLines`), the spine
-  // then drops every (concept,cwid) block at `if (!hitEvidence) continue`, so no keyPaper is emitted
-  // → the artifact's `.evidence` is present but every `blocks:[]`. Staging app has all of these ON
-  // (SEARCH_RESULT_EVIDENCE / _EVIDENCE_REASON_COUNTS / _PEOPLE_MATCH_AWARE_SNIPPET / _PEOPLE_CONCEPT_HINT),
-  // so the measured spine must too or it isn't the shipped path. Default-on, each overridable.
+  // Reproduce the staging APP's search flag env. The eval runs on the sps-etl-<env> task def,
+  // which carries NONE of these (verified: its env has zero SEARCH_* flags). Staging app has
+  // SEARCH_PEOPLE_CONCEPT_HINT ON, so the measured spine must too or it isn't the shipped path.
+  // Default-on, each overridable. (The evidence flags this list used to seed —
+  // SEARCH_RESULT_EVIDENCE / _EVIDENCE_REASON_COUNTS / _PEOPLE_MATCH_AWARE_SNIPPET — were retired
+  // in #1440: `searchPeople` now always emits `evidenceLines`, so nothing needs seeding for them.)
   //
   // SEARCH_PEOPLE_PHRASE_BOOST joined that list on 2026-07-27. It was missing, and by the paragraph
   // above it should never have been: it is `on` in BOTH deployed envs (app-stack.ts, prod flipped
@@ -100,16 +99,12 @@ async function main() {
   // here would change nothing, and seeding it "on" would misrepresent the shipped spine.
   // Enabling the ladder for the spine is a separate decision needing a sponsor gold
   // re-baseline (and that gold is nDCG@20-graded).
-  for (const f of [
-    "SEARCH_RESULT_EVIDENCE",
-    "SEARCH_EVIDENCE_REASON_COUNTS",
-    "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
-    "SEARCH_PEOPLE_CONCEPT_HINT",
-    "SEARCH_PEOPLE_PHRASE_BOOST",
-  ]) {
+  for (const f of ["SEARCH_PEOPLE_CONCEPT_HINT", "SEARCH_PEOPLE_PHRASE_BOOST"]) {
     if (process.env[f] == null) process.env[f] = "on";
   }
-  console.error(`SEARCH_RESULT_EVIDENCE=${process.env.SEARCH_RESULT_EVIDENCE} REASON_COUNTS=${process.env.SEARCH_EVIDENCE_REASON_COUNTS}`);
+  console.error(
+    `SEARCH_PEOPLE_CONCEPT_HINT=${process.env.SEARCH_PEOPLE_CONCEPT_HINT} PHRASE_BOOST=${process.env.SEARCH_PEOPLE_PHRASE_BOOST}`,
+  );
 
   // REASON_AGG_BYPASS makes cachedReasonAgg call through instead of caching, which would send
   // every seed straight to a Bedrock call this role cannot make. Fail loudly, not silently.

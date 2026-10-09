@@ -65,10 +65,6 @@ export type PeopleResultCardProps = {
     activity: ActivityFilter[];
   };
   keyPaperConfig?: KeyPaperConfig | null;
-  /** SEARCH_EVIDENCE_ROWS (server-resolved) — gates the lazy Funding evidence row
-   *  and the publications flavor badge. Off ⇒ no `/grants` fetch, no Funding row,
-   *  and the pub reason row keeps its shipped muted treatment (byte-identical). */
-  evidenceRows?: boolean;
 };
 
 /**
@@ -125,7 +121,6 @@ export function PeopleResultCard({
   total,
   filters,
   keyPaperConfig = null,
-  evidenceRows = false,
 }: PeopleResultCardProps) {
   function handleClick() {
     if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
@@ -150,7 +145,7 @@ export function PeopleResultCard({
   const [alsoExpanded, setAlsoExpanded] = useState(false);
   const alsoPanelId = useId();
 
-  // Funding evidence row (SEARCH_EVIDENCE_ROWS) — a scholar's TOPIC-matching grants.
+  // Funding evidence row — a scholar's TOPIC-matching grants.
   // #1412 — counts are EAGER, precomputed once per page by a single funding agg
   // (`grantMatchCount`/`grantMatchTaggedCount` on the hit) that replaced the old per-card
   // /grants fan-out. The row is presence-gated (hide-when-empty, §4.1/§5) on the eager
@@ -244,30 +239,23 @@ export function PeopleResultCard({
   // on the no-query Browse page the identity hints (areas/concepts) stand alone.
   const hasQuery = qParam.length > 0;
 
-  // #1366 — the evidence reason block. STACKED lines (`evidenceLines`, flag on),
-  // else the single `evidence` object (selectEvidence's terminal `{ kind: "none" }`
-  // guarantees one of the two is always present). Both render through one or more
-  // `<EvidenceLine>` (each owns its disclosure + exemplar fetch); they share
-  // `claimedPmids` so representative papers stay globally disjoint across stacked lines.
-  // #1366 follow-up — `stacked` = the multi-line `evidenceLines` context (the flag on).
-  // The PRIMARY / "Also matched" tiering is scoped to it; the single-`evidence` path
-  // (the older, separately-flagged rendering) keeps its current single block + full
-  // Funding row, so merging this doesn't restyle that surface where the flag is off.
-  const stacked = !!(hit.evidenceLines && hit.evidenceLines.length > 0);
-  const lines: ResultEvidence[] | undefined = stacked
-    ? hit.evidenceLines
-    : hit.evidence
-      ? [hit.evidence]
-      : undefined;
+  // #1366 — the evidence reason block: the STACKED `evidenceLines`
+  // (selectEvidenceLines terminates in `{ kind: "none" }`, so `searchPeople`
+  // always emits at least one). Each renders through an `<EvidenceLine>` (each
+  // owns its disclosure + exemplar fetch); they share `claimedPmids` so
+  // representative papers stay globally disjoint across stacked lines.
+  // #1366 follow-up — always the tiered PRIMARY / "Also matched" layout (#1440
+  // retired the single-`evidence` field and its untiered rendering).
+  const lines: ResultEvidence[] = hit.evidenceLines ?? [];
 
   // #1366 follow-up Part D — the "Also matched" group = the demoted stacked lines
   // (everything after the primary) plus the (demoted) Funding row. `singleSecondary`
   // (exactly one) still collapses under "Also matched" (#1381 follow-up), but the
   // umbrella toggle then expands straight to that secondary's records — one click.
-  const lesserLines = lines ? lines.slice(1) : [];
+  const lesserLines = lines.slice(1);
   // Clinical research — PI trials tagged within the query concept. Always a secondary
-  // (never the lead), and only on the stacked surface.
-  const trialCount = stacked ? (hit.trialMatchCount ?? 0) : 0;
+  // (never the lead).
+  const trialCount = hit.trialMatchCount ?? 0;
   const hasTrials = trialCount > 0;
   const secondaryCount = lesserLines.length + (hasFunding ? 1 : 0) + (hasTrials ? 1 : 0);
   const singleSecondary = secondaryCount === 1;
@@ -278,11 +266,10 @@ export function PeopleResultCard({
   // e.g. infectious-disease chips on a "children's health" search). The Funding row
   // below is the honest, query-specific reason and would otherwise sit under a
   // contradictory "no specific match". Real matches (publications/method/clinical/
-  // topic) are NOT suppressed — they coexist with the Funding row. In the stacked
-  // path an identity kind is ONLY ever the sole fallback element (selectEvidenceLines
-  // returns it alone), so a one-element list is the analogue of the single evidence.
+  // topic) are NOT suppressed — they coexist with the Funding row. An identity kind
+  // is ONLY ever the sole fallback element (selectEvidenceLines returns it alone).
   const fallbackEvidence: ResultEvidence | undefined =
-    lines && lines.length === 1 ? lines[0] : undefined;
+    lines.length === 1 ? lines[0] : undefined;
   const primaryIsIdentityFallback =
     fallbackEvidence != null &&
     (fallbackEvidence.kind === "concepts" ||
@@ -305,16 +292,14 @@ export function PeopleResultCard({
   const profileHref = `${profilePath(hit.slug)}#publications`;
 
   // #1366 follow-up — Funding rendered ONCE in the slot its tier dictates: the full
-  // badge when it leads (promoted, or the legacy non-tiered path), else a compact
+  // badge when it leads (promoted), else a compact
   // "Also matched" dot row. Same KeyFunding panel + expand state across tiers. #1359 —
   // concept-tagged grants read "tagged <Concept>" (underlined term); a literal text
   // match reads "mention '<query>'" (the honesty note). The dot is always FILLED green
   // (Part C); strength is carried by the muted/italic text, not the dot fill.
   const fundingTagged = grantsTagged > 0 && grantConceptLabel.length > 0;
-  // Full badge unless we're in the tiered (stacked) context and funding isn't promoted —
-  // then it's a compact "Also matched" dot. The single-evidence / legacy paths (not
-  // stacked) keep the full Funding row exactly as before.
-  const fundingFull = promoteFunding || !stacked;
+  // Full badge only when funding is promoted; otherwise a compact "Also matched" dot.
+  const fundingFull = promoteFunding;
   // #1732 — the LEAD number is whatever the lead relation actually counts: the tagged
   // count under "tagged <Concept>", the OR total under "mention". `fundingMentionSuffix`
   // carries the remainder, so a mixed set states both and they sum to `grantsTotal`.
@@ -535,9 +520,9 @@ export function PeopleResultCard({
           q={q}
           keyPaperConfig={keyPaperConfig}
           hasQuery={hasQuery}
-          badged={evidenceRows}
+          badged
           claimedPmids={claimedPmids}
-          stacked={stacked}
+          stacked
           tier="lesser"
           // A lone lesser secondary mounts pre-expanded so the "Also matched" umbrella
           // reveals its records in one click (matches the lone-funding behavior).
@@ -594,19 +579,16 @@ export function PeopleResultCard({
         {/* #1366 follow-up — tiered evidence: ONE prominent primary signal + a compact
             "Also matched" group (the demoted lesser stacked lines + the Funding row).
             Funding LEADS instead when it's the strongest signal (promoted — no
-            first-class pub line). The legacy (flag-off) path renders its single block
-            plus the full Funding row below, unchanged. */}
+            first-class pub line). */}
         {promoteFunding ? (
           fundingNode
         ) : (
           <>
-            {/* `lines` is always populated: selectEvidence/selectEvidenceLines
-                terminate in `{ kind: "none" }` rather than returning nothing. The
-                non-null assertion documents that invariant (see the `stacked`
-                comment above). */}
+            {/* `lines` is always populated: selectEvidenceLines terminates in
+                `{ kind: "none" }` rather than returning nothing. */}
             <EvidenceLine
-              key={lineKey(lines![0], 0)}
-              evidence={lines![0]}
+              key={lineKey(lines[0], 0)}
+              evidence={lines[0]}
               cwid={hit.cwid}
               slug={hit.slug}
               pubCount={hit.pubCount}
@@ -616,16 +598,15 @@ export function PeopleResultCard({
               q={q}
               keyPaperConfig={keyPaperConfig}
               hasQuery={hasQuery}
-              badged={evidenceRows}
+              badged
               claimedPmids={claimedPmids}
-              stacked={stacked}
+              stacked
               tier="primary"
             />
             {/* "Also matched" — the demoted signals collapsed under one summary line.
-                Only the STACKED (`evidenceLines`) context tiers; shown when there is ≥1
-                lesser line or a (demoted) Funding row. A single secondary collapses the
+                Shown when there is ≥1 lesser line or a (demoted) Funding row. A single secondary collapses the
                 same way (#1381 follow-up) and expands to its records in one click. */}
-            {stacked && lines && secondaryCount >= 1 ? (
+            {secondaryCount >= 1 ? (
               // Balanced 10px above/below the dotted rule so it sits centered in the
               // gap between the primary row and the "Also matched" group (not hugging
               // the primary). Supersedes the #1381 tightening now that there's a rule.
@@ -721,9 +702,6 @@ export function PeopleResultCard({
                     ) : null}
               </div>
             ) : null}
-            {/* Non-stacked (single-evidence + legacy) keeps the full Funding row below
-                the block, unchanged from before the tiered redesign. */}
-            {!stacked && hasFunding ? fundingNode : null}
           </>
         )}
       </div>

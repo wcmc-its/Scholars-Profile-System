@@ -38,9 +38,7 @@ import {
   resolveConceptMode,
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
-  resolveGenericTermMode,
   resolveSearchPeopleDivisionShape,
-  resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolvePeopleReasonFromDoc,
   resolveSearchPeopleFacultyProminence,
@@ -53,7 +51,6 @@ import {
   resolveConceptFallbackSparseEnabled,
   resolveMeshEntryTierParityEnabled,
   resolveSearchShellStreaming,
-  resolveSearchEvidenceRows,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
@@ -266,12 +263,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // stays inert. `contentQuery` also drives the highlight/fallback fields below.
   // A phrase whose FULL form resolved verbatim in MeSH is kept as typed (see
   // `stripDeprioritizedUnlessResolved`), same as the route.
-  const genericTermMode = resolveGenericTermMode();
   const { contentQuery, removed: genericRemoved } = stripDeprioritizedUnlessResolved(
     q,
     taxonomyResolved.fullQueryMeshConfidence,
   );
-  const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
+  const genericDemote = genericRemoved.length > 0;
 
   const taxonomyMatch = taxonomyResolved.taxonomyMatch;
   const taxonomyMatchMs = taxonomyResolved.taxonomyMatchMs;
@@ -512,9 +508,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // streamed People list. Decouple it: the list paints on a fast call that SKIPS
   // the reason agg (`skipReasonAgg`), and the full reason streams into the cards
   // from a separate promise resolved in a nested Suspense boundary (`use()` in
-  // the card). The split only matters when `matchExplain` is on (otherwise no
-  // reason agg runs and `skipReasonAgg` is a no-op).
-  const peopleMatchExplain = resolvePeopleMatchExplain();
+  // the card). `matchExplain` is always on here (#1440 retired
+  // SEARCH_PEOPLE_MATCH_EXPLAIN).
   // #2215 — typo-tolerant zero-result fallback (dark by default). Passed to the
   // badge-count AND list searches of both People and Publications: each call
   // falls back on its own zero, so a tab's badge always equals the list it
@@ -585,12 +580,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 }
               : undefined,
           reasonFromDoc: resolvePeopleReasonFromDoc(),
-          matchExplain: peopleMatchExplain,
+          matchExplain: true,
           // Issue #967 — representative matching publication in the reason line.
           representativePub: resolvePeopleSnippetRepresentativePub(),
           // #824 follow-up — match-aware snippet context (resolved method family +
-          // matched topics) derived from the already-resolved taxonomyMatch. Inert
-          // unless SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
+          // matched topics) derived from the already-resolved taxonomyMatch.
           matchAwareContext: buildMatchAwareContext(taxonomyMatch),
           // Track B — Research-Area concentration boost (inert unless resolved above).
           areaConcentration,
@@ -608,7 +602,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     peopleSearchOpts !== null
       ? searchPeople({
           ...peopleSearchOpts,
-          skipReasonAgg: reasonFromDoc ? false : peopleMatchExplain,
+          skipReasonAgg: !reasonFromDoc,
         })
       : null;
   // The streamed reason map (cwid → reason/evidence). NON-doc path only: D folds
@@ -618,15 +612,12 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // `.catch` keeps an early rejection from surfacing as unhandled; the card's
   // `use()` still sees the resolved value (empty on error).
   const activePeopleReasonPromise =
-    peopleSearchOpts !== null && peopleMatchExplain && !reasonFromDoc
+    peopleSearchOpts !== null && !reasonFromDoc
       ? searchPeople({ ...peopleSearchOpts, skipReasonAgg: false })
           .then(
             (r) =>
               new Map(
-                r.hits.map((h) => [
-                  h.cwid,
-                  { evidence: h.evidence, evidenceLines: h.evidenceLines },
-                ]),
+                r.hits.map((h) => [h.cwid, { evidenceLines: h.evidenceLines }]),
               ),
           )
           .catch(() => new Map<string, PeopleReasonPatch>())
@@ -639,7 +630,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // serializable object handed to the client card; no promise / no extra query
   // here — the card fetches per-card, off the critical path.
   const keyPaperConfig =
-    peopleSearchOpts !== null && peopleMatchExplain && resolvePeopleReasonFromDoc()
+    peopleSearchOpts !== null && resolvePeopleReasonFromDoc()
       ? {
           descriptorUis: meshOff
             ? []
@@ -663,10 +654,6 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           conceptLabel: meshOff ? "" : (taxonomyMatch.meshResolution?.name ?? ""),
         }
       : null;
-  // SEARCH_EVIDENCE_ROWS — server-resolved once, threaded to each Scholars card to
-  // gate the lazy Funding row + the publications flavor badge (off ⇒ no fetch, row,
-  // or badge).
-  const evidenceRows = resolveSearchEvidenceRows();
   const activePubsPromise =
     type === "publications"
       ? searchPublications({
@@ -1029,7 +1016,6 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 resultPromise={activePeoplePromise!}
                 reasonPromise={activePeopleReasonPromise}
                 keyPaperConfig={keyPaperConfig}
-                evidenceRows={evidenceRows}
               />
             )}
           </React.Suspense>
@@ -1215,9 +1201,8 @@ type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 // list paints without it; the card's `use()` overlays it when the promise
 // resolves.
 type PeopleReasonPatch = {
-  evidence: PeopleResultData["hits"][number]["evidence"];
-  // #1366 — the stacked, counted lines (present instead of `evidence` under the
-  // reason-counts flag); streamed and overlaid the same way.
+  // #1366 — the stacked, counted evidence lines; streamed and overlaid onto the
+  // fast hit.
   evidenceLines: PeopleResultData["hits"][number]["evidenceLines"];
 };
 type PeopleReasonMap = Map<string, PeopleReasonPatch>;
@@ -1316,7 +1301,6 @@ async function PeopleResults({
   resultPromise,
   reasonPromise,
   keyPaperConfig,
-  evidenceRows,
 }: {
   q: string;
   /** #1513 — A–Z last-name-initial browse; preserved across facet/sort/page links. */
@@ -1352,13 +1336,11 @@ async function PeopleResults({
   /** Scaling fix B — the deferred reason map (cwid → reason/evidence patch),
    *  NOT awaited here. Passed to each card and unwrapped client-side via `use()`
    *  inside a nested Suspense, so the slow reason line streams in after the list
-   *  paints. Null when `matchExplain` is off (no reason line to defer). */
+   *  paints. Null under reason-from-doc (the list call already carries it). */
   reasonPromise: Promise<PeopleReasonMap> | null;
   /** Search reason-from-doc (lazy key papers) — the per-card lazy key-paper
    *  config, or null when the doc-sourced reason path is off. */
   keyPaperConfig: KeyPaperConfig | null;
-  /** SEARCH_EVIDENCE_ROWS — gates the per-card lazy Funding row + pub flavor badge. */
-  evidenceRows: boolean;
 }) {
   // Overlap the search round-trip with the dept/div label lookup.
   const [result, deptDivLabelMap] = await Promise.all([
@@ -1558,13 +1540,12 @@ async function PeopleResults({
   //   the #921 grant axis (SEARCH_PEOPLE_CONCEPT_GRANT_AXIS is on in both envs).
   //   They carry no tagged publication by construction, so folding them would
   //   hide exactly the people that axis exists to surface.
-  // Gate 3 `.length > 0` — fail-open. SEARCH_RESULT_EVIDENCE is a per-request
-  //   flag applied uniformly in one .map, so flag-off ⇒ no hit carries either
-  //   field ⇒ this is empty ⇒ no fold.
+  // Gate 3 `.length > 0` — fail-open: if no hit carries research evidence, nothing
+  //   is folded.
   const withEvidence =
     result.queryShape === "topic_template" && scope !== "concept"
       ? result.hits.filter((h) =>
-          (h.evidenceLines ?? (h.evidence ? [h.evidence] : [])).some(
+          (h.evidenceLines ?? []).some(
             (e) => isResearchMatchEvidence(e) || e.kind === "affiliation",
           ),
         )
@@ -1638,7 +1619,6 @@ async function PeopleResults({
                   filters={{ deptDiv, personType, activity }}
                   reasonPromise={reasonPromise}
                   keyPaperConfig={keyPaperConfig}
-                  evidenceRows={evidenceRows}
                 />
               </li>
             ))}

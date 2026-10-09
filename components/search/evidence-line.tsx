@@ -498,8 +498,8 @@ export function EvidenceLine({
 
   // Concept-matched GRANTS, artifact-lead only. Same params as the key-paper route by design.
   //
-  // The route is gated on SEARCH_EVIDENCE_ROWS, which is already on in prod, so this needs no flag
-  // flip and changes nothing on the public card (which fetches its own funding row independently).
+  // The route is ungated (SEARCH_EVIDENCE_ROWS retired in #1440), and this changes nothing on the
+  // public card (which fetches its own funding row independently).
   //
   // ONLY CONCEPT-ADMITTED GRANTS MAY LEAD A CONCEPT-CAPTIONED BLOCK. The funding query is an OR —
   // literal text OR concept tag — so an untagged grant can surface having matched nothing but a

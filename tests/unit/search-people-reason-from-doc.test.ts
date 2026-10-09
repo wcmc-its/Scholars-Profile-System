@@ -5,16 +5,19 @@
  *
  * The load-bearing new logic is the pure `taggedCountFromDoc` extraction. For
  * concepts within the resolver's DESCENDANT_HARD_CAP (≤200 descendants) the
- * doc count equals the agg count and the reason text matches. For BROAD concepts
+ * doc count equals the agg count. For BROAD concepts
  * (>200 descendants) the doc count is INTENTIONALLY larger and more accurate: the
  * legacy agg only filters on the first 200 descendants (capped) and undercounts,
  * while the precomputed doc count reflects the full subtree. This file pins both
  * the equal-case parity AND the intentional broad-concept divergence (no 200-cap
- * on the doc value). The end-to-end query wiring — `_source` inclusion, agg-skip —
+ * on the doc value). The rendered "N of M publications tagged under X" text is
+ * pinned at the `searchPeople` level in search-people-result-evidence.test.ts
+ * (the legacy `composeMatchReason` it used to go through was deleted in #1440).
+ * The end-to-end query wiring — `_source` inclusion, agg-skip —
  * is exercised by the staging parity diff in the rollout plan §8.
  */
 import { describe, expect, it } from "vitest";
-import { taggedCountFromDoc, composeMatchReason } from "@/lib/api/search";
+import { taggedCountFromDoc } from "@/lib/api/search";
 
 describe("taggedCountFromDoc (doc-sourced tagged count)", () => {
   const counts = { D006678: 14, D007239: 3 };
@@ -36,55 +39,6 @@ describe("taggedCountFromDoc (doc-sourced tagged count)", () => {
   });
 });
 
-describe("reason-from-doc vs agg parity (identical matchReason text)", () => {
-  // The doc count is the SAME distinct-pub number the publications-index `tagged`
-  // filter agg would return; both flow through `composeMatchReason`, so the text
-  // is identical. This is the flag-on==flag-off output contract.
-  function reasonFor(taggedCount: number) {
-    return composeMatchReason({
-      counts: { tagged: taggedCount, mention: 0 },
-      rep: undefined, // doc path omits the pub; key paper arrives lazily (commit 5)
-      pubCount: 372,
-      hasProvenance: true,
-      provenanceParent: "HIV",
-      contentQuery: "hiv",
-    });
-  }
-
-  it("doc-sourced count produces the same tagged reason line as the agg count", () => {
-    const docCount = taggedCountFromDoc({ D006678: 14 }, "D006678");
-    const aggCount = 14; // what the publications-index `tagged` filter would report
-    expect(docCount).toBe(aggCount);
-    expect(reasonFor(docCount)).toEqual(reasonFor(aggCount));
-    expect(reasonFor(docCount)).toEqual({
-      icon: "publications",
-      text: "14 of 372 publications tagged under HIV",
-    });
-  });
-
-  it("zero doc count falls through to the concept fallback (mention may still fire at runtime)", () => {
-    // When the doc count is 0 the tagged branch never fires; with no mention the
-    // reason is the concept fallback — identical to the agg path returning 0.
-    const docCount = taggedCountFromDoc({ D007239: 3 }, "D006678");
-    expect(docCount).toBe(0);
-    expect(reasonFor(docCount)).toEqual({ icon: "concept", text: "via related concept HIV" });
-  });
-
-  it("caps an over-count at the scholar's pubCount, same as the agg path", () => {
-    // Index drift (counts > pubCount) is capped in composeMatchReason regardless
-    // of source.
-    const r = composeMatchReason({
-      counts: { tagged: taggedCountFromDoc({ D006678: 400 }, "D006678"), mention: 0 },
-      rep: undefined,
-      pubCount: 372,
-      hasProvenance: true,
-      provenanceParent: "HIV",
-      contentQuery: "hiv",
-    });
-    expect(r?.text).toBe("372 of 372 publications tagged under HIV");
-  });
-});
-
 describe("reason-from-doc broad-concept divergence (intentional, more accurate)", () => {
   // For a concept with >200 descendants the legacy `tagged` agg undercounts —
   // computeDescendants truncates `descendantUis` at DESCENDANT_HARD_CAP (200), so
@@ -97,49 +51,5 @@ describe("reason-from-doc broad-concept divergence (intentional, more accurate)"
     // 200-descendant-capped agg would report.
     const broad = taggedCountFromDoc({ D009369: 1626 }, "D009369");
     expect(broad).toBe(1626); // NOT clamped to 200 or to the legacy capped count
-  });
-
-  it("the broad-concept reason text reflects the true count (capped only at pubCount)", () => {
-    const docCount = taggedCountFromDoc({ D009369: 1626 }, "D009369");
-    const reason = composeMatchReason({
-      counts: { tagged: docCount, mention: 0 },
-      rep: undefined,
-      pubCount: 2072,
-      hasProvenance: true,
-      provenanceParent: "Neoplasms",
-      contentQuery: "cancer",
-    });
-    // Legacy capped agg would have shown a smaller "N" here; the doc path is exact.
-    expect(reason).toEqual({
-      icon: "publications",
-      text: "1626 of 2072 publications tagged under Neoplasms",
-    });
-  });
-
-  it("#1960 — the label says 'under' because the count is a SUBTREE total, not a tag count", () => {
-    // This is the honesty guard, and it is worth stating as its own case because the
-    // wording and the number are load-bearing for each other. `meshSubtreeCounts` is
-    // folded up each publication's full ancestor chain, so the value under a parent's UI
-    // counts every pub tagged with that descriptor OR any narrower one. A scholar can
-    // therefore have a large N here while carrying the parent tag on nothing at all —
-    // measured on staging, 71% of the scholars this line renders for carry no parent tag.
-    // "tagged Neoplasms" asserted all 1626 held that exact tag. "tagged under Neoplasms"
-    // is true whether they hold the parent, only descendants, or both.
-    const subtreeTotal = taggedCountFromDoc({ D009369: 1626 }, "D009369");
-    const reason = composeMatchReason({
-      counts: { tagged: subtreeTotal, mention: 0 },
-      rep: undefined,
-      pubCount: 2072,
-      hasProvenance: true,
-      provenanceParent: "Neoplasms",
-      contentQuery: "cancer",
-    });
-    expect(reason?.text).toContain("tagged under Neoplasms");
-    // The bare form is the over-claim this issue retired — it must not survive anywhere
-    // in the sentence.
-    expect(reason?.text).not.toMatch(/tagged Neoplasms/);
-    // `under` must not displace `tagged`: the via-line's "also tagged X" takes its subject
-    // by echoing this verb (#1955/#1957), so dropping it would strand that line's grammar.
-    expect(reason?.text).toContain("publications tagged");
   });
 });

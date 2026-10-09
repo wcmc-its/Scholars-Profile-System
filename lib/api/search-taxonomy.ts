@@ -56,7 +56,6 @@ import {
   resolveMeshSecondaryConceptEnabled,
   resolveMeshQueryNormalizationEnabled,
   resolveAcronymSenseGuardEnabled,
-  resolveGenericTermMode,
   resolveDescendantTermsClauseCap,
 } from "@/lib/api/search-flags";
 import {
@@ -918,10 +917,10 @@ export async function resolveQueryTaxonomy(
   // Issue #692 — generic-term demotion. Strip deprioritized filler tokens once
   // up front; `removed` is empty when nothing was stripped (incl. the
   // never-strip-to-empty case), so the resolution retry below is inert unless
-  // there is a real content/full split.
-  const genericTermMode = resolveGenericTermMode();
+  // there is a real content/full split. Always on (#1440 retired the
+  // SEARCH_GENERIC_TERM_DEMOTE selector at its deployed `on` mode).
   const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
-  const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
+  const genericStripped = genericRemoved.length > 0;
   // #1980 — did the strip keep enough of the query for its result to be adopted when
   // NOTHING resolved? Counted off `q` rather than `contentQuery` so the denominator is
   // what the user actually typed, independent of `stripDeprioritized`'s internals.

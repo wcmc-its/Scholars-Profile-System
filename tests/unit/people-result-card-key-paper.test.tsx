@@ -53,12 +53,12 @@ const keyPaperConfig = {
 // A publications-tagged evidence with NO inline pubs (the reason-from-doc shape):
 // just the count. The key papers are fetched lazily on expand.
 const taggedHit = makeHit({
-  evidence: {
+  evidenceLines: [{
     kind: "publications",
     strength: "tagged",
     text: "162 of 255 publications tagged HIV",
     count: 255,
-  },
+  }],
 });
 
 function mockFetch(payload: { pubs: unknown[] }) {
@@ -119,12 +119,12 @@ describe("PeopleResultCard — evidence-path lazy key paper (fetch on expand)", 
     // scan — the SAME predicate that produced its count — so descriptorUis + label
     // are cleared even though `keyPaperConfig` carries them.
     const mentionHit = makeHit({
-      evidence: {
+      evidenceLines: [{
         kind: "publications",
         strength: "mention",
         text: "1 of 37 publications mention “hiv”",
         count: 37,
-      },
+      }],
     });
     const fetchFn = mockFetch({
       pubs: [{ pmid: "9", title: "An HIV mention in the title", year: 2019 }],
@@ -181,12 +181,12 @@ describe("PeopleResultCard — evidence-path lazy key paper (fetch on expand)", 
 
   it("MATCHA_GLOSS_INWORDS — suppresses glossTerms on the mention-only path (no subtree ⇒ no claim)", async () => {
     const mentionHit = makeHit({
-      evidence: {
+      evidenceLines: [{
         kind: "publications",
         strength: "mention",
         text: "1 of 37 publications mention “hiv”",
         count: 37,
-      },
+      }],
     });
     const fetchFn = mockFetch({ pubs: [{ pmid: "9", title: "An HIV mention", year: 2019 }] });
     render(

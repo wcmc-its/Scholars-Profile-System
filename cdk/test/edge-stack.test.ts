@@ -306,7 +306,7 @@ describe("EdgeStack", () => {
         // + the two GrantRecs Phase 2 matcher routes
         // (/api/scholars/*/opportunities, /api/opportunities/*/researchers)
         // + the GrantRecs slice-3 browse list (/api/opportunities)
-        // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher
+        // + the `/api/scholar/*/grants` funding-row fetcher
         // + `/edge-ip`, the off-network block page's IP echo (CloudFront
         // Function only, never reaches the origin)
         // + `/_sps-errors/*`, the #2503 origin-down page (S3 origin, direct).
@@ -353,7 +353,7 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           // #967 method-badge representative-paper hover -- reads `?family=`.
           "/api/scholar/*/method-exemplar",
-          // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- reads `?q=`.
+          // Funding-row representative grants -- reads `?q=`.
           "/api/scholar/*/grants",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
@@ -714,7 +714,7 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           // #967 method-badge representative-paper hover -- GET-only read.
           "/api/scholar/*/method-exemplar",
-          // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- GET-only read.
+          // Funding-row representative grants -- GET-only read.
           "/api/scholar/*/grants",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",

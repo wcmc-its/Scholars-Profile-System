@@ -3,7 +3,7 @@
 **Issue:** #1366 · **Date:** 2026-06-30 · **Status:** SIGNED-OFF model, ready to build
 **Supersedes scope of:** the earlier counts-only handoff (no longer in this repo). Adds line **stacking** + exemplar **de-dup**.
 **Follow-up (deferred):** #1367 — clinical MeSH-mapped count + subspecialty/expertise-type ETL.
-**Flag:** `SEARCH_EVIDENCE_REASON_COUNTS` — **`"on"` in BOTH envs** (prod flipped 2026-07-04, #1464; `methodFamilyCounts`/`areaCounts` backfilled #1481). This line previously read "staging-on / prod-off"; that has been false since the flip. Off ⇒ the single-line, label-only behavior this spec replaced.
+**Flag:** `SEARCH_EVIDENCE_REASON_COUNTS` — **`"on"` in BOTH envs** (prod flipped 2026-07-04, #1464; `methodFamilyCounts`/`areaCounts` backfilled #1481). This line previously read "staging-on / prod-off"; that has been false since the flip. **Retired in #1440** — the stacked lines are unconditional and the single-line, label-only path (and the `PeopleHit.evidence` field) is deleted.
 
 ## Goal
 

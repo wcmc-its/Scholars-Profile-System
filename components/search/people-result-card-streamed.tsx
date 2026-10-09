@@ -18,7 +18,7 @@ import type { ResultEvidence } from "@/lib/api/result-evidence";
  * a cwid→patch map) that is NOT on the list's critical path. This wrapper sits in
  * its own Suspense boundary: the fallback is the card rendered with the fast
  * (reason-less) hit, and the resolved child re-renders the same card with the
- * streamed `evidence` patched in. So a slow agg degrades to "the reason line
+ * streamed `evidenceLines` patched in. So a slow agg degrades to "the reason line
  * appears a beat later," never a blocked render / nav-watchdog hang.
  *
  * ponytail (full): renders `PeopleResultCard` twice (fallback fast hit + resolved
@@ -29,9 +29,7 @@ import type { ResultEvidence } from "@/lib/api/result-evidence";
  * byte-identical to its pre-B self.
  */
 type ReasonPatch = {
-  evidence?: ResultEvidence;
-  // #1366 — the stacked, counted lines (present instead of `evidence` under
-  // SEARCH_EVIDENCE_REASON_COUNTS); overlaid the same way.
+  // #1366 — the stacked, counted evidence lines.
   evidenceLines?: ResultEvidence[];
 };
 type ReasonMap = Map<string, ReasonPatch>;
@@ -46,7 +44,6 @@ function mergeHit(hit: PeopleHit, patch: ReasonPatch | undefined): PeopleHit {
   // Overlay only the reason-bearing fields; everything else is the fast hit.
   return {
     ...hit,
-    evidence: patch.evidence,
     evidenceLines: patch.evidenceLines,
   };
 }
@@ -72,17 +69,15 @@ export function PeopleResultCardStreamed({
   reasonPromise: Promise<ReasonMap> | null;
   keyPaperConfig?: KeyPaperConfig | null;
 }) {
-  // No deferred reason promise. Either matchExplain is off (keyPaperConfig also
-  // null → a plain card) OR reason-from-doc (D) already put the reason on the hit
-  // inline via the single list query, so there's no second-query map to stream.
+  // No deferred reason promise: reason-from-doc (D) already put the reason on the
+  // hit inline via the single list query, so there's no second-query map to stream.
   if (reasonPromise === null) {
     return <PeopleResultCard {...props} keyPaperConfig={keyPaperConfig} />;
   }
   return (
     // The fallback is the fast (reason-less) hit that immediately unmounts when the
-    // reason promise resolves — force `evidenceRows={false}` on it so the heavy
-    // per-card /grants fetch fires only on the RESOLVED card, not twice.
-    <Suspense fallback={<PeopleResultCard {...props} evidenceRows={false} />}>
+    // reason promise resolves.
+    <Suspense fallback={<PeopleResultCard {...props} />}>
       <PatchedCard {...props} reasonPromise={reasonPromise} keyPaperConfig={keyPaperConfig} />
     </Suspense>
   );
