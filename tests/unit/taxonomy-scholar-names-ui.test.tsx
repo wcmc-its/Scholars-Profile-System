@@ -1,9 +1,10 @@
 /**
  * TAXONOMY_SCHOLAR_CARDS — the selected rail item's scholars (subarea on the
  * topic adapter, family on the category adapter) render as a "Scholars" h3 +
- * muted count over plain slate profile links (mockup `showSubNames`):
- *   - no pick-to-filter: no aria-pressed toggles, no "Showing publications by"
- *     chip, no live region, the feed gets no scholar prop;
+ * muted count over avatar chips (the author-chip skin):
+ *   - a click is a profile link, never a filter: the pick happens only from the
+ *     hover card ("Filter publications →"), so no aria-pressed toggles, no
+ *     "Showing publications by" chip, the feed gets no scholar prop;
  *   - `?scholar=` is neither read nor written;
  *   - flag off, the rows keep today's rendering.
  * Fake scholars only.
@@ -109,7 +110,7 @@ function expectNoPickUi() {
 }
 
 describe("topic: subarea scholars as names", () => {
-  it("'Scholars' h3 + count, then plain slate profile links (no avatars, no cards)", async () => {
+  it("'Scholars' h3 + count, then avatar chips linking to profiles", async () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
     render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={1} scholarNames />);
     const list = await screen.findByTestId("scholar-name-list");
@@ -117,11 +118,15 @@ describe("topic: subarea scholars as names", () => {
     expect(h3.className).toContain("text-xl");
     expect(h3.className).toContain("font-medium");
     expect(within(list).getByText("2").className).toContain("text-muted-foreground");
-    const alpha = within(list).getByRole("link", { name: "Test Alpha" });
-    expect(alpha.getAttribute("href")).toBe("/test-alpha");
-    expect(alpha.className).toContain("text-[var(--color-accent-slate)]");
-    expect(within(list).getByRole("link", { name: "Test Beta" })).toBeTruthy();
-    expect(list.querySelector("img")).toBeNull();
+    // Two chips per scholar (plain link below md, hover-card trigger at md+).
+    const alphas = within(list).getAllByRole("link", { name: /Test Alpha/ });
+    expect(alphas.length).toBeGreaterThan(0);
+    for (const a of alphas) {
+      expect(a.getAttribute("href")).toBe("/test-alpha");
+      expect(a.className).toContain("rounded-full");
+      expect(a.className).toContain("border-zinc-300");
+    }
+    expect(within(list).getAllByRole("link", { name: /Test Beta/ }).length).toBeGreaterThan(0);
     expectNoPickUi();
   });
 
@@ -129,7 +134,7 @@ describe("topic: subarea scholars as names", () => {
     mockGet.mockImplementation((k: string) => (k === "subtopic" ? "s1" : null));
     window.history.replaceState(null, "", "/topics/cardio?subtopic=s1");
     render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={1} scholarNames />);
-    const alpha = await screen.findByRole("link", { name: "Test Alpha" });
+    const [alpha] = await screen.findAllByRole("link", { name: /Test Alpha/ });
     // jsdom cannot navigate; the default action is the profile href (asserted above).
     alpha.addEventListener("click", (e) => e.preventDefault());
     fireEvent.click(alpha);
@@ -183,7 +188,7 @@ describe("category: family scholars as names", () => {
     },
   };
 
-  it("'Scholars' h3 + count + plain links; subhead eyebrow is 'Family'", async () => {
+  it("'Scholars' h3 + count + avatar chips; subhead eyebrow is 'Family'", async () => {
     mockGet.mockImplementation((k: string) => (k === "family" ? "mri-fam_0001" : null));
     render(
       <SupercategoryRailLayout
@@ -197,9 +202,9 @@ describe("category: family scholars as names", () => {
     );
     const list = await screen.findByTestId("scholar-name-list");
     expect(within(list).getByRole("heading", { level: 3, name: /Scholars/ })).toBeTruthy();
-    expect(within(list).getByRole("link", { name: "Test Delta" }).getAttribute("href")).toBe(
-      "/test-delta",
-    );
+    for (const a of within(list).getAllByRole("link", { name: /Test Delta/ })) {
+      expect(a.getAttribute("href")).toBe("/test-delta");
+    }
     expect(within(screen.getByTestId("rail-subhead")).getByText("Family")).toBeTruthy();
     expect(feed()).toBe("MRI");
     expectNoPickUi();

@@ -32,13 +32,18 @@ export function SubtopicScholarsRow({
   topicSlug,
   subtopicId,
   subtopicLabel,
+  topicLabel,
   variant = "inline",
 }: {
   topicSlug: string;
   subtopicId: string;
   subtopicLabel: string | null;
-  /** TAXONOMY_SCHOLAR_CARDS — `"names"`: a "Scholars N" heading over plain
-   *  slate name links (mockup). `"inline"` (default): today's middot list. */
+  /** Names the hover card's scope ("N publications in {topic}"); the
+   *  popover-context route scopes taxonomy cards to the topic, not the subarea. */
+  topicLabel?: string;
+  /** TAXONOMY_SCHOLAR_CARDS — `"names"`: a "Scholars N" heading over avatar
+   *  chips with the filterable hover card. `"inline"` (default): today's
+   *  middot list. */
   variant?: "inline" | "names";
 }) {
   const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
@@ -81,6 +86,7 @@ export function SubtopicScholarsRow({
       <ScholarNameList
         scholars={visible}
         countLabel={scholars.length.toLocaleString()}
+        popover={{ label: topicLabel ?? "this area", topicSlug, filterable: true }}
         footer={
           overflow > 0 ? (
             <button

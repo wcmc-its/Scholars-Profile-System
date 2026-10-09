@@ -68,6 +68,7 @@ export function familyRailRow(f: FamilyRailItem): TaxonomyRailItem {
 
 export function SupercategoryRailLayout({
   supercategorySlug,
+  supercategoryId,
   supercategoryLabel,
   families,
   familyMeta,
@@ -77,6 +78,9 @@ export function SupercategoryRailLayout({
   loadMore = false,
 }: {
   supercategorySlug: string;
+  /** The supercategory id (not the slug) — scopes the scholar chips' hover
+   *  card. Omitted ⇒ the chips are plain profile links. */
+  supercategoryId?: string;
   supercategoryLabel: string;
   families: FamilyRailItem[];
   familyMeta: Record<string, FamilyPanelMeta>;
@@ -87,7 +91,7 @@ export function SupercategoryRailLayout({
    *  count). Omitted ⇒ no count on the row (no honest total). */
   allPubCount?: number;
   /** TAXONOMY_SCHOLAR_CARDS — the selected family's scholars render as a
-   *  "Scholars N" heading over plain name links. */
+   *  "Scholars N" heading over avatar chips. */
   scholarNames?: boolean;
   /** TAXONOMY_FEED_LOAD_MORE — the paged "All families" feed replaces the
    *  12-newest list, and the family feed pages with Load more. */
@@ -184,6 +188,7 @@ export function SupercategoryRailLayout({
               supercategorySlug={supercategorySlug}
               familyId={activeFamilyId}
               familyLabel={label}
+              supercategoryId={supercategoryId}
               variant={scholarNames ? "names" : "chips"}
             />
             <FamilyPublicationFeed
