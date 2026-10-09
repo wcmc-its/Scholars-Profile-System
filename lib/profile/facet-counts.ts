@@ -143,7 +143,7 @@ export function computeFacetCounts(args: ComputeFacetCountsArgs): FacetCounts {
     if (!passesPosition) continue; // position composes as an "other facet" for both
 
     const passesTopics =
-      !topicsActive || pub.meshTerms.some((t) => t.ui !== null && selectedUiSet.has(t.ui));
+      !topicsActive || pub.meshUis.some((ui) => selectedUiSet.has(ui));
     const passesFamilies = !familiesActive || familyUnion.has(pub.pmid);
 
     // (3) Topic counts EXCLUDE the Topics selection; Method counts EXCLUDE the
@@ -156,17 +156,16 @@ export function computeFacetCounts(args: ComputeFacetCountsArgs): FacetCounts {
   }
 
   // (4) Topic map: for every in-(other-facet)-context pub, increment each of its
-  // non-null mesh uis. Dedupe within a pub so a malformed double-entry can't
+  // mesh uis. Dedupe within a pub so a malformed double-entry can't
   // double-count. Works for both selected and unselected topics; the selected
   // topic converges on barTotal.
   const topic = new Map<string, number>();
   for (const pub of pmidsForTopicCounts) {
     const seenOnThisPub = new Set<string>();
-    for (const term of pub.meshTerms) {
-      if (term.ui === null) continue;
-      if (seenOnThisPub.has(term.ui)) continue;
-      seenOnThisPub.add(term.ui);
-      topic.set(term.ui, (topic.get(term.ui) ?? 0) + 1);
+    for (const ui of pub.meshUis) {
+      if (seenOnThisPub.has(ui)) continue;
+      seenOnThisPub.add(ui);
+      topic.set(ui, (topic.get(ui) ?? 0) + 1);
     }
   }
 

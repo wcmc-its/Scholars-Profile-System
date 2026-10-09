@@ -8,7 +8,7 @@ import {
   AuthorPositionBadge,
   deriveAuthorPositionRole,
 } from "@/components/profile/author-position-badge";
-import type { ProfileClientPublication } from "@/lib/profile/client-publication";
+import type { ProfileRowPublication } from "@/lib/profile/client-publication";
 import { sanitizePubTitle } from "@/lib/utils";
 
 /**
@@ -27,7 +27,7 @@ export function PublicationRow({
   compact = false,
   currentProfileCwid,
 }: {
-  pub: ProfileClientPublication;
+  pub: ProfileRowPublication;
   compact?: boolean;
   /** The cwid of the scholar whose profile this row is rendered on. Drives
    *  PersonPopover's self-hover guard and co-author surface routing (#242). */

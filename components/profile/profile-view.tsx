@@ -30,7 +30,7 @@ import { NewsSection } from "@/components/profile/news-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
-import { PublicationsSection } from "@/components/profile/publications-section";
+import { PublicationsSectionFromWire } from "@/components/profile/publications-section";
 import {
   buildProfileJsonLd,
   getScholarFullProfileBySlug,
@@ -40,7 +40,7 @@ import {
   type ProfilePayload,
   type ProfilePublication,
 } from "@/lib/api/profile";
-import { toClientPublication } from "@/lib/profile/client-publication";
+import { toClientPublicationWire } from "@/lib/profile/client-publication";
 import { serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   groupProfileAppointments,
@@ -207,10 +207,11 @@ export async function ProfileView({ slug }: { slug: string }) {
   // stated by its own section body (year groups; an "Active" grants heading;
   // an "Active" trials group). Nothing was lost, only de-duplicated.
 
-  // #2213 — one slimmed array, passed to both client components below so the
-  // RSC payload serializes it once (the fallback and the cluster share the
-  // reference).
-  const clientPublications = profile.publications.map(toClientPublication);
+  // #2213 — one compact wire object (client-read fields only, repeated strings
+  // and author identities interned), passed to both client components below so
+  // the RSC payload serializes it once (the fallback and the cluster share the
+  // reference). Each hydrates it back into row objects.
+  const publicationsWire = toClientPublicationWire(profile.publications);
 
   return (
     <>
@@ -634,14 +635,14 @@ export async function ProfileView({ slug }: { slug: string }) {
             >
               <Suspense
                 fallback={
-                  <PublicationsSection
-                    publications={clientPublications}
+                  <PublicationsSectionFromWire
+                    publicationsWire={publicationsWire}
                     scholarCwid={profile.cwid}
                   />
                 }
               >
                 <ProfilePubsCluster
-                  publications={clientPublications}
+                  publicationsWire={publicationsWire}
                   keywords={profile.keywords.keywords}
                   families={profile.families}
                   sensitiveGateActive={

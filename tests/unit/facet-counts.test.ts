@@ -3,7 +3,7 @@
  * contextual counter behind the scholar-profile facet-filter redesign (PR-1).
  *
  * Strategy: small HAND-CONSTRUCTED publication fixtures with author-designed
- * pmids/meshTerms, asserting EXACT counts computed by hand. No mocks, no I/O.
+ * pmids/meshUis, asserting EXACT counts computed by hand. No mocks, no I/O.
  *
  * Coverage:
  *  (a) Convergence — selected topic AND selected family both equal barTotal.
@@ -20,7 +20,7 @@ import type { ProfileClientPublication } from "@/lib/profile/client-publication"
 
 // ---------------------------------------------------------------------------
 // Fixture builder — only the fields computeFacetCounts reads matter (pmid,
-// meshTerms, authorship). Everything else is filled with inert placeholders so
+// meshUis, authorship). Everything else is filled with inert placeholders so
 // the object satisfies ProfileClientPublication without distracting from the logic.
 // ---------------------------------------------------------------------------
 function pub(
@@ -47,7 +47,7 @@ function pub(
       isPenultimate: authorship.isPenultimate ?? false,
     },
     isConfirmed: true,
-    meshTerms: uis.map((ui) => ({ ui, label: ui })),
+    meshUis: uis,
     abstract: null,
     wcmAuthors: [],
     score: 0,

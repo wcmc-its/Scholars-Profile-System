@@ -3,7 +3,10 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ScholarFamilyView, ScholarKeyword } from "@/lib/api/profile";
-import type { ProfileClientPublication } from "@/lib/profile/client-publication";
+import {
+  hydrateClientPublications,
+  type ClientPublicationWire,
+} from "@/lib/profile/client-publication";
 import {
   ActiveFilterBanner,
   POSITION_BANNER_LABEL,
@@ -36,7 +39,9 @@ const VALID_NON_ALL_POSITIONS: ReadonlySet<Exclude<PositionFilter, "all">> = new
  * (curated 3-item list, not a feed).
  */
 type ProfilePubsClusterProps = {
-  publications: ProfileClientPublication[];
+  /** #2213 — the publication list in its compact RSC wire form; hydrated once
+   *  here into row objects. */
+  publicationsWire: ClientPublicationWire;
   keywords: ScholarKeyword[];
   /** #799 — family-primary Methods lens rows; empty when the lens flag is off. */
   families: ScholarFamilyView[];
@@ -73,7 +78,7 @@ export function ProfilePubsCluster(props: ProfilePubsClusterProps) {
 }
 
 function ProfilePubsClusterInner({
-  publications,
+  publicationsWire,
   keywords,
   families,
   sensitiveGateActive,
@@ -85,6 +90,10 @@ function ProfilePubsClusterInner({
 }: ProfilePubsClusterProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const publications = useMemo(
+    () => hydrateClientPublications(publicationsWire),
+    [publicationsWire],
+  );
 
   // #819 — the #801 sensitive families are revealed (to self/admin) inside the
   // MethodsSection island; it hands them back here via onRevealedFamilies so the
@@ -237,7 +246,7 @@ function ProfilePubsClusterInner({
     let out = publications;
     if (selectedUis.length > 0) {
       const wanted = new Set(selectedUis);
-      out = out.filter((p) => p.meshTerms.some((t) => t.ui && wanted.has(t.ui)));
+      out = out.filter((p) => p.meshUis.some((ui) => wanted.has(ui)));
     }
     if (positions.length > 0) {
       out = out.filter((p) => {
