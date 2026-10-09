@@ -155,16 +155,26 @@ function severityForRecord(topicArn: string): AlertSeverity {
  *                       slack, and the freshness ACK/STALE report is the right
  *                       net for them.
  * Anything else on this topic keeps the topic-derived tier.
+ *
+ * #2196 -- an ACKED step failure (`ackUntil` set, still in the future) keeps the
+ * topic-derived tier: it is a known failure that has been accepted until a
+ * date, and re-paging it every night is the cry-wolf the ack exists to stop. It
+ * still posts (warn), so it is never silent. Expiry is graded by the same rule
+ * as the state machine and the freshness ack (#2192): from `until` on it pages
+ * again, and an unparseable `until` fails CLOSED (pages).
  */
 export function severityForEtlEvent(
   evt: EtlEventPayload,
   base: AlertSeverity,
+  now: number = Date.now(),
 ): AlertSeverity {
   if (base === "page") return base;
   const isStepFailure =
     typeof evt.step === "string" && evt.step.length > 0 && evt.error !== undefined;
   const isNightly = (evt.stateMachine ?? "").includes("-nightly-");
-  return isStepFailure && isNightly ? "page" : base;
+  const ackUntil = evt.ackUntil === undefined ? NaN : Date.parse(evt.ackUntil);
+  const acked = !Number.isNaN(ackUntil) && now < ackUntil;
+  return isStepFailure && isNightly && !acked ? "page" : base;
 }
 
 /**

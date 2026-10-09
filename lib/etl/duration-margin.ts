@@ -149,3 +149,107 @@ export function gradeDurationMargin(
     fraction > 1 ? "over" : fraction >= MARGIN_WARN_FRACTION ? "near" : "ok";
   return { source, timeoutSeconds, level, worst, fraction };
 }
+
+/**
+ * #2190 — the log markers the heartbeat prints for its WARN-tier findings. The
+ * ObservabilityStack counts them with CloudWatch metric filters on the ETL log
+ * group (`/aws/ecs/sps-etl-<env>`) and alarms each to `sps-warn-<env>`, so a
+ * WARN no longer depends on someone happening to open the heartbeat log.
+ *
+ * 🔴 MIRRORED (as text) in cdk/lib/observability-stack.ts, for the same reason
+ * as the timeouts above. `tests/unit/duration-margin.test.ts` fails on drift: a
+ * renamed marker would silently stop matching and its alarm would sit OK
+ * forever. Plain words and ONE space -- a quoted filter term is an exact phrase.
+ */
+export const MARGIN_WARN_MARKER = "WARN margin";
+export const RETRY_WARN_MARKER = "WARN retries";
+
+/**
+ * #2190 — "one window" for the retry signal: how far back two runs of the same
+ * source count as the same scheduled run. One cadence INTERVAL, not the SLA
+ * (which adds grace and would span two nights). Cadences not listed are not
+ * graded: mirrored/monthly rows are the producer's runs, not our retries, and
+ * annual runs behind a manual gate.
+ */
+export const RETRY_WINDOW_HOURS: Readonly<Partial<Record<Cadence, number>>> = {
+  nightly: 24,
+  weekly: 7 * 24,
+};
+
+/**
+ * Sources that legitimately run many times per window: the reconcilers fire
+ * every 5 minutes (`rate(5 minutes)` in etl-stack.ts), so one transient failure
+ * among ~288 runs is not a storm, and each has its own status alarm.
+ */
+const RETRY_EXEMPT: ReadonlySet<string> = new Set(["SearchReconcile", "CdnReconcile"]);
+
+export interface RetryResult {
+  readonly source: string;
+  readonly windowHours: number;
+  /** Rows started in the window. */
+  readonly runs: number;
+  /** Of those, how many did not end clean (see {@link gradeRetries}). */
+  readonly unclean: number;
+  /** `runs >= 2 && unclean >= 1` — the retry/re-run signature. */
+  readonly flagged: boolean;
+  /** Each row's status in start order; a `running` row that cannot be alive reads `killed`. */
+  readonly statuses: readonly string[];
+}
+
+/**
+ * #2190 — retry-storm signal. `buildStep` retries a failed attempt as a fresh
+ * ECS task, and every attempt opens its own `etl_run` row, so a source that
+ * timed out and was retried shows up as SEVERAL rows in one window. The step
+ * may well end green on its last attempt, which is exactly why nothing else
+ * sees it: a 3x-timeout storm burns hours of the nightly and still reports
+ * success.
+ *
+ * Pure. Returns null when the source is not graded (a cadence with no window,
+ * or {@link RETRY_EXEMPT}).
+ *
+ * The signal is "more than one row in the window AND at least one of them did
+ * not end clean", not the bare row count. A bare count false-alarms every
+ * Sunday: search:index, integrity and revalidate run in BOTH the nightly and
+ * the weekly machine (two clean rows, no retry), and `ReCiterAI-projection`
+ * runs on its own daily machine as well as in the nightly. A Step Functions
+ * retry only ever follows a FAILED attempt, so requiring one unclean row loses
+ * no real storm.
+ *
+ * Unclean = any status other than `success`/`skipped`/`running`, or a
+ * `running` row that cannot still be running: older than its ceiling (killed
+ * at the timeout before it could close its row), or not the newest row
+ * (attempts are sequential, so a newer row means the older task is gone; an
+ * OOM-killed task strands its row as `running` well inside the timeout).
+ */
+export function gradeRetries(
+  source: string,
+  cadence: Cadence,
+  timeoutSeconds: number,
+  rows: readonly MarginRow[],
+  now: number,
+): RetryResult | null {
+  const windowHours = RETRY_WINDOW_HOURS[cadence];
+  if (windowHours === undefined || RETRY_EXEMPT.has(source)) return null;
+  const since = now - windowHours * HOUR_MS;
+  const inWindow = rows
+    .filter((r) => r.startedAt.getTime() >= since)
+    .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+  const statuses = inWindow.map((r, i) => {
+    if (r.status !== "running") return r.status;
+    const newest = i === inWindow.length - 1;
+    const end = r.completedAt?.getTime() ?? now;
+    const alive = newest && (end - r.startedAt.getTime()) / 1000 <= timeoutSeconds;
+    return alive ? "running" : "killed";
+  });
+  const unclean = statuses.filter(
+    (s) => s !== "success" && s !== "skipped" && s !== "running",
+  ).length;
+  return {
+    source,
+    windowHours,
+    runs: inWindow.length,
+    unclean,
+    flagged: inWindow.length >= 2 && unclean >= 1,
+    statuses,
+  };
+}

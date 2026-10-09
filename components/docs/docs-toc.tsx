@@ -50,8 +50,8 @@ function useActiveSection(nav: NavGroup[]): string {
 // Shared link styling so the desktop sidebar and the mobile menu render the
 // active / inactive states identically.
 const ITEM_BASE = "block rounded-r border-l-2 px-2.5 py-1 ";
-const ITEM_ACTIVE = "border-[#7d1c1c] bg-[#f6f7f9] font-semibold text-[#7d1c1c]";
-const ITEM_INACTIVE = "border-transparent text-muted-foreground hover:text-[#7d1c1c]";
+const ITEM_ACTIVE = "border-docs-accent bg-docs-tint font-semibold text-docs-accent";
+const ITEM_INACTIVE = "border-transparent text-muted-foreground hover:text-docs-accent";
 
 function NavLinks({
   nav,
@@ -131,13 +131,13 @@ export function DocsMobileNav({ nav }: { nav: NavGroup[] }) {
     <div className="sticky top-[60px] z-30 -mx-6 border-b border-border bg-white/95 backdrop-blur lg:hidden">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          className="flex w-full items-center gap-2 px-6 py-2.5 text-left text-sm focus:outline-none focus-visible:bg-[#f6f7f9]"
+          className="flex w-full items-center gap-2 px-6 py-2.5 text-left text-sm focus:outline-none focus-visible:bg-docs-tint"
           aria-label="Jump to section"
         >
           <span className="shrink-0 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
             On this page
           </span>
-          <span className="min-w-0 flex-1 truncate font-semibold text-[#7d1c1c]">{activeLabel}</span>
+          <span className="min-w-0 flex-1 truncate font-semibold text-docs-accent">{activeLabel}</span>
           <ChevronDownIcon
             className={
               "size-4 shrink-0 text-muted-foreground transition-transform " +

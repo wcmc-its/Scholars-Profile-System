@@ -1561,3 +1561,20 @@ export function resolveSearchPeopleTrialMeshWeight(): number {
   const n = Number(process.env.SEARCH_PEOPLE_TRIAL_MESH_WEIGHT);
   return Number.isFinite(n) && n > 1 && n <= 3 ? n : 1;
 }
+
+/**
+ * #2215 — typo-tolerant zero-result fallback (`lib/api/search-typo-fallback.ts`).
+ * When on, a People or Publications search whose primary query returns ZERO hits
+ * (non-empty, eligible query; no MeSH concept in play) is re-run once with a
+ * `fuzziness: AUTO` clause over name / title fields, and the response is marked
+ * `typoFallback: true` so the page can say "showing results for similar
+ * spellings". Every query that returns results today is untouched, so ranking is
+ * byte-identical with the flag on or off; only zero-result pages change.
+ *
+ * Default OFF (`=== "on"` opt-in, dark in both envs): staging flip + an eval of
+ * the typo / near-miss query set comes first. Query-time only, no reindex.
+ * Overridable per request on staging (`?flags=SEARCH_TYPO_FALLBACK:on`, #2085).
+ */
+export function resolveSearchTypoFallback(): boolean {
+  return (ovr("SEARCH_TYPO_FALLBACK") ?? process.env.SEARCH_TYPO_FALLBACK) === "on";
+}

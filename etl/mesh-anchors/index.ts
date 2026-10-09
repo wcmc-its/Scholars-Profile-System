@@ -36,6 +36,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/lib/db";
 import { processStartedAt } from "@/lib/etl-run";
+import { assertReseedCount } from "@/lib/etl/reseed-count";
 import { parseCuratedCsv } from "./csv";
 import { filterDerived, mergeAnchors, percentiles } from "./derive";
 import type { AnchorRow, DerivedRowRaw } from "./types";
@@ -197,6 +198,16 @@ async function replaceAnchors(anchors: AnchorRow[]): Promise<void> {
           })),
         });
       }
+      // #1987 -- full replace, so the table must hold exactly the merged set
+      // (curated CSV + derived, after mergeAnchors drops derived rows a curated
+      // one covers). A mismatch rolls the truncate back and fails the run.
+      assertReseedCount({
+        source: "MeshAnchor",
+        table: "mesh_curated_topic_anchor",
+        expected: anchors.length,
+        actual: await tx.meshCuratedTopicAnchor.count(),
+        from: `${CURATED_PATH} + derived anchors`,
+      });
     },
     { timeout: 5 * 60 * 1000, maxWait: 30 * 1000 },
   );

@@ -58,7 +58,7 @@ const NAV: NavGroup[] = [
   { group: "", items: [{ id: "glossary", label: "Glossary" }] },
 ];
 
-const LINK = "text-[#7d1c1c] underline underline-offset-4 hover:no-underline";
+const LINK = "text-docs-accent underline underline-offset-4 hover:no-underline";
 const PM = "https://reciter.weill.cornell.edu";
 const NIH_MPI =
   "https://grants.nih.gov/grants-process/plan-to-apply/consider-your-idea-resources-and-collaborators/multiple-principal-investigators";
@@ -74,13 +74,13 @@ function Callout({
 }) {
   const box =
     variant === "key"
-      ? "border-[#d3d8de] bg-[#f6f7f9]"
+      ? "border-docs-rule bg-docs-tint"
       : variant === "warn"
-        ? "border-[#eedcb6] bg-[#fdf6ec]"
-        : "border-[#c9d8ee] bg-[#f3f6fb]";
-  const head = variant === "warn" ? "text-[#8a5a00]" : "text-[#7d1c1c]";
+        ? "border-docs-warn-border bg-docs-warn-bg"
+        : "border-docs-note-border bg-docs-note-bg";
+  const head = variant === "warn" ? "text-docs-warn-text" : "text-docs-accent";
   return (
-    <div className={`mt-5 max-w-[820px] rounded-[10px] border p-4 ${box}`}>
+    <div className={`mt-5 rounded-[10px] border p-4 ${box}`}>
       <div className={`mb-1 text-[13px] font-semibold ${head}`}>{heading}</div>
       {children}
     </div>
@@ -90,12 +90,16 @@ function Callout({
 const WRG = "https://wrg.weill.cornell.edu";
 
 const MAIN_CLASS = [
-  "min-w-0 pb-24 pt-8 text-[var(--apollo-ink)]",
-  // Hybrid width: cap running prose to a comfortable reading measure (~820px)
-  // while the data-table wrappers below stay uncapped and fill the wider
-  // content column. Headings/lists/callouts/cards are capped directly; the
-  // `overflow-x-auto` table wrappers are intentionally not.
-  "[&_h1]:max-w-[820px] [&_h2]:max-w-[820px] [&_h3]:max-w-[820px] [&_p]:max-w-[820px] [&_ul]:max-w-[820px] [&_ol]:max-w-[820px] [&_dl]:max-w-[820px]",
+  // One width for everything (#1903). The page used a hybrid width: prose
+  // capped at an 820px reading measure, tables and diagrams uncapped so they
+  // filled the wider column, which left every table 116px past every
+  // paragraph at desktop widths. The tables never needed that room (their
+  // min-widths top out at 680px, and below that they scroll in their
+  // `overflow-x-auto` wrappers), so the column itself is now the measure:
+  // `main` is capped at 820px here, and at lg the page container is the
+  // header's max-w-6xl, which leaves main ~808px. Prose, callouts, tables and
+  // the provenance diagram all share one right edge, aligned with the header.
+  "min-w-0 w-full max-w-[820px] pb-24 pt-8 text-[var(--apollo-ink)]",
   "[&_p]:mt-3 [&_ul]:mt-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mt-1 [&_ol]:mt-3 [&_ol]:ml-5 [&_ol]:list-decimal",
   // Anchor offset: below lg a sticky "On this page" bar (DocsMobileNav) sits
   // under the 60px header, so headings need extra scroll-margin to clear it;
@@ -104,7 +108,7 @@ const MAIN_CLASS = [
   "[&_h2]:mt-14 [&_h2]:scroll-mt-28 lg:[&_h2]:scroll-mt-20 [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-tight",
   "[&_h3]:mt-7 [&_h3]:text-lg [&_h3]:font-semibold",
   "[&_table]:w-full [&_table]:border-collapse [&_table]:text-[15px]",
-  "[&_th]:border-b-2 [&_th]:border-[#d3d8de] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:align-top [&_th]:text-[13px] [&_th]:font-semibold [&_th]:text-[var(--apollo-ink-2)]",
+  "[&_th]:border-b-2 [&_th]:border-docs-rule [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:align-top [&_th]:text-[13px] [&_th]:font-semibold [&_th]:text-[var(--apollo-ink-2)]",
   "[&_td]:border-b [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top",
   // Emphasize each row's subject (the first column reads as a row label).
   "[&_tbody_td:first-child]:font-medium [&_tbody_td:first-child]:text-foreground",
@@ -112,7 +116,7 @@ const MAIN_CLASS = [
 
 export default function DocsPage() {
   return (
-    <div className="mx-auto max-w-[1280px] px-6 lg:grid lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-12">
+    <div className="mx-auto max-w-6xl px-6 lg:grid lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-12">
       <DocsMobileNav nav={NAV} />
       <DocsToc nav={NAV} />
 
@@ -120,7 +124,7 @@ export default function DocsPage() {
         <p className="text-[13px] font-semibold text-[var(--apollo-ink-2)]">About</p>
         <h1
           id="start"
-          className="mt-1 scroll-mt-28 font-serif text-4xl font-semibold leading-tight tracking-tight lg:scroll-mt-20"
+          className="page-title mt-1 scroll-mt-28 text-4xl leading-tight tracking-tight lg:scroll-mt-20"
         >
           Scholars at Weill Cornell Medicine
         </h1>
@@ -136,7 +140,7 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from.</em> 28 authoritative sources, among them
+              <em>Where your data comes from.</em> 27 authoritative sources, among them
               the Enterprise Directory, the WCM Web Directory, ASMS, InfoEd, Jenzabar, OnCore, the
               External Relationships / COI system, PubMed, Scopus, NIH RePORTER, the WCM Newsroom,
               and Muck Rack (the full list is in{" "}
@@ -194,7 +198,7 @@ export default function DocsPage() {
         <h2 className="!mt-7 !text-lg !font-semibold !tracking-normal">
           Common questions
         </h2>
-        <div className="mt-3 max-w-[820px] overflow-hidden rounded-[10px] border border-border bg-[#fafbfc]">
+        <div className="mt-3 overflow-hidden rounded-[10px] border border-border bg-docs-card">
           {[
             {
               href: "#scholar",
@@ -230,9 +234,9 @@ export default function DocsPage() {
             <Link
               key={item.href}
               href={item.href}
-              className="block border-t border-border px-4 py-2.5 first:border-t-0 hover:bg-[#f6f7f9]"
+              className="block border-t border-border px-4 py-2.5 first:border-t-0 hover:bg-docs-tint"
             >
-              <span className="font-medium text-[#7d1c1c]">{item.q}</span>
+              <span className="font-medium text-docs-accent">{item.q}</span>
               <span className="mt-0.5 block text-sm text-[var(--apollo-ink-2)]">{item.a}</span>
             </Link>
           ))}
@@ -247,7 +251,7 @@ export default function DocsPage() {
           Jump to your section. Each is short and links into the shared reference below for the
           mechanics.
         </p>
-        <div className="mt-5 grid max-w-[820px] gap-3.5 sm:grid-cols-2">
+        <div className="mt-5 grid gap-3.5 sm:grid-cols-2">
           {[
             { href: "#scholar", t: "A scholar (faculty)", d: "You have a profile and want it to be right." },
             { href: "#postdoc", t: "A postdoc or fellow", d: "An academic appointee who can appear as a scholar." },
@@ -257,9 +261,9 @@ export default function DocsPage() {
             <Link
               key={c.href}
               href={c.href}
-              className="rounded-[10px] border border-border p-4 no-underline hover:border-[#7d1c1c]"
+              className="rounded-[10px] border border-border p-4 no-underline hover:border-docs-accent"
             >
-              <span className="block font-medium text-[#7d1c1c]">{c.t}</span>
+              <span className="block font-medium text-docs-accent">{c.t}</span>
               <span className="mt-1 block text-sm text-[var(--apollo-ink-2)]">{c.d}</span>
             </Link>
           ))}

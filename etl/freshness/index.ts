@@ -53,8 +53,12 @@ import {
 } from "@/lib/etl/freshness-policy";
 import {
   MARGIN_WARN_FRACTION,
+  MARGIN_WARN_MARKER,
+  RETRY_WARN_MARKER,
   type MarginResult,
+  type RetryResult,
   gradeDurationMargin,
+  gradeRetries,
   marginWindowStart,
   stepTimeoutSeconds,
 } from "@/lib/etl/duration-margin";
@@ -96,13 +100,21 @@ async function evaluate(now: number): Promise<SourceStatus[]> {
  * #2190 — per-step duration margin. For every tracked source with an SPS
  * timeout, grade every `etl_run` row started in its cadence window against that
  * timeout (see lib/etl/duration-margin.ts). WARN tier: a breach is logged as a
- * `[freshness] WARN` line and never sets the exit code — nothing has failed yet,
- * and the exit code is reserved for staleness, which alarms via
- * `sps-etl-heartbeat-status-<env>`.
+ * `[freshness] WARN margin` line and never sets the exit code — nothing has
+ * failed yet, and the exit code is reserved for staleness, which alarms via
+ * `sps-etl-heartbeat-status-<env>`. The WARN line itself reaches
+ * `sps-warn-<env>` through a metric filter + alarm in ObservabilityStack.
+ *
+ * The retry-storm signal (gradeRetries) grades the SAME rows: its window (one
+ * cadence interval) sits inside the margin window (one SLA), so it costs no
+ * extra query.
  */
-async function evaluateMargins(now: number): Promise<MarginResult[]> {
+async function evaluateMargins(
+  now: number,
+): Promise<{ margins: MarginResult[]; retries: RetryResult[] }> {
   const env = process.env.SCHOLARS_ENV;
-  const out: MarginResult[] = [];
+  const margins: MarginResult[] = [];
+  const retries: RetryResult[] = [];
   for (const [source, spec] of Object.entries(TRACKED)) {
     if (!isTrackedInEnv(spec, env)) continue;
     const timeoutSeconds = stepTimeoutSeconds(source);
@@ -111,9 +123,11 @@ async function evaluateMargins(now: number): Promise<MarginResult[]> {
       where: { source, startedAt: { gte: marginWindowStart(spec.cadence, now) } },
       select: { startedAt: true, completedAt: true, status: true },
     });
-    out.push(gradeDurationMargin(source, timeoutSeconds, rows, now));
+    margins.push(gradeDurationMargin(source, timeoutSeconds, rows, now));
+    const retry = gradeRetries(source, spec.cadence, timeoutSeconds, rows, now);
+    if (retry !== null) retries.push(retry);
   }
-  return out;
+  return { margins, retries };
 }
 
 function fmtAge(ageHours: number | null): string {
@@ -180,12 +194,14 @@ async function main(): Promise<void> {
     console.log(`[freshness] untracked sources (not alarmed): ${untracked.join(", ")}`);
   }
 
-  const margins = await evaluateMargins(now);
+  const { margins, retries } = await evaluateMargins(now);
   const breaches = margins.filter((m) => m.level !== "ok");
   for (const m of breaches) {
     const w = m.worst!;
+    // The marker is what the sps-etl-duration-margin-<env> metric filter counts
+    // (ObservabilityStack) -- print it via the constant, never retyped.
     console.warn(
-      `[freshness] WARN  margin ${m.source}: ${m.level.toUpperCase()} — run started ` +
+      `[freshness] ${MARGIN_WARN_MARKER} ${m.source}: ${m.level.toUpperCase()} — run started ` +
         `${w.startedAt.toISOString()} (${w.status}${w.open ? ", no completedAt" : ""}) took ` +
         `${Math.round(w.durationSeconds)}s = ${Math.round((m.fraction ?? 0) * 100)}% of its ` +
         `${m.timeoutSeconds}s timeout` +
@@ -196,7 +212,25 @@ async function main(): Promise<void> {
   }
   console.log(
     `[freshness] margin: ${margins.length} sources checked against their step timeout, ` +
-      `${breaches.length} at or over ${Math.round(MARGIN_WARN_FRACTION * 100)}% (warn only, not alarmed)`,
+      `${breaches.length} at or over ${Math.round(MARGIN_WARN_FRACTION * 100)}% (warn tier, sps-warn)`,
+  );
+
+  // #2190 -- retry storms. Each Step Functions retry is a fresh task and a fresh
+  // etl_run row, so a step that timed out and was retried is several rows in
+  // one window even when its last attempt went green. WARN tier, like margin:
+  // logged under RETRY_WARN_MARKER (counted into sps-warn-<env>), never sets
+  // the exit code.
+  const storms = retries.filter((r) => r.flagged);
+  for (const r of storms) {
+    console.warn(
+      `[freshness] ${RETRY_WARN_MARKER} ${r.source}: ${r.runs} runs in the last ` +
+        `${r.windowHours}h, ${r.unclean} not clean (${r.statuses.join(" -> ")}) — ` +
+        `retried or re-run; each attempt costs up to its step timeout`,
+    );
+  }
+  console.log(
+    `[freshness] retries: ${retries.length} sources checked for repeat runs in one window, ` +
+      `${storms.length} retried (warn tier, sps-warn)`,
   );
 
   const acked = statuses.filter((s) => s.acknowledged);

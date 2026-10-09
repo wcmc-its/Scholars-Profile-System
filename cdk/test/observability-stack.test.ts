@@ -146,8 +146,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 18 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 18);
+    it("creates exactly 20 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge + 2 #2190 ETL heartbeat warns)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 20);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -155,7 +155,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(18);
+      expect(names).toHaveLength(20);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
@@ -183,6 +183,8 @@ describe("SpsObservabilityStack", () => {
           "sps-edge-probe-stalled-prod",
           "sps-edge-unreachable-prod",
           "sps-edit-authz-denied-prod",
+          "sps-etl-duration-margin-prod",
+          "sps-etl-retry-storm-prod",
           "sps-opensearch-breaker-prod",
           "sps-opensearch-cluster-red-prod",
           "sps-opensearch-jvm-pressure-prod",
@@ -355,6 +357,9 @@ describe("SpsObservabilityStack", () => {
         "sps-db-pool-timeout-prod": pageId,
         "sps-opensearch-jvm-pressure-prod": warnId,
         "sps-edit-authz-denied-prod": warnId,
+        // #2190 -- the heartbeat's WARN lines: nothing has failed yet.
+        "sps-etl-duration-margin-prod": warnId,
+        "sps-etl-retry-storm-prod": warnId,
         "sps-oncall-relay-errors-prod": notifyId,
         // #1934 -- origin-cert expiry is weeks of lead time, not an outage, so
         // it warns rather than pages and stays out of the composite.
@@ -390,8 +395,8 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      // 17 in prod; staging is 16 — it gets no ACU alarm (see the note above).
-      expect(seen).toBe(18);
+      // 20 in prod; staging is 19 — it gets no ACU alarm (see the note above).
+      expect(seen).toBe(20);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -635,7 +640,7 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("creates the B02 edit_authz_denied metric filter on the app log group", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 3);
+      template.resourceCountIs("AWS::Logs::MetricFilter", 5);
       const filters = template.findResources("AWS::Logs::MetricFilter", {
         Properties: { FilterName: "sps-edit-authz-denied-prod" },
       });
@@ -656,6 +661,53 @@ describe("SpsObservabilityStack", () => {
       // shape matches the AppStack-owned env-prefixed group.
       const logGroupName = props?.LogGroupName;
       expect(logGroupName).toBeDefined();
+    });
+
+    // #2190 -- the etl:freshness heartbeat's WARN lines reach sps-warn. The
+    // patterns are quoted literal phrases (the ECS log lines are plain text, so
+    // a JSON pattern would never match), on the ETL log group BY NAME (no
+    // EtlStack export), and their text is drift-tested against
+    // lib/etl/duration-margin.ts in tests/unit/duration-margin.test.ts.
+    it.each([
+      ["sps-etl-duration-margin-prod", '"WARN margin"', "EtlDurationMarginWarn"],
+      ["sps-etl-retry-storm-prod", '"WARN retries"', "EtlRetryStormWarn"],
+    ])("%s counts %s on the ETL log group into SPS/Etl/prod", (name, pattern, metric) => {
+      template.hasResourceProperties("AWS::Logs::MetricFilter", {
+        FilterName: name,
+        LogGroupName: "/aws/ecs/sps-etl-prod",
+        FilterPattern: pattern,
+        MetricTransformations: [
+          Match.objectLike({
+            MetricNamespace: "SPS/Etl/prod",
+            MetricName: metric,
+            MetricValue: "1",
+            DefaultValue: 0,
+          }),
+        ],
+      });
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: name,
+        Namespace: "SPS/Etl/prod",
+        MetricName: metric,
+        Statistic: "Sum",
+        Threshold: 0,
+        ComparisonOperator: "GreaterThanThreshold",
+        TreatMissingData: "notBreaching",
+      });
+    });
+
+    it("the warn topic carries no explicit TopicPolicy, so CloudWatch alarms can publish (#2279)", () => {
+      // An explicit policy REPLACES the implicit same-account default; one that
+      // granted only some service would silently mute every alarm on the topic.
+      const topics = template.findResources("AWS::SNS::Topic");
+      const warnId = Object.entries(topics).find(
+        ([, r]) => (r.Properties as { TopicName?: string }).TopicName === "sps-warn-prod",
+      )?.[0];
+      const policies = template.findResources("AWS::SNS::TopicPolicy");
+      const onWarn = Object.values(policies).filter((p) =>
+        JSON.stringify(p.Properties?.Topics ?? []).includes(`"${warnId}"`),
+      );
+      expect(onWarn).toEqual([]);
     });
 
     it("alarms on the first circuit_breaking_exception in the app log", () => {
@@ -1181,8 +1233,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 17 CloudWatch alarms (11 platform + 1 B27 relay-errors + 5 edge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 17);
+    it("creates exactly 19 CloudWatch alarms (11 platform + 1 B27 relay-errors + 5 edge + 2 #2190 ETL heartbeat warns)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 19);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -1190,7 +1242,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(17);
+      expect(names).toHaveLength(19);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -1276,6 +1328,8 @@ describe("SpsObservabilityStack", () => {
         "sps-db-pool-timeout-staging": pageId,
         "sps-opensearch-jvm-pressure-staging": warnId,
         "sps-edit-authz-denied-staging": warnId,
+        "sps-etl-duration-margin-staging": warnId,
+        "sps-etl-retry-storm-staging": warnId,
         "sps-oncall-relay-errors-staging": notifyId,
         // #1934 -- same tiering as prod: cert expiry warns, the two edge
         // outage leaves page through the composite.
@@ -1306,7 +1360,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(17);
+      expect(seen).toBe(19);
     });
 
     it("creates the app-unavailable composite in staging too", () => {
@@ -1393,7 +1447,7 @@ describe("SpsObservabilityStack", () => {
     // log-group-scoped (per-env) rather than account-wide. They must ship in
     // both envs so staging traffic exercises the binding before prod.
     it("creates the B02 edit_authz_denied metric filter in staging (not prod-only)", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 3);
+      template.resourceCountIs("AWS::Logs::MetricFilter", 5);
       template.hasResourceProperties("AWS::Logs::MetricFilter", {
         FilterPattern: '{ $.event = "edit_authz_denied" }',
       });
@@ -1541,8 +1595,8 @@ describe("SpsObservabilityStack", () => {
     it("every MetricFilter namespace carries its env literal", () => {
       const prodNs = namespaces(prod, "AWS::Logs::MetricFilter");
       const stagingNs = namespaces(staging, "AWS::Logs::MetricFilter");
-      expect(prodNs).toHaveLength(3);
-      expect(stagingNs).toHaveLength(3);
+      expect(prodNs).toHaveLength(5);
+      expect(stagingNs).toHaveLength(5);
       for (const n of prodNs) expect(n).toMatch(/\/prod$/);
       for (const n of stagingNs) expect(n).toMatch(/\/staging$/);
     });
@@ -1561,10 +1615,10 @@ describe("SpsObservabilityStack", () => {
       ] as const) {
         const written = new Set(namespaces(t, "AWS::Logs::MetricFilter"));
         const read = namespaces(t, "AWS::CloudWatch::Alarm");
-        // Six alarms live under SPS/: three log-derived (MetricFilter) plus
-        // the four #1934 edge alarms. The rest key on AWS/* namespaces and
+        // Eight alarms live under SPS/: the log-derived ones (MetricFilter; two
+        // of them the #2190 ETL heartbeat warns) plus the #1934 edge alarms. The rest key on AWS/* namespaces and
         // are filtered out above.
-        expect(read).toHaveLength(6);
+        expect(read).toHaveLength(8);
         for (const n of read) {
           // The invariant that matters in BOTH cases: the namespace carries
           // this env's literal, so one env can never read the other's signal.

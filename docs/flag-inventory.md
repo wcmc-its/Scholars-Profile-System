@@ -67,6 +67,7 @@ owning issues; dates from the cdk flip annotations.
 | Flag | Owner | Exit criterion / decision |
 |---|---|---|
 | SEARCH_PEOPLE_DIVISION_SHAPE | #1347 | Dark pending A/B of division-shape routing |
+| SEARCH_TYPO_FALLBACK | #2215 | Typo-tolerant zero-result fallback (fires only when the exact People/Publications search returns 0; non-zero searches byte-identical). Flip staging first, eval the typo set (`oncolgy`, `cardiolgy`, `radiolgy`, `immunolgy`, `Harrigton`) plus a no-false-rescue set of genuine zeros, then prod. Per-request staging A/B: `?flags=SEARCH_TYPO_FALLBACK:on` |
 | SEARCH_MESH_RESOLVE_TOKEN_COVERAGE | #1348 (folded into #1972) | OFF in both envs on its own merits, not by the resolution-fallback flag being off. Flipped on in staging 2026-07-26, A/B'd same day on the deployed index, reverted: resolution rate fell 33/35→22/35 (11 lost, e.g. `pediatric asthma`→Asthma, `cancer immunotherapy`→Immunotherapy), one query got WORSE (`policy and health outcomes`: `Health Policy`→`Policy`), and exactly one trap closed (`foreign policy`→`Policy`). No further work planned — the open design question (score the one-token case instead of rejecting it) has no owner |
 | SEARCH_PEOPLE_CONCEPT_PRECOUNT | #1414 | Inverted polarity ("off" = new fast path); #1414 wants code-default flip |
 | SEARCH_SUGGEST_MESH_CONCEPT | #878 | Flip staging first for a soak → prod; no data prereq |

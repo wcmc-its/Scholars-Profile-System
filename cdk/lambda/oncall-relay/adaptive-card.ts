@@ -46,6 +46,9 @@ export interface EtlEventPayload {
   readonly execution?: string;
   readonly error?: unknown;
   readonly runbook?: string;
+  /** #2196 -- set when the failed step carries an ack (`StepAck` in etl-stack.ts). */
+  readonly ackUntil?: string;
+  readonly ackReason?: string;
 }
 
 /** Adaptive Card envelope shape accepted by the Teams Workflows webhook. */
@@ -428,6 +431,16 @@ export function buildEtlCard(
     facts.push({ title: "Execution", value: payload.execution });
   }
   facts.push({ title: "Error", value: errorFact(payload.error) });
+  // #2196 -- never silent about what an ack is suppressing, or until when.
+  if (payload.ackUntil !== undefined) {
+    facts.push({
+      title: "Acknowledged",
+      value: truncate(
+        `until ${payload.ackUntil}${payload.ackReason ? ` \u{2014} ${payload.ackReason}` : ""}`,
+        REASON_MAX_CHARS,
+      ),
+    });
+  }
   if (payload.runbook !== undefined) {
     facts.push({ title: "Runbook", value: truncate(payload.runbook, REASON_MAX_CHARS) });
   }

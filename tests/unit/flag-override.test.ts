@@ -34,6 +34,7 @@ import {
   resolveSearchPeopleConceptArmFirst,
   resolveSearchPeopleFacultyProminence,
   resolveSearchPeoplePubCountDampen,
+  resolveSearchTypoFallback,
 } from "@/lib/api/search-flags";
 
 /**
@@ -149,6 +150,12 @@ const CASES: Record<
     read: resolveSearchPeoplePubCountDampen,
     dflt: "off",
     overridden: "capped",
+  },
+  SEARCH_TYPO_FALLBACK: {
+    value: "on",
+    read: resolveSearchTypoFallback,
+    dflt: false,
+    overridden: true,
   },
 };
 

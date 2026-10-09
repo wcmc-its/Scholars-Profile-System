@@ -11,6 +11,12 @@
  * ETL step, cadence or route changes. "Occasional" = a hand-run export or
  * import with no schedule.
  *
+ * The diagram (#1903) shows the page's thesis: sources, then the ReCiter and
+ * ReciterAI computed layers, then Scholars, with corrections going back
+ * upstream. Plain HTML/CSS rather than an SVG from scripts/diagrams (those are
+ * fixed-palette, fixed-viewBox architecture drawings), so it reflows to a
+ * single column on phones and takes its colours from theme tokens.
+ *
  * Client only for the two filters (Refresh on the diagram, "who fixes it" on
  * the table); everything renders on the server first. Built from divs with
  * ARIA table roles rather than <table> so MAIN_CLASS's `[&_td]` styles on the
@@ -20,7 +26,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-const LINK = "text-[#7d1c1c] underline underline-offset-4 hover:no-underline";
+const LINK = "text-docs-accent underline underline-offset-4 hover:no-underline";
 const WEB_DIR = "https://directory.weill.cornell.edu";
 const PM = "https://reciter.weill.cornell.edu";
 const WRG = "https://wrg.weill.cornell.edu";
@@ -40,8 +46,6 @@ const WCM: Source[] = [
   { name: "ASMS", data: "Education and training", cad: "nightly" },
   { name: "InfoEd (Weill Research Gateway)", data: "Grants and grant roles", cad: "nightly" },
   { name: "External Relationships / COI (WRG)", data: "Disclosures, which you manage in the Weill Research Gateway", cad: "nightly" },
-  { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts, suggested ORCID iDs from your PubMed author records", cad: "nightly" },
-  { name: "ReciterAI", data: "Research areas, Impact, synopses, methods, core facilities, Spotlight", cad: "nightly" },
   { name: "OnCore", data: "Which clinical trials you are on", cad: "occasional" },
   { name: "Jenzabar", data: "PhD thesis advisees, Graduate School appointments", cad: "nightly" },
   { name: "Medical Education rosters", data: "MD scholarly-project, MD-PhD and early-career mentees", cad: "occasional" },
@@ -72,6 +76,13 @@ const DATA: Source[] = [
   { name: "Europe PMC", data: "Full-text Data Availability statements, scanned for dataset deposits", cad: "occasional" },
   { name: "PubMed Central", data: "Full text where Europe PMC has none", cad: "occasional" },
   { name: "DataCite", data: "Dataset titles, creators and publishers", cad: "occasional" },
+];
+
+// The two in-house computed layers between the sources and Scholars (#1903):
+// ReCiter matches publication records to people; ReciterAI reads those papers.
+const LAYERS: [Source, Source] = [
+  { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts, suggested ORCID iDs from your PubMed author records", cad: "nightly" },
+  { name: "ReciterAI", data: "Research areas, Impact, synopses, methods, core facilities, Spotlight", cad: "nightly" },
 ];
 
 const CADENCES: Cadence[] = ["live", "nightly", "weekly", "annual", "occasional"];
@@ -295,8 +306,8 @@ const fixOf = (tag: Tag): Exclude<Fix, "all"> =>
       : "source";
 
 /** Green = you act, slate = someone acts on your request, neutral = nobody here can. */
-const GREEN_OUTLINE = "border-[#a9d3c0] bg-[var(--apollo-surface)] text-[var(--apollo-green)]";
-const SLATE = "border-[#d5dfeb] bg-[#eaf0f7] text-[#2f4a6d]";
+const GREEN_OUTLINE = "border-docs-pill-green-border bg-[var(--apollo-surface)] text-[var(--apollo-green)]";
+const SLATE = "border-docs-pill-slate-border bg-docs-pill-slate-bg text-docs-pill-slate-text";
 const TAG_STYLE: Record<Tag, string> = {
   "Yours to edit": "border-transparent bg-[var(--apollo-green-tint)] text-[var(--apollo-green)]",
   "Yours · Web Directory": GREEN_OUTLINE,
@@ -366,6 +377,23 @@ function CadencePill({ cad }: { cad: string }) {
   );
 }
 
+function SourceCard({ s, cad }: { s: Source; cad: Cadence | null }) {
+  const hit = cad === s.cad;
+  return (
+    <div
+      className={`flex min-w-0 flex-col gap-0.5 rounded-lg border bg-[var(--apollo-surface)] px-3 py-2 transition-opacity ${
+        hit ? "border-[var(--apollo-ink-2)]" : "border-[var(--apollo-border-strong)]"
+      } ${cad && !hit ? "opacity-35" : ""}`}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
+        <CadencePill cad={s.cad} />
+      </div>
+      <span className="text-xs text-[var(--apollo-ink-2)]">{s.data}</span>
+    </div>
+  );
+}
+
 function SourceGroup({
   label,
   sources,
@@ -382,46 +410,115 @@ function SourceGroup({
         <span className="text-xs tabular-nums text-muted-foreground">{sources.length}</span>
       </div>
       <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {sources.map((s) => {
-          const hit = cad === s.cad;
-          return (
-            <div
-              key={s.name}
-              className={`flex min-w-0 flex-col gap-0.5 rounded-lg border bg-[var(--apollo-surface)] px-3 py-2 transition-opacity ${
-                hit ? "border-[var(--apollo-ink-2)]" : "border-[var(--apollo-border-strong)]"
-              } ${cad && !hit ? "opacity-35" : ""}`}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
-                <CadencePill cad={s.cad} />
-              </div>
-              <span className="text-xs text-[var(--apollo-ink-2)]">{s.data}</span>
-            </div>
-          );
-        })}
+        {sources.map((s) => (
+          <SourceCard key={s.name} s={s} cad={cad} />
+        ))}
       </div>
     </div>
   );
 }
 
+/**
+ * One arrow of the provenance diagram. `flow` (solid, ink) is data moving
+ * downstream toward Scholars; `fix` (dashed, maroon) is a correction going
+ * back upstream to the system that owns the record. Drawn in currentColor so
+ * the tone follows the theme tokens; the SVG is decorative and the label (or
+ * the surrounding text) carries the meaning.
+ */
+function Arrow({
+  dir,
+  tone = "flow",
+  label,
+  className = "",
+}: {
+  dir: "down" | "up" | "right" | "left";
+  tone?: "flow" | "fix";
+  label?: string;
+  className?: string;
+}) {
+  const vertical = dir === "down" || dir === "up";
+  const path = {
+    down: "M6 1v24M1 19l5 6 5-6",
+    up: "M6 27V3M1 9l5-6 5 6",
+    right: "M1 6h30M25 1l6 5-6 5",
+    left: "M33 6H3M9 1 3 6l6 5",
+  }[dir];
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 text-xs ${
+        tone === "fix" ? "text-docs-accent" : "text-[var(--apollo-ink-2)]"
+      } ${className}`}
+    >
+      <svg
+        width={vertical ? 12 : 34}
+        height={vertical ? 28 : 12}
+        viewBox={vertical ? "0 0 12 28" : "0 0 34 12"}
+        className="shrink-0"
+        aria-hidden="true"
+      >
+        <path
+          d={path}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeDasharray={tone === "fix" ? "3 2.5" : undefined}
+        />
+      </svg>
+      {label && <span>{label}</span>}
+    </span>
+  );
+}
+
+/** The two columns of the lower half: computed layers (left) and Scholars (right). */
+const LANES = "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)] sm:gap-0";
+
+const FIX_ROUTES: { name: string; to: string; body: React.ReactNode }[] = [
+  {
+    name: "Not mine",
+    to: "ReCiter",
+    body: "Reject a wrong paper on your edit page or in Publication Manager. ReCiter learns from it and stops matching the paper to you.",
+  },
+  {
+    name: "Request a change",
+    to: "the office that owns the record",
+    body: "Titles, appointments, grants, education and the like are fixed by the office behind the source system.",
+  },
+  {
+    name: "Fix it yourself",
+    to: "at the source",
+    body: <>Your name, photo and email in the {WebDir}; your disclosures in the Weill Research Gateway.</>,
+  },
+];
+
 export function SystemContext() {
   const [cad, setCad] = useState<Cadence | null>(null);
-  const all = [...WCM, ...EXT, ...DATA];
+  const sources = [...WCM, ...EXT, ...DATA];
+  const all = [...sources, ...LAYERS];
   return (
-    <div className="mt-6 flex flex-col gap-3.5">
+    <figure
+      className="mt-6 flex flex-col gap-3.5"
+      aria-labelledby="provenance-diagram-title"
+      aria-describedby="provenance-diagram-caption"
+    >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex flex-col gap-0.5">
-          <div className="flex items-baseline gap-2">
-            <span className="text-lg font-semibold">System sources</span>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span id="provenance-diagram-title" className="text-lg font-semibold">
+              How a profile is assembled
+            </span>
             <span className="text-sm tabular-nums text-[var(--apollo-ink-2)]">
-              {all.length} sources feed Scholars
+              {sources.length} sources, {LAYERS.length} computed layers
             </span>
           </div>
           <span className="text-sm text-[var(--apollo-ink-2)]">
             All sources refresh nightly unless marked.
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto" role="group" aria-label="Highlight sources by refresh schedule">
+        <div
+          className="flex flex-wrap items-center gap-1.5 sm:ml-auto"
+          role="group"
+          aria-label="Highlight sources by refresh schedule"
+        >
           <span className="text-xs text-[var(--apollo-ink-2)]">Refresh</span>
           {CADENCES.map((c) => (
             <button
@@ -444,63 +541,114 @@ export function SystemContext() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] p-4 shadow-[var(--apollo-shadow-card)] sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto_220px] lg:gap-0 bg-[var(--apollo-page)]">
+      <div className="flex flex-col rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-page)] p-4 shadow-[var(--apollo-shadow-card)] sm:p-5">
+        {/* 1. Source systems */}
         <div className="flex flex-col gap-4">
           <SourceGroup label="WCM source systems" sources={WCM} cad={cad} />
           <SourceGroup label="Outside sources" sources={EXT} cad={cad} />
           <SourceGroup label="Data-sharing sources" sources={DATA} cad={cad} />
         </div>
 
-        <div className="flex items-center justify-center gap-1.5 text-[var(--apollo-ink-2)] lg:flex-col lg:px-1">
-          <span className="whitespace-nowrap rounded-full border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface)] px-2 text-xs">
-            ingest
-          </span>
-          <svg width="44" height="12" viewBox="0 0 44 12" className="hidden lg:block" aria-hidden="true">
-            <path d="M0 6h40M35 1l6 5-6 5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          </svg>
-          <svg width="12" height="22" viewBox="0 0 12 22" className="lg:hidden" aria-hidden="true">
-            <path d="M6 0v18M1 13l5 6 5-6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          </svg>
+        {/* Source → lanes: publications go through the computed layers, the
+            rest is copied as-is; corrections travel back up. */}
+        <div className={`${LANES} py-3`}>
+          <div className="flex justify-center">
+            <Arrow dir="down" label="Publication records" />
+          </div>
+          <div className="hidden sm:block" />
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
+            <Arrow dir="down" label="Everything else, as-is" />
+            <Arrow dir="up" tone="fix" label="Corrections" />
+          </div>
         </div>
 
-        <div className="flex flex-col justify-center rounded-[10px] border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface-2)] p-5 shadow-[inset_0_3px_0_var(--apollo-maroon)]">
-          <div className="flex flex-col items-center gap-1.5 py-2 text-center">
-            <span className="text-base font-semibold">Scholars</span>
-            <span className="text-[13px] text-[var(--apollo-ink-2)]">
-              Combines imported data with edits and publishes profiles
+        <div className={LANES}>
+          {/* 2. Computed layers */}
+          <div className="flex flex-col gap-1 rounded-[10px] border border-[var(--apollo-slate-tint-border)] bg-[var(--apollo-slate-tint)] p-3.5">
+            <span className="px-0.5 pb-1 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
+              Computed layers
             </span>
-          </div>
-          <div className="flex h-[34px] items-center justify-center gap-2 text-[var(--apollo-ink-2)]">
-            <svg width="12" height="22" viewBox="0 0 12 22" aria-hidden="true">
-              <path d="M6 22V4M1 9l5-6 5 6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-            </svg>
-            <span className="text-xs">applied on top</span>
-          </div>
-          <div className="flex flex-col gap-2 rounded-lg border border-[var(--apollo-border-strong)] bg-[var(--apollo-green-tint)] px-3.5 py-3">
-            <span className="flex items-center gap-1.5 text-sm font-medium">
-              <span className="text-[var(--apollo-green)]">
-                <PencilIcon />
-              </span>
-              Edits in Scholars
-            </span>
-            <div className="flex flex-col gap-1 text-xs">
-              {SCHOLARS_EDITS.map((e) => (
-                <span key={e}>{e}</span>
-              ))}
+            <SourceCard s={LAYERS[0]} cad={cad} />
+            <div className="flex justify-center">
+              <Arrow dir="down" />
             </div>
-            <span className="border-t border-[var(--apollo-border-strong)] pt-1.5 text-xs text-[var(--apollo-ink-2)]">
-              Made by scholars, their editors, or unit curators. Kept separately, so imports never
-              overwrite them.
+            <SourceCard s={LAYERS[1]} cad={cad} />
+          </div>
+
+          <div className="flex items-center justify-center gap-4 sm:flex-col sm:gap-2">
+            {/* Phones stack the lanes, so the arrows turn vertical. */}
+            <span className="contents sm:hidden">
+              <Arrow dir="down" />
+              <Arrow dir="up" tone="fix" label="Not mine" />
             </span>
+            <span className="hidden sm:contents">
+              <Arrow dir="right" />
+              <Arrow dir="left" tone="fix" />
+              <span className="text-xs text-docs-accent">Not mine</span>
+            </span>
+          </div>
+
+          {/* 3. Scholars */}
+          <div className="flex flex-col rounded-[10px] border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface-2)] p-4 shadow-[inset_0_3px_0_var(--apollo-maroon)]">
+            <div className="flex flex-col items-center gap-1 py-1 text-center">
+              <span className="text-base font-semibold">Scholars</span>
+              <span className="text-[13px] text-[var(--apollo-ink-2)]">
+                Combines imported data with edits and publishes profiles
+              </span>
+            </div>
+            <div className="flex h-[34px] items-center justify-center">
+              <Arrow dir="up" label="applied on top" />
+            </div>
+            <div className="flex flex-col gap-2 rounded-lg border border-[var(--apollo-border-strong)] bg-[var(--apollo-green-tint)] px-3.5 py-3">
+              <span className="flex items-center gap-1.5 text-sm font-medium">
+                <span className="text-[var(--apollo-green)]">
+                  <PencilIcon />
+                </span>
+                Edits in Scholars
+              </span>
+              <div className="grid grid-cols-1 gap-x-3 gap-y-1 text-xs min-[480px]:grid-cols-2 sm:grid-cols-1 lg:grid-cols-2">
+                {SCHOLARS_EDITS.map((e) => (
+                  <span key={e}>{e}</span>
+                ))}
+              </div>
+              <span className="border-t border-[var(--apollo-border-strong)] pt-1.5 text-xs text-[var(--apollo-ink-2)]">
+                Made by scholars, their editors, or unit curators. Kept separately, so imports never
+                overwrite them.
+              </span>
+            </div>
           </div>
         </div>
+
+        {/* Corrections, back upstream */}
+        <div className="mt-4 rounded-[10px] border border-dashed border-docs-accent bg-[var(--apollo-surface)] p-3.5">
+          <div className="flex items-center gap-2 pb-2">
+            <Arrow dir="up" tone="fix" />
+            <span className="text-[13px] font-semibold text-docs-accent">
+              Corrections go back upstream, not into Scholars
+            </span>
+          </div>
+          <ul className="!m-0 grid !list-none grid-cols-1 gap-3 sm:grid-cols-3">
+            {FIX_ROUTES.map((r) => (
+              <li key={r.name} className="!m-0 flex flex-col gap-0.5">
+                <span className="text-sm font-medium">
+                  {r.name} <span className="font-normal text-[var(--apollo-ink-2)]">&rarr; {r.to}</span>
+                </span>
+                <span className="text-xs text-[var(--apollo-ink-2)]">{r.body}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
-      <div className="text-xs text-[var(--apollo-ink-2)]">
-        Photos are shown live from the Web Directory rather than copied, so a changed photo
-        appears right away and a new one within about a day. &ldquo;Occasional&rdquo; means someone runs an export by hand, with no
-        schedule.
-      </div>
-    </div>
+      <figcaption id="provenance-diagram-caption" className="text-xs text-[var(--apollo-ink-2)]">
+        Source systems feed Scholars on a schedule. Publication records pass through two computed
+        layers first: ReCiter decides which papers are yours, and ReciterAI works out what they are
+        about. Scholars applies the edits made in Scholars itself and publishes the result.
+        Corrections go back to the system that owns the record, because the next refresh would
+        overwrite a fix made to the copy. Photos are shown live from the Web Directory rather than
+        copied, so a changed photo appears right away and a new one within about a day.
+        &ldquo;Occasional&rdquo; means someone runs an export by hand, with no schedule.
+      </figcaption>
+    </figure>
   );
 }
 

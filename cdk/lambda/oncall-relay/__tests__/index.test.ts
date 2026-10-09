@@ -324,6 +324,38 @@ describe("oncall-relay handler", () => {
     expect(delivered).toContain('"severity":"warn"');
   });
 
+  // #2196 -- an acked nightly failure still posts, but at warn until its ack
+  // expires; past `until` (or with an unparseable one) it pages as before.
+  it.each([
+    ["2099-01-01", "warn"],
+    ["2020-01-01", "page"],
+    ["whenever", "page"],
+  ])("an ACKED nightly step failure (until %s) grades %s", async (ackUntil, expected) => {
+    sendMock.mockResolvedValue({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent(
+        {
+          AlarmName: undefined,
+          env: "prod",
+          step: "Infoed",
+          stateMachine: "scholars-nightly-prod",
+          error: { Error: "States.TaskFailed" },
+          ackUntil,
+          ackReason: "upstream outage",
+        },
+        ETL_TOPIC_ARN,
+      ),
+      {} as never,
+      () => undefined,
+    );
+
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain(`"severity":"${expected}"`);
+  });
+
   it("ETL card threads the handler-computed severity + the topic ARN's account id into an execution-specific link (#2304)", async () => {
     sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
     fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));

@@ -62,7 +62,7 @@ Log groups owned by other stacks (ReCiter, ReciterAI, etc.) are out of scope for
 
 ## Alarm catalog
 
-Ten simple alarms per env plus one composite, all defined in `cdk/lib/observability-stack.ts`, split across two on-call **tiers** so the page channel carries only customer-facing problems (§ ETL alarm catalog below covers the further 20 alarms `cdk/lib/etl-stack.ts` defines):
+Twelve simple alarms per env plus one composite, all defined in `cdk/lib/observability-stack.ts`, split across two on-call **tiers** so the page channel carries only customer-facing problems (§ ETL alarm catalog below covers the further 20 alarms `cdk/lib/etl-stack.ts` defines):
 
 - **P1 (page)** publishes to the **page** SNS topic `sps-alarms-${env}` -- the Teams on-call channel, via the B27 relay Lambda.
 - **P2 (warn)** publishes to the **warn** SNS topic `sps-warn-${env}` -- the same relay posts these to a separate, quieter Teams channel, falling back to the page channel if that channel's webhook (`scholars/${env}/oncall/teams-webhook-url-warn`) is not yet provisioned, so demoting an alarm never silently drops it. P2 = leading indicators and operational signals that warrant attention but are not "wake on-call": resource pressure, the security-probe counter, and (in `cdk/lib/etl-stack.ts`, topic `etl-failures-${env}`) every ETL/reconciler data-freshness alarm.
@@ -81,6 +81,8 @@ The operator email rides the sibling **notify** topic (`sps-notify-${env}`), use
 | 7 | `sps-opensearch-jvm-pressure-${env}` | P2 | OpenSearch `JVMMemoryPressure` | > 85% | 5m, 3 datapoints | GC pressure cascading into query latency (leading indicator). |
 | 8 | `sps-opensearch-cluster-red-${env}` | P1 | OpenSearch `ClusterStatus.red` | >= 1 | 1m, 1 datapoint | Shards unassigned -- searches affected. |
 | 9 | `sps-edit-authz-denied-${env}` | P2 | Log metric `SPS/Auth EditAuthzDenied` | > 10 | 5m, 2 datapoints | Sustained edit-surface 403s -- predicate bug or active probing. |
+| 9b | `sps-etl-duration-margin-${env}` | P2 | Log metric `SPS/Etl EtlDurationMarginWarn` (`"WARN margin"` on `/aws/ecs/sps-etl-${env}`) | >= 1 | 1h, 1 datapoint | The `etl:freshness` heartbeat found a step run at >= 80% of the timeout that would kill it (#2190). |
+| 9c | `sps-etl-retry-storm-${env}` | P2 | Log metric `SPS/Etl EtlRetryStormWarn` (`"WARN retries"` on `/aws/ecs/sps-etl-${env}`) | >= 1 | 1h, 1 datapoint | The heartbeat found a source with several `etl_run` rows in one cadence window, at least one not clean -- a Step Functions retry or re-run, even if it ended green (#2190). |
 | C | `sps-app-unavailable-${env}` | P1 | Composite: `ALARM(#1) OR ALARM(#2) OR ALARM(#4)` | any child in ALARM | -- | The serving cascade. Single P1 page when 5xx-burst / zero-healthy-hosts / task-shortfall fire together from one root cause. |
 
 † These three serving-failure symptoms carry **no direct action** -- they feed the `sps-app-unavailable-${env}` composite (row C), which is the single P1 page for a serving cascade. Without the composite, one root cause (e.g. Aurora connection exhaustion) posted three separate page cards for one incident. The children still evaluate, so the reliability dashboard and the composite rule see them.

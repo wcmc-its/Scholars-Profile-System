@@ -1,4 +1,12 @@
-import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
+import {
+  Annotations,
+  CfnOutput,
+  Duration,
+  Fn,
+  RemovalPolicy,
+  Stack,
+  type StackProps,
+} from "aws-cdk-lib";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
@@ -46,6 +54,13 @@ export interface EtlStackProps extends StackProps {
    * (containerization design, 2026-08-14).
    */
   readonly bulkDataRuleEcrRepository: ecr.IRepository;
+  /**
+   * #2196 -- TEST SEAM. Acks applied on top of the checked-in StepSpecs, keyed
+   * by step id, so the ack wiring can be exercised without acking a real step.
+   * bin/ never passes it; a real ack belongs on the StepSpec, in review. An id
+   * that matches no graded step throws at synth.
+   */
+  readonly stepAckOverrides?: Readonly<Record<string, StepAck>>;
 }
 
 /**
@@ -75,6 +90,37 @@ interface StepSpec {
   readonly npmScript: string;
   readonly external: boolean;
   readonly tier?: "abort" | "continue";
+  /** #2196 -- see {@link StepAck}. Continue-tier steps only. */
+  readonly ack?: StepAck;
+}
+
+/**
+ * #2196 -- acknowledge a KNOWN continue-tier step failure so it stops failing
+ * the whole run. Since #2191/#2194 a continue-tier step that fails all its
+ * retries leaves `$.error` behind and the run ends `DegradedRun`, which fires
+ * `sps-etl-<cadence>-status-<env>`. A step that is known-broken for a known
+ * reason (an upstream outage with a date on it) then fails EVERY night, and the
+ * status alarm cries wolf until a real failure is one more red run among many.
+ * Same failure mode, and the same shape of fix, as the freshness ack (#2192,
+ * `FreshnessAck` in lib/etl/freshness-policy.ts) -- one dialect, not two.
+ *
+ * An acked failure still notifies (`Notify<id>` -> `etl-failures-<env>`, the
+ * subject says ACK) and is still recorded -- its Catch writes `$.acked` instead
+ * of `$.error` -- but it does not degrade the execution.
+ *
+ * `until` is mandatory and enforced AT RUNTIME, not at synth: the Catch path
+ * compares `$$.State.EnteredTime` against it, and past it copies `$.acked` into
+ * `$.error`, grading the failure normally with no redeploy. An unparseable
+ * `until` fails CLOSED: the ack is ignored (the step is wired exactly as if it
+ * had none) and synth warns. An ack that has already expired at synth is still
+ * wired -- runtime grades it normally -- so the template never depends on the
+ * date it was synthesized; synth warns so it gets removed.
+ */
+export interface StepAck {
+  /** ISO date/timestamp. From this instant the ack no longer applies. */
+  readonly until: string;
+  /** Why this failure is accepted, and what would end it. */
+  readonly reason: string;
 }
 
 /**
@@ -1273,16 +1319,31 @@ export class EtlStack extends Stack {
     // tier (page vs failures); buildStateMachine chains .next(Fail|successor)
     // after it. Construct id `Notify${id}` is stable across the refactor.
     // ------------------------------------------------------------------
-    const buildNotify = (spec: StepSpec, topic: sns.Topic): tasks.SnsPublish =>
+    //
+    // #2196 -- an acked step's Catch writes `$.acked`, not `$.error`, so its
+    // notify reads the error from there and says ACK (and until when) up front.
+    // The subject is fixed at synth, so it cannot know whether the ack has
+    // expired by the time it fires; `ackUntil` lets the reader check, and an
+    // expired ack still fails the run (the AckCheck Choice in buildStateMachine).
+    const buildNotify = (spec: StepSpec, topic: sns.Topic, ack?: StepAck): tasks.SnsPublish =>
       new tasks.SnsPublish(this, `Notify${spec.id}`, {
         topic,
-        subject: `SPS ETL ${env} -- ${spec.id} failed`,
+        subject:
+          ack === undefined
+            ? `SPS ETL ${env} -- ${spec.id} failed`
+            : `SPS ETL ${env} -- ${spec.id} failed (ACK until ${ack.until})`,
         message: sfn.TaskInput.fromObject({
           env,
           step: spec.id,
           stateMachine: sfn.JsonPath.stateMachineName,
           execution: sfn.JsonPath.executionName,
-          error: sfn.JsonPath.stringAt("$.error"),
+          ...(ack === undefined
+            ? { error: sfn.JsonPath.stringAt("$.error") }
+            : {
+                error: sfn.JsonPath.stringAt("$.acked"),
+                ackUntil: ack.until,
+                ackReason: ack.reason,
+              }),
         }),
         // #2191 -- keep `$` (and the `$.error` the Catch just wrote) instead of
         // replacing it with the SNS MessageId. Without this the marker a
@@ -1338,6 +1399,49 @@ export class EtlStack extends Stack {
     };
 
     // ------------------------------------------------------------------
+    // #2196 -- the ack that applies to a step, or undefined. Same rules as
+    // ackState() in lib/etl/freshness-policy.ts (#2192), minus the clock: that
+    // is read at runtime (AckCheck<id>), so expiry needs no redeploy.
+    //   - only continue-tier steps can be acked. Any other tier stops the chain
+    //     at its own Fail, so an ack could only hide WHICH step failed -- that
+    //     is a config error, so it throws.
+    //   - an unparseable `until` fails CLOSED: warned, then ignored, so the step
+    //     grades exactly as if it had no ack. A typo must never silence a step.
+    //   - an already-expired `until` is still wired (runtime grades it
+    //     normally); it is only warned about, so the template stays independent
+    //     of the synth date and the dead ack gets removed.
+    // ------------------------------------------------------------------
+    const ackOverrides = props.stepAckOverrides ?? {};
+    const ackOverridesUsed = new Set<string>();
+    const resolveAck = (spec: StepSpec): StepAck | undefined => {
+      const override = ackOverrides[spec.id];
+      if (override !== undefined) ackOverridesUsed.add(spec.id);
+      const ack = override ?? spec.ack;
+      if (ack === undefined) return undefined;
+      if (spec.tier !== "continue") {
+        throw new Error(
+          `#2196: step ${spec.id} has an ack but is not tier "continue" -- only a ` +
+            `continue-tier failure can be acknowledged`,
+        );
+      }
+      const until = Date.parse(ack.until);
+      if (Number.isNaN(until)) {
+        Annotations.of(this).addWarning(
+          `#2196: ack on step ${spec.id} has an unparseable until "${ack.until}" -- ` +
+            `ignoring the ack; a failure of ${spec.id} still degrades the run`,
+        );
+        return undefined;
+      }
+      if (until <= Date.now()) {
+        Annotations.of(this).addWarning(
+          `#2196: ack on step ${spec.id} expired ${ack.until} -- it no longer applies ` +
+            `(a failure degrades the run again); remove it`,
+        );
+      }
+      return ack;
+    };
+
+    // ------------------------------------------------------------------
     // Helper -- build a state machine from an ordered list of steps,
     // prefixing it with a top-level Choice on $.startFrom so operators
     // can skip ahead (`aws stepfunctions start-execution --input
@@ -1370,7 +1474,29 @@ export class EtlStack extends Stack {
       // "the pipeline stopped early", it now means "the pipeline did not fully
       // succeed". A degraded run shows FAILED even though every step ran, so
       // read the `Notify*` states to see which one died.
-      const outcome = new sfn.Choice(this, `${smId}Outcome`)
+      const acks = steps.map((s) => resolveAck(s));
+      const outcome = new sfn.Choice(this, `${smId}Outcome`);
+      // #2196 -- an acked failure leaves `$.acked`, which on its own does NOT
+      // degrade the run (the Succeed below; the marker rides out in the
+      // execution output). When the run is degraded anyway, say so in the
+      // cause: either another step failed outright, or an ack had expired by
+      // the time its step failed and AckExpired<id> promoted it to `$.error`.
+      // Only added to machines that carry an ack, so with none configured the
+      // ASL is byte-identical to #2191's.
+      if (acks.some((a) => a !== undefined)) {
+        outcome.when(
+          sfn.Condition.and(sfn.Condition.isPresent("$.error"), sfn.Condition.isPresent("$.acked")),
+          new sfn.Fail(this, `${smId}DegradedWithAck`, {
+            error: "DegradedRun",
+            cause:
+              "every step ran, but at least one continue-tier step failed all retries " +
+              "-- and at least one failure was ACKed (#2196): an ACK past its until " +
+              "counts as a failure, a live one does not. See the Notify* states " +
+              "(ACK in the subject) and the etl-failures topic for which",
+          }),
+        );
+      }
+      outcome
         .when(
           sfn.Condition.isPresent("$.error"),
           new sfn.Fail(this, `${smId}Degraded`, {
@@ -1407,7 +1533,38 @@ export class EtlStack extends Stack {
         // resultPath keeps the error payload out of `$` so it can flow into a
         // continue-successor harmlessly (steps use static container overrides,
         // never state input; the startFrom Choice runs once at the top).
-        if (spec.tier === "continue") {
+        const ack = acks[i];
+        if (spec.tier === "continue" && ack !== undefined) {
+          // #2196 -- acked: Catch -> Notify (ACK) -> AckClock -> AckCheck.
+          // Expiry is decided HERE, at runtime, so it takes effect without a
+          // deploy. Step Functions Choice rules compare state-input paths, so
+          // AckClock first copies the failure's own `$$.State.EnteredTime` into
+          // `$.ackClock.at`. Before `until` -> straight to the successor with
+          // only `$.acked` set. From `until` on -> AckExpired copies `$.acked`
+          // into `$.error`, and the run degrades exactly as an un-acked failure
+          // would. Neither Pass state may write `$` itself: both name a
+          // sub-path, or they would wipe the run's markers (#2191).
+          const untilTs = new Date(Date.parse(ack.until)).toISOString().replace(/\.\d{3}Z$/, "Z");
+          const ackCheck = new sfn.Choice(this, `AckCheck${spec.id}`)
+            .when(sfn.Condition.timestampLessThan("$.ackClock.at", untilTs), successor)
+            .otherwise(
+              new sfn.Pass(this, `AckExpired${spec.id}`, {
+                inputPath: "$.acked",
+                resultPath: "$.error",
+              }).next(successor),
+            );
+          task.addCatch(
+            buildNotify(spec, this.failureTopic, ack)
+              .next(
+                new sfn.Pass(this, `AckClock${spec.id}`, {
+                  parameters: { "at.$": "$$.State.EnteredTime" },
+                  resultPath: "$.ackClock",
+                }),
+              )
+              .next(ackCheck),
+            { errors: ["States.ALL"], resultPath: "$.acked" },
+          );
+        } else if (spec.tier === "continue") {
           task.addCatch(buildNotify(spec, this.failureTopic).next(successor), {
             errors: ["States.ALL"],
             resultPath: "$.error",
@@ -1931,6 +2088,14 @@ export class EtlStack extends Stack {
       "heartbeat",
       freshnessSteps,
     );
+    // #2196 -- an override naming no graded step would ack nothing while the
+    // test (or operator) believed it did. Every graded machine is built above.
+    const unusedAckOverrides = Object.keys(ackOverrides).filter((id) => !ackOverridesUsed.has(id));
+    if (unusedAckOverrides.length > 0) {
+      throw new Error(
+        `#2196: stepAckOverrides names unknown step(s): ${unusedAckOverrides.join(", ")}`,
+      );
+    }
 
     // ------------------------------------------------------------------
     // EventBridge schedules (D7). Per-env `etlSchedulesEnabled` flips the

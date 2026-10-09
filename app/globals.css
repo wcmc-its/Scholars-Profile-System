@@ -273,6 +273,25 @@
   /* Detail-card radius + elevation. */
   --apollo-radius-card: 13px;
   --apollo-shadow-card: 0 1px 2px rgba(34, 30, 28, 0.04), 0 1px 3px rgba(34, 30, 28, 0.05);
+  /* Docs (/about) palette (#1903). Literals that used to be inlined in
+     app/(public)/about/page.tsx and components/docs/*; light values are
+     unchanged from those literals, so light mode renders identically. Unlike
+     the --apollo-* set these get .dark values below. --docs-accent is the
+     /about maroon (links, eyebrows, active TOC item): 10.2:1 on white, not
+     --color-primary-cornell-red (#B31B1B, the header chrome). */
+  --docs-accent: #7d1c1c;
+  --docs-tint: #f6f7f9; /* "key" callout fill, active TOC item, row hover */
+  --docs-rule: #d3d8de; /* "key" callout border, <th> rule */
+  --docs-card: #fafbfc; /* Common questions card */
+  --docs-note-bg: #f3f6fb;
+  --docs-note-border: #c9d8ee;
+  --docs-warn-bg: #fdf6ec;
+  --docs-warn-border: #eedcb6;
+  --docs-warn-text: #8a5a00; /* 5.5:1 on --docs-warn-bg */
+  --docs-pill-green-border: #a9d3c0; /* outlined "Yours ·" field-table pills */
+  --docs-pill-slate-bg: #eaf0f7; /* "Request a change" / "Unit curator" pills */
+  --docs-pill-slate-border: #d5dfeb;
+  --docs-pill-slate-text: #2f4a6d; /* 7.9:1 on --docs-pill-slate-bg */
   /* Layout */
   --max-content: 1320px;
   --max-narrow: 720px;
@@ -316,6 +335,24 @@
   --color-facet-position-border: #C79A33;
   --color-facet-position-text: #F2E2BC;
   --color-facet-position-count: #EFD389;
+
+  /* Docs (/about) palette — see :root. Every text value clears 8:1 on its
+     dark fill and on --background. The /about body text and the provenance
+     diagram's cards still use --apollo-* tokens, which have no .dark values,
+     so the page is not fully dark-ready until that set gets them too. */
+  --docs-accent: #eba3a3;
+  --docs-tint: #1c1f24;
+  --docs-rule: #3a4048;
+  --docs-card: #131518;
+  --docs-note-bg: #152031;
+  --docs-note-border: #2d4466;
+  --docs-warn-bg: #2a1f0e;
+  --docs-warn-border: #5a4421;
+  --docs-warn-text: #e9c27a;
+  --docs-pill-green-border: #2f6b52;
+  --docs-pill-slate-bg: #1a2636;
+  --docs-pill-slate-border: #34506e;
+  --docs-pill-slate-text: #b9cde4;
 }
 
 @theme inline {
@@ -379,6 +416,20 @@
   --color-elig-fill: var(--elig-fill);
   --color-elig-border: var(--elig-border);
   --color-elig-text: var(--elig-text);
+  /* Docs (/about) palette — text-docs-accent, bg-docs-tint, border-docs-rule, … */
+  --color-docs-accent: var(--docs-accent);
+  --color-docs-tint: var(--docs-tint);
+  --color-docs-rule: var(--docs-rule);
+  --color-docs-card: var(--docs-card);
+  --color-docs-note-bg: var(--docs-note-bg);
+  --color-docs-note-border: var(--docs-note-border);
+  --color-docs-warn-bg: var(--docs-warn-bg);
+  --color-docs-warn-border: var(--docs-warn-border);
+  --color-docs-warn-text: var(--docs-warn-text);
+  --color-docs-pill-green-border: var(--docs-pill-green-border);
+  --color-docs-pill-slate-bg: var(--docs-pill-slate-bg);
+  --color-docs-pill-slate-border: var(--docs-pill-slate-border);
+  --color-docs-pill-slate-text: var(--docs-pill-slate-text);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);

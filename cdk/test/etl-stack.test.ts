@@ -1,7 +1,7 @@
-import { Template } from "aws-cdk-lib/assertions";
+import { Annotations, Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import type { SpsEnvConfig } from "../lib/config";
-import { EtlStack } from "../lib/etl-stack";
+import { EtlStack, type StepAck } from "../lib/etl-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture } from "./test-utils";
 
@@ -9,6 +9,7 @@ function buildEtlStack(
   envName: "staging" | "prod",
   envConfigOverride: Partial<SpsEnvConfig> = {},
   context?: Record<string, unknown>,
+  stepAckOverrides?: Readonly<Record<string, StepAck>>,
 ): {
   template: Template;
   stack: EtlStack;
@@ -31,6 +32,7 @@ function buildEtlStack(
     ecsCluster: appStack.ecsCluster,
     etlEcrRepository: appStack.etlEcrRepository,
     bulkDataRuleEcrRepository: appStack.bulkDataRuleEcrRepository,
+    stepAckOverrides,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -276,6 +278,31 @@ function getStateMachineDefinitionText(
   return parts
     .map((p) => (typeof p === "string" ? p : JSON.stringify(p)))
     .join("");
+}
+
+type Asl = { States: Record<string, Record<string, unknown>> };
+
+// Parse a definition into real ASL rather than grepping the text, so tests
+// assert on structure (which state points where) instead of substrings.
+// DefinitionString is an Fn::Join whose intrinsic chunks sit INSIDE JSON
+// string values -- rendering them as JSON would inject quotes and break the
+// parse, so each collapses to an opaque literal.
+// Throws rather than expect()s: this also runs at describe time, where a
+// failed expectation would not be attributed to any test.
+function aslFrom(template: Template, name: string): Asl {
+  const sms = template.findResources("AWS::StepFunctions::StateMachine");
+  const match = Object.values(sms).find((r) => r.Properties?.StateMachineName === name);
+  if (match === undefined) {
+    throw new Error(`no state machine named ${name}`);
+  }
+  const def = match.Properties?.DefinitionString as { "Fn::Join"?: [string, unknown[]] } | string;
+  const parts = typeof def === "string" ? [def] : (def?.["Fn::Join"]?.[1] ?? []);
+  const text = parts.map((p) => (typeof p === "string" ? p : "REF")).join("");
+  return JSON.parse(text) as Asl;
+}
+
+function isTask(s: Record<string, unknown>, kind: string): boolean {
+  return s.Type === "Task" && String(s.Resource ?? "").includes(kind);
 }
 
 describe("EtlStack", () => {
@@ -2196,29 +2223,7 @@ describe("EtlStack", () => {
   // is the fragile part, so it is what these tests pin.
   describe("degraded-run detection (#2191)", () => {
     const { template } = buildEtlStack("staging");
-    // Parse a definition into real ASL rather than grepping the text, so these
-    // assert on structure (which state points where) instead of substrings.
-    // DefinitionString is an Fn::Join whose intrinsic chunks sit INSIDE JSON
-    // string values -- rendering them as JSON would inject quotes and break the
-    // parse, so each collapses to an opaque literal.
-    // Throws rather than expect()s: this also runs at describe time, where a
-    // failed expectation would not be attributed to any test.
-    const aslOf = (name: string): { States: Record<string, Record<string, unknown>> } => {
-      const sms = template.findResources("AWS::StepFunctions::StateMachine");
-      const match = Object.values(sms).find((r) => r.Properties?.StateMachineName === name);
-      if (match === undefined) {
-        throw new Error(`no state machine named ${name}`);
-      }
-      const def = match.Properties?.DefinitionString as
-        | { "Fn::Join"?: [string, unknown[]] }
-        | string;
-      const parts = typeof def === "string" ? [def] : (def?.["Fn::Join"]?.[1] ?? []);
-      const text = parts.map((p) => (typeof p === "string" ? p : "REF")).join("");
-      return JSON.parse(text) as { States: Record<string, Record<string, unknown>> };
-    };
-
-    const isTask = (s: Record<string, unknown>, kind: string): boolean =>
-      s.Type === "Task" && String(s.Resource ?? "").includes(kind);
+    const aslOf = (name: string): Asl => aslFrom(template, name);
 
     // DISCOVER the graded machines instead of listing them. A fifth cadence
     // added later is then covered automatically -- a hardcoded list would stop
@@ -2352,6 +2357,164 @@ describe("EtlStack", () => {
       const catches = states.TaskIntegrityNightly.Catch as Array<Record<string, unknown>>;
       expect(states[String(catches[0].Next)].Next).toBe("FailIntegrityNightly");
       expect(states.FailIntegrityNightly.Type).toBe("Fail");
+    });
+  });
+
+  // #2196 -- ack-with-expiry for a continue-tier step failure. Acks are exercised
+  // through the `stepAckOverrides` test seam on a real continue-tier step (Asms)
+  // so no checked-in StepSpec has to carry one.
+  describe("step-failure ack (#2196)", () => {
+    const NIGHTLY = "scholars-nightly-staging";
+    const { template: baseline } = buildEtlStack("staging");
+    const live = buildEtlStack("staging", {}, undefined, {
+      Asms: { until: "2099-01-01", reason: "test: upstream outage with an end date" },
+    });
+    const pastAtSynth = buildEtlStack("staging", {}, undefined, {
+      Asms: { until: "2020-01-01", reason: "test: long over" },
+    });
+    const invalid = buildEtlStack("staging", {}, undefined, {
+      Asms: { until: "end of next sprint", reason: "test: typo" },
+    });
+
+    /**
+     * Walk the failure path of `TaskAsms` the way Step Functions would, with the
+     * failing state entering at `clock`: Catch -> Notify -> AckClock -> AckCheck
+     * -> (AckExpired) -> the next step. Returns which top-level `$` keys the path
+     * wrote and where it handed on. Deliberately evaluates ONLY what the ack
+     * path may contain -- anything else throws, so a new state on this path has
+     * to be taught here rather than skipped.
+     */
+    const walkFailure = (asl: Asl, clock: string): { wrote: string[]; handedTo: string } => {
+      const states = asl.States;
+      const catches = states.TaskAsms.Catch as Array<Record<string, unknown>>;
+      const wrote = [String(catches[0].ResultPath).replace(/^\$\./, "")];
+      let name = String(catches[0].Next);
+      const env: Record<string, string> = {};
+      for (let hops = 0; hops < 10; hops++) {
+        const s = states[name];
+        if (isTask(s, "ecs:runTask")) return { wrote: wrote.sort(), handedTo: name };
+        if (isTask(s, "sns:publish")) {
+          expect(s.ResultPath).toBeNull();
+          name = String(s.Next);
+        } else if (s.Type === "Pass") {
+          const rp = String(s.ResultPath);
+          expect(rp).toMatch(/^\$\.[a-zA-Z]+$/);
+          const params = s.Parameters as Record<string, string> | undefined;
+          if (params?.["at.$"] === "$$.State.EnteredTime") env[`${rp}.at`] = clock;
+          wrote.push(rp.replace(/^\$\./, ""));
+          name = String(s.Next);
+        } else if (s.Type === "Choice") {
+          const rules = s.Choices as Array<Record<string, unknown>>;
+          const hit = rules.find((r) => {
+            if (typeof r.TimestampLessThan !== "string") {
+              throw new Error(`unexpected Choice rule on the ack path: ${JSON.stringify(r)}`);
+            }
+            const at = env[String(r.Variable)];
+            if (at === undefined) throw new Error(`${String(r.Variable)} was never written`);
+            return Date.parse(at) < Date.parse(r.TimestampLessThan);
+          });
+          name = String(hit !== undefined ? hit.Next : s.Default);
+        } else {
+          throw new Error(`unexpected ${String(s.Type)} state ${name} on the ack path`);
+        }
+      }
+      throw new Error("ack path did not reach a step");
+    };
+
+    // Where an un-acked Asms failure hands on to -- the ack must not change it.
+    const baselineSuccessor = String(aslFrom(baseline, NIGHTLY).States.NotifyAsms.Next);
+
+    it("ships with zero acks: no machine carries ack wiring", () => {
+      for (const r of Object.values(baseline.findResources("AWS::StepFunctions::StateMachine"))) {
+        const states = aslFrom(baseline, String(r.Properties?.StateMachineName)).States;
+        expect(Object.keys(states).filter((n) => /^Ack|DegradedWithAck$/.test(n))).toEqual([]);
+      }
+    });
+
+    it("an unexpired ack writes $.acked, not $.error, still notifies, and carries on", () => {
+      const asl = aslFrom(live.template, NIGHTLY);
+      const catches = asl.States.TaskAsms.Catch as Array<Record<string, unknown>>;
+      expect(catches[0].ResultPath).toBe("$.acked");
+      expect(catches[0].Next).toBe("NotifyAsms");
+      expect(String(asl.States.NotifyAsms.Resource)).toContain("sns:publish");
+
+      const r = walkFailure(asl, "2026-10-09T06:00:00.000Z");
+      expect(r.wrote).toEqual(["ackClock", "acked"]);
+      expect(r.handedTo).toBe(baselineSuccessor);
+    });
+
+    it("an expired ack grades normally: the same failure writes $.error", () => {
+      const asl = aslFrom(live.template, NIGHTLY);
+      // One second past `until` -- runtime expiry, no redeploy involved.
+      const r = walkFailure(asl, "2099-01-01T00:00:01.000Z");
+      expect(r.wrote).toEqual(["ackClock", "acked", "error"]);
+      expect(r.handedTo).toBe(baselineSuccessor);
+      // ...and the boundary itself is already expired (now < until, as #2192).
+      expect(walkFailure(asl, "2099-01-01T00:00:00.000Z").wrote).toContain("error");
+    });
+
+    it("an ack already expired at synth is still wired, warned, and grades normally", () => {
+      const asl = aslFrom(pastAtSynth.template, NIGHTLY);
+      expect(walkFailure(asl, new Date().toISOString()).wrote).toContain("error");
+      Annotations.fromStack(pastAtSynth.stack).hasWarning(
+        "*",
+        Match.stringLikeRegexp("ack on step Asms expired 2020-01-01"),
+      );
+    });
+
+    it("an unparseable until fails CLOSED: the step is wired as if un-acked", () => {
+      expect(aslFrom(invalid.template, NIGHTLY)).toEqual(aslFrom(baseline, NIGHTLY));
+      Annotations.fromStack(invalid.stack).hasWarning(
+        "*",
+        Match.stringLikeRegexp('unparseable until "end of next sprint"'),
+      );
+    });
+
+    it("the Outcome says ACK when a run with an ack still degrades", () => {
+      const states = aslFrom(live.template, NIGHTLY).States;
+      const choices = states.NightlyStateMachineOutcome.Choices as Array<Record<string, unknown>>;
+      // Ack-aware branch first (Choice rules evaluate in order), then #2191's.
+      expect(choices).toHaveLength(2);
+      const withAck = states[String(choices[0].Next)];
+      expect(withAck.Type).toBe("Fail");
+      expect(withAck.Error).toBe("DegradedRun");
+      expect(String(withAck.Cause)).toContain("ACK");
+      expect(choices[1].Variable).toBe("$.error");
+      expect(states[String(choices[1].Next)].Error).toBe("DegradedRun");
+      // $.acked alone does not degrade: it falls through to Succeed.
+      expect(states[String(states.NightlyStateMachineOutcome.Default)].Type).toBe("Succeed");
+    });
+
+    it("with an ack configured, no Task or Pass state overwrites `$` (#2191)", () => {
+      for (const r of Object.values(
+        live.template.findResources("AWS::StepFunctions::StateMachine"),
+      )) {
+        const states = aslFrom(live.template, String(r.Properties?.StateMachineName)).States;
+        // Graded machines only (an `*Outcome` state); the reconcilers have no
+        // marker to protect, as in #2191's test above.
+        if (!Object.keys(states).some((n) => n.endsWith("Outcome"))) continue;
+        const clobbering = Object.entries(states)
+          // Tasks must discard; a Pass must name a sub-path (its default is `$`).
+          .filter(([, s]) =>
+            isTask(s, "ecs:runTask") || isTask(s, "sns:publish")
+              ? s.ResultPath !== null
+              : s.Type === "Pass" &&
+                (typeof s.ResultPath !== "string" || !/^\$\.[a-zA-Z]+$/.test(s.ResultPath)),
+          )
+          .map(([n]) => n);
+        expect(clobbering).toEqual([]);
+      }
+    });
+
+    it("refuses an ack on a non-continue step, and an override naming no step", () => {
+      expect(() =>
+        buildEtlStack("staging", {}, undefined, { Ed: { until: "2099-01-01", reason: "x" } }),
+      ).toThrow(/not tier "continue"/);
+      expect(() =>
+        buildEtlStack("staging", {}, undefined, {
+          NoSuchStep: { until: "2099-01-01", reason: "x" },
+        }),
+      ).toThrow(/unknown step\(s\): NoSuchStep/);
     });
   });
 });

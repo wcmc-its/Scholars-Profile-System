@@ -65,6 +65,7 @@ export const OVERRIDABLE_FLAGS = [
   "SEARCH_PEOPLE_METHOD_FAMILY_TIER",
   "SEARCH_PEOPLE_PHRASE_BOOST",
   "SEARCH_PEOPLE_PUBCOUNT_DAMPEN",
+  "SEARCH_TYPO_FALLBACK",
 ] as const;
 
 export type OverridableFlag = (typeof OVERRIDABLE_FLAGS)[number];
