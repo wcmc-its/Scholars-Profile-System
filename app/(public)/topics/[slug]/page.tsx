@@ -199,6 +199,7 @@ export default async function TopicPage({
       <section id="publications" className="scroll-mt-20">
         <TopicRailLayout
           topicSlug={slug}
+          topicLabel={topic.label}
           subtopics={subtopicList}
           totalPubCount={totalPubsForStats}
           scholarNames={scholarCards}

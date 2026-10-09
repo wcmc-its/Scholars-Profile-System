@@ -32,13 +32,17 @@ export function FamilyScholarsRow({
   supercategorySlug,
   familyId,
   familyLabel,
+  supercategoryId,
   variant = "chips",
 }: {
   supercategorySlug: string;
   familyId: string;
   familyLabel: string | null;
-  /** TAXONOMY_SCHOLAR_CARDS — `"names"`: a "Scholars N" heading over plain
-   *  slate name links (mockup). `"chips"` (default): today's popover chips. */
+  /** Scopes the `"names"` chips' hover card (the id, not the slug). */
+  supercategoryId?: string;
+  /** TAXONOMY_SCHOLAR_CARDS — `"names"`: a "Scholars N" heading over avatar
+   *  chips with the filterable hover card. `"chips"` (default): today's
+   *  popover chips. */
   variant?: "chips" | "names";
 }) {
   const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
@@ -104,6 +108,16 @@ export function FamilyScholarsRow({
         scholars={scholars}
         // The route caps the roster, so a full page means "at least this many".
         countLabel={`${scholars.length.toLocaleString()}${capped ? "+" : ""}`}
+        popover={
+          supercategoryId && familyLabel
+            ? {
+                label: familyLabel,
+                supercategory: supercategoryId,
+                familyLabel,
+                filterable: true,
+              }
+            : undefined
+        }
         info={
           <SectionInfoButton label="Scholars in this method" anchor="topScholars">
             {infoCopy}

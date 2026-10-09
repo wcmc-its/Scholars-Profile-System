@@ -189,6 +189,7 @@ export default async function SupercategoryPage({
       <section id="families" className="scroll-mt-20">
         <SupercategoryRailLayout
           supercategorySlug={sc.slug}
+          supercategoryId={sc.id}
           supercategoryLabel={sc.label}
           families={railItems}
           familyMeta={familyMeta}

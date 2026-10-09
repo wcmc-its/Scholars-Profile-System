@@ -25,18 +25,21 @@ const LESS_COMMON_THRESHOLD = 10;
 
 export function TopicRailLayout({
   topicSlug,
+  topicLabel,
   subtopics,
   totalPubCount,
   scholarNames = false,
   loadMore = false,
 }: {
   topicSlug: string;
+  /** Scope label for the scholar chips' hover card. */
+  topicLabel?: string;
   subtopics: SubtopicRailItem[];
   /** Distinct research-article pmids in the whole topic (`getSubtopicRail`):
    *  the "All subareas" count. Not the row sum. */
   totalPubCount: number;
   /** TAXONOMY_SCHOLAR_CARDS — the selected subarea's scholars render as a
-   *  "Scholars N" heading over plain name links. */
+   *  "Scholars N" heading over avatar chips. */
   scholarNames?: boolean;
   /** TAXONOMY_FEED_LOAD_MORE — Load more, one "All relevant" list and the
    *  per-row subarea label. */
@@ -98,6 +101,7 @@ export function TopicRailLayout({
                 topicSlug={topicSlug}
                 subtopicId={activeSubtopic}
                 subtopicLabel={subtopicLabel}
+                topicLabel={topicLabel}
                 variant={scholarNames ? "names" : "inline"}
               />
             )}
