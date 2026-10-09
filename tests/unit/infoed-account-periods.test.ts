@@ -58,8 +58,10 @@ const base = {
   spon_code: null,
   Role: "PrincipalInvestigatorRole",
   Project_Status: "Active Award",
+  central_office: null,
+  intake_type: null,
 };
-const row = (Account_Number: string) => ({ ...base, Account_Number });
+const row =(Account_Number: string) => ({ ...base, Account_Number });
 const period = (Account_Number: string, b: string | null, e: string | null) => ({
   Account_Number,
   begin_date: b === null ? null : new Date(b),

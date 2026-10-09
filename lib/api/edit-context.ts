@@ -47,6 +47,7 @@ import { rankForSelectedHighlights } from "@/lib/ranking";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
+import { parseExternalId } from "@/lib/funding-projection";
 import { isChairTitleFor } from "@/lib/leadership";
 import { DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
@@ -229,6 +230,21 @@ export type EditContextGrant = {
   isActive: boolean;
   state: Exclude<EditEntityState, "locked">;
   suppressionId: string | null;
+  /*
+   * #2180 — record-level routing metadata: what an admin needs to know who to
+   * contact and what to quote. InfoEd rows only — every field is null on a
+   * RePORTER row (whose `dates_source` column is a schema default, not a
+   * statement about InfoEd). Each is null when unknown; the card renders the
+   * ones present and omits the rest, never a guess.
+   */
+  /** InfoEd `Account_Number`, parsed from `INFOED-{account}-{cwid}`. */
+  accountNumber: string | null;
+  /** InfoEd central office (`prop_u.P_SIN_18`), e.g. "OSRA" / "JCTO". */
+  centralOffice: string | null;
+  /** InfoEd intake type (`prop_u.p_sin_5`), e.g. "Clinical Trial Agreement". */
+  intakeType: string | null;
+  /** Where the displayed dates came from: "infoed" | "reporter" (#2020). */
+  datesSource: string | null;
 };
 
 /**
@@ -1077,6 +1093,9 @@ export async function loadEditContext(
         primeSponsorRaw: true,
         startDate: true,
         endDate: true,
+        datesSource: true,
+        centralOffice: true,
+        intakeType: true,
       },
       orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
     }),
@@ -2037,6 +2056,7 @@ export async function loadEditContext(
 
   const grants: EditContextGrant[] = grantRows.map((g) => {
     const hide = entityHide.get(`grant:${g.externalId}`);
+    const isInfoEd = g.source === "InfoEd";
     return {
       externalId: g.externalId,
       title: g.title,
@@ -2050,6 +2070,10 @@ export async function loadEditContext(
       isActive: isFundingActive(g.endDate, now),
       state: hide ? hide.state : "shown",
       suppressionId: hide ? hide.suppressionId : null,
+      accountNumber: isInfoEd ? (parseExternalId(g.externalId)?.accountNumber ?? null) : null,
+      centralOffice: isInfoEd ? (g.centralOffice?.trim() || null) : null,
+      intakeType: isInfoEd ? (g.intakeType?.trim() || null) : null,
+      datesSource: isInfoEd ? g.datesSource : null,
     };
   });
 

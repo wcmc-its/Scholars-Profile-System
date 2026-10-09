@@ -98,6 +98,10 @@ export type EntityPanelProps<T extends EntityRow> = {
   getTitle: (e: T) => string;
   /** Row metadata line under the title. */
   renderMeta: (e: T) => React.ReactNode;
+  /** Optional secondary line under the meta (Funding's #2180 record-level
+   *  routing details). Kept out of `renderMeta` so it doesn't bloat the row
+   *  checkbox's accessible name, which is built from the meta text. */
+  renderDetail?: (e: T) => React.ReactNode;
   /** Show a title filter + bounded scroll region (Funding). */
   filterable?: boolean;
   /** Offer the selection bar's "Also select the N older …" link — only
@@ -142,6 +146,7 @@ export function EntityPanel<T extends EntityRow>({
   copy,
   getTitle,
   renderMeta,
+  renderDetail,
   filterable = false,
   extendable = false,
   sourceLabel,
@@ -303,6 +308,7 @@ export function EntityPanel<T extends EntityRow>({
           key={e.externalId}
           title={getTitle(e)}
           meta={renderMeta(e)}
+          detail={renderDetail ? renderDetail(e) : null}
           state={e.state}
           mode={mode}
           lockedNote={copy.lockedNote}
@@ -448,6 +454,7 @@ export function EntityPanel<T extends EntityRow>({
 function EntityRowView({
   title,
   meta,
+  detail,
   state,
   mode,
   lockedNote,
@@ -463,6 +470,7 @@ function EntityRowView({
 }: {
   title: string;
   meta: React.ReactNode;
+  detail: React.ReactNode;
   state: EditEntityState;
   mode: "self" | "superuser";
   lockedNote?: string;
@@ -536,6 +544,7 @@ function EntityRowView({
               </>
             )}
           </div>
+          {detail}
           {state === "locked" && lockedNote && (
             <p className="text-muted-foreground mt-1 text-sm italic">{lockedNote}</p>
           )}

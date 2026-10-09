@@ -30,6 +30,10 @@ const grant = (over: Partial<EditContextGrant>): EditContextGrant => ({
   isActive: false,
   state: "shown",
   suppressionId: null,
+  accountNumber: null,
+  centralOffice: null,
+  intakeType: null,
+  datesSource: null,
   ...over,
 });
 

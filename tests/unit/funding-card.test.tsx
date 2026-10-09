@@ -20,6 +20,10 @@ const grant = (over: Partial<EditContextGrant>): EditContextGrant => ({
   isActive: false,
   state: "shown",
   suppressionId: null,
+  accountNumber: null,
+  centralOffice: null,
+  intakeType: null,
+  datesSource: null,
   ...over,
 });
 
@@ -44,5 +48,82 @@ describe("FundingCard — source header reflects the grant systems", () => {
       />,
     );
     expect(sourceText(container)).toBe("Source: InfoEd and NIH RePORTER");
+  });
+});
+
+const recordLines = (c: HTMLElement) =>
+  [...c.querySelectorAll('[data-slot="grant-record"]')].map((n) => n.textContent);
+
+describe("FundingCard — #2180 record-level routing line", () => {
+  it("shows account, office, intake type, and dates source together", () => {
+    const { container } = render(
+      <FundingCard
+        cwid="abc1001"
+        mode="superuser"
+        scholarName="Jane"
+        grants={[
+          grant({
+            accountNumber: "12345",
+            centralOffice: "JCTO",
+            intakeType: "Clinical Trial Agreement",
+            datesSource: "infoed",
+          }),
+        ]}
+      />,
+    );
+    expect(recordLines(container)).toEqual([
+      "InfoEd account 12345 · Office: JCTO · Intake type: Clinical Trial Agreement · Dates from InfoEd",
+    ]);
+  });
+
+  it("degrades field by field — a missing office is omitted, never guessed", () => {
+    const { container } = render(
+      <FundingCard
+        cwid="abc1001"
+        mode="self"
+        scholarName="Jane"
+        grants={[
+          grant({
+            accountNumber: "777",
+            centralOffice: null,
+            intakeType: "Clinical Trial Agreement",
+            datesSource: "reporter",
+          }),
+        ]}
+      />,
+    );
+    const [line] = recordLines(container);
+    expect(line).toBe(
+      "InfoEd account 777 · Intake type: Clinical Trial Agreement · Dates from NIH RePORTER (missing in InfoEd)",
+    );
+    expect(line).not.toMatch(/Office|OSRA/);
+  });
+
+  it("renders no record line for a row with nothing recorded (a RePORTER row)", () => {
+    const { container } = render(
+      <FundingCard
+        cwid="abc1001"
+        mode="self"
+        scholarName="Jane"
+        grants={[grant({ source: "RePORTER" })]}
+      />,
+    );
+    expect(recordLines(container)).toEqual([]);
+    expect(container.textContent).not.toContain("quote its account number");
+  });
+
+  it("keeps the record line out of the row checkbox's accessible name", () => {
+    const { container } = render(
+      <FundingCard
+        cwid="abc1001"
+        mode="self"
+        scholarName="Jane"
+        grants={[grant({ accountNumber: "12345", centralOffice: "OSRA", datesSource: "infoed" })]}
+      />,
+    );
+    const box = container.querySelector('[role="checkbox"]');
+    expect(box).not.toBeNull();
+    expect(box?.getAttribute("aria-label")).not.toContain("12345");
+    expect(container.textContent).toContain("quote its account number");
   });
 });
