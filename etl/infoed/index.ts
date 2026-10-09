@@ -153,8 +153,11 @@ WITH infoed_all AS (
     ct.code_desc        AS Program_Type,
     -- #2180 — intake type (free text) and owning central office ('OSRA' /
     -- 'JCTO'), both per proposal; rolled up per account in z below.
-    p_udf.p_sin_5       AS intake_type,
-    p_udf.P_SIN_18      AS central_office,
+    -- CAST: LTRIM/RTRIM/MAX below reject a legacy ntext/text column. LEFT: fit
+    -- grant.intake_type VARCHAR(255) / central_office VARCHAR(64); one overlong
+    -- value would otherwise fail the whole import on MySQL 1406.
+    LEFT(CAST(p_udf.p_sin_5 AS NVARCHAR(4000)), 255) AS intake_type,
+    LEFT(CAST(p_udf.P_SIN_18 AS NVARCHAR(4000)), 64) AS central_office,
     ct2.code_desc       AS Proposal_Type,
     cdp.code_desc       AS Project_Status,
     cdp2.code_desc      AS Proposal_Status,

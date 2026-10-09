@@ -81,8 +81,8 @@ describe("toGrantInsert — #2180 central office + intake type", () => {
 
 describe("CONSOLIDATED_QUERY — #2180 fields are selected, rolled up, and compared", () => {
   it("selects P_SIN_18 as central_office in the CTE", () => {
-    expect(SRC).toMatch(/p_udf\.P_SIN_18\s+AS central_office/);
-    expect(SRC).toMatch(/p_udf\.p_sin_5\s+AS intake_type/);
+    expect(SRC).toMatch(/LEFT\(CAST\(p_udf\.P_SIN_18 AS NVARCHAR\(4000\)\), 64\) AS central_office/);
+    expect(SRC).toMatch(/LEFT\(CAST\(p_udf\.p_sin_5 AS NVARCHAR\(4000\)\), 255\) AS intake_type/);
   });
 
   it("aggregates both per account over non-blank values only", () => {
