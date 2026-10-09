@@ -7,7 +7,9 @@
  *   2. Validate each descriptor_ui's shape (existence is validated lazily by
  *      the resolver — a stale UI goes inert).
  *   3. Truncate `mesh_curated_alias` and insert the curated rows, inside one
- *      $transaction so an insert failure rolls back the truncate.
+ *      $transaction so an insert failure rolls back the truncate. Before it
+ *      commits, the table's row count must equal the CSV's (#1987) — a
+ *      mismatch rolls back and fails the run.
  *   4. Record the run in `etl_run` under source="MeshAlias".
  *
  * Cadence: on demand. Not wired into etl/orchestrate.ts — the seed changes
@@ -32,6 +34,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/lib/db";
 import { processStartedAt } from "@/lib/etl-run";
+import { assertReseedCount } from "@/lib/etl/reseed-count";
 import { parseAliasCsv } from "./csv";
 import type { AliasRow } from "./types";
 
@@ -109,6 +112,16 @@ export async function replaceAliases(rows: AliasRow[]): Promise<void> {
           })),
         });
       }
+      // #1987 -- the table is a full replace of the CSV, so it must now hold
+      // exactly the CSV's rows. Inside the transaction: a mismatch rolls the
+      // truncate back and fails the run instead of recording a quiet success.
+      assertReseedCount({
+        source: "MeshAlias",
+        table: "mesh_curated_alias",
+        expected: rows.length,
+        actual: await tx.meshCuratedAlias.count(),
+        from: CURATED_PATH,
+      });
     },
     { timeout: 5 * 60 * 1000, maxWait: 30 * 1000 },
   );

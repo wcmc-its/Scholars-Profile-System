@@ -38,6 +38,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/lib/db";
 import { processStartedAt } from "@/lib/etl-run";
+import { assertReseedCount } from "@/lib/etl/reseed-count";
 
 const CURATED_PATH =
   process.env.FAMILY_SENSITIVITY_CURATED_PATH ?? "etl/family-sensitivity/curated.csv";
@@ -294,6 +295,18 @@ export async function replaceRows(rows: SensitiveRow[]): Promise<ReseedCounts> {
           },
         });
       }
+
+      // #1987 -- not a full-table replace (steward rows are left alone), but the
+      // `source='seed'` partition IS fully rebuilt: after the upserts and the
+      // stale prune it must hold exactly the kept CSV keys (post-dedup, minus
+      // steward/decision-owned ones). A mismatch rolls the reseed back.
+      assertReseedCount({
+        source: "FamilySensitivity",
+        table: "family_sensitivity_overlay (source='seed')",
+        expected: seedKeysToKeep.size,
+        actual: await tx.familySensitivityOverlay.count({ where: { source: "seed" } }),
+        from: `${CURATED_PATH} (after skipping steward/decision-owned keys)`,
+      });
 
       return { inserted, updated, deleted: staleSeed.length };
     },
