@@ -10,11 +10,22 @@
  * dimension that page doesn't show, or it leaks that dimension's data through
  * which rows come back even with the column withheld.
  *
- * Loads the scholars in the viewer's scope and computes each one's gaps
- * (headshot / overview presence + freshness), pending-COI counts, and a
- * rolled-our-own "prominence" score, then sorts by prominence and paginates.
- * Read-only; the page deep-links each row into the existing per-scholar edit
- * surface.
+ * Computes each in-scope scholar's gaps (headshot / overview presence +
+ * freshness), pending-COI counts, and the roster "prominence" score
+ * (`lib/api/prominence.ts`), sorts by leadership tier + prominence, and
+ * paginates. Read-only; the page deep-links each row into the existing
+ * per-scholar edit surface.
+ *
+ * Two paths, one order (#2596):
+ *  - DB path (`loadRosterFromDb`): when every in-scope scholar has a stored
+ *    `rosterProminence` / `rosterLeadershipTier` (written nightly by
+ *    `etl:roster-prominence`), the database sorts and pages
+ *    (`loadRosterOrderPage`), the summary counts and the total are `COUNT`s,
+ *    and only the page's rows and aggregates are read.
+ *  - In-app path (`computeDataQualityEntries`): the original whole-roster load,
+ *    scored live and sorted with the same `compareRosterOrder`. Used whenever
+ *    any in-scope scholar is still unscored: before the nightly has ever run
+ *    in an environment, or for a scholar created since the last run.
  *
  * Authorization/scope is the page's responsibility to *resolve* (via
  * `loadDataQualityScope`), but the scope MUST live in the query (so the UI is
@@ -24,7 +35,8 @@
  * cwid across the whole table and joined to the candidate set in-app, rather
  * than with an `in: [thousands of cwids]` clause — the candidate set can be
  * every active scholar for a superuser, and the grouped aggregates are each
- * one bounded query.
+ * one bounded query. (That is the in-app path; the DB path reads them `IN` the
+ * page's cwids only, at most `MAX_LIMIT` or the export cap.)
  *
  * Server-only by construction (uses Prisma) — no `server-only` import so it
  * loads under vitest with a fake client, matching `edit-roster.ts`.
@@ -38,7 +50,14 @@ import {
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
-import { loadCenterDirectors, scoreProminence } from "@/lib/api/prominence";
+import {
+  classifyLeadership,
+  compareRosterOrder,
+  hasUnscoredRoster,
+  loadCenterDirectors,
+  loadRosterOrderPage,
+  scoreProminence,
+} from "@/lib/api/prominence";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
@@ -455,14 +474,14 @@ function buildWhere(
 }
 
 /**
- * Compute the FULL, filtered, prominence-sorted entry set + summary counts —
- * shared by the paginated page loader and the (unpaginated) CSV export. Honors
- * everything in `opts` except `limit`/`offset`, which only the page loader applies.
+ * The candidate `where` for `opts` (scope + every filter except `gap` /
+ * `overviewAge`, which need derived per-scholar state): the membership
+ * pre-reads `buildWhere` needs, then `buildWhere`. Shared by both paths.
  */
-async function computeDataQualityEntries(
+async function resolveCandidateWhere(
   opts: DataQualityOptions,
   client: DataQualityClient,
-): Promise<{ entries: DataQualityEntry[]; counts: DataQualityCounts }> {
+): Promise<Prisma.ScholarWhereInput> {
   // Manual DIVISION-roster membership, viewer's granted divisions only. Amendment
   // 4 derives a scholar's editable units as deptCode ∪ divCode ∪ `DivisionMembership`
   // (`lib/edit/unit-scholar-authz.ts`), so a roster-only member IS editable by
@@ -515,8 +534,332 @@ async function computeDataQualityEntries(
   }
 
   const filterRosterCwids = await loadSelectedDivisionRosterCwids(client, opts.unitValues ?? []);
-  const where = buildWhere(opts, scopeCenterCwids, filterCenterCwids, scopeRosterCwids, filterRosterCwids);
+  return buildWhere(opts, scopeCenterCwids, filterCenterCwids, scopeRosterCwids, filterRosterCwids);
+}
 
+/** Pending High-tier COI review: `pendingCoiHigh > 0` as a relation filter. */
+const WITH_COI_WHERE: Prisma.ScholarWhereInput = {
+  coiGapCandidates: { some: { status: "new", tier: "High" } },
+};
+
+/** The `field_override` rows that replace a scholar's overview. */
+const OVERVIEW_OVERRIDE_WHERE = { entityType: "scholar", fieldName: "overview" } as const;
+
+/** Map override rows to the cwid → text of the NON-blank ones (an override
+ *  that is whitespace-only does not count as an overview). */
+function overviewOverrides(
+  rows: ReadonlyArray<{ entityId: string; value: string | null }>,
+): Map<string, string> {
+  return new Map(
+    rows.filter((r) => nonEmpty(r.value)).map((r) => [r.entityId, r.value as string] as const),
+  );
+}
+
+/**
+ * Every character `String.prototype.trim` strips (ECMAScript WhiteSpace +
+ * LineTerminator). A string is blank to `nonEmpty` exactly when it is "" or
+ * made only of these, so a blank non-empty overview starts AND ends with one.
+ */
+export const JS_TRIM_WHITESPACE = [
+  "\t", "\n", "\v", "\f", "\r", " ", " ", " ",
+  " ", " ", " ", " ", " ", " ", " ", " ",
+  " ", " ", " ", " ", " ", " ", " ", "　", "﻿",
+] as const;
+
+/**
+ * A superset of the scholars whose `overview` column is blank-but-not-NULL to
+ * `nonEmpty` ("" or whitespace-only). SQL has no `trim()` filter in Prisma, so
+ * the DB path reads these few candidates and applies `nonEmpty` in-app; over-
+ * matching (a collation treating some character as ignorable) costs a few extra
+ * rows, never a wrong answer.
+ */
+const BLANK_OVERVIEW_CANDIDATE_WHERE: Prisma.ScholarWhereInput = {
+  OR: [
+    { overview: "" },
+    {
+      AND: [
+        { OR: JS_TRIM_WHITESPACE.map((c) => ({ overview: { startsWith: c } })) },
+        { OR: JS_TRIM_WHITESPACE.map((c) => ({ overview: { endsWith: c } })) },
+      ],
+    },
+  ],
+};
+
+/** Overview presence / freshness as `where` fragments — the DB twin of
+ *  `hasOverview` + `classifyOverview`, built from the override cwids and the
+ *  in-scope cwids whose own overview is blank. */
+function overviewWhere(overrideCwids: string[], blankCwids: string[], now: number) {
+  const hasText: Prisma.ScholarWhereInput =
+    blankCwids.length > 0
+      ? { AND: [{ overview: { not: null } }, { cwid: { notIn: blankCwids } }] }
+      : { overview: { not: null } };
+  const noText: Prisma.ScholarWhereInput =
+    blankCwids.length > 0
+      ? { OR: [{ overview: null }, { cwid: { in: blankCwids } }] }
+      : { overview: null };
+  const has: Prisma.ScholarWhereInput =
+    overrideCwids.length > 0 ? { OR: [hasText, { cwid: { in: overrideCwids } }] } : hasText;
+  const none: Prisma.ScholarWhereInput =
+    overrideCwids.length > 0 ? { AND: [noText, { cwid: { notIn: overrideCwids } }] } : noText;
+  // `classifyOverview`: age < 1y ⇔ updatedAt > now − 1y (integer ms, exact).
+  const oneYearAgo = new Date(now - MS_PER_YEAR);
+  const twoYearsAgo = new Date(now - 2 * MS_PER_YEAR);
+  const age: Record<OverviewState, Prisma.ScholarWhereInput> = {
+    never: none,
+    imported: { AND: [has, { overviewProvenance: { is: null } }] },
+    lt1yr: { AND: [has, { overviewProvenance: { is: { updatedAt: { gt: oneYearAgo } } } }] },
+    "1to2yr": {
+      AND: [
+        has,
+        { overviewProvenance: { is: { updatedAt: { lte: oneYearAgo, gt: twoYearsAgo } } } },
+      ],
+    },
+    gt2yr: { AND: [has, { overviewProvenance: { is: { updatedAt: { lte: twoYearsAgo } } } }] },
+  };
+  return { none, age };
+}
+
+/** The per-row derived fields the two paths compute differently. */
+type EntryDerived = {
+  chairLabel: string | null;
+  isChief: boolean;
+  leadershipLabel: string | null;
+  leadershipTier: number;
+  prominence: number;
+  hasOverview: boolean;
+  overviewProvenanceAt: Date | undefined;
+  coiHigh: number;
+  coiMedium: number;
+};
+
+type EntryRow = {
+  cwid: string;
+  slug: string;
+  preferredName: string;
+  primaryTitle: string | null;
+  roleCategory: string | null;
+  status: string;
+  hasHeadshot: boolean | null;
+  headshotCheckedAt: Date | null;
+  department: { name: string } | null;
+  division: { name: string } | null;
+};
+
+function toEntry(s: EntryRow, d: EntryDerived, now: number): DataQualityEntry {
+  const headshot: HeadshotState =
+    s.hasHeadshot === true ? "present" : s.hasHeadshot === false ? "missing" : "unknown";
+  const { overviewState, overviewUpdatedAt } = classifyOverview(
+    d.hasOverview,
+    d.overviewProvenanceAt,
+    now,
+  );
+  return {
+    cwid: s.cwid,
+    slug: s.slug,
+    name: s.preferredName,
+    title: s.primaryTitle ?? null,
+    unit: s.department?.name ?? s.division?.name ?? null,
+    roleCategory: s.roleCategory ?? null,
+    isChair: d.chairLabel !== null,
+    isChief: d.isChief,
+    leadership: d.leadershipLabel,
+    leadershipTier: d.leadershipTier,
+    isVisible: s.status === "active",
+    headshot,
+    headshotCheckedAt: s.headshotCheckedAt?.toISOString() ?? null,
+    hasOverview: d.hasOverview,
+    overviewUpdatedAt,
+    overviewState,
+    pendingCoiHigh: d.coiHigh,
+    pendingCoiMedium: d.coiMedium,
+    prominence: d.prominence,
+    editHref: `/edit/scholar/${encodeURIComponent(s.cwid)}`,
+  };
+}
+
+/** "Chair" for clinical/mixed/basic departments, "Director" for administrative
+ *  ones (#58 / #2542). A cwid leading more than one department (unusual) keeps
+ *  the LAST row's label; no ordering is defined or needed for that edge case. */
+function chairLabels(rows: ReadonlyArray<{ cwid: string; roleKey: string }>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    out.set(r.cwid, r.roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair");
+  }
+  return out;
+}
+
+function coiCounts(rows: ReadonlyArray<{ cwid: string; tier: string; _count: { _all: number } }>) {
+  const high = new Map<string, number>();
+  const medium = new Map<string, number>();
+  for (const r of rows) {
+    if (r.tier === "High") high.set(r.cwid, r._count._all);
+    else if (r.tier === "Medium") medium.set(r.cwid, r._count._all);
+  }
+  return { high, medium };
+}
+
+const ENTRY_SELECT = {
+  cwid: true,
+  slug: true,
+  preferredName: true,
+  primaryTitle: true,
+  roleCategory: true,
+  status: true,
+  overview: true,
+  hasHeadshot: true,
+  headshotCheckedAt: true,
+  department: { select: { name: true } },
+  division: { select: { name: true } },
+} as const;
+
+/**
+ * The DB path (#2596): one page sorted and paged by the stored
+ * `rosterLeadershipTier` / `rosterProminence`, with the total and the summary
+ * counts as `COUNT`s over the same `where`. Returns `null` (caller falls back to
+ * `computeDataQualityEntries`) when any in-scope scholar is unscored.
+ *
+ * FALLBACK: the stored columns are NULL until `etl:roster-prominence` has run in
+ * an environment, and for any scholar created since its last run. Checked with
+ * one `LIMIT 1` read over the in-scope set (`hasUnscoredRoster`) before anything
+ * else, so a page never regresses before the nightly runs; the in-app path is
+ * exactly the pre-#2596 behavior.
+ *
+ * Staleness, accepted by #2596: the ORDER and the displayed `prominence` /
+ * `leadershipTier` are as of the last nightly run (a weight tuned today, or a
+ * grant loaded since, moves nothing until the next run). Role facts shown on the
+ * row (`isChair`, `isChief`, the leadership label) are read live, as before.
+ *
+ * Reads: the override rows (whole table, as the in-app path) and the few blank-
+ * overview candidates, then COUNTs, then the page's sort keys, then only the
+ * page's rows and their chair/chief/center/COI/provenance aggregates.
+ */
+async function loadRosterFromDb(
+  opts: DataQualityOptions,
+  client: DataQualityClient,
+  where: Prisma.ScholarWhereInput,
+  skip: number,
+  take: number,
+): Promise<{ entries: DataQualityEntry[]; total: number; counts: DataQualityCounts } | null> {
+  if (await hasUnscoredRoster(client, where)) return null;
+
+  const now = Date.now();
+  const [overrideRows, blankCandidates] = await Promise.all([
+    client.fieldOverride.findMany({
+      where: OVERVIEW_OVERRIDE_WHERE,
+      select: { entityId: true, value: true },
+    }),
+    client.scholar.findMany({
+      where: { AND: [where, BLANK_OVERVIEW_CANDIDATE_WHERE] },
+      select: { cwid: true, overview: true },
+    }),
+  ]);
+  const overrideText = overviewOverrides(overrideRows);
+  const overview = overviewWhere(
+    [...overrideText.keys()],
+    blankCandidates.filter((r) => !nonEmpty(r.overview)).map((r) => r.cwid),
+    now,
+  );
+
+  // The same narrowing `computeDataQualityEntries` applies in-app, as `where`.
+  const narrow: Prisma.ScholarWhereInput[] = [];
+  if (opts.gap === "no-headshot") narrow.push({ hasHeadshot: false });
+  else if (opts.gap === "no-overview") narrow.push(overview.none);
+  else if (opts.gap === "has-coi") narrow.push(WITH_COI_WHERE);
+  if (opts.overviewAge && opts.overviewAge !== "all") narrow.push(overview.age[opts.overviewAge]);
+  const filtered: Prisma.ScholarWhereInput = narrow.length > 0 ? { AND: [where, ...narrow] } : where;
+  const countWhere = (extra: Prisma.ScholarWhereInput) =>
+    client.scholar.count({ where: { AND: [where, extra] } });
+
+  const [inScope, missingHeadshot, missingOverview, withCoi, filteredTotal, keys] =
+    await Promise.all([
+      client.scholar.count({ where }),
+      countWhere({ hasHeadshot: false }),
+      countWhere(overview.none),
+      countWhere(WITH_COI_WHERE),
+      narrow.length > 0 ? client.scholar.count({ where: filtered }) : Promise.resolve(null),
+      loadRosterOrderPage(client, filtered, skip, take),
+    ]);
+  if (keys === null) return null;
+  const counts: DataQualityCounts = { inScope, missingHeadshot, missingOverview, withCoi };
+  const total = filteredTotal ?? inScope;
+  if (keys.length === 0) return { entries: [], total, counts };
+
+  const cwids = keys.map((k) => k.cwid);
+  const [rows, chairRows, chiefRows, centerDirectors, coiRows, provRows] = await Promise.all([
+    client.scholar.findMany({ where: { cwid: { in: cwids } }, select: ENTRY_SELECT }),
+    client.orgUnitRoleAssignment.findMany({
+      where: {
+        entityType: "department",
+        roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        cwid: { in: cwids },
+      },
+      select: { cwid: true, roleKey: true },
+    }),
+    client.orgUnitRoleAssignment.findMany({
+      where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY, cwid: { in: cwids } },
+      select: { cwid: true },
+    }),
+    loadCenterDirectors(client, cwids),
+    client.coiGapCandidate.groupBy({
+      by: ["cwid", "tier"],
+      where: { status: "new", cwid: { in: cwids } },
+      _count: { _all: true },
+    }),
+    client.overviewProvenance.findMany({
+      where: { cwid: { in: cwids } },
+      select: { cwid: true, updatedAt: true },
+    }),
+  ]);
+  const rowByCwid = new Map(rows.map((r) => [r.cwid, r]));
+  const chairLabelByCwid = chairLabels(chairRows);
+  const chiefs = new Set(chiefRows.map((r) => r.cwid));
+  const coi = coiCounts(coiRows);
+  const provByCwid = new Map(provRows.map((r) => [r.cwid, r.updatedAt]));
+
+  const entries: DataQualityEntry[] = [];
+  for (const k of keys) {
+    const s = rowByCwid.get(k.cwid);
+    if (!s) continue; // deleted between the two reads
+    const chairLabel = chairLabelByCwid.get(s.cwid) ?? null;
+    const isChief = chiefs.has(s.cwid);
+    entries.push(
+      toEntry(
+        s,
+        {
+          chairLabel,
+          isChief,
+          leadershipLabel: classifyLeadership(
+            s.primaryTitle ?? null,
+            chairLabel,
+            isChief,
+            centerDirectors.has(s.cwid),
+            s.department?.name ?? null,
+          ).label,
+          leadershipTier: k.leadershipTier,
+          prominence: k.prominence,
+          hasOverview: nonEmpty(s.overview) || overrideText.has(s.cwid),
+          overviewProvenanceAt: provByCwid.get(s.cwid),
+          coiHigh: coi.high.get(s.cwid) ?? 0,
+          coiMedium: coi.medium.get(s.cwid) ?? 0,
+        },
+        now,
+      ),
+    );
+  }
+  return { entries, total, counts };
+}
+
+/**
+ * The in-app path: compute the FULL, filtered, prominence-sorted entry set +
+ * summary counts by loading the whole in-scope roster and scoring it live. Used
+ * when the DB path cannot be (see `loadRosterFromDb` on the fallback). Honors
+ * everything in `opts` except `limit`/`offset`, which the callers apply.
+ */
+async function computeDataQualityEntries(
+  opts: DataQualityOptions,
+  client: DataQualityClient,
+  where: Prisma.ScholarWhereInput,
+): Promise<{ entries: DataQualityEntry[]; counts: DataQualityCounts }> {
   // Candidate identities + prominence inputs. The whole in-scope set loads (the
   // prominence sort is computed in-app over all of it, then paginated).
   const centerDirectorsRead = loadCenterDirectors(client);
@@ -524,26 +867,12 @@ async function computeDataQualityEntries(
     await Promise.all([
       client.scholar.findMany({
         where,
-        select: {
-          cwid: true,
-          slug: true,
-          preferredName: true,
-          primaryTitle: true,
-          roleCategory: true,
-          status: true,
-          overview: true,
-          hIndex: true,
-          scoredPubCount: true,
-          hasHeadshot: true,
-          headshotCheckedAt: true,
-          department: { select: { name: true } },
-          division: { select: { name: true } },
-        },
+        select: { ...ENTRY_SELECT, hIndex: true, scoredPubCount: true },
       }),
       // #2542 contract A — chair/director/chief come from `OrgUnitRoleAssignment`
       // only; `Department.chairCwid` / `Division.chiefCwid` no longer exist as
       // read sources. `roleKey` itself distinguishes Chair vs. Director (#58) —
-      // see the `chairLabelByCwid` build below.
+      // see `chairLabels`.
       client.orgUnitRoleAssignment.findMany({
         where: {
           entityType: "department",
@@ -573,48 +902,31 @@ async function computeDataQualityEntries(
         _count: { _all: true },
       }),
       client.fieldOverride.findMany({
-        where: { entityType: "scholar", fieldName: "overview" },
+        where: OVERVIEW_OVERRIDE_WHERE,
         select: { entityId: true, value: true },
       }),
       // #1077 parity — the last-edited-in-/edit date; absence ⇒ imported VIVO seed.
       client.overviewProvenance.findMany({ select: { cwid: true, updatedAt: true } }),
     ]);
 
-  // "Chair" for clinical/mixed/basic departments, "Director" for
-  // administrative ones (#58 / #2542) — a plain membership Set can't carry
-  // that distinction, so this is a label map instead. A cwid chairing more
-  // than one department (unusual) keeps the LAST department's label; no
-  // ordering is defined or needed for that edge case today.
-  const chairLabelByCwid = new Map<string, string>();
-  for (const r of chairRows) {
-    chairLabelByCwid.set(r.cwid, r.roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair");
-  }
+  const chairLabelByCwid = chairLabels(chairRows);
   const chiefs = new Set(chiefRows.map((r) => r.cwid));
   const centerDirectors = await centerDirectorsRead;
   const piCount = new Map(piRows.map((r) => [r.cwid, r._count._all]));
   const nihPiCount = new Map(nihPiRows.map((r) => [r.cwid, r._count._all]));
-  const overrideText = new Map(
-    overrideRows.filter((r) => nonEmpty(r.value)).map((r) => [r.entityId, r.value] as const),
-  );
-  const overviewOverride = new Set(overrideText.keys());
+  const overrideText = overviewOverrides(overrideRows);
   const provByCwid = new Map(provRows.map((r) => [r.cwid, r.updatedAt]));
-  const coiHigh = new Map<string, number>();
-  const coiMedium = new Map<string, number>();
-  for (const r of coiRows) {
-    if (r.tier === "High") coiHigh.set(r.cwid, r._count._all);
-    else if (r.tier === "Medium") coiMedium.set(r.cwid, r._count._all);
-  }
+  const coi = coiCounts(coiRows);
 
   const now = Date.now();
 
   let entries: DataQualityEntry[] = candidates.map((s) => {
     const chairLabel = chairLabelByCwid.get(s.cwid) ?? null;
-    const isChair = chairLabel !== null;
     const isChief = chiefs.has(s.cwid);
     // The formula + tier rules live in `lib/api/prominence.ts` (one definition,
-    // shared with the news queue). The READS stay here: this loader scores the
-    // whole in-scope roster from grouped aggregates, which is the opposite shape
-    // to `computeProminence`'s bounded `IN` reads.
+    // shared with the news queue and the nightly writer). The READS stay here:
+    // this path scores the whole in-scope roster from grouped aggregates, which
+    // is the opposite shape to `computeProminence`'s bounded `IN` reads.
     const { prominence, leadershipTier, leadershipLabel } = scoreProminence({
       scoredPubCount: s.scoredPubCount,
       hIndex: s.hIndex,
@@ -627,39 +939,21 @@ async function computeDataQualityEntries(
       piCount: piCount.get(s.cwid) ?? 0,
       nihPiCount: nihPiCount.get(s.cwid) ?? 0,
     });
-
-    const headshot: HeadshotState =
-      s.hasHeadshot === true ? "present" : s.hasHeadshot === false ? "missing" : "unknown";
-
-    const hasOverview = nonEmpty(s.overview) || overviewOverride.has(s.cwid);
-    const { overviewState, overviewUpdatedAt } = classifyOverview(
-      hasOverview,
-      provByCwid.get(s.cwid),
+    return toEntry(
+      s,
+      {
+        chairLabel,
+        isChief,
+        leadershipLabel,
+        leadershipTier,
+        prominence,
+        hasOverview: nonEmpty(s.overview) || overrideText.has(s.cwid),
+        overviewProvenanceAt: provByCwid.get(s.cwid),
+        coiHigh: coi.high.get(s.cwid) ?? 0,
+        coiMedium: coi.medium.get(s.cwid) ?? 0,
+      },
       now,
     );
-
-    return {
-      cwid: s.cwid,
-      slug: s.slug,
-      name: s.preferredName,
-      title: s.primaryTitle ?? null,
-      unit: s.department?.name ?? s.division?.name ?? null,
-      roleCategory: s.roleCategory ?? null,
-      isChair,
-      isChief,
-      leadership: leadershipLabel,
-      leadershipTier,
-      isVisible: s.status === "active",
-      headshot,
-      headshotCheckedAt: s.headshotCheckedAt?.toISOString() ?? null,
-      hasOverview,
-      overviewUpdatedAt,
-      overviewState,
-      pendingCoiHigh: coiHigh.get(s.cwid) ?? 0,
-      pendingCoiMedium: coiMedium.get(s.cwid) ?? 0,
-      prominence,
-      editHref: `/edit/scholar/${encodeURIComponent(s.cwid)}`,
-    };
   });
 
   // Summary counts across the in-scope, filtered set (before the gap filter).
@@ -682,28 +976,27 @@ async function computeDataQualityEntries(
     entries = entries.filter((e) => e.overviewState === opts.overviewAge);
   }
 
-  // Leadership tier first (Dean #1), then prominence desc, then name asc for a
-  // stable page boundary.
-  entries.sort(
-    (a, b) =>
-      a.leadershipTier - b.leadershipTier ||
-      b.prominence - a.prominence ||
-      a.name.localeCompare(b.name),
-  );
+  // Leadership tier first (Dean #1), then prominence desc, then name, then cwid:
+  // the one roster order, shared with the DB path (`compareRosterOrder`).
+  entries.sort(compareRosterOrder);
 
   return { entries, counts };
 }
 
-/** Load one page of the roster — the prominence-sorted slice + total + counts. */
+/** Load one page of the roster — the prominence-sorted slice + total + counts.
+ *  DB-sorted and paged when every in-scope scholar is scored, else the in-app
+ *  path (`loadRosterFromDb` documents the fallback). */
 export async function loadDataQualityRoster(
   opts: DataQualityOptions,
   client: DataQualityClient,
 ): Promise<DataQualityResult> {
-  const { entries, counts } = await computeDataQualityEntries(opts, client);
-  const total = entries.length;
   const take = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
   const skip = Math.max(opts.offset ?? 0, 0);
-  return { entries: entries.slice(skip, skip + take), total, counts };
+  const where = await resolveCandidateWhere(opts, client);
+  const fromDb = await loadRosterFromDb(opts, client, where, skip, take);
+  if (fromDb) return fromDb;
+  const { entries, counts } = await computeDataQualityEntries(opts, client, where);
+  return { entries: entries.slice(skip, skip + take), total: entries.length, counts };
 }
 
 /** Upper bound on rows in one CSV export — keeps a steward's "export everything"
@@ -721,13 +1014,23 @@ export type DataQualityExport = {
 
 /**
  * The full (capped) filtered + prominence-sorted set for CSV export — same scope
- * and filters as the page, just unpaginated.
+ * and filters as the page, just unpaginated: the DB path's first
+ * `DATA_QUALITY_EXPORT_CAP` rows, or the in-app path's when it falls back.
  */
 export async function loadDataQualityExport(
   opts: DataQualityOptions,
   client: DataQualityClient,
 ): Promise<DataQualityExport> {
-  const { entries } = await computeDataQualityEntries(opts, client);
+  const where = await resolveCandidateWhere(opts, client);
+  const fromDb = await loadRosterFromDb(opts, client, where, 0, DATA_QUALITY_EXPORT_CAP);
+  if (fromDb) {
+    return {
+      rows: fromDb.entries,
+      total: fromDb.total,
+      truncated: fromDb.total > DATA_QUALITY_EXPORT_CAP,
+    };
+  }
+  const { entries } = await computeDataQualityEntries(opts, client, where);
   const total = entries.length;
   return {
     rows: entries.slice(0, DATA_QUALITY_EXPORT_CAP),
@@ -735,6 +1038,7 @@ export async function loadDataQualityExport(
     truncated: total > DATA_QUALITY_EXPORT_CAP,
   };
 }
+
 
 const BASE_CSV_HEADERS = ["rank", "cwid", "name", "title", "unit", "person_type", "leadership"] as const;
 /** Profiles-only columns (Status + gaps). */

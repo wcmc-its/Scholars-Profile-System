@@ -104,6 +104,10 @@ const ctx: EditContext = {
       isActive: true,
       state: "shown",
       suppressionId: null,
+      accountNumber: "12345",
+      centralOffice: "OSRA",
+      intakeType: "Grant",
+      datesSource: "infoed",
     },
   ],
   coiDisclosures: [

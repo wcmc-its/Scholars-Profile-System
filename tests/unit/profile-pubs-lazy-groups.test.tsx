@@ -11,18 +11,18 @@ vi.mock("@/components/profile/publication-row", () => ({
 }));
 
 import { PublicationsSection } from "@/components/profile/publications-section";
-import type { ProfilePublication } from "@/lib/api/profile";
+import type { ProfileClientPublication } from "@/lib/profile/client-publication";
 
-function pub(pmid: string, year: number): ProfilePublication {
+function pub(pmid: string, year: number): ProfileClientPublication {
   return {
     pmid,
     title: `Paper ${pmid}`,
     year,
     publicationType: "Academic Article",
     authorship: { isFirst: false, isLast: false, isPenultimate: false },
-    meshTerms: [],
+    meshUis: [],
     wcmAuthors: [],
-  } as unknown as ProfilePublication;
+  } as unknown as ProfileClientPublication;
 }
 
 // Six 2025 papers meet the default-open target (5) on their own, so 2020 stays closed.

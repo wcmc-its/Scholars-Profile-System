@@ -159,7 +159,11 @@ describe("buildDataQualityCsv", () => {
 /** Minimal fake client — empty aggregates, N scholars. */
 function fakeClient(scholars: unknown[]) {
   return {
-    scholar: { findMany: vi.fn().mockResolvedValue(scholars) },
+    // Stored scores NULL in this fake (#2596): the in-app path.
+    scholar: {
+      findMany: vi.fn().mockResolvedValue(scholars),
+      findFirst: vi.fn().mockResolvedValue({ cwid: "x" }),
+    },
     department: { findMany: vi.fn().mockResolvedValue([]) },
     division: { findMany: vi.fn().mockResolvedValue([]) },
     center: { findMany: vi.fn().mockResolvedValue([]) },

@@ -69,6 +69,10 @@ type GrantRow = {
   /// #2020 — 'Active Award' | 'Expired Award' | 'In Process'. Only consumed by
   /// the undated-award worklist; the Grant row itself derives status from dates.
   Project_Status: string | null;
+  /// #2180 — `prop_u.P_SIN_18` / `p_sin_5`, rolled up per account (NULL when
+  /// the whole family left them blank). Stored as-is, never defaulted.
+  central_office: string | null;
+  intake_type: string | null;
 };
 
 const INSERT_BATCH = 1000;
@@ -91,7 +95,7 @@ function chunks<T>(arr: T[], size: number): T[][] {
 }
 
 /** An InfoEd row paired with where its project period came from. */
-type Prepared = { row: GrantRow; datesSource: "infoed" | "reporter" };
+export type Prepared = { row: GrantRow; datesSource: "infoed" | "reporter" };
 
 /**
  * #2020 — project periods straight from NIH RePORTER's public API, keyed by
@@ -147,7 +151,13 @@ WITH infoed_all AS (
     -- The account-level date source below reads dbo.proposal upstream of this
     -- join, so #2173's recovery does not depend on #2174 being fixed first.
     ct.code_desc        AS Program_Type,
-    p_udf.p_sin_5       AS intake_type,
+    -- #2180 — intake type (free text) and owning central office ('OSRA' /
+    -- 'JCTO'), both per proposal; rolled up per account in z below.
+    -- CAST: LTRIM/RTRIM/MAX below reject a legacy ntext/text column. LEFT: fit
+    -- grant.intake_type VARCHAR(255) / central_office VARCHAR(64); one overlong
+    -- value would otherwise fail the whole import on MySQL 1406.
+    LEFT(CAST(p_udf.p_sin_5 AS NVARCHAR(4000)), 255) AS intake_type,
+    LEFT(CAST(p_udf.P_SIN_18 AS NVARCHAR(4000)), 64) AS central_office,
     ct2.code_desc       AS Proposal_Type,
     cdp.code_desc       AS Project_Status,
     cdp2.code_desc      AS Proposal_Status,
@@ -207,6 +217,7 @@ SELECT DISTINCT
   v.CWID, v.Account_Number, x.Award_Number,
   REPLACE(REPLACE(REPLACE(z.proj_title, CHAR(13), ' '), CHAR(10), ' '), '    ', '') AS proj_title,
   z.unit_name, z.int_unit_code, z.program_type, z.Orig_Sponsor, z.Project_Status,
+  z.central_office, z.intake_type,
   CASE WHEN z.Sponsor = z.Orig_Sponsor THEN NULL ELSE z.Sponsor END AS Subward_Sponsor,
   z.spon_code,
   CASE
@@ -262,7 +273,13 @@ LEFT JOIN (
     -- #2020 — triage field for the undated-award worklist. MIN() so an account
     -- mixing statuses reports 'Active Award' ('A' sorts before 'E' and 'I'):
     -- an undated ACTIVE award is the one a faculty member notices missing.
-    MIN(Project_Status) AS Project_Status
+    MIN(Project_Status) AS Project_Status,
+    -- #2180 — account-level routing metadata. Account_Number rolls up a
+    -- parent's proposals, which can disagree; MAX() over NON-BLANK values only,
+    -- so a family with nothing recorded comes back NULL rather than '' (an
+    -- unknown must never look like a recorded value downstream).
+    MAX(NULLIF(LTRIM(RTRIM(central_office)), '')) AS central_office,
+    MAX(NULLIF(LTRIM(RTRIM(intake_type)), '')) AS intake_type
   FROM infoed_all GROUP BY cwid, Account_Number
 ) AS z
   ON z.cwid = v.cwid AND z.Account_Number = v.Account_Number
@@ -686,6 +703,63 @@ async function reconcileDateGaps(
   );
 }
 
+/** Trimmed text, or null for NULL / blank. Never substitutes a default. */
+function blankToNull(s: string | null | undefined): string | null {
+  return s?.trim() || null;
+}
+
+/**
+ * One prepared InfoEd row -> the Grant row the reconcile writes. Pure, so the
+ * field mapping is unit-testable without MSSQL or Prisma.
+ *
+ * #2180 — `centralOffice` / `intakeType` are stored only when InfoEd recorded
+ * them; a missing value stays null (no `programType`-style default), because
+ * these are routing provenance and a guessed office is worse than none.
+ */
+export function toGrantInsert({ row: r, datesSource }: Prepared) {
+  const role = ROLE_MAP[r.Role] ?? "Key Personnel";
+
+  // Issue #78 F6 — prime is Orig_Sponsor (always populated when this row
+  // exists; defensive-fallback to "(unknown sponsor)" matches the prior
+  // funder-string contract). Direct equals prime when WCM holds the
+  // award directly; Subward_Sponsor is set by the query when WCM is the
+  // sub-recipient.
+  const primeRaw = r.Orig_Sponsor?.trim() || null;
+  const directRaw = (r.Subward_Sponsor?.trim() || primeRaw) ?? null;
+  const isSubaward =
+    !!primeRaw && !!directRaw && primeRaw !== directRaw;
+
+  const funderParts = [primeRaw ?? "(unknown sponsor)"];
+  if (r.Subward_Sponsor) funderParts.push(`via ${r.Subward_Sponsor}`);
+
+  // Issue #78 F2 — derive mechanism + IC from the award number for NIH
+  // grants. Returns nulls for non-NIH formats.
+  const award = parseNihAward(r.Award_Number);
+
+  return {
+    cwid: r.CWID!,
+    title: repairEncodingOrNull(r.proj_title?.trim()) || `(untitled grant ${r.Account_Number})`,
+    role,
+    funder: funderParts.join(" "),
+    startDate: r.begin_date!,
+    endDate: r.end_date!,
+    externalId: `INFOED-${r.Account_Number}-${r.CWID}`,
+    awardNumber: repairEncodingOrNull(r.Award_Number?.trim() || null),
+    source: "InfoEd",
+    datesSource,
+    programType: r.program_type?.trim() || "Grant",
+    primeSponsor: canonicalizeSponsor(primeRaw),
+    primeSponsorRaw: primeRaw,
+    directSponsor: canonicalizeSponsor(directRaw),
+    directSponsorRaw: directRaw,
+    mechanism: award.mechanism,
+    nihIc: award.nihIc,
+    isSubaward,
+    centralOffice: blankToNull(r.central_office),
+    intakeType: blankToNull(r.intake_type),
+  };
+}
+
 async function main() {
   const start = Date.now();
   const run = await db.write.etlRun.create({
@@ -765,47 +839,7 @@ async function main() {
       `After filtering to active CWIDs + non-null dates: ${prepared.length} grants.`,
     );
 
-    const inserts = prepared.map(({ row: r, datesSource }) => {
-      const role = ROLE_MAP[r.Role] ?? "Key Personnel";
-
-      // Issue #78 F6 — prime is Orig_Sponsor (always populated when this row
-      // exists; defensive-fallback to "(unknown sponsor)" matches the prior
-      // funder-string contract). Direct equals prime when WCM holds the
-      // award directly; Subward_Sponsor is set by the query when WCM is the
-      // sub-recipient.
-      const primeRaw = r.Orig_Sponsor?.trim() || null;
-      const directRaw = (r.Subward_Sponsor?.trim() || primeRaw) ?? null;
-      const isSubaward =
-        !!primeRaw && !!directRaw && primeRaw !== directRaw;
-
-      const funderParts = [primeRaw ?? "(unknown sponsor)"];
-      if (r.Subward_Sponsor) funderParts.push(`via ${r.Subward_Sponsor}`);
-
-      // Issue #78 F2 — derive mechanism + IC from the award number for NIH
-      // grants. Returns nulls for non-NIH formats.
-      const award = parseNihAward(r.Award_Number);
-
-      return {
-        cwid: r.CWID!,
-        title: repairEncodingOrNull(r.proj_title?.trim()) || `(untitled grant ${r.Account_Number})`,
-        role,
-        funder: funderParts.join(" "),
-        startDate: r.begin_date!,
-        endDate: r.end_date!,
-        externalId: `INFOED-${r.Account_Number}-${r.CWID}`,
-        awardNumber: repairEncodingOrNull(r.Award_Number?.trim() || null),
-        source: "InfoEd",
-        datesSource,
-        programType: r.program_type?.trim() || "Grant",
-        primeSponsor: canonicalizeSponsor(primeRaw),
-        primeSponsorRaw: primeRaw,
-        directSponsor: canonicalizeSponsor(directRaw),
-        directSponsorRaw: directRaw,
-        mechanism: award.mechanism,
-        nihIc: award.nihIc,
-        isSubaward,
-      };
-    });
+    const inserts = prepared.map(toGrantInsert);
 
     // Issue #352 — reconcile grants by externalId instead of truncate-and-
     // recreate, so each row keeps its uuid PK across runs and the manual-
@@ -817,7 +851,7 @@ async function main() {
       select: {
         externalId: true, cwid: true, title: true, role: true, funder: true,
         startDate: true, endDate: true, awardNumber: true, source: true,
-        datesSource: true,
+        datesSource: true, centralOffice: true, intakeType: true,
         programType: true, primeSponsor: true, primeSponsorRaw: true,
         directSponsor: true, directSponsorRaw: true, mechanism: true,
         nihIc: true, isSubaward: true,
@@ -834,6 +868,10 @@ async function main() {
           g.awardNumber, g.source, g.datesSource, g.programType, g.primeSponsor,
           g.primeSponsorRaw, g.directSponsor, g.directSponsorRaw,
           g.mechanism, g.nihIc, g.isSubaward,
+          // #2180 — appended (not interleaved) so the key stays readable; a
+          // change to either field must re-write the row, or a first run after
+          // the migration would leave every unchanged grant NULL forever.
+          g.centralOffice, g.intakeType,
         ]),
     });
     if (plan.duplicateExternalIds.length > 0) {

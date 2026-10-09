@@ -64,7 +64,10 @@ function fakeClient(opts: {
     return Promise.resolve(rows.map((r) => ({ cwid: r.cwid, _count: { _all: r.n } })));
   });
   const client = {
-    scholar: { findMany: scholarFindMany },
+    // #2596 — `hasUnscoredRoster` finds an unscored row (the stored columns are
+    // NULL in this fake), so every test here exercises the in-app path. The DB
+    // path has its own suite (data-quality-db-path.test.ts).
+    scholar: { findMany: scholarFindMany, findFirst: vi.fn().mockResolvedValue({ cwid: "x" }) },
     department: {
       findMany: vi.fn().mockResolvedValue(
         opts.chairDepartments ??

@@ -171,7 +171,9 @@ The **semantics** column is where the two sides disagree. Read it before you tru
 | `externalId` | derived | `INFOED-<Account_Number>-<CWID>` | Composite of a **mutable** CASE expression and the CWID. Unique. See §4 for what happens when the account re-keys |
 | `awardNumber` | `proposal.spon_awd` | `MAX(Award_Number)` per `(cwid, Account_Number)`, then encoding repair | **`MAX()` across the account family**: on a family carrying several award numbers, the lexically greatest wins. Encoding repair is load-bearing here — 9 award numbers carried a soft hyphen (measured 2026-07-30) |
 | `source` | none | literal `"InfoEd"` | Also the scope key for reconcile and delete. RePORTER-created rows carry `"RePORTER"` and are outside this ETL's universe entirely |
-| `datesSource` | none | `"infoed"` for dated rows, `"reporter"` for backfilled ones | Provenance of the **dates**, not of the grant. ADR-012 D3. Currently written and read at no UI surface (#2180) |
+| `datesSource` | none | `"infoed"` for dated rows, `"reporter"` for backfilled ones | Provenance of the **dates**, not of the grant. ADR-012 D3. Read only by the /edit Funding card's record-level line, and only on `source = "InfoEd"` rows (#2180) — see (d) below for why RePORTER rows are excluded |
+| `centralOffice` | `prop_u.P_SIN_18` | `MAX(NULLIF(LTRIM(RTRIM(...)), ''))` per `(cwid, Account_Number)`, then JS `trim` | #2180. `OSRA` / `JCTO` in practice. **No default**: NULL or blank stays NULL. Routing metadata — shown in /edit only, never on a public surface |
+| `intakeType` | `prop_u.p_sin_5` | same as `centralOffice` | #2180. Free text, 13 values. Classifies a record together with `centralOffice` (ADR-012 D8). **No default**; /edit only |
 | `lastRefreshedAt` | none | `new Date()` **on update only** | **Means "last changed", not "last seen".** An unchanged row gets no write at all, so a stale-looking timestamp is not evidence the feed skipped it |
 | `programType` | `codetab.code_desc` via `proposal.pgm_type` | Guarded `MIN(...)` excluding `'Contract without funding'`, then a default | Code-table lookup, guarded aggregate, then a **fabricated default**. Empty or NULL silently becomes the literal `"Grant"`. The guard exists because a bare `MIN()` returned `'Contract without funding'` on mixed-type accounts (`'C'` sorts before `'G'`), writing the exact value the policy excludes |
 | `primeSponsor` | `sponspas.spon_name` via `proposal.orig_spon` when it differs from `spon_code`, else via `spon_code` | `MAX(Orig_Sponsor)`, then `canonicalizeSponsor` | **Lookup normalization.** Exact short-name/alias match, then full-name, then a normalized form that strips legal suffixes and a leading "The"/"United States", maps `&` to "and", and drops `/NIH` and `/DHHS` tails. **Null when unmatched**, which is not an error |
@@ -193,10 +195,10 @@ active versus past is derived purely from the dates. `int_unit_code` and `spon_c
 the row type and used nowhere.
 
 **Columns computed in the query and read by nothing:** `Project_Period_Start`, `Project_Period_End`
-(superseded by the account-period query in #2173), `RecordID`, `Submission_Status`, `intake_type`,
+(superseded by the account-period query in #2173), `RecordID`, `Submission_Status`,
 `Proposal_Type`, `Proposal_Status`, `Subward_Indicator`, `lname`, `fname`, `title`,
-`Role_Description`. `intake_type` is the interesting one: ADR-012 D8 shows it is the discriminator
-that makes the date-gap worklist actionable, and it is selected and thrown away.
+`Role_Description`. (`intake_type` used to be on this list; since #2180 it is carried to
+`Grant.intakeType`, alongside `P_SIN_18` as `Grant.centralOffice`.)
 
 ### Role, in three renames
 
@@ -532,8 +534,8 @@ definition matches the template** — confirm against the live task def before s
 
 **(d) RePORTER-created rows never get a `datesSource`.** `buildReporterGrantRow` does not set the
 field, so the row inherits the schema default `"infoed"` even though every date came from RePORTER.
-Whether any consumer mis-reports provenance because of this is **not established** — no consumer of
-`datesSource` has been audited, and it is currently read at no UI surface.
+Its one consumer, the /edit Funding card (#2180), reads it only on `source = "InfoEd"` rows
+(`lib/api/edit-context.ts`) so the default never surfaces as "Dates from InfoEd".
 
 **(e) Phased-family dedup degrades to exact-match on four-character activity codes.** The family key
 drops exactly three characters, but the award-number regex admits three **or four**. For a

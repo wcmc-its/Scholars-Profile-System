@@ -16,6 +16,12 @@
  *     own `IN`-scoped reads. For callers holding a few hundred cwids (the news
  *     queue), not for a whole-roster load.
  *
+ * And the stored order (#2596): `etl:roster-prominence` writes `computeProminence(
+ * "all")` to `Scholar.rosterProminence` / `rosterLeadershipTier` nightly, and
+ * `loadRosterOrderPage` pages by those columns in the DB in exactly
+ * `compareRosterOrder` order. `data-quality.ts` uses that whenever every
+ * in-scope scholar is scored, and its in-app path (`scoreProminence`) otherwise.
+ *
  * Server-only by construction (Prisma types + reads) but with no `server-only`
  * import, so it loads under vitest with a fake client — matching `data-quality.ts`.
  */
@@ -27,7 +33,7 @@ import {
   DIRECTOR_ROLE_KEY,
   DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { rankTitleText, TITLE_RANK } from "@/lib/scholar-title";
 
 /** The Prisma surface `computeProminence` reads — a `db.read` client satisfies it. */
@@ -228,8 +234,8 @@ export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
  * Prominence + leadership tier for a BOUNDED set of cwids.
  *
  * Every read is `IN`-scoped to `cwids` — this is deliberately NOT the
- * whole-roster shape `data-quality.ts` uses. That module loads the entire
- * in-scope roster because it SORTS and PAGINATES all of it; a caller that
+ * whole-roster shape of `data-quality.ts`'s in-app fallback, which loads the
+ * entire in-scope roster because it SORTS and PAGINATES all of it; a caller that
  * already knows its cwids (the news queue: a few hundred distinct scholars
  * behind ~1,400 pending mentions) must not drag the roster in behind them.
  *
@@ -326,4 +332,183 @@ export async function computeProminence(
     );
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Roster ORDER (#2596): paging by the stored `Scholar.rosterProminence` /
+// `rosterLeadershipTier` columns in the database. Any surface that lists
+// scholars "most prominent first" can page with `loadRosterOrderPage` instead
+// of scoring its whole candidate set in-app.
+// ---------------------------------------------------------------------------
+
+/** The four keys the roster sorts on. `DataQualityEntry` satisfies it. */
+export type RosterSortKey = {
+  cwid: string;
+  name: string;
+  leadershipTier: number;
+  prominence: number;
+};
+
+/**
+ * THE roster order, in-app: leadership tier ascending (THE Dean first), then
+ * prominence descending, then name (`localeCompare`), then cwid. The cwid term
+ * is the deterministic final tiebreak; before #2596 two identically named
+ * scholars at the same tier and score kept whatever order `findMany` returned.
+ *
+ * `ROSTER_ORDER_BY` is the same order for the database, key for key. The first
+ * two keys are numeric, so the DB and this comparator agree on them exactly.
+ * The name key does NOT agree exactly: MySQL compares under the column's
+ * collation (`utf8mb4_unicode_ci`, case- and accent-insensitive, UCA 4.0),
+ * while `localeCompare` is ICU. `loadRosterOrderPage` corrects for that, so a
+ * DB page is always a slice of the list this comparator sorts.
+ */
+export function compareRosterOrder(a: RosterSortKey, b: RosterSortKey): number {
+  return (
+    a.leadershipTier - b.leadershipTier ||
+    b.prominence - a.prominence ||
+    a.name.localeCompare(b.name) ||
+    (a.cwid < b.cwid ? -1 : a.cwid > b.cwid ? 1 : 0)
+  );
+}
+
+/** `compareRosterOrder` as a Prisma `orderBy`, one entry per comparator key. */
+export const ROSTER_ORDER_BY = [
+  { rosterLeadershipTier: "asc" },
+  { rosterProminence: "desc" },
+  { preferredName: "asc" },
+  { cwid: "asc" },
+] as const satisfies readonly Prisma.ScholarOrderByWithRelationInput[];
+
+/**
+ * True when some scholar matching `where` has no stored score. The columns are
+ * NULL until `etl:roster-prominence` has run in an environment, and a scholar
+ * created since the last run stays NULL until the next one. The caller must
+ * then sort in-app (`scoreProminence`), because MySQL sorts a NULL FIRST under
+ * `ORDER BY … ASC` and the page would be wrong. One `LIMIT 1` read.
+ */
+export async function hasUnscoredRoster(
+  client: Pick<PrismaClient, "scholar">,
+  where: Prisma.ScholarWhereInput,
+): Promise<boolean> {
+  const row = await client.scholar.findFirst({
+    where: { AND: [where, { OR: [{ rosterProminence: null }, { rosterLeadershipTier: null }] }] },
+    select: { cwid: true },
+  });
+  return row !== null;
+}
+
+const ROSTER_SORT_SELECT = {
+  cwid: true,
+  preferredName: true,
+  rosterLeadershipTier: true,
+  rosterProminence: true,
+} as const;
+
+type RosterSortRow = {
+  cwid: string;
+  preferredName: string;
+  rosterLeadershipTier: number | null;
+  rosterProminence: number | null;
+};
+
+/** Sort keys for stored rows, or `null` if any row is unscored. */
+function rosterSortKeys(rows: readonly RosterSortRow[]): RosterSortKey[] | null {
+  const out: RosterSortKey[] = [];
+  for (const r of rows) {
+    if (r.rosterLeadershipTier === null || r.rosterProminence === null) return null;
+    out.push({
+      cwid: r.cwid,
+      name: r.preferredName,
+      leadershipTier: r.rosterLeadershipTier,
+      prominence: r.rosterProminence,
+    });
+  }
+  return out;
+}
+
+/**
+ * One page of the scholars matching `where`, in exactly `compareRosterOrder`
+ * order, sorted and paged by the database on the stored columns. Returns the
+ * page's sort keys (the caller loads whatever else it shows for those cwids),
+ * or `null` when a row it read is unscored, so the caller falls back to its
+ * in-app sort. Call `hasUnscoredRoster` first; the `null` here only covers a
+ * row going unscored between the two reads.
+ *
+ * Why it is more than `findMany({ orderBy, skip, take })`: the DB's name order
+ * is the collation's, not `localeCompare`'s (see `compareRosterOrder`). Tier and
+ * prominence are exact, so the two orders can differ only INSIDE a run of rows
+ * that share both (a "tie group"), never across one. A tie group wholly inside
+ * the page is fixed by re-sorting the page. One that straddles a page edge is
+ * read whole (cwid, name and the two scores only) so the edge falls where the
+ * in-app sort puts it. The tail of the roster is one large zero-score group, so
+ * a deep page there reads that group's thin keys; still far less than the
+ * whole-roster load (every column, every aggregate) it replaces.
+ *
+ * No index on the two columns (the #2596 migration left that to this switch):
+ * the scholar table is ~9k rows, every roster `where` also filters on scope /
+ * unit / search columns, and a filesort of the matching rows is cheaper than
+ * an index-order scan that has to re-check those filters. Revisit with
+ * `EXPLAIN` if the table grows by an order of magnitude.
+ */
+export async function loadRosterOrderPage(
+  client: Pick<PrismaClient, "scholar">,
+  where: Prisma.ScholarWhereInput,
+  skip: number,
+  take: number,
+): Promise<RosterSortKey[] | null> {
+  const page = rosterSortKeys(
+    await client.scholar.findMany({
+      where,
+      orderBy: [...ROSTER_ORDER_BY],
+      skip,
+      take,
+      select: ROSTER_SORT_SELECT,
+    }),
+  );
+  if (page === null) return null;
+  if (page.length === 0) return [];
+
+  const first = page[0];
+  const last = page[page.length - 1];
+  const sameGroup = (a: RosterSortKey, b: RosterSortKey) =>
+    a.leadershipTier === b.leadershipTier && a.prominence === b.prominence;
+  const groupWhere = (k: RosterSortKey): Prisma.ScholarWhereInput => ({
+    AND: [where, { rosterLeadershipTier: k.leadershipTier, rosterProminence: k.prominence }],
+  });
+  const oneGroup = sameGroup(first, last);
+
+  const [firstGroupRows, before, lastGroupRows] = await Promise.all([
+    client.scholar.findMany({ where: groupWhere(first), select: ROSTER_SORT_SELECT }),
+    // Rows strictly ahead of the first row's tie group (the numeric keys only).
+    client.scholar.count({
+      where: {
+        AND: [
+          where,
+          {
+            OR: [
+              { rosterLeadershipTier: { lt: first.leadershipTier } },
+              {
+                rosterLeadershipTier: first.leadershipTier,
+                rosterProminence: { gt: first.prominence },
+              },
+            ],
+          },
+        ],
+      },
+    }),
+    oneGroup
+      ? Promise.resolve([] as RosterSortRow[])
+      : client.scholar.findMany({ where: groupWhere(last), select: ROSTER_SORT_SELECT }),
+  ]);
+  const firstGroup = rosterSortKeys(firstGroupRows);
+  const lastGroup = rosterSortKeys(lastGroupRows);
+  if (firstGroup === null || lastGroup === null) return null;
+
+  // The window is a contiguous run of WHOLE tie groups starting at DB position
+  // `before`: the first edge group, the page rows between the edges, then the
+  // last edge group. Sorting it in-app gives that run's exact in-app order.
+  const middle = page.filter((r) => !sameGroup(r, first) && !sameGroup(r, last));
+  const window = [...firstGroup, ...middle, ...lastGroup].sort(compareRosterOrder);
+  const start = skip - before;
+  return window.slice(start, start + take);
 }

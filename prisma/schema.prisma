@@ -1182,6 +1182,18 @@ model Grant {
   /// period must never be mistaken for an authoritative one — the matching
   /// `GrantDateGap` row stays OPEN so the InfoEd record still gets fixed.
   datesSource     String   @default("infoed") @map("dates_source") @db.VarChar(16)
+  /// #2180 — InfoEd central office that administers the record
+  /// (`prop_u.P_SIN_18`): 'OSRA' or 'JCTO' in practice. Routing metadata —
+  /// who can correct the record — shown at the record level in /edit only,
+  /// never on a public surface. Null when unknown (InfoEd NULL or blank, and
+  /// every non-InfoEd row); deliberately NO synthetic default (unlike
+  /// `programType`), so a missing office never reads as a real one.
+  centralOffice   String?  @map("central_office") @db.VarChar(64)
+  /// #2180 — InfoEd intake type (`prop_u.p_sin_5`), free text, e.g. 'Grant',
+  /// 'Clinical Trial Agreement', 'Outgoing Consulting Agreement'. Classifies a
+  /// record together with `centralOffice` (ADR-012 D8). Null when unknown;
+  /// same no-default rule and same /edit-only visibility as `centralOffice`.
+  intakeType      String?  @map("intake_type") @db.VarChar(255)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
   /// Issue #78 — InfoEd `program_type`. Possible values: Grant, Contract

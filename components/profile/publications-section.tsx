@@ -11,7 +11,11 @@ import {
 } from "@/components/profile/author-position-badge";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
-import type { ProfileClientPublication } from "@/lib/profile/client-publication";
+import {
+  hydrateClientPublications,
+  type ClientPublicationWire,
+  type ProfileClientPublication,
+} from "@/lib/profile/client-publication";
 import { Caret } from "@/components/ui/caret";
 
 /**
@@ -45,6 +49,22 @@ const POSITION_SHORT_LABEL: Record<NonAllPosition, string> = {
   senior: "Senior author",
   co_author: "Co-author",
 };
+
+/** #2213 — the unfiltered list straight from the compact wire form; the
+ *  profile page's Suspense fallback for `<ProfilePubsCluster>`. */
+export function PublicationsSectionFromWire({
+  publicationsWire,
+  scholarCwid,
+}: {
+  publicationsWire: ClientPublicationWire;
+  scholarCwid?: string;
+}) {
+  const publications = useMemo(
+    () => hydrateClientPublications(publicationsWire),
+    [publicationsWire],
+  );
+  return <PublicationsSection publications={publications} scholarCwid={scholarCwid} />;
+}
 
 export function PublicationsSection({
   publications,

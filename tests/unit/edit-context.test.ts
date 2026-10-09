@@ -869,6 +869,39 @@ describe("loadEditContext — entity attributes (#160 appointments / education /
     expect(ctx!.grants[0].funderLabel).toBe("Legacy Funder String");
   });
 
+  it("#2180 — carries InfoEd routing metadata; nulls it on a RePORTER row", async () => {
+    const c = withEntities({
+      grants: [
+        grant({
+          externalId: "INFOED-55555-abc1234",
+          centralOffice: "JCTO",
+          intakeType: "Clinical Trial Agreement",
+          datesSource: "reporter",
+        }),
+        grant({
+          externalId: "INFOED-66666-abc1234",
+          centralOffice: "  ",
+          intakeType: null,
+          datesSource: "infoed",
+        }),
+        grant({
+          externalId: "reporter:abc1234:R01AG000001",
+          source: "RePORTER",
+          centralOffice: null,
+          intakeType: null,
+          // The column default — must not surface as "Dates from InfoEd".
+          datesSource: "infoed",
+        }),
+      ],
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.grants.map((g) => [g.accountNumber, g.centralOffice, g.intakeType, g.datesSource])).toEqual([
+      ["55555", "JCTO", "Clinical Trial Agreement", "reporter"],
+      ["66666", null, null, "infoed"],
+      [null, null, null, null],
+    ]);
+  });
+
   it("skips the entity-suppression query when the scholar has no entities", async () => {
     const c = fakeClient();
     c.scholar.findUnique.mockResolvedValue(scholarRow());
