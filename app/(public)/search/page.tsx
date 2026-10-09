@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { ResearchAreasRow } from "@/components/search/research-areas-row";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
+import { TypoFallbackNotice } from "@/components/search/typo-fallback-notice";
 import {
   ConceptFallbackResults,
   ConceptFallbackAnnouncement,
@@ -46,6 +47,7 @@ import {
   resolveSearchPeoplePubCountDampen,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
+  resolveSearchTypoFallback,
   resolvePublicationDepartmentFilter,
   resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
@@ -513,6 +515,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // the card). The split only matters when `matchExplain` is on (otherwise no
   // reason agg runs and `skipReasonAgg` is a no-op).
   const peopleMatchExplain = resolvePeopleMatchExplain();
+  // #2215 — typo-tolerant zero-result fallback (dark by default). Passed to the
+  // badge-count AND list searches of both People and Publications: each call
+  // falls back on its own zero, so a tab's badge always equals the list it
+  // labels (both exact, or both the similar-spelling retry).
+  const typoFallback = resolveSearchTypoFallback();
   // Track B — Research-Area concentration boost plus the #1343 concept axis. Shared with
   // the JSON route via resolveAreaConcentration so the badge count and the result list
   // cannot resolve different arms; see that module for the #2018 precedence fix. The
@@ -587,6 +594,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           matchAwareContext: buildMatchAwareContext(taxonomyMatch),
           // Track B — Research-Area concentration boost (inert unless resolved above).
           areaConcentration,
+          typoFallback,
         }
       : null;
   // Under reason-from-doc (D) the reason is a cheap O(1) lookup on the list
@@ -684,6 +692,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           contentQuery,
           highlightMatches: resolvePublicationHighlight(),
           matchProvenance: resolvePublicationMatchProvenance(),
+          typoFallback,
         })
       : null;
   const activeFundingPromise =
@@ -766,6 +775,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       // (the demote content-gate changes the total, so both calls must agree).
       genericDemote,
       contentQuery,
+      // #2215 — fall back with the list so the badge matches it.
+      typoFallback,
       // Perf — badge count only; the people tab's full result streams below.
       countOnly: true,
       }),
@@ -805,6 +816,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       // Issue #692 — keep the badge count aligned with the streamed full search.
       genericDemote,
       contentQuery,
+      // #2215 — fall back with the list so the badge matches it.
+      typoFallback,
       // Perf — badge count only; the pub tab's full result streams below.
       countOnly: true,
         }),
@@ -865,6 +878,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       sort,
       peopleCount: peopleResult.total,
       pubCount: pubsResult.total,
+      // #2215 — the counts above are similar-spelling (fuzzy retry) totals.
+      peopleTypoFallback: peopleResult.typoFallback === true,
+      pubTypoFallback: pubsResult.typoFallback === true,
       fundingCount: fundingResult.total,
       // Timing, whole ms. `taxonomyMatchMs` is null when q < 3 chars (the
       // resolver is skipped). `searchesMs` is now the parallel wall time of
@@ -1586,6 +1602,7 @@ async function PeopleResults({
       <section>
         {scopeRow}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
+        {result.typoFallback ? <TypoFallbackNotice query={q} noun="people" /> : null}
         <ResultsToolbar
           tab="people"
           total={result.total}
@@ -2089,6 +2106,7 @@ async function PublicationsResults({
         <ConceptFallbackAnnouncement query={q} total={conceptFallback?.total ?? null} />
         {scopeRow}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
+        {result.typoFallback ? <TypoFallbackNotice query={q} noun="publications" /> : null}
         <ResultsToolbar
           tab="publications"
           total={result.total}

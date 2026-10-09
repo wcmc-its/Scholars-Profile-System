@@ -51,6 +51,7 @@ import {
   resolveSearchPeoplePubCountDampen,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
+  resolveSearchTypoFallback,
   resolvePublicationDepartmentFilter,
   resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
@@ -406,6 +407,8 @@ async function handleSearch(request: NextRequest) {
       highlightMatches: resolvePublicationHighlight(),
       // SEARCH_PUB_MATCH_PROVENANCE — #688-parity "Why this match" MeSH note.
       matchProvenance: resolvePublicationMatchProvenance(),
+      // #2215 — typo-tolerant retry when this search returns zero (dark by default).
+      typoFallback: resolveSearchTypoFallback(),
     });
     const searchLatencyMs = Date.now() - searchStart;
     // Issue #298 — concept-fallback co-render telemetry. The SSR page renders
@@ -478,6 +481,10 @@ async function handleSearch(request: NextRequest) {
         q,
         type: "publications",
         resultCount: result.total,
+        // #2215 — true when the exact query found nothing and `resultCount` is
+        // the fuzzy (similar-spelling) retry's total; keeps typo rescues
+        // separable from genuine hits in zero-result analysis.
+        typoFallback: result.typoFallback === true,
         queryShape: result.queryShape,
         // SPEC §7.5 — resolved mode (after the legacy `OR_OF_EVIDENCE`
         // fallback). Captures the per-request shape without analysts
@@ -763,6 +770,8 @@ async function handleSearch(request: NextRequest) {
     // Track B — Research-Area concentration boost. Inert unless the flag resolved a
     // non-empty area ranking above; searchPeople applies it only on topic/hybrid shapes.
     areaConcentration,
+    // #2215 — typo-tolerant retry when this search returns zero (dark by default).
+    typoFallback: resolveSearchTypoFallback(),
   });
   const searchLatencyMs = Date.now() - searchStart;
   // SPEC §9 — descendant-set size for the shapes that consume it (topic /
@@ -785,6 +794,8 @@ async function handleSearch(request: NextRequest) {
       q,
       type: "people",
       resultCount: result.total,
+      // #2215 — see the publications branch: fuzzy-retry total, not exact hits.
+      typoFallback: result.typoFallback === true,
       queryShape,
       appliedRelevanceMode,
       filters: {

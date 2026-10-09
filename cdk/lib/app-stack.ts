@@ -2360,6 +2360,15 @@ export class AppStack extends Stack {
         //   staging A/B before any flip (then set staging -> "on"); the chief-of ranking
         //   WITHIN the roster additionally needs the #1347 chiefCwid reindex.
         SEARCH_PEOPLE_DIVISION_SHAPE: "off",
+        // #2215 -- typo-tolerant ZERO-RESULT fallback. When on, a People or Publications
+        //   search whose exact query returns 0 (non-empty, not an id, no MeSH concept in
+        //   play) is re-run once with a `fuzziness: AUTO` best_fields clause over name /
+        //   title fields, and the page says "No exact matches for X -- showing results
+        //   with similar spellings". Fires ONLY on total=0, so every query that returns
+        //   results today is byte-identical. resolveSearchTypoFallback reads === "on".
+        //   Query-time, no reindex. DARK everywhere -- flip staging first and eval the
+        //   typo set (oncolgy / cardiolgy / Harrigton) + a no-false-rescue set, then prod.
+        SEARCH_TYPO_FALLBACK: "off",
         // #1345 -- full-time-faculty prominence lever. "off" drops the #513 flat +1.0
         //   full_time_faculty prominence term (the expertise-independent employment
         //   prior) so genuine affiliated/clinical subspecialty experts aren't buried.

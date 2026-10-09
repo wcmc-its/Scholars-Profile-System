@@ -1058,6 +1058,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_TYPO_FALLBACK",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
                 "Value": "off",
               },
@@ -6038,6 +6042,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_DIVISION_SHAPE",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_TYPO_FALLBACK",
                 "Value": "off",
               },
               {
