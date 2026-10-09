@@ -1160,6 +1160,93 @@ export class SpsObservabilityStack extends Stack {
     editAuthzDeniedAlarm.addAlarmAction(warnAction); // P2 -- security signal, review-in-hours
 
     // ------------------------------------------------------------------
+    // ETL heartbeat WARN lines -> sps-warn (#2190)
+    // ------------------------------------------------------------------
+    // (9b) The daily heartbeat (`etl:freshness`, 13:00 UTC) grades two WARN-tier
+    // signals it must not fail on -- a step creeping toward its timeout (margin)
+    // and a step that was retried (several etl_run rows in one window). Both
+    // only ever reached the heartbeat log, which nobody opens while the run is
+    // green. Count the log lines and alarm each to the warn topic.
+    //
+    // Unstructured literal terms, not JSON patterns: the ECS awslogs lines are
+    // plain text, and a JSON metric filter cannot parse an event with a text
+    // prefix. The quoted phrase is an exact substring match.
+    //
+    // 🔴 MIRRORED from MARGIN_WARN_MARKER / RETRY_WARN_MARKER in
+    // lib/etl/duration-margin.ts (cdk/ cannot import lib/, and lib/ is in the
+    // ETL image while cdk/ is not). tests/unit/duration-margin.test.ts reads
+    // this file as text and fails if either drifts.
+    //
+    // The log group is looked up BY NAME (EtlStack owns it as
+    // `/aws/ecs/sps-etl-${env}`) rather than via `props.etlStack`: a token would
+    // mint an EtlStack export that locks the log group against replacement, for
+    // a name that is already a fixed convention.
+    //
+    // Topic policy: sps-warn-<env> has no explicit TopicPolicy, so the implicit
+    // default (same-account publishers, CloudWatch included) applies -- the
+    // #2279 trap (an explicit states-only policy muting every alarm) does not
+    // arise. Whoever adds a grantPublish to warnTopic must also grant
+    // cloudwatch.amazonaws.com, as EtlStack does for its topics.
+    //
+    // 1h period, missing = not breaching: the heartbeat runs once a day, so the
+    // alarm goes ALARM once per heartbeat that still finds the condition and
+    // back to OK when the hour rolls -- one P2 post per day while it persists,
+    // not one per log line.
+    const etlLogGroup = logs.LogGroup.fromLogGroupName(
+      this,
+      "EtlLogGroupByName",
+      `/aws/ecs/sps-etl-${env}`,
+    );
+    const ETL_HEARTBEAT_WARNS: ReadonlyArray<{
+      id: string;
+      marker: string;
+      metricName: string;
+      alarmName: string;
+      description: string;
+    }> = [
+      {
+        id: "EtlDurationMargin",
+        marker: "WARN margin", // = MARGIN_WARN_MARKER
+        metricName: "EtlDurationMarginWarn",
+        alarmName: `sps-etl-duration-margin-${env}`,
+        description: `An ETL step's recent run used >= 80% of the timeout that would kill it (${env}) -- the next slow night fails hard. Logged by the etl:freshness heartbeat as "[freshness] WARN margin <source>: NEAR|OVER". Next: open /aws/ecs/sps-etl-${env}, filter "WARN margin" for the source and its % of timeout; see lib/etl/duration-margin.ts (#2190).`,
+      },
+      {
+        id: "EtlRetryStorm",
+        marker: "WARN retries", // = RETRY_WARN_MARKER
+        metricName: "EtlRetryStormWarn",
+        alarmName: `sps-etl-retry-storm-${env}`,
+        description: `An ETL source has more than one etl_run row in one cadence window with at least one that did not end clean (${env}) -- Step Functions retried it (each retry is a fresh task and row), even if the last attempt succeeded. Logged by the etl:freshness heartbeat as "[freshness] WARN retries <source>". Next: open /aws/ecs/sps-etl-${env}, filter "WARN retries", then that source's failed attempt's log; see gradeRetries in lib/etl/duration-margin.ts (#2190).`,
+      },
+    ];
+    for (const w of ETL_HEARTBEAT_WARNS) {
+      new logs.MetricFilter(this, `${w.id}MetricFilter`, {
+        logGroup: etlLogGroup,
+        filterName: w.alarmName,
+        filterPattern: logs.FilterPattern.literal(`"${w.marker}"`),
+        metricNamespace: `SPS/Etl/${env}`, // env-scoped -- see (6b)
+        metricName: w.metricName,
+        metricValue: "1",
+        defaultValue: 0,
+      });
+      new cloudwatch.Alarm(this, `${w.id}Alarm`, {
+        alarmName: w.alarmName,
+        alarmDescription: w.description,
+        metric: new cloudwatch.Metric({
+          namespace: `SPS/Etl/${env}`,
+          metricName: w.metricName,
+          statistic: "Sum",
+          period: Duration.hours(1),
+        }),
+        threshold: 0,
+        evaluationPeriods: 1,
+        datapointsToAlarm: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }).addAlarmAction(warnAction); // P2 -- nothing failed yet; review in hours
+    }
+
+    // ------------------------------------------------------------------
     // On-call relay Lambda (B27)
     // ------------------------------------------------------------------
     // SNS -> Lambda -> Adaptive Card JSON POST to a Power Automate Teams

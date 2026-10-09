@@ -663,6 +663,43 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::Logs::MetricFilter",
     },
+    "EtlDurationMarginAlarm3700ADF4": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An ETL step's recent run used >= 80% of the timeout that would kill it (prod) -- the next slow night fails hard. Logged by the etl:freshness heartbeat as "[freshness] WARN margin <source>: NEAR|OVER". Next: open /aws/ecs/sps-etl-prod, filter "WARN margin" for the source and its % of timeout; see lib/etl/duration-margin.ts (#2190).",
+        "AlarmName": "sps-etl-duration-margin-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "EtlDurationMarginWarn",
+        "Namespace": "SPS/Etl/prod",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EtlDurationMarginMetricFilter5846BF09": {
+      "Properties": {
+        "FilterName": "sps-etl-duration-margin-prod",
+        "FilterPattern": ""WARN margin"",
+        "LogGroupName": "/aws/ecs/sps-etl-prod",
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EtlDurationMarginWarn",
+            "MetricNamespace": "SPS/Etl/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
     "EtlFailuresRelaySubscriptionD17272A2": {
       "Properties": {
         "Endpoint": {
@@ -692,6 +729,43 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::SNS::Subscription",
+    },
+    "EtlRetryStormAlarm50CB2CF2": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An ETL source has more than one etl_run row in one cadence window with at least one that did not end clean (prod) -- Step Functions retried it (each retry is a fresh task and row), even if the last attempt succeeded. Logged by the etl:freshness heartbeat as "[freshness] WARN retries <source>". Next: open /aws/ecs/sps-etl-prod, filter "WARN retries", then that source's failed attempt's log; see gradeRetries in lib/etl/duration-margin.ts (#2190).",
+        "AlarmName": "sps-etl-retry-storm-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "EtlRetryStormWarn",
+        "Namespace": "SPS/Etl/prod",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EtlRetryStormMetricFilter3404EA47": {
+      "Properties": {
+        "FilterName": "sps-etl-retry-storm-prod",
+        "FilterPattern": ""WARN retries"",
+        "LogGroupName": "/aws/ecs/sps-etl-prod",
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EtlRetryStormWarn",
+            "MetricNamespace": "SPS/Etl/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "MonthlyBudget": {
       "Properties": {
@@ -2136,6 +2210,43 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::Logs::MetricFilter",
     },
+    "EtlDurationMarginAlarm3700ADF4": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An ETL step's recent run used >= 80% of the timeout that would kill it (staging) -- the next slow night fails hard. Logged by the etl:freshness heartbeat as "[freshness] WARN margin <source>: NEAR|OVER". Next: open /aws/ecs/sps-etl-staging, filter "WARN margin" for the source and its % of timeout; see lib/etl/duration-margin.ts (#2190).",
+        "AlarmName": "sps-etl-duration-margin-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "EtlDurationMarginWarn",
+        "Namespace": "SPS/Etl/staging",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EtlDurationMarginMetricFilter5846BF09": {
+      "Properties": {
+        "FilterName": "sps-etl-duration-margin-staging",
+        "FilterPattern": ""WARN margin"",
+        "LogGroupName": "/aws/ecs/sps-etl-staging",
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EtlDurationMarginWarn",
+            "MetricNamespace": "SPS/Etl/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
     "EtlFailuresRelaySubscriptionD17272A2": {
       "Properties": {
         "Endpoint": {
@@ -2165,6 +2276,43 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::SNS::Subscription",
+    },
+    "EtlRetryStormAlarm50CB2CF2": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An ETL source has more than one etl_run row in one cadence window with at least one that did not end clean (staging) -- Step Functions retried it (each retry is a fresh task and row), even if the last attempt succeeded. Logged by the etl:freshness heartbeat as "[freshness] WARN retries <source>". Next: open /aws/ecs/sps-etl-staging, filter "WARN retries", then that source's failed attempt's log; see gradeRetries in lib/etl/duration-margin.ts (#2190).",
+        "AlarmName": "sps-etl-retry-storm-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "EtlRetryStormWarn",
+        "Namespace": "SPS/Etl/staging",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EtlRetryStormMetricFilter3404EA47": {
+      "Properties": {
+        "FilterName": "sps-etl-retry-storm-staging",
+        "FilterPattern": ""WARN retries"",
+        "LogGroupName": "/aws/ecs/sps-etl-staging",
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EtlRetryStormWarn",
+            "MetricNamespace": "SPS/Etl/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "NotifyTopic5FFA0016": {
       "Properties": {

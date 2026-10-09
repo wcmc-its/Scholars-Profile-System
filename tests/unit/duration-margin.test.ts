@@ -7,10 +7,14 @@ import {
   HONORS_TASK_TIMEOUT_SECONDS,
   INFOED_REQUEST_TIMEOUT_SECONDS,
   MARGIN_WARN_FRACTION,
+  MARGIN_WARN_MARKER,
   PROJECTION_TASK_TIMEOUT_SECONDS,
   RECONCILER_TASK_TIMEOUT_SECONDS,
+  RETRY_WARN_MARKER,
+  RETRY_WINDOW_HOURS,
   type MarginRow,
   gradeDurationMargin,
+  gradeRetries,
   marginWindowStart,
   stepTimeoutSeconds,
 } from "@/lib/etl/duration-margin";
@@ -99,6 +103,93 @@ describe("stepTimeoutSeconds", () => {
   });
 });
 
+describe("gradeRetries (#2190 retry storm)", () => {
+  const H = 3600;
+
+  it("flags the 08-05 shape: attempts killed at the timeout, then a green retry", () => {
+    const rows = [row(10 * H, 2427, "failed"), row(9 * H, 2427, "failed"), row(8 * H, 300)];
+    const r = gradeRetries("InfoEd", "nightly", TIMEOUT, rows, NOW);
+    expect(r).toMatchObject({ runs: 3, unclean: 2, flagged: true, windowHours: 24 });
+    expect(r?.statuses).toEqual(["failed", "failed", "success"]);
+  });
+
+  it("does not flag a single run, clean or not — a lone failure is the step alarm's job", () => {
+    expect(gradeRetries("InfoEd", "nightly", TIMEOUT, [row(H, 300)], NOW)?.flagged).toBe(false);
+    expect(gradeRetries("InfoEd", "nightly", TIMEOUT, [row(H, 300, "failed")], NOW)?.flagged).toBe(
+      false,
+    );
+    expect(gradeRetries("InfoEd", "nightly", TIMEOUT, [], NOW)).toMatchObject({
+      runs: 0,
+      flagged: false,
+    });
+  });
+
+  it("does not flag two CLEAN runs — Sunday's nightly + weekly search:index is not a retry", () => {
+    const rows = [row(6 * H, 900), row(H, 900), row(30 * 60, null, "running")];
+    // ...nor a newest row still in flight under its ceiling.
+    const r = gradeRetries("SearchIndex", "nightly", CADENCE_STEP_TIMEOUT_SECONDS, rows, NOW);
+    expect(r?.statuses).toEqual(["success", "success", "running"]);
+    expect(r?.flagged).toBe(false);
+    // `skipped` is a clean outcome for a dirty-check gate.
+    const gate = [row(5 * H, 10, "skipped"), row(H, 10, "skipped")];
+    expect(gradeRetries("Gates", "weekly", CADENCE_STEP_TIMEOUT_SECONDS, gate, NOW)?.flagged).toBe(
+      false,
+    );
+  });
+
+  it("reads a stranded `running` row as killed once a newer attempt exists, even inside the timeout", () => {
+    // OOM-killed task: its row never closed, the retry opened a new one 30s later.
+    const rows = [row(2 * H, null, "running"), row(2 * H - 60, 400)];
+    const r = gradeRetries("ED", "nightly", CADENCE_STEP_TIMEOUT_SECONDS, rows, NOW);
+    expect(r?.statuses).toEqual(["killed", "success"]);
+    expect(r?.flagged).toBe(true);
+  });
+
+  it("reads the newest `running` row past its ceiling as killed", () => {
+    const rows = [row(5 * H, 2400, "failed"), row(4 * H, null, "running")];
+    const r = gradeRetries("InfoEd", "nightly", TIMEOUT, rows, NOW);
+    expect(r?.statuses).toEqual(["failed", "killed"]);
+    expect(r?.unclean).toBe(2);
+  });
+
+  it("only counts rows in ONE cadence interval, not the wider SLA window", () => {
+    // Yesterday's failure + today's success: two different nights, no storm.
+    const rows = [row(28 * H, 300, "failed"), row(4 * H, 300)];
+    const r = gradeRetries("InfoEd", "nightly", TIMEOUT, rows, NOW);
+    expect(r).toMatchObject({ runs: 1, flagged: false });
+    // Weekly gets a week.
+    const weekly = [row(6 * 24 * H, 300, "failed"), row(6 * 24 * H - 60, 300)];
+    expect(
+      gradeRetries("Reporter", "weekly", CADENCE_STEP_TIMEOUT_SECONDS, weekly, NOW),
+    ).toMatchObject({ windowHours: 168, flagged: true });
+  });
+
+  it("does not grade the 5-minute reconcilers or cadences without a window", () => {
+    const rows = [row(H, 10, "failed"), row(H - 300, 10)];
+    expect(gradeRetries("SearchReconcile", "nightly", 240, rows, NOW)).toBeNull();
+    expect(gradeRetries("CdnReconcile", "nightly", 240, rows, NOW)).toBeNull();
+    expect(gradeRetries("Hierarchy", "annual", CADENCE_STEP_TIMEOUT_SECONDS, rows, NOW)).toBeNull();
+    expect(
+      gradeRetries(
+        "ReciterAI-enrichment",
+        "nightly-mirrored",
+        CADENCE_STEP_TIMEOUT_SECONDS,
+        rows,
+        NOW,
+      ),
+    ).toBeNull();
+    expect(RETRY_WINDOW_HOURS).toEqual({ nightly: 24, weekly: 168 });
+  });
+
+  it("orders rows by start, whatever order the query returned them in", () => {
+    const rows = [row(H, 300), row(2 * H, 2400, "failed")];
+    expect(gradeRetries("InfoEd", "nightly", TIMEOUT, rows, NOW)?.statuses).toEqual([
+      "failed",
+      "success",
+    ]);
+  });
+});
+
 describe("marginWindowStart", () => {
   it("looks back one cadence SLA window", () => {
     expect(marginWindowStart("nightly", NOW).getTime()).toBe(NOW - 30 * HOUR_MS);
@@ -153,6 +244,21 @@ describe("mirrored timeouts match their source of truth", () => {
       PROJECTION_TASK_TIMEOUT_SECONDS,
     );
   });
+  // #2190 -- the WARN markers the heartbeat prints are what the ObservabilityStack
+  // metric filters count. A drift here is an alarm that can never fire.
+  it("WARN markers match the sps-warn metric filters", () => {
+    const obs = readFileSync(join(root, "cdk/lib/observability-stack.ts"), "utf8");
+    expect(obs).toContain(`marker: "${MARGIN_WARN_MARKER}", // = MARGIN_WARN_MARKER`);
+    expect(obs).toContain(`marker: "${RETRY_WARN_MARKER}", // = RETRY_WARN_MARKER`);
+    // ...and the heartbeat prints them through the constants, not retyped text.
+    const heartbeat = readFileSync(join(root, "etl/freshness/index.ts"), "utf8");
+    expect(heartbeat).toContain("[freshness] ${MARGIN_WARN_MARKER} ${m.source}");
+    expect(heartbeat).toContain("[freshness] ${RETRY_WARN_MARKER} ${r.source}");
+    // A quoted filter term is an exact phrase: no double spaces, no regex bait.
+    for (const m of [MARGIN_WARN_MARKER, RETRY_WARN_MARKER])
+      expect(m).toMatch(/^[A-Za-z]+( [A-Za-z]+)+$/);
+  });
+
   it("InfoEd requestTimeout", () => {
     const src = readFileSync(join(root, "lib/sources/mssql-infoed.ts"), "utf8");
     const m = /requestTimeout:\s*([\d_]+)/.exec(src);
