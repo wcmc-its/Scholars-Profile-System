@@ -2064,14 +2064,26 @@ export class AppStack extends Stack {
         // Sps-App-<env>` -- no code revert (CD re-rolls the image only, so an
         // env-flag change requires an explicit cdk deploy).
         SHOW_BETA_BADGE: "on",
-        // #692 generic-term demotion (SEARCH_GENERIC_TERM_DEMOTE), its #688
-        // sibling SEARCH_PEOPLE_MATCH_PROVENANCE, and the #702 People-tab reason
-        // line (SEARCH_PEOPLE_MATCH_EXPLAIN) were retired in #1440 -- each was on
-        // in both envs and is now always on in code.
+        // #692 -- generic-term de-highlight, graduated to prod parity after the
+        // staging UAT + SPEC §8 eval; runs in BOTH envs. resolveGenericTermMode
+        // reads off|resolve|on (lib/api/search-flags.ts). Its #688 sibling
+        // SEARCH_PEOPLE_MATCH_PROVENANCE (the "Why this match" MeSH-provenance
+        // note) was retired in #1440 -- the note is now always on in code.
+        SEARCH_GENERIC_TERM_DEMOTE: "on",
+        // #713 / #702 / #707 -- "Why this match" explanation lines. Brought to
+        // local-dev parity (these were on in .env.local but never wired here, so
+        // the features worked locally and were silently off in staging+prod):
+        //   SEARCH_PEOPLE_MATCH_EXPLAIN  -> People-tab "N of M publications
+        //     tagged {concept}" / "mention {term}" reason line (adds one bounded
+        //     per-page publications agg; resolvePeopleMatchExplain reads === on).
+        //   SEARCH_PUB_HIGHLIGHT         -> Publications-tab title highlight.
+        //   SEARCH_PUB_MATCH_PROVENANCE  -> Publications-tab match provenance.
+        // All three are query-time/render-only (no reindex prereq).
+        SEARCH_PEOPLE_MATCH_EXPLAIN: "on",
         // #967 -- surface a representative matching publication inside the
         // People reason line (`... tagged HIV -- incl. "<title>" (2024)`). Adds a
         // `top_hits` sub-agg to the SAME bounded reason-count publications agg
-        // (no people-index field, no reindex).
+        // (no people-index field, no reindex); inert unless MATCH_EXPLAIN is on.
         // resolvePeopleSnippetRepresentativePub reads === "on". Turned OFF on
         // staging too (was staging-on): the `top_hits` sub-agg is the most
         // expensive part of the reason-count agg and drove the broad-concept
@@ -2088,19 +2100,13 @@ export class AppStack extends Stack {
         // concurrency. resolvePeopleReasonFromDoc reads === "on". REINDEX PREREQ:
         // the people index must be rebuilt with `meshSubtreeCounts` before this
         // serves non-zero counts (a stale index degrades to the concept fallback,
-        // never a 500). DEFAULT OFF BOTH ENVS --
+        // never a 500). Inert unless MATCH_EXPLAIN is on. DEFAULT OFF BOTH ENVS --
         // staging-first parity A/B + instant rollback; flip on staging after the
         // people reindex, then prod after its own reindex.
         // Staging reindex done 2026-06-25 (people v11 carries meshSubtreeCounts) → ON staging.
         // Prod ON 2026-07-02 (prod search:index ran 2026-07-01; verify a prod
         // people doc carries non-null meshSubtreeCounts before deploying).
         SEARCH_PEOPLE_REASON_FROM_DOC: "on",
-        // #713 / #707 -- "Why this match" Publications-tab lines. Brought to
-        // local-dev parity (these were on in .env.local but never wired here, so
-        // the features worked locally and were silently off in staging+prod):
-        //   SEARCH_PUB_HIGHLIGHT         -> Publications-tab title highlight.
-        //   SEARCH_PUB_MATCH_PROVENANCE  -> Publications-tab match provenance.
-        // Both are query-time/render-only (no reindex prereq).
         SEARCH_PUB_HIGHLIGHT: "on",
         SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #837 -- Publications-tab Department facet. Unlike the three above this
@@ -2251,12 +2257,34 @@ export class AppStack extends Stack {
         // Prod ON 2026-09-22 after the prod pub + funding alias rebuilds.
         SEARCH_PUB_INSTITUTION_FACET: "on",
         SEARCH_FUNDING_INSTITUTION_FACET: "on",
-        // The People-card evidence bundle -- SEARCH_PEOPLE_MATCH_AWARE_SNIPPET,
-        // SEARCH_RESULT_EVIDENCE (#1056), SEARCH_EVIDENCE_ROWS and
-        // SEARCH_EVIDENCE_REASON_COUNTS (#1366) -- was on in both envs since
-        // 2026-07-04/05 (#1464) and was retired in #1440 / #967 Phase 3 together
-        // with the legacy snippet chain it gated; the stacked ResultEvidence lines
-        // + Funding row are now unconditional in code.
+        // #824 follow-up -- match-aware People-results "why" line (method/topic/
+        // humanized-areas snippet). APP-ONLY, no reindex: derives from
+        // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
+        // AwareSnippet reads === "on"; off => today's snippet. STAGING-FIRST: on
+        // for staging (pairs with SEARCH_PEOPLE_METHOD_FAMILY above so the method
+        // badge has families to surface), off for prod.
+        SEARCH_PEOPLE_MATCH_AWARE_SNIPPET: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
+        // #824 follow-up Phase 1 -- the coherent ResultEvidence snippet model
+        // (#1056). When on, supersedes the match-aware chain above with one typed
+        // evidence object per hit selected by one precedence function and rendered
+        // by one <ResultEvidence> component. APP-ONLY, no reindex (same query-time
+        // derive). resolveSearchResultEvidence reads === "on". STAGING-FIRST soak:
+        // Prod flipped on 2026-07-04 (#1464 evidence bundle: this + rows + reason-counts flip together).
+        SEARCH_RESULT_EVIDENCE: "on",
+        // Generalized evidence rows -- surfaces a scholar's topic-matching grants
+        // as a lazy "Funding" disclosure row (Key funding) on the Scholars card and
+        // badges the publications flavor (Research area / Concept / Keyword). The
+        // row is presence-gated (hide-when-empty) via a per-card /grants fetch.
+        // APP-ONLY, no reindex. resolveSearchEvidenceRows reads === "on".
+        // Prod flipped on 2026-07-04 (#1464 evidence bundle).
+        SEARCH_EVIDENCE_ROWS: "on",
+        // #1366 -- counted, STACKED evidence reason lines on the People card:
+        // method / tagged-concept / research-area each become a first-class line
+        // prefixed "N of M publications" (keyword fallback; clinical label-only).
+        // Method + area counts read precomputed people-doc maps (methodFamilyCounts
+        // / areaCounts), populated by a reindex. resolveSearchEvidenceReasonCounts
+        // reads === "on". Prod flipped on 2026-07-04 (#1464 evidence bundle); methodFamilyCounts/areaCounts backfilled (#1481).
+        SEARCH_EVIDENCE_REASON_COUNTS: "on",
         // Research-Area concentration boost (docs/search-research-area-relevance-spec.md).
         // When on, a topic query that resolves to a Research Area lifts scholars by their
         // relevance×coverage ranking in that area (reorder-only, no reindex).
