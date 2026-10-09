@@ -1,7 +1,8 @@
 /**
- * #824 follow-up Phase 1 — `searchPeople` emits the single typed `evidence`
- * object per hit when `SEARCH_RESULT_EVIDENCE` is on (and nothing — byte-
- * identical to today — when off). Mirrors the match-aware-snippet test harness.
+ * #824 follow-up Phase 1 / #1366 — `searchPeople` emits the stacked, typed
+ * `evidenceLines` per hit (unconditional since #1440 retired
+ * SEARCH_RESULT_EVIDENCE / SEARCH_EVIDENCE_REASON_COUNTS). Mirrors the
+ * match-aware-snippet test harness.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -55,6 +56,15 @@ vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
     ...actual,
     descriptorLabelsForUis: async () => new Map([["D000072761", "Mycobiome"]]),
   };
+});
+
+// The page-level funding agg (#1412) now runs on every query-bearing search (the
+// SEARCH_EVIDENCE_ROWS gate was retired in #1440). It has its own suite
+// (investigator-grant-match-counts.test.ts); stub it to "no matching grants" here so
+// the `@/lib/search` mock below need not carry the funding-index surface.
+vi.mock("@/lib/api/search-funding", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/search-funding")>();
+  return { ...actual, investigatorGrantMatchCounts: async () => new Map() };
 });
 
 // One scholar with SIX areas (to exercise the N=4 cap), one with the method.
@@ -138,9 +148,6 @@ vi.mock("@/lib/search", () => ({
 import { searchPeople, methodIndexedPubCounts } from "@/lib/api/search";
 import { familyOverlayKey, type FamilyOverlayGate } from "@/lib/api/methods-overlay";
 
-const EVIDENCE = "SEARCH_RESULT_EVIDENCE";
-const MATCH_AWARE = "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET";
-
 const TOPIC_ROWS = [
   { id: "single_cell_spatial_biology", label: "Single-cell & spatial biology" },
   { id: "metabolic_endocrine_disease", label: "Metabolic & endocrine disease" },
@@ -157,31 +164,16 @@ beforeEach(() => {
   mockSearch.mockReset();
   mockReasonAgg.mockReset().mockReturnValue([]);
   hitSourcePatch = {};
-  delete process.env[MATCH_AWARE];
 });
 
 afterEach(() => {
-  delete process.env[EVIDENCE];
-  delete process.env[MATCH_AWARE];
   vi.clearAllMocks();
 });
 
 const FAMILY = { supercategory: "sequencing", familyLabel: "Single-cell RNA sequencing" };
 
-describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", () => {
-  it("flag OFF ⇒ no evidence field, no scholar_family query", async () => {
-    const result = await searchPeople({
-      q: "single cell rna sequencing",
-      relevanceMode: "v3",
-      shape: "topic",
-      matchAwareContext: { methodFamily: FAMILY, topics: [] },
-    });
-    expect(result.hits[0].evidence).toBeUndefined();
-    expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
-  });
-
-  it("flag ON + method family the scholar is in ⇒ method evidence with REFINED tools", async () => {
-    process.env[EVIDENCE] = "on";
+describe("searchPeople — evidence emission", () => {
+  it("method family the scholar is in ⇒ method evidence with REFINED tools", async () => {
     mockScholarFamilyFindMany.mockResolvedValue([
       {
         cwid: "el1",
@@ -200,15 +192,14 @@ describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", (
       shape: "topic",
       matchAwareContext: { methodFamily: FAMILY, topics: [] },
     });
-    expect(result.hits[0].evidence).toEqual({
+    expect(result.hits[0].evidenceLines?.[0]).toEqual({
       kind: "method",
       family: "Single-cell RNA sequencing",
       tools: ["scRNA-seq", "single-cell transcriptomics", "10x"],
     });
   });
 
-  it("flag ON + matched topic slug in areas ⇒ topic evidence", async () => {
-    process.env[EVIDENCE] = "on";
+  it("matched topic slug in areas ⇒ topic evidence", async () => {
     const result = await searchPeople({
       q: "single cell spatial biology",
       relevanceMode: "v3",
@@ -218,15 +209,14 @@ describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", (
         topics: [{ slug: "single_cell_spatial_biology", label: "Single-cell & spatial biology" }],
       },
     });
-    expect(result.hits[0].evidence).toEqual({
+    expect(result.hits[0].evidenceLines?.[0]).toEqual({
       kind: "topic",
       label: "Single-cell & spatial biology",
       id: "single_cell_spatial_biology",
     });
   });
 
-  it("flag ON + nothing matched ⇒ areas evidence, capped to N=4, total=6, NO matchedIndex", async () => {
-    process.env[EVIDENCE] = "on";
+  it("nothing matched ⇒ areas evidence, capped to N=4, total=6, NO matchedIndex", async () => {
     const result = await searchPeople({
       q: "single cell rna sequencing",
       relevanceMode: "v3",
@@ -236,7 +226,7 @@ describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", (
         topics: [{ slug: "not_in_any_areas", label: "Unrelated" }],
       },
     });
-    const ev = result.hits[0].evidence;
+    const ev = result.hits[0].evidenceLines?.[0];
     expect(ev?.kind).toBe("areas");
     if (ev?.kind !== "areas") throw new Error("expected areas");
     expect(ev.labels).toHaveLength(4);
@@ -264,10 +254,7 @@ describe("searchPeople — topic evidence count (#2071 E1b)", () => {
     });
 
   it("carries a count sourced from the live groupBy, not a doc field", async () => {
-    process.env[EVIDENCE] = "on";
-    // `count` only surfaces on the stacked (#1366) evidence path — the single-
-    // evidence `evidence` object never carries one, by design.
-    process.env.SEARCH_EVIDENCE_REASON_COUNTS = "on";
+    // `count` is the stacked (#1366) evidence line's "N of M" prefix.
     mockPubTopicGroupBy.mockResolvedValue([
       { cwid: "el1", parentTopicId: "single_cell_spatial_biology", _count: { pmid: 9 } },
     ]);
@@ -280,11 +267,9 @@ describe("searchPeople — topic evidence count (#2071 E1b)", () => {
         count: 9,
       },
     ]);
-    delete process.env.SEARCH_EVIDENCE_REASON_COUNTS;
   });
 
   it("the query is scoped to the page cwids and to the topics THIS query resolved to", async () => {
-    process.env[EVIDENCE] = "on";
     mockPubTopicGroupBy.mockResolvedValue([]);
     await runWithTopic();
     expect(mockPubTopicGroupBy).toHaveBeenCalledTimes(1);
@@ -294,7 +279,6 @@ describe("searchPeople — topic evidence count (#2071 E1b)", () => {
   });
 
   it("nothing matched ⇒ NO groupBy query is issued", async () => {
-    process.env[EVIDENCE] = "on";
     const result = await searchPeople({
       q: "single cell rna sequencing",
       relevanceMode: "v3",
@@ -302,17 +286,14 @@ describe("searchPeople — topic evidence count (#2071 E1b)", () => {
       matchAwareContext: { methodFamily: null, topics: [] },
     });
     expect(mockPubTopicGroupBy).not.toHaveBeenCalled();
-    expect(result.hits[0].evidence?.kind).not.toBe("topic");
+    expect(result.hits[0].evidenceLines?.[0]?.kind).not.toBe("topic");
   });
 
   it("a row for a DIFFERENT cwid never leaks onto this scholar's count", async () => {
-    process.env[EVIDENCE] = "on";
-    process.env.SEARCH_EVIDENCE_REASON_COUNTS = "on";
     mockPubTopicGroupBy.mockResolvedValue([
       { cwid: "someone-else", parentTopicId: "single_cell_spatial_biology", _count: { pmid: 400 } },
     ]);
     const result = await runWithTopic();
-    delete process.env.SEARCH_EVIDENCE_REASON_COUNTS;
     const ev = result.hits[0].evidenceLines?.[0];
     if (ev?.kind !== "topic") throw new Error("expected topic");
     expect(ev.count).toBeUndefined();
@@ -321,11 +302,8 @@ describe("searchPeople — topic evidence count (#2071 E1b)", () => {
 
 // Rep-papers disclosure (#1) — the content-shaped free-text mention path. A query
 // that resolves to NO concept (`meshDescendantUis` empty, `queryShape` ===
-// "restructured_msm") must, ONLY when the evidence flag is on, run the reason
-// aggregation and surface `publications:mention`. With the flag OFF the agg gate
-// falls back to the original pre-disclosure predicate, so neither the extra
-// publications-index round-trip nor the new "publications mention" legacy reason
-// line appears (off-path byte-identical).
+// "restructured_msm") runs the reason aggregation and surfaces
+// `publications:mention`.
 const PUBLICATIONS_INDEX = "scholars-publications";
 
 const MENTION_BUCKET = [
@@ -381,24 +359,43 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
     });
 
   it("descriptor NOT in publicationMeshUi ⇒ the tagged count is withheld", async () => {
-    process.env[EVIDENCE] = "on";
     mockReasonAgg.mockReturnValue(taggedBucket);
     // HITS[0]._source carries no `publicationMeshUi` — the scholar the ETL's
     // min-evidence gate excluded, i.e. exactly who `match=concept` hides.
     const result = await run();
-    const ev = result.hits[0].evidence ?? result.hits[0].evidenceLines?.[0];
+    const ev = result.hits[0].evidenceLines?.[0];
     expect(ev?.kind === "publications" && ev.strength === "tagged").toBe(false);
   });
 
   it("descriptor IS in publicationMeshUi ⇒ the tagged count survives", async () => {
-    process.env[EVIDENCE] = "on";
     mockReasonAgg.mockReturnValue(taggedBucket);
     source.publicationMeshUi = [CONCEPT_UI];
     const result = await run();
-    const lines = result.hits[0].evidenceLines ?? [result.hits[0].evidence];
+    const lines = result.hits[0].evidenceLines ?? [];
     expect(
       lines.some((e) => e?.kind === "publications" && e.strength === "tagged"),
     ).toBe(true);
+  });
+
+  // #1960 — the label says "tagged UNDER X" because the count is a SUBTREE total
+  // (every pub tagged X or a narrower descriptor), not an exact-tag count. Pinned here
+  // on what `searchPeople` emits (it used to be pinned on the deleted legacy
+  // `composeMatchReason`). `under` must not displace `tagged`: the via-line's
+  // "also tagged X" takes its subject from this verb (#1955/#1957).
+  it("#1960 — the tagged lead reads 'N of M publications tagged under' + the concept term", async () => {
+    mockReasonAgg.mockReturnValue(taggedBucket);
+    source.publicationMeshUi = [CONCEPT_UI];
+    const result = await run();
+    const tagged = (result.hits[0].evidenceLines ?? []).find(
+      (e) => e?.kind === "publications" && e.strength === "tagged",
+    );
+    expect(tagged).toMatchObject({
+      kind: "publications",
+      strength: "tagged",
+      text: "1 of 200 publications tagged under",
+      term: "Gun Violence",
+      count: 1,
+    });
   });
 
   // The residual after the first fix. #726's escalate-on-sparse admission ORs the
@@ -432,12 +429,11 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
       });
 
     const taggedSurvives = (r: Awaited<ReturnType<typeof searchPeople>>) => {
-      const lines = r.hits[0].evidenceLines ?? [r.hits[0].evidence];
+      const lines = r.hits[0].evidenceLines ?? [];
       return lines.some((e) => e?.kind === "publications" && e.strength === "tagged");
     };
 
     it("mesh-ONLY admit (no lexical match) ⇒ the tagged count is withheld", async () => {
-      process.env[EVIDENCE] = "on";
       mockReasonAgg.mockReturnValue(taggedBucket);
       source.publicationMeshUi = [CONCEPT_UI]; // carries the tag — passes the tag half
       hit.matched_queries = ["meshAdmit"]; // …but matched no lexical clause
@@ -445,7 +441,6 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
     });
 
     it("lexical admit that also carries the tag ⇒ the tagged count survives", async () => {
-      process.env[EVIDENCE] = "on";
       mockReasonAgg.mockReturnValue(taggedBucket);
       source.publicationMeshUi = [CONCEPT_UI];
       hit.matched_queries = ["lexicalAdmit", "meshAdmit"];
@@ -457,7 +452,6 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
     // survive the outer function_score wrapper. Degrade to today's behaviour rather
     // than silently zero every tagged label on the sparse path.
     it("named-query reporting absent ⇒ fails OPEN, not closed", async () => {
-      process.env[EVIDENCE] = "on";
       mockReasonAgg.mockReturnValue(taggedBucket);
       source.publicationMeshUi = [CONCEPT_UI];
       // no `matched_queries` on the hit at all
@@ -467,27 +461,7 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
 });
 
 describe("searchPeople — free-text publications:mention evidence (#1)", () => {
-  it("flag OFF + matchExplain on + free-text query ⇒ NO reason agg, NO mention reason line", async () => {
-    // No EVIDENCE flag. matchExplain on, a free-text query with no shape →
-    // queryShape stays "restructured_msm", no resolved descriptor. The widened
-    // content-shape gate must NOT fire on the off-path.
-    mockReasonAgg.mockReturnValue(MENTION_BUCKET);
-    const result = await searchPeople({
-      q: "16s rna",
-      relevanceMode: "v3",
-      matchExplain: true,
-      representativePub: true,
-    });
-    // The publications-index reason aggregation must not have been issued.
-    expect(
-      mockSearch.mock.calls.some(([a]) => (a as { index?: string })?.index === PUBLICATIONS_INDEX),
-    ).toBe(false);
-    // No evidence object (flag off).
-    expect(result.hits[0].evidence).toBeUndefined();
-  });
-
-  it("flag ON + matchExplain/representativePub + free-text no-concept query ⇒ publications:mention with pubs", async () => {
-    process.env[EVIDENCE] = "on";
+  it("matchExplain/representativePub + free-text no-concept query ⇒ publications:mention with pubs", async () => {
     mockReasonAgg.mockReturnValue(MENTION_BUCKET);
     const result = await searchPeople({
       q: "16s rna",
@@ -500,7 +474,7 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
     expect(
       mockSearch.mock.calls.some(([a]) => (a as { index?: string })?.index === PUBLICATIONS_INDEX),
     ).toBe(true);
-    const ev = result.hits[0].evidence;
+    const ev = result.hits[0].evidenceLines?.[0];
     expect(ev?.kind).toBe("publications");
     if (ev?.kind !== "publications") throw new Error("expected publications evidence");
     expect(ev.strength).toBe("mention");
@@ -528,7 +502,6 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
   // an unknown year that arrives as 0, or as the current year, is exactly the
   // defaulting bug this field exists to avoid.
   it("mention `latestYear` — present from the agg, ABSENT (never 0) when the year is unknown", async () => {
-    process.env[EVIDENCE] = "on";
     const run = async () =>
       (
         await searchPeople({
@@ -538,7 +511,7 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
           representativePub: true,
           matchAwareContext: { methodFamily: null, topics: [] },
         })
-      ).hits[0].evidence;
+      ).hits[0].evidenceLines?.[0];
 
     // (a) year present — the stale-scholar signal the payload is for.
     mockReasonAgg.mockReturnValue([
@@ -563,8 +536,7 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
     expect("latestYear" in noAgg).toBe(false);
   });
 
-  it("flag ON + no descriptor ⇒ the `tagged` sub-agg is OMITTED from the request body", async () => {
-    process.env[EVIDENCE] = "on";
+  it("no descriptor ⇒ the `tagged` sub-agg is OMITTED from the request body", async () => {
     mockReasonAgg.mockReturnValue(MENTION_BUCKET);
     await searchPeople({
       q: "16s rna",
@@ -587,7 +559,6 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
   // list can paint without blocking on the slow publications-index agg. The fast
   // call must NOT issue the agg, yet still return the hits.
   it("skipReasonAgg true ⇒ NO publications-index reason agg, hits still returned", async () => {
-    process.env[EVIDENCE] = "on";
     mockReasonAgg.mockReturnValue(MENTION_BUCKET);
     const result = await searchPeople({
       q: "16s rna",
@@ -617,8 +588,8 @@ const MICROBIOTA = "D064307"; // the resolved parent descriptor
 const MYCOBIOME = "D000072761"; // a strict descendant of it
 
 type PeopleSearchHit = Awaited<ReturnType<typeof searchPeople>>["hits"][number];
-/** The card's LEAD evidence, whichever shape the stacked-lines flag emitted. */
-const leadEvidence = (hit: PeopleSearchHit) => hit.evidenceLines?.[0] ?? hit.evidence;
+/** The card's LEAD evidence (the first stacked line). */
+const leadEvidence = (hit: PeopleSearchHit) => hit.evidenceLines?.[0];
 
 /** One concept search over the fixture scholar, with `_source` patched per case.
  *  `extra` overrides the search args (#1977 needs a boost set that differs from the
@@ -627,7 +598,6 @@ async function leadEvidenceFor(
   source: Record<string, unknown>,
   extra: Record<string, unknown> = {},
 ) {
-  process.env[EVIDENCE] = "on";
   hitSourcePatch = source;
   const result = await searchPeople({
     q: "microbiome",
@@ -728,7 +698,6 @@ describe("searchPeople — #1959 the below-gate parent set survives both hops", 
   });
 
   it("does NOT request it when no concept resolved — every other search keeps today's shape", async () => {
-    process.env[EVIDENCE] = "on";
     await searchPeople({ q: "microbiome", relevanceMode: "v3" }); // no topic template, no descendants
     const peopleCall = mockSearch.mock.calls.find(
       ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
@@ -925,7 +894,6 @@ describe("searchPeople — methodPubCount on the hit", () => {
   const METHOD_ROW = { cwid: "el1", familyLabel: "Single-cell RNA sequencing", exemplarTools: [] };
 
   it("emits the UNION of the scholar's visible families, NOT their pubCount", async () => {
-    process.env[EVIDENCE] = "on";
     routeFamilyQueries(
       [METHOD_ROW],
       [
@@ -945,7 +913,6 @@ describe("searchPeople — methodPubCount on the hit", () => {
   });
 
   it("a NULL pmids anywhere ⇒ the field is ABSENT, never a partial count", async () => {
-    process.env[EVIDENCE] = "on";
     routeFamilyQueries(
       [METHOD_ROW],
       [
@@ -965,7 +932,6 @@ describe("searchPeople — methodPubCount on the hit", () => {
   it("nobody on the page is in the resolved family ⇒ NO denominator query is issued", async () => {
     // The whole point of gating it: a page with no method line must cost exactly what it
     // costs today. If this regresses, every people search pays for a query it cannot use.
-    process.env[EVIDENCE] = "on";
     mockScholarFamilyFindMany.mockResolvedValue([]);
     const result = await runWithFamily();
     expect(mockScholarFamilyFindMany).toHaveBeenCalledTimes(1);
@@ -974,7 +940,6 @@ describe("searchPeople — methodPubCount on the hit", () => {
   });
 
   it("no method family resolved ⇒ no query and no field", async () => {
-    process.env[EVIDENCE] = "on";
     const result = await searchPeople({
       q: "single cell spatial biology",
       relevanceMode: "v3",
@@ -989,7 +954,6 @@ describe("searchPeople — methodPubCount on the hit", () => {
   });
 
   it("the denominator query is scoped to the page and to LIVE scholars, not to the family", async () => {
-    process.env[EVIDENCE] = "on";
     routeFamilyQueries(
       [METHOD_ROW],
       [
@@ -1027,7 +991,6 @@ describe("searchPeople — clinical evidence on-topic pub count (#1367 Gap 1)", 
   });
 
   const runClinical = (source: Record<string, unknown>) => {
-    process.env[EVIDENCE] = "on";
     process.env[CLINICAL_FLAG] = "on";
     hitSourcePatch = source;
     return searchPeople({
@@ -1045,7 +1008,7 @@ describe("searchPeople — clinical evidence on-topic pub count (#1367 Gap 1)", 
       clinicalOnTopicCounts: { Cardiology: 12 },
       meshTaggedPubCount: 340,
     });
-    expect(result.hits[0].evidence).toEqual({
+    expect(result.hits[0].evidenceLines?.[0]).toEqual({
       kind: "clinical",
       specialty: "Cardiology",
       boardCertified: true,
@@ -1059,7 +1022,7 @@ describe("searchPeople — clinical evidence on-topic pub count (#1367 Gap 1)", 
       clinicalSpecialties: ["Cardiology"],
       clinicalBoardSet: ["Cardiology"],
     });
-    expect(result.hits[0].evidence).toEqual({
+    expect(result.hits[0].evidenceLines?.[0]).toEqual({
       kind: "clinical",
       specialty: "Cardiology",
       boardCertified: true,
@@ -1074,7 +1037,7 @@ describe("searchPeople — clinical evidence on-topic pub count (#1367 Gap 1)", 
       clinicalOnTopicCounts: { Nephrology: 8 },
       meshTaggedPubCount: 340,
     });
-    expect(result.hits[0].evidence).toEqual({
+    expect(result.hits[0].evidenceLines?.[0]).toEqual({
       kind: "clinical",
       specialty: "Cardiology",
       boardCertified: true,
@@ -1092,7 +1055,6 @@ describe("searchPeople — clinical evidence on-topic pub count (#1367 Gap 1)", 
   });
 
   it("does NOT request either field when the flag is off — every other search keeps today's `_source` shape", async () => {
-    process.env[EVIDENCE] = "on";
     await searchPeople({ q: "cardiology", relevanceMode: "v3" });
     const peopleCall = mockSearch.mock.calls.find(
       ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
@@ -1118,7 +1080,6 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
   });
 
   const runClinical = (q: string, source: Record<string, unknown>) => {
-    process.env[EVIDENCE] = "on";
     process.env[CLINICAL_FLAG] = "on";
     hitSourcePatch = source;
     return searchPeople({
@@ -1135,7 +1096,7 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
       clinicalBoardSet: ["Cardiology"],
       clinicalExpertise: ["Cardiology consultations"],
     });
-    expect(result.hits[0].evidence).toEqual({
+    expect(result.hits[0].evidenceLines?.[0]).toEqual({
       kind: "clinical",
       specialty: "Cardiology",
       boardCertified: true,
@@ -1149,7 +1110,7 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
       clinicalBoardSet: ["Cardiology"],
       clinicalExpertise: ["Hip replacement surgery"],
     });
-    expect(result.hits[0].evidence).toEqual({
+    expect(result.hits[0].evidenceLines?.[0]).toEqual({
       kind: "clinical",
       boardCertified: false,
       expertise: ["Hip replacement surgery"],
@@ -1162,7 +1123,7 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
       clinicalBoardSet: ["Cardiology"],
       clinicalExpertise: ["Hip replacement surgery"],
     });
-    expect(result.hits[0].evidence).not.toMatchObject({ kind: "clinical" });
+    expect(result.hits[0].evidenceLines?.[0]).not.toMatchObject({ kind: "clinical" });
   });
 
   it("requests `clinicalExpertise` in the people `_source` when SEARCH_PEOPLE_CLINICAL_FN is on", async () => {
@@ -1175,7 +1136,6 @@ describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
   });
 
   it("does NOT request `clinicalExpertise` when the flag is off — every other search keeps today's `_source` shape", async () => {
-    process.env[EVIDENCE] = "on";
     await searchPeople({ q: "cardiology", relevanceMode: "v3" });
     const peopleCall = mockSearch.mock.calls.find(
       ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
@@ -1197,10 +1157,8 @@ describe("searchPeople — two-concept `secondary` count on the tagged lead", ()
   // without `secondary` while the single-evidence path had it, and this suite
   // was green. Assert both.
   it("stacked lines: the secondary rides on the tagged lead too", async () => {
-    process.env.SEARCH_EVIDENCE_REASON_COUNTS = "on";
     try {
       hitSourcePatch = { publicationMeshUi: [MICROBIOTA], meshSubtreeCounts: { [MICROBIOTA]: 12, [COVID]: 4 } };
-      process.env[EVIDENCE] = "on";
       const result = await searchPeople({
         q: "microbiome",
         relevanceMode: "v3",
@@ -1220,7 +1178,6 @@ describe("searchPeople — two-concept `secondary` count on the tagged lead", ()
         secondary: { term: "COVID-19", count: 4 },
       });
     } finally {
-      delete process.env.SEARCH_EVIDENCE_REASON_COUNTS;
     }
   });
 

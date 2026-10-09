@@ -1,5 +1,6 @@
 /**
- * #824 follow-up — match-aware People snippet (`SEARCH_PEOPLE_MATCH_AWARE_SNIPPET`).
+ * #824 follow-up — match-aware People snippet (the `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET`
+ * flag was retired in #1440; the derivation is unconditional).
  *
  * The legacy `matchReason`/`humanizedAreas` hit fields this file used to assert
  * on were deleted (#2118 remainder) — they lost their only renderer in #2134 and
@@ -7,7 +8,7 @@
  * areas derivation now lives in `search-people-result-evidence.test.ts` (the
  * `evidence`/`evidenceLines` fields those legacy fields were duplicating). What
  * remains here:
- *   (f)/(f-off) the raw `areasOfInterest` highlight-request regression;
+ *   (f) the raw `areasOfInterest` highlight-request regression;
  *   `humanizeAreaSlug` / `pickMatchedAreaIndex` — the pure helpers still used by
  *   the live evidence path (`buildHitEvidenceInput` in `lib/api/search.ts`);
  *   `buildMatchAwareContext` — unrelated, still live.
@@ -92,6 +93,15 @@ const HITS = [
   },
 ];
 
+// The page-level funding agg (#1412) runs on every query-bearing searchPeople call
+// since #1440 retired its SEARCH_EVIDENCE_ROWS gate; it has its own suite
+// (investigator-grant-match-counts.test.ts). Stub it to "no matching grants" so the
+// `@/lib/search` mock need not carry the funding-index surface.
+vi.mock("@/lib/api/search-funding", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/search-funding")>();
+  return { ...actual, investigatorGrantMatchCounts: async () => new Map() };
+});
+
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
   PUBLICATIONS_INDEX: "scholars-publications",
@@ -162,9 +172,6 @@ import {
   type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
 
-const FLAG = "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET";
-let prior: string | undefined;
-
 const TOPIC_ROWS = [
   { id: "single_cell_spatial_biology", label: "Single-cell & spatial biology" },
   { id: "metabolic_endocrine_disease", label: "Metabolic & endocrine disease" },
@@ -172,7 +179,6 @@ const TOPIC_ROWS = [
 ];
 
 beforeEach(() => {
-  prior = process.env[FLAG];
   mockPubTopicGroupBy.mockReset().mockResolvedValue([]);
   mockScholarFamilyFindMany.mockReset().mockResolvedValue([]);
   mockTopicFindMany.mockReset().mockResolvedValue(TOPIC_ROWS);
@@ -194,18 +200,12 @@ function peopleHighlightFields(): Record<string, unknown> {
 }
 
 afterEach(() => {
-  if (prior === undefined) delete process.env[FLAG];
-  else process.env[FLAG] = prior;
   vi.clearAllMocks();
 });
 
 const FAMILY = { supercategory: "sequencing", familyLabel: "Single-cell RNA sequencing" };
 
-describe("match-aware snippet — flag ON", () => {
-  beforeEach(() => {
-    process.env[FLAG] = "on";
-  });
-
+describe("match-aware snippet — #800/#801 family gates", () => {
   // The method/topic/areas OUTPUT these used to assert on (`matchReason`,
   // `humanizedAreas`) is gone (#2118 remainder); equivalent coverage of the
   // resolution itself (family match, ≤3 deduped/refined tools, topic label,
@@ -242,14 +242,13 @@ describe("match-aware snippet — flag ON", () => {
 });
 
 describe("match-aware snippet — raw areasOfInterest highlight is replaced (regression)", () => {
-  // The bug: the server kept highlighting `areasOfInterest` even with the flag on,
-  // so the raw `under_score` slug fragment came back as `hit.highlight` and the
+  // The bug: the server kept highlighting `areasOfInterest` alongside the match-aware
+  // derivation, so the raw `under_score` slug fragment came back as `hit.highlight` and the
   // card rendered it BEFORE `humanizedAreas` — the slug dump still showed (e.g.
   // Olivier Elemento, row 1, on staging). Fix: drop areasOfInterest from the
   // highlight request when matchAwareContext is set, so humanized areas (or a real
   // overview sentence) is the only areas-grade snippet.
-  it("(f) flag ON + context ⇒ areasOfInterest is NOT in the people highlight; overview stays", async () => {
-    process.env[FLAG] = "on";
+  it("(f) context ⇒ areasOfInterest is NOT in the people highlight; overview stays", async () => {
     await searchPeople({
       q: "single cell rna sequencing",
       relevanceMode: "v3",
@@ -260,17 +259,6 @@ describe("match-aware snippet — raw areasOfInterest highlight is replaced (reg
     expect(fields).not.toHaveProperty("areasOfInterest");
     expect(fields).toHaveProperty("overview");
     expect(fields).toHaveProperty("preferredName");
-  });
-
-  it("(f-off) flag OFF ⇒ areasOfInterest IS highlighted (today's behavior unchanged)", async () => {
-    delete process.env[FLAG];
-    await searchPeople({
-      q: "single cell rna sequencing",
-      relevanceMode: "v3",
-      shape: "topic",
-      matchAwareContext: { methodFamily: FAMILY, topics: [] },
-    });
-    expect(peopleHighlightFields()).toHaveProperty("areasOfInterest");
   });
 });
 

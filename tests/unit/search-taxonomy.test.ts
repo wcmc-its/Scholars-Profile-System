@@ -2126,12 +2126,7 @@ describe("resolveQueryTaxonomy (#2115) — #1980 stripKeptEnough guard", () => {
   };
 
   beforeEach(() => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
     mockMeshFindMany.mockResolvedValue([D_KIDNEY]);
-  });
-
-  afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
   });
 
   it("rejects an over-aggressive strip: 2-of-3 tokens removed stays unresolved", async () => {
@@ -2190,12 +2185,7 @@ describe("resolveQueryTaxonomy (#2115) — #1980 fix (2) dropped-word-disjoint g
   };
 
   beforeEach(() => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
     mockMeshFindMany.mockResolvedValue([D_PUBLIC_POLICY, D_CORONARY_VESSELS]);
-  });
-
-  afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
   });
 
   it("rejects public health policy — Public Policy shares no token with dropped `health`", async () => {
@@ -2239,13 +2229,6 @@ describe("resolveQueryTaxonomy (#1982) — a curated match no longer blocks the 
     localPubCoverage: null as number | null,
     treeNumbers: ["A07.015.114.269"],
   };
-
-  beforeEach(() => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
-  });
-  afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
-  });
 
   it("attaches a concept for a curated-matched query whose full-query MeSH side is null", async () => {
     // "Cancer Research Advocacy" curated-matches the full query "cancer research" (token-

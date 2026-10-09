@@ -31,7 +31,7 @@ export ACCOUNT=665083158573
 export REGION=us-east-1
 ```
 
-Record the **search-flag state** at QA time — ranking and evidence rendering are flag-dependent, so a result that looks wrong may just be a flag difference. Capture the values of at least: `SEARCH_PUB_MESH_ONLY_FILTER`, `SEARCH_RESULT_EVIDENCE`, `SEARCH_PEOPLE_MATCH_EXPLAIN`, `SEARCH_PUB_TAB_IMPACT`, `COAUTHOR_HIDDEN_STUDENT_CHIPS`, `EDIT_DATA_QUALITY_DASHBOARD` (from the running task-def env, e.g. `aws ecs describe-task-definition --task-definition sps-app-${ENV}` → `containerDefinitions[?name=='app'].environment`).
+Record the **search-flag state** at QA time — ranking and evidence rendering are flag-dependent, so a result that looks wrong may just be a flag difference. Capture the values of at least: `SEARCH_PUB_MESH_ONLY_FILTER`, `SEARCH_PUB_TAB_IMPACT`, `COAUTHOR_HIDDEN_STUDENT_CHIPS`, `EDIT_DATA_QUALITY_DASHBOARD` (from the running task-def env, e.g. `aws ecs describe-task-definition --task-definition sps-app-${ENV}` → `containerDefinitions[?name=='app'].environment`).
 
 ---
 
@@ -217,7 +217,7 @@ The functional-owner sign-off here is the artifact that feeds Terrie's Gate B ap
 ## Sample-set record (fill in — makes the pass auditable & re-runnable)
 
 - **Environment / date:** _______
-- **Flag state captured:** `SEARCH_PUB_MESH_ONLY_FILTER=…`, `SEARCH_RESULT_EVIDENCE=…`, `SEARCH_PEOPLE_MATCH_EXPLAIN=…`, `SEARCH_PUB_TAB_IMPACT=…`, `COAUTHOR_HIDDEN_STUDENT_CHIPS=…`, `EDIT_DATA_QUALITY_DASHBOARD=…`
+- **Flag state captured:** `SEARCH_PUB_MESH_ONLY_FILTER=…`, `SEARCH_PUB_TAB_IMPACT=…`, `COAUTHOR_HIDDEN_STUDENT_CHIPS=…`, `EDIT_DATA_QUALITY_DASHBOARD=…`
 - **Selection method:** dashboard filters used (e.g. `gap=no-overview`, `overviewAge=imported`, prominence top-N) / `/browse` fallback.
 - **Profiles sampled (slug / cwid · role · unit · why chosen):**
   1. _______

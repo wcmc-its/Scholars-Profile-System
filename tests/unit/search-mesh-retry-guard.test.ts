@@ -10,7 +10,7 @@
  * Both fixtures are real staging measurements (2026-07-26), taken with the retry
  * neutralised (`<q> zzzqqx`) to expose each query's raw full-query resolution.
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { DESCENDANT_HARD_CAP, type TaxonomyMatchResult } from "@/lib/api/search-taxonomy";
 import {
@@ -21,7 +21,6 @@ import {
   meshRetryDroppedWordUnrelated,
 } from "@/lib/search";
 import { stripDeprioritized, isAllDeprioritized } from "@/lib/api/deprioritized-terms";
-import { resolveGenericTermMode } from "@/lib/api/search-flags";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -148,9 +147,8 @@ vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
     // fixture-driven. `resolveQueryTaxonomy`'s own implementation is covered
     // directly (DB-mocked, not module-mocked) in search-taxonomy.test.ts.
     resolveQueryTaxonomy: vi.fn(async (q: string) => {
-      const genericTermMode = resolveGenericTermMode();
       const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
-      const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
+      const genericStripped = genericRemoved.length > 0;
       const stripKeptEnough = meshStripRemovedAtMostHalf(
         genericRemoved.length,
         q.trim().split(/\s+/).filter(Boolean).length,
@@ -192,12 +190,7 @@ async function conceptFor(q: string, type: "people" | "publications") {
 }
 
 describe("#1972 — the strip retry may replace a FILLER window but not a CONTENT one", () => {
-  beforeEach(() => {
-    // The retry is inert unless generic-term stripping is active.
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
-  });
   afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
     vi.resetModules();
   });
 
@@ -230,11 +223,7 @@ describe("#1972 — the strip retry may replace a FILLER window but not a CONTEN
  * and this arm — not the same-descriptor arm — is the one that fires.
  */
 describe("#1980 — an over-aggressive strip may not be adopted on the null arm", () => {
-  beforeEach(() => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
-  });
   afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
     vi.resetModules();
   });
 
@@ -262,11 +251,7 @@ describe("#1980 — an over-aggressive strip may not be adopted on the null arm"
  * the word the strip dropped.
  */
 describe("#1980 fix (2) — a multi-word retry disjoint from the dropped word is REJECTED", () => {
-  beforeEach(() => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
-  });
   afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
     vi.resetModules();
   });
 
@@ -305,11 +290,7 @@ describe("#1980 fix (2) — a multi-word retry disjoint from the dropped word is
  * descriptor itself, or stop tracking the cap.
  */
 describe("#2094 — searchInterpretation reports the descendant-set size and truncation", () => {
-  beforeEach(() => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
-  });
   afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
     vi.resetModules();
   });
 
@@ -345,11 +326,7 @@ describe("#2094 — searchInterpretation reports the descendant-set size and tru
  * ("Microbiome Research" → Microbiota) keeps demoting exactly as before.
  */
 describe("#692 follow-up — a verbatim-resolved phrase is not stripped for the search", () => {
-  beforeEach(() => {
-    process.env.SEARCH_GENERIC_TERM_DEMOTE = "on";
-  });
   afterEach(() => {
-    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
     vi.resetModules();
   });
 

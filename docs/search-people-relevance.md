@@ -396,7 +396,8 @@ Suppressed authorships and dark pmids are skipped from all three blobs *and* fro
 
 ### Generic-term demotion
 
-When `SEARCH_GENERIC_TERM_DEMOTE=on` and the stripped `contentQuery` differs from the full query
+When a deprioritized term was stripped (generic-term demotion — always on since #1440 retired
+`SEARCH_GENERIC_TERM_DEMOTE`) and the stripped `contentQuery` differs from the full query
 (`lib/api/search.ts:1855-1859`), the single must clause is replaced by `demoteScoringClause`
 (`:2209-2216` -> `:1196-1230`):
 
@@ -608,8 +609,8 @@ filter.
 
 Attribution is omitted entirely when no descriptor resolved. `methodFamilyTierLabel` is non-null only
 when `resolvePeopleMethodFamilyTier() && applyTopicTemplate` and the taxonomy resolved a single family
-(`:2053-2056`); it reads `opts.matchAwareContext` **directly**, so it does not depend on
-`SEARCH_PEOPLE_MATCH_AWARE_SNIPPET` or `SEARCH_RESULT_EVIDENCE`.
+(`:2053-2056`); it reads `opts.matchAwareContext` **directly** (the match-aware / evidence flags
+it once sat beside were retired in #1440).
 
 Inner multiplier range: 0.7 to `1.5 x 2.0 x 1.2 = 3.6`.
 
@@ -738,7 +739,7 @@ Every value below is the **CDK-wired** value at `cdk/lib/app-stack.ts`. It is no
 | `SEARCH_PEOPLE_CONCEPT_GRANT_AXIS` | off | on `:1901` | on | Under `match=concept` only: unions grant-funded-on-concept cwids into the gate at boost 0.1. | `search-flags.ts:999-1001`; `search.ts:2282-2306` |
 | `SEARCH_PEOPLE_DIVISION_SHAPE` | off | off `:1792` | off | Routes a bare division query to the dept template **and** scopes it to that division's roster. Dark everywhere; needs a staging A/B. | `search-flags.ts:325-327`; `route.ts:563-570` |
 | `SEARCH_TYPO_FALLBACK` | off | off `:2371` | off | #2215. Only when the exact search returns **zero**: re-runs once with a `fuzziness: AUTO` best_fields clause over name/title fields (People + Publications) and marks the response `typoFallback: true`. Non-zero searches are untouched. Dark everywhere; staging eval first. | `search-flags.ts:1578-1580`; `search-typo-fallback.ts`; `search.ts:1732` |
-| `SEARCH_GENERIC_TERM_DEMOTE` | off | on `:1624` | on | At `on` the gate moves to the stripped content query. | `search-flags.ts:443-452`; `search.ts:1855-1859` |
+| ~~`SEARCH_GENERIC_TERM_DEMOTE`~~ | — | retired | retired | Retired in #1440 at its deployed `on` mode (no longer an env var): whenever a deprioritized term is stripped, the gate moves to the stripped content query. | `route.ts` / SSR `page.tsx` (`genericDemote`); `search-taxonomy.ts` (`genericStripped`) |
 | `SEARCH_MESH_RESOLUTION_FALLBACK` | off | **on** `:1916` | **off** | Window decompose-and-resolve on a full-query miss, at `partial`. Decides whether a descriptor exists at all. | `search-flags.ts:1017-1019`; `search-taxonomy.ts:1399` |
 | `SEARCH_MESH_RESOLVE_TOKEN_COVERAGE` | off | off `:1966` | off | Majority-coverage guard on the window fallback. Flipped on in staging 2026-07-26 and reverted the same day (resolution 33/35 -> 22/35). No-op in prod anyway. | `search-flags.ts:1070-1072`; `search-taxonomy.ts:1556` |
 | `SEARCH_MESH_QUERY_NORMALIZATION` | off | on `:2004` | on | Singularize retry at `partial`. | `search-flags.ts:1129-1131`; `search-taxonomy.ts:1383` |
@@ -764,7 +765,7 @@ Every value below is the **CDK-wired** value at `cdk/lib/app-stack.ts`. It is no
 |---|---|---|
 | `SEARCH_PEOPLE_CONCEPT_PRECOUNT` | off both `:1881` | Chooses **how** the sparse count is sourced, not whether escalation happens. The CDK comment at `:1867-1868` claims the resolver reads `!== "off"`; it reads `=== "on"` (`search-flags.ts:984`), so unset means OFF, not on. Deployed behaviour is unaffected because CDK sets the literal; a local run inherits the wrong expectation. |
 | `SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED` / `_SPECIALTY_OVER_TAGGED` | "6" / "4" both `:1723-1724` | Evidence-reason precedence only. Not ranking. |
-| `SEARCH_PEOPLE_MATCH_EXPLAIN` `:1634`, `_SNIPPET_REPRESENTATIVE_PUB` `:1646`, `_REASON_FROM_DOC` `:1661`, `_MATCH_AWARE_SNIPPET` `:1751`, `SEARCH_RESULT_EVIDENCE` `:1758`, `SEARCH_EVIDENCE_ROWS` `:1765`, `SEARCH_EVIDENCE_REASON_COUNTS` `:1772`, `SEARCH_PEOPLE_CONCEPT_HINT` `:1807`, `SEARCH_SHELL_STREAMING` `:1853` | on/off as listed | Presentation only. None touches the query predicate, the score, or the result set. |
+| `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` `:1646`, `SEARCH_PEOPLE_REASON_FROM_DOC` `:1661`, `SEARCH_PEOPLE_CONCEPT_HINT` `:1807`, `SEARCH_SHELL_STREAMING` `:1853` | on/off as listed | Presentation only. None touches the query predicate, the score, or the result set. (`SEARCH_PEOPLE_MATCH_EXPLAIN`, `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET`, `SEARCH_RESULT_EVIDENCE`, `SEARCH_EVIDENCE_ROWS` and `SEARCH_EVIDENCE_REASON_COUNTS` were retired in #1440 — always on in code.) |
 | `SEARCH_PEOPLE_RELEVANCE_MODE` | **not wired** — allowlisted `flag-parity-allowlist.txt:58` | Code default `v3`. `legacy` disables all four templates and therefore prominence, area, clinical, method-tier, phrase, and leadership. Not a total kill switch: `SEARCH_PEOPLE_METHOD_FAMILY` still admits via `methodFamily^3` on the fallback body (`search.ts:2079-2082 -> :2254`) and `_METHOD_CONTEXT` still fires at `:2271`. |
 | `SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST` | **not wired** — `:57` | Code default on. Chair 3.0 / chief 1.5, dept shape only. |
 | `SEARCH_PEOPLE_CLINICAL_FN_WEIGHT` | **not wired** — `:56` | Code default 3. |
