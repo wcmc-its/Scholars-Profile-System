@@ -226,6 +226,9 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "frt-mentees/[id]": "deny",
   "functional-roles": "deny",
   grant: "deny",
+  // #1609 — Save / Not relevant is the scholar's own label (genuine self or a
+  // genuine superuser), the mentee-suggestion actor rule.
+  "grant-recs/feedback": "deny",
   "honor/decision": "deny",
   honor: "allow",
   "honor/sources/run": "deny",

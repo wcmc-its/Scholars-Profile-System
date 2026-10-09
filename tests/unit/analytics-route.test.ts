@@ -171,7 +171,89 @@ describe("VALID_EVENTS allow-list", () => {
     expect(VALID_EVENTS.has("search_nav_watchdog")).toBe(true);
     expect(VALID_EVENTS.has("search_mesh_restrict")).toBe(true);
     expect(VALID_EVENTS.has("biosketch_worksheet_copy")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(13);
+    expect(VALID_EVENTS.has("grant_rec_impression")).toBe(true);
+    expect(VALID_EVENTS.has("grant_rec_details_open")).toBe(true);
+    expect(VALID_EVENTS.has("grant_rec_outbound_click")).toBe(true);
+    expect(VALID_EVENTS.has("grant_rec_sort")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(17);
+  });
+});
+
+describe("handleAnalyticsBeacon grant_rec_* (#1609)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const lastLog = () =>
+    JSON.parse((console.log as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string);
+
+  it("204s through the route and logs an impression with its bounded id list", async () => {
+    const resp = await POST(
+      makeRequest({
+        event: "grant_rec_impression",
+        cwid: "thc2015",
+        surface: "self",
+        mode: "fit",
+        resultCount: 2,
+        opportunityIds: ["NIH-PA-1", 42, "NSF-9"],
+        ts: 1700000007000,
+      }),
+    );
+    expect(resp.status).toBe(204);
+    expect(lastLog()).toMatchObject({
+      event: "grant_rec_impression",
+      cwid: "thc2015",
+      surface: "self",
+      mode: "fit",
+      resultCount: 2,
+      // non-strings dropped (log-poisoning posture)
+      opportunityIds: ["NIH-PA-1", "NSF-9"],
+      opportunityId: null,
+    });
+  });
+
+  it("caps the id list at 100 entries and each id at 512 chars", () => {
+    handleAnalyticsBeacon({
+      event: "grant_rec_impression",
+      opportunityIds: [
+        "x".repeat(2000),
+        ...Array.from({ length: 300 }, (_, i) => `id${i}`),
+      ],
+    });
+    const logged = lastLog();
+    expect(logged.opportunityIds).toHaveLength(100);
+    expect(logged.opportunityIds[0]).toHaveLength(512);
+  });
+
+  it("logs details-open / outbound-click with opportunityId + position, and sort with mode", () => {
+    for (const event of ["grant_rec_details_open", "grant_rec_outbound_click"]) {
+      handleAnalyticsBeacon({
+        event,
+        cwid: "thc2015",
+        surface: "superuser",
+        mode: "deadline",
+        opportunityId: "NIH-PA-1",
+        position: 3,
+      });
+      expect(lastLog()).toMatchObject({
+        event,
+        opportunityId: "NIH-PA-1",
+        position: 3,
+        surface: "superuser",
+        opportunityIds: null,
+      });
+    }
+    handleAnalyticsBeacon({ event: "grant_rec_sort", cwid: "thc2015", mode: "prestige" });
+    expect(lastLog()).toMatchObject({ event: "grant_rec_sort", mode: "prestige" });
+  });
+
+  it("still drops unknown grant-rec-ish events", () => {
+    handleAnalyticsBeacon({ event: "grant_rec_whatever", opportunityId: "x" });
+    expect(console.log).not.toHaveBeenCalled();
   });
 });
 

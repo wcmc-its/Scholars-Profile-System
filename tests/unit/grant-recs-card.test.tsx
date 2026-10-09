@@ -219,3 +219,174 @@ describe("GrantRecsCard", () => {
     expect(screen.getByRole("alert")).toBeTruthy();
   });
 });
+
+describe("GrantRecsCard — feedback loop + beacons (#1609)", () => {
+  const A = { ...OPP, opportunityId: "A", title: "Alpha award" };
+  const B = { ...OPP, opportunityId: "B", title: "Bravo award" };
+  const C = { ...OPP, opportunityId: "C", title: "Charlie award" };
+
+  type Handler = (url: string, init?: RequestInit) => Response;
+  /** One fetch mock routing the feedback read / write, the list, and details. */
+  function wire(opts: { feedback?: unknown[]; results?: unknown[]; post?: Handler }) {
+    const post: Handler = opts.post ?? (() => okJson({ ok: true }));
+    return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.startsWith("/api/edit/grant-recs/feedback")) {
+        return Promise.resolve(
+          init?.method === "POST"
+            ? post(u, init)
+            : okJson({ ok: true, feedback: opts.feedback ?? [] }),
+        );
+      }
+      if (u.includes("/api/opportunities/")) return Promise.resolve(okJson(DETAIL));
+      return Promise.resolve(okJson({ results: opts.results ?? [A, B, C] }));
+    });
+  }
+  const beaconMock = () => navigator.sendBeacon as unknown as ReturnType<typeof vi.fn>;
+  // jsdom's Blob has no `.text()`; read it the FileReader way.
+  const readBlob = (blob: Blob) =>
+    new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.readAsText(blob);
+    });
+  const beacons = () =>
+    Promise.all(
+      beaconMock().mock.calls.map(async ([, blob]) => JSON.parse(await readBlob(blob as Blob))),
+    );
+  const posts = (f: ReturnType<typeof vi.fn>) =>
+    f.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(navigator, "sendBeacon", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockReturnValue(true),
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (navigator as unknown as { sendBeacon?: unknown }).sendBeacon;
+  });
+
+  it("without feedbackEnabled: read-only rows, no feedback read", async () => {
+    const f = wire({});
+    vi.stubGlobal("fetch", f);
+    render(<GrantRecsCard cwid="thc2015" />);
+    await screen.findByText("Alpha award");
+    expect(screen.queryByRole("button", { name: /^Save:/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Not relevant:/ })).toBeNull();
+    expect(f.mock.calls.some(([u]) => String(u).includes("grant-recs/feedback"))).toBe(false);
+  });
+
+  it("drops not-relevant items, pins + badges saved ones, and over-fetches to keep the page full", async () => {
+    const f = wire({
+      feedback: [
+        { opportunityId: "B", status: "not_relevant", reason: null, updatedAt: "x" },
+        { opportunityId: "C", status: "saved", reason: null, updatedAt: "x" },
+      ],
+    });
+    vi.stubGlobal("fetch", f);
+    render(<GrantRecsCard cwid="thc2015" feedbackEnabled />);
+    await screen.findByText("Alpha award");
+    expect(screen.queryByText("Bravo award")).toBeNull();
+    const titles = screen.getAllByText(/award$/).map((e) => e.textContent);
+    expect(titles).toEqual(["Charlie award", "Alpha award"]);
+    expect(screen.getByText("Saved")).toBeTruthy();
+    const pressed = (name: string) =>
+      screen.getByRole("button", { name }).getAttribute("aria-pressed");
+    expect(pressed("Save: Charlie award")).toBe("true");
+    expect(pressed("Save: Alpha award")).toBe("false");
+    // The feedback read lands first (a dismissed item never flashes in), and the
+    // list asks for LIMIT + 1 so dropping the one hidden item keeps the page full.
+    const listUrl = f.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/opportunities?"));
+    expect(listUrl).toContain("limit=26");
+  });
+
+  it("Save is optimistic and POSTs; clicking again clears it (status null)", async () => {
+    const f = wire({});
+    vi.stubGlobal("fetch", f);
+    render(<GrantRecsCard cwid="thc2015" feedbackEnabled />);
+    const save = await screen.findByRole("button", { name: "Save: Alpha award" });
+    fireEvent.click(save);
+    expect(save.getAttribute("aria-pressed")).toBe("true"); // before the POST resolves
+    await waitFor(() =>
+      expect(posts(f)).toEqual([
+        { cwid: "thc2015", opportunityId: "A", status: "saved", reason: null },
+      ]),
+    );
+    fireEvent.click(save);
+    await waitFor(() => expect(posts(f)[1]).toMatchObject({ opportunityId: "A", status: null }));
+    expect(save.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("rolls back and shows an inline alert when the write fails", async () => {
+    const f = wire({
+      post: () => ({ ok: false, status: 500, json: async () => ({ ok: false }) }) as unknown as Response,
+    });
+    vi.stubGlobal("fetch", f);
+    render(<GrantRecsCard cwid="thc2015" feedbackEnabled />);
+    const save = await screen.findByRole("button", { name: "Save: Alpha award" });
+    fireEvent.click(save);
+    expect(await screen.findByText(/couldn’t save that/i)).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/try again/i);
+    expect(save.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("Not relevant collapses the row in place (focus → Undo), takes an optional reason, and Undo restores it", async () => {
+    const f = wire({});
+    vi.stubGlobal("fetch", f);
+    render(<GrantRecsCard cwid="thc2015" feedbackEnabled />);
+    fireEvent.click(await screen.findByRole("button", { name: "Not relevant: Bravo award" }));
+    const undo = await screen.findByRole("button", { name: "Undo not relevant: Bravo award" });
+    expect(document.activeElement).toBe(undo);
+    expect(screen.getByText(/marked not relevant/i)).toBeTruthy();
+    // the optional reason chips are pressed-state toggles
+    const why = screen.getByRole("button", { name: "I'm not eligible" });
+    expect(why.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(why);
+    expect(why.getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() => expect(posts(f)).toHaveLength(2));
+    expect(posts(f)[0]).toMatchObject({ opportunityId: "B", status: "not_relevant", reason: null });
+    expect(posts(f)[1]).toMatchObject({ status: "not_relevant", reason: "not_eligible" });
+
+    fireEvent.click(undo);
+    expect(await screen.findByRole("button", { name: "Not relevant: Bravo award" })).toBeTruthy();
+    await waitFor(() => expect(posts(f)[2]).toMatchObject({ opportunityId: "B", status: null }));
+  });
+
+  it("fires impression / details / outbound / sort beacons tagged with the surface", async () => {
+    vi.stubGlobal("fetch", wire({}));
+    render(<GrantRecsCard cwid="thc2015" surface="superuser" />);
+    await screen.findByText("Alpha award");
+    await waitFor(() => expect(beaconMock()).toHaveBeenCalled());
+    expect(beaconMock().mock.calls[0][0]).toBe("/api/analytics");
+    expect((await beacons())[0]).toMatchObject({
+      event: "grant_rec_impression",
+      cwid: "thc2015",
+      surface: "superuser",
+      mode: "fit",
+      resultCount: 3,
+      opportunityIds: ["A", "B", "C"],
+    });
+
+    fireEvent.click(screen.getAllByText("Details")[1]);
+    fireEvent.click(await screen.findByText("View opportunity ↗"));
+    fireEvent.click(screen.getByText("Deadline"));
+    await waitFor(() => expect(beaconMock().mock.calls.length).toBeGreaterThanOrEqual(4));
+    const sent = await beacons();
+    expect(sent.find((b) => b.event === "grant_rec_details_open")).toMatchObject({
+      opportunityId: "B",
+      position: 1,
+      surface: "superuser",
+    });
+    expect(sent.find((b) => b.event === "grant_rec_outbound_click")).toMatchObject({
+      opportunityId: "B",
+      position: 1,
+    });
+    expect(sent.find((b) => b.event === "grant_rec_sort")).toMatchObject({ mode: "deadline" });
+  });
+});
