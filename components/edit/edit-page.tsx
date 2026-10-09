@@ -629,6 +629,11 @@ export type EditPageProps = {
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like the other feature gates; self + superuser only. */
   grantRecsEnabled?: boolean;
+  /** #1609 — whether the "Grants for me" rows carry Save / Not relevant and
+   *  apply the scholar's feedback. The server page computes it as
+   *  `SELF_EDIT_GRANT_RECS && (genuine self || genuine superuser)`, the actor
+   *  rule `/api/edit/grant-recs/feedback` re-enforces. Off ⇒ read-only list. */
+  grantRecsFeedbackEnabled?: boolean;
   /** #917 v5 (`EDIT_BIOSKETCH_GENERATE`): whether the "NIH biosketch" Services
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like grantRecsEnabled. Surfaced to every actor the generate
@@ -755,6 +760,7 @@ export function EditPage({
   orcidTabEnabled = false,
   profileLinksEnabled = false,
   grantRecsEnabled = false,
+  grantRecsFeedbackEnabled = false,
   biosketchEnabled = false,
   cvEnabled = false,
   railRestructureEnabled = false,
@@ -1011,6 +1017,7 @@ export function EditPage({
         reciterPendingEnabled,
         orcidTabEnabled,
         profileLinksEnabled,
+        grantRecsFeedbackEnabled,
       )}
     </EditShell>
   );
@@ -1098,6 +1105,7 @@ function renderPanel(
   reciterPendingEnabled: boolean,
   orcidTabEnabled: boolean,
   profileLinksEnabled: boolean,
+  grantRecsFeedbackEnabled: boolean,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -1125,7 +1133,15 @@ function renderPanel(
     case "grant-recs":
       // GrantRecs Phase 3 — the "Grants for me" panel. Client island fetching the
       // public forward route for the resolved cwid (self or superuser-target).
-      return <GrantRecsCard cwid={cwid} />;
+      // #1609 — Save / Not relevant ride `grantRecsFeedbackEnabled`; the beacons
+      // are tagged with the viewer's voice so superuser QA is separable.
+      return (
+        <GrantRecsCard
+          cwid={cwid}
+          feedbackEnabled={grantRecsFeedbackEnabled}
+          surface={voiceMode}
+        />
+      );
     case "biosketch":
       // #917 v5/v6 — the "NIH biosketch" Services panel. The generate tool (client
       // island) POSTs to /api/edit/biosketch/generate for the resolved cwid; the

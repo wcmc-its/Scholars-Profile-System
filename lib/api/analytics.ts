@@ -35,7 +35,16 @@ import { logVivoFourOhFour } from "@/lib/analytics/vivo-pattern";
  *  - biosketch_worksheet_copy: a Copy on the SciENcv worksheet (#2652). Carries
  *    `surface` (which block was copied) and `cwid` (the scholar the worksheet is
  *    for). Distinct (cwid, day) is the "completed worksheet" denominator — the
- *    feature's only adoption signal. */
+ *    feature's only adoption signal.
+ *  - grant_rec_impression / grant_rec_details_open / grant_rec_outbound_click /
+ *    grant_rec_sort: the /edit "Grants for me" card (#1609). Every one carries
+ *    `cwid` (the scholar the list is for), `surface` (`self` | `superuser` — the
+ *    viewer, so superuser QA never inflates scholar engagement) and `mode` (the
+ *    active sort chip). An impression is one list render: `resultCount` +
+ *    `opportunityIds` (rank order). Details-open / outbound-click carry
+ *    `opportunityId` + 0-based `position`; grant_rec_sort's `mode` is the chip
+ *    just chosen. Save / Not-relevant are NOT beacons — they are durable rows in
+ *    `grant_rec_feedback` (+ the B03 audit log). */
 export const VALID_EVENTS = new Set<string>([
   "search_click",
   "mentoring_copubs_open",
@@ -50,6 +59,10 @@ export const VALID_EVENTS = new Set<string>([
   "search_nav_watchdog",
   "search_mesh_restrict",
   "biosketch_worksheet_copy",
+  "grant_rec_impression",
+  "grant_rec_details_open",
+  "grant_rec_outbound_click",
+  "grant_rec_sort",
 ]);
 
 /** Max logged length for any user-controlled string field. The beacon is
@@ -60,6 +73,19 @@ const MAX_STR = 512;
 /** Coerce to a length-bounded string, or null for non-strings. */
 function capStr(v: unknown): string | null {
   return typeof v === "string" ? v.slice(0, MAX_STR) : null;
+}
+
+/** Max ids logged from an array field — the grant-recs route caps a list at 100. */
+const MAX_IDS = 100;
+
+/** Coerce to a bounded array of bounded strings (non-strings dropped), or null
+ *  for a non-array. Same log-poisoning posture as {@link capStr}. */
+function capStrArray(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  return v
+    .filter((x): x is string => typeof x === "string")
+    .slice(0, MAX_IDS)
+    .map((x) => x.slice(0, MAX_STR));
 }
 
 /**
@@ -156,6 +182,9 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       descriptorId: capStr(p.descriptorId),
       // home_method_category_click — carries the category slug. Null otherwise.
       slug: capStr(p.slug),
+      // grant_rec_* fields (#1609). Null for other events.
+      opportunityId: capStr(p.opportunityId),
+      opportunityIds: capStrArray(p.opportunityIds),
       filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),
