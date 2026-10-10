@@ -1305,39 +1305,35 @@ export async function loadEditContext(
   const mediaHighlights = clipsOn ? mentions.filter((n) => n.outlet !== null) : [];
 
   // Dataset deposits — the interactive /edit "Datasets" card (data-sharing
-  // spec, #2348). Loaded for every caller; only queried when
-  // DATA_SHARING_SECTION is on, or the scholar has opted in via `showDatasets`
-  // (the env default flipped off 2026-08-24 — they need this card even while
-  // the public section stays dark, to curate which deposits show once they
-  // opt in) — else the loader returns [] and never touches this delegate,
-  // same dark-launch precedent as technologies/news. Computed here (ABOVE the
-  // pmids/early-return branch below) and threaded into BOTH `return`
-  // statements, so a scholar with zero confirmed publications but real
-  // dataset deposits still gets the card.
-  const datasetRows =
-    process.env.DATA_SHARING_SECTION === "on" || hiddenSections.includes("showDatasets")
-      ? await client.personDatasetDeposit.findMany({
-          where: { cwid },
-          select: {
-            datasetId: true,
-            authorPosition: true,
-            pmids: true,
-            dataset: {
-              select: {
-                repository: true,
-                accessionOrDoi: true,
-                resourceType: true,
-                dataType: true,
-                depositYear: true,
-                accessModel: true,
-                confidence: true,
-                title: true,
-                provenance: true,
-              },
-            },
-          },
-        })
-      : [];
+  // spec, #2348). Queried for every caller regardless of DATA_SHARING_SECTION
+  // or the `showDatasets` opt-in: a scholar must see their deposits in /edit to
+  // decide whether to show them, and the panel's HiddenSectionBanner says when
+  // the public section is dark (the env default flipped off 2026-08-24). The
+  // public payload (`lib/api/profile.ts`) keeps its own gate. Computed here
+  // (ABOVE the pmids/early-return branch below) and threaded into BOTH
+  // `return` statements, so a scholar with zero confirmed publications but
+  // real dataset deposits still gets the card.
+  const datasetRows = await client.personDatasetDeposit.findMany({
+    where: { cwid },
+    select: {
+      datasetId: true,
+      authorPosition: true,
+      pmids: true,
+      dataset: {
+        select: {
+          repository: true,
+          accessionOrDoi: true,
+          resourceType: true,
+          dataType: true,
+          depositYear: true,
+          accessModel: true,
+          confidence: true,
+          title: true,
+          provenance: true,
+        },
+      },
+    },
+  });
 
   const datasets: EditContextDataset[] = [];
   if (datasetRows.length > 0) {
