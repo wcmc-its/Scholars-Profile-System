@@ -18,9 +18,10 @@
  * `removed_by_admin` row renders read-only with an inline explanation and no
  * controls.
  *
- * Rendered only when the loader populated `ctx.datasets` (DATA_SHARING_SECTION
- * on, or the scholar's own `showDatasets` opt-in, AND the scholar has ≥1
- * deposit), so an empty panel is never reached.
+ * Rendered only when the loader populated `ctx.datasets` (the scholar has ≥1
+ * deposit), so an empty panel is never reached. The public section may still be
+ * dark (DATA_SHARING_SECTION off, no `showDatasets` opt-in) — the edit page's
+ * HiddenSectionBanner above this card says so.
  *
  * Optimistic mechanism: `useOptimistic` over a local-state list that commits
  * on a successful POST. On a network/server failure the optimistic state

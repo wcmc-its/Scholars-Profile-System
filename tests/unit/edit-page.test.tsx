@@ -5,7 +5,7 @@
  * tested elsewhere; this is the rail + routing + role-parity wiring.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -1506,5 +1506,34 @@ describe("EditPage router — read-only mode (an observer)", () => {
   it("sees the CV rail item (superuser-parity content set) when cvEnabled", () => {
     render(<EditPage ctx={superuserCtx} mode="read-only" attr="home" cvEnabled />);
     expect(screen.getByText("CV (WCM format)")).toBeTruthy();
+  });
+});
+
+// The hidden-public-section notice is rendered by EditPage itself (not a child
+// card), so wiring is asserted here, not just in the banner's unit test.
+describe("EditPage — hidden public section notice", () => {
+  const withHidden = (hiddenSections: string[]): EditContext => ({
+    ...ctx,
+    scholar: { ...ctx.scholar, hiddenSections },
+  });
+
+  it("shows the notice with 'Show it' above a hidden section's panel", () => {
+    render(<EditPage ctx={withHidden(["hideFunding"])} mode="self" attr="funding" />);
+    expect(screen.getByTestId("hidden-section-banner")).toBeTruthy();
+    expect(screen.getByTestId("hidden-section-show")).toBeTruthy();
+  });
+
+  it("shows nothing when that section is visible, or on an unrelated panel", () => {
+    render(<EditPage ctx={withHidden([])} mode="self" attr="funding" />);
+    expect(screen.queryByTestId("hidden-section-banner")).toBeNull();
+    cleanup();
+    render(<EditPage ctx={withHidden(["hideFunding"])} mode="self" attr="overview" />);
+    expect(screen.queryByTestId("hidden-section-banner")).toBeNull();
+  });
+
+  it("a proxy sees the notice but no button (the field route refuses their write)", () => {
+    render(<EditPage ctx={withHidden(["hideFunding"])} mode="proxy" attr="funding" />);
+    expect(screen.getByTestId("hidden-section-banner")).toBeTruthy();
+    expect(screen.queryByTestId("hidden-section-show")).toBeNull();
   });
 });

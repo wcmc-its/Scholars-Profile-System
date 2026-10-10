@@ -42,6 +42,10 @@ import { TitleField } from "@/components/edit/title-field";
 import { TechnologyEditCard } from "@/components/edit/technology-edit-card";
 import { NewsEditCard } from "@/components/edit/news-edit-card";
 import { DatasetsCard } from "@/components/edit/datasets-card";
+import {
+  HiddenSectionBanner,
+  type SectionFieldWrite,
+} from "@/components/edit/hidden-section-banner";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { SlugCard } from "@/components/edit/slug-card";
 import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
@@ -727,10 +731,10 @@ export function visibleAttrKeys(
       .filter((a) => a.key !== "news" || hasNews)
       // Media highlights — same rule, on approved clips (MEDIA_HIGHLIGHTS_SECTION).
       .filter((a) => a.key !== "media-highlights" || hasMediaHighlights)
-      // Datasets appear only when the scholar has ≥1 deposit (loader-gated on
-      // DATA_SHARING_SECTION or the scholar's showDatasets opt-in). Empty ⇒
-      // dropped from the rail and the valid-attr set, so `?attr=datasets`
-      // canonicalizes away.
+      // Datasets appear whenever the scholar has ≥1 deposit — even while the
+      // public section is dark (HiddenSectionBanner says so). Empty ⇒ dropped
+      // from the rail and the valid-attr set, so `?attr=datasets` canonicalizes
+      // away.
       .filter((a) => a.key !== "datasets" || hasDatasets)
       // #2634 — "Mentees › From your publications" exists only when the loader
       // returned rows (flag on + self/superuser); `?attr=mentee-suggestions`
@@ -809,9 +813,8 @@ export function EditPage({
   // NEWS_MENTIONS_SECTION is on AND there is ≥1 published mention.
   const hasNews = ctx.news.length > 0;
   const hasMediaHighlights = ctx.mediaHighlights.length > 0;
-  // Datasets — same gate: the loader populates `ctx.datasets` only when
-  // (DATA_SHARING_SECTION is on OR the scholar's own showDatasets opt-in is
-  // set) AND there is ≥1 deposit.
+  // Datasets — present whenever the scholar has ≥1 deposit (not flag-gated in
+  // /edit; the public section's state shows in HiddenSectionBanner).
   const hasDatasets = ctx.datasets.length > 0;
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
   // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
@@ -850,6 +853,7 @@ export function EditPage({
     visible.find((a) => a.key === attr) ??
     visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
     visible[0];
+  const hiddenSection = sectionVisibility(active.key, ctx.scholar.hiddenSections);
 
   // Profile URL is "owned" when the scholar can request a slug, "readonly" when
   // the flag is off (the panel shows their current URL but no request form).
@@ -1003,6 +1007,18 @@ export function EditPage({
       actorLabel={actorLabel}
       actorNote={actorNote}
     >
+      {hiddenSection && (
+        <HiddenSectionBanner
+          // Remount per attr so a just-shown Undo line never carries to the next panel.
+          key={active.key}
+          cwid={ctx.scholar.cwid}
+          hidden={hiddenSection.hidden}
+          canShow={mode === "self" || mode === "superuser" || mode === "comms_steward"}
+          thirdPerson={mode !== "self"}
+          show={hiddenSection.show}
+          undo={hiddenSection.undo}
+        />
+      )}
       {renderPanel(
         active.key,
         ctx,
@@ -1021,6 +1037,49 @@ export function EditPage({
       )}
     </EditShell>
   );
+}
+
+/** The Visibility switch behind each rail attr whose public section the scholar
+ *  can hide (`SECTION_PANEL_DEFS` in `visibility-card.tsx`). */
+const SECTION_HIDE_KEY: Partial<Record<AttrKey, string>> = {
+  funding: "hideFunding",
+  mentees: "hideMentoring",
+  education: "hideEducation",
+  technologies: "hideTechnologies",
+};
+
+/**
+ * Whether the active attr's PUBLIC section is hidden, and the field writes that
+ * show it / put it back — feeds `HiddenSectionBanner`. `null` for an attr with no
+ * hideable section. Datasets mirrors `lib/api/profile.ts`'s `datasetsSectionOn`:
+ * with `DATA_SHARING_SECTION` off the section shows only on the `showDatasets`
+ * opt-in; with it on, until `hideDatasets`.
+ */
+export function sectionVisibility(
+  key: AttrKey,
+  hiddenSections: ReadonlyArray<string>,
+): { hidden: boolean; show: SectionFieldWrite; undo: SectionFieldWrite } | null {
+  if (key === "datasets") {
+    if (process.env.DATA_SHARING_SECTION === "on") {
+      return {
+        hidden: hiddenSections.includes("hideDatasets") && !hiddenSections.includes("showDatasets"),
+        show: { fieldName: "hideDatasets", value: "false" },
+        undo: { fieldName: "hideDatasets", value: "true" },
+      };
+    }
+    return {
+      hidden: !hiddenSections.includes("showDatasets"),
+      show: { fieldName: "showDatasets", value: "true" },
+      undo: { fieldName: "showDatasets", value: "false" },
+    };
+  }
+  const field = SECTION_HIDE_KEY[key];
+  if (!field) return null;
+  return {
+    hidden: hiddenSections.includes(field),
+    show: { fieldName: field, value: "false" },
+    undo: { fieldName: field, value: "true" },
+  };
 }
 
 /** The ORCID row's inputs. `scholar.orcid` (WCM Identity) is on file; with
@@ -1463,10 +1522,9 @@ function renderPanel(
         />
       );
     case "datasets":
-      // Interactive "Datasets" — the loader populates `ctx.datasets` only when
-      // (DATA_SHARING_SECTION is on OR the scholar's showDatasets opt-in is
-      // set) AND the scholar has ≥1 deposit, and the rail item is dropped when
-      // the array is empty. `voiceMode` reframes the intro copy for a
+      // Interactive "Datasets" — the loader populates `ctx.datasets` whenever the
+      // scholar has ≥1 deposit, and the rail item is dropped when the array is
+      // empty. Whether the PUBLIC section shows is HiddenSectionBanner's notice. `voiceMode` reframes the intro copy for a
       // third-person editor.
       return (
         <DatasetsCard

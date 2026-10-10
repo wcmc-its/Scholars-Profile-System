@@ -1021,7 +1021,7 @@ describe("loadEditContext — CTL technologies (read-only, flag-gated)", () => {
   });
 });
 
-describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)", () => {
+describe("loadEditContext — dataset deposits (suppressible, #2348)", () => {
   const DATASET_ROWS = [
     {
       datasetId: "ds-1",
@@ -1051,14 +1051,16 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
     else process.env.DATA_SHARING_SECTION = prevFlag;
   });
 
-  it("returns [] and never queries person_dataset_deposit when the flag is off", async () => {
+  it("still loads deposits when the flag is off and there is no opt-in (the scholar decides in /edit)", async () => {
     delete process.env.DATA_SHARING_SECTION;
     const c = fakeClient();
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
     const ctx = await loadEditContext(SELF, asClient(c));
-    expect(ctx!.datasets).toEqual([]);
-    expect(c.personDatasetDeposit.findMany).not.toHaveBeenCalled();
+    expect(ctx!.datasets).toHaveLength(1);
+    expect(c.personDatasetDeposit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: SELF } }),
+    );
   });
 
   it("queries person_dataset_deposit when the flag is off but the scholar's own showDatasets override is set", async () => {
