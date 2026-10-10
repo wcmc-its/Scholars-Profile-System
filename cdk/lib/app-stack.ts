@@ -2368,8 +2368,9 @@ export class AppStack extends Stack {
         //   results today is byte-identical. resolveSearchTypoFallback reads === "on".
         //   Query-time, no reindex. DARK everywhere -- flip staging first and eval the
         //   typo set (oncolgy / cardiolgy / Harrigton) + a no-false-rescue set, then prod.
-        //   On in both envs 2026-10-09 (fires only on total=0).
-        SEARCH_TYPO_FALLBACK: "on",
+        //   Staging on 2026-10-09; prod held off: the staging eval found false rescues
+        //   on non-WCM names (Topol 713, Gawande 380, Fauci 7). Tighten, re-eval, then prod.
+        SEARCH_TYPO_FALLBACK: env === "staging" ? "on" : "off",
         // #1345 -- full-time-faculty prominence lever. "off" drops the #513 flat +1.0
         //   full_time_faculty prominence term (the expertise-independent employment
         //   prior) so genuine affiliated/clinical subspecialty experts aren't buried.
