@@ -89,6 +89,7 @@ function Callout({
 
 const WRG = "https://wrg.weill.cornell.edu";
 const AREA_BENCHMARK = "https://github.com/wcmc-its/ReciterAI/blob/main/docs/benchmark/README.md";
+const CARE_PLAN = "https://weill.cornell.edu/careplan";
 
 const MAIN_CLASS = [
   // One width for everything (#1903). The page used a hybrid width: prose
@@ -669,8 +670,11 @@ export default function DocsPage() {
           October 2026, 62 of 67 research areas are concentrated in a recognizable Weill Cornell
           department or division. 58 areas match one of NIH&apos;s research, condition, and disease
           categories, and together the areas cover 308 of NIH&apos;s 331 categories. Each of the 13
-          scientific priorities named in Weill Cornell&apos;s CARE Strategic Plan corresponds to at
-          least one area. The{" "}
+          scientific priorities named in Weill Cornell&apos;s{" "}
+          <a href={CARE_PLAN} className={LINK}>
+            CARE Strategic Plan
+          </a>{" "}
+          corresponds to at least one area. The{" "}
           <a href={AREA_BENCHMARK} className={LINK}>
             full comparison
           </a>{" "}
