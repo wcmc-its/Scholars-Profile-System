@@ -88,6 +88,10 @@ function Callout({
 }
 
 const WRG = "https://wrg.weill.cornell.edu";
+const AREA_BENCHMARK = "https://github.com/wcmc-its/ReciterAI/blob/main/docs/benchmark/README.md";
+const CARE_PLAN = "https://weill.cornell.edu/careplan";
+const AREA_CROSSWALK =
+  "https://github.com/wcmc-its/ReciterAI/blob/main/docs/benchmark/outputs/research-areas-reference-crosswalk-2026-10-10.csv";
 
 const MAIN_CLASS = [
   // One width for everything (#1903). The page used a hybrid width: prose
@@ -664,11 +668,24 @@ export default function DocsPage() {
           research-area to subarea hierarchy.
         </p>
         <p>
-          As an independent check, that map was benchmarked against authoritative institutional
-          reference points: Weill Cornell&apos;s divisions and departments, its strategic research
-          roadmap, and NIH research designations. It aligned cleanly with all three. What the model
-          surfaced from the literature mirrors how the institution and the wider field already
-          organize science.
+          As an independent check, we compared that map with three outside reference points. As of
+          October 2026, 62 of 67 research areas are concentrated in a recognizable Weill Cornell
+          department or division. 58 areas match one of NIH&apos;s research, condition, and disease
+          categories, and together the areas cover 308 of NIH&apos;s 331 categories. Each of the 13
+          scientific priorities named in Weill Cornell&apos;s{" "}
+          <a href={CARE_PLAN} className={LINK}>
+            CARE Strategic Plan
+          </a>{" "}
+          corresponds to at least one area. The{" "}
+          <a href={AREA_BENCHMARK} className={LINK}>
+            full comparison
+          </a>{" "}
+          covers the method, a{" "}
+          <a href={AREA_CROSSWALK} className={LINK}>
+            row-by-row crosswalk
+          </a>{" "}
+          of every department, plan priority, and NIH category, and the places where the map and
+          these references don&apos;t line up.
         </p>
         <p>
           Each publication is then placed on that map. ReciterAI scores each paper against every
