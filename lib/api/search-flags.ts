@@ -12,6 +12,7 @@
  */
 
 import { ovr } from "./flag-override";
+import type { TypoFallbackMode } from "./search-typo-fallback";
 
 export type ConceptMode = "strict" | "expanded" | "off";
 
@@ -1438,7 +1439,11 @@ export function resolveSearchPeopleTrialMeshWeight(): number {
  * Default OFF (`=== "on"` opt-in, dark in both envs): staging flip + an eval of
  * the typo / near-miss query set comes first. Query-time only, no reindex.
  * Overridable per request on staging (`?flags=SEARCH_TYPO_FALLBACK:on`, #2085).
+ *
+ * `=names` is the narrow mode: fuzzy on person names only (see
+ * `TypoFallbackMode`). Anything else is off.
  */
-export function resolveSearchTypoFallback(): boolean {
-  return (ovr("SEARCH_TYPO_FALLBACK") ?? process.env.SEARCH_TYPO_FALLBACK) === "on";
+export function resolveSearchTypoFallback(): TypoFallbackMode | false {
+  const v = ovr("SEARCH_TYPO_FALLBACK") ?? process.env.SEARCH_TYPO_FALLBACK;
+  return v === "on" || v === "names" ? v : false;
 }

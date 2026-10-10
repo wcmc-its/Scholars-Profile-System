@@ -144,9 +144,9 @@ import type { PeopleQueryShape as PeopleQueryClassification } from "@/lib/api/pe
 import { searchHref } from "@/lib/search/query-url";
 import {
   buildTypoFuzzyClause,
-  PEOPLE_TYPO_FALLBACK_FIELDS,
-  PUBLICATION_TYPO_FALLBACK_FIELDS,
   TYPO_FUZZY_PARAMS,
+  typoFallbackFields,
+  type TypoFallbackMode,
   withTypoFallback,
 } from "@/lib/api/search-typo-fallback";
 
@@ -1645,9 +1645,7 @@ export async function getConceptScholarConcentration(
 export async function searchPeople(opts: SearchPeopleOpts): Promise<PeopleSearchResult> {
   return withTypoFallback({
     enabled:
-      opts.typoFallback === true &&
-      opts.shape !== "cwid" &&
-      (opts.meshDescendantUis?.length ?? 0) === 0,
+      !!opts.typoFallback && opts.shape !== "cwid" && (opts.meshDescendantUis?.length ?? 0) === 0,
     q: opts.q,
     corpus: "people",
     primary: () => searchPeopleCore(opts),
@@ -1656,7 +1654,7 @@ export async function searchPeople(opts: SearchPeopleOpts): Promise<PeopleSearch
         ...opts,
         shape: undefined,
         genericDemote: false,
-        typoFuzzy: true,
+        typoFuzzy: opts.typoFallback || "on",
       }),
   });
 }
@@ -1672,13 +1670,13 @@ async function searchPeopleCore(opts: {
    * {@link searchPeople}). Resolved by the caller from `SEARCH_TYPO_FALLBACK`;
    * absent ⇒ no fallback. Read only by the wrapper, never by the core.
    */
-  typoFallback?: boolean;
+  typoFallback?: TypoFallbackMode | false;
   /**
    * #2215 — INTERNAL (set only by the {@link searchPeople} wrapper's retry):
-   * replace the text-admission clause with the fuzzy
-   * `buildTypoFuzzyClause(q, PEOPLE_TYPO_FALLBACK_FIELDS)`.
+   * replace the text-admission clause with the fuzzy clause over
+   * `typoFallbackFields("people", mode)`.
    */
-  typoFuzzy?: boolean;
+  typoFuzzy?: TypoFallbackMode;
   filters?: PeopleFilters;
   /** Phase 3 D-10 — filter results to scholars who have publications in this topic (parent topic slug). */
   topic?: string;
@@ -2333,7 +2331,7 @@ async function searchPeopleCore(opts: {
   // #2215 — the typo-fallback retry (wrapper-only; `shape` is cleared there, so
   // no template flag above is set) swaps in the fuzzy name/title clause.
   const queryBranch: Record<string, unknown> = opts.typoFuzzy
-    ? buildTypoFuzzyClause(trimmed, PEOPLE_TYPO_FALLBACK_FIELDS)
+    ? buildTypoFuzzyClause(trimmed, typoFallbackFields("people", opts.typoFuzzy))
     : applyNameTemplate
     ? {
         bool: {
@@ -4770,12 +4768,16 @@ export async function searchPublications(
   opts: SearchPublicationsOpts,
 ): Promise<PublicationsSearchResult> {
   return withTypoFallback({
-    enabled: opts.typoFallback === true && !opts.meshResolution,
+    enabled: !!opts.typoFallback && !opts.meshResolution,
     q: opts.q,
     corpus: "publications",
     primary: () => searchPublicationsCore(opts),
     fuzzy: () =>
-      searchPublicationsCore({ ...opts, genericDemote: false, typoFuzzy: true }),
+      searchPublicationsCore({
+        ...opts,
+        genericDemote: false,
+        typoFuzzy: opts.typoFallback || "on",
+      }),
   });
 }
 
@@ -4793,13 +4795,13 @@ async function searchPublicationsCore(opts: {
    * {@link searchPublications}). Resolved by the caller from
    * `SEARCH_TYPO_FALLBACK`; absent ⇒ no fallback. Read only by the wrapper.
    */
-  typoFallback?: boolean;
+  typoFallback?: TypoFallbackMode | false;
   /**
    * #2215 — INTERNAL (set only by the {@link searchPublications} wrapper's
-   * retry): replace the §1.2 text clause with the fuzzy
-   * `buildTypoFuzzyClause(q, PUBLICATION_TYPO_FALLBACK_FIELDS)`.
+   * retry): replace the §1.2 text clause with the fuzzy clause over
+   * `typoFallbackFields("publications", mode)`.
    */
-  typoFuzzy?: boolean;
+  typoFuzzy?: TypoFallbackMode;
   filters?: PublicationsFilters;
   /**
    * Issue #259 §5 — when set AND `SEARCH_PUB_TAB_CONCEPT_MODE=strict` (or
@@ -5135,7 +5137,7 @@ async function searchPublicationsCore(opts: {
     // #2215 — the typo-fallback retry (wrapper-only) swaps in the fuzzy clause.
     must.push(
       opts.typoFuzzy
-        ? buildTypoFuzzyClause(trimmed, PUBLICATION_TYPO_FALLBACK_FIELDS)
+        ? buildTypoFuzzyClause(trimmed, typoFallbackFields("publications", opts.typoFuzzy))
         : demoteGeneric
         ? demoteScoringClause({
             contentQuery,
@@ -5513,7 +5515,8 @@ async function searchPublicationsCore(opts: {
                   { match: { title: highlightSignificantQuery } },
                   // #2215 — on the typo-fallback retry the title matched a
                   // similar spelling, which the exact clauses above never mark.
-                  ...(opts.typoFuzzy
+                  // Names-only mode never admits on title, so it marks nothing here.
+                  ...(opts.typoFuzzy === "on"
                     ? [{ match: { title: { query: trimmed, ...TYPO_FUZZY_PARAMS } } }]
                     : []),
                   // #1351 — also mark the RESOLVED concept term, so a title that

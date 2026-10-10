@@ -19,7 +19,9 @@ import {
   buildTypoFuzzyClause,
   isTypoFallbackEligible,
   PEOPLE_TYPO_FALLBACK_FIELDS,
+  PEOPLE_TYPO_NAME_FIELDS,
   PUBLICATION_TYPO_FALLBACK_FIELDS,
+  PUBLICATION_TYPO_NAME_FIELDS,
   TYPO_FUZZY_PARAMS,
   withTypoFallback,
 } from "@/lib/api/search-typo-fallback";
@@ -117,14 +119,18 @@ function multiMatches(node: unknown, out: Record<string, unknown>[] = []): Recor
 }
 
 describe("resolveSearchTypoFallback", () => {
-  it("is off unless the env is exactly 'on'", () => {
+  it("is off unless the env is exactly 'on' or 'names'", () => {
     expect(resolveSearchTypoFallback()).toBe(false);
     process.env.SEARCH_TYPO_FALLBACK = "off";
     expect(resolveSearchTypoFallback()).toBe(false);
     process.env.SEARCH_TYPO_FALLBACK = "ON";
     expect(resolveSearchTypoFallback()).toBe(false);
+    process.env.SEARCH_TYPO_FALLBACK = "Names";
+    expect(resolveSearchTypoFallback()).toBe(false);
     process.env.SEARCH_TYPO_FALLBACK = "on";
-    expect(resolveSearchTypoFallback()).toBe(true);
+    expect(resolveSearchTypoFallback()).toBe("on");
+    process.env.SEARCH_TYPO_FALLBACK = "names";
+    expect(resolveSearchTypoFallback()).toBe("names");
   });
 });
 
@@ -276,7 +282,7 @@ describe("searchPeople — #2215 fallback wiring", () => {
     await searchPeople({ q: "oncology", shape: "topic" });
     const off = structuredClone(capturedBodies);
     capturedBodies.length = 0;
-    const res = await searchPeople({ q: "oncology", shape: "topic", typoFallback: true });
+    const res = await searchPeople({ q: "oncology", shape: "topic", typoFallback: "on" });
     vi.useRealTimers();
     expect(capturedBodies).toEqual(off);
     expect(capturedBodies).toHaveLength(1);
@@ -285,7 +291,7 @@ describe("searchPeople — #2215 fallback wiring", () => {
 
   it("opt on + zero primary → fuzzy retry over the people name/title fields", async () => {
     const { searchPeople } = await import("@/lib/api/search");
-    const res = await searchPeople({ q: "Harrigton", shape: "name", typoFallback: true });
+    const res = await searchPeople({ q: "Harrigton", shape: "name", typoFallback: "on" });
     expect(capturedBodies).toHaveLength(2);
     expect(isFuzzy(capturedBodies[0])).toBe(false);
     const fuzzy = multiMatches(capturedBodies[1]).filter((m) => "fuzziness" in m);
@@ -304,12 +310,29 @@ describe("searchPeople — #2215 fallback wiring", () => {
     expect(res.typoFallback).toBe(true);
   });
 
+  it("names mode → the retry fuzzes person names only, never topical fields", async () => {
+    const { searchPeople } = await import("@/lib/api/search");
+    const res = await searchPeople({ q: "Topol", typoFallback: "names" });
+    expect(capturedBodies).toHaveLength(2);
+    const fuzzy = multiMatches(capturedBodies[1]).filter((m) => "fuzziness" in m);
+    expect(fuzzy).toEqual([
+      {
+        query: "Topol",
+        fields: [...PEOPLE_TYPO_NAME_FIELDS],
+        type: "best_fields",
+        operator: "and",
+        ...TYPO_FUZZY_PARAMS,
+      },
+    ]);
+    expect(res).toMatchObject({ typoFallback: true });
+  });
+
   it("count-only badge falls back with the list (same predicate)", async () => {
     const { searchPeople } = await import("@/lib/api/search");
     const res = await searchPeople({
       q: "oncolgy",
       shape: "topic",
-      typoFallback: true,
+      typoFallback: "on",
       countOnly: true,
     });
     expect(capturedBodies).toHaveLength(2);
@@ -322,7 +345,7 @@ describe("searchPeople — #2215 fallback wiring", () => {
     const { searchPeople } = await import("@/lib/api/search");
     await searchPeople({
       q: "oncolgy",
-      typoFallback: true,
+      typoFallback: "on",
       filters: { personType: ["full_time_faculty"], activity: ["has_grants"] },
     });
     expect(capturedBodies).toHaveLength(2);
@@ -334,11 +357,11 @@ describe("searchPeople — #2215 fallback wiring", () => {
 
   it("never falls back for a CWID-shaped query or a resolved MeSH concept", async () => {
     const { searchPeople } = await import("@/lib/api/search");
-    await searchPeople({ q: "abc2001", shape: "cwid", typoFallback: true, countOnly: true });
+    await searchPeople({ q: "abc2001", shape: "cwid", typoFallback: "on", countOnly: true });
     await searchPeople({
       q: "neoplasms",
       shape: "topic",
-      typoFallback: true,
+      typoFallback: "on",
       countOnly: true,
       meshDescendantUis: ["D009369"],
     });
@@ -348,7 +371,7 @@ describe("searchPeople — #2215 fallback wiring", () => {
   it("zero fuzzy result → the exact zero, unmarked", async () => {
     fuzzyTotal = 0;
     const { searchPeople } = await import("@/lib/api/search");
-    const res = await searchPeople({ q: "zzzqqqx", typoFallback: true, countOnly: true });
+    const res = await searchPeople({ q: "zzzqqqx", typoFallback: "on", countOnly: true });
     expect(capturedBodies).toHaveLength(2);
     expect(res.total).toBe(0);
     expect(res.typoFallback).toBeUndefined();
@@ -370,7 +393,7 @@ describe("searchPublications — #2215 fallback wiring", () => {
     await searchPublications({ q: "oncology", highlightMatches: true });
     const off = structuredClone(capturedBodies);
     capturedBodies.length = 0;
-    await searchPublications({ q: "oncology", highlightMatches: true, typoFallback: true });
+    await searchPublications({ q: "oncology", highlightMatches: true, typoFallback: "on" });
     expect(capturedBodies).toEqual(off);
   });
 
@@ -379,7 +402,7 @@ describe("searchPublications — #2215 fallback wiring", () => {
     const res = await searchPublications({
       q: "oncolgy",
       highlightMatches: true,
-      typoFallback: true,
+      typoFallback: "on",
     });
     expect(capturedBodies).toHaveLength(2);
     const fuzzy = multiMatches(capturedBodies[1]).filter((m) => "fuzziness" in m);
@@ -398,9 +421,30 @@ describe("searchPublications — #2215 fallback wiring", () => {
     expect(res).toMatchObject({ total: 3, typoFallback: true });
   });
 
+  it("names mode → the retry fuzzes author names only, with no fuzzy title highlight", async () => {
+    const { searchPublications } = await import("@/lib/api/search");
+    await searchPublications({ q: "harington", highlightMatches: true, typoFallback: "names" });
+    expect(capturedBodies).toHaveLength(2);
+    const fuzzy = multiMatches(capturedBodies[1]).filter((m) => "fuzziness" in m);
+    expect(fuzzy).toEqual([
+      {
+        query: "harington",
+        fields: [...PUBLICATION_TYPO_NAME_FIELDS],
+        type: "best_fields",
+        operator: "and",
+        ...TYPO_FUZZY_PARAMS,
+      },
+    ]);
+    const hl = (capturedBodies[1].highlight as { highlight_query: { bool: { should: unknown[] } } })
+      .highlight_query.bool.should;
+    expect(hl).not.toContainEqual({
+      match: { title: { query: "harington", ...TYPO_FUZZY_PARAMS } },
+    });
+  });
+
   it("count-only badge falls back too", async () => {
     const { searchPublications } = await import("@/lib/api/search");
-    const res = await searchPublications({ q: "oncolgy", typoFallback: true, countOnly: true });
+    const res = await searchPublications({ q: "oncolgy", typoFallback: "on", countOnly: true });
     expect(capturedBodies).toHaveLength(2);
     expect(res).toMatchObject({ total: 3, typoFallback: true });
   });
@@ -417,7 +461,7 @@ describe("searchPublications — #2215 fallback wiring", () => {
     } as unknown as MeshResolution;
     await searchPublications({
       q: "neoplasms",
-      typoFallback: true,
+      typoFallback: "on",
       countOnly: true,
       meshResolution: resolution,
     });
