@@ -3922,13 +3922,37 @@ async function searchPeopleCore(opts: {
           )
           .map((h) => h._source.cwid),
   );
-  const countsFor = (cwid: string) => {
+  // The lexical-half failures only: admitted on the concept tag alone (#726), and
+  // really carrying it. A scholar failing the TAG half (ETL min-evidence) stays
+  // withheld outright, as #1952 intends.
+  const tagOnlyAdmits = new Set<string>(
+    conceptUiSet.size === 0
+      ? []
+      : r.hits.hits
+          .filter(
+            (h) =>
+              !isLexicalAdmit(h) &&
+              (h._source.publicationMeshUi ?? []).some((ui) => conceptUiSet.has(ui)),
+          )
+          .map((h) => h._source.cwid),
+  );
+  type ReasonCounts = NonNullable<ReturnType<typeof reasonCounts.get>>;
+  const countsFor = (cwid: string): (ReasonCounts & { withheldTagged?: number }) | undefined => {
     const c = reasonCounts.get(cwid);
     // Zeroing the tagged count also drops `taggedLatest` — a year for a withheld
     // count would describe publications the card never claims. The mention side is
     // untouched.
+    // `withheldTagged` keeps the real count for the evidence builder, which shows it
+    // as a related-concept line rather than the strong `tagged` claim. Without it a
+    // synonym query (tylenol → Acetaminophen), whose hits are ALL mesh-only admits,
+    // left every card on "no specific match".
     return c && !conceptTagged.has(cwid)
-      ? { tagged: 0, mention: c.mention, mentionLatest: c.mentionLatest }
+      ? {
+          tagged: 0,
+          mention: c.mention,
+          mentionLatest: c.mentionLatest,
+          ...(tagOnlyAdmits.has(cwid) ? { withheldTagged: c.tagged } : {}),
+        }
       : c;
   };
   // Search reason-from-doc — serve the tagged count from `_source.meshSubtreeCounts`
@@ -4408,7 +4432,20 @@ async function searchPeopleCore(opts: {
         ...(counts.mentionLatest != null ? { latestYear: counts.mentionLatest } : {}),
         ...(reps?.mention && reps.mention.length > 0 ? { pubs: reps.mention } : {}),
       };
-    if (hasProvenance)
+    if (counts?.withheldTagged && provenanceParent.length > 0) {
+      // Mesh-only admit (#726 escalation) whose `tagged` the #1952 gate withheld:
+      // the tag IS why they are listed, so say so, worded as a related concept and
+      // carried on the `concept` strength so it never counts as a tagged magnitude.
+      const n = Math.min(counts.withheldTagged, pubCount);
+      pub.concept = {
+        text: `${n} of ${pubCount} publications tagged under related concept`,
+        term: provenanceParent,
+        ...(narrowerTerms && narrowerTerms.length > 0
+          ? { descendantTerms: narrowerTerms, alsoParent }
+          : {}),
+        ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
+      };
+    } else if (hasProvenance)
       pub.concept = {
         text: `via related concept`,
         term: provenanceParent,
