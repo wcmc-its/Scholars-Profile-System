@@ -90,6 +90,8 @@ function Callout({
 const WRG = "https://wrg.weill.cornell.edu";
 const AREA_BENCHMARK = "https://github.com/wcmc-its/ReciterAI/blob/main/docs/benchmark/README.md";
 const CARE_PLAN = "https://weill.cornell.edu/careplan";
+const AREA_CROSSWALK =
+  "https://github.com/wcmc-its/ReciterAI/blob/main/docs/benchmark/outputs/research-areas-reference-crosswalk-2026-10-10.csv";
 
 const MAIN_CLASS = [
   // One width for everything (#1903). The page used a hybrid width: prose
@@ -678,8 +680,12 @@ export default function DocsPage() {
           <a href={AREA_BENCHMARK} className={LINK}>
             full comparison
           </a>{" "}
-          covers the method, a row-by-row crosswalk, and the places where the map and these
-          references don&apos;t line up.
+          covers the method, a{" "}
+          <a href={AREA_CROSSWALK} className={LINK}>
+            row-by-row crosswalk
+          </a>{" "}
+          of every department, plan priority, and NIH category, and the places where the map and
+          these references don&apos;t line up.
         </p>
         <p>
           Each publication is then placed on that map. ReciterAI scores each paper against every
