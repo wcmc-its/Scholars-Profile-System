@@ -11,9 +11,10 @@
  * ETL step, cadence or route changes. "Occasional" = a hand-run export or
  * import with no schedule.
  *
- * The diagram (#1903) shows the page's thesis: sources, then the ReCiter and
- * ReciterAI computed layers, then Scholars, with corrections going back
- * upstream. Plain HTML/CSS rather than an SVG from scripts/diagrams (those are
+ * The diagram (#1903) shows the page's thesis in two parts: every non-publication
+ * source is copied into Scholars, which applies its own edits on top; then
+ * publications, which reach Scholars only through ReCiter and ReciterAI.
+ * Corrections go back upstream. Plain HTML/CSS rather than an SVG from scripts/diagrams (those are
  * fixed-palette, fixed-viewBox architecture drawings), so it reflows to a
  * single column on phones and takes its colours from theme tokens.
  *
@@ -58,16 +59,21 @@ const WCM: Source[] = [
 ];
 
 const EXT: Source[] = [
-  { name: "PubMed", data: "Publication records, retractions", cad: "nightly" },
   { name: "ORCID", data: "Suggested ORCID iDs, from public ORCID records that name WCM", cad: "weekly" },
-  { name: "Scopus", data: "Citation counts, papers not in PubMed", cad: "nightly" },
-  { name: "OpenAlex", data: "Papers not in PubMed", cad: "nightly" },
-  { name: "NIH iCite", data: "Citing papers", cad: "occasional" },
   { name: "NIH RePORTER", data: "Earlier NIH grants, abstracts, grant-linked papers", cad: "weekly" },
   { name: "NSF Awards", data: "NSF grant abstracts", cad: "weekly" },
   { name: "Gates Foundation", data: "Gates grant summaries", cad: "weekly" },
   { name: "ClinicalTrials.gov", data: "Trial details, status, whether results are posted; condition MeSH terms for search", cad: "weekly" },
   { name: "NLM MeSH", data: "Subject vocabulary for search", cad: "annual" },
+];
+
+// Publication sources reach Scholars only through ReCiter, so they are drawn
+// in their own diagram ("How publications reach your profile").
+const PUB: Source[] = [
+  { name: "PubMed", data: "Publication records, retractions", cad: "nightly" },
+  { name: "Scopus", data: "Citation counts, papers not in PubMed", cad: "nightly" },
+  { name: "OpenAlex", data: "Papers not in PubMed", cad: "nightly" },
+  { name: "NIH iCite", data: "Citing papers", cad: "occasional" },
 ];
 
 // Feed the Datasets section and the data-sharing dashboard via reciterdb.dataset_deposit
@@ -78,21 +84,14 @@ const DATA: Source[] = [
   { name: "DataCite", data: "Dataset titles, creators and publishers", cad: "occasional" },
 ];
 
-// The two in-house computed layers between the sources and Scholars (#1903):
-// ReCiter matches publication records to people; ReciterAI reads those papers.
-const LAYERS: [Source, Source] = [
-  { name: "ReCiter", data: "Which papers are yours, publication details, MeSH tags, citation counts, suggested ORCID iDs from your PubMed author records", cad: "nightly" },
-  { name: "ReciterAI", data: "Research areas, Impact, synopses, methods, core facilities, Spotlight", cad: "nightly" },
-];
-
 const CADENCES: Cadence[] = ["live", "nightly", "weekly", "annual", "occasional"];
 
 const SCHOLARS_EDITS = [
   "Overview",
+  "Selected highlights",
   "Positions and honors you add",
   "Mentees you add",
   "ORCID and profile links",
-  "Selected highlights",
   "Anything you hide",
   "Center rosters",
   "Custom URL",
@@ -418,85 +417,66 @@ function SourceGroup({
   );
 }
 
-/**
- * One arrow of the provenance diagram. `flow` (solid, ink) is data moving
- * downstream toward Scholars; `fix` (dashed, maroon) is a correction going
- * back upstream to the system that owns the record. Drawn in currentColor so
- * the tone follows the theme tokens; the SVG is decorative and the label (or
- * the surrounding text) carries the meaning.
- */
-function Arrow({
-  dir,
-  tone = "flow",
-  label,
-  className = "",
-}: {
-  dir: "down" | "up" | "right" | "left";
-  tone?: "flow" | "fix";
-  label?: string;
-  className?: string;
-}) {
-  const vertical = dir === "down" || dir === "up";
-  const path = {
-    down: "M6 1v24M1 19l5 6 5-6",
-    up: "M6 27V3M1 9l5-6 5 6",
-    right: "M1 6h30M25 1l6 5-6 5",
-    left: "M33 6H3M9 1 3 6l6 5",
-  }[dir];
+/** A decorative flow arrow; the label (or the surrounding text) carries the meaning. */
+function Arrow({ dir, label, className = "" }: { dir: "down" | "right"; label?: string; className?: string }) {
+  const down = dir === "down";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 text-xs ${
-        tone === "fix" ? "text-docs-accent" : "text-[var(--apollo-ink-2)]"
+      className={`inline-flex items-center gap-1.5 text-xs text-[var(--apollo-ink-2)] ${
+        down ? "" : "flex-col !gap-0.5 text-center"
       } ${className}`}
     >
       <svg
-        width={vertical ? 12 : 34}
-        height={vertical ? 28 : 12}
-        viewBox={vertical ? "0 0 12 28" : "0 0 34 12"}
+        width={down ? 12 : 16}
+        height={down ? 22 : 12}
+        viewBox={down ? "0 0 12 22" : "0 0 16 12"}
         className="shrink-0"
         aria-hidden="true"
       >
         <path
-          d={path}
+          d={down ? "M6 1v19M1.5 15.5 6 20l4.5-4.5" : "M1 6h13M10 1.5 14.5 6 10 10.5"}
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.6"
-          strokeDasharray={tone === "fix" ? "3 2.5" : undefined}
+          strokeWidth="1.5"
+          strokeLinecap="round"
         />
       </svg>
-      {label && <span>{label}</span>}
+      {label && <span className="leading-tight">{label}</span>}
     </span>
   );
 }
 
-/** The two columns of the lower half: computed layers (left) and Scholars (right). */
-const LANES = "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)] sm:gap-0";
+/** "Fix it where it comes from" rows: action on the left, route on the right. */
+function FixRow({ action, children }: { action: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-t border-[var(--apollo-border)] py-2.5 text-[13px] leading-snug sm:grid sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-4">
+      <span className="font-medium">{action}</span>
+      <span className="text-[var(--apollo-ink-2)]">{children}</span>
+    </div>
+  );
+}
 
-const FIX_ROUTES: { name: string; to: string; body: React.ReactNode }[] = [
-  {
-    name: "Not mine",
-    to: "ReCiter",
-    body: "Reject a wrong paper on your edit page or in Publication Manager. ReCiter learns from it and stops matching the paper to you.",
-  },
-  {
-    name: "Request a change",
-    to: "the office that owns the record",
-    body: "Titles, appointments, grants, education and the like are fixed by the office behind the source system.",
-  },
-  {
-    name: "Fix it yourself",
-    to: "at the source",
-    body: <>Your name, photo and email in the {WebDir}; your disclosures in the Weill Research Gateway.</>,
-  },
-];
+/** A box in the publications diagram. */
+function PubBox({ name, lead, body, scholars }: { name: string; lead?: string; body: string; scholars?: boolean }) {
+  return (
+    <div
+      className={`flex h-full flex-col gap-1.5 rounded-[10px] border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface)] p-3 ${
+        scholars ? "shadow-[inset_0_3px_0_var(--apollo-maroon)]" : ""
+      }`}
+    >
+      <span className="text-sm font-semibold">{name}</span>
+      {lead && <span className="text-xs">{lead}</span>}
+      <span className="text-xs text-[var(--apollo-ink-2)]">{body}</span>
+    </div>
+  );
+}
 
 export function SystemContext() {
   const [cad, setCad] = useState<Cadence | null>(null);
   const sources = [...WCM, ...EXT, ...DATA];
-  const all = [...sources, ...LAYERS];
   return (
     <figure
-      className="mt-6 flex flex-col gap-3.5"
+      className="mt-6 flex flex-col gap-3.5 rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] p-4 shadow-[var(--apollo-shadow-card)] sm:px-8 sm:pb-8 sm:pt-7"
       aria-labelledby="provenance-diagram-title"
       aria-describedby="provenance-diagram-caption"
     >
@@ -506,12 +486,14 @@ export function SystemContext() {
             <span id="provenance-diagram-title" className="text-lg font-semibold">
               How a profile is assembled
             </span>
-            <span className="text-sm tabular-nums text-[var(--apollo-ink-2)]">
-              {sources.length} sources, {LAYERS.length} computed layers
-            </span>
+            <span className="text-sm tabular-nums text-[var(--apollo-ink-2)]">{sources.length} sources</span>
           </div>
           <span className="text-sm text-[var(--apollo-ink-2)]">
-            All sources refresh nightly unless marked.
+            All sources refresh nightly unless marked. Publications are covered{" "}
+            <a href="#provenance-publications" className={LINK}>
+              below
+            </a>
+            .
           </span>
         </div>
         <div
@@ -534,119 +516,137 @@ export function SystemContext() {
             >
               {c}
               <span className="tabular-nums text-muted-foreground">
-                {all.filter((s) => s.cad === c).length}
+                {sources.filter((s) => s.cad === c).length}
               </span>
             </button>
           ))}
         </div>
       </div>
 
-      <div className="flex flex-col rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-page)] p-4 shadow-[var(--apollo-shadow-card)] sm:p-5">
-        {/* 1. Source systems */}
-        <div className="flex flex-col gap-4">
-          <SourceGroup label="WCM source systems" sources={WCM} cad={cad} />
-          <SourceGroup label="Outside sources" sources={EXT} cad={cad} />
-          <SourceGroup label="Data-sharing sources" sources={DATA} cad={cad} />
-        </div>
+      <div className="flex flex-col gap-4 rounded-xl border border-[var(--apollo-border)] bg-[var(--apollo-surface-2)] p-3 sm:p-4">
+        <SourceGroup label="WCM source systems" sources={WCM} cad={cad} />
+        <SourceGroup label="Outside sources" sources={EXT} cad={cad} />
+        <SourceGroup label="Data-sharing sources" sources={DATA} cad={cad} />
 
-        {/* Source → lanes: publications go through the computed layers, the
-            rest is copied as-is; corrections travel back up. */}
-        <div className={`${LANES} py-3`}>
-          <div className="flex justify-center">
-            <Arrow dir="down" label="Publication records" />
-          </div>
-          <div className="hidden sm:block" />
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
-            <Arrow dir="down" label="Everything else, as-is" />
-            <Arrow dir="up" tone="fix" label="Corrections" />
-          </div>
-        </div>
+        <Arrow dir="down" label="Copied in on each refresh" className="self-center" />
 
-        <div className={LANES}>
-          {/* 2. Computed layers */}
-          <div className="flex flex-col gap-1 rounded-[10px] border border-[var(--apollo-slate-tint-border)] bg-[var(--apollo-slate-tint)] p-3.5">
-            <span className="px-0.5 pb-1 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
-              Computed layers
-            </span>
-            <SourceCard s={LAYERS[0]} cad={cad} />
-            <div className="flex justify-center">
-              <Arrow dir="down" />
-            </div>
-            <SourceCard s={LAYERS[1]} cad={cad} />
-          </div>
-
-          <div className="flex items-center justify-center gap-4 sm:flex-col sm:gap-2">
-            {/* Phones stack the lanes, so the arrows turn vertical. */}
-            <span className="contents sm:hidden">
-              <Arrow dir="down" />
-              <Arrow dir="up" tone="fix" label="Not mine" />
-            </span>
-            <span className="hidden sm:contents">
-              <Arrow dir="right" />
-              <Arrow dir="left" tone="fix" />
-              <span className="text-xs text-docs-accent">Not mine</span>
+        <div className="flex flex-col gap-3 rounded-[10px] border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface)] p-4 shadow-[inset_0_3px_0_var(--apollo-maroon)]">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-base font-semibold">Scholars</span>
+            <span className="text-[13px] text-[var(--apollo-ink-2)]">
+              Publishes your profile: the imported data, with the edits below applied on top.
             </span>
           </div>
-
-          {/* 3. Scholars */}
-          <div className="flex flex-col rounded-[10px] border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface-2)] p-4 shadow-[inset_0_3px_0_var(--apollo-maroon)]">
-            <div className="flex flex-col items-center gap-1 py-1 text-center">
-              <span className="text-base font-semibold">Scholars</span>
-              <span className="text-[13px] text-[var(--apollo-ink-2)]">
-                Combines imported data with edits and publishes profiles
-              </span>
+          <div className="flex flex-col gap-2 rounded-lg border border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] px-3.5 py-3">
+            <span className="flex items-center gap-1.5 text-[13px] font-semibold text-[var(--apollo-green-foreground)]">
+              <PencilIcon />
+              Edits in Scholars
+            </span>
+            <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs min-[480px]:grid-cols-2 md:grid-cols-3">
+              {SCHOLARS_EDITS.map((e) => (
+                <span key={e}>{e}</span>
+              ))}
             </div>
-            <div className="flex h-[34px] items-center justify-center">
-              <Arrow dir="up" label="applied on top" />
-            </div>
-            <div className="flex flex-col gap-2 rounded-lg border border-[var(--apollo-border-strong)] bg-[var(--apollo-green-tint)] px-3.5 py-3">
-              <span className="flex items-center gap-1.5 text-sm font-medium">
-                <span className="text-[var(--apollo-green)]">
-                  <PencilIcon />
-                </span>
-                Edits in Scholars
-              </span>
-              <div className="grid grid-cols-1 gap-x-3 gap-y-1 text-xs min-[480px]:grid-cols-2 sm:grid-cols-1 lg:grid-cols-2">
-                {SCHOLARS_EDITS.map((e) => (
-                  <span key={e}>{e}</span>
-                ))}
-              </div>
-              <span className="border-t border-[var(--apollo-border-strong)] pt-1.5 text-xs text-[var(--apollo-ink-2)]">
-                Made by scholars, their editors, or unit curators. Kept separately, so imports never
-                overwrite them.
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Corrections, back upstream */}
-        <div className="mt-4 rounded-[10px] border border-dashed border-docs-accent bg-[var(--apollo-surface)] p-3.5">
-          <div className="flex items-center gap-2 pb-2">
-            <Arrow dir="up" tone="fix" />
-            <span className="text-[13px] font-semibold text-docs-accent">
-              Corrections go back upstream, not into Scholars
+            <span className="text-xs text-[var(--apollo-ink-2)]">
+              Made by scholars, their editors, or unit curators. Kept separately, so imports never
+              overwrite them.
             </span>
           </div>
-          <ul className="!m-0 grid !list-none grid-cols-1 gap-3 sm:grid-cols-3">
-            {FIX_ROUTES.map((r) => (
-              <li key={r.name} className="!m-0 flex flex-col gap-0.5">
-                <span className="text-sm font-medium">
-                  {r.name} <span className="font-normal text-[var(--apollo-ink-2)]">&rarr; {r.to}</span>
-                </span>
-                <span className="text-xs text-[var(--apollo-ink-2)]">{r.body}</span>
-              </li>
-            ))}
-          </ul>
         </div>
       </div>
+
+      <div className="flex flex-col gap-1 pt-1">
+        <span className="text-sm font-semibold">If something is wrong, fix it where it comes from</span>
+        <div>
+          <FixRow action="Request a change">
+            Goes to the office that owns the record. Titles, appointments, grants, education and the
+            like are fixed in the source system.
+          </FixRow>
+          <FixRow action="Fix it yourself">
+            At the source: your name, photo and email in the {WebDir}; your disclosures in the Weill
+            Research Gateway.
+          </FixRow>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-0.5 border-t border-[var(--apollo-border)] pt-5">
+        <span id="provenance-publications" className="scroll-mt-28 text-lg font-semibold lg:scroll-mt-20">
+          How publications reach your profile
+        </span>
+        <span className="text-sm text-[var(--apollo-ink-2)]">
+          ReCiter, the system of record for authorship, scores which papers are yours and sends them
+          to Scholars. ReciterAI reads those papers and adds what they are about.
+        </span>
+      </div>
+
+      {/* Phones: one column, top to bottom. sm+: sources | → | ReCiter over ReciterAI | → | Scholars. */}
+      <div className="grid grid-cols-1 justify-items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_22px_minmax(0,1.15fr)_52px_minmax(0,1fr)] sm:grid-rows-[auto_26px_auto] sm:gap-x-1.5 sm:gap-y-0">
+        <div className="flex flex-col gap-1.5 rounded-[10px] border border-[var(--apollo-border)] bg-[var(--apollo-surface-2)] p-2.5 sm:col-start-1 sm:row-span-3 sm:row-start-1">
+          <span className="text-xs uppercase tracking-wide text-[var(--apollo-ink-2)]">Sources</span>
+          {PUB.map((s) => (
+            <div key={s.name} className="flex flex-col">
+              <span className="flex items-center gap-2 text-xs font-medium">
+                {s.name}
+                <CadencePill cad={s.cad} />
+              </span>
+              <span className="text-xs text-[var(--apollo-ink-2)]">{s.data}</span>
+            </div>
+          ))}
+        </div>
+        <Arrow dir="down" className="justify-self-center sm:hidden" />
+        <div className="hidden items-center justify-center sm:flex sm:col-start-2 sm:row-start-1">
+          <Arrow dir="right" />
+        </div>
+        <div className="sm:col-start-3 sm:row-start-1">
+          <PubBox
+            name="ReCiter"
+            lead="System of record for authorship."
+            body="Ingests records from these sources and scores how likely each paper is yours. Also supplies publication details, MeSH tags, citation counts and suggested ORCID iDs."
+          />
+        </div>
+        <div className="hidden items-center justify-center sm:flex sm:col-start-4 sm:row-start-1">
+          <Arrow dir="right" label="Your papers" />
+        </div>
+        <Arrow dir="down" className="justify-self-center sm:col-start-3 sm:row-start-2 sm:self-center" />
+        <div className="sm:col-start-3 sm:row-start-3">
+          <PubBox
+            name="ReciterAI"
+            lead="Works out what they are about."
+            body="Research areas, Impact, synopses, methods, core facilities, Spotlight."
+          />
+        </div>
+        <Arrow dir="down" label="Your papers, with areas, Impact and synopses" className="justify-self-center sm:hidden" />
+        <div className="hidden items-center justify-center sm:flex sm:col-start-4 sm:row-start-3">
+          <Arrow dir="right" label="Areas, Impact, synopses" />
+        </div>
+        <div className="sm:col-start-5 sm:row-span-3 sm:row-start-1">
+          <PubBox
+            name="Scholars"
+            body="Shows your papers with what ReciterAI adds, plus your Selected highlights and anything you hide."
+            scholars
+          />
+        </div>
+      </div>
+
+      <div className="border-b border-[var(--apollo-border)]">
+        <FixRow action="Not mine → ReCiter">
+          Reject a wrong paper on your edit page or in{" "}
+          <a href={PM} className={LINK}>
+            Publication Manager
+          </a>
+          . ReCiter learns from it and stops matching the paper to you. A missing paper is added
+          there too.
+        </FixRow>
+      </div>
+
       <figcaption id="provenance-diagram-caption" className="text-xs text-[var(--apollo-ink-2)]">
-        Source systems feed Scholars on a schedule. Publication records pass through two computed
-        layers first: ReCiter decides which papers are yours, and ReciterAI works out what they are
-        about. Scholars applies the edits made in Scholars itself and publishes the result.
-        Corrections go back to the system that owns the record, because the next refresh would
-        overwrite a fix made to the copy. Photos are shown live from the Web Directory rather than
-        copied, so a changed photo appears right away and a new one within about a day.
-        &ldquo;Occasional&rdquo; means someone runs an export by hand, with no schedule.
+        Source systems feed Scholars on a schedule, and Scholars applies the edits made in Scholars
+        itself on top. Publications take a separate path: ReCiter decides which papers are yours, and
+        ReciterAI works out what they are about. Corrections go back to the system that owns the
+        record, because the next refresh would overwrite a fix made to the copy. Photos are shown
+        live from the Web Directory rather than copied, so a changed photo appears right away and a
+        new one within about a day. &ldquo;Occasional&rdquo; means someone runs an export by hand,
+        with no schedule.
       </figcaption>
     </figure>
   );
