@@ -147,6 +147,7 @@ vi.mock("@/lib/search", () => ({
 
 import { searchPeople, methodIndexedPubCounts } from "@/lib/api/search";
 import { familyOverlayKey, type FamilyOverlayGate } from "@/lib/api/methods-overlay";
+import { taggedPubCount } from "@/lib/api/result-evidence";
 
 const TOPIC_ROWS = [
   { id: "single_cell_spatial_biology", label: "Single-cell & spatial biology" },
@@ -367,6 +368,13 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
     expect(ev?.kind === "publications" && ev.strength === "tagged").toBe(false);
   });
 
+  it("descriptor NOT in publicationMeshUi ⇒ no related-concept count either", async () => {
+    mockReasonAgg.mockReturnValue(taggedBucket);
+    const result = await run();
+    const lines = result.hits[0].evidenceLines ?? [];
+    expect(lines.some((e) => e?.kind === "publications" && /tagged under/.test(e.text))).toBe(false);
+  });
+
   it("descriptor IS in publicationMeshUi ⇒ the tagged count survives", async () => {
     mockReasonAgg.mockReturnValue(taggedBucket);
     source.publicationMeshUi = [CONCEPT_UI];
@@ -438,6 +446,24 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
       source.publicationMeshUi = [CONCEPT_UI]; // carries the tag — passes the tag half
       hit.matched_queries = ["meshAdmit"]; // …but matched no lexical clause
       expect(taggedSurvives(await runEscalated())).toBe(false);
+    });
+
+    // The synonym case (tylenol → Acetaminophen): every hit is a mesh-only admit, so
+    // withholding with nothing in its place left every card on "no specific match".
+    // The count comes back as the weaker `concept` strength, worded as a related
+    // concept, so it never reads as (or counts as) a tagged magnitude.
+    it("mesh-ONLY admit ⇒ the count returns as a related-concept line, not `tagged`", async () => {
+      mockReasonAgg.mockReturnValue(taggedBucket);
+      source.publicationMeshUi = [CONCEPT_UI];
+      hit.matched_queries = ["meshAdmit"];
+      const lines = (await runEscalated()).hits[0].evidenceLines ?? [];
+      expect(lines.find((e) => e?.kind === "publications")).toMatchObject({
+        kind: "publications",
+        strength: "concept",
+        text: "1 of 200 publications tagged under related concept",
+        term: "Gun Violence",
+      });
+      expect(taggedPubCount(lines)).toBeUndefined();
     });
 
     it("lexical admit that also carries the tag ⇒ the tagged count survives", async () => {

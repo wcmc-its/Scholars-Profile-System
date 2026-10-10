@@ -483,7 +483,7 @@ export type SelectEvidenceInput = {
       latestYear?: number;
       pubs?: EvidencePub[];
     };
-    concept?: { text: string; term?: string; descendantTerms?: string[]; alsoParent?: boolean };
+    concept?: { text: string; term?: string; descendantTerms?: string[]; alsoParent?: boolean; pubs?: EvidencePub[] };
   };
   /** Resolved clinical specialty — exact tier only. Caller ran
    *  {@link clinicalExactMatch} against the hit's `_source` clinical fields; pass
@@ -726,6 +726,7 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
             alsoParent: input.pub.concept.alsoParent === true,
           }
         : {}),
+      ...(input.pub.concept.pubs && input.pub.concept.pubs.length > 0 ? { pubs: input.pub.concept.pubs } : {}),
     };
   // 6 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
   // FULL-query / single-token bio match still wins, as today). A query-literal
