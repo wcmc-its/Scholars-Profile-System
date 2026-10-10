@@ -155,7 +155,7 @@ const CASES: Record<
     value: "on",
     read: resolveSearchTypoFallback,
     dflt: false,
-    overridden: true,
+    overridden: "on",
   },
 };
 

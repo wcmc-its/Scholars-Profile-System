@@ -2365,12 +2365,15 @@ export class AppStack extends Stack {
         //   play) is re-run once with a `fuzziness: AUTO` best_fields clause over name /
         //   title fields, and the page says "No exact matches for X -- showing results
         //   with similar spellings". Fires ONLY on total=0, so every query that returns
-        //   results today is byte-identical. resolveSearchTypoFallback reads === "on".
+        //   results today is byte-identical. "on" = full field set; "names" = fuzzy on
+        //   person names only (People name fields, Publications authorNames).
         //   Query-time, no reindex. DARK everywhere -- flip staging first and eval the
         //   typo set (oncolgy / cardiolgy / Harrigton) + a no-false-rescue set, then prod.
         //   Staging on 2026-10-09; prod held off: the staging eval found false rescues
-        //   on non-WCM names (Topol 713, Gawande 380, Fauci 7). Tighten, re-eval, then prod.
-        SEARCH_TYPO_FALLBACK: env === "staging" ? "on" : "off",
+        //   on non-WCM names (Topol 713, Gawande 380, Fauci 7) via the topical fields.
+        //   Prod runs "names" (surname rescue, no topical false rescues; typo'd topics
+        //   stay a zero) until the topical side is tightened and re-evaluated.
+        SEARCH_TYPO_FALLBACK: env === "staging" ? "on" : "names",
         // #1345 -- full-time-faculty prominence lever. "off" drops the #513 flat +1.0
         //   full_time_faculty prominence term (the expertise-independent employment
         //   prior) so genuine affiliated/clinical subspecialty experts aren't buried.

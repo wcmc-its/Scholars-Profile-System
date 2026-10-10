@@ -73,6 +73,20 @@ export const PEOPLE_TYPO_FALLBACK_FIELDS: readonly string[] = [
 ];
 
 /**
+ * `SEARCH_TYPO_FALLBACK=names` — the narrow mode prod runs: fuzzy matching on
+ * person NAMES only. The full field set (`=on`) also fuzzes the pub-derived
+ * topical fields, where a short non-WCM surname lands on unrelated words
+ * (`Topol` → 713 unrelated people, `Gawande` → 381, staging eval after #3045).
+ * Names-only keeps the surname rescue (`harington` → the Harringtons) and gives
+ * those queries back their honest zero; typo'd topics (`oncolgy`) stay a zero
+ * in this mode until the topical side is tightened.
+ */
+export type TypoFallbackMode = "on" | "names";
+
+export const PEOPLE_TYPO_NAME_FIELDS: readonly string[] = ["preferredName^10", "fullName^10"];
+export const PUBLICATION_TYPO_NAME_FIELDS: readonly string[] = ["authorNames^2"];
+
+/**
  * Publications-index fields the fallback matches on — the
  * `PUBLICATION_FIELD_BOOSTS` set minus `abstract` (long prose; fuzzy expansion
  * there admits off-topic papers by an incidental near-miss word). Keyword ids
@@ -84,6 +98,17 @@ export const PUBLICATION_TYPO_FALLBACK_FIELDS: readonly string[] = [
   "authorNames^2",
   "journal^1",
 ];
+
+/** The fields a fallback retry fuzzes for this corpus and mode. */
+export function typoFallbackFields(
+  corpus: "people" | "publications",
+  mode: TypoFallbackMode,
+): readonly string[] {
+  if (corpus === "people") {
+    return mode === "names" ? PEOPLE_TYPO_NAME_FIELDS : PEOPLE_TYPO_FALLBACK_FIELDS;
+  }
+  return mode === "names" ? PUBLICATION_TYPO_NAME_FIELDS : PUBLICATION_TYPO_FALLBACK_FIELDS;
+}
 
 /**
  * The fuzzy admission clause. `best_fields` (the multi_match type that supports
