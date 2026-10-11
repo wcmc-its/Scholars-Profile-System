@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDownIcon } from "lucide-react";
 
@@ -163,5 +163,48 @@ export function DocsMobileNav({ nav }: { nav: NavGroup[] }) {
         </PopoverContent>
       </Popover>
     </div>
+  );
+}
+
+/**
+ * Below lg, a sticky horizontal tab row (scrolls sideways when it overflows),
+ * underlining the section in view. Used by /about/research-areas, whose six
+ * sections fit a row; /about's long grouped list keeps DocsMobileNav.
+ * Link-out items (`href`) are skipped.
+ */
+export function DocsTabNav({ nav }: { nav: NavGroup[] }) {
+  const active = useActiveSection(nav);
+  const items = nav.flatMap((g) => g.items).filter((i) => !i.href);
+  const current = active || items[0]?.id;
+  const ref = useRef<HTMLElement>(null);
+  // Keep the active tab visible when the row overflows sideways.
+  useEffect(() => {
+    ref.current
+      ?.querySelector<HTMLElement>("[aria-current]")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [current]);
+
+  return (
+    <nav
+      ref={ref}
+      aria-label="On this page"
+      className="sticky top-[60px] z-30 -mx-6 flex gap-5 overflow-x-auto border-b border-border bg-[var(--apollo-page)]/95 px-6 text-sm backdrop-blur lg:hidden"
+    >
+      {items.map((it) => (
+        <Link
+          key={it.id}
+          href={`#${it.id}`}
+          aria-current={it.id === current ? "location" : undefined}
+          className={
+            "flex-none border-b-2 py-2.5 whitespace-nowrap " +
+            (it.id === current
+              ? "border-docs-accent font-semibold text-docs-accent"
+              : "border-transparent text-muted-foreground hover:text-docs-accent")
+          }
+        >
+          {it.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
