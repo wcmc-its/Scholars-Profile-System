@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
 import { FieldTable, SystemContext } from "@/components/docs/data-provenance";
+import { LATEST, loadSnapshot } from "@/lib/benchmark";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -88,10 +89,7 @@ function Callout({
 }
 
 const WRG = "https://wrg.weill.cornell.edu";
-const AREA_BENCHMARK = "https://github.com/wcmc-its/ReciterAI/blob/main/docs/benchmark/README.md";
 const CARE_PLAN = "https://weill.cornell.edu/careplan";
-const AREA_CROSSWALK =
-  "https://github.com/wcmc-its/ReciterAI/blob/main/docs/benchmark/outputs/research-areas-reference-crosswalk-2026-10-10.csv";
 
 const MAIN_CLASS = [
   // One width for everything (#1903). The page used a hybrid width: prose
@@ -118,7 +116,16 @@ const MAIN_CLASS = [
   "[&_tbody_td:first-child]:font-medium [&_tbody_td:first-child]:text-foreground",
 ].join(" ");
 
-export default function DocsPage() {
+export default async function DocsPage() {
+  // Research-area benchmark numbers come from the latest imported snapshot, so
+  // an import updates this paragraph with no code change.
+  const bench = (await loadSnapshot(LATEST.date))!;
+  const bh = bench.headline;
+  const benchMonth = new Date(`${bench.snapshot_date}T12:00:00`).toLocaleString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
   return (
     <div className="mx-auto max-w-6xl px-6 lg:grid lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-12">
       <DocsMobileNav nav={NAV} />
@@ -668,24 +675,25 @@ export default function DocsPage() {
           research-area to subarea hierarchy.
         </p>
         <p>
-          As an independent check, we compared that map with three outside reference points. As of
-          October 2026, 62 of 67 research areas are concentrated in a recognizable Weill Cornell
-          department or division. 58 areas match one of NIH&apos;s research, condition, and disease
-          categories, and together the areas cover 308 of NIH&apos;s 331 categories. Each of the 13
+          As an independent check, we compared that map with three outside reference points. As of{" "}
+          {benchMonth}, {bh.A.areas_with_home} of {bh.A.areas_total} research areas are concentrated in a
+          recognizable Weill Cornell department or division. {bh.C2.areas_matched} areas match one of
+          NIH&apos;s research, condition, and disease categories, and together the areas cover{" "}
+          {bh.C2.categories_matched} of NIH&apos;s {bh.C2.categories_total} categories.{" "}
+          {bh.B.items_matched === bh.B.items_in_scope
+            ? `Each of the ${bh.B.items_in_scope}`
+            : `${bh.B.items_matched} of the ${bh.B.items_in_scope}`}{" "}
           scientific priorities named in Weill Cornell&apos;s{" "}
           <a href={CARE_PLAN} className={LINK}>
             CARE Strategic Plan
           </a>{" "}
-          corresponds to at least one area. The{" "}
-          <a href={AREA_BENCHMARK} className={LINK}>
+          {bh.B.items_matched === bh.B.items_in_scope ? "corresponds" : "correspond"} to at least one
+          area. The{" "}
+          <Link href="/about/research-areas" className={LINK}>
             full comparison
-          </a>{" "}
-          covers the method, a{" "}
-          <a href={AREA_CROSSWALK} className={LINK}>
-            row-by-row crosswalk
-          </a>{" "}
-          of every department, plan priority, and NIH category, and the places where the map and
-          these references don&apos;t line up.
+          </Link>{" "}
+          lets you look up any department, plan priority, NIH category, or research area, and lists
+          the places where the map and these references don&apos;t line up.
         </p>
         <p>
           Each publication is then placed on that map. ReciterAI scores each paper against every
