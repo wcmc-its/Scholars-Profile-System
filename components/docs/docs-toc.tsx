@@ -9,6 +9,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 interface NavItem {
   id: string;
   label: string;
+  /** Link elsewhere instead of to `#id` (not scroll-spied). */
+  href?: string;
+  /** Indented, smaller child of the item above it. */
+  sub?: boolean;
 }
 export interface NavGroup {
   group: string;
@@ -50,7 +54,7 @@ function useActiveSection(nav: NavGroup[]): string {
 // Shared link styling so the desktop sidebar and the mobile menu render the
 // active / inactive states identically.
 const ITEM_BASE = "block rounded-r border-l-2 px-2.5 py-1 ";
-const ITEM_ACTIVE = "border-docs-accent bg-docs-tint font-semibold text-docs-accent";
+const ITEM_ACTIVE = "border-docs-accent bg-[var(--apollo-surface)] font-semibold text-docs-accent";
 const ITEM_INACTIVE = "border-transparent text-muted-foreground hover:text-docs-accent";
 
 function NavLinks({
@@ -76,10 +80,12 @@ function NavLinks({
             return (
               <Link
                 key={it.id}
-                href={`#${it.id}`}
+                href={it.href ?? `#${it.id}`}
                 aria-current={isActive ? "location" : undefined}
                 onClick={onSelect}
-                className={ITEM_BASE + (isActive ? ITEM_ACTIVE : ITEM_INACTIVE)}
+                className={[ITEM_BASE, it.sub && "pl-6 text-[13px]", isActive ? ITEM_ACTIVE : ITEM_INACTIVE]
+                  .filter(Boolean)
+                  .join(" ")}
               >
                 {it.label}
               </Link>
@@ -122,7 +128,7 @@ export function DocsMobileNav({ nav }: { nav: NavGroup[] }) {
   const active = useActiveSection(nav);
   const [open, setOpen] = useState(false);
 
-  const items = nav.flatMap((g) => g.items);
+  const items = nav.flatMap((g) => g.items).filter((i) => !i.href);
   // Before the first intersection (top of page) `active` is "" — fall back to
   // the first section so the bar always names a real section.
   const activeLabel = items.find((i) => i.id === active)?.label ?? items[0]?.label ?? "Sections";

@@ -47,6 +47,12 @@ const NAV: NavGroup[] = [
       { id: "control", label: "What you control" },
       { id: "roles", label: "Roles & who can edit" },
       { id: "research-areas", label: "Research areas" },
+      {
+        id: "research-areas-compared",
+        label: "Research areas compared ↗",
+        href: "/about/research-areas",
+        sub: true,
+      },
       { id: "methods", label: "Methods & tools" },
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
@@ -73,12 +79,19 @@ function Callout({
   heading: string;
   children: React.ReactNode;
 }) {
+  if (variant === "key")
+    return (
+      <div className="mt-5 rounded-[var(--apollo-radius-card)] border border-l-4 border-[var(--apollo-border)] border-l-[var(--apollo-maroon)] bg-[var(--apollo-surface)] px-6 py-5 shadow-[var(--apollo-shadow-card)]">
+        <div className="mb-1 text-xs font-semibold tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">
+          {heading}
+        </div>
+        {children}
+      </div>
+    );
   const box =
-    variant === "key"
-      ? "border-docs-rule bg-docs-tint"
-      : variant === "warn"
-        ? "border-docs-warn-border bg-docs-warn-bg"
-        : "border-docs-note-border bg-docs-note-bg";
+    variant === "warn"
+      ? "border-docs-warn-border bg-docs-warn-bg"
+      : "border-docs-note-border bg-docs-note-bg";
   const head = variant === "warn" ? "text-docs-warn-text" : "text-docs-accent";
   return (
     <div className={`mt-5 rounded-[10px] border p-4 ${box}`}>
@@ -108,6 +121,8 @@ const MAIN_CLASS = [
   // at lg the bar is gone and the original 80px (matching the sidebar's
   // lg:top-20) applies.
   "[&_h2]:mt-14 [&_h2]:scroll-mt-28 lg:[&_h2]:scroll-mt-20 [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-tight",
+  // Short maroon rule under every section heading.
+  "[&_h2]:after:mt-2 [&_h2]:after:block [&_h2]:after:h-[3px] [&_h2]:after:w-10 [&_h2]:after:bg-[var(--apollo-maroon)] [&_h2]:after:content-['']",
   "[&_h3]:mt-7 [&_h3]:text-lg [&_h3]:font-semibold",
   "[&_table]:w-full [&_table]:border-collapse [&_table]:text-[15px]",
   "[&_th]:border-b-2 [&_th]:border-docs-rule [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:align-top [&_th]:text-[13px] [&_th]:font-semibold [&_th]:text-[var(--apollo-ink-2)]",
@@ -127,6 +142,7 @@ export default async function DocsPage() {
     timeZone: "UTC",
   });
   return (
+    <div className="bg-[var(--apollo-page)]">
     <div className="mx-auto max-w-6xl px-6 lg:grid lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-12">
       <DocsMobileNav nav={NAV} />
       <DocsToc nav={NAV} />
@@ -201,15 +217,8 @@ export default async function DocsPage() {
           most active faculty in an area.
         </p>
 
-        {/* Top-level section directly under the page h1, semantically an h2
-            (clears the heading-order skip). Pinned to the smaller 18px/spacing
-            of the page's h3 scale so the visual teaser hierarchy is unchanged;
-            MAIN_CLASS sizes bare `h2` via a `[&_h2]` descendant variant whose
-            class+element specificity beats plain utilities, hence the `!`. */}
-        <h2 className="!mt-7 !text-lg !font-semibold !tracking-normal">
-          Common questions
-        </h2>
-        <div className="mt-3 overflow-hidden rounded-[10px] border border-border bg-docs-card">
+        <h2 className="!mt-10">Common questions</h2>
+        <div className="mt-4 overflow-hidden rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] shadow-[var(--apollo-shadow-card)]">
           {[
             {
               href: "#scholar",
@@ -245,9 +254,11 @@ export default async function DocsPage() {
             <Link
               key={item.href}
               href={item.href}
-              className="block border-t border-border px-4 py-2.5 first:border-t-0 hover:bg-docs-tint"
+              className="group block border-t border-[var(--apollo-border)] px-5 py-3.5 first:border-t-0 hover:bg-[var(--apollo-surface-2)]"
             >
-              <span className="font-medium text-docs-accent">{item.q}</span>
+              <span className="font-semibold text-[var(--apollo-ink)] group-hover:text-[var(--apollo-maroon)]">
+                {item.q}
+              </span>
               <span className="mt-0.5 block text-sm text-[var(--apollo-ink-2)]">{item.a}</span>
             </Link>
           ))}
@@ -272,9 +283,9 @@ export default async function DocsPage() {
             <Link
               key={c.href}
               href={c.href}
-              className="rounded-[10px] border border-border p-4 no-underline hover:border-docs-accent"
+              className="rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] px-5 py-[18px] no-underline shadow-[var(--apollo-shadow-card)] hover:border-[var(--apollo-border-strong)] hover:shadow-[0_2px_8px_rgba(34,30,28,.08)]"
             >
-              <span className="block font-medium text-docs-accent">{c.t}</span>
+              <span className="block text-[17px] font-semibold text-[var(--apollo-maroon)]">{c.t}</span>
               <span className="mt-1 block text-sm text-[var(--apollo-ink-2)]">{c.d}</span>
             </Link>
           ))}
@@ -1259,6 +1270,7 @@ export default async function DocsPage() {
           ))}
         </dl>
       </main>
+    </div>
     </div>
   );
 }
