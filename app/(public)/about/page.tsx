@@ -82,7 +82,7 @@ function Callout({
   if (variant === "key")
     return (
       <div className="mt-5 rounded-[var(--apollo-radius-card)] border border-l-4 border-[var(--apollo-border)] border-l-[var(--apollo-maroon)] bg-[var(--apollo-surface)] px-6 py-5 shadow-[var(--apollo-shadow-card)]">
-        <div className="mb-1 text-xs font-semibold tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">
+        <div className="mb-1 text-xs font-[600] tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">
           {heading}
         </div>
         {children}
@@ -120,10 +120,10 @@ const MAIN_CLASS = [
   // under the 60px header, so headings need extra scroll-margin to clear it;
   // at lg the bar is gone and the original 80px (matching the sidebar's
   // lg:top-20) applies.
-  "[&_h2]:mt-14 [&_h2]:scroll-mt-28 lg:[&_h2]:scroll-mt-20 [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-tight",
+  "[&_h2]:mt-14 [&_h2]:scroll-mt-28 lg:[&_h2]:scroll-mt-20 [&_h2]:text-2xl [&_h2]:font-[600] [&_h2]:tracking-tight",
   // Short maroon rule under every section heading.
   "[&_h2]:after:mt-2 [&_h2]:after:block [&_h2]:after:h-[3px] [&_h2]:after:w-10 [&_h2]:after:bg-[var(--apollo-maroon)] [&_h2]:after:content-['']",
-  "[&_h3]:mt-7 [&_h3]:text-lg [&_h3]:font-semibold",
+  "[&_h3]:mt-7 [&_h3]:text-lg [&_h3]:font-[600]",
   "[&_table]:w-full [&_table]:border-collapse [&_table]:text-[15px]",
   "[&_th]:border-b-2 [&_th]:border-docs-rule [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:align-top [&_th]:text-[13px] [&_th]:font-semibold [&_th]:text-[var(--apollo-ink-2)]",
   "[&_td]:border-b [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top",
@@ -256,7 +256,7 @@ export default async function DocsPage() {
               href={item.href}
               className="group block border-t border-[var(--apollo-border)] px-5 py-3.5 first:border-t-0 hover:bg-[var(--apollo-surface-2)]"
             >
-              <span className="font-semibold text-[var(--apollo-ink)] group-hover:text-[var(--apollo-maroon)]">
+              <span className="font-[600] text-[var(--apollo-ink)] group-hover:text-[var(--apollo-maroon)]">
                 {item.q}
               </span>
               <span className="mt-0.5 block text-sm text-[var(--apollo-ink-2)]">{item.a}</span>
@@ -264,7 +264,7 @@ export default async function DocsPage() {
           ))}
         </div>
 
-        <p className="!mt-14 text-xs font-semibold tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">Part 1 · By stakeholder</p>
+        <p className="!mt-14 text-xs font-[600] tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">Part 1 · By stakeholder</p>
         <h2 id="who" className="!mt-2">
           Which of these are you?
         </h2>
@@ -284,7 +284,7 @@ export default async function DocsPage() {
               href={c.href}
               className="rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] px-5 py-[18px] no-underline shadow-[var(--apollo-shadow-card)] hover:border-[var(--apollo-border-strong)] hover:shadow-[0_2px_8px_rgba(34,30,28,.08)]"
             >
-              <span className="block text-[17px] font-semibold text-[var(--apollo-maroon)]">{c.t}</span>
+              <span className="block text-[17px] font-[600] text-[var(--apollo-maroon)]">{c.t}</span>
               <span className="mt-1 block text-sm text-[var(--apollo-ink-2)]">{c.d}</span>
             </Link>
           ))}
@@ -476,7 +476,7 @@ export default async function DocsPage() {
           as any scholar. You route those. You do not own them.
         </p>
 
-        <p className="!mt-14 text-xs font-semibold tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">Part 2 · Shared reference</p>
+        <p className="!mt-14 text-xs font-[600] tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">Part 2 · Shared reference</p>
 
         <h2 id="provenance" className="!mt-2">
           Where your data comes from

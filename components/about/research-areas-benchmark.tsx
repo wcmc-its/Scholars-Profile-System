@@ -243,7 +243,7 @@ function Pill({
 }) {
   return (
     <span
-      className={`inline-block rounded-full border px-[9px] py-0.5 text-xs leading-snug ${soft ? "font-medium" : "font-semibold whitespace-nowrap"}`}
+      className={`inline-block rounded-full border px-[9px] py-0.5 text-xs leading-snug ${soft ? "font-medium" : "font-[600] whitespace-nowrap"}`}
       style={{ color: tone.ink, background: tone.fill, borderColor: tone.border }}
     >
       {children}
@@ -353,14 +353,14 @@ function scrollToId(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-const H2 = "text-[22px] font-semibold";
+const H2 = "text-[22px] font-[600]";
 const RULE = <div aria-hidden className="h-[3px] w-10 bg-[var(--apollo-maroon)]" />;
 const LEAD = "max-w-[720px] text-[15px] leading-relaxed text-[var(--apollo-ink-2)]";
 const CARD =
   "rounded-[var(--apollo-radius-card)] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] shadow-[var(--apollo-shadow-card)]";
 const TH =
-  "px-3.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-[var(--apollo-ink-2)]";
-const H4 = "text-[13px] font-semibold uppercase tracking-wider text-[var(--apollo-ink-2)]";
+  "px-3.5 py-2.5 text-left text-xs font-[600] uppercase tracking-wider text-[var(--apollo-ink-2)]";
+const H4 = "text-[13px] font-[600] uppercase tracking-wider text-[var(--apollo-ink-2)]";
 const REVIEW = (
   <span className="border-b border-dashed border-[var(--apollo-amber)] text-xs text-[var(--apollo-amber)]">
     added on review
@@ -371,13 +371,16 @@ function MaybeLink({
   href,
   children,
   className,
+  plain,
 }: {
   href?: string;
   children: React.ReactNode;
   className?: string;
+  /** Opt out of the page's slate link style (heatmap labels, chips). */
+  plain?: boolean;
 }) {
   return href ? (
-    <a href={href} className={className}>
+    <a href={href} className={className} data-plain={plain || undefined}>
       {children}
     </a>
   ) : (
@@ -746,7 +749,7 @@ export function ResearchAreasBenchmark({
           name: "No scored papers",
           kind: "Corpus coverage",
           tone: KIND.neutral,
-          why: "No active scholar with a primary appointment here has a first- or last-author article from 2020 on in the scored corpus.",
+          why: "No active scholar with a primary appointment here has a first- or last-author article from 2020 on in the scored corpus. Matching areas exist (for example Musculoskeletal & Orthopedic Medicine, Women’s Health & Reproductive Medicine).",
           items: unitsNo.filter((u) => u.status !== "low_volume").map(uItem),
         },
       ],
@@ -862,10 +865,17 @@ export function ResearchAreasBenchmark({
 
   return (
     <div className="bg-[var(--apollo-page)]">
-      <div className="mx-auto max-w-6xl px-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-12">
+      <div className="mx-auto max-w-[1240px] px-6 lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-12">
         <DocsTabNav nav={NAV} />
         <DocsToc nav={NAV} />
-        <main className="box-border flex min-w-0 flex-col gap-14 pt-8 pb-16 text-[var(--apollo-ink)]">
+        <main
+          className={[
+            "box-border flex min-w-0 flex-col gap-14 pt-8 pb-16 text-[var(--apollo-ink)]",
+            // Mockup link style: slate with a soft tinted underline, maroon on hover.
+            "[&_a:not([data-plain])]:text-[var(--apollo-slate)] [&_a:not([data-plain])]:underline [&_a:not([data-plain])]:decoration-[var(--apollo-slate-tint-border)] [&_a:not([data-plain])]:underline-offset-2",
+            "[&_a:not([data-plain]):hover]:text-[var(--apollo-maroon)] [&_a:not([data-plain]):hover]:decoration-current",
+          ].join(" ")}
+        >
           <section aria-label="Introduction" className="flex flex-col gap-4">
             <nav
               aria-label="Breadcrumb"
@@ -922,7 +932,7 @@ export function ResearchAreasBenchmark({
               <div className="flex min-w-[220px] flex-col gap-1.5">
                 <span
                   id="snap-label"
-                  className="text-muted-foreground text-xs font-semibold tracking-wider uppercase"
+                  className="text-muted-foreground text-xs font-[600] tracking-wider uppercase"
                 >
                   Snapshot
                 </span>
@@ -972,13 +982,13 @@ export function ResearchAreasBenchmark({
                   style={{ borderTopColor: c.tone.solid }}
                 >
                   <div
-                    className="text-xs font-semibold tracking-wider uppercase"
+                    className="text-xs font-[600] tracking-wider uppercase"
                     style={{ color: c.tone.ink }}
                   >
                     {c.eyebrow}
                   </div>
                   <div className="flex flex-wrap items-baseline gap-1.5">
-                    <span className="text-[34px] leading-none font-semibold tabular-nums">
+                    <span className="text-[34px] leading-none font-[600] tabular-nums">
                       {c.num}
                     </span>
                     <span className="text-[15px] text-[var(--apollo-ink-2)]">of {c.den}</span>
@@ -997,7 +1007,7 @@ export function ResearchAreasBenchmark({
                       }}
                     />
                   </div>
-                  <div className="text-sm font-semibold">{c.metric}</div>
+                  <div className="text-sm font-[600]">{c.metric}</div>
                   <p className="flex-1 text-sm leading-normal text-pretty text-[var(--apollo-ink-2)]">
                     {c.takeaway}
                   </p>
@@ -1014,7 +1024,7 @@ export function ResearchAreasBenchmark({
             </div>
             <section aria-labelledby="rel-h" className="flex flex-col gap-3">
               <div className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
-                <h3 id="rel-h" className="text-[15px] font-semibold">
+                <h3 id="rel-h" className="text-[15px] font-[600]">
                   How to read a match
                 </h3>
                 <div className="flex items-center gap-4 text-xs text-[var(--apollo-ink-2)]">
@@ -1043,7 +1053,7 @@ export function ResearchAreasBenchmark({
                       ))}
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <dt className="text-sm font-semibold">{r.term}</dt>
+                      <dt className="text-sm font-[600]">{r.term}</dt>
                       <dd className="text-[13px] leading-snug text-[var(--apollo-ink-2)]">
                         {r.text}
                       </dd>
@@ -1051,13 +1061,16 @@ export function ResearchAreasBenchmark({
                   </div>
                 ))}
               </dl>
-              <p className="rounded-lg border border-[var(--apollo-amber-tint-border)] bg-[var(--apollo-amber-tint)] px-3.5 py-2.5 text-[13px] text-[var(--apollo-ink-2)]">
-                {REVIEW} marks a match that only the final gap review found, after both mapping runs
-                missed it. The methods treat these as weaker and they can be discounted.
-              </p>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2 rounded-lg border border-[var(--apollo-amber-tint-border)] bg-[var(--apollo-amber-tint)] px-3.5 py-2.5 text-[13px] text-[var(--apollo-ink-2)]">
+                {REVIEW}
+                <span>
+                  marks a match that only the final gap review found, after both mapping runs missed
+                  it. The methods treat these as weaker and they can be discounted.
+                </span>
+              </div>
             </section>
             <section aria-labelledby="refs-h" className="flex flex-col gap-3">
-              <h3 id="refs-h" className="text-[15px] font-semibold">
+              <h3 id="refs-h" className="text-[15px] font-[600]">
                 The four reference points
               </h3>
               <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-3">
@@ -1091,7 +1104,7 @@ export function ResearchAreasBenchmark({
                     key={r.name}
                     className="flex flex-col gap-1.5 rounded-[10px] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] px-4 py-3.5"
                   >
-                    <dt className="flex items-center gap-2 text-sm font-semibold">
+                    <dt className="flex items-center gap-2 text-sm font-[600]">
                       <Swatch color={r.tone.solid} />
                       {r.href.startsWith("/") ? (
                         <Link href={r.href} className="underline underline-offset-2">
@@ -1249,7 +1262,7 @@ export function ResearchAreasBenchmark({
                       <td className="px-3.5 py-3">
                         <Pill tone={palOf(e.src)}>{SRC_SHORT[e.src]}</Pill>
                       </td>
-                      <th scope="row" className="px-3.5 py-3 text-left font-semibold">
+                      <th scope="row" className="px-3.5 py-3 text-left font-[600]">
                         <div>{e.entry}</div>
                         <div className="text-muted-foreground mt-0.5 text-xs font-normal">
                           {e.detail}
@@ -1267,9 +1280,7 @@ export function ResearchAreasBenchmark({
                               key={r.label + r.rel}
                               className="flex flex-wrap items-baseline gap-x-2 gap-y-1"
                             >
-                              <MaybeLink href={r.href} className="underline underline-offset-2">
-                                {r.label}
-                              </MaybeLink>
+                              <MaybeLink href={r.href}>{r.label}</MaybeLink>
                               <span className="text-[var(--apollo-ink-2)]">{r.rel}</span>
                               {r.review && REVIEW}
                             </div>
@@ -1330,7 +1341,7 @@ export function ResearchAreasBenchmark({
                         aria-pressed={a.id === A.id}
                         onClick={() => setAreaSel(a.id)}
                         className={`flex cursor-pointer justify-between gap-2.5 border-b border-[var(--apollo-border)] px-3.5 py-2 text-left text-sm hover:bg-[var(--apollo-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--apollo-ring)] ${
-                          a.id === A.id ? "bg-[var(--apollo-rail)] font-semibold" : ""
+                          a.id === A.id ? "bg-[var(--apollo-rail)] font-[600]" : ""
                         }`}
                       >
                         <span>{a.label}</span>
@@ -1347,7 +1358,7 @@ export function ResearchAreasBenchmark({
               >
                 <div className="flex flex-col gap-1.5">
                   <div className="flex flex-wrap items-baseline justify-between gap-2.5">
-                    <h3 className="text-[22px] font-semibold">{A.label}</h3>
+                    <h3 className="text-[22px] font-[600]">{A.label}</h3>
                     {links.areas[A.id] && (
                       <a href={links.areas[A.id]} className="text-sm underline underline-offset-2">
                         Topic page →
@@ -1376,8 +1387,9 @@ export function ResearchAreasBenchmark({
                         className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-[var(--apollo-border)] py-1.5 text-sm"
                       >
                         <MaybeLink
+                          plain
                           href={links.units[c.unit]}
-                          className="flex-[1_1_220px] font-semibold"
+                          className="flex-[1_1_220px] font-[600]"
                         >
                           {u?.name ?? c.unit}
                         </MaybeLink>
@@ -1420,7 +1432,7 @@ export function ResearchAreasBenchmark({
                           className="flex flex-col gap-0.5 border-b border-[var(--apollo-border)] py-1.5 text-sm"
                         >
                           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                            <span className="font-semibold">
+                            <span className="font-[600]">
                               {d.ref[`${k}|${p.ref}`]?.name ?? p.ref}
                             </span>
                             <span className="text-[var(--apollo-ink-2)]">{SHORT[p.relation]}</span>
@@ -1512,7 +1524,7 @@ export function ResearchAreasBenchmark({
             >
               {hm && rows[hm.r] && cols[hm.c] ? (
                 <>
-                  <span className="font-semibold">
+                  <span className="font-[600]">
                     {rows[hm.r].label} × {cols[hm.c].name}
                   </span>
                   <span className="text-[var(--apollo-ink-2)] tabular-nums">
@@ -1523,7 +1535,7 @@ export function ResearchAreasBenchmark({
                 </>
               ) : (
                 <>
-                  <span className="font-semibold">Hover or focus a cell</span>
+                  <span className="font-[600]">Hover or focus a cell</span>
                   <span className="text-[var(--apollo-ink-2)]">Values appear here.</span>
                 </>
               )}
@@ -1568,6 +1580,7 @@ export function ResearchAreasBenchmark({
                       }}
                     >
                       <MaybeLink
+                        plain
                         href={links.units[u.id]}
                         className="rotate-180 text-xs whitespace-nowrap text-[var(--apollo-ink)] no-underline [writing-mode:vertical-rl]"
                       >
@@ -1586,6 +1599,7 @@ export function ResearchAreasBenchmark({
                       }}
                     >
                       <MaybeLink
+                        plain
                         href={links.areas[a.id]}
                         className="overflow-hidden text-ellipsis text-[var(--apollo-ink)] no-underline"
                       >
@@ -1646,7 +1660,7 @@ export function ResearchAreasBenchmark({
                 style={{ borderLeftColor: g.solid }}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-                  <h3 className="text-[17px] font-semibold">{g.title}</h3>
+                  <h3 className="text-[17px] font-[600]">{g.title}</h3>
                   <span className="text-muted-foreground text-[13px]">{g.count}</span>
                 </div>
                 {g.groups.map((gr) => (
@@ -1655,7 +1669,7 @@ export function ResearchAreasBenchmark({
                     className="grid gap-2 border-t border-[var(--apollo-border)] pt-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold">{gr.name}</span>
+                      <span className="text-sm font-[600]">{gr.name}</span>
                       <Pill tone={gr.tone}>{gr.kind}</Pill>
                     </div>
                     <p className="max-w-[760px] text-sm leading-normal text-[var(--apollo-ink-2)]">
@@ -1668,6 +1682,7 @@ export function ResearchAreasBenchmark({
                           className="rounded-full border border-[var(--apollo-border)] bg-[var(--apollo-surface-2)] px-2.5 py-[3px] text-[13px]"
                         >
                           <MaybeLink
+                            plain
                             href={i.href}
                             className="text-[var(--apollo-ink)] no-underline"
                           >
@@ -1708,24 +1723,24 @@ export function ResearchAreasBenchmark({
               </p>
             </div>
             <div className="flex flex-col gap-2">
-              <h3 className="text-[15px] font-semibold">Agreement between the two mapping runs</h3>
+              <h3 className="text-[15px] font-[600]">Agreement between the two mapping runs</h3>
               <div className="overflow-x-auto rounded-[10px] border border-[var(--apollo-border)] bg-[var(--apollo-surface)]">
                 <table className="w-full min-w-[520px] border-collapse text-sm">
                   <thead>
                     <tr className="bg-[var(--apollo-surface-2)] text-xs">
-                      <th scope="col" className="px-3 py-2 text-left font-semibold">
+                      <th scope="col" className="px-3 py-2 text-left font-[600]">
                         Reference
                       </th>
-                      <th scope="col" className="px-3 py-2 text-right font-semibold">
+                      <th scope="col" className="px-3 py-2 text-right font-[600]">
                         Positive agreement
                       </th>
-                      <th scope="col" className="px-3 py-2 text-right font-semibold">
+                      <th scope="col" className="px-3 py-2 text-right font-[600]">
                         Disagreements decided
                       </th>
-                      <th scope="col" className="px-3 py-2 text-right font-semibold">
+                      <th scope="col" className="px-3 py-2 text-right font-[600]">
                         Added on review
                       </th>
-                      <th scope="col" className="px-3 py-2 text-right font-semibold">
+                      <th scope="col" className="px-3 py-2 text-right font-[600]">
                         Final matches
                       </th>
                     </tr>
@@ -1741,7 +1756,7 @@ export function ResearchAreasBenchmark({
                       const a = s.agreement[k];
                       return (
                         <tr key={k} className="border-t border-[var(--apollo-border)] tabular-nums">
-                          <th scope="row" className="px-3 py-2 text-left font-semibold">
+                          <th scope="row" className="px-3 py-2 text-left font-[600]">
                             {n}
                           </th>
                           <td className="px-3 py-2 text-right">
@@ -1762,7 +1777,7 @@ export function ResearchAreasBenchmark({
               </p>
             </div>
             <div className="flex flex-col gap-1.5 text-sm [&_a]:underline [&_a]:underline-offset-2">
-              <h3 className="text-[15px] font-semibold">Full audit trail</h3>
+              <h3 className="text-[15px] font-[600]">Full audit trail</h3>
               <a href={s.methods_url}>Methods README, with prompts and code</a>
               <a href={s.crosswalk_url}>Crosswalk CSV for this snapshot</a>
               <a href={s.outputs_url}>Raw outputs</a>
