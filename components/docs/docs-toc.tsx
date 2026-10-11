@@ -54,8 +54,8 @@ function useActiveSection(nav: NavGroup[]): string {
 // Shared link styling so the desktop sidebar and the mobile menu render the
 // active / inactive states identically.
 const ITEM_BASE = "block rounded-r border-l-2 px-2.5 py-1 ";
-const ITEM_ACTIVE = "border-docs-accent bg-[var(--apollo-surface)] font-semibold text-docs-accent";
-const ITEM_INACTIVE = "border-transparent text-muted-foreground hover:text-docs-accent";
+const ITEM_ACTIVE = "border-docs-accent bg-[var(--apollo-surface)] font-[600] text-docs-accent";
+const ITEM_INACTIVE = "border-transparent text-[var(--apollo-ink-2)] hover:text-docs-accent";
 
 function NavLinks({
   nav,
@@ -71,7 +71,7 @@ function NavLinks({
       {nav.map((g) => (
         <div key={g.group || "_top"} className="mb-4 last:mb-0">
           {g.group ? (
-            <div className="mb-1.5 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
+            <div className="mb-1.5 text-[13px] font-[600] text-[var(--apollo-ink-2)]">
               {g.group}
             </div>
           ) : null}
