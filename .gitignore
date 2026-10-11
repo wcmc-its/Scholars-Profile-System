@@ -102,6 +102,10 @@ data/*
 # behind lib/hero-search-suggestions.ts). Committed so chip edits flow through
 # PR review; method + refresh recipe in docs/suggested-search-chips.md.
 !data/suggested-searches.json
+# Exception: research-area benchmark snapshots, produced by ReciterAI and
+# imported by scripts/import-benchmark.sh; rendered at /about/research-areas.
+# Area- and unit-level aggregates only. See docs/research-areas-benchmark-refresh.md.
+!data/benchmark/
 # Exception: the SEO rank-tracker query basket is the fixed instrument that
 # makes before/after comparable, so it is committed and reviewed. SerpAPI
 # *output* (data/seo/snapshots/*, any rank-diff.csv) stays ignored — it can be
