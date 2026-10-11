@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { buildSecurityHeaders } from "./lib/security-headers";
+import benchmarkIndex from "./data/benchmark/index.json";
 
 // Next.js 15.5 instrumentation bundle does not resolve the `node:` URI scheme
 // for built-in modules pulled in from instrumentation.ts -> lib/tracing/init.ts
@@ -147,6 +148,17 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: "/about/help", destination: "/about", permanent: true },
+      // The latest research-area benchmark snapshot lives at the undated URL.
+      // Done here, not in the page: a redirect thrown during prerender was
+      // cached as a 404 by the ISR handler.
+      ...[...benchmarkIndex.snapshots]
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 1)
+        .map((s) => ({
+          source: `/about/research-areas/${s.date}`,
+          destination: "/about/research-areas",
+          permanent: true,
+        })),
       { source: "/edit/find-researchers", destination: "/edit/grant-matcha", permanent: false },
     ];
   },
