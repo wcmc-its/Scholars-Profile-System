@@ -11,8 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { BenchmarkLinks, BenchmarkSnapshot, SnapshotEntry } from "@/lib/benchmark";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
-import { Badge } from "@/components/ui/badge";
+import { DocsTabNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,7 +28,6 @@ type Unit = Snap["units"][number];
 type Ref = Snap["references"][number];
 type Pair = Snap["pairs"][number];
 type Cell = Snap["unit_cells"][number];
-type BadgeVariant = "default" | "secondary" | "outline" | "destructive";
 
 const SHORT: Record<string, string> = {
   exact: "exact match",
@@ -48,18 +46,6 @@ const HOW: Record<string, string> = {
   not_covered: "No area concentrated here",
   no_papers: "No scored papers",
   out_of_scope: "Out of scope",
-};
-const HOWV: Record<string, BadgeVariant> = {
-  exact: "default",
-  area_broader: "secondary",
-  area_narrower: "secondary",
-  overlap: "outline",
-  none: "destructive",
-  covered: "default",
-  low_volume: "outline",
-  not_covered: "destructive",
-  no_papers: "outline",
-  out_of_scope: "outline",
 };
 const FR: Record<string, string> = {
   B: "CARE Strategic Plan",
@@ -196,18 +182,137 @@ const KIND: Record<"real" | "structural" | "thin" | "neutral", Tone> = {
     ink: "var(--apollo-ink-2)",
   },
 };
+/** Soft pills for "how represented" and home/under-25 tags. */
+const HT: Record<"pos" | "mid" | "neg" | "thin" | "off", Tone> = {
+  pos: {
+    fill: "var(--apollo-slate-tint)",
+    border: "var(--apollo-slate-tint-border)",
+    ink: "var(--apollo-slate)",
+  },
+  mid: {
+    fill: "var(--apollo-surface)",
+    border: "var(--apollo-border-strong)",
+    ink: "var(--apollo-ink-2)",
+  },
+  neg: {
+    fill: "var(--apollo-coral-tint)",
+    border: "color-mix(in oklch, var(--apollo-coral-tint-border) 55%, white)",
+    ink: "var(--apollo-coral-foreground)",
+  },
+  thin: {
+    fill: "var(--apollo-amber-tint)",
+    border: "var(--apollo-amber-tint-border)",
+    ink: "var(--apollo-amber)",
+  },
+  off: {
+    fill: "var(--apollo-surface-2)",
+    border: "var(--apollo-border)",
+    ink: "var(--apollo-ink-2)",
+  },
+};
+const HOWT: Record<string, Tone> = {
+  exact: HT.pos,
+  covered: HT.pos,
+  area_broader: HT.mid,
+  area_narrower: HT.mid,
+  overlap: HT.mid,
+  none: HT.neg,
+  not_covered: HT.neg,
+  low_volume: HT.thin,
+  no_papers: HT.off,
+  out_of_scope: HT.off,
+};
+const SRC_SHORT: Record<string, string> = {
+  department: "Department",
+  division: "Division",
+  B: "CARE plan",
+  C1: "NIH IC",
+  C2: "NIH RCDC",
+};
 const palOf = (src: string) => PAL[src === "department" || src === "division" ? "A" : (src as "B")];
 
-function Pill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+function Pill({
+  tone,
+  soft,
+  children,
+}: {
+  tone: Tone;
+  /** Lighter weight for status pills (vs. the semibold source/kind pills). */
+  soft?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <span
-      className="inline-block rounded-full border px-[9px] py-0.5 text-xs leading-snug font-semibold"
+      className={`inline-block rounded-full border px-[9px] py-0.5 text-xs leading-snug ${soft ? "font-medium" : "font-semibold whitespace-nowrap"}`}
       style={{ color: tone.ink, background: tone.fill, borderColor: tone.border }}
     >
       {children}
     </span>
   );
 }
+
+/** Venn-style legend circle: solid tint = research area, dashed = reference entry. */
+function Circle({
+  area,
+  size,
+  left,
+  top,
+}: {
+  area?: boolean;
+  size: number;
+  left?: number;
+  top?: number;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={`box-border block rounded-full border-[1.5px] ${left == null ? "" : "absolute"} ${
+        area
+          ? "border-solid border-[var(--apollo-slate)] bg-[color-mix(in_oklch,var(--apollo-slate)_22%,transparent)]"
+          : "border-dashed border-[#6f6a5e]"
+      }`}
+      style={{ width: size, height: size, left, top }}
+    />
+  );
+}
+const RELATIONS: {
+  term: string;
+  text: string;
+  circles: { area?: boolean; size: number; left: number; top: number }[];
+}[] = [
+  {
+    term: "exact match",
+    text: "The area and the entry cover the same field.",
+    circles: [
+      { area: true, size: 36, left: 10, top: 2 },
+      { size: 36, left: 10, top: 2 },
+    ],
+  },
+  {
+    term: "contains it",
+    text: "The entry sits inside the area.",
+    circles: [
+      { area: true, size: 40, left: 8, top: 0 },
+      { size: 18, left: 22, top: 14 },
+    ],
+  },
+  {
+    term: "part of it",
+    text: "The area sits inside the entry.",
+    circles: [
+      { size: 40, left: 8, top: 0 },
+      { area: true, size: 18, left: 22, top: 14 },
+    ],
+  },
+  {
+    term: "partial overlap",
+    text: "They share some ground, and each covers things the other doesn’t.",
+    circles: [
+      { area: true, size: 32, left: 0, top: 4 },
+      { size: 32, left: 22, top: 4 },
+    ],
+  },
+];
 
 function Swatch({ color }: { color: string }) {
   return (
@@ -295,7 +400,7 @@ function Section({
     <section
       id={id}
       aria-labelledby={`${id}-h`}
-      className={`flex scroll-mt-20 flex-col gap-4 ${className}`}
+      className={`flex scroll-mt-28 flex-col gap-4 lg:scroll-mt-20 ${className}`}
     >
       <div className="flex flex-col gap-2">
         <h2 id={`${id}-h`} className={H2}>
@@ -512,6 +617,58 @@ export function ResearchAreasBenchmark({
   const shortName = (u: Unit) => (level === "division" ? u.name.replace(/^.*? \/ /, "") : u.name);
   const hmCell =
     hm && rows[hm.r] && cols[hm.c] ? d.cell[`${rows[hm.r].id}|${cols[hm.c].id}`] : undefined;
+  // Geometry shared by the column headers, the hover ring and hit-testing.
+  const CELL = 24;
+  const ROW_HEAD = 240; // w-60
+  const headH = level === "division" ? 250 : 240;
+  // Cells never depend on the hover state, so hovering re-renders only the
+  // ring and the two header highlights, not ~2,000 cells.
+  const cellRows = useMemo(
+    () =>
+      rows.map((a, ri) =>
+        cols.map((u, ci) => {
+          const c = d.cell[`${a.id}|${u.id}`];
+          const cs = cellStyle(c, th);
+          return (
+            <div
+              key={u.id}
+              id={`hm-${ri}-${ci}`}
+              role="gridcell"
+              data-r={ri}
+              data-c={ci}
+              aria-label={`${a.label}, ${u.name}: ${c ? `${f1(c.lift)}× expected, ${c.n} papers` : "no papers"}`}
+              className="box-border grid size-6 flex-none cursor-pointer place-items-center rounded border-2 border-[var(--apollo-surface)] text-[9px]"
+              style={{ background: cs.bg, color: cs.fg }}
+            >
+              {cs.g}
+            </div>
+          );
+        }),
+      ),
+    [rows, cols, d, th],
+  );
+  // Pointer hit-testing from coordinates (not per-cell mouseover, which
+  // flickered between neighbours on a shared border). 4px hysteresis: the
+  // current cell stays selected until the pointer is 4px into the next one.
+  const hmMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("[role=rowheader],[role=columnheader]")) return;
+    const g = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - g.left - ROW_HEAD;
+    const y = e.clientY - g.top - headH;
+    if (x < 0 || y < 0) return;
+    const PAD = 4;
+    if (
+      hm &&
+      x >= hm.c * CELL - PAD &&
+      x < (hm.c + 1) * CELL + PAD &&
+      y >= hm.r * CELL - PAD &&
+      y < (hm.r + 1) * CELL + PAD
+    )
+      return;
+    const r = Math.floor(y / CELL);
+    const c = Math.floor(x / CELL);
+    if (r < rows.length && c < cols.length && (r !== hm?.r || c !== hm?.c)) setHm({ r, c });
+  };
   const hmKey = (e: React.KeyboardEvent) => {
     const move = (
       { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] } as Record<
@@ -706,11 +863,14 @@ export function ResearchAreasBenchmark({
   return (
     <div className="bg-[var(--apollo-page)]">
       <div className="mx-auto max-w-6xl px-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-12">
-        <DocsMobileNav nav={NAV} />
+        <DocsTabNav nav={NAV} />
         <DocsToc nav={NAV} />
         <main className="box-border flex min-w-0 flex-col gap-14 pt-8 pb-16 text-[var(--apollo-ink)]">
           <section aria-label="Introduction" className="flex flex-col gap-4">
-            <nav aria-label="Breadcrumb" className="text-muted-foreground flex gap-1.5 text-[13px]">
+            <nav
+              aria-label="Breadcrumb"
+              className="text-muted-foreground flex flex-wrap gap-1.5 text-[13px] whitespace-nowrap"
+            >
               <Link href="/about" className="underline underline-offset-2">
                 About
               </Link>
@@ -719,7 +879,7 @@ export function ResearchAreasBenchmark({
             </nav>
             <div className="flex flex-wrap items-end justify-between gap-6">
               <div className="flex max-w-[720px] flex-col gap-3">
-                <h1 className="text-[32px] leading-tight font-semibold text-balance">
+                <h1 className="page-title text-[38px] leading-[1.12] font-bold tracking-[-0.01em] text-balance">
                   How our research areas compare with outside reference points
                 </h1>
                 <p className="text-base leading-relaxed text-pretty text-[var(--apollo-ink-2)]">
@@ -852,36 +1012,50 @@ export function ResearchAreasBenchmark({
                 </div>
               ))}
             </div>
-            <div
-              aria-label="How to read relations"
-              className="flex flex-col gap-2.5 rounded-[10px] border border-[var(--apollo-border-strong)] bg-[var(--apollo-surface-2)] px-5 py-4"
-            >
-              <div className="text-[13px] font-semibold">
-                How to read matches. Relations are stated from the research area&apos;s side.
+            <section aria-labelledby="rel-h" className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
+                <h3 id="rel-h" className="text-[15px] font-semibold">
+                  How to read a match
+                </h3>
+                <div className="flex items-center gap-4 text-xs text-[var(--apollo-ink-2)]">
+                  <span className="flex items-center gap-1.5">
+                    <Circle area size={12} />
+                    research area
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Circle size={12} />
+                    reference entry
+                  </span>
+                </div>
               </div>
-              <dl className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-x-5 gap-y-2 text-[13px] leading-snug">
-                {[
-                  ["exact match", "same field"],
-                  ["contains it", "the entry sits inside the area"],
-                  ["part of it", "the area sits inside the entry"],
-                  ["partial overlap", "they share some ground"],
-                ].map(([t, dd]) => (
-                  <div key={t}>
-                    <dt className="inline font-semibold">{t}</dt>
-                    <dd className="inline text-[var(--apollo-ink-2)]"> · {dd}</dd>
+              <p className="text-sm text-[var(--apollo-ink-2)]">
+                Every match is stated from the research area&apos;s side.
+              </p>
+              <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-2.5">
+                {RELATIONS.map((r) => (
+                  <div
+                    key={r.term}
+                    className="flex items-center gap-3 rounded-[10px] border border-[var(--apollo-border)] bg-[var(--apollo-surface)] p-3.5"
+                  >
+                    <div aria-hidden className="relative h-10 w-14 flex-none">
+                      {r.circles.map((c, i) => (
+                        <Circle key={i} {...c} />
+                      ))}
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <dt className="text-sm font-semibold">{r.term}</dt>
+                      <dd className="text-[13px] leading-snug text-[var(--apollo-ink-2)]">
+                        {r.text}
+                      </dd>
+                    </div>
                   </div>
                 ))}
-                <div>
-                  <dt className="inline border-b border-dashed border-[var(--apollo-amber)] font-semibold">
-                    added on review
-                  </dt>
-                  <dd className="inline text-[var(--apollo-ink-2)]">
-                    {" "}
-                    · found only by the gap review, may be discounted
-                  </dd>
-                </div>
               </dl>
-            </div>
+              <p className="rounded-lg border border-[var(--apollo-amber-tint-border)] bg-[var(--apollo-amber-tint)] px-3.5 py-2.5 text-[13px] text-[var(--apollo-ink-2)]">
+                {REVIEW} marks a match that only the final gap review found, after both mapping runs
+                missed it. The methods treat these as weaker and they can be discounted.
+              </p>
+            </section>
             <section aria-labelledby="refs-h" className="flex flex-col gap-3">
               <h3 id="refs-h" className="text-[15px] font-semibold">
                 The four reference points
@@ -1073,7 +1247,7 @@ export function ResearchAreasBenchmark({
                       className="border-t border-[var(--apollo-border)] align-top"
                     >
                       <td className="px-3.5 py-3">
-                        <Pill tone={palOf(e.src)}>{e.source}</Pill>
+                        <Pill tone={palOf(e.src)}>{SRC_SHORT[e.src]}</Pill>
                       </td>
                       <th scope="row" className="px-3.5 py-3 text-left font-semibold">
                         <div>{e.entry}</div>
@@ -1082,9 +1256,9 @@ export function ResearchAreasBenchmark({
                         </div>
                       </th>
                       <td className="px-3.5 py-3">
-                        <Badge variant={HOWV[e.howKey]} className="text-left whitespace-normal">
+                        <Pill soft tone={HOWT[e.howKey]}>
                           {HOW[e.howKey]}
-                        </Badge>
+                        </Pill>
                       </td>
                       <td className="px-3.5 py-3">
                         <div className="flex flex-col gap-1 text-[13px] leading-snug">
@@ -1210,9 +1384,11 @@ export function ResearchAreasBenchmark({
                         <span className="text-[var(--apollo-ink-2)] tabular-nums">
                           {f1(c.lift)}× expected · {c.n} papers
                         </span>
-                        <Badge variant={home ? "default" : "outline"}>
-                          {home ? "Home" : "Under 25 papers"}
-                        </Badge>
+                        <Pill soft tone={home ? HT.pos : HT.thin}>
+                          <span className="whitespace-nowrap">
+                            {home ? "Home" : "Under 25 papers"}
+                          </span>
+                        </Pill>
                       </div>
                     );
                   })}
@@ -1332,7 +1508,7 @@ export function ResearchAreasBenchmark({
             </div>
             <div
               aria-live="polite"
-              className="flex min-h-11 flex-wrap items-baseline gap-x-3.5 gap-y-1 rounded-lg border border-[var(--apollo-border)] bg-[var(--apollo-surface)] px-3.5 py-2.5 text-sm"
+              className="box-border flex h-16 flex-col justify-center gap-0.5 overflow-hidden rounded-lg border border-[var(--apollo-border)] bg-[var(--apollo-surface)] px-3.5 py-2.5 text-sm [&>span]:truncate"
             >
               {hm && rows[hm.r] && cols[hm.c] ? (
                 <>
@@ -1360,16 +1536,20 @@ export function ResearchAreasBenchmark({
                 tabIndex={0}
                 onKeyDown={hmKey}
                 onFocus={() => !hm && setHm({ r: 0, c: 0 })}
-                onMouseOver={(e) => {
-                  const t = (e.target as HTMLElement).closest<HTMLElement>("[data-r]");
-                  if (t) setHm({ r: Number(t.dataset.r), c: Number(t.dataset.c) });
-                }}
+                onMouseMove={hmMove}
                 onClick={(e) => {
                   const t = (e.target as HTMLElement).closest<HTMLElement>("[data-r]");
                   if (t) openArea(rows[Number(t.dataset.r)].id);
                 }}
-                className="inline-block min-w-full outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--apollo-ring)]"
+                className="relative inline-block min-w-full outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--apollo-ring)]"
               >
+                {hm && (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute z-0 box-border size-6 rounded-[5px] border-2 border-[var(--apollo-ring)]"
+                    style={{ left: ROW_HEAD + hm.c * CELL, top: headH + hm.r * CELL }}
+                  />
+                )}
                 <div role="row" className="sticky top-0 z-[2] flex bg-[var(--apollo-surface)]">
                   <div
                     role="columnheader"
@@ -1383,7 +1563,7 @@ export function ResearchAreasBenchmark({
                       role="columnheader"
                       className="box-border flex w-6 flex-none items-end justify-center border-b border-[var(--apollo-border)] pb-2"
                       style={{
-                        height: level === "division" ? 250 : 240,
+                        height: headH,
                         background: hm?.c === ci ? "var(--apollo-rail)" : "var(--apollo-surface)",
                       }}
                     >
@@ -1412,30 +1592,7 @@ export function ResearchAreasBenchmark({
                         {a.label}
                       </MaybeLink>
                     </div>
-                    {cols.map((u, ci) => {
-                      const c = d.cell[`${a.id}|${u.id}`];
-                      const cs = cellStyle(c, th);
-                      const on = hm?.r === ri && hm?.c === ci;
-                      return (
-                        <div
-                          key={u.id}
-                          id={`hm-${ri}-${ci}`}
-                          role="gridcell"
-                          data-r={ri}
-                          data-c={ci}
-                          aria-label={`${a.label}, ${u.name}: ${c ? `${f1(c.lift)} times expected, ${c.n} papers` : "no papers"}`}
-                          className="box-border grid size-6 flex-none cursor-pointer place-items-center rounded border-2 border-[var(--apollo-surface)] text-[9px]"
-                          style={{
-                            background: cs.bg,
-                            color: cs.fg,
-                            outline: on ? "2px solid var(--apollo-ring)" : "none",
-                            outlineOffset: -1,
-                          }}
-                        >
-                          {cs.g}
-                        </div>
-                      );
-                    })}
+                    {cellRows[ri]}
                   </div>
                 ))}
               </div>

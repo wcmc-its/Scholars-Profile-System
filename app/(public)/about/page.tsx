@@ -264,11 +264,10 @@ export default async function DocsPage() {
           ))}
         </div>
 
-        <hr className="mt-12 border-border" />
-        <p className="mt-8 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
-          Part 1: by stakeholder
-        </p>
-        <h2 id="who">Which of these are you?</h2>
+        <p className="!mt-14 text-xs font-semibold tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">Part 1 · By stakeholder</p>
+        <h2 id="who" className="!mt-2">
+          Which of these are you?
+        </h2>
         <p>
           Jump to your section. Each is short and links into the shared reference below for the
           mechanics.
@@ -477,12 +476,11 @@ export default async function DocsPage() {
           as any scholar. You route those. You do not own them.
         </p>
 
-        <hr className="mt-12 border-border" />
-        <p className="mt-8 text-[13px] font-semibold text-[var(--apollo-ink-2)]">
-          Part 2: shared reference
-        </p>
+        <p className="!mt-14 text-xs font-semibold tracking-[0.08em] text-[var(--apollo-maroon)] uppercase">Part 2 · Shared reference</p>
 
-        <h2 id="provenance">Where your data comes from</h2>
+        <h2 id="provenance" className="!mt-2">
+          Where your data comes from
+        </h2>
         <p>
           Nearly every part of a profile is copied from another system. Scholars pulls from WCM
           systems of record and outside sources on a schedule, applies the edits made in Scholars
