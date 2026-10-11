@@ -914,14 +914,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_EXPLAIN",
-                "Value": "on",
-              },
-              {
                 "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
                 "Value": "off",
               },
@@ -999,22 +991,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_FUNDING_INSTITUTION_FACET",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_RESULT_EVIDENCE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_EVIDENCE_ROWS",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_EVIDENCE_REASON_COUNTS",
                 "Value": "on",
               },
               {
@@ -5901,14 +5877,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_EXPLAIN",
-                "Value": "on",
-              },
-              {
                 "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
                 "Value": "off",
               },
@@ -5986,22 +5954,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_FUNDING_INSTITUTION_FACET",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_RESULT_EVIDENCE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_EVIDENCE_ROWS",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_EVIDENCE_REASON_COUNTS",
                 "Value": "on",
               },
               {
