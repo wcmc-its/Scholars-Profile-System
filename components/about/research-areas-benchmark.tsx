@@ -141,6 +141,7 @@ const RCDCG: [string, "real" | "structural", string, string[]][] = [
   ],
 ];
 
+const CARE_PLAN = "https://weill.cornell.edu/careplan";
 const f1 = (x: number) => (Math.round(x * 10) / 10).toFixed(1);
 const csvq = (v: unknown) => {
   const s = v == null ? "" : String(v);
@@ -623,9 +624,12 @@ export function ResearchAreasBenchmark({
             <p className="text-base leading-relaxed text-pretty text-[var(--apollo-ink-2)]">
               Scholars describes each person&apos;s work with research areas derived from their
               publications. This page compares those {H.A.areas_total} areas with Weill
-              Cornell&apos;s departments and divisions, the CARE Strategic Plan 2026–2029, and
-              NIH&apos;s Institutes, Centers and spending categories. For background on how the site
-              works, see{" "}
+              Cornell&apos;s departments and divisions, the{" "}
+              <a href={CARE_PLAN} className="underline underline-offset-2">
+                CARE Strategic Plan 2026–2029
+              </a>
+              , and NIH&apos;s Institutes, Centers and spending categories. For background on how
+              the site works, see{" "}
               <Link href="/about#research-areas" className="underline underline-offset-2">
                 About Scholars
               </Link>
