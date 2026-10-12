@@ -40,13 +40,19 @@
  */
 import { db, disconnect } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
-import { HONOR_LISTS, type HonorListMeta, selectHonorLists } from "@/lib/honors/lists";
+import {
+  HONOR_LISTS,
+  type HonorListMeta,
+  NEWSROOM_LIST_ID,
+  selectHonorLists,
+} from "@/lib/honors/lists";
 import { claimHonorRun } from "@/lib/honors/run-lock";
 
 import { defaultFetch } from "./lists/html";
 import { SCRAPERS } from "./lists/index";
 import { buildScholarIndex, type ScholarIndex } from "./lists/match";
-import { type ExistingHonor, planList } from "./lists/plan";
+import { type ExistingHonor, type ListPlan, planList } from "./lists/plan";
+import { type NewsroomExisting, scrapeNewsroom } from "./newsroom";
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -68,7 +74,6 @@ async function runList(
   trigger: Trigger,
   ownRunId: string | null,
 ): Promise<ListOutcome> {
-  const scraper = SCRAPERS[meta.id];
   let runId: string | null = null;
   if (!dryRun) {
     const claim = await claimHonorRun(db.write, { listId: meta.id, trigger, runId: ownRunId });
@@ -86,23 +91,15 @@ async function runList(
     runId = claim.id;
   }
   try {
-    if (!scraper) throw new Error(`no scraper registered for list "${meta.id}"`);
-    const scrape = await scraper(defaultFetch);
-    // Every list has entries; zero means the page changed shape under us, and
-    // recording that as a quiet success would hide it indefinitely.
-    if (scrape.entries.length === 0) {
-      throw new Error("The roster parsed to zero entries; the page layout may have changed.");
-    }
-    const existing = (await db.read.honor.findMany({
-      where: { organization: meta.organization, name: meta.honorName },
-      select: { id: true, cwid: true, status: true, evidence: true },
-    })) as ExistingHonor[];
-    const plan = planList(meta, scrape, index, existing);
-    const status = scrape.complete ? "success" : "partial";
+    const { plan, complete, warning } =
+      meta.id === NEWSROOM_LIST_ID
+        ? await readNewsroom(meta, index)
+        : await readRoster(meta, index);
+    const status = complete ? "success" : "partial";
     console.log(
       `[Honors] ${meta.id}: ${plan.onListTotal} on list, ${plan.matched} matched, ` +
         `${plan.creates.length} new candidate(s), ${plan.evidenceFills.length} evidence fill(s)` +
-        (scrape.warning ? ` — ${scrape.warning}` : ""),
+        (warning ? ` — ${warning}` : ""),
     );
     if (!runId) return { list: meta.id, status, onList: plan.onListTotal };
 
@@ -127,7 +124,7 @@ async function runList(
         onListTotal: plan.onListTotal,
         matched: plan.matched,
         newCandidates: plan.creates.length,
-        errorMessage: scrape.warning ? clip(scrape.warning) : null,
+        errorMessage: warning ? clip(warning) : null,
       },
     });
     return { list: meta.id, status, onList: plan.onListTotal };
@@ -149,6 +146,63 @@ async function runList(
     }
     return { list: meta.id, status: "failed", onList: 0 };
   }
+}
+
+type ListRead = { plan: ListPlan; complete: boolean; warning: string | null };
+
+async function readRoster(meta: HonorListMeta, index: ScholarIndex): Promise<ListRead> {
+  const scraper = SCRAPERS[meta.id];
+  if (!scraper) throw new Error(`no scraper registered for list "${meta.id}"`);
+  const scrape = await scraper(defaultFetch);
+  // Every list has entries; zero means the page changed shape under us, and
+  // recording that as a quiet success would hide it indefinitely.
+  if (scrape.entries.length === 0) {
+    throw new Error("The roster parsed to zero entries; the page layout may have changed.");
+  }
+  const existing = (await db.read.honor.findMany({
+    where: { organization: meta.organization, name: meta.honorName },
+    select: { id: true, cwid: true, status: true, evidence: true },
+  })) as ExistingHonor[];
+  return {
+    plan: planList(meta, scrape, index, existing),
+    complete: scrape.complete,
+    warning: scrape.warning,
+  };
+}
+
+/** #3040: every honor row, for the de-dup key and the model's vocabulary. A
+ *  zero-honor week is normal here, so unlike a roster it is not an error. */
+async function readNewsroom(meta: HonorListMeta, index: ScholarIndex): Promise<ListRead> {
+  const existing = (await db.read.honor.findMany({
+    select: {
+      id: true,
+      cwid: true,
+      status: true,
+      evidence: true,
+      organization: true,
+      name: true,
+      sourceRef: true,
+    },
+  })) as NewsroomExisting[];
+  const counts = new Map<string, { organization: string; name: string; n: number }>();
+  for (const r of existing) {
+    const k = `${r.organization}\u0000${r.name}`;
+    const c = counts.get(k);
+    if (c) c.n += 1;
+    else counts.set(k, { organization: r.organization, name: r.name, n: 1 });
+  }
+  const vocab = [...counts.values()].sort((a, b) => b.n - a.n);
+  return scrapeNewsroom({
+    meta,
+    fetcher: defaultFetch,
+    index,
+    existing,
+    vocab,
+    // The first run reads the whole archive (back to 1997); so does every run
+    // until one finishes clean, so a partial backfill is retried, not lost.
+    backfill:
+      (await db.read.honorListRun.count({ where: { listId: meta.id, status: "success" } })) === 0,
+  });
 }
 
 async function scrapeSelected(

@@ -24,7 +24,12 @@ import {
 import { parseNaiRoster } from "@/etl/honors/lists/nai";
 import { HONORS_SCRAPER_ACTOR, lineSourceRef, planList } from "@/etl/honors/lists/plan";
 import { rosterKey, rosterMatchedName } from "@/lib/edit/honor-queue";
-import { HONOR_LISTS, honorListById, selectHonorLists } from "@/lib/honors/lists";
+import {
+  HONOR_LISTS,
+  honorListById,
+  NEWSROOM_LIST_ID,
+  selectHonorLists,
+} from "@/lib/honors/lists";
 
 const fixture = (name: string) =>
   readFileSync(path.resolve(__dirname, "../fixtures/honors", name), "utf8");
@@ -50,8 +55,9 @@ function entry(over: Partial<RosterEntry>): RosterEntry {
 }
 
 describe("registry", () => {
-  it("every list has a scraper, and every scraper a list", () => {
-    expect(Object.keys(SCRAPERS).sort()).toEqual(HONOR_LISTS.map((l) => l.id).sort());
+  it("every roster list has a scraper, and every scraper a list", () => {
+    const rosters = HONOR_LISTS.filter((l) => l.id !== NEWSROOM_LIST_ID);
+    expect(Object.keys(SCRAPERS).sort()).toEqual(rosters.map((l) => l.id).sort());
   });
 
   it("list metadata fits the honor columns it is written to", () => {

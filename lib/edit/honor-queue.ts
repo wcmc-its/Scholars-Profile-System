@@ -28,6 +28,7 @@ import {
   HONOR_LISTS,
   honorListHost,
   isHonorListRunActive,
+  NEWSROOM_ROSTER_URL,
 } from "@/lib/honors/lists";
 import { formatPublishedName } from "@/lib/postnominal";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -664,6 +665,8 @@ export function buildListStatuses(
 export function rosterKey(sourceRef: string): string {
   const parts = sourceRef.split("|");
   const head = (parts.length === 3 ? parts[0] : sourceRef).trim();
+  // A Newsroom row's line is its article (#3040); every article is one source.
+  if (head.startsWith(`${NEWSROOM_ROSTER_URL}/`)) return NEWSROOM_ROSTER_URL;
   const hash = head.indexOf("#");
   return hash > 0 ? head.slice(0, hash) : head;
 }
