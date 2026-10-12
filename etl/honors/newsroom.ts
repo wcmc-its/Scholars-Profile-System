@@ -205,9 +205,9 @@ export function systemPrompt(vocab: Vocabulary): string {
     .join("\n");
   return `You read Weill Cornell Medicine newsroom posts and list the individual honors they announce for Weill Cornell faculty.
 
-Include: elections to academies and learned societies, named fellowships of a society, named investigatorships, prizes, medals, named lectureships and other awards conferred on ONE named faculty member in recognition of their work. A competitively awarded career distinction that carries money (NIH Director's Pioneer Award, Sloan Research Fellowship) counts.
+Include: elections to academies and learned societies, named fellowships of a society, named investigatorships, prizes, medals, named lectureships and other awards conferred on ONE named faculty member in recognition of their work. A competitively awarded career distinction that carries money (NIH Director's Pioneer Award, Sloan Research Fellowship) counts. Weill Cornell's own awards to faculty count too: teaching, mentoring, clinical and research awards (for example the Excellence in Medical Education Awards); use "Weill Cornell Medicine" as the organization.
 
-Exclude: research grants, contracts and project funding (another system records those); student, trainee, resident and fellow-in-training awards; awards to a team, department, program or institution; internal Weill Cornell appointments, promotions and endowed chairs; honors for people who are not Weill Cornell faculty; honors the post only mentions in passing as past background.
+Exclude: research grants, contracts and project funding (another system records those); student, trainee, resident and fellow-in-training awards; awards to a team, department, program or institution; Weill Cornell appointments, promotions and endowed chairs (an award is not an appointment); honors for people who are not Weill Cornell faculty; honors the post only mentions in passing as past background.
 
 For each honor return:
 - scholarName: the person's name as printed, without "Dr." or degrees.
