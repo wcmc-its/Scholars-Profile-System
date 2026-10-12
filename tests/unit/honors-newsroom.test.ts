@@ -9,6 +9,7 @@ import { buildScholarIndex } from "@/etl/honors/lists/match";
 import { HONORS_SCRAPER_ACTOR } from "@/etl/honors/lists/plan";
 import {
   annotatedText,
+  isPosition,
   type ExtractedHonor,
   normalizeHonor,
   type NewsroomExisting,
@@ -65,6 +66,7 @@ const honor = (over: Partial<ExtractedHonor> = {}): ExtractedHonor => ({
   organization: "Institute of Medicine",
   year: null,
   category: "ACADEMY_MEMBERSHIP",
+  announcedHere: true,
   quote: "Dr. Quentin Anvilworth was elected to the National Academy of Medicine.",
   ...over,
 });
@@ -124,6 +126,30 @@ describe("screen", () => {
     expect(screenPost({ storyType: "News from WCM", title: "New Imaging Center Opens" })).toBe(
       false,
     );
+  });
+});
+
+describe("isPosition", () => {
+  it("drops officer, committee and named-chair titles", () => {
+    for (const n of [
+      "Secretary-Treasurer-Elect",
+      "Board of Trustees",
+      "Membership Committee",
+      "Ronay Menschel Professor of Pediatrics",
+      "Vice-Chair",
+    ])
+      expect(isPosition(n)).toBe(true);
+  });
+  it("keeps awards that merely mention a role, and honorary titles", () => {
+    for (const n of [
+      "Chair's Award",
+      "Honorary Professorship",
+      "President's Award",
+      "Excellence in Resident Teaching Award",
+      "Member",
+      "Senior List",
+    ])
+      expect(isPosition(n)).toBe(false);
   });
 });
 
@@ -198,6 +224,8 @@ describe("planNewsroom", () => {
             status,
             evidence: "x",
             sourceRef: null,
+            year: null,
+            source: "SEED",
             organization: "national academy of medicine",
             name: "MEMBER",
           },
@@ -217,6 +245,8 @@ describe("planNewsroom", () => {
           status: "pending",
           evidence: null,
           sourceRef: null,
+          year: null,
+          source: "SEED",
           organization: "National Academy of Medicine",
           name: "Member",
         },
@@ -310,10 +340,66 @@ describe("planNewsroom", () => {
           organization: "National Academy of Medicine",
           name: "Member",
           sourceRef: `${URL1}#national-academy-of-medicine-member|Quentin Anvilworth|2026`,
+          year: 2026,
+          source: "NEWSROOM",
         },
       ],
     );
     expect(out.creates).toEqual([]);
+  });
+
+  it("keeps an honor recited from the person's past, undated rather than given the post's year", () => {
+    const out = plan([honor({ announcedHere: false })]);
+    expect(out.creates).toHaveLength(1);
+    expect(out.creates[0].year).toBeNull();
+  });
+
+  it("takes an undated recited honor to be held when the scholar has any honor from that body", () => {
+    const seeded = {
+      id: "h1",
+      cwid: "zzq9001",
+      status: "published" as const,
+      evidence: null,
+      organization: "National Academy of Medicine",
+      name: "Member",
+      year: 2001,
+      source: "SEED",
+      sourceRef: null,
+    };
+    expect(
+      plan([honor({ announcedHere: false, honorName: "Walsh McDermott Medal" })], [seeded]).creates,
+    ).toEqual([]);
+  });
+
+  it("takes a seeded honor from the same body within a year to be this one, however it is named", () => {
+    const seeded = (year: number) => ({
+      id: "h1",
+      cwid: "zzq9001",
+      status: "published" as const,
+      evidence: null,
+      organization: "National Academy of Medicine",
+      name: "Elected Member (seed wording)",
+      year,
+      source: "SEED",
+      sourceRef: null,
+    });
+    expect(plan([honor({ year: 2025 })], [seeded(2026)]).creates).toEqual([]);
+    expect(plan([honor({ year: 2020 })], [seeded(2026)]).creates).toHaveLength(1);
+  });
+
+  it("does not apply the same-body rule between newsroom rows (one body, two awards a year)", () => {
+    const other = {
+      id: "h1",
+      cwid: "zzq9001",
+      status: "pending" as const,
+      evidence: "x",
+      organization: "National Academy of Medicine",
+      name: "Some Other Prize",
+      year: 2026,
+      source: "NEWSROOM",
+      sourceRef: `${NEWSROOM_ROSTER_URL}/2026/01/other#x|Quentin Anvilworth|2026`,
+    };
+    expect(plan([honor()], [other]).creates).toHaveLength(1);
   });
 
   it("prefers the honor's own year over the post date", () => {

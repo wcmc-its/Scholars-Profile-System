@@ -181,6 +181,8 @@ async function readNewsroom(meta: HonorListMeta, index: ScholarIndex): Promise<L
       evidence: true,
       organization: true,
       name: true,
+      year: true,
+      source: true,
       sourceRef: true,
     },
   })) as NewsroomExisting[];

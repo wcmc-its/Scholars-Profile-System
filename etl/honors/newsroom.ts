@@ -189,6 +189,9 @@ export const ExtractSchema = z.object({
       organization: z.string(),
       year: z.number().int().nullish(),
       category: z.enum(CATEGORIES),
+      /** False for an honor the post only recites from the person's past
+       *  (a bio line in an appointment story): its year is unknowable here. */
+      announcedHere: z.boolean(),
       quote: z.string(),
     }),
   ),
@@ -205,9 +208,15 @@ export function systemPrompt(vocab: Vocabulary): string {
     .join("\n");
   return `You read Weill Cornell Medicine newsroom posts and list the individual honors they announce for Weill Cornell faculty.
 
-Include: elections to academies and learned societies, named fellowships of a society, named investigatorships, prizes, medals, named lectureships and other awards conferred on ONE named faculty member in recognition of their work. A competitively awarded career distinction that carries money (NIH Director's Pioneer Award, Sloan Research Fellowship) counts. Weill Cornell's own awards to faculty count too: teaching, mentoring, clinical and research awards (for example the Excellence in Medical Education Awards); use "Weill Cornell Medicine" as the organization.
+Include: elections to academies and learned societies, named fellowships of a society, named investigatorships, prizes, medals, named lectureships and other awards conferred on ONE named faculty member in recognition of their work. A competitively awarded career distinction that carries money (NIH Director's Pioneer Award, Sloan Research Fellowship) counts. Weill Cornell's own awards to faculty count too: teaching, mentoring, clinical and research awards (for example the Excellence in Medical Education Awards); use "Weill Cornell Medicine" as the organization. Teaching honors chosen by students (the Senior List, convocation teaching awards) count.
 
-Exclude: research grants, contracts and project funding (another system records those); student, trainee, resident and fellow-in-training awards; awards to a team, department, program or institution; Weill Cornell appointments, promotions and endowed chairs (an award is not an appointment); honors for people who are not Weill Cornell faculty; honors the post only mentions in passing as past background.
+Exclude:
+- Research grants, contracts and project funding, including internal funding programs (pilot awards, JumpStart awards) and seed or career-development money (another system records those).
+- Awards the person received as a student, resident, postdoc or fellow-in-training, even if they are faculty now.
+- Awards to a team, department, program or institution.
+- Positions, even elected ones: board, council, committee and commission seats; officer roles (president, president-elect, chair, secretary, treasurer, trustee); editorships; an address given because the person holds an office (a presidential address). Being elected to a society's council or committee is NOT election to membership. An invited named lecture (the "Goldberg Lecture") IS an honor.
+- Weill Cornell appointments, promotions, named professorships and endowed chairs.
+- Honors for people who are not Weill Cornell faculty.
 
 For each honor return:
 - scholarName: the person's name as printed, without "Dr." or degrees.
@@ -216,6 +225,7 @@ For each honor return:
 - honorName: the honor itself. For an academy or society election use the membership title ("Member", "Fellow"); for a prize use the prize name. If it matches a KNOWN HONOR for that organization, copy the name exactly.
 - year: the year the honor was conferred, if the post states or clearly implies it; otherwise null.
 - category: ACADEMY_MEMBERSHIP (elected membership or fellowship of an academy or learned society), INVESTIGATORSHIP (a named investigator appointment such as HHMI), PRIZE (an award, prize, medal or lectureship), or OTHER.
+- announcedHere: true if this post reports the person receiving the honor now; false if the post only lists it among their earlier distinctions (as a bio or background line does). Still list those earlier distinctions; set year only if the post states it.
 - quote: the shortest sentence from the post that names the person and the honor, verbatim, without the [cwid-…] marker.
 
 Return an empty list when the post announces no qualifying honor.
@@ -247,6 +257,21 @@ export const bedrockExtract: Extractor = async (post, system) => {
   });
   return object.honors;
 };
+
+/**
+ * A position, not an honor, by its name: the model still returns some officer
+ * and committee titles despite the prompt (a validity audit of 126 staging
+ * rows found 8 of 16 errors were positions). An award, prize, medal, lecture or
+ * honorary title keeps its row ("Chair's Award", "Honorary Professorship").
+ */
+const POSITION =
+  /\b(?:president(?:-elect)?|vice[- ]president|secretary|treasurer|trustee|chair(?:man|woman|person)?|board|council|committee|commission(?:er)?|editor(?:-in-chief)?|professor(?:ship)?)\b/i;
+const HONOR_TITLE =
+  /\b(?:award|prize|medal|lecture(?:ship)?|honorary|laureate|excellence|distinction)\b/i;
+
+export function isPosition(honorName: string): boolean {
+  return POSITION.test(honorName) && !HONOR_TITLE.test(honorName);
+}
 
 /** Fold an honor string for comparison: case, accents, "&"/"and", a leading "the",
  *  punctuation and spacing. */
@@ -312,6 +337,8 @@ export type PostExtraction = { post: NewsroomPost; honors: ExtractedHonor[] };
 export type NewsroomExisting = ExistingHonor & {
   organization: string;
   name: string;
+  year: number | null;
+  source: string;
   sourceRef: string | null;
 };
 
@@ -332,6 +359,14 @@ const rowKey = (cwid: string, organization: string, name: string) =>
  * weekly window re-reads each post several times, and a second reading that
  * words the honor differently ("Elected Member") would otherwise slip past the
  * (cwid, organization, name) key and re-propose an honor a curator rejected.
+ *
+ * And one for the seed, roster and hand-entered rows, which name the same award
+ * differently ("Damon Runyon Fellowship / Grant" vs "Clinical Investigator
+ * Award"): a scholar who already holds a non-newsroom honor from the same
+ * organization within a year is taken to hold this one, and an undated one
+ * (recited from a bio) is taken to be held if any honor from that body is. Not applied between
+ * newsroom rows, where one body (Weill Cornell itself) often gives one person
+ * two different awards in a year.
  */
 export function planNewsroom(
   meta: Pick<HonorListMeta, "source">,
@@ -345,6 +380,18 @@ export function planNewsroom(
     const k = rowKey(e.cwid, e.organization, e.name);
     if (!byKey.has(k)) byKey.set(k, e);
   }
+  const nearby = new Map<string, Array<number | null>>();
+  for (const e of existing) {
+    if (e.source === meta.source) continue;
+    const k = `${e.cwid}\u0000${foldHonor(e.organization)}`;
+    nearby.set(k, [...(nearby.get(k) ?? []), e.year]);
+  }
+  // An undated honor (a bio line) is any honor from that body; a dated one is
+  // one within a year.
+  const heldNearby = (cwid: string, organization: string, year: number | null) =>
+    (nearby.get(`${cwid}\u0000${foldHonor(organization)}`) ?? []).some(
+      (y) => year === null || (y !== null && Math.abs(y - year) <= 1),
+    );
   const fromArticle = new Set(
     existing.filter((e) => e.sourceRef).map((e) => `${e.cwid}\u0000${articleOf(e.sourceRef!)}`),
   );
@@ -364,6 +411,7 @@ export function planNewsroom(
     const postYear = post.publishedAt ? Number(post.publishedAt.slice(0, 4)) : null;
     const prose = foldToken(post.text.replace(/\s+/g, "")).replace(/-/g, "");
     for (const h of honors) {
+      if (isPosition(h.honorName)) continue;
       const split = splitDisplayName(h.scholarName);
       // A name the post never prints is a model invention.
       if (!split || !prose.includes(split.family.replace(/-/g, ""))) continue;
@@ -387,7 +435,8 @@ export function planNewsroom(
       if (candidates.length === 0) continue;
       matched += 1;
       const { organization, name } = normalizeHonor(h, vocab);
-      const year = h.year ?? postYear;
+      // A bio line's honor predates the post: its year is only what the post states.
+      const year = h.announcedHere ? (h.year ?? postYear) : (h.year ?? null);
       const sourceRef = clip(
         `${post.url}#${honorSlug(organization, name)}|${h.scholarName.replace(/\|/g, "/").trim()}|${year ?? ""}`,
         SOURCE_REF_MAX,
@@ -408,7 +457,12 @@ export function planNewsroom(
             evidenceFills.push({ id: prior.id, evidence });
           continue;
         }
-        if (lineClaimed || fromArticle.has(`${c.cwid}\u0000${post.url}`)) continue;
+        if (
+          lineClaimed ||
+          fromArticle.has(`${c.cwid}\u0000${post.url}`) ||
+          heldNearby(c.cwid, organization, year)
+        )
+          continue;
         creates.push({
           cwid: c.cwid,
           category: h.category as HonorListCategory,
