@@ -24,10 +24,13 @@
  * Authorization identity resolves via the EFFECTIVE seam
  * (`getEffectiveEditSession`), mirroring the write path: while impersonating
  * target T, `session.cwid` is T and `session.isSuperuser` re-derives from T, so
- * `/edit/scholar/T` is self and `/edit/scholar/U` (U≠T) 403s (#637). The proxy
- * and unit-admin gates are keyed on the RAW identity and run only when NOT
- * impersonating (`raw.cwid === session.cwid`) — a "View as" overlay must never
- * confer either path (IS-1). Neither a proxy nor a unit admin is a superuser, so
+ * `/edit/scholar/T` is self. The proxy and unit-admin gates key on the EFFECTIVE
+ * cwid too, so "View as" a proxy or unit admin shows the scholar editor they
+ * actually get — not a 403 that the forbidden page bounced to their own unit.
+ * Under an overlay those gates run only after a live `isSuperuser(raw.cwid)`
+ * re-check: a real superuser already reaches every scholar, so this is a read
+ * verdict that confers nothing new. Every write route keeps its proxy/unit-admin
+ * authz on the REAL cwid (IS-1/IS-10, unchanged). Neither a proxy nor a unit admin is a superuser, so
  * both remain subject to each caller's soft-deleted-404 and #536 hidden-class-404
  * guards — which stay in the callers because they derive role/deletion from data
  * the editor already loads (`loadEditContext`) and the history page reads on its
@@ -39,7 +42,7 @@
  */
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { getSession } from "@/lib/auth/session-server";
-import type { EditSession } from "@/lib/auth/superuser";
+import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import {
@@ -102,28 +105,34 @@ export async function resolveScholarEditAccess(
   // Gate 2 — self.
   const isSelf = session.cwid === targetCwid;
 
-  // Gate 3 — granted, conflict-free proxy (#779). RAW-keyed, not-impersonating.
+  // Gates 3–4 key on the effective cwid. Not impersonating, that IS the raw
+  // human; under "View as" they run only if the raw human is still a live
+  // superuser (short-circuits: no LDAPS call when not impersonating).
+  const delegatedGates =
+    raw.cwid === session.cwid || (await isSuperuser(raw.cwid).catch(() => false));
+
+  // Gate 3 — granted, conflict-free proxy (#779).
   let isProxy = false;
-  if (!isSelf && !session.isSuperuser && raw.cwid === session.cwid) {
-    if (await isGrantedProxy(raw.cwid, targetCwid, db.read as unknown as ProxyLookup)) {
+  if (!isSelf && !session.isSuperuser && delegatedGates) {
+    if (await isGrantedProxy(session.cwid, targetCwid, db.read as unknown as ProxyLookup)) {
       const conflict = await checkProxyConflictingRole(
-        raw.cwid,
+        session.cwid,
         db.read as unknown as ProxyLookup,
-        // Reuse the live verdict already resolved for this (non-impersonating)
-        // cwid instead of a second LDAPS round-trip.
+        // Reuse the live verdict already resolved for this effective cwid
+        // instead of a second LDAPS round-trip.
         async () => session.isSuperuser,
       );
       isProxy = conflict.ok;
     }
   }
 
-  // Gate 4 — org-unit administrator (Amendment 4). RAW-keyed, not-impersonating,
-  // not already self/proxy. The conferring unit feeds the editor's banner.
+  // Gate 4 — org-unit administrator (Amendment 4), not already self/proxy. The
+  // conferring unit feeds the editor's banner.
   let isUnitAdmin = false;
   let unit: EditableUnit | null = null;
-  if (!isSelf && !isProxy && !session.isSuperuser && raw.cwid === session.cwid) {
+  if (!isSelf && !isProxy && !session.isSuperuser && delegatedGates) {
     const resolved = await resolveEditableUnitViaUnitAdmin(
-      raw.cwid,
+      session.cwid,
       targetCwid,
       db.read as unknown as UnitScholarLookup,
     );
