@@ -32,6 +32,7 @@ import {
   canViewHonorsQueue,
   isHonorQueueEnabled,
   isHonorsQueueReadOnly,
+  loadDoctoralDegrees,
   loadHonorQueue,
   loadHonorSources,
 } from "@/lib/edit/honor-queue";
@@ -90,6 +91,11 @@ export default async function HonorsQueuePage() {
   ]);
   // An observer reads the queue but never decides it (the decision routes 403
   // them anyway); hide the controls rather than show buttons that fail.
+  // Rejected's "awarded before the scholar's degree" note.
+  const degrees = await loadDoctoralDegrees(
+    db.read,
+    rejected.flatMap((g) => g.rows.map((r) => r.cwid)),
+  );
   const readOnly = isHonorsQueueReadOnly(session);
   const pendingCount = groups.reduce((sum, g) => sum + g.rows.length, 0);
   // The subnav's slug badge is a live count; keep it truthful on this page too
@@ -131,6 +137,7 @@ export default async function HonorsQueuePage() {
         rejected={rejected}
         userAsserted={userAsserted}
         sources={sources}
+        degrees={degrees}
         runNowEnabled={!readOnly && isHonorsRunNowEnabled()}
         readOnly={readOnly}
       />

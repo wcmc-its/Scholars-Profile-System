@@ -325,6 +325,10 @@ model Honor {
   /// tier (`lib/honors/tiers.ts`). NULL = use the rules. Curator-only: the
   /// scholar-facing honor editor never writes it and faculty never see a tier.
   tierOverride    Int?          @map("tier_override") @db.TinyInt
+  /// When (and by whom) a curator verified a self-asserted (`source='SELF'`)
+  /// honor in the queue's User asserted tab. NULL = self-reported.
+  verifiedAt      DateTime?     @map("verified_at")
+  verifiedByCwid  String?       @map("verified_by_cwid") @db.VarChar(32)
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
 

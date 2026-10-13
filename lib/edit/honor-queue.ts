@@ -89,6 +89,9 @@ export type HonorQueueRow = {
   /** What a scraped match rests on ("Name and institution match: listed at …"),
    *  for the candidate's evidence column. Null on seeded and hand-entered rows. */
   evidence: string | null;
+  /** A curator verified this self-asserted honor (User asserted tab). False on
+   *  every other row. */
+  verified: boolean;
 };
 
 /** One roster line's worth of candidates. A group of 1 is the normal case. */
@@ -264,6 +267,7 @@ export async function loadHonorQueue(
       supersededById: true,
       evidence: true,
       tierOverride: true,
+      verifiedAt: true,
     },
   });
   if (rows.length === 0) return [];
@@ -345,6 +349,7 @@ export async function loadHonorQueue(
           superseded: Boolean(r.supersededById),
           competingCwids: contested ? cwids.filter((c) => c !== r.cwid) : [],
           evidence: r.evidence ?? null,
+          verified: Boolean(r.verifiedAt),
         };
       }),
     });
@@ -410,6 +415,52 @@ export function yearPlausibilityNote(
   const age = now.getUTCFullYear() - row.year;
   if (age <= SUSPECT_AWARD_AGE_YEARS) return null;
   return `Awarded ${age} years ago, but the current title reads junior — check this is the same person, not a namesake.`;
+}
+
+/** A doctoral degree's display label ("MD", "PhD"), or null for any other
+ *  degree. Dots are dropped first, so "M.D." and "Ph.D." count. */
+export function doctoralDegree(degree: string): string | null {
+  const m = /\b(MD|PHD|DO|DPHIL|SCD|DRPH|PHARMD|DVM|DDS|DMD|EDD|PSYD|DNP)\b/i.exec(
+    degree.replace(/\./g, ""),
+  );
+  if (!m) return null;
+  const k = m[1].toUpperCase();
+  return k === "PHD" ? "PhD" : k === "DPHIL" ? "DPhil" : k === "PHARMD" ? "PharmD" : k;
+}
+
+export type DoctoralDegree = { degree: string; year: number };
+
+/**
+ * Each scholar's EARLIEST doctoral degree with a year, from ASMS education.
+ * For the Rejected tab's "awarded before the scholar's degree" note — an honor
+ * that predates the doctorate is almost always a namesake. A signal for the
+ * curator, never a filter.
+ */
+export async function loadDoctoralDegrees(
+  client: Pick<PrismaClient, "education">,
+  cwids: readonly string[],
+): Promise<Record<string, DoctoralDegree>> {
+  if (cwids.length === 0) return {};
+  const rows = await client.education.findMany({
+    where: { cwid: { in: [...new Set(cwids)] }, year: { not: null } },
+    select: { cwid: true, degree: true, year: true },
+  });
+  const out: Record<string, DoctoralDegree> = {};
+  for (const r of rows) {
+    const degree = doctoralDegree(r.degree);
+    if (!degree || r.year === null) continue;
+    if (!out[r.cwid] || r.year < out[r.cwid].year) out[r.cwid] = { degree, year: r.year };
+  }
+  return out;
+}
+
+/** "Awarded 13 years before the scholar's MD (1990)", or null. */
+export function predatesDegreeNote(
+  year: number | null,
+  degree: DoctoralDegree | undefined,
+): string | null {
+  if (year === null || !degree || year >= degree.year) return null;
+  return `Awarded ${degree.year - year} years before the scholar’s ${degree.degree} (${degree.year})`;
 }
 
 /** Count pending honors — the admin sub-nav's pending-count pill (#1762). */

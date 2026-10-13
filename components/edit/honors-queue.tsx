@@ -43,13 +43,23 @@
  * person-type filter (and its "All" chip, on every tab), the Possible sort, and
  * the Possible group-by. Group-by is ORTHOGONAL to the contested-pair mechanic —
  * a contested line stays one pick-one unit under every mode.
+ *
+ * 2026-10-13 iteration ("Honors Iteration - 2026-10-13"): every tab opens on All
+ * scholars and says when a filter hides rows; Possible gains a Source filter and
+ * a reject needs a reason. Known / Rejected / User asserted are flat tables with
+ * a Scholar column (optional "By scholar"), each row with its action: Known's
+ * "Move to Possible" and Rejected's "Restore" are the decision route's undo,
+ * User asserted's Verify is `/api/edit/honor/verify`. Sources links its counts
+ * into Possible.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import {
   Kbd,
   ReasonSelect,
+  EvidenceQuote,
+  rosterSourceUrl,
   ReviewList,
   ReviewPane,
   shortName,
@@ -60,6 +70,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import type {
+  DoctoralDegree,
   HonorQueueGroup,
   HonorListRunView,
   HonorListStatus,
@@ -68,7 +79,15 @@ import type {
   HonorSourcesSummary,
 } from "@/lib/edit/honor-queue";
 import { groupMatchLevel, MATCH_LEVEL_RANK, type MatchLevel } from "@/lib/edit/honor-match";
-import { isFullTimeFaculty } from "@/lib/edit/honor-queue";
+import {
+  isFullTimeFaculty,
+  predatesDegreeNote,
+  REJECTION_REASONS,
+  rosterKey,
+  rosterMatchedName,
+} from "@/lib/edit/honor-queue";
+import { parseEvidence } from "@/lib/edit/honor-match";
+import { NEWSROOM_ROSTER_URL } from "@/lib/honors/lists";
 import { HONOR_TIER_LABELS, HONOR_TIERS, ruleTier, type HonorTier } from "@/lib/honors/tiers";
 import { cn } from "@/lib/utils";
 import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
@@ -82,6 +101,8 @@ type Props = {
   userAsserted: HonorQueueGroup[];
   /** The Sources tab: honor rosters and recorded load runs. */
   sources: HonorSourcesSummary;
+  /** cwid → earliest doctoral degree, for Rejected's "predates the degree" note. */
+  degrees?: Record<string, DoctoralDegree>;
   /** HONORS_RUN_NOW: offer Run now on each scraped list. */
   runNowEnabled?: boolean;
   /** An observer's view: the queue renders, the decision controls do not. */
@@ -95,8 +116,8 @@ type TierFilter = HonorTier | "all";
 type MatchFilter = "strong" | "review" | "all";
 /** Possible's group-by (the shipped control). */
 export type GroupBy = "none" | "person" | "award";
-/** The read-only tabs' group-by (the redesign's segmented control). */
-export type ListGroupBy = "scholar" | "award" | "none";
+/** The record tabs' group-by. */
+export type ListGroupBy = "scholar" | "none";
 
 /** Contested lines span people, so they can't sit under any one person heading —
  *  they bucket together here under group-by "person". The double-underscore
@@ -148,6 +169,35 @@ function rowMatchesQuery(row: HonorQueueRow, q: string): boolean {
 }
 
 type Section = { key: string; heading: string | null; groups: HonorQueueGroup[] };
+
+/** The roster a line came from (`rosterKey`), or null for a hand-entered row. */
+function lineSource(row: HonorQueueRow): string | null {
+  return row.sourceRef ? rosterKey(row.sourceRef) : null;
+}
+
+/** A source's short label for the Source filter. */
+function sourceLabel(key: string, summary: HonorSourcesSummary): string {
+  if (key === NEWSROOM_ROSTER_URL) return "WCM Newsroom";
+  const list = summary.lists.find((l) => l.rosterUrl === key);
+  if (list) return list.organization;
+  return summary.sources.find((x) => x.key === key)?.organization ?? key;
+}
+
+/** "the WCM Newsroom", "the Burroughs Wellcome Fund Career Award list". */
+function sourcePhrase(key: string, summary: HonorSourcesSummary): string {
+  if (key === NEWSROOM_ROSTER_URL) return "the WCM Newsroom";
+  const list = summary.lists.find((l) => l.rosterUrl === key);
+  if (list) return `the ${list.organization} ${list.honorName} list`;
+  const src = summary.sources.find((x) => x.key === key);
+  return src ? `the ${src.organization} ${src.name} list` : "a seed import";
+}
+
+const PERSON_LABEL: Record<PersonFilter, string> = {
+  faculty: "Full-time faculty",
+  affiliated: "Affiliated faculty",
+  other: "Trainees & other",
+  all: "All scholars",
+};
 
 /** The bucket a group falls in for a given group-by mode. A contested group
  *  (>1 distinct cwid) never keys on a person — it goes to the shared contested
@@ -201,12 +251,10 @@ export type ListSection = {
 };
 
 /**
- * The read-only tabs' sections (Known / Rejected / User asserted). Exported for
+ * The record tabs' sections (Known / Rejected / User asserted). Exported for
  * the grouping test.
  *  - scholar: one section per scholar (cwid), sections A–Z by surname, rows
  *    newest-decision first.
- *  - award: one section per honor + conferring body, biggest section first,
- *    rows A–Z by surname.
  *  - none: one flat, unheaded section, newest-decision first.
  */
 export function buildListSections(rows: HonorQueueRow[], mode: ListGroupBy): ListSection[] {
@@ -219,43 +267,30 @@ export function buildListSections(rows: HonorQueueRow[], mode: ListGroupBy): Lis
   }
   const buckets = new Map<string, HonorQueueRow[]>();
   for (const r of rows) {
-    const k = mode === "scholar" ? r.cwid : `${r.name}\u0000${r.organization}`;
-    const bucket = buckets.get(k);
+    const bucket = buckets.get(r.cwid);
     if (bucket) bucket.push(r);
-    else buckets.set(k, [r]);
+    else buckets.set(r.cwid, [r]);
   }
-  const sections = [...buckets].map(([key, rs]) => ({ key, rows: rs }));
-  if (mode === "scholar") {
-    return sections
-      .sort(
-        (a, b) =>
-          surnameKey(a.rows[0].scholarName).localeCompare(surnameKey(b.rows[0].scholarName)) ||
-          a.rows[0].scholarName.localeCompare(b.rows[0].scholarName),
-      )
-      .map(({ key, rows: rs }) => ({
-        key,
-        label: rs[0].scholarName,
-        sub: `${rs.length} honor${rs.length === 1 ? "" : "s"}`,
-        rows: [...rs].sort(newestFirst),
-      }));
-  }
-  return sections
-    .sort((a, b) => b.rows.length - a.rows.length || a.rows[0].name.localeCompare(b.rows[0].name))
-    .map(({ key, rows: rs }) => ({
+  return [...buckets]
+    .sort(
+      ([, a], [, b]) =>
+        surnameKey(a[0].scholarName).localeCompare(surnameKey(b[0].scholarName)) ||
+        a[0].scholarName.localeCompare(b[0].scholarName),
+    )
+    .map(([key, rs]) => ({
       key,
-      label: rs[0].name,
-      sub: `${rs[0].organization} · ${rs.length} scholar${rs.length === 1 ? "" : "s"}`,
-      rows: [...rs].sort((a, b) =>
-        surnameKey(a.scholarName).localeCompare(surnameKey(b.scholarName)),
-      ),
+      label: rs[0].scholarName,
+      sub: `${rs.length} honor${rs.length === 1 ? "" : "s"}`,
+      rows: [...rs].sort(newestFirst),
     }));
 }
 
 /** "Sep 15, 2026" — the decision date on the read-only tabs. UTC so a
  *  late-evening decision does not render as the next/previous day. */
-function formatDecided(iso: string): string {
+function formatDecided(iso: string, now: Date = new Date()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  if (d.toDateString() === now.toDateString()) return "Today";
   return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -287,14 +322,18 @@ export function HonorsQueue({
   rejected,
   userAsserted,
   sources,
+  degrees = {},
   runNowEnabled = false,
   readOnly = false,
 }: Props) {
   const router = useRouter();
   // Possible first — the redesign: land on the working queue.
   const [tab, setTab] = useState<Tab>("pending");
-  // Full-time faculty first — the curator's stated priority. Widen from there.
-  const [filter, setFilter] = useState<PersonFilter>("faculty");
+  // All scholars by default (2026-10-13 iteration); the row count says when a
+  // narrower filter is hiding rows.
+  const [filter, setFilter] = useState<PersonFilter>("all");
+  /** Possible's Source filter: a roster key (`rosterKey`) or "all". */
+  const [sourceFilter, setSourceFilter] = useState("all");
   // Highest tier first — the round-3 ask: work the biggest honors before the rest.
   const [sortKey, setSortKey] = useState<SortKey>("tier");
   // Tier facet: every tier by default; a curator narrows to one (e.g. tier 1, so
@@ -305,15 +344,17 @@ export function HonorsQueue({
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("strong");
   // Possible: no extra grouping by default — the flat, roster-line view.
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
-  // Read-only tabs: grouped by scholar by default (the redesign).
-  const [listGroupBy, setListGroupBy] = useState<ListGroupBy>("scholar");
+  // Record tabs: flat by default, with a Scholar column.
+  const [listGroupBy, setListGroupBy] = useState<ListGroupBy>("none");
+  /** Record rows whose evidence is expanded (Known's "View evidence"). */
+  const [evOpen, setEvOpen] = useState<Record<string, true>>({});
   const [query, setQuery] = useState("");
   const [groups, setGroups] = useState(pending);
   /** Contested line key → the candidate row id the curator picked. */
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [decided, setDecided] = useState<Record<string, Decided>>({});
-  /** Line key → the rejection reason picked beside its Reject (optional). */
-  const [reasons, setReasons] = useState<Record<string, string>>({});
+  /** The line whose reject-reason choices are open (Reject pressed). */
+  const [asking, setAsking] = useState<string | null>(null);
   /** Decisions made on this page, newest last: what U / the toast's Undo reverts. */
   const [history, setHistory] = useState<string[][]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -325,6 +366,24 @@ export function HonorsQueue({
   const [error, setError] = useState<string | null>(null);
 
   const q = query.trim().toLowerCase();
+
+  // A refresh (after a decision, Move to Possible or Restore) brings new pending
+  // lines in. Merge rather than replace: a line decided on this page stays in
+  // place with its outcome, which a plain replace would drop.
+  const decidedRef = useRef(decided);
+  decidedRef.current = decided;
+  useEffect(() => {
+    setGroups((prev) => {
+      const fresh = new Map(pending.map((g) => [g.key, g]));
+      const seen = new Set(prev.map((g) => g.key));
+      return [
+        ...prev
+          .filter((g) => decidedRef.current[g.key] || fresh.has(g.key))
+          .map((g) => (decidedRef.current[g.key] ? g : (fresh.get(g.key) ?? g))),
+        ...pending.filter((g) => !seen.has(g.key)),
+      ];
+    });
+  }, [pending]);
 
   // The active tab's groups. Pending is the mutable working queue; the other
   // tabs are props reconciled by `router.refresh()` after a decision.
@@ -356,7 +415,6 @@ export function HonorsQueue({
     }),
     [undecided, approved, rejected, userAsserted, sources],
   );
-  const contestedOpen = undecided.filter((g) => g.contested).length;
 
   // Option counts follow the ACTIVE tab (round 4: the filters are on every tab).
   const counts = useMemo(() => {
@@ -378,6 +436,14 @@ export function HonorsQueue({
         }
     return c;
   }, [source, filter]);
+  const sourceCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const g of undecided) {
+      const k = lineSource(g.rows[0]);
+      if (k) c.set(k, (c.get(k) ?? 0) + 1);
+    }
+    return c;
+  }, [undecided]);
   const levels = useMemo(() => new Map(groups.map((g) => [g.key, groupMatchLevel(g)])), [groups]);
   const matchCounts = useMemo(() => {
     let strong = 0;
@@ -391,13 +457,14 @@ export function HonorsQueue({
         (g) =>
           groupMatchesFilter(g, filter) &&
           (tierFilter === "all" || g.rows[0].tier === tierFilter) &&
+          (tab !== "pending" || sourceFilter === "all" || lineSource(g.rows[0]) === sourceFilter) &&
           (tab !== "pending" ||
             matchFilter === "all" ||
             (matchFilter === "strong") === (levels.get(g.key) === "strong")) &&
           !(tab === "pending" && hideDecided && decided[g.key]) &&
           g.rows.some((r) => rowMatchesQuery(r, q)),
       ),
-    [source, filter, tierFilter, tab, matchFilter, levels, hideDecided, decided, q],
+    [source, filter, tierFilter, sourceFilter, tab, matchFilter, levels, hideDecided, decided, q],
   );
   const sections = useMemo(
     () =>
@@ -419,46 +486,65 @@ export function HonorsQueue({
     return g && (!g.contested || picks[k]);
   }).length;
 
-  // Read-only tabs filter per ROW (no contested units there).
-  const filterTotal = counts[filter];
+  // Record tabs filter per ROW (no contested units there).
   const listRows = useMemo(
     () =>
       source
         .flatMap((g) => g.rows)
         .filter(
           (r) =>
-            (filter === "all" || personBucket(r.roleCategory) === filter) &&
-            (tierFilter === "all" || r.tier === tierFilter) &&
-            rowMatchesQuery(r, q),
+            (filter === "all" || personBucket(r.roleCategory) === filter) && rowMatchesQuery(r, q),
         ),
-    [source, filter, tierFilter, q],
+    [source, filter, q],
   );
   const listSections = useMemo(
     () => buildListSections(listRows, listGroupBy),
     [listRows, listGroupBy],
   );
 
+  // Possible needs no note: the shown-count line under the filters says it.
   const tabNote =
     tab === "pending"
-      ? tabTotals.pending === 0
-        ? "Nothing awaiting a decision."
-        : `${tabTotals.pending} honor${tabTotals.pending === 1 ? "" : "s"} awaiting a decision${
-            contestedOpen > 0
-              ? `, including ${contestedOpen} where more than one person matches the same award`
-              : ""
-          }.`
+      ? ""
       : tab === "approved"
         ? "Approved honors. These show on profiles."
         : tab === "rejected"
           ? "Matches that were ruled out. They won’t be suggested again."
           : tab === "sources"
             ? "Honor lists we scrape, and when each last ran."
-            : "Honors scholars added to their own profiles. Shown as self-reported.";
+            : "Honors scholars added to their own profiles. Shown as self-reported until verified.";
 
   function switchTab(next: Tab) {
     setTab(next);
     setQuery("");
+    setSelected({});
+    setAsking(null);
+    setToast(null);
   }
+
+  /** Sources → Possible, optionally narrowed to one source and nothing else. */
+  function openPossible(sourceKey: string | null) {
+    switchTab("pending");
+    setSourceFilter(sourceKey ?? "all");
+    if (sourceKey) {
+      setFilter("all");
+      setTierFilter("all");
+      setMatchFilter("all");
+    }
+  }
+
+  /** "Full-time faculty only · WCM Newsroom only": what is narrowing Possible. */
+  const narrowing = [
+    filter !== "all" ? `${PERSON_LABEL[filter]} only` : null,
+    tierFilter !== "all" ? `Tier ${tierFilter} only` : null,
+    matchFilter === "strong"
+      ? "Strong matches only"
+      : matchFilter === "review"
+        ? "Closer-look matches only"
+        : null,
+    sourceFilter !== "all" ? `${sourceLabel(sourceFilter, sources)} only` : null,
+    q ? `Matching “${query.trim()}”` : null,
+  ].filter(Boolean);
 
   async function send(payload: Record<string, unknown>): Promise<boolean> {
     try {
@@ -504,11 +590,14 @@ export function HonorsQueue({
   /**
    * Decide lines in order: approve (a contested line needs its pick; approving
    * resolves the WHOLE line, siblings rejected server-side) or reject (every
-   * candidate on the line). Sequential on purpose: each is its own transaction
-   * and audit row, and a parallel burst would race the pending re-check.
+   * candidate on the line, with a required reason). Sequential on purpose: each
+   * is its own transaction and audit row, and a parallel burst would race the
+   * pending re-check.
    */
-  async function decide(keys: string[], kind: "approve" | "reject", reasonOverride?: string) {
+  async function decide(keys: string[], kind: "approve" | "reject", reason = "") {
+    if (kind === "reject" && !reason) return;
     setBusy(true);
+    setAsking(null);
     setError(null);
     const next = { ...decided };
     const done: string[] = [];
@@ -523,17 +612,9 @@ export function HonorsQueue({
         next[key] = { kind: "approved", scholarName: row.scholarName, rowIds: [row.id] };
         lastText = `Approved ${row.name}, ${row.organization} for ${shortName(row.scholarName)}.`;
       } else {
-        const reason = (reasonOverride ?? reasons[key]) || "";
         const ok: string[] = [];
         for (const row of group.rows) {
-          if (
-            !(await send(
-              reason
-                ? { id: row.id, decision: "reject", reason }
-                : { id: row.id, decision: "reject" },
-            ))
-          )
-            break;
+          if (!(await send({ id: row.id, decision: "reject", reason }))) break;
           ok.push(row.id);
         }
         if (ok.length < group.rows.length) {
@@ -582,6 +663,49 @@ export function HonorsQueue({
       return;
     }
     void decide([key], "approve");
+  }
+
+  /** Reject needs a reason: open the choices on the line (1–5 or a click). */
+  function askReject(key: string) {
+    setFocus(key);
+    setAsking(key);
+  }
+
+  /** Known's "Move to Possible" / Rejected's "Restore": the decision route's
+   *  undo on one record row. A line decided on this page is undone as a whole. */
+  async function reopen(row: HonorQueueRow) {
+    const local = Object.entries(decided).find(([, d]) => d.rowIds.includes(row.id))?.[0];
+    if (local) {
+      await undo([local]);
+      setToast(`Moved ${row.name} (${shortName(row.scholarName)}) back to Possible.`);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    if (await send({ id: row.id, decision: "undo" })) {
+      setToast(`Moved ${row.name} (${shortName(row.scholarName)}) back to Possible.`);
+      router.refresh();
+    }
+    setBusy(false);
+  }
+
+  /** User asserted: mark a self-asserted honor verified, or back to self-reported. */
+  async function setVerified(row: HonorQueueRow, verified: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/edit/honor/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id, verified }),
+      });
+      const json = (await res.json()) as { ok?: boolean };
+      if (!res.ok || !json.ok) throw new Error("verify not saved");
+      router.refresh();
+    } catch {
+      setError("That didn't save. Nothing was changed.");
+    }
+    setBusy(false);
   }
 
   /** Revert decisions made on this page (default: the latest). Each line is ONE
@@ -679,6 +803,18 @@ export function HonorsQueue({
       return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    // The reason choices own the keyboard while open on the focused line: 1–5
+    // picks, Esc cancels. (Open on a line the curator has moved off, they are
+    // hidden and inert.)
+    if (asking && asking === focusKey) {
+      if (k === "escape") setAsking(null);
+      const n = Number(k);
+      if (Number.isInteger(n) && n >= 1 && n <= REJECTION_REASONS.length) {
+        e.preventDefault();
+        void decide([asking], "reject", REJECTION_REASONS[n - 1]);
+      }
+      return;
+    }
     if (k === "j" || k === "arrowdown") {
       e.preventDefault();
       move(1);
@@ -699,8 +835,10 @@ export function HonorsQueue({
       else approveOne(focusKey);
     } else if (k === "r") {
       e.preventDefault();
-      if (e.shiftKey && selKeys.length) void decide(selKeys, "reject", bulkReason);
-      else void decide([focusKey], "reject");
+      if (e.shiftKey && selKeys.length) {
+        if (bulkReason) void decide(selKeys, "reject", bulkReason);
+        else setToast("Pick a reason in the selection bar first.");
+      } else if (!decided[focusKey]) askReject(focusKey);
     } else if (k === "u" || k === "z") {
       e.preventDefault();
       void undo();
@@ -741,9 +879,11 @@ export function HonorsQueue({
             />
           ))}
         </div>
-        <p className="text-muted-foreground text-[13.5px]" data-slot="honors-tab-note">
-          {tabNote}
-        </p>
+        {tabNote ? (
+          <p className="text-muted-foreground text-[13.5px]" data-slot="honors-tab-note">
+            {tabNote}
+          </p>
+        ) : null}
       </div>
 
       {error ? (
@@ -771,53 +911,81 @@ export function HonorsQueue({
             slot="honors-person-filter"
             value={filter}
             onChange={(v) => setFilter(v as PersonFilter)}
-            options={[
-              ["faculty", `Full-time faculty (${counts.faculty})`],
-              ["affiliated", `Affiliated faculty (${counts.affiliated})`],
-              ["other", `Trainees & other (${counts.other})`],
-              ["all", `All scholars (${counts.all})`],
-            ]}
-          />
-          <ToolbarSelect
-            label="Tier"
-            slot="honors-tier-filter"
-            value={String(tierFilter)}
-            onChange={(v) => setTierFilter(v === "all" ? "all" : (Number(v) as HonorTier))}
-            options={[
-              ["all", `All tiers (${tierCounts.all})`],
-              ...HONOR_TIERS.map(
-                (t) => [String(t), `${t} · ${HONOR_TIER_LABELS[t]} (${tierCounts[t]})`] as const,
-              ),
-            ]}
+            options={(["all", "faculty", "affiliated", "other"] as const).map(
+              (k) => [k, `${PERSON_LABEL[k]} (${counts[k]})`] as const,
+            )}
           />
           {tab === "pending" ? (
-            <ToolbarSelect
-              label="Match"
-              slot="honors-match-filter"
-              value={matchFilter}
-              onChange={(v) => setMatchFilter(v as MatchFilter)}
-              options={[
-                ["strong", `Strong only (${matchCounts.strong})`],
-                ["review", `Needs a closer look (${matchCounts.review})`],
-                ["all", `All matches (${matchCounts.all})`],
-              ]}
-            />
+            <>
+              <ToolbarSelect
+                label="Tier"
+                slot="honors-tier-filter"
+                value={String(tierFilter)}
+                onChange={(v) => setTierFilter(v === "all" ? "all" : (Number(v) as HonorTier))}
+                options={[
+                  ["all", `All tiers (${tierCounts.all})`],
+                  ...HONOR_TIERS.map(
+                    (t) =>
+                      [String(t), `${t} · ${HONOR_TIER_LABELS[t]} (${tierCounts[t]})`] as const,
+                  ),
+                ]}
+              />
+              <ToolbarSelect
+                label="Match"
+                slot="honors-match-filter"
+                value={matchFilter}
+                onChange={(v) => setMatchFilter(v as MatchFilter)}
+                options={[
+                  ["strong", `Strong only (${matchCounts.strong})`],
+                  ["review", `Needs a closer look (${matchCounts.review})`],
+                  ["all", `All matches (${matchCounts.all})`],
+                ]}
+              />
+              <ToolbarSelect
+                label="Source"
+                slot="honors-source-filter"
+                value={sourceFilter}
+                onChange={setSourceFilter}
+                options={[
+                  ["all", "All sources"],
+                  // The active source stays listed even with nothing pending (opened
+                  // from Sources), so the select never misreports the filter.
+                  ...[
+                    ...sourceCounts,
+                    ...(sourceFilter !== "all" && !sourceCounts.has(sourceFilter)
+                      ? [[sourceFilter, 0] as const]
+                      : []),
+                  ]
+                    .map(([k, n]) => [k, `${sourceLabel(k, sources)} (${n})`] as const)
+                    .sort((a, b) => a[1].localeCompare(b[1])),
+                ]}
+              />
+            </>
+          ) : filter !== "all" || q ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFilter("all");
+                setQuery("");
+              }}
+              className="text-apollo-slate text-[13px]"
+              data-slot="honors-show-all"
+            >
+              Show all
+            </button>
           ) : null}
           <div className="flex flex-wrap items-center gap-2.5 sm:ml-auto">
             {isList ? (
-              <div className="flex items-center gap-2.5" data-slot="honors-list-group-by">
-                <span className="text-muted-foreground text-[13px]">Group</span>
-                <Segmented
-                  label="Group"
-                  value={listGroupBy}
-                  onChange={setListGroupBy}
-                  options={[
-                    ["scholar", "Scholar"],
-                    ["award", "Award"],
-                    ["none", "None"],
-                  ]}
-                />
-              </div>
+              <ToolbarSelect
+                label="Group"
+                slot="honors-list-group-by"
+                value={listGroupBy}
+                onChange={(v) => setListGroupBy(v as ListGroupBy)}
+                options={[
+                  ["none", "No grouping"],
+                  ["scholar", "By scholar"],
+                ]}
+              />
             ) : (
               <>
                 <ToolbarSelect
@@ -886,8 +1054,10 @@ export function HonorsQueue({
             />
             Hide decided
           </label>
-          <span>
-            Showing {flat.length} · {open.length} open
+          <span data-slot="honors-shown">
+            Showing {flat.length.toLocaleString("en-US")} of {groups.length.toLocaleString("en-US")}{" "}
+            · {open.length.toLocaleString("en-US")} open
+            {narrowing.map((n) => ` · ${n}`).join("")}
           </span>
           <div className="ml-auto hidden flex-wrap items-center gap-2.5 text-xs md:flex">
             <span className="flex items-center gap-1">
@@ -923,6 +1093,8 @@ export function HonorsQueue({
           summary={sources}
           empty={emptyMessage("sources", true)}
           runNowEnabled={runNowEnabled}
+          pendingTotal={tabTotals.pending}
+          onOpenPossible={openPossible}
         />
       ) : tab === "pending" ? (
         flat.length === 0 || !focused ? (
@@ -943,16 +1115,17 @@ export function HonorsQueue({
               position={`${flat.indexOf(focused) + 1} of ${flat.length}`}
               pick={picks[focused.key] ?? null}
               decided={decided[focused.key] ?? null}
-              reason={reasons[focused.key] ?? ""}
+              asking={asking === focused.key}
               busy={busy}
               readOnly={readOnly}
               published={published}
               pending={groups}
               decidedMap={decided}
               onPick={(rowId) => setPicks((p) => ({ ...p, [focused.key]: rowId }))}
-              onReason={(r) => setReasons((rs) => ({ ...rs, [focused.key]: r }))}
+              onRejectWith={(r) => void decide([focused.key], "reject", r)}
+              onCancelAsk={() => setAsking(null)}
               onApprove={() => approveOne(focused.key)}
-              onReject={() => void decide([focused.key], "reject")}
+              onReject={() => askReject(focused.key)}
               onUndo={() => void undo([focused.key])}
               onSkip={() => move(1, true)}
               onTier={(t) => void setTier(focused, t)}
@@ -964,17 +1137,32 @@ export function HonorsQueue({
           </div>
         )
       ) : (
-        <DecidedTable
+        <RecordTable
           kind={tab}
           sections={listSections}
-          mode={listGroupBy}
           shown={listRows.length}
-          total={filterTotal}
+          total={counts.all}
+          narrowing={filter !== "all" ? `${PERSON_LABEL[filter]} only` : null}
           empty={emptyMessage(tab, source.length === 0)}
+          readOnly={readOnly}
+          busy={busy}
+          degrees={degrees}
+          summary={sources}
+          evOpen={evOpen}
+          onToggleEvidence={(id) =>
+            setEvOpen((o) => {
+              const n = { ...o };
+              if (n[id]) delete n[id];
+              else n[id] = true;
+              return n;
+            })
+          }
+          onReopen={(row) => void reopen(row)}
+          onVerify={(row, v) => void setVerified(row, v)}
         />
       )}
 
-      {tab === "pending" && (toast || (!readOnly && selKeys.length > 0)) ? (
+      {toast || (tab === "pending" && !readOnly && selKeys.length > 0) ? (
         <div className="fixed bottom-5 left-1/2 z-20 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 flex-col items-center gap-2">
           {toast ? (
             <div
@@ -983,7 +1171,7 @@ export function HonorsQueue({
               data-slot="honors-toast"
             >
               <span>{toast}</span>
-              {history.length > 0 ? (
+              {tab === "pending" && history.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => void undo()}
@@ -995,7 +1183,7 @@ export function HonorsQueue({
               ) : null}
             </div>
           ) : null}
-          {!readOnly && selKeys.length > 0 ? (
+          {tab === "pending" && !readOnly && selKeys.length > 0 ? (
             <div
               className="bg-apollo-surface border-apollo-border-strong flex flex-wrap items-center gap-2.5 rounded-xl border py-2 pr-2.5 pl-4 text-[13.5px] shadow-[0_10px_30px_rgba(34,30,28,.14)]"
               data-slot="honors-bulk-bar"
@@ -1017,7 +1205,8 @@ export function HonorsQueue({
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || !bulkReason}
+                title={bulkReason ? undefined : "Pick a reason first"}
                 onClick={() => void decide(selKeys, "reject", bulkReason)}
                 className="text-destructive hover:bg-apollo-red-tint hover:text-destructive text-[13px] font-normal"
               >
@@ -1129,46 +1318,6 @@ function TabButton({
   );
 }
 
-function Segmented<T extends string>({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: T;
-  onChange: (v: T) => void;
-  options: ReadonlyArray<readonly [T, string]>;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={label}
-      className="bg-apollo-surface-2 border-apollo-border flex gap-0.5 rounded-lg border p-[3px]"
-    >
-      {options.map(([k, text]) => {
-        const on = value === k;
-        return (
-          <button
-            key={k}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onChange(k)}
-            className={cn(
-              "rounded-md px-[11px] py-1 text-[13px] whitespace-nowrap",
-              on
-                ? "bg-apollo-surface text-foreground shadow-[var(--apollo-shadow-card)]"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {text}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function EmptyCard({ slot, children }: { slot: string; children: ReactNode }) {
   return (
     <div
@@ -1180,169 +1329,301 @@ function EmptyCard({ slot, children }: { slot: string; children: ReactNode }) {
   );
 }
 
-/** Known / Rejected / User asserted: a read-only table, grouped per the segmented
- *  control. Columns follow the grouping: the section label carries the scholar
- *  (or the award), so the row doesn't repeat it. */
-function DecidedTable({
+const RECORD_COLS: Record<"approved" | "rejected" | "self", string> = {
+  approved: "sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_100px_110px_220px]",
+  rejected: "sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(0,1.2fr)_70px_150px_110px_90px]",
+  self: "sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_70px_110px_120px_90px]",
+};
+
+const RECORD_HEADS: Record<"approved" | "rejected" | "self", string[]> = {
+  approved: ["Scholar", "Honor", "Organization", "Year", "Added", ""],
+  rejected: ["Scholar", "Honor", "Organization", "Year", "Reason", "Rejected on", ""],
+  self: ["Scholar", "Honor", "Organization", "Year", "Added", "Status", ""],
+};
+
+/** Known (approve-side) rows a curator may send back to Possible: anything the
+ *  queue decided or a feed seeded. Hand-entered rows never came through it. */
+function reopenable(row: HonorQueueRow): boolean {
+  return !row.superseded && row.source !== "CURATOR" && row.source !== "SELF";
+}
+
+const rowAction =
+  "text-apollo-slate hover:bg-apollo-surface-2 rounded-md px-2 py-1 text-[13px] whitespace-nowrap disabled:opacity-60";
+
+/** Known / Rejected / User asserted: one row per honor with a Scholar column,
+ *  flat or under scholar headings, each row with its action. */
+function RecordTable({
   kind,
   sections,
-  mode,
   shown,
   total,
+  narrowing,
   empty,
+  readOnly,
+  busy,
+  degrees,
+  summary,
+  evOpen,
+  onToggleEvidence,
+  onReopen,
+  onVerify,
 }: {
   kind: "approved" | "rejected" | "self";
   sections: ListSection[];
-  mode: ListGroupBy;
   shown: number;
   total: number;
+  narrowing: string | null;
   empty: string;
+  readOnly: boolean;
+  busy: boolean;
+  degrees: Record<string, DoctoralDegree>;
+  summary: HonorSourcesSummary;
+  evOpen: Record<string, true>;
+  onToggleEvidence: (id: string) => void;
+  onReopen: (row: HonorQueueRow) => void;
+  onVerify: (row: HonorQueueRow, verified: boolean) => void;
 }) {
-  // Rejected: the mockup's Reason column, with the date and curator under it.
-  const dateHead = kind === "rejected" ? "Reason" : "Added";
-  const heads: string[] =
-    mode === "scholar"
-      ? ["Honor", "Organization", "Year", dateHead]
-      : mode === "award"
-        ? ["Scholar", "Scholar type", "Year", dateHead]
-        : ["Scholar", "Honor", "Organization", "Year", dateHead];
-  const cols =
-    mode === "none"
-      ? "sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_56px_150px]"
-      : mode === "scholar"
-        ? "sm:grid-cols-[minmax(0,1.4fr)_minmax(0,2fr)_56px_150px]"
-        : "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1.4fr)_56px_150px]";
-  const addedBy = (row: HonorQueueRow) =>
-    kind === "self"
-      ? `${formatDecided(row.decidedAt)} by the scholar`
-      : row.decidedByName
-        ? `${formatDecided(row.decidedAt)} by ${row.decidedByName}`
-        : formatDecided(row.decidedAt);
-  const cells = (
-    row: HonorQueueRow,
-  ): Array<{
-    v: string;
-    sub?: string;
-    strong?: boolean;
-    muted?: boolean;
-    right?: boolean;
-    year?: boolean;
-  }> => {
-    const year = { v: row.year === null ? "—" : String(row.year), right: true, year: true };
-    const date =
-      kind === "rejected"
-        ? { v: row.rejectionReason ?? "—", sub: addedBy(row), right: true, muted: true }
-        : { v: addedBy(row), right: true, muted: true };
-    if (mode === "scholar")
-      return [{ v: row.name, strong: true }, { v: row.organization, muted: true }, year, date];
-    if (mode === "award")
+  const cols = RECORD_COLS[kind];
+  const heads = RECORD_HEADS[kind];
+  const rows = sections.flatMap((x) => x.rows);
+  const predates =
+    kind === "rejected"
+      ? rows.filter((r) => predatesDegreeNote(r.year, degrees[r.cwid])).length
+      : 0;
+
+  const year = (row: HonorQueueRow) =>
+    row.year === null ? (
+      <span className="bg-apollo-amber-tint text-apollo-amber rounded-full px-2 py-0.5 text-xs whitespace-nowrap">
+        Year unknown
+      </span>
+    ) : (
+      row.year
+    );
+
+  const cells = (row: HonorQueueRow): ReactNode[] => {
+    const lead = [
+      <span key="s" className="min-w-0 basis-full font-medium sm:basis-auto">
+        {row.scholarName}
+      </span>,
+      kind === "rejected" ? (
+        <span key="h" className="flex min-w-0 flex-col gap-0.5">
+          <span>{row.name}</span>
+          {predatesDegreeNote(row.year, degrees[row.cwid]) ? (
+            <span className="text-apollo-amber text-xs" data-slot="honor-predates-degree">
+              {predatesDegreeNote(row.year, degrees[row.cwid])}
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span key="h" className="min-w-0">
+          {row.name}
+        </span>
+      ),
+      <span key="o" className="text-muted-foreground min-w-0">
+        {row.organization}
+      </span>,
+      <span key="y" className="tabular-nums">
+        {year(row)}
+      </span>,
+    ];
+    if (kind === "approved")
       return [
-        { v: row.scholarName, strong: true },
-        { v: row.roleLabel ?? "—", muted: true },
-        year,
-        date,
+        ...lead,
+        <span key="a" className="text-muted-foreground">
+          {formatDecided(row.decidedAt)}
+        </span>,
+        <span key="x" className="flex gap-0.5 sm:justify-end">
+          <button type="button" onClick={() => onToggleEvidence(row.id)} className={rowAction}>
+            {evOpen[row.id] ? "Hide evidence" : "View evidence"}
+          </button>
+          {readOnly || !reopenable(row) ? null : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onReopen(row)}
+              className={cn(rowAction, "text-muted-foreground")}
+              data-slot="honor-move-to-possible"
+            >
+              Move to Possible
+            </button>
+          )}
+        </span>,
+      ];
+    if (kind === "rejected")
+      return [
+        ...lead,
+        <span key="r">
+          {row.rejectionReason ?? <span className="text-muted-foreground">Not recorded</span>}
+        </span>,
+        <span key="d" className="text-muted-foreground">
+          {formatDecided(row.decidedAt)}
+        </span>,
+        <span key="x" className="flex sm:justify-end">
+          {readOnly || !reopenable(row) ? null : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onReopen(row)}
+              className={rowAction}
+              data-slot="honor-restore"
+            >
+              Restore
+            </button>
+          )}
+        </span>,
       ];
     return [
-      { v: row.scholarName, strong: true },
-      { v: row.name },
-      { v: row.organization, muted: true },
-      year,
-      date,
+      ...lead,
+      <span key="a" className="text-muted-foreground">
+        {formatDecided(row.createdAt)}
+      </span>,
+      <span key="st">
+        {row.verified ? (
+          <span className="bg-apollo-slate-tint text-apollo-slate rounded-full px-[9px] py-0.5 text-xs whitespace-nowrap">
+            Verified
+          </span>
+        ) : (
+          <span className="bg-apollo-surface-2 rounded-full px-[9px] py-0.5 text-xs whitespace-nowrap text-[#3a3532]">
+            Self-reported
+          </span>
+        )}
+      </span>,
+      <span key="x" className="flex sm:justify-end">
+        {readOnly ? null : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onVerify(row, !row.verified)}
+            className={rowAction}
+            data-slot="honor-verify"
+          >
+            {row.verified ? "Unverify" : "Verify"}
+          </button>
+        )}
+      </span>,
     ];
   };
+
   return (
-    <div
-      className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[var(--apollo-radius-card)] border"
-      data-slot={`honors-${kind}-table`}
-    >
-      <div
-        className={cn(
-          "bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground hidden gap-3.5 border-b px-5 py-2.5 text-xs font-medium tracking-[0.08em] uppercase sm:grid",
-          cols,
-        )}
-        aria-hidden
-      >
-        {heads.map((h, i) => (
-          <span key={h} className={i >= heads.length - 2 ? "text-right" : undefined}>
-            {h}
-          </span>
-        ))}
-      </div>
-      {sections.length === 0 ? (
+    <div className="flex flex-col gap-3">
+      {predates > 0 ? (
         <div
-          className="text-muted-foreground p-8 text-center text-sm"
-          data-slot={`honors-${kind}-empty`}
+          className="bg-apollo-amber-tint border-apollo-amber-tint-border rounded-lg border px-3 py-[9px] text-[13px] text-[#3a3532]"
+          data-slot="honors-predates-note"
         >
-          {empty}
+          {predates} of these {predates === 1 ? "was" : "were"} awarded before the scholar’s degree.
         </div>
-      ) : (
-        sections.map((section, si) => (
+      ) : null}
+      <div
+        className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[var(--apollo-radius-card)] border"
+        data-slot={`honors-${kind}-table`}
+      >
+        <div
+          className={cn(
+            "bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground hidden gap-4 border-b px-5 py-3 text-[11.5px] font-semibold tracking-[0.08em] uppercase sm:grid",
+            cols,
+          )}
+          aria-hidden
+        >
+          {heads.map((h, i) => (
+            <span key={i}>{h}</span>
+          ))}
+        </div>
+        {sections.length === 0 ? (
           <div
-            key={section.key}
-            data-slot={section.label ? "honor-list-section" : "honor-list-flat"}
+            className="text-muted-foreground p-8 text-center text-sm"
+            data-slot={`honors-${kind}-empty`}
           >
-            {section.label ? (
-              <div
-                className={cn(
-                  "bg-apollo-page flex flex-wrap items-baseline gap-x-2.5 px-5 pt-2.5 pb-2",
-                  si > 0 && "border-apollo-border-strong border-t",
-                )}
-              >
-                <span className="text-[14.5px] font-semibold" data-slot="honor-list-heading">
-                  {section.label}
-                </span>
-                <span className="text-muted-foreground text-[12.5px]">{section.sub}</span>
-              </div>
-            ) : null}
-            <ul data-slot={`honors-${kind}-list`}>
-              {section.rows.map((row, i) => (
-                <li
-                  key={row.id}
-                  className={cn(
-                    "hover:bg-apollo-page flex flex-wrap gap-x-3.5 gap-y-0.5 py-2.5 pr-5 text-sm sm:grid sm:items-center",
-                    section.label ? "pl-8" : "pl-5",
-                    cols,
-                    (i > 0 || (!section.label && si > 0)) && "border-apollo-border border-t",
-                  )}
-                >
-                  {cells(row).map((c, ci) => (
-                    <span
-                      key={ci}
-                      title={c.sub ? `${c.v} · ${c.sub}` : c.v}
+            {empty}
+          </div>
+        ) : (
+          sections.map((section) => (
+            <div
+              key={section.key}
+              data-slot={section.label ? "honor-list-section" : "honor-list-flat"}
+            >
+              {section.label ? (
+                <div className="bg-apollo-page border-apollo-border flex items-baseline gap-2 border-b px-5 py-[9px] text-sm font-medium">
+                  <span data-slot="honor-list-heading">{section.label}</span>
+                  <span className="text-muted-foreground text-[12.5px] font-normal">
+                    {section.sub}
+                  </span>
+                </div>
+              ) : null}
+              <ul data-slot={`honors-${kind}-list`}>
+                {section.rows.map((row) => (
+                  <li key={row.id} className="border-apollo-border border-b">
+                    <div
                       className={cn(
-                        "min-w-0 leading-snug [overflow-wrap:anywhere] tabular-nums",
-                        c.strong && "font-medium",
-                        c.muted && "text-muted-foreground",
-                        c.right && "sm:text-right",
-                        c.year && c.v === "—" && "text-apollo-border-strong",
-                        // Phones: the lead cell takes its own line; the rest flow under it.
-                        ci === 0 && "basis-full sm:basis-auto",
-                        ci > 0 && (c.muted && c.right ? "text-[13px]" : "text-[13px] sm:text-sm"),
+                        "flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-[11px] text-[13.5px] sm:grid",
+                        cols,
                       )}
                     >
-                      {c.v}
-                      {c.sub ? (
-                        <span
-                          className="text-muted-foreground block text-xs"
-                          data-slot="honor-decided-by"
-                        >
-                          {c.sub}
-                        </span>
-                      ) : null}
-                    </span>
-                  ))}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
-      )}
-      <div
-        className="bg-apollo-page border-apollo-border text-muted-foreground border-t px-5 py-3 text-[13px]"
-        data-slot="honors-list-footer"
-      >
-        Showing {shown} of {total} honors.
+                      {cells(row).map((c, i) => (
+                        <Fragment key={i}>{c}</Fragment>
+                      ))}
+                    </div>
+                    {kind === "approved" && evOpen[row.id] ? (
+                      <RecordEvidence row={row} summary={summary} />
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+        <div
+          className="text-muted-foreground px-5 py-[11px] text-[13px]"
+          data-slot="honors-list-footer"
+        >
+          Showing {shown.toLocaleString("en-US")} of {total.toLocaleString("en-US")}
+          {narrowing ? ` · ${narrowing}` : ""}
+        </div>
       </div>
+    </div>
+  );
+}
+
+/** Known's expanded evidence: the quote the match rested on, and its source. */
+function RecordEvidence({ row, summary }: { row: HonorQueueRow; summary: HonorSourcesSummary }) {
+  const { quote, note } = parseEvidence(row.evidence);
+  const key = row.sourceRef ? rosterKey(row.sourceRef) : null;
+  const url = rosterSourceUrl(row.sourceRef);
+  return (
+    <div
+      className="flex max-w-[820px] flex-col gap-2 px-5 pb-3.5"
+      data-slot="honor-record-evidence"
+    >
+      {quote !== null ? (
+        <EvidenceQuote
+          quote={quote}
+          group={{
+            key: row.id,
+            rows: [row],
+            rosterMatchedName: rosterMatchedName(row.sourceRef),
+            contested: false,
+          }}
+          small
+        />
+      ) : note !== null ? (
+        <p className="text-muted-foreground m-0 text-[13.5px]">{note}</p>
+      ) : null}
+      <span className="text-muted-foreground text-[12.5px]">
+        {key ? `Matched from ${sourcePhrase(key, summary)}` : "Added by hand, no source list"}
+        {url ? (
+          <>
+            {" · "}
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-apollo-slate hover:underline"
+            >
+              source list ↗
+            </a>
+          </>
+        ) : null}
+      </span>
     </div>
   );
 }
@@ -1370,7 +1651,30 @@ function runStatus(run: HonorSourceRun): { label: string; dot: string; ink: stri
   return { label: "Running", dot: "bg-apollo-amber", ink: "text-apollo-amber" };
 }
 
-const SOURCE_COLS = "sm:grid-cols-[minmax(0,2.2fr)_80px_150px_76px_64px_92px]";
+const SOURCE_COLS = "sm:grid-cols-[minmax(0,2.2fr)_80px_150px_76px_110px_92px]";
+
+/** A list's WCM match count, as a link into Possible filtered to that list. */
+function WcmCount({
+  n,
+  title,
+  onClick,
+}: {
+  n: number | null | undefined;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="text-apollo-slate font-semibold whitespace-nowrap tabular-nums"
+      data-slot="honors-source-wcm"
+    >
+      {count(n)} →<span className="font-normal sm:hidden"> WCM</span>
+    </button>
+  );
+}
 
 /** "Sep 1, 2026" — a list run's date. */
 function formatRunDate(iso: string): string {
@@ -1431,10 +1735,16 @@ function SourcesPanel({
   summary,
   empty,
   runNowEnabled,
+  pendingTotal,
+  onOpenPossible,
 }: {
   summary: HonorSourcesSummary;
   empty: string;
   runNowEnabled: boolean;
+  /** Possible's count: the header's "N pending review →". */
+  pendingTotal: number;
+  /** Open Possible, narrowed to one source (a roster key) or not at all. */
+  onOpenPossible: (sourceKey: string | null) => void;
 }) {
   const router = useRouter();
   const { sources, runs, lists } = summary;
@@ -1443,7 +1753,6 @@ function SourcesPanel({
   const scrapedUrls = new Set(lists.map((l) => l.rosterUrl));
   const manual = sources.filter((s) => !scrapedUrls.has(s.key));
   const rollupByUrl = new Map(sources.map((s) => [s.key, s]));
-  const waiting = sources.reduce((n, s) => n + s.pendingLines, 0);
   const partial = lists.filter((l) => l.latest?.status === "partial").length;
   const failed = lists.filter(
     (l) => l.latest?.status === "failed" || l.latest?.status === "stalled",
@@ -1512,9 +1821,15 @@ function SourcesPanel({
         <span className="text-muted-foreground whitespace-nowrap">
           <span className="text-destructive font-semibold tabular-nums">{failed}</span> failed
         </span>
-        <span className="text-muted-foreground whitespace-nowrap">
-          <span className="text-apollo-amber font-semibold tabular-nums">{waiting}</span> waiting
-        </span>
+        <button
+          type="button"
+          onClick={() => onOpenPossible(null)}
+          className="text-apollo-slate whitespace-nowrap"
+          data-slot="honors-sources-pending"
+        >
+          <span className="font-semibold tabular-nums">{pendingTotal.toLocaleString("en-US")}</span>{" "}
+          pending review →
+        </button>
       </div>
 
       {runError ? (
@@ -1538,7 +1853,7 @@ function SourcesPanel({
           <span>Schedule</span>
           <span>Last run</span>
           <span className="text-right">On list</span>
-          <span className="text-right">WCM</span>
+          <span className="text-right">WCM matches</span>
           <span />
         </div>
         {total === 0 ? (
@@ -1592,16 +1907,16 @@ function SourcesPanel({
                       {count(counts?.onListTotal)}
                       <span className="text-muted-foreground sm:hidden"> on list</span>
                     </span>
-                    <span
-                      className="text-[13px] font-medium tabular-nums sm:text-right sm:text-sm"
-                      title={
-                        rollup
-                          ? `${rollup.pendingLines} waiting · ${rollup.approved} approved`
-                          : undefined
-                      }
-                    >
-                      {count(counts?.matched)}
-                      <span className="text-muted-foreground font-normal sm:hidden"> WCM</span>
+                    <span className="text-[13px] tabular-nums sm:text-right sm:text-sm">
+                      <WcmCount
+                        n={counts?.matched}
+                        title={
+                          rollup
+                            ? `${rollup.pendingLines} waiting · ${rollup.approved} approved. Open matches in Possible`
+                            : "Open matches in Possible"
+                        }
+                        onClick={() => onOpenPossible(l.rosterUrl)}
+                      />
                     </span>
                     <span className="flex sm:justify-end">
                       {runNowEnabled ? (
@@ -1668,9 +1983,12 @@ function SourcesPanel({
                 <span className="text-muted-foreground text-[13px] sm:text-right sm:text-sm">
                   —
                 </span>
-                <span className="text-[13px] font-medium tabular-nums sm:text-right sm:text-sm">
-                  {s.lines}
-                  <span className="text-muted-foreground font-normal sm:hidden"> WCM</span>
+                <span className="text-[13px] tabular-nums sm:text-right sm:text-sm">
+                  <WcmCount
+                    n={s.lines}
+                    title="Open matches in Possible"
+                    onClick={() => onOpenPossible(s.key)}
+                  />
                 </span>
                 <span />
               </li>
@@ -1679,9 +1997,9 @@ function SourcesPanel({
         )}
         <div className="bg-apollo-page border-apollo-border text-muted-foreground border-t px-5 py-3 text-[13px]">
           New matches from each run land in Possible, and nothing is approved automatically.
-          &ldquo;On list&rdquo; counts the entries read from the list; &ldquo;WCM&rdquo; counts
-          those matched to a Weill Cornell scholar. &ldquo;Manual&rdquo; lists come from the
-          operator-run seed import.
+          &ldquo;On list&rdquo; counts the entries read from the list; &ldquo;WCM matches&rdquo;
+          counts those matched to a Weill Cornell scholar. &ldquo;Manual&rdquo; lists come from the
+          operator-run seed import. Click a WCM count to review that list&rsquo;s matches.
         </div>
       </div>
 

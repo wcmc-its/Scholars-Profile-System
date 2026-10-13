@@ -13,6 +13,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  doctoralDegree,
+  loadDoctoralDegrees,
+  predatesDegreeNote,
   buildHonorCsv,
   canViewHonorsQueue,
   isHonorsQueueReadOnly,
@@ -53,7 +56,13 @@ function honor(over: Partial<Row> & { id: string; cwid: string }): Row {
 /** Minimal stand-in for the Prisma surface the loader touches. */
 function client(
   rows: Row[],
-  scholars: Array<{ cwid: string; preferredName: string; primaryTitle?: string; postnominal?: string | null; roleCategory?: string | null }>,
+  scholars: Array<{
+    cwid: string;
+    preferredName: string;
+    primaryTitle?: string;
+    postnominal?: string | null;
+    roleCategory?: string | null;
+  }>,
 ) {
   return {
     honor: { findMany: async () => rows },
@@ -119,7 +128,9 @@ describe("loadHonorQueue — grouping by roster line", () => {
       honor({ id: "a", cwid: "aaa1001", sourceRef: "ref-1" }),
       honor({ id: "b", cwid: "aaa1001", sourceRef: "ref-1" }),
     ];
-    const groups = await loadHonorQueue(client(rows, [{ cwid: "aaa1001", preferredName: "A Smith" }]));
+    const groups = await loadHonorQueue(
+      client(rows, [{ cwid: "aaa1001", preferredName: "A Smith" }]),
+    );
 
     expect(groups).toHaveLength(1);
     expect(groups[0].contested).toBe(false);
@@ -194,16 +205,20 @@ describe("loadHonorQueue — the verification pair (name matched against + publi
 
   it("leaves rosterMatchedName null for a hand-entered honor (null sourceRef)", async () => {
     const groups = await loadHonorQueue(
-      client([honor({ id: "a", cwid: "aaa1001", sourceRef: null })], [{ cwid: "aaa1001", preferredName: "A Smith" }]),
+      client(
+        [honor({ id: "a", cwid: "aaa1001", sourceRef: null })],
+        [{ cwid: "aaa1001", preferredName: "A Smith" }],
+      ),
     );
     expect(groups[0].rosterMatchedName).toBeNull();
   });
 
   it("carries the roleCategory + a display label for the person filter", async () => {
     const groups = await loadHonorQueue(
-      client([honor({ id: "a", cwid: "aaa1001", sourceRef: "x|Y|2013" })], [
-        { cwid: "aaa1001", preferredName: "A", roleCategory: "affiliated_faculty" },
-      ]),
+      client(
+        [honor({ id: "a", cwid: "aaa1001", sourceRef: "x|Y|2013" })],
+        [{ cwid: "aaa1001", preferredName: "A", roleCategory: "affiliated_faculty" }],
+      ),
     );
     expect(groups[0].rows[0].roleCategory).toBe("affiliated_faculty");
     expect(groups[0].rows[0].roleLabel).toBeTruthy();
@@ -240,8 +255,21 @@ describe("loadHonorQueue — tier", () => {
     const groups = await loadHonorQueue(
       client(
         [
-          honor({ id: "a", cwid: "aaa1001", sourceRef: "x|A|2013", organization: "National Academy of Sciences", name: "Member" }),
-          honor({ id: "b", cwid: "aaa1001", sourceRef: "y|A|2014", organization: "National Academy of Sciences", name: "Member", tierOverride: 1 }),
+          honor({
+            id: "a",
+            cwid: "aaa1001",
+            sourceRef: "x|A|2013",
+            organization: "National Academy of Sciences",
+            name: "Member",
+          }),
+          honor({
+            id: "b",
+            cwid: "aaa1001",
+            sourceRef: "y|A|2014",
+            organization: "National Academy of Sciences",
+            name: "Member",
+            tierOverride: 1,
+          }),
         ],
         [{ cwid: "aaa1001", preferredName: "A" }],
       ),
@@ -254,8 +282,9 @@ describe("loadHonorQueue — tier", () => {
 
 describe("yearPlausibilityNote — a SIGNAL, never a filter", () => {
   it("flags an old award on a junior current title", () => {
-    expect(yearPlausibilityNote({ year: 1985, title: "Clinical Instructor in Emergency Medicine" }))
-      .toMatch(/check this is the same person/i);
+    expect(
+      yearPlausibilityNote({ year: 1985, title: "Clinical Instructor in Emergency Medicine" }),
+    ).toMatch(/check this is the same person/i);
   });
 
   it("stays silent on an old award held by a senior title (a real emeritus hit)", () => {
@@ -263,7 +292,9 @@ describe("yearPlausibilityNote — a SIGNAL, never a filter", () => {
   });
 
   it("stays silent on a recent award, junior title or not", () => {
-    expect(yearPlausibilityNote({ year: 2020, title: "Assistant Professor of Medicine" })).toBeNull();
+    expect(
+      yearPlausibilityNote({ year: 2020, title: "Assistant Professor of Medicine" }),
+    ).toBeNull();
   });
 
   it("stays silent when the year is unknown rather than guessing", () => {
@@ -305,7 +336,7 @@ describe("yearPlausibilityNote — the threshold must not rot", () => {
 
 describe("isHonorsQueueTabVisible", () => {
   const on = { HONORS_APPROVAL_QUEUE: "on" };
-  const withEnv = <T,>(env: Record<string, string>, fn: () => T): T => {
+  const withEnv = <T>(env: Record<string, string>, fn: () => T): T => {
     const prev = { ...process.env };
     Object.assign(process.env, env);
     try {
@@ -384,7 +415,9 @@ describe("loadHonorQueue — self-source partition", () => {
 
 // #1762 — the Research Dean's CSV report. All synthetic names.
 describe("buildHonorCsv", () => {
-  function exportRow(over: Partial<HonorQueueRow & { status: string }>): HonorQueueRow & { status: string } {
+  function exportRow(
+    over: Partial<HonorQueueRow & { status: string }>,
+  ): HonorQueueRow & { status: string } {
     return {
       id: "1",
       cwid: "abc1001",
@@ -409,13 +442,17 @@ describe("buildHonorCsv", () => {
       superseded: false,
       competingCwids: [],
       evidence: null,
+      verified: false,
       status: "published",
       ...over,
     };
   }
 
   it("emits a header row and one line per honor, carrying Status and Source", () => {
-    const csv = buildHonorCsv([exportRow({}), exportRow({ status: "pending", source: "NOBEL", year: null })]);
+    const csv = buildHonorCsv([
+      exportRow({}),
+      exportRow({ status: "pending", source: "NOBEL", year: null }),
+    ]);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toContain("Scholar");
     expect(lines[0]).toContain("Status");
@@ -448,5 +485,37 @@ describe("canViewHonorsQueue / isHonorsQueueReadOnly", () => {
 
   it("anyone else is refused", () => {
     expect(canViewHonorsQueue({ isSuperuser: false })).toBe(false);
+  });
+});
+
+describe("doctoral degrees (Rejected's predates-degree note)", () => {
+  it("reads doctoral degrees with or without dots and ignores others", () => {
+    expect(doctoralDegree("M.D.")).toBe("MD");
+    expect(doctoralDegree("PhD")).toBe("PhD");
+    expect(doctoralDegree("BA")).toBeNull();
+    expect(doctoralDegree("MPH")).toBeNull();
+  });
+
+  it("keeps each scholar's earliest doctorate", async () => {
+    const client = {
+      education: {
+        findMany: async () => [
+          { cwid: "a", degree: "PhD", year: 1995 },
+          { cwid: "a", degree: "MD", year: 1990 },
+          { cwid: "a", degree: "BA", year: 1980 },
+        ],
+      },
+    };
+    expect(await loadDoctoralDegrees(client as never, ["a"])).toEqual({
+      a: { degree: "MD", year: 1990 },
+    });
+  });
+
+  it("notes only an honor that predates the degree", () => {
+    const deg = { degree: "MD", year: 1990 };
+    expect(predatesDegreeNote(1977, deg)).toBe("Awarded 13 years before the scholar’s MD (1990)");
+    expect(predatesDegreeNote(1990, deg)).toBeNull();
+    expect(predatesDegreeNote(null, deg)).toBeNull();
+    expect(predatesDegreeNote(1977, undefined)).toBeNull();
   });
 });
