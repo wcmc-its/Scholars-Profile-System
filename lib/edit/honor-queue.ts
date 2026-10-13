@@ -31,6 +31,7 @@ import {
 } from "@/lib/honors/lists";
 import { formatPublishedName } from "@/lib/postnominal";
 import { formatRoleCategory } from "@/lib/role-display";
+import { honorTier, isHonorTier, type HonorTier } from "@/lib/honors/tiers";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { HonorCategory, HonorStatus } from "@/lib/generated/prisma/enums";
 
@@ -58,11 +59,11 @@ export type HonorQueueRow = {
   name: string;
   organization: string;
   year: number | null;
-  /** Prestige weight of the honor from `HONOR_PRESTIGE` keyed on `organization`.
-   *  Mostly 0–100; the individual mega-prizes (Nobel/Lasker/MacArthur) score
-   *  above 100. A sort dimension, not a hard rank; unknown bodies score 0 and
-   *  sink. Editable — see the map. */
-  prestige: number;
+  /** The honor's effective tier, 1 (highest) to 6: the curator's override or
+   *  the rules in `lib/honors/tiers.ts`. A curator sort/facet, never a gate. */
+  tier: HonorTier;
+  /** True when a curator set the tier (`tier_override`), not the rules. */
+  tierOverridden: boolean;
   source: string;
   sourceRef: string | null;
   createdAt: string;
@@ -101,51 +102,10 @@ export type HonorQueueGroup = {
   /** True when >1 candidate competes for this line ⇒ approving one MUST reject
    *  the others. The UI must not offer a plain "approve" here. */
   contested: boolean;
-};
-
-/**
- * Prestige weight per conferring body, 0–100. A curator sort dimension (#1762
- * round 3), NOT an eligibility gate — nothing is dropped by a low score, it just
- * sorts later. Keyed on the honor's `organization` string exactly as seeded.
- *
- * These weights are a DEFERABLE JUDGEMENT, deliberately in one editable table so
- * the Dean's office can retune without touching logic. The ordering encodes the
- * usual academic reading — the individual mega-prizes above the national
- * academies and HHMI, the clinical/scientific societies next, the early-career
- * fellowships below — but it is a starting point, not a claim of exact rank.
- * Unknown bodies → 0.
- *
- * The 0–100 band is descriptive, NOT a cap (#1762 round 4): a Nobel is another
- * tier above academy *membership*, so the mega-prizes score above 100. Retune
- * with the Dean's office.
- */
-export const HONOR_PRESTIGE: Readonly<Record<string, number>> = {
-  // Individual mega-prizes — above 100 on purpose (see note). Keyed on the exact
-  // `organization` the seed writes; the specific prize lives in the honor `name`
-  // ("Nobel Prize in Physiology or Medicine", "National Medal of Science").
-  "Nobel Foundation": 120,
-  "National Science Foundation": 115, // National Medal of Science — US highest science honor
-  "Lasker Foundation": 112,
-  "John D. and Catherine T. MacArthur Foundation": 108,
-  "Shaw Prize Foundation": 106,
-  "Columbia University": 104, // Louisa Gross Horwitz Prize (strong Nobel predictor)
-  "National Academy of Sciences": 100,
-  "National Academy of Engineering": 100,
-  "National Academy of Medicine": 100,
-  "Howard Hughes Medical Institute": 96,
-  "American Philosophical Society": 92,
-  "American Academy of Arts and Sciences": 90,
-  "Association of American Physicians": 78,
-  "American Society for Clinical Investigation": 74,
-  "National Academy of Inventors": 70,
-  "American Association for the Advancement of Science": 66,
-  "U.S. Government (PECASE)": 60,
-  "Alfred P. Sloan Foundation": 56,
-  "David and Lucile Packard Foundation": 54,
-  "Pew Charitable Trusts": 50,
-  "Searle Scholars Program": 50,
-  "Burroughs Wellcome Fund": 48, // Career Award (early-career, ~Damon Runyon tier)
-  "Damon Runyon Cancer Research Foundation": 46,
+  /** A reliable match: one candidate, and every word of the printed name is in
+   *  the scholar's name (`matchConfidence` = 2). The queue's default view, so
+   *  curators clear the rows faculty will want on their profiles first. */
+  reliable: boolean;
 };
 
 /** The Reason shown for a row an approval auto-rejected (no curator reason). */
@@ -159,10 +119,6 @@ export const REJECTION_REASONS = [
   "Not on the source list",
   "Duplicate of an existing honor",
 ] as const;
-
-export function honorPrestige(organization: string): number {
-  return HONOR_PRESTIGE[organization.trim()] ?? 0;
-}
 
 export function isHonorQueueEnabled(): boolean {
   return process.env.HONORS_APPROVAL_QUEUE === "on";
@@ -309,6 +265,7 @@ export async function loadHonorQueue(
       rejectionReason: true,
       supersededById: true,
       evidence: true,
+      tierOverride: true,
     },
   });
   if (rows.length === 0) return [];
@@ -358,6 +315,7 @@ export async function loadHonorQueue(
     out.push({
       key,
       contested,
+      reliable: false, // set below, once the rows carry their scholar names
       rosterMatchedName: rosterMatchedName(groupRows[0].sourceRef),
       rows: groupRows.map((r) => {
         const s = byCwid.get(r.cwid);
@@ -379,7 +337,8 @@ export async function loadHonorQueue(
           name: r.name,
           organization: r.organization,
           year: r.year,
-          prestige: honorPrestige(r.organization),
+          tier: honorTier(r.organization, r.name, r.tierOverride),
+          tierOverridden: isHonorTier(r.tierOverride),
           source: r.source,
           sourceRef: r.sourceRef,
           createdAt: r.createdAt.toISOString(),
@@ -393,6 +352,8 @@ export async function loadHonorQueue(
       }),
     });
   }
+
+  for (const g of out) g.reliable = matchConfidence(g) >= 2;
 
   // Confidence DESC, then award year DESC (nulls last), then createdAt for a
   // stable final order. `rows[0]` is safe: a group is never empty.
@@ -472,6 +433,7 @@ const HONOR_CSV_HEADERS = [
   "Organization",
   "Year",
   "Category",
+  "Tier",
   "Status",
   "Source",
   "Updated",
@@ -514,6 +476,7 @@ export function buildHonorCsv(rows: ReadonlyArray<HonorQueueRow & { status: stri
     r.organization,
     r.year ?? "",
     r.category,
+    r.tier,
     r.status,
     r.source,
     r.decidedAt.slice(0, 10),
@@ -765,7 +728,7 @@ export async function loadHonorSources(
   });
   sources.sort(
     (a, b) =>
-      honorPrestige(b.organization) - honorPrestige(a.organization) ||
+      honorTier(a.organization, a.name, null) - honorTier(b.organization, b.name, null) ||
       a.organization.localeCompare(b.organization) ||
       a.name.localeCompare(b.name),
   );

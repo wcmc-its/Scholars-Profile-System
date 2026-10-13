@@ -34,7 +34,8 @@ function row(over: Partial<HonorQueueRow>): HonorQueueRow {
     name: "Member",
     organization: "Invented Academy",
     year: 2024,
-    prestige: 0,
+    tier: 5,
+    tierOverridden: false,
     source: "SEED",
     sourceRef: null,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -53,7 +54,13 @@ function grp(
   rows: HonorQueueRow[],
   rosterMatchedName: string | null = null,
 ): HonorQueueGroup {
-  return { key, rows, rosterMatchedName, contested: new Set(rows.map((r) => r.cwid)).size > 1 };
+  return {
+    key,
+    rows,
+    rosterMatchedName,
+    contested: new Set(rows.map((r) => r.cwid)).size > 1,
+    reliable: true,
+  };
 }
 
 const NO_SOURCES: HonorSourcesSummary = { sources: [], runs: [], lists: [] };

@@ -57,6 +57,7 @@ import type {
   HonorSourcesSummary,
 } from "@/lib/edit/honor-queue";
 import { isFullTimeFaculty, REJECTION_REASONS, yearPlausibilityNote } from "@/lib/edit/honor-queue";
+import { HONOR_TIER_LABELS, HONOR_TIERS, ruleTier, type HonorTier } from "@/lib/honors/tiers";
 import { cn } from "@/lib/utils";
 import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
@@ -77,7 +78,8 @@ type Props = {
 
 type Tab = "pending" | "approved" | "rejected" | "self" | "sources";
 type PersonFilter = "faculty" | "affiliated" | "other" | "all";
-type SortKey = "prestige" | "recent" | "confident";
+type SortKey = "tier" | "recent" | "confident";
+type TierFilter = HonorTier | "all";
 /** Possible's group-by (the shipped control). */
 export type GroupBy = "none" | "person" | "award";
 /** The read-only tabs' group-by (the redesign's segmented control). */
@@ -97,17 +99,17 @@ const CONTESTED_BUCKET = "__contested__";
 /** Sources has no honor groups; a stable empty array keeps the memos below steady. */
 const NO_GROUPS: HonorQueueGroup[] = [];
 
-/** All rows on one group share a roster line ⇒ one honor ⇒ one prestige/year, so
+/** All rows on one group share a roster line ⇒ one honor ⇒ one tier/year, so
  *  the group's sort key is `rows[0]`'s. Comparators return standard <0/0/>0. */
 function compareGroups(a: HonorQueueGroup, b: HonorQueueGroup, key: SortKey): number {
   const ay = a.rows[0].year;
   const by = b.rows[0].year;
   const recent = () => (ay === by ? 0 : ay === null ? 1 : by === null ? -1 : by - ay);
-  const prestige = () => b.rows[0].prestige - a.rows[0].prestige;
+  const tier = () => a.rows[0].tier - b.rows[0].tier; // tier 1 first
   const confident = () => Number(a.contested) - Number(b.contested); // singles first
-  if (key === "prestige") return prestige() || recent();
-  if (key === "recent") return recent() || prestige();
-  return confident() || prestige() || recent();
+  if (key === "tier") return tier() || recent();
+  if (key === "recent") return recent() || tier();
+  return confident() || tier() || recent();
 }
 
 /** Which filter bucket a scholar's roleCategory falls in. */
@@ -305,8 +307,14 @@ export function HonorsQueue({
   const [tab, setTab] = useState<Tab>("pending");
   // Full-time faculty first — the curator's stated priority. Widen from there.
   const [filter, setFilter] = useState<PersonFilter>("faculty");
-  // Prestige first — the round-3 ask: work the biggest honors before the rest.
-  const [sortKey, setSortKey] = useState<SortKey>("prestige");
+  // Highest tier first — the round-3 ask: work the biggest honors before the rest.
+  const [sortKey, setSortKey] = useState<SortKey>("tier");
+  // Tier facet: every tier by default; a curator narrows to one (e.g. tier 1, so
+  // no pinnacle prize is missed).
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  // Possible opens on reliable matches: the rows faculty will want on their
+  // profiles, clearable fastest. "All matches" widens to the rest.
+  const [reliableOnly, setReliableOnly] = useState(true);
   // Possible: no extra grouping by default — the flat, roster-line view.
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   // Read-only tabs: grouped by scholar by default (the redesign).
@@ -358,22 +366,52 @@ export function HonorsQueue({
 
   // Filter-chip counts reflect the ACTIVE tab's rows (round 4: the filter is on
   // every tab, so its counts follow the tab).
+  // Reliability narrows Possible only: the decided tabs are already confirmed.
+  const matchScoped = useMemo(
+    () => (tab === "pending" && reliableOnly ? source.filter((g) => g.reliable) : source),
+    [source, tab, reliableOnly],
+  );
   const counts = useMemo(() => {
     const c = { faculty: 0, affiliated: 0, other: 0, all: 0 };
-    for (const g of source)
+    for (const g of matchScoped)
       for (const r of g.rows) {
         c.all += 1;
         c[personBucket(r.roleCategory)] += 1;
       }
     return c;
-  }, [source]);
+  }, [matchScoped]);
+  // Tier-chip counts honor the person filter and search, so each chip says what
+  // clicking it would show.
+  const tierCounts = useMemo(() => {
+    const c: Record<TierFilter, number> = { all: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    for (const g of matchScoped)
+      for (const r of g.rows)
+        if (
+          (filter === "all" || personBucket(r.roleCategory) === filter) &&
+          rowMatchesQuery(r, q)
+        ) {
+          c.all += 1;
+          c[r.tier] += 1;
+        }
+    return c;
+  }, [matchScoped, filter, q]);
+  const reliableCounts = useMemo(
+    () => ({
+      reliable: undecided.filter((g) => g.reliable).reduce((n, g) => n + g.rows.length, 0),
+      all: tabTotals.pending,
+    }),
+    [undecided, tabTotals.pending],
+  );
 
   const filtered = useMemo(
     () =>
-      source.filter(
-        (g) => groupMatchesFilter(g, filter) && g.rows.some((r) => rowMatchesQuery(r, q)),
+      matchScoped.filter(
+        (g) =>
+          groupMatchesFilter(g, filter) &&
+          (tierFilter === "all" || g.rows[0].tier === tierFilter) &&
+          g.rows.some((r) => rowMatchesQuery(r, q)),
       ),
-    [source, filter, q],
+    [matchScoped, filter, tierFilter, q],
   );
   const sections = useMemo(() => buildSections(filtered, groupBy), [filtered, groupBy]);
 
@@ -385,9 +423,11 @@ export function HonorsQueue({
         .flatMap((g) => g.rows)
         .filter(
           (r) =>
-            (filter === "all" || personBucket(r.roleCategory) === filter) && rowMatchesQuery(r, q),
+            (filter === "all" || personBucket(r.roleCategory) === filter) &&
+            (tierFilter === "all" || r.tier === tierFilter) &&
+            rowMatchesQuery(r, q),
         ),
-    [source, filter, q],
+    [source, filter, tierFilter, q],
   );
   const listSections = useMemo(
     () => buildListSections(listRows, listGroupBy),
@@ -528,6 +568,38 @@ export function HonorsQueue({
     setBusy(null);
   }
 
+  /** Set (or, with null, clear) the curator tier on every row of one card. */
+  async function setTier(group: HonorQueueGroup, tier: HonorTier | null) {
+    setBusy(group.key);
+    setError(null);
+    try {
+      const res = await fetch("/api/edit/honor/tier", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: group.rows.map((r) => r.id), tier }),
+      });
+      const json = (await res.json()) as { ok?: boolean };
+      if (!res.ok || !json.ok) throw new Error("tier not saved");
+      setGroups((gs) =>
+        gs.map((g) =>
+          g.key !== group.key
+            ? g
+            : {
+                ...g,
+                rows: g.rows.map((r) => ({
+                  ...r,
+                  tier: tier ?? ruleTier(r.organization, r.name),
+                  tierOverridden: tier !== null,
+                })),
+              },
+        ),
+      );
+    } catch {
+      setError("That tier didn't save. Nothing was changed.");
+    }
+    setBusy(null);
+  }
+
   const isList = tab !== "pending" && tab !== "sources";
 
   return (
@@ -643,7 +715,7 @@ export function HonorsQueue({
                     onChange={(e) => setSortKey(e.target.value as SortKey)}
                     className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
                   >
-                    <option value="prestige">Most prestigious</option>
+                    <option value="tier">Highest tier first</option>
                     <option value="recent">Most recent</option>
                     <option value="confident">Most confident match</option>
                   </select>
@@ -651,6 +723,39 @@ export function HonorsQueue({
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {tab === "sources" ? null : (
+        <div className="flex flex-wrap items-center gap-1.5" data-slot="honors-tier-filter">
+          {tab === "pending" ? (
+            <span className="mr-2 flex">
+              <Segmented
+                label="Match reliability"
+                value={reliableOnly ? "reliable" : "all"}
+                onChange={(v) => setReliableOnly(v === "reliable")}
+                options={[
+                  ["reliable", `Reliable matches ${reliableCounts.reliable}`],
+                  ["all", `All matches ${reliableCounts.all}`],
+                ]}
+              />
+            </span>
+          ) : null}
+          <FilterChip
+            active={tierFilter === "all"}
+            onClick={() => setTierFilter("all")}
+            label="All tiers"
+            count={tierCounts.all}
+          />
+          {HONOR_TIERS.map((t) => (
+            <FilterChip
+              key={t}
+              active={tierFilter === t}
+              onClick={() => setTierFilter(t)}
+              label={`${t} · ${HONOR_TIER_LABELS[t]}`}
+              count={tierCounts[t]}
+            />
+          ))}
         </div>
       )}
 
@@ -694,6 +799,7 @@ export function HonorsQueue({
             onApprove={approve}
             onRejectAll={rejectAll}
             onUndo={undo}
+            onTier={setTier}
             readOnly={readOnly}
           />
         )
@@ -850,6 +956,7 @@ function PendingSections({
   onApprove,
   onRejectAll,
   onUndo,
+  onTier,
   readOnly,
 }: {
   sections: Section[];
@@ -863,6 +970,7 @@ function PendingSections({
   onApprove: (group: HonorQueueGroup) => void;
   onRejectAll: (group: HonorQueueGroup) => void;
   onUndo: (groupKey: string) => void;
+  onTier: (group: HonorQueueGroup, tier: HonorTier | null) => void;
   readOnly: boolean;
 }) {
   const ordered = sections
@@ -900,6 +1008,7 @@ function PendingSections({
               onApprove={onApprove}
               onRejectAll={onRejectAll}
               onUndo={onUndo}
+              onTier={onTier}
               readOnly={readOnly}
             />
           ))}
@@ -920,6 +1029,7 @@ function PendingGroup({
   onApprove,
   onRejectAll,
   onUndo,
+  onTier,
   readOnly,
 }: {
   group: HonorQueueGroup;
@@ -932,6 +1042,7 @@ function PendingGroup({
   onApprove: (group: HonorQueueGroup) => void;
   onRejectAll: (group: HonorQueueGroup) => void;
   onUndo: (groupKey: string) => void;
+  onTier: (group: HonorQueueGroup, tier: HonorTier | null) => void;
   readOnly: boolean;
 }) {
   const head = group.rows[0];
@@ -949,6 +1060,38 @@ function PendingGroup({
           <span className="text-muted-foreground text-[12.5px]">
             <span className="text-foreground font-semibold">{head.organization}</span>
             {head.year === null ? null : ` · ${head.year}`}
+            {" · "}
+            {readOnly ? (
+              <span data-slot="honor-tier">
+                Tier {head.tier} · {HONOR_TIER_LABELS[head.tier]}
+              </span>
+            ) : (
+              <select
+                value={head.tier}
+                onChange={(e) =>
+                  onTier(
+                    group,
+                    e.target.value === "rule" ? null : (Number(e.target.value) as HonorTier),
+                  )
+                }
+                disabled={busy !== null}
+                aria-label="Honor tier"
+                className="text-muted-foreground hover:text-foreground cursor-pointer bg-transparent text-[12.5px]"
+                data-slot="honor-tier"
+              >
+                {HONOR_TIERS.map((t) => (
+                  <option key={t} value={t}>
+                    Tier {t} · {HONOR_TIER_LABELS[t]}
+                    {head.tierOverridden && t === head.tier ? " (set by curator)" : ""}
+                  </option>
+                ))}
+                {head.tierOverridden ? (
+                  <option value="rule">
+                    Reset to the rules (tier {ruleTier(head.organization, head.name)})
+                  </option>
+                ) : null}
+              </select>
+            )}
           </span>
           <span className="text-[16.5px] leading-snug font-semibold">{head.name}</span>
           {group.rosterMatchedName || sourceUrl ? (

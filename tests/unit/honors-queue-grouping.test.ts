@@ -23,7 +23,8 @@ function mkRow(over: Partial<HonorQueueRow>): HonorQueueRow {
     name: "Member",
     organization: "National Academy of Sciences",
     year: 2020,
-    prestige: 100,
+    tier: 2,
+    tierOverridden: false,
     source: "SEED",
     sourceRef: null,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -38,7 +39,13 @@ function mkRow(over: Partial<HonorQueueRow>): HonorQueueRow {
 }
 
 function grp(key: string, rows: HonorQueueRow[]): HonorQueueGroup {
-  return { key, rows, rosterMatchedName: null, contested: new Set(rows.map((r) => r.cwid)).size > 1 };
+  return {
+    key,
+    rows,
+    rosterMatchedName: null,
+    contested: new Set(rows.map((r) => r.cwid)).size > 1,
+    reliable: true,
+  };
 }
 
 const single = grp("g1", [mkRow({ cwid: "aaa1001", scholarName: "Ada", organization: "NAS" })]);
