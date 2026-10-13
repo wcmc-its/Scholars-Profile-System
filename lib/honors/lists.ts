@@ -38,6 +38,10 @@ export type HonorListMeta = {
   readonly source: string;
 };
 
+/** The Newsroom list (#3040): read by `etl/honors/newsroom.ts`, not a roster parser. */
+export const NEWSROOM_LIST_ID = "newsroom";
+export const NEWSROOM_ROSTER_URL = "https://news.weill.cornell.edu/news";
+
 export const HONOR_LISTS: readonly HonorListMeta[] = [
   {
     id: "nai-fellows",
@@ -63,6 +67,18 @@ export const HONOR_LISTS: readonly HonorListMeta[] = [
     rosterUrl:
       "https://www.bwfund.org/grants/biomedical-sciences/career-awards-for-medical-scientists/",
     source: "LIST:BWF",
+  },
+  {
+    // #3040. Not one honor but every faculty honor the WCM Newsroom announces
+    // (etl/honors/newsroom.ts); `honorName`/`organization` label the Sources tab
+    // only, each proposed row carries its own. Rows link the article, whose URL
+    // sits under `rosterUrl`, so the Sources tab groups them here.
+    id: NEWSROOM_LIST_ID,
+    honorName: "Honors announced in the Newsroom",
+    organization: "WCM Newsroom",
+    category: "OTHER",
+    rosterUrl: NEWSROOM_ROSTER_URL,
+    source: "NEWSROOM",
   },
 ];
 
