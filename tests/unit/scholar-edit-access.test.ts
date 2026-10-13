@@ -16,6 +16,7 @@ const {
   mockCheckProxyConflict,
   mockResolveUnit,
   mockRequireSuperuserGet,
+  mockIsSuperuser,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEditSession: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockCheckProxyConflict: vi.fn(),
   mockResolveUnit: vi.fn(),
   mockRequireSuperuserGet: vi.fn(),
+  mockIsSuperuser: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
@@ -35,6 +37,7 @@ vi.mock("@/lib/edit/unit-scholar-authz", () => ({
   resolveEditableUnitViaUnitAdmin: mockResolveUnit,
 }));
 vi.mock("@/lib/edit/authz", () => ({ requireSuperuserGet: mockRequireSuperuserGet }));
+vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: mockIsSuperuser }));
 // The resolver passes `db.read` to the (mocked) proxy / unit-admin checks, which
 // ignore it — so a bare stub satisfies the import.
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
@@ -63,6 +66,7 @@ beforeEach(() => {
   mockCheckProxyConflict.mockResolvedValue({ ok: true });
   mockResolveUnit.mockResolvedValue(null);
   mockRequireSuperuserGet.mockReturnValue("not_superuser");
+  mockIsSuperuser.mockResolvedValue(false);
 });
 
 describe("resolveScholarEditAccess — five-gate matrix", () => {
@@ -184,17 +188,57 @@ describe("resolveScholarEditAccess — five-gate matrix", () => {
     });
   });
 
-  it("impersonation overlay (IS-1) — raw ≠ effective skips proxy/unit gates", async () => {
-    // Raw human A is viewing-as B; B is not the target and not a superuser. The
-    // proxy and unit-admin gates are RAW-keyed (`raw.cwid === session.cwid`), so
-    // the overlay must NOT confer either — even though a grant exists.
+  /** Raw superuser `rawA` viewing-as non-superuser `effB` (not the target). */
+  function viewingAs() {
     mockGetSession.mockResolvedValue({ cwid: "rawA" });
     mockGetEditSession.mockResolvedValue({ cwid: "effB", isSuperuser: false, isCommsSteward: false });
+  }
+
+  it("View as a proxy → proxy mode, keyed on the EFFECTIVE cwid", async () => {
+    viewingAs();
+    mockIsSuperuser.mockResolvedValue(true);
+    mockIsGrantedProxy.mockResolvedValue(true);
+    const access = await resolveScholarEditAccess(TARGET);
+    expect(access.kind).toBe("authorized");
+    if (access.kind === "authorized") expect(access.isProxy).toBe(true);
+    expect(mockIsSuperuser).toHaveBeenCalledWith("rawA");
+    expect(mockIsGrantedProxy).toHaveBeenCalledWith("effB", TARGET, expect.anything());
+  });
+
+  it("View as a unit admin → unit-admin mode with the conferring unit", async () => {
+    viewingAs();
+    mockIsSuperuser.mockResolvedValue(true);
+    mockResolveUnit.mockResolvedValue({ kind: "department", code: "DEPT" });
+    const access = await resolveScholarEditAccess(TARGET);
+    expect(access.kind).toBe("authorized");
+    if (access.kind === "authorized") {
+      expect(access.isUnitAdmin).toBe(true);
+      expect(access.unit).toEqual({ kind: "department", code: "DEPT" });
+    }
+    expect(mockResolveUnit).toHaveBeenCalledWith("effB", TARGET, expect.anything());
+  });
+
+  it("overlay whose raw human is no longer a superuser → delegated gates skipped, 403", async () => {
+    viewingAs();
     mockIsGrantedProxy.mockResolvedValue(true);
     mockResolveUnit.mockResolvedValue({ kind: "department", code: "MED" });
     const access = await resolveScholarEditAccess(TARGET);
     expect(access.kind).toBe("forbidden");
     expect(mockIsGrantedProxy).not.toHaveBeenCalled();
     expect(mockResolveUnit).not.toHaveBeenCalled();
+  });
+
+  it("View as someone with no grant on the target → still 403", async () => {
+    viewingAs();
+    mockIsSuperuser.mockResolvedValue(true);
+    const access = await resolveScholarEditAccess(TARGET);
+    expect(access.kind).toBe("forbidden");
+  });
+
+  it("not impersonating → no LDAPS superuser call for the delegated gates", async () => {
+    signedInAs("prx0001");
+    mockIsGrantedProxy.mockResolvedValue(true);
+    await resolveScholarEditAccess(TARGET);
+    expect(mockIsSuperuser).not.toHaveBeenCalled();
   });
 });
