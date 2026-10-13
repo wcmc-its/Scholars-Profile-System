@@ -235,7 +235,7 @@ describe("isFullTimeFaculty", () => {
   });
 });
 
-describe("loadHonorQueue — tier and reliability", () => {
+describe("loadHonorQueue — tier", () => {
   it("attaches the rule tier, and a curator override wins", async () => {
     const groups = await loadHonorQueue(
       client(
@@ -249,28 +249,6 @@ describe("loadHonorQueue — tier and reliability", () => {
     const byId = new Map(groups.map((g) => [g.rows[0].id, g.rows[0]]));
     expect(byId.get("a")).toMatchObject({ tier: 2, tierOverridden: false });
     expect(byId.get("b")).toMatchObject({ tier: 1, tierOverridden: true });
-  });
-
-  it("marks a group reliable only when one candidate carries every printed name word", async () => {
-    const groups = await loadHonorQueue(
-      client(
-        [
-          honor({ id: "full", cwid: "aaa1001", sourceRef: "x|Ada Lovelace|2013" }),
-          honor({ id: "part", cwid: "bbb2002", sourceRef: "y|Grace Brewster Hopper|2013" }),
-          honor({ id: "c1", cwid: "aaa1001", sourceRef: "z|Ada Lovelace|2014" }),
-          honor({ id: "c2", cwid: "ccc3003", sourceRef: "z|Ada Lovelace|2014" }),
-        ],
-        [
-          { cwid: "aaa1001", preferredName: "Ada Lovelace" },
-          { cwid: "bbb2002", preferredName: "Grace Hopper" },
-          { cwid: "ccc3003", preferredName: "Ada Lovelace" },
-        ],
-      ),
-    );
-    const byKey = new Map(groups.map((g) => [g.key, g.reliable]));
-    expect(byKey.get("x|Ada Lovelace|2013")).toBe(true);
-    expect(byKey.get("y|Grace Brewster Hopper|2013")).toBe(false);
-    expect(byKey.get("z|Ada Lovelace|2014")).toBe(false); // contested
   });
 });
 

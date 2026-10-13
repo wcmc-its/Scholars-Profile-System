@@ -44,7 +44,6 @@ function grp(key: string, rows: HonorQueueRow[]): HonorQueueGroup {
     rows,
     rosterMatchedName: null,
     contested: new Set(rows.map((r) => r.cwid)).size > 1,
-    reliable: true,
   };
 }
 

@@ -102,10 +102,6 @@ export type HonorQueueGroup = {
   /** True when >1 candidate competes for this line ⇒ approving one MUST reject
    *  the others. The UI must not offer a plain "approve" here. */
   contested: boolean;
-  /** A reliable match: one candidate, and every word of the printed name is in
-   *  the scholar's name (`matchConfidence` = 2). The queue's default view, so
-   *  curators clear the rows faculty will want on their profiles first. */
-  reliable: boolean;
 };
 
 /** The Reason shown for a row an approval auto-rejected (no curator reason). */
@@ -114,10 +110,11 @@ export const SUPERSEDED_REASON = "Another candidate was approved";
 /** Preset rejection reasons offered next to Reject. Free text is accepted by the
  *  route too; these are the common cases, not a closed vocabulary. */
 export const REJECTION_REASONS = [
-  "Different person",
-  "Name collision",
-  "Not on the source list",
-  "Duplicate of an existing honor",
+  "Wrong person",
+  "Not this award",
+  "Duplicate",
+  "Evidence doesn’t support it",
+  "Not a WCM honor",
 ] as const;
 
 export function isHonorQueueEnabled(): boolean {
@@ -315,7 +312,6 @@ export async function loadHonorQueue(
     out.push({
       key,
       contested,
-      reliable: false, // set below, once the rows carry their scholar names
       rosterMatchedName: rosterMatchedName(groupRows[0].sourceRef),
       rows: groupRows.map((r) => {
         const s = byCwid.get(r.cwid);
@@ -352,8 +348,6 @@ export async function loadHonorQueue(
       }),
     });
   }
-
-  for (const g of out) g.reliable = matchConfidence(g) >= 2;
 
   // Confidence DESC, then award year DESC (nulls last), then createdAt for a
   // stable final order. `rows[0]` is safe: a group is never empty.

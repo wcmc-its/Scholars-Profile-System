@@ -44,10 +44,21 @@
  * the Possible group-by. Group-by is ORTHOGONAL to the contested-pair mechanic —
  * a contested line stays one pick-one unit under every mode.
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  Kbd,
+  ReasonSelect,
+  ReviewList,
+  ReviewPane,
+  shortName,
+  type Decided,
+} from "@/components/edit/honors-review";
+export { rosterSourceUrl } from "@/components/edit/honors-review";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import type {
   HonorQueueGroup,
   HonorListRunView,
@@ -56,7 +67,8 @@ import type {
   HonorSourceRun,
   HonorSourcesSummary,
 } from "@/lib/edit/honor-queue";
-import { isFullTimeFaculty, REJECTION_REASONS, yearPlausibilityNote } from "@/lib/edit/honor-queue";
+import { groupMatchLevel, MATCH_LEVEL_RANK, type MatchLevel } from "@/lib/edit/honor-match";
+import { isFullTimeFaculty } from "@/lib/edit/honor-queue";
 import { HONOR_TIER_LABELS, HONOR_TIERS, ruleTier, type HonorTier } from "@/lib/honors/tiers";
 import { cn } from "@/lib/utils";
 import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
@@ -80,16 +92,11 @@ type Tab = "pending" | "approved" | "rejected" | "self" | "sources";
 type PersonFilter = "faculty" | "affiliated" | "other" | "all";
 type SortKey = "tier" | "recent" | "confident";
 type TierFilter = HonorTier | "all";
+type MatchFilter = "strong" | "review" | "all";
 /** Possible's group-by (the shipped control). */
 export type GroupBy = "none" | "person" | "award";
 /** The read-only tabs' group-by (the redesign's segmented control). */
 export type ListGroupBy = "scholar" | "award" | "none";
-
-/** A card's outcome this session. The card stays put, showing it. `rowIds` are
- *  the rows the decision wrote directly — what an undo reverts. */
-type Decided =
-  | { kind: "approved"; scholarName: string; rowIds: string[] }
-  | { kind: "rejected"; rowIds: string[] };
 
 /** Contested lines span people, so they can't sit under any one person heading —
  *  they bucket together here under group-by "person". The double-underscore
@@ -101,15 +108,20 @@ const NO_GROUPS: HonorQueueGroup[] = [];
 
 /** All rows on one group share a roster line ⇒ one honor ⇒ one tier/year, so
  *  the group's sort key is `rows[0]`'s. Comparators return standard <0/0/>0. */
-function compareGroups(a: HonorQueueGroup, b: HonorQueueGroup, key: SortKey): number {
+function compareGroups(
+  a: HonorQueueGroup,
+  b: HonorQueueGroup,
+  key: SortKey,
+  levels: ReadonlyMap<string, MatchLevel>,
+): number {
   const ay = a.rows[0].year;
   const by = b.rows[0].year;
   const recent = () => (ay === by ? 0 : ay === null ? 1 : by === null ? -1 : by - ay);
   const tier = () => a.rows[0].tier - b.rows[0].tier; // tier 1 first
-  const confident = () => Number(a.contested) - Number(b.contested); // singles first
+  const rank = (g: HonorQueueGroup) => MATCH_LEVEL_RANK[levels.get(g.key) ?? "weak"];
   if (key === "tier") return tier() || recent();
   if (key === "recent") return recent() || tier();
-  return confident() || tier() || recent();
+  return rank(a) - rank(b) || tier() || recent(); // strongest match first
 }
 
 /** Which filter bucket a scholar's roleCategory falls in. */
@@ -239,15 +251,6 @@ export function buildListSections(rows: HonorQueueRow[], mode: ListGroupBy): Lis
     }));
 }
 
-/** The roster URL behind a seeded row, when its `sourceRef` carries one
- *  (`<roster>|<printed-name>|<year>`, see `rosterMatchedName`). Only an http(s)
- *  roster segment becomes a link; an opaque roster id renders nothing. */
-export function rosterSourceUrl(sourceRef: string | null): string | null {
-  if (!sourceRef) return null;
-  const roster = sourceRef.split("|")[0].trim();
-  return /^https?:\/\//i.test(roster) ? roster : null;
-}
-
 /** "Sep 15, 2026" — the decision date on the read-only tabs. UTC so a
  *  late-evening decision does not render as the next/previous day. */
 function formatDecided(iso: string): string {
@@ -259,21 +262,6 @@ function formatDecided(iso: string): string {
     year: "numeric",
     timeZone: "UTC",
   });
-}
-
-/** Two-letter initials for the candidate avatar: first and last word. */
-function initials(scholarName: string): string {
-  const words = scholarName.split(",")[0].trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "";
-  const first = words[0][0] ?? "";
-  const last = words.length > 1 ? (words[words.length - 1][0] ?? "") : "";
-  return (first + last).toUpperCase();
-}
-
-/** "Approve for Ada Lovelace" — first + last word of the published name. */
-function shortName(scholarName: string): string {
-  const words = scholarName.split(",")[0].trim().split(/\s+/).filter(Boolean);
-  return words.length > 1 ? `${words[0]} ${words[words.length - 1]}` : (words[0] ?? scholarName);
 }
 
 function emptyMessage(tab: Tab, sourceEmpty: boolean): string {
@@ -312,9 +300,9 @@ export function HonorsQueue({
   // Tier facet: every tier by default; a curator narrows to one (e.g. tier 1, so
   // no pinnacle prize is missed).
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
-  // Possible opens on reliable matches: the rows faculty will want on their
-  // profiles, clearable fastest. "All matches" widens to the rest.
-  const [reliableOnly, setReliableOnly] = useState(true);
+  // Possible opens on strong matches: the rows faculty will want on their
+  // profiles, clearable fastest (2026-10-13). Widen from there.
+  const [matchFilter, setMatchFilter] = useState<MatchFilter>("strong");
   // Possible: no extra grouping by default — the flat, roster-line view.
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   // Read-only tabs: grouped by scholar by default (the redesign).
@@ -326,9 +314,14 @@ export function HonorsQueue({
   const [decided, setDecided] = useState<Record<string, Decided>>({});
   /** Line key → the rejection reason picked beside its Reject (optional). */
   const [reasons, setReasons] = useState<Record<string, string>>({});
-  /** The last decision, offered for undo in the toast. */
-  const [toast, setToast] = useState<{ groupKey: string; text: string } | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  /** Decisions made on this page, newest last: what U / the toast's Undo reverts. */
+  const [history, setHistory] = useState<string[][]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, true>>({});
+  const [focus, setFocus] = useState<string | null>(null);
+  const [hideDecided, setHideDecided] = useState(false);
+  const [bulkReason, setBulkReason] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const q = query.trim().toLowerCase();
@@ -347,6 +340,7 @@ export function HonorsQueue({
             : NO_GROUPS;
 
   const undecided = useMemo(() => groups.filter((g) => !decided[g.key]), [groups, decided]);
+  const published = useMemo(() => approved.flatMap((g) => g.rows), [approved]);
 
   // Tab-label totals are per-tab and independent of the active tab — the count on
   // "Possible" must not change when the curator opens "Known".
@@ -364,56 +358,66 @@ export function HonorsQueue({
   );
   const contestedOpen = undecided.filter((g) => g.contested).length;
 
-  // Filter-chip counts reflect the ACTIVE tab's rows (round 4: the filter is on
-  // every tab, so its counts follow the tab).
-  // Reliability narrows Possible only: the decided tabs are already confirmed.
-  const matchScoped = useMemo(
-    () => (tab === "pending" && reliableOnly ? source.filter((g) => g.reliable) : source),
-    [source, tab, reliableOnly],
-  );
+  // Option counts follow the ACTIVE tab (round 4: the filters are on every tab).
   const counts = useMemo(() => {
     const c = { faculty: 0, affiliated: 0, other: 0, all: 0 };
-    for (const g of matchScoped)
+    for (const g of source)
       for (const r of g.rows) {
         c.all += 1;
         c[personBucket(r.roleCategory)] += 1;
       }
     return c;
-  }, [matchScoped]);
-  // Tier-chip counts honor the person filter and search, so each chip says what
-  // clicking it would show.
+  }, [source]);
   const tierCounts = useMemo(() => {
     const c: Record<TierFilter, number> = { all: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
-    for (const g of matchScoped)
+    for (const g of source)
       for (const r of g.rows)
-        if (
-          (filter === "all" || personBucket(r.roleCategory) === filter) &&
-          rowMatchesQuery(r, q)
-        ) {
+        if (filter === "all" || personBucket(r.roleCategory) === filter) {
           c.all += 1;
           c[r.tier] += 1;
         }
     return c;
-  }, [matchScoped, filter, q]);
-  const reliableCounts = useMemo(
-    () => ({
-      reliable: undecided.filter((g) => g.reliable).reduce((n, g) => n + g.rows.length, 0),
-      all: tabTotals.pending,
-    }),
-    [undecided, tabTotals.pending],
-  );
+  }, [source, filter]);
+  const levels = useMemo(() => new Map(groups.map((g) => [g.key, groupMatchLevel(g)])), [groups]);
+  const matchCounts = useMemo(() => {
+    let strong = 0;
+    for (const g of undecided) if (levels.get(g.key) === "strong") strong += 1;
+    return { strong, review: undecided.length - strong, all: undecided.length };
+  }, [undecided, levels]);
 
   const filtered = useMemo(
     () =>
-      matchScoped.filter(
+      source.filter(
         (g) =>
           groupMatchesFilter(g, filter) &&
           (tierFilter === "all" || g.rows[0].tier === tierFilter) &&
+          (tab !== "pending" ||
+            matchFilter === "all" ||
+            (matchFilter === "strong") === (levels.get(g.key) === "strong")) &&
+          !(tab === "pending" && hideDecided && decided[g.key]) &&
           g.rows.some((r) => rowMatchesQuery(r, q)),
       ),
-    [matchScoped, filter, tierFilter, q],
+    [source, filter, tierFilter, tab, matchFilter, levels, hideDecided, decided, q],
   );
-  const sections = useMemo(() => buildSections(filtered, groupBy), [filtered, groupBy]);
+  const sections = useMemo(
+    () =>
+      buildSections(filtered, groupBy)
+        .map((s) => ({
+          ...s,
+          groups: [...s.groups].sort((a, b) => compareGroups(a, b, sortKey, levels)),
+        }))
+        .sort((a, b) => compareGroups(a.groups[0], b.groups[0], sortKey, levels)),
+    [filtered, groupBy, sortKey, levels],
+  );
+  const flat = useMemo(() => sections.flatMap((s) => s.groups), [sections]);
+  const focusKey = flat.some((g) => g.key === focus) ? focus : (flat[0]?.key ?? null);
+  const focused = flat.find((g) => g.key === focusKey) ?? null;
+  const open = flat.filter((g) => !decided[g.key]);
+  const selKeys = Object.keys(selected);
+  const approvable = selKeys.filter((k) => {
+    const g = groups.find((x) => x.key === k);
+    return g && (!g.contested || picks[k]);
+  }).length;
 
   // Read-only tabs filter per ROW (no contested units there).
   const filterTotal = counts[filter];
@@ -456,15 +460,6 @@ export function HonorsQueue({
     setQuery("");
   }
 
-  /** POST one decision. Returns whether it saved; sets the error line if not. */
-  async function post(
-    rowId: string,
-    decision: "approve" | "reject" | "undo",
-    reason?: string,
-  ): Promise<boolean> {
-    return send(reason ? { id: rowId, decision, reason } : { id: rowId, decision });
-  }
-
   async function send(payload: Record<string, unknown>): Promise<boolean> {
     try {
       const res = await fetch("/api/edit/honor/decision", {
@@ -492,85 +487,151 @@ export function HonorsQueue({
     }
   }
 
-  async function approve(group: HonorQueueGroup) {
-    const row = group.contested ? group.rows.find((r) => r.id === picks[group.key]) : group.rows[0];
-    if (!row) return; // a contested line with no pick — the button is disabled
-    setBusy(group.key);
+  /** Move the focus `d` lines, optionally past decided ones. */
+  function move(d: 1 | -1, skipDecided = false, decidedNow: Record<string, Decided> = decided) {
+    let i = flat.findIndex((g) => g.key === focusKey);
+    for (let k = 0; k < flat.length; k++) {
+      i += d;
+      if (i < 0 || i >= flat.length) return;
+      if (!skipDecided || !decidedNow[flat[i].key]) {
+        setFocus(flat[i].key);
+        scrollRowIntoView(flat[i].key);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Decide lines in order: approve (a contested line needs its pick; approving
+   * resolves the WHOLE line, siblings rejected server-side) or reject (every
+   * candidate on the line). Sequential on purpose: each is its own transaction
+   * and audit row, and a parallel burst would race the pending re-check.
+   */
+  async function decide(keys: string[], kind: "approve" | "reject", reasonOverride?: string) {
+    setBusy(true);
     setError(null);
-    // Approving resolves the WHOLE line (siblings rejected server-side).
-    if (await post(row.id, "approve")) {
-      setDecided((d) => ({
-        ...d,
-        [group.key]: { kind: "approved", scholarName: row.scholarName, rowIds: [row.id] },
-      }));
-      setToast({
-        groupKey: group.key,
-        text: `Approved ${row.name}, ${row.organization} for ${shortName(row.scholarName)}.`,
+    const next = { ...decided };
+    const done: string[] = [];
+    let lastText = "";
+    for (const key of keys) {
+      const group = groups.find((g) => g.key === key);
+      if (!group || next[key]) continue;
+      if (kind === "approve") {
+        const row = group.contested ? group.rows.find((r) => r.id === picks[key]) : group.rows[0];
+        if (!row) continue;
+        if (!(await send({ id: row.id, decision: "approve" }))) break;
+        next[key] = { kind: "approved", scholarName: row.scholarName, rowIds: [row.id] };
+        lastText = `Approved ${row.name}, ${row.organization} for ${shortName(row.scholarName)}.`;
+      } else {
+        const reason = (reasonOverride ?? reasons[key]) || "";
+        const ok: string[] = [];
+        for (const row of group.rows) {
+          if (
+            !(await send(
+              reason
+                ? { id: row.id, decision: "reject", reason }
+                : { id: row.id, decision: "reject" },
+            ))
+          )
+            break;
+          ok.push(row.id);
+        }
+        if (ok.length < group.rows.length) {
+          // A partial "None of these": drop the candidates that did reject; the
+          // rest are still live.
+          if (ok.length > 0)
+            setGroups((gs) =>
+              gs.map((g) => {
+                if (g.key !== key) return g;
+                const rows = g.rows.filter((r) => !ok.includes(r.id));
+                return { ...g, rows, contested: new Set(rows.map((r) => r.cwid)).size > 1 };
+              }),
+            );
+          break;
+        }
+        next[key] = { kind: "rejected", reason, rowIds: ok };
+        lastText = `Rejected ${group.rows[0].name}, ${group.rows[0].organization}.`;
+      }
+      done.push(key);
+    }
+    if (done.length > 0) {
+      setDecided(next);
+      setHistory((h) => [...h, done]);
+      setSelected((s) => {
+        const n = { ...s };
+        for (const k of done) delete n[k];
+        return n;
       });
+      setToast(
+        done.length === 1
+          ? lastText
+          : `${kind === "approve" ? "Approved" : "Rejected"} ${done.length} honors.`,
+      );
       // Reconcile Known/Rejected (and the subnav pending pill) with the server.
       router.refresh();
+      if (keys.length === 1 && keys[0] === focusKey) move(1, true, next);
     }
-    setBusy(null);
+    setBusy(false);
   }
 
-  async function rejectAll(group: HonorQueueGroup) {
-    setBusy(group.key);
-    setError(null);
-    const done: string[] = [];
-    const reason = reasons[group.key] || undefined;
-    for (const row of group.rows) {
-      // Sequential on purpose: each is its own transaction + audit row, and a
-      // parallel burst would race the pending re-check for no benefit at this size.
-      if (!(await post(row.id, "reject", reason))) break;
-      done.push(row.id);
+  function approveOne(key: string) {
+    const g = groups.find((x) => x.key === key);
+    if (g?.contested && !picks[key]) {
+      setFocus(key);
+      setToast("Pick which scholar first.");
+      return;
     }
-    if (done.length === group.rows.length) {
-      setDecided((d) => ({ ...d, [group.key]: { kind: "rejected", rowIds: done } }));
-      const head = group.rows[0];
-      setToast({ groupKey: group.key, text: `Rejected ${head.name}, ${head.organization}.` });
-    } else if (done.length > 0) {
-      // A partial "None of these": drop the candidates that did reject; the rest
-      // are still live.
-      setGroups((gs) =>
-        gs.map((g) => {
-          if (g.key !== group.key) return g;
-          const rows = g.rows.filter((r) => !done.includes(r.id));
-          return { ...g, rows, contested: new Set(rows.map((r) => r.cwid)).size > 1 };
-        }),
+    void decide([key], "approve");
+  }
+
+  /** Revert decisions made on this page (default: the latest). Each line is ONE
+   *  request: the server reverts every written row (and any siblings an approval
+   *  auto-rejected) all-or-nothing, so a failed line stays decided. */
+  async function undo(keys?: string[]) {
+    const target = keys ?? history[history.length - 1];
+    if (!target) return;
+    setBusy(true);
+    setError(null);
+    const reverted: string[] = [];
+    for (const key of target) {
+      const d = decided[key];
+      if (!d) continue;
+      const ok = await send(
+        d.rowIds.length === 1
+          ? { id: d.rowIds[0], decision: "undo" }
+          : { ids: d.rowIds, decision: "undo" },
       );
+      if (ok) reverted.push(key);
     }
-    if (done.length > 0) router.refresh();
-    setBusy(null);
-  }
-
-  /** Revert a decision made on this page, in ONE request: the server reverts
-   *  every written row (and any siblings an approval auto-rejected) all-or-nothing,
-   *  so on failure nothing moved and the decided card stays as it is. */
-  async function undo(groupKey: string) {
-    const d = decided[groupKey];
-    if (!d) return;
-    setBusy(groupKey);
-    setError(null);
-    const ok = await send(
-      d.rowIds.length === 1
-        ? { id: d.rowIds[0], decision: "undo" }
-        : { ids: d.rowIds, decision: "undo" },
-    );
-    if (ok) {
+    if (reverted.length > 0) {
       setDecided((cur) => {
-        const next = { ...cur };
-        delete next[groupKey];
-        return next;
+        const n = { ...cur };
+        for (const k of reverted) delete n[k];
+        return n;
       });
-      setToast((t) => (t?.groupKey === groupKey ? null : t));
+      setHistory((h) =>
+        h.map((e) => e.filter((k) => !reverted.includes(k))).filter((e) => e.length > 0),
+      );
+      setToast(null);
+      if (reverted.length === 1) setFocus(reverted[0]);
     }
     router.refresh();
-    setBusy(null);
+    setBusy(false);
   }
 
-  /** Set (or, with null, clear) the curator tier on every row of one card. */
+  function toggleSelected(key: string) {
+    if (decided[key]) return;
+    setSelected((s) => {
+      const n = { ...s };
+      if (n[key]) delete n[key];
+      else n[key] = true;
+      return n;
+    });
+  }
+
+  /** Set (or, with null, clear) the curator tier on every row of one line. */
   async function setTier(group: HonorQueueGroup, tier: HonorTier | null) {
-    setBusy(group.key);
+    setBusy(true);
     setError(null);
     try {
       const res = await fetch("/api/edit/honor/tier", {
@@ -597,13 +658,71 @@ export function HonorsQueue({
     } catch {
       setError("That tier didn't save. Nothing was changed.");
     }
-    setBusy(null);
+    setBusy(false);
   }
 
+  // Keyboard review on Possible. The handler is re-bound each render through a
+  // ref, so the listener always sees current state.
+  const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  onKey.current = (e: KeyboardEvent) => {
+    if (tab !== "pending" || busy) return;
+    const t = e.target as HTMLElement | null;
+    if (
+      t &&
+      ((t.tagName === "INPUT" &&
+        (t as HTMLInputElement).type !== "checkbox" &&
+        (t as HTMLInputElement).type !== "radio") ||
+        t.tagName === "SELECT" ||
+        t.tagName === "TEXTAREA" ||
+        t.isContentEditable)
+    )
+      return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === "j" || k === "arrowdown") {
+      e.preventDefault();
+      move(1);
+      return;
+    }
+    if (k === "k" || k === "arrowup") {
+      e.preventDefault();
+      move(-1);
+      return;
+    }
+    if (readOnly || !focusKey) return;
+    if (k === "x") {
+      e.preventDefault();
+      toggleSelected(focusKey);
+    } else if (k === "a") {
+      e.preventDefault();
+      if (e.shiftKey && selKeys.length) void decide(selKeys, "approve");
+      else approveOne(focusKey);
+    } else if (k === "r") {
+      e.preventDefault();
+      if (e.shiftKey && selKeys.length) void decide(selKeys, "reject", bulkReason);
+      else void decide([focusKey], "reject");
+    } else if (k === "u" || k === "z") {
+      e.preventDefault();
+      void undo();
+    } else if (k === "escape") {
+      setSelected({});
+    } else if (/^[1-9]$/.test(k) && focused?.contested && !decided[focusKey]) {
+      const row = focused.rows[Number(k) - 1];
+      if (row) setPicks((p) => ({ ...p, [focusKey]: row.id }));
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => onKey.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
   const isList = tab !== "pending" && tab !== "sources";
+  const strongOpen = open.filter((g) => levels.get(g.key) === "strong");
+  const allSelected = open.length > 0 && open.every((g) => selected[g.key]);
 
   return (
-    <div className="flex flex-col gap-[22px]" data-slot="honors-queue">
+    <div className="flex flex-col gap-[18px]" data-slot="honors-queue">
       <div className="flex flex-col gap-3">
         {/* Status tabs. "Possible" = matched but unconfirmed; "Known" = confirmed
             and rendering on profiles. The internal keys stay pending/approved/…. */}
@@ -637,43 +756,54 @@ export function HonorsQueue({
       ) : null}
 
       {tab === "sources" ? null : (
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex flex-wrap gap-1.5" data-slot="honors-person-filter">
-            <FilterChip
-              active={filter === "faculty"}
-              onClick={() => setFilter("faculty")}
-              label="Full-time faculty"
-              count={counts.faculty}
+        <div className="flex flex-wrap items-center gap-2.5" data-slot="honors-filters">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Scholar, honor or org…"
+            aria-label="Search honors"
+            className="border-apollo-border-strong bg-apollo-surface h-[34px] w-full rounded-lg border px-2.5 text-[13.5px] outline-none sm:w-[220px]"
+            data-slot="honors-search"
+          />
+          <ToolbarSelect
+            label="Scholars"
+            slot="honors-person-filter"
+            value={filter}
+            onChange={(v) => setFilter(v as PersonFilter)}
+            options={[
+              ["faculty", `Full-time faculty (${counts.faculty})`],
+              ["affiliated", `Affiliated faculty (${counts.affiliated})`],
+              ["other", `Trainees & other (${counts.other})`],
+              ["all", `All scholars (${counts.all})`],
+            ]}
+          />
+          <ToolbarSelect
+            label="Tier"
+            slot="honors-tier-filter"
+            value={String(tierFilter)}
+            onChange={(v) => setTierFilter(v === "all" ? "all" : (Number(v) as HonorTier))}
+            options={[
+              ["all", `All tiers (${tierCounts.all})`],
+              ...HONOR_TIERS.map(
+                (t) => [String(t), `${t} · ${HONOR_TIER_LABELS[t]} (${tierCounts[t]})`] as const,
+              ),
+            ]}
+          />
+          {tab === "pending" ? (
+            <ToolbarSelect
+              label="Match"
+              slot="honors-match-filter"
+              value={matchFilter}
+              onChange={(v) => setMatchFilter(v as MatchFilter)}
+              options={[
+                ["strong", `Strong only (${matchCounts.strong})`],
+                ["review", `Needs a closer look (${matchCounts.review})`],
+                ["all", `All matches (${matchCounts.all})`],
+              ]}
             />
-            <FilterChip
-              active={filter === "affiliated"}
-              onClick={() => setFilter("affiliated")}
-              label="Affiliated faculty"
-              count={counts.affiliated}
-            />
-            <FilterChip
-              active={filter === "other"}
-              onClick={() => setFilter("other")}
-              label="Trainees & other"
-              count={counts.other}
-            />
-            <FilterChip
-              active={filter === "all"}
-              onClick={() => setFilter("all")}
-              label="All"
-              count={counts.all}
-            />
-          </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2.5 sm:ml-auto">
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Scholar, honor or org…"
-              aria-label="Search honors"
-              className="border-apollo-border-strong bg-apollo-surface h-[34px] w-full rounded-lg border px-2.5 text-[13.5px] outline-none sm:w-[200px]"
-              data-slot="honors-search"
-            />
             {isList ? (
               <div className="flex items-center gap-2.5" data-slot="honors-list-group-by">
                 <span className="text-muted-foreground text-[13px]">Group</span>
@@ -690,90 +820,101 @@ export function HonorsQueue({
               </div>
             ) : (
               <>
-                <label
-                  className="text-muted-foreground flex items-center gap-2 text-[13px]"
-                  data-slot="honors-group-by"
-                >
-                  Group
-                  <select
-                    value={groupBy}
-                    onChange={(e) => setGroupBy(e.target.value as GroupBy)}
-                    className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
-                  >
-                    <option value="none">No grouping</option>
-                    <option value="person">By person</option>
-                    <option value="award">By award</option>
-                  </select>
-                </label>
-                <label
-                  className="text-muted-foreground flex items-center gap-2 text-[13px]"
-                  data-slot="honors-sort"
-                >
-                  Sort
-                  <select
-                    value={sortKey}
-                    onChange={(e) => setSortKey(e.target.value as SortKey)}
-                    className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
-                  >
-                    <option value="tier">Highest tier first</option>
-                    <option value="recent">Most recent</option>
-                    <option value="confident">Most confident match</option>
-                  </select>
-                </label>
+                <ToolbarSelect
+                  label="Group"
+                  slot="honors-group-by"
+                  value={groupBy}
+                  onChange={(v) => setGroupBy(v as GroupBy)}
+                  options={[
+                    ["none", "No grouping"],
+                    ["person", "By scholar"],
+                    ["award", "By award"],
+                  ]}
+                />
+                <ToolbarSelect
+                  label="Sort"
+                  slot="honors-sort"
+                  value={sortKey}
+                  onChange={(v) => setSortKey(v as SortKey)}
+                  options={[
+                    ["tier", "Highest tier first"],
+                    ["recent", "Most recent"],
+                    ["confident", "Strongest match first"],
+                  ]}
+                />
               </>
             )}
           </div>
         </div>
       )}
 
-      {tab === "sources" ? null : (
-        <div className="flex flex-wrap items-center gap-1.5" data-slot="honors-tier-filter">
-          {tab === "pending" ? (
-            <span className="mr-2 flex">
-              <Segmented
-                label="Match reliability"
-                value={reliableOnly ? "reliable" : "all"}
-                onChange={(v) => setReliableOnly(v === "reliable")}
-                options={[
-                  ["reliable", `Reliable matches ${reliableCounts.reliable}`],
-                  ["all", `All matches ${reliableCounts.all}`],
-                ]}
-              />
-            </span>
-          ) : null}
-          <FilterChip
-            active={tierFilter === "all"}
-            onClick={() => setTierFilter("all")}
-            label="All tiers"
-            count={tierCounts.all}
-          />
-          {HONOR_TIERS.map((t) => (
-            <FilterChip
-              key={t}
-              active={tierFilter === t}
-              onClick={() => setTierFilter(t)}
-              label={`${t} · ${HONOR_TIER_LABELS[t]}`}
-              count={tierCounts[t]}
-            />
-          ))}
-        </div>
-      )}
-
-      {tab === "pending" && toast ? (
+      {tab === "pending" ? (
         <div
-          className="bg-apollo-bar flex items-center gap-3 rounded-[10px] px-3.5 py-2.5 text-[13.5px] text-white"
-          role="status"
-          data-slot="honors-toast"
+          className="text-muted-foreground flex flex-wrap items-center gap-3.5 text-[13px]"
+          data-slot="honors-review-bar"
         >
-          <span className="flex-1">{toast.text}</span>
-          <button
-            type="button"
-            onClick={() => undo(toast.groupKey)}
-            disabled={busy !== null}
-            className="rounded-md border border-white/35 px-2.5 py-[3px] text-[13px]"
-          >
-            Undo
-          </button>
+          {readOnly ? null : (
+            <>
+              <label className="flex cursor-pointer items-center gap-2">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={(v) =>
+                    setSelected(
+                      v ? Object.fromEntries(open.map((g) => [g.key, true as const])) : {},
+                    )
+                  }
+                  aria-label="Select all shown"
+                />
+                <span>Select all shown ({open.length})</span>
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  setSelected(Object.fromEntries(strongOpen.map((g) => [g.key, true as const])))
+                }
+                className="text-apollo-slate text-[13px]"
+              >
+                Select {strongOpen.length} strong matches
+              </button>
+            </>
+          )}
+          <label className="flex cursor-pointer items-center gap-2">
+            <Switch
+              checked={hideDecided}
+              onCheckedChange={(v) => setHideDecided(Boolean(v))}
+              aria-label="Hide decided"
+            />
+            Hide decided
+          </label>
+          <span>
+            Showing {flat.length} · {open.length} open
+          </span>
+          <div className="ml-auto hidden flex-wrap items-center gap-2.5 text-xs md:flex">
+            <span className="flex items-center gap-1">
+              <Kbd>J</Kbd>
+              <Kbd>K</Kbd> move
+            </span>
+            {readOnly ? null : (
+              <>
+                <span className="flex items-center gap-1">
+                  <Kbd>X</Kbd> select
+                </span>
+                <span className="flex items-center gap-1">
+                  <Kbd>A</Kbd> approve
+                </span>
+                <span className="flex items-center gap-1">
+                  <Kbd>R</Kbd> reject
+                </span>
+                <span className="flex items-center gap-1">
+                  <Kbd>1</Kbd>
+                  <Kbd>2</Kbd> pick
+                </span>
+                <span className="flex items-center gap-1">
+                  <Kbd>U</Kbd> undo
+                </span>
+              </>
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -784,24 +925,43 @@ export function HonorsQueue({
           runNowEnabled={runNowEnabled}
         />
       ) : tab === "pending" ? (
-        filtered.length === 0 ? (
+        flat.length === 0 || !focused ? (
           <EmptyCard slot="honors-queue-empty">{emptyMessage(tab, source.length === 0)}</EmptyCard>
         ) : (
-          <PendingSections
-            sections={sections}
-            sortKey={sortKey}
-            busy={busy}
-            picks={picks}
-            decided={decided}
-            reasons={reasons}
-            onPick={(groupKey, rowId) => setPicks((p) => ({ ...p, [groupKey]: rowId }))}
-            onReason={(groupKey, reason) => setReasons((r) => ({ ...r, [groupKey]: reason }))}
-            onApprove={approve}
-            onRejectAll={rejectAll}
-            onUndo={undo}
-            onTier={setTier}
-            readOnly={readOnly}
-          />
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(300px,400px)_minmax(0,1fr)]">
+            <ReviewList
+              sections={sections}
+              focusKey={focusKey}
+              decided={decided}
+              selected={selected}
+              readOnly={readOnly}
+              onFocus={setFocus}
+              onToggle={toggleSelected}
+            />
+            <ReviewPane
+              group={focused}
+              position={`${flat.indexOf(focused) + 1} of ${flat.length}`}
+              pick={picks[focused.key] ?? null}
+              decided={decided[focused.key] ?? null}
+              reason={reasons[focused.key] ?? ""}
+              busy={busy}
+              readOnly={readOnly}
+              published={published}
+              pending={groups}
+              decidedMap={decided}
+              onPick={(rowId) => setPicks((p) => ({ ...p, [focused.key]: rowId }))}
+              onReason={(r) => setReasons((rs) => ({ ...rs, [focused.key]: r }))}
+              onApprove={() => approveOne(focused.key)}
+              onReject={() => void decide([focused.key], "reject")}
+              onUndo={() => void undo([focused.key])}
+              onSkip={() => move(1, true)}
+              onTier={(t) => void setTier(focused, t)}
+              onFocus={(key) => {
+                setFocus(key);
+                scrollRowIntoView(key);
+              }}
+            />
+          </div>
         )
       ) : (
         <DecidedTable
@@ -813,7 +973,113 @@ export function HonorsQueue({
           empty={emptyMessage(tab, source.length === 0)}
         />
       )}
+
+      {tab === "pending" && (toast || (!readOnly && selKeys.length > 0)) ? (
+        <div className="fixed bottom-5 left-1/2 z-20 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 flex-col items-center gap-2">
+          {toast ? (
+            <div
+              className="bg-apollo-bar flex items-center gap-3 rounded-[10px] py-[9px] pr-2.5 pl-3.5 text-[13.5px] text-white shadow-[0_6px_20px_rgba(0,0,0,.18)]"
+              role="status"
+              data-slot="honors-toast"
+            >
+              <span>{toast}</span>
+              {history.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void undo()}
+                  disabled={busy}
+                  className="rounded-md border border-white/35 px-2.5 py-[3px] text-[13px]"
+                >
+                  Undo
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {!readOnly && selKeys.length > 0 ? (
+            <div
+              className="bg-apollo-surface border-apollo-border-strong flex flex-wrap items-center gap-2.5 rounded-xl border py-2 pr-2.5 pl-4 text-[13.5px] shadow-[0_10px_30px_rgba(34,30,28,.14)]"
+              data-slot="honors-bulk-bar"
+            >
+              <b className="font-semibold">{selKeys.length} selected</b>
+              {selKeys.length > approvable ? (
+                <span className="text-apollo-amber text-[12.5px]">
+                  {selKeys.length - approvable} need a pick, skipped on approve
+                </span>
+              ) : null}
+              <Button
+                size="sm"
+                disabled={busy || approvable === 0}
+                onClick={() => void decide(selKeys, "approve")}
+                className="bg-apollo-slate hover:bg-apollo-slate/90 text-[13px] text-white"
+              >
+                Approve {approvable}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void decide(selKeys, "reject", bulkReason)}
+                className="text-destructive hover:bg-apollo-red-tint hover:text-destructive text-[13px] font-normal"
+              >
+                Reject {selKeys.length}
+              </Button>
+              <ReasonSelect value={bulkReason} onChange={setBulkReason} disabled={busy} small />
+              <button
+                type="button"
+                onClick={() => setSelected({})}
+                className="text-muted-foreground flex items-center gap-1.5 text-[13px]"
+              >
+                Clear
+                <span aria-hidden className="hidden md:inline">
+                  <Kbd>Esc</Kbd>
+                </span>
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/** Keep a keyboard-moved row visible inside the list's own scroll box. */
+function scrollRowIntoView(key: string) {
+  // Matched by attribute value, not a selector: a line key is a URL and may carry
+  // characters a selector would need escaped.
+  const el = [...document.querySelectorAll<HTMLElement>("[data-row]")].find(
+    (r) => r.dataset.row === key,
+  );
+  el?.scrollIntoView?.({ block: "nearest" });
+}
+
+function ToolbarSelect({
+  label,
+  slot,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  slot: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: ReadonlyArray<readonly [string, string]>;
+}) {
+  return (
+    <label className="text-muted-foreground flex items-center gap-1.5 text-[13px]" data-slot={slot}>
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
+      >
+        {options.map(([v, text]) => (
+          <option key={v} value={v}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -859,34 +1125,6 @@ function TabButton({
       >
         {count}
       </span>
-    </button>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  label,
-  count,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "rounded-full border px-3 py-[5px] text-[13px] whitespace-nowrap",
-        active
-          ? "border-apollo-slate bg-apollo-slate-tint text-apollo-slate"
-          : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
-      )}
-    >
-      {label} <span className="text-muted-foreground tabular-nums">{count}</span>
     </button>
   );
 }
@@ -938,377 +1176,6 @@ function EmptyCard({ slot, children }: { slot: string; children: ReactNode }) {
       data-slot={slot}
     >
       {children}
-    </div>
-  );
-}
-
-/** Possible tab: each section's groups sorted by the active sort key, sections
- *  ordered by their top group. Renders the interactive contested-aware cards. */
-function PendingSections({
-  sections,
-  sortKey,
-  busy,
-  picks,
-  decided,
-  reasons,
-  onPick,
-  onReason,
-  onApprove,
-  onRejectAll,
-  onUndo,
-  onTier,
-  readOnly,
-}: {
-  sections: Section[];
-  sortKey: SortKey;
-  busy: string | null;
-  picks: Record<string, string>;
-  decided: Record<string, Decided>;
-  reasons: Record<string, string>;
-  onPick: (groupKey: string, rowId: string) => void;
-  onReason: (groupKey: string, reason: string) => void;
-  onApprove: (group: HonorQueueGroup) => void;
-  onRejectAll: (group: HonorQueueGroup) => void;
-  onUndo: (groupKey: string) => void;
-  onTier: (group: HonorQueueGroup, tier: HonorTier | null) => void;
-  readOnly: boolean;
-}) {
-  const ordered = sections
-    .map((s) => ({ ...s, groups: [...s.groups].sort((a, b) => compareGroups(a, b, sortKey)) }))
-    .sort((a, b) => compareGroups(a.groups[0], b.groups[0], sortKey));
-  return (
-    <div className="flex flex-col gap-6">
-      {ordered.map((section) => (
-        <section
-          key={section.key}
-          className="flex flex-col gap-3"
-          data-slot={section.heading ? "honor-section" : "honor-section-flat"}
-        >
-          {section.heading ? (
-            <h3
-              className="flex items-baseline gap-2.5 text-[14.5px] font-semibold"
-              data-slot="honor-section-heading"
-            >
-              {section.heading}
-              <span className="text-muted-foreground text-[12.5px] font-normal">
-                {section.groups.length} honor{section.groups.length === 1 ? "" : "s"}
-              </span>
-            </h3>
-          ) : null}
-          {section.groups.map((group) => (
-            <PendingGroup
-              key={group.key}
-              group={group}
-              busy={busy}
-              pick={picks[group.key] ?? null}
-              decided={decided[group.key] ?? null}
-              reason={reasons[group.key] ?? ""}
-              onPick={onPick}
-              onReason={onReason}
-              onApprove={onApprove}
-              onRejectAll={onRejectAll}
-              onUndo={onUndo}
-              onTier={onTier}
-              readOnly={readOnly}
-            />
-          ))}
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function PendingGroup({
-  group,
-  busy,
-  pick,
-  decided,
-  reason,
-  onPick,
-  onReason,
-  onApprove,
-  onRejectAll,
-  onUndo,
-  onTier,
-  readOnly,
-}: {
-  group: HonorQueueGroup;
-  busy: string | null;
-  pick: string | null;
-  decided: Decided | null;
-  reason: string;
-  onPick: (groupKey: string, rowId: string) => void;
-  onReason: (groupKey: string, reason: string) => void;
-  onApprove: (group: HonorQueueGroup) => void;
-  onRejectAll: (group: HonorQueueGroup) => void;
-  onUndo: (groupKey: string) => void;
-  onTier: (group: HonorQueueGroup, tier: HonorTier | null) => void;
-  readOnly: boolean;
-}) {
-  const head = group.rows[0];
-  const choosing = group.contested && !decided;
-  const chosen = group.contested ? (group.rows.find((r) => r.id === pick) ?? null) : head;
-  const blocked = chosen === null;
-  const sourceUrl = rosterSourceUrl(head.sourceRef);
-  return (
-    <article
-      data-slot={group.contested ? "honor-group-contested" : "honor-group"}
-      className="bg-apollo-surface border-apollo-border-strong flex flex-col gap-3 rounded-[var(--apollo-radius-card)] border px-4 py-4 sm:px-5"
-    >
-      <div className="flex flex-wrap items-start gap-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-muted-foreground text-[12.5px]">
-            <span className="text-foreground font-semibold">{head.organization}</span>
-            {head.year === null ? null : ` · ${head.year}`}
-            {" · "}
-            {readOnly ? (
-              <span data-slot="honor-tier">
-                Tier {head.tier} · {HONOR_TIER_LABELS[head.tier]}
-              </span>
-            ) : (
-              <select
-                value={head.tier}
-                onChange={(e) =>
-                  onTier(
-                    group,
-                    e.target.value === "rule" ? null : (Number(e.target.value) as HonorTier),
-                  )
-                }
-                disabled={busy !== null}
-                aria-label="Honor tier"
-                className="text-muted-foreground hover:text-foreground cursor-pointer bg-transparent text-[12.5px]"
-                data-slot="honor-tier"
-              >
-                {HONOR_TIERS.map((t) => (
-                  <option key={t} value={t}>
-                    Tier {t} · {HONOR_TIER_LABELS[t]}
-                    {head.tierOverridden && t === head.tier ? " (set by curator)" : ""}
-                  </option>
-                ))}
-                {head.tierOverridden ? (
-                  <option value="rule">
-                    Reset to the rules (tier {ruleTier(head.organization, head.name)})
-                  </option>
-                ) : null}
-              </select>
-            )}
-          </span>
-          <span className="text-[16.5px] leading-snug font-semibold">{head.name}</span>
-          {group.rosterMatchedName || sourceUrl ? (
-            <span className="text-muted-foreground text-[13px]" data-slot="honor-roster-name">
-              {group.rosterMatchedName ? <>Listed as “{group.rosterMatchedName}”</> : null}
-              {group.rosterMatchedName && sourceUrl ? " · " : null}
-              {sourceUrl ? (
-                <a
-                  href={sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-apollo-slate hover:underline"
-                >
-                  source list ↗
-                </a>
-              ) : null}
-            </span>
-          ) : null}
-        </div>
-        {decided ? (
-          <span
-            className={cn(
-              "rounded-full px-2.5 py-[3px] text-[12.5px] whitespace-nowrap",
-              decided.kind === "approved"
-                ? "bg-apollo-slate-tint text-apollo-slate"
-                : "bg-apollo-red-tint text-destructive",
-            )}
-            data-slot="honor-decided"
-          >
-            {decided.kind === "approved" ? `Approved for ${decided.scholarName}` : "Rejected"}
-          </span>
-        ) : null}
-      </div>
-
-      {choosing ? (
-        <span
-          className="text-apollo-amber text-[12.5px] font-semibold"
-          data-slot="honor-contested-label"
-        >
-          {group.rows.length} scholars match this name. Pick the right one. Approving one rejects
-          the others.
-        </span>
-      ) : null}
-
-      <div
-        className="border-apollo-border flex flex-col overflow-hidden rounded-[10px] border"
-        role={choosing ? "radiogroup" : undefined}
-        aria-label={choosing ? `Who won ${head.name}, ${head.organization}?` : undefined}
-      >
-        {group.rows.map((row, i) => (
-          <CandidateRow
-            key={row.id}
-            row={row}
-            first={i === 0}
-            groupKey={group.key}
-            choosing={choosing}
-            picked={pick === row.id}
-            disabled={busy !== null}
-            onPick={onPick}
-          />
-        ))}
-      </div>
-
-      {readOnly ? null : decided ? (
-        <button
-          type="button"
-          onClick={() => onUndo(group.key)}
-          disabled={busy !== null}
-          className="text-muted-foreground hover:text-foreground self-start text-[12.5px]"
-          data-slot="honor-undo"
-        >
-          Undo
-        </button>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            disabled={busy !== null || blocked}
-            title={blocked ? "Pick which scholar first" : undefined}
-            onClick={() => onApprove(group)}
-            className={cn(
-              "text-[13px] text-white",
-              blocked ? "bg-apollo-border-strong" : "bg-apollo-slate hover:bg-apollo-slate/90",
-            )}
-          >
-            {blocked ? "Pick a scholar to approve" : `Approve for ${shortName(chosen.scholarName)}`}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() => onRejectAll(group)}
-            className="text-destructive hover:bg-apollo-red-tint hover:text-destructive text-[13px] font-normal"
-          >
-            {group.contested ? "None of these" : "Reject"}
-          </Button>
-          <select
-            value={reason}
-            onChange={(e) => onReason(group.key, e.target.value)}
-            disabled={busy !== null}
-            aria-label="Rejection reason (optional)"
-            className="border-apollo-border bg-apollo-surface text-muted-foreground h-8 rounded-md border px-2 text-[12.5px]"
-            data-slot="honor-reject-reason"
-          >
-            <option value="">Reason (optional)</option>
-            {REJECTION_REASONS.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-    </article>
-  );
-}
-
-function CandidateRow({
-  row,
-  first,
-  groupKey,
-  choosing,
-  picked,
-  disabled,
-  onPick,
-}: {
-  row: HonorQueueRow;
-  first: boolean;
-  groupKey: string;
-  choosing: boolean;
-  picked: boolean;
-  disabled: boolean;
-  onPick: (groupKey: string, rowId: string) => void;
-}) {
-  const note = yearPlausibilityNote(row);
-  const role = [row.title, row.department].filter(Boolean).join(" · ") || row.roleLabel;
-  const body = (
-    <>
-      {choosing ? (
-        <input
-          type="radio"
-          name={`honor-pick-${groupKey}`}
-          checked={picked}
-          disabled={disabled}
-          onChange={() => onPick(groupKey, row.id)}
-          className="m-0 accent-[var(--color-primary-cornell-red)]"
-          aria-label={row.scholarName}
-        />
-      ) : null}
-      <div className="flex min-w-0 items-center gap-2.5">
-        <div
-          aria-hidden
-          className="bg-apollo-surface-2 text-apollo-bar ring-apollo-border-strong flex size-8 flex-none items-center justify-center rounded-full text-[11.5px] font-semibold ring-1"
-        >
-          {initials(row.scholarName)}
-        </div>
-        <div className="flex min-w-0 flex-col gap-px">
-          <span className="text-sm font-semibold">
-            {row.scholarName}{" "}
-            <span className="text-muted-foreground font-mono text-xs font-normal">{row.cwid}</span>
-          </span>
-          {role ? (
-            <span className="text-muted-foreground truncate text-[12.5px]">{role}</span>
-          ) : null}
-          {note ? (
-            <span className="text-apollo-amber text-xs" data-slot="honor-year-warning">
-              ⚠ {note}
-            </span>
-          ) : null}
-        </div>
-      </div>
-      <span
-        className={cn(
-          "text-muted-foreground flex flex-col gap-0.5 text-xs sm:items-end sm:text-right",
-          choosing && "col-start-2 sm:col-start-auto",
-        )}
-      >
-        {/* What the match rests on (the mockup's evidence column). Only scraped
-            rows carry it; seeded and hand-entered rows show the type alone. */}
-        {row.evidence ? (
-          <span className="sm:max-w-[34ch]" data-slot="honor-evidence">
-            {row.evidence}
-          </span>
-        ) : null}
-        <span>
-          {row.roleLabel && role !== row.roleLabel ? `${row.roleLabel} · ` : null}
-          {row.slug ? (
-            <a
-              href={`/scholars/${row.slug}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-apollo-slate hover:underline"
-            >
-              profile ↗
-            </a>
-          ) : (
-            <span className="italic">no public profile</span>
-          )}
-        </span>
-      </span>
-    </>
-  );
-  const className = cn(
-    "grid items-center gap-x-3 gap-y-1 px-3.5 py-2.5",
-    choosing
-      ? "grid-cols-[18px_minmax(0,1fr)] sm:grid-cols-[18px_minmax(0,1fr)_auto]"
-      : "grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto]",
-    !first && "border-apollo-border border-t",
-    choosing && picked ? "bg-apollo-slate-tint" : "bg-apollo-surface",
-  );
-  return choosing ? (
-    <label className={cn(className, "cursor-pointer")} data-slot="honor-candidate">
-      {body}
-    </label>
-  ) : (
-    <div className={className} data-slot="honor-candidate">
-      {body}
     </div>
   );
 }

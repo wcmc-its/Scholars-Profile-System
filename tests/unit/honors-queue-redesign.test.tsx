@@ -59,7 +59,6 @@ function grp(
     rows,
     rosterMatchedName,
     contested: new Set(rows.map((r) => r.cwid)).size > 1,
-    reliable: true,
   };
 }
 
@@ -99,6 +98,14 @@ const contested = grp(
 );
 const single = grp("single", [row({ id: "s1" })], "Ada Example");
 
+/** Possible opens on strong matches; a contested line is "Pick", so widen. */
+function widen(container: HTMLElement) {
+  fireEvent.change(
+    container.querySelector('[data-slot="honors-match-filter"] select') as HTMLSelectElement,
+    { target: { value: "all" } },
+  );
+}
+
 describe("HonorsQueue redesign — Possible", () => {
   it("opens on Possible with an amber count and the tab note", () => {
     const { container } = render(
@@ -116,7 +123,10 @@ describe("HonorsQueue redesign — Possible", () => {
     expect(container.querySelector('[data-slot="honors-tab-note"]')?.textContent).toBe(
       "3 honors awaiting a decision, including 1 where more than one person matches the same award.",
     );
-    expect(screen.getByText("Listed as “B. Sample”")).toBeTruthy();
+    // Strong matches by default: the contested line waits under "All matches".
+    expect(screen.queryByText(/2 candidates · B\. Sample/)).toBeNull();
+    widen(container);
+    expect(screen.getByText(/2 candidates · B\. Sample/)).toBeTruthy();
   });
 
   it("contested: Approve is blocked until a pick, then approves the picked candidate", async () => {
@@ -129,6 +139,7 @@ describe("HonorsQueue redesign — Possible", () => {
         sources={NO_SOURCES}
       />,
     );
+    widen(container);
     const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
     const blocked = within(card).getByRole("button", {
       name: "Pick a scholar to approve",
@@ -176,16 +187,15 @@ describe("HonorsQueue redesign — Possible", () => {
         readOnly
       />,
     );
-    const card = container.querySelector('[data-slot="honor-group"]') as HTMLElement;
-    const contestedCard = container.querySelector(
-      '[data-slot="honor-group-contested"]',
-    ) as HTMLElement;
-    expect(card).toBeTruthy();
-    expect(contestedCard).toBeTruthy();
-    for (const c of [card, contestedCard]) {
-      expect(within(c).queryByRole("button", { name: /Approve|Reject|None of these/ })).toBeNull();
-      expect(c.querySelector('[data-slot="honor-reject-reason"]')).toBeNull();
-    }
+    widen(container);
+    expect(container.querySelector('[data-slot="honor-group"]')).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Approve|Reject|None of these/ })).toBeNull();
+    expect(container.querySelector('[data-slot="honor-reject-reason"]')).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    // The contested line renders too, still with no controls.
+    fireEvent.click(screen.getByText(/2 candidates · B\. Sample/));
+    expect(container.querySelector('[data-slot="honor-group-contested"]')).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Approve|Reject|None of these/ })).toBeNull();
   });
 });
 
@@ -328,6 +338,7 @@ describe("HonorsQueue: undo, reasons, decided-by", () => {
         sources={NO_SOURCES}
       />,
     );
+    widen(container);
     const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
     fireEvent.click(within(card).getByRole("radio", { name: "Bea Sample" }));
     fireEvent.click(within(card).getByRole("button", { name: "Approve for Bea Sample" }));
@@ -360,15 +371,16 @@ describe("HonorsQueue: undo, reasons, decided-by", () => {
         sources={NO_SOURCES}
       />,
     );
+    widen(container);
     const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
     fireEvent.change(within(card).getByRole("combobox", { name: "Rejection reason (optional)" }), {
-      target: { value: "Name collision" },
+      target: { value: "Wrong person" },
     });
     fireEvent.click(within(card).getByRole("button", { name: "None of these" }));
-    await waitFor(() => expect(within(card).getByText("Rejected")).toBeTruthy());
+    await waitFor(() => expect(within(card).getByText("Rejected · Wrong person")).toBeTruthy());
     expect(fetchMock.mock.calls.map((c) => JSON.parse(c[1].body))).toEqual([
-      { id: "c1", decision: "reject", reason: "Name collision" },
-      { id: "c2", decision: "reject", reason: "Name collision" },
+      { id: "c1", decision: "reject", reason: "Wrong person" },
+      { id: "c2", decision: "reject", reason: "Wrong person" },
     ]);
 
     fireEvent.click(within(card).getByRole("button", { name: "Undo" }));
@@ -378,7 +390,7 @@ describe("HonorsQueue: undo, reasons, decided-by", () => {
       ids: ["c1", "c2"],
       decision: "undo",
     });
-    await waitFor(() => expect(within(card).queryByText("Rejected")).toBeNull());
+    await waitFor(() => expect(within(card).queryByText("Rejected · Wrong person")).toBeNull());
   });
 
   it("a failed multi-row undo leaves the None of these card whole and still undoable", async () => {
@@ -393,6 +405,7 @@ describe("HonorsQueue: undo, reasons, decided-by", () => {
         sources={NO_SOURCES}
       />,
     );
+    widen(container);
     const card = container.querySelector('[data-slot="honor-group-contested"]') as HTMLElement;
     fireEvent.click(within(card).getByRole("button", { name: "None of these" }));
     await waitFor(() => expect(within(card).getByText("Rejected")).toBeTruthy());
