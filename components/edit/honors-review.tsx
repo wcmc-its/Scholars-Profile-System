@@ -10,6 +10,9 @@
  * Kept from the shipped card although the mockup shows it as plain text: the
  * curator tier select (with "Reset to the rules"), and the year-plausibility
  * warning, shown here as a flag.
+ *
+ * 2026-10-13 iteration: a reject needs a reason. Reject (or R) opens the reason
+ * choices in the pane, picked by click or 1–5; Esc cancels.
  */
 import type { ReactNode } from "react";
 
@@ -215,14 +218,15 @@ export function ReviewPane({
   position,
   pick,
   decided,
-  reason,
+  asking,
   busy,
   readOnly,
   published,
   pending,
   decidedMap,
   onPick,
-  onReason,
+  onRejectWith,
+  onCancelAsk,
   onApprove,
   onReject,
   onUndo,
@@ -234,7 +238,8 @@ export function ReviewPane({
   position: string;
   pick: string | null;
   decided: Decided | null;
-  reason: string;
+  /** The reason choices are open (Reject was pressed). */
+  asking: boolean;
   busy: boolean;
   readOnly: boolean;
   /** Every published row, for "On …'s profile" and the already-on-profile flag. */
@@ -243,7 +248,8 @@ export function ReviewPane({
   pending: HonorQueueGroup[];
   decidedMap: Record<string, Decided>;
   onPick: (rowId: string) => void;
-  onReason: (reason: string) => void;
+  onRejectWith: (reason: string) => void;
+  onCancelAsk: () => void;
   onApprove: () => void;
   onReject: () => void;
   onUndo: () => void;
@@ -280,6 +286,18 @@ export function ReviewPane({
       title: "Already on profile.",
       text: "An identical honor is already published. Reject as Duplicate.",
     });
+  else if (chosen) {
+    // Same body, same year, another name: often one award under two names
+    // (a Damon Runyon "Clinical Investigator Award" vs "Fellowship / Grant").
+    const similar = onProfile.find(
+      (p) => same(p.organization, head.organization) && p.year !== null && p.year === head.year,
+    );
+    if (similar)
+      flags.push({
+        title: "Similar honor on profile.",
+        text: `“${similar.name}” (${similar.organization}, ${similar.year}) is already published. It may be the same award under another name.`,
+      });
+  }
   if (quote) {
     const shared = pending.filter(
       (g) => g.key !== group.key && parseEvidence(g.rows[0].evidence).quote === quote,
@@ -463,37 +481,7 @@ export function ReviewPane({
       )}
 
       {quote !== null ? (
-        <blockquote
-          className="bg-apollo-page border-apollo-border m-0 rounded-[10px] border px-4 py-3.5 text-[15px] leading-[1.65] text-pretty text-[#3a3532]"
-          data-slot="honor-evidence"
-        >
-          {highlight(quote, highlightTerms(group)).map((s, i) =>
-            s.k === "name" ? (
-              <mark
-                key={i}
-                className="bg-apollo-slate-tint text-apollo-slate rounded-[3px] px-0.5 font-semibold"
-              >
-                {s.t}
-              </mark>
-            ) : s.k === "award" ? (
-              <mark
-                key={i}
-                className="bg-apollo-amber-tint text-apollo-amber rounded-[3px] px-0.5 font-semibold"
-              >
-                {s.t}
-              </mark>
-            ) : s.k === "inst" ? (
-              <mark
-                key={i}
-                className="decoration-apollo-border-strong bg-transparent text-[#1f1b19] underline underline-offset-[3px]"
-              >
-                {s.t}
-              </mark>
-            ) : (
-              <span key={i}>{s.t}</span>
-            ),
-          )}
-        </blockquote>
+        <EvidenceQuote quote={quote} group={group} />
       ) : note !== null ? (
         <p className="text-muted-foreground m-0 text-[13.5px]" data-slot="honor-evidence">
           {note}
@@ -570,6 +558,44 @@ export function ReviewPane({
         </div>
       ))}
 
+      {asking && !readOnly && !decided ? (
+        <div
+          className="border-apollo-border-strong bg-apollo-surface-2 flex flex-col gap-2.5 rounded-[10px] border px-3.5 py-3"
+          data-slot="honor-reject-reasons"
+        >
+          <span className="text-[13.5px] font-semibold">
+            Why reject this?{" "}
+            <span className="text-muted-foreground font-normal">A reason is required.</span>
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {REJECTION_REASONS.map((r, i) => (
+              <button
+                key={r}
+                type="button"
+                disabled={busy}
+                onClick={() => onRejectWith(r)}
+                className="border-apollo-border-strong bg-apollo-surface flex items-center gap-[7px] rounded-lg border px-2.5 py-1.5 text-[13px]"
+              >
+                <span aria-hidden className="hidden md:inline">
+                  <Kbd>{i + 1}</Kbd>
+                </span>
+                {r}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={onCancelAsk}
+              className="text-muted-foreground flex items-center gap-1.5 text-[13px]"
+            >
+              Cancel
+              <span aria-hidden className="hidden md:inline">
+                <Kbd>Esc</Kbd>
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {readOnly || decided ? null : (
         <div className="border-apollo-border flex flex-wrap items-center gap-2.5 border-t pt-4">
           <Button
@@ -597,7 +623,6 @@ export function ReviewPane({
               <Kbd>R</Kbd>
             </span>
           </Button>
-          <ReasonSelect value={reason} onChange={onReason} disabled={busy} />
           <button
             type="button"
             onClick={onSkip}
@@ -630,20 +655,68 @@ export function ReasonSelect({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
-      aria-label="Rejection reason (optional)"
+      aria-label="Rejection reason"
       className={cn(
         "border-apollo-border bg-apollo-surface text-muted-foreground rounded-md border px-2",
         small ? "h-8 text-[12.5px]" : "h-9 text-[13px]",
       )}
       data-slot="honor-reject-reason"
     >
-      <option value="">Reason (optional)</option>
+      <option value="">Reason (required to reject)</option>
       {REJECTION_REASONS.map((r) => (
         <option key={r} value={r}>
           {r}
         </option>
       ))}
     </select>
+  );
+}
+
+/** An evidence quote with the scholar's name, the award and Weill Cornell marked. */
+export function EvidenceQuote({
+  quote,
+  group,
+  small = false,
+}: {
+  quote: string;
+  group: HonorQueueGroup;
+  small?: boolean;
+}) {
+  return (
+    <blockquote
+      className={cn(
+        "bg-apollo-page border-apollo-border m-0 rounded-[10px] border text-pretty text-[#3a3532]",
+        small ? "px-3.5 py-3 text-sm leading-[1.6]" : "px-4 py-3.5 text-[15px] leading-[1.65]",
+      )}
+      data-slot="honor-evidence"
+    >
+      {highlight(quote, highlightTerms(group)).map((s, i) =>
+        s.k === "name" ? (
+          <mark
+            key={i}
+            className="bg-apollo-slate-tint text-apollo-slate rounded-[3px] px-0.5 font-semibold"
+          >
+            {s.t}
+          </mark>
+        ) : s.k === "award" ? (
+          <mark
+            key={i}
+            className="bg-apollo-amber-tint text-apollo-amber rounded-[3px] px-0.5 font-semibold"
+          >
+            {s.t}
+          </mark>
+        ) : s.k === "inst" ? (
+          <mark
+            key={i}
+            className="decoration-apollo-border-strong bg-transparent text-[#1f1b19] underline underline-offset-[3px]"
+          >
+            {s.t}
+          </mark>
+        ) : (
+          <span key={i}>{s.t}</span>
+        ),
+      )}
+    </blockquote>
   );
 }
 

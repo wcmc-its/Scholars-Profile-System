@@ -306,6 +306,38 @@ describe("undo", () => {
     expect(h.appendAuditRow).not.toHaveBeenCalled();
   });
 
+  it.each(["CURATOR", "SELF"])(
+    "🔴 refuses an undecided %s row even when published (Move to Possible)",
+    async (source) => {
+      h.tx.honor.findUnique.mockResolvedValue({
+        ...ROW,
+        source,
+        status: "published",
+        decidedAt: null,
+      });
+      const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+      expect(res.status).toBe(409);
+      expect(h.tx.honor.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reopens a SEEDED feed row the queue never decided (Move to Possible / Restore)", async () => {
+    h.tx.honor.findUnique.mockResolvedValue({
+      ...ROW,
+      source: "HONORS_SEED",
+      status: "published",
+      decidedAt: null,
+    });
+    h.tx.honor.findMany.mockResolvedValue([]);
+    const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
+    expect(res.status).toBe(200);
+    expect(h.tx.honor.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "honor-1", status: "published", decidedAt: null, supersededById: null },
+      }),
+    );
+  });
+
   it("refuses a row that is still pending", async () => {
     const res = await POST(request({ id: "honor-1", decision: "undo" }, CURATOR) as never);
     expect(res.status).toBe(409);
@@ -337,7 +369,7 @@ describe("undo", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, status: "pending", siblingsRestored: 0 });
     expect(h.tx.honor.updateMany).toHaveBeenCalledWith({
-      where: { id: "honor-1", status: "rejected", decidedAt: { not: null }, supersededById: null },
+      where: { id: "honor-1", status: "rejected", decidedAt: DECIDED_AT, supersededById: null },
       data: {
         status: "pending",
         decidedByCwid: null,

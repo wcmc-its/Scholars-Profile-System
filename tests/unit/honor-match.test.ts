@@ -28,6 +28,7 @@ function row(over: Partial<HonorQueueRow>): HonorQueueRow {
     superseded: false,
     competingCwids: [],
     evidence: null,
+    verified: false,
     ...over,
   };
 }

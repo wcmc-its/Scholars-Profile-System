@@ -30,7 +30,8 @@
  * (it has no batch).
  *
  * UNDO (`decision: "undo"`). Reverts ONE queue decision to `pending`: the row's
- * `decidedAt` must be set, so a hand-entered or self-asserted `published` row (which
+ * `decidedAt` must be set, or the row must come from a feed (a seeded decision,
+ * see `undoable()`), so a hand-entered or self-asserted `published` row (which
  * the queue never decided) can never be knocked back into the queue and off a
  * profile. Undoing an APPROVAL also restores the siblings that approval
  * auto-rejected — exactly the rows whose `supersededById` names it — in the same
@@ -79,6 +80,8 @@ type StoredRow = {
   year: number | null;
   /** The roster-LINE identity. Siblings share it — see the sibling note above. */
   sourceRef: string | null;
+  /** CURATOR | SELF | a feed identifier — see `undoable()`. */
+  source?: string;
   decidedByCwid?: string | null;
   decidedAt?: Date | null;
   rejectionReason?: string | null;
@@ -98,6 +101,20 @@ const CLEARED_DECISION = {
 
 /** Most rows one undo may revert — a contested line's candidates, not a bulk tool. */
 const UNDO_MAX_IDS = 50;
+
+/**
+ * Whether a decided row may go back to pending: the queue decided it
+ * (`decidedAt` set), or it came from a feed (seeded straight to published or
+ * rejected before decisions were recorded, the Known tab's "Move to Possible"
+ * and Rejected's "Restore"). Never a hand-entered (`CURATOR`) or self-asserted
+ * (`SELF`) row: those never came through the queue, and undoing one would knock
+ * it off a profile into a queue it never belonged to.
+ */
+function undoable(row: StoredRow): boolean {
+  if (row.status === "pending") return false;
+  if (row.decidedAt) return true;
+  return row.source !== undefined && row.source !== "CURATOR" && row.source !== "SELF";
+}
 
 /** An undo refusal, thrown so the WHOLE undo transaction rolls back. */
 class UndoRefused extends Error {
@@ -197,7 +214,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           const row = (await tx.honor.findUnique({ where: { id } })) as StoredRow | null;
           if (!row) throw new UndoRefused("not_found");
           // Only a decision the QUEUE made is undoable — see the undo note above.
-          if (row.status === "pending" || !row.decidedAt) throw new UndoRefused("not_undoable");
+          if (!undoable(row)) throw new UndoRefused("not_undoable");
           if (row.supersededById) throw new UndoRefused("superseded");
           // A manual rejection on a line another candidate has since WON would
           // reopen a contested claim next to a published winner. Rows undone in
@@ -215,7 +232,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             where: {
               id: row.id,
               status: row.status as "published" | "rejected",
-              decidedAt: { not: null },
+              decidedAt: row.decidedAt ?? null,
               supersededById: null,
             },
             data: { status: "pending", ...CLEARED_DECISION },
