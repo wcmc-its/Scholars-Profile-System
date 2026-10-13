@@ -33,6 +33,7 @@ type Row = {
   sourceRef: string | null;
   createdAt: Date;
   updatedAt: Date;
+  tierOverride?: number | null;
 };
 
 function honor(over: Partial<Row> & { id: string; cwid: string }): Row {
@@ -234,36 +235,20 @@ describe("isFullTimeFaculty", () => {
   });
 });
 
-describe("honorPrestige — a sort weight, never a gate", () => {
-  it("ranks the national academies above the early-career fellowships", async () => {
-    const { honorPrestige } = await import("@/lib/edit/honor-queue");
-    expect(honorPrestige("National Academy of Sciences")).toBeGreaterThan(
-      honorPrestige("Alfred P. Sloan Foundation"),
-    );
-    expect(honorPrestige("National Academy of Medicine")).toBeGreaterThan(
-      honorPrestige("American Association for the Advancement of Science"),
-    );
-  });
-
-  it("scores an unknown body 0 (it sorts last, is never dropped)", async () => {
-    const { honorPrestige } = await import("@/lib/edit/honor-queue");
-    expect(honorPrestige("Some Society We Have Not Weighted")).toBe(0);
-  });
-
-  it("tolerates surrounding whitespace on the organization key", async () => {
-    const { honorPrestige } = await import("@/lib/edit/honor-queue");
-    expect(honorPrestige("  National Academy of Sciences  ")).toBe(
-      honorPrestige("National Academy of Sciences"),
-    );
-  });
-
-  it("attaches the weight to each loaded row", async () => {
+describe("loadHonorQueue — tier", () => {
+  it("attaches the rule tier, and a curator override wins", async () => {
     const groups = await loadHonorQueue(
-      client([honor({ id: "a", cwid: "aaa1001", sourceRef: "x|Y|2013", organization: "National Academy of Sciences" })], [
-        { cwid: "aaa1001", preferredName: "A" },
-      ]),
+      client(
+        [
+          honor({ id: "a", cwid: "aaa1001", sourceRef: "x|A|2013", organization: "National Academy of Sciences", name: "Member" }),
+          honor({ id: "b", cwid: "aaa1001", sourceRef: "y|A|2014", organization: "National Academy of Sciences", name: "Member", tierOverride: 1 }),
+        ],
+        [{ cwid: "aaa1001", preferredName: "A" }],
+      ),
     );
-    expect(groups[0].rows[0].prestige).toBe(100);
+    const byId = new Map(groups.map((g) => [g.rows[0].id, g.rows[0]]));
+    expect(byId.get("a")).toMatchObject({ tier: 2, tierOverridden: false });
+    expect(byId.get("b")).toMatchObject({ tier: 1, tierOverridden: true });
   });
 });
 
@@ -413,7 +398,8 @@ describe("buildHonorCsv", () => {
       name: "Member",
       organization: "National Academy of Sciences",
       year: 2020,
-      prestige: 100,
+      tier: 2,
+      tierOverridden: false,
       source: "DEAN_NAS",
       sourceRef: null,
       createdAt: "2026-01-01T00:00:00.000Z",

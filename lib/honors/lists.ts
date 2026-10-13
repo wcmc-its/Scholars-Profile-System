@@ -10,7 +10,7 @@
  * `organization` and `honorName` are written verbatim onto every `honor` row a
  * list proposes, and the scraper's de-dup keys on (cwid, organization, name), so
  * they MUST match the strings the seed import already used for the same honor
- * (and `HONOR_PRESTIGE` in `lib/edit/honor-queue.ts`). Changing one re-proposes
+ * (and the tier rules in `lib/honors/tiers.ts`). Changing one re-proposes
  * every already-decided honor from that list as a fresh pending row.
  *
  * Only lists whose public roster was reachable and parseable without a browser

@@ -321,6 +321,10 @@ model Honor {
   /// institution match: listed at …"). Written by the honors-list scraper
   /// (etl/honors/scrape-lists.ts); NULL on seeded and hand-entered rows.
   evidence        String?       @db.VarChar(255)
+  /// A curator's tier for this honor, 1 (highest) to 6 — overrides the rule-derived
+  /// tier (`lib/honors/tiers.ts`). NULL = use the rules. Curator-only: the
+  /// scholar-facing honor editor never writes it and faculty never see a tier.
+  tierOverride    Int?          @map("tier_override") @db.TinyInt
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
 
