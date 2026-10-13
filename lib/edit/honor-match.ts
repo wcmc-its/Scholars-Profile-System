@@ -46,7 +46,9 @@ export function parseEvidence(evidence: string | null): {
 } {
   if (!evidence) return { quote: null, note: null, nickname: false };
   const nickname = /^nickname/i.test(evidence);
-  const m = evidence.match(/“([\s\S]*)”/);
+  // A quote opens with “ (after any "Nickname match. " basis). Its closing ” is
+  // optional: the ETL clips evidence to 255 chars, which cuts it off.
+  const m = evidence.match(/^(?:Nickname match\.\s*)?“([\s\S]*?)”?$/i);
   return m ? { quote: m[1], note: null, nickname } : { quote: null, note: evidence, nickname };
 }
 

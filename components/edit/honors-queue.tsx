@@ -1071,7 +1071,7 @@ function ToolbarSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] rounded-lg border px-2 text-[13px]"
+        className="border-apollo-border-strong bg-apollo-surface text-foreground h-[34px] max-w-[240px] rounded-lg border px-2 text-[13px]"
       >
         {options.map(([v, text]) => (
           <option key={v} value={v}>

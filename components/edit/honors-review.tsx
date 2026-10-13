@@ -440,9 +440,9 @@ export function ReviewPane({
           </div>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center gap-3" data-slot="honor-candidate">
+        <div className="flex items-center gap-3" data-slot="honor-candidate">
           <Avatar name={head.scholarName} size={40} />
-          <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="text-[15px] font-semibold">
               {head.scholarName}{" "}
               <span className="text-muted-foreground font-mono text-xs font-normal">
@@ -456,7 +456,7 @@ export function ReviewPane({
               <ProfileLink slug={head.slug} />
             </span>
           </div>
-          <div className="ml-auto">
+          <div className="shrink-0">
             <LevelPill level={level} n={group.rows.length} large />
           </div>
         </div>

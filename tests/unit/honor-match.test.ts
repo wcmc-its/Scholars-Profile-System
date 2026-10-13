@@ -43,6 +43,10 @@ describe("parseEvidence", () => {
       quote: null,
       nickname: false,
     });
+    // The ETL's 255-char clip drops the closing quote; it is still a quote.
+    expect(parseEvidence("“Dr. Example of Weill Cornell won…").quote).toBe(
+      "Dr. Example of Weill Cornell won…",
+    );
     expect(parseEvidence(null)).toEqual({ quote: null, note: null, nickname: false });
   });
 });
