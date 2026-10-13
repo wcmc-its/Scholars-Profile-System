@@ -676,7 +676,7 @@ export function HonorsQueue({
   async function reopen(row: HonorQueueRow) {
     const local = Object.entries(decided).find(([, d]) => d.rowIds.includes(row.id))?.[0];
     if (local) {
-      await undo([local]);
+      if (!(await undo([local]))) return;
       setToast(`Moved ${row.name} (${shortName(row.scholarName)}) back to Possible.`);
       return;
     }
@@ -711,9 +711,9 @@ export function HonorsQueue({
   /** Revert decisions made on this page (default: the latest). Each line is ONE
    *  request: the server reverts every written row (and any siblings an approval
    *  auto-rejected) all-or-nothing, so a failed line stays decided. */
-  async function undo(keys?: string[]) {
+  async function undo(keys?: string[]): Promise<boolean> {
     const target = keys ?? history[history.length - 1];
-    if (!target) return;
+    if (!target) return false;
     setBusy(true);
     setError(null);
     const reverted: string[] = [];
@@ -741,6 +741,7 @@ export function HonorsQueue({
     }
     router.refresh();
     setBusy(false);
+    return reverted.length === target.length;
   }
 
   function toggleSelected(key: string) {
