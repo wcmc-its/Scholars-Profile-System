@@ -76,7 +76,12 @@ import {
   type FunctionalRoleScopeOption,
   type FunctionalRoleScopeOptions,
 } from "@/lib/edit/functional-roles";
-import { isGrantableReportKey, REPORT_ACCESS_SCOPE_OPTIONS } from "@/lib/edit/report-access";
+import {
+  isGrantableReportKey,
+  isGrantableScopeKey,
+  isUnitScopeKey,
+  REPORT_ACCESS_SCOPE_OPTIONS,
+} from "@/lib/edit/report-access";
 import { REPORT_META_DEFAULTS } from "@/lib/edit/report-meta";
 
 /** Superuser only: these are institution-wide roles, so a unit Owner (who
@@ -126,11 +131,22 @@ export function functionalRoleScopeOptions(): FunctionalRoleScopeOptions {
   };
 }
 
+/** A report_access UNIT grant as the import mirrors it
+ *  (`mentored-publications:center:MCC`, `reportAccessScopeKey`): valid on a
+ *  Reporting row although the Assign dialog never lists one (every unit would
+ *  be an option) — else re-saving an imported row would 400. */
+function isReportingUnitScope(key: string): boolean {
+  const cut = key.indexOf(":");
+  if (cut <= 0) return false;
+  const scope = key.slice(cut + 1);
+  return isUnitScopeKey(scope) && isGrantableScopeKey(key.slice(0, cut), scope);
+}
+
 /** Whether every key is a valid scope for `role` (and there is at least one). */
 export function validScopes(role: FunctionalRole, scopes: ReadonlyArray<string>): boolean {
   if (scopes.length === 0) return false;
   const allowed = new Set(functionalRoleScopeOptions()[role].map((o) => o.key));
-  return scopes.every((s) => allowed.has(s));
+  return scopes.every((s) => allowed.has(s) || (role === "reporting" && isReportingUnitScope(s)));
 }
 
 type ReaderClient = Pick<PrismaClient, "functionalRoleGrant" | "scholar">;

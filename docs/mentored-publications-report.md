@@ -90,6 +90,18 @@ Access is NOT unit-scoped like reports 1–6. It is a row in `report_access` —
   panel, whose select lists every center, department and division after the program options. They
   are deliberately NOT unit Owner/Curator access: that would put student names in front of every
   unit administrator, a FERPA call this table keeps to named grantees.
+  - Known limit: the grant is bounded by the unit's ROSTER, and a unit's Owners/Curators edit that
+    roster in-app (center membership; a manual division's hand-added members). A grantee who also
+    curates their unit can add a faculty member to it and so see that person's learners. The roster
+    change is audited (`roster_change`), but nothing on `report_access` records it. Freezing the
+    pinned set to non-manual membership is the upgrade path if that is unacceptable.
+  - Known limit: grants are not monotonic across kinds. Adding a program scope (a Viewers row or a
+    functional-roles Reporting grant) to a unit holder drops the pin. They then see their program
+    school-wide plus the never-scope-gated sources school-wide, and lose the unit's other programs.
+    Give a unit office unit scopes only.
+  - The functional-roles import mirrors a unit grant as `mentored-publications:center:CODE`, and
+    `validScopes` accepts it so the row can be re-saved. The Assign dialog never offers one, because
+    every unit would be an option. Grant units from the Viewers panel.
 
 Grants are made from the page itself: the "Viewers" panel (`ReportAccessPanel`) renders only for a
 superuser / comms steward and offers a CWID field plus a program select (All programs / AOC /

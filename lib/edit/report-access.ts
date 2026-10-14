@@ -191,7 +191,8 @@ export function resolveMentoredPubsAccess(
   const program = [...granted].filter((s) => !isUnitScopeKey(s));
   if (program.length > 0) return { scopes: new Set(program), units: [...requestedUnits], pinnedUnits: null };
   const held = [...granted].sort();
-  const kept = requestedUnits.filter((u) => held.includes(u));
+  // Deduped: a repeated unit must not read as "every unit held".
+  const kept = [...new Set(requestedUnits.filter((u) => held.includes(u)))];
   return { scopes: new Set([ALL_SCOPES]), units: kept.length > 0 ? kept : held, pinnedUnits: held };
 }
 
