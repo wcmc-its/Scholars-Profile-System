@@ -263,6 +263,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Submits new opportunities from the Research Dean's weekly funding email to Grant Matcha.",
     origin: "external", // Research Dean digest, via SES to S3, then ReciterAI
   },
+  "AreaSignal-inputs": {
+    label: "Grants and Trials for Research Areas",
+    description:
+      "Sends the text of eligible grants and clinical trials to the research-AI system to be matched to research areas.",
+    origin: "internal", // reads SPS-DB grants and trials; writes the ReciterAI queue
+  },
   HonorsLists: {
     label: "Honor Lists",
     description:
@@ -327,6 +333,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description:
       "When the research-AI system last published a fresh set of funding opportunities. Measures the data, not the job.",
     origin: "external", // ReCiterAI-published S3 artifacts (manifest generated_at)
+  },
+  "ReciterAI-area-signals": {
+    label: "Research AI: Grants and Trials by Area",
+    description:
+      "When the research-AI system last matched queued grants and clinical trials to research areas.",
+    origin: "external", // ReciterAI pipeline_area_signals stage ledger
   },
   "ReciterAI-cores": {
     label: "Research AI: Core Facility Usage",

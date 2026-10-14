@@ -313,6 +313,11 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Deployed weekly step (cdk/lib/etl-stack.ts FundingDigestWeekly, tier:"continue")
   // that writes source "FundingDigest" (etl/opportunities/funding-digest.ts).
   FundingDigest: { cadence: "weekly" },
+  // Deployed nightly step (cdk/lib/etl-stack.ts AreaSignalInputs, tier:"continue",
+  // plus AreaSignalInputsWeekly after ClinicalTrialsWeekly) that writes source
+  // "AreaSignal-inputs" (etl/area-signal-inputs). A run that queues nothing new
+  // still succeeds, so staleness here means the step stopped running.
+  "AreaSignal-inputs": { cadence: "nightly" },
   // Honors-list scraper (etl/honors/scrape-lists.ts), its own weekly machine
   // `scholars-honors-<env>` (cdk/lib/etl-stack.ts HonorsStateMachine), both envs.
   // Writes source "HonorsLists" on an ALL-lists run only (the schedule); a
@@ -442,6 +447,19 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // an anchor that is still the age of the output.
   "ReciterAI-grants": { cadence: "nightly-mirrored" },
   "ReciterAI-cores": { cadence: "weekly" },
+  // ReciterAI `pipeline_area_signals` (STAGE#area_signals#GLOBAL), daily after
+  // the SPS nightly, so mirrored the following night like its siblings. Acked
+  // because the producer is not deployed yet (ReciterAI build plan R2/R3,
+  // 2026-10-14): until its first run there is no row and this would read
+  // never-ran. Remove the ack once the first run is mirrored.
+  "ReciterAI-area-signals": {
+    cadence: "nightly-mirrored",
+    ack: {
+      until: "2026-11-30",
+      reason:
+        "ReciterAI pipeline_area_signals not deployed yet (area-signals build plan R2/R3); remove once STAGE#area_signals rows are mirrored",
+    },
+  },
 };
 
 export interface SourceStatus {
