@@ -389,7 +389,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       expect.stringContaining("reporting manager from the ED appointment record"),
       expect.stringContaining("Added by the mentor on their Scholars profile"),
       expect.stringContaining("annual Faculty Review Tool"),
-      expect.stringContaining("Enterprise Directory affiliate record names this faculty member as sponsor"),
+      expect.stringContaining("directory affiliate record names this faculty member as sponsor"),
       expect.stringContaining("Not on any roster"),
       expect.stringContaining("research staff or MD alumni"),
     ]);

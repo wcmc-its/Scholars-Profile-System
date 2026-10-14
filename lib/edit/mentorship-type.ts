@@ -116,7 +116,7 @@ export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
   possible: "Possible mentee (from co-authorship)",
   faculty: "Faculty-asserted",
   frt: "Self-reported (Faculty Review)",
-  volunteer: "Volunteer or intern (ED sponsor)",
+  volunteer: "Volunteer or intern (sponsor)",
 };
 
 /** One sentence per key: what the source is and how sure it is — the
@@ -140,7 +140,7 @@ export const MENTORSHIP_TYPE_DESCRIPTION: Record<MentorshipTypeKey, string> = {
     "Added by the mentor on their Scholars profile, or confirmed there from a co-authorship suggestion.",
   frt: "Mentees the faculty member listed in the annual Faculty Review Tool, whether or not they added them to their profile. Counted only when linked to a WCM person (matched by name, or linked by the mentor in Scholars); no year.",
   volunteer:
-    "A volunteer whose Enterprise Directory affiliate record names this faculty member as sponsor, or as manager when no faculty sponsor is recorded. ED records interns as volunteers. Years are the volunteer appointment's.",
+    "A volunteer whose directory affiliate record names this faculty member as sponsor, or as manager when no faculty sponsor is recorded. Interns are recorded as volunteers, so they appear here too. Years are the volunteer appointment's.",
 };
 
 /** `report_access` scope key (`MENTORED_PUBS_SCOPES`, `lib/edit/report-access.ts`)
