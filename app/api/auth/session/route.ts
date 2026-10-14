@@ -119,16 +119,28 @@ export async function GET(): Promise<NextResponse> {
           .catch(() => null)
       )?.displayName ?? null;
 
-  // The superuser verdict, resolved once and reused below. Live LDAPS check
-  // against the REAL cwid; `isSuperuser` is fail-closed, so a directory hiccup
-  // just hides the superuser surfaces.
-  const superuser = await isSuperuser(session.cwid).catch(() => false);
+  // Every role verdict, against the REAL cwid, resolved CONCURRENTLY. Each is a
+  // fresh LDAPS connect + bind + search + compare (~230 ms, `lib/auth/ldap-group.ts`)
+  // and React `cache()` does not dedupe inside a route handler, so awaiting them
+  // one by one put up to six round trips on every signed-in page's header probe:
+  // this route was half the prod ALB p99 tail (p90 1.8 s, 2026-10-13). A
+  // superuser now pays for the lookups it ignores below, in parallel and at no
+  // latency cost. All are fail-closed: a directory hiccup just hides a surface.
+  const [superuser, developerRaw, contentEditorRaw, observer, commsStewardRaw, manageable] =
+    await Promise.all([
+      isSuperuser(session.cwid).catch(() => false),
+      // isDeveloper is self-gated by DEVELOPMENT_ENABLED.
+      isDeveloper(session.cwid).catch(() => false),
+      isContentEditor(session.cwid).catch(() => false),
+      isObserver(session.cwid).catch(() => false),
+      // Flag-gated: no directory call when `COMMS_STEWARD_ENABLED` is off.
+      isCommsSteward(session.cwid).catch(() => false),
+      loadManageableUnits(session.cwid, db.read).catch(() => null),
+    ]);
 
   // GrantRecs Phase 4 — the top-nav "Researchers for funding" link is gated to the
-  // same audience as the tool: a superuser OR a development-role member. Pay the
-  // extra isDeveloper LDAPS only for non-superusers (a superuser already qualifies);
-  // isDeveloper is fail-closed and self-gated by DEVELOPMENT_ENABLED.
-  const developer = superuser ? false : await isDeveloper(session.cwid).catch(() => false);
+  // same audience as the tool: a superuser OR a development-role member.
+  const developer = !superuser && developerRaw;
   const canAccessFundingMatcher = superuser || developer;
 
   // R1 — only a superuser or an observer (read-only "View as") may initiate
@@ -138,20 +150,15 @@ export async function GET(): Promise<NextResponse> {
   const featureEnabled = process.env.IMPERSONATION_ENABLED === "true";
   // A content editor's verdict also names the role in the account menu, so it
   // is resolved once here (never for a superuser, who outranks it).
-  const contentEditor = !superuser && (await isContentEditor(session.cwid).catch(() => false));
-  const canImpersonate =
-    featureEnabled &&
-    (superuser || contentEditor || (await isObserver(session.cwid).catch(() => false)));
+  const contentEditor = !superuser && contentEditorRaw;
+  const canImpersonate = featureEnabled && (superuser || contentEditor || observer);
 
   // Role-aware console entry points for the account-menu dropdown
   // (`lib/auth/console-links.ts`, role-aware-navigation-entry-points-spec.md).
   // A superuser collapses to the Profiles roster (its AdminSubnav fans out to
-  // the rest) and skips the steward / unit lookups entirely — so a superuser
-  // probe costs no extra directory or DB work. A non-superuser pays only for the
-  // roles they might hold: `isCommsSteward` (flag-gated — short-circuits to
-  // false with NO directory call when `COMMS_STEWARD_ENABLED` is off) and one
-  // indexed `unit_admin` lookup. All verdicts are against the REAL cwid, like
-  // `canImpersonate` above. Fail-closed: a lookup error just drops that link.
+  // the rest) and ignores the steward / unit verdicts. A non-superuser's links
+  // come from the roles they hold: comms steward and one indexed `unit_admin`
+  // lookup. Fail-closed: a lookup error just drops that link.
   let consoleLinks: ConsoleLink[];
   if (superuser) {
     consoleLinks = buildConsoleLinks({
@@ -162,11 +169,7 @@ export async function GET(): Promise<NextResponse> {
   } else {
     // An observer or content editor gets the steward's console entry (their
     // steward-shaped read view).
-    const commsSteward =
-      (await isCommsSteward(session.cwid).catch(() => false)) ||
-      contentEditor ||
-      (await isObserver(session.cwid).catch(() => false));
-    const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
+    const commsSteward = commsStewardRaw || contentEditor || observer;
     const managesUnits = manageable !== null && manageable.total > 0;
     consoleLinks = buildConsoleLinks({
       isSuperuser: false,

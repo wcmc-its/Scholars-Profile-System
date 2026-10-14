@@ -180,6 +180,28 @@ describe("fail-open (S3 unavailable never throws)", () => {
   });
 });
 
+describe("tag freshness reads", () => {
+  it("fetches every tag concurrently, not one S3 round trip after another", async () => {
+    const s3 = fakeS3();
+    let t = 1;
+    const h = createHandler({ client: s3, bucket: "b", now: () => t });
+    await h.set("k", { html: "x" }, { tags: ["/a", "/b", "/c"] });
+    t = 10_000; // past TAG_TTL_MS, so every tag is re-read from S3
+    const realSend = s3.send.bind(s3);
+    let inFlight = 0;
+    let peak = 0;
+    s3.send = async (cmd) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return realSend(cmd);
+    };
+    expect((await h.get("k"))?.value).toEqual({ html: "x" });
+    expect(peak).toBe(3);
+  });
+});
+
 describe("key hashing", () => {
   it("is stable and hex", () => {
     expect(_sha("route:/topics/x")).toMatch(/^[0-9a-f]{64}$/);
