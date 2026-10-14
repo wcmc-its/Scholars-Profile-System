@@ -71,9 +71,10 @@ type View = "summary" | "mentors" | "publications";
 const TH = "text-muted-foreground px-3 py-2.5 align-bottom text-xs font-semibold tracking-[0.08em] uppercase";
 const TD = "px-3 py-3 align-top";
 const NUM_TD = `${TD} text-right tabular-nums hidden md:table-cell`;
-const TAB_ACTIVE = "border-apollo-maroon text-foreground -mb-px border-b-2 py-2.5 text-base font-semibold";
+const TAB_ACTIVE =
+  "border-apollo-maroon text-foreground -mb-px border-b-2 py-2.5 text-base font-semibold whitespace-nowrap";
 const TAB_IDLE =
-  "text-muted-foreground hover:text-foreground -mb-px border-b-2 border-transparent py-2.5 text-base";
+  "text-muted-foreground hover:text-foreground -mb-px border-b-2 border-transparent py-2.5 text-base whitespace-nowrap";
 
 const learnerName = (l: { firstName: string | null; lastName: string | null }) =>
   [l.lastName, l.firstName].filter(Boolean).join(", ");
@@ -685,14 +686,27 @@ function MentorsView({
           <thead className="bg-apollo-surface-2">
             <tr>
               <th className={TH} aria-sort={ariaSort(sort, "mentor")}>
-                <SortButton col={C.mentor} sort={sort} onSort={onSort}>
-                  Mentor
-                </SortButton>
+                <span className="inline-flex flex-wrap items-end gap-x-2">
+                  <SortButton col={C.mentor} sort={sort} onSort={onSort}>
+                    Mentor
+                  </SortButton>
+                  {/* Below md the count columns hide; their sorts live here. */}
+                  <span className="inline-flex items-end gap-x-2 md:hidden">
+                    <span aria-hidden>·</span>
+                    <SortButton col={C.learners} sort={sort} onSort={onSort} title="Sort by number of learners">
+                      Learners
+                    </SortButton>
+                    <span aria-hidden>·</span>
+                    <SortButton col={C.papers} sort={sort} onSort={onSort} title="Sort by papers">
+                      Papers
+                    </SortButton>
+                  </span>
+                </span>
               </th>
               <th className={`${TH} hidden md:table-cell`}>Learners</th>
               <th className={`${TH} hidden w-16 text-right md:table-cell`} aria-sort={ariaSort(sort, "learners")}>
                 <SortButton col={C.learners} sort={sort} onSort={onSort} title="Learners of this mentor under the filters">
-                  Learners
+                  Total
                 </SortButton>
               </th>
               <th className={`${TH} hidden w-16 text-right md:table-cell`} aria-sort={ariaSort(sort, "papers")}>
@@ -797,7 +811,8 @@ export function MentoredPublicationsTable({
     setQuery(e.target.value);
     window.history.replaceState(null, "", withQuery(viewHrefs[view], e.target.value));
   };
-  const tab = (v: View, label: string) => (
+  // Below sm the counts hide (the stats above carry them) so three tabs fit a phone on one line.
+  const tab = (v: View, label: string, count: number) => (
     <a
       href={withQuery(viewHrefs[v], query)}
       onClick={pick(v)}
@@ -806,6 +821,7 @@ export function MentoredPublicationsTable({
       data-testid={`mentored-pubs-view-${v}`}
     >
       {label}
+      <span className="hidden sm:inline"> ({count.toLocaleString()})</span>
     </a>
   );
 
@@ -818,10 +834,10 @@ export function MentoredPublicationsTable({
         </React.Fragment>
       ))}
       <div className="border-apollo-border mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b">
-        <nav className="flex gap-6" aria-label="Report views">
-          {tab("summary", `Learners (${summary.length.toLocaleString()})`)}
-          {tab("mentors", `Mentors (${mentorCount.toLocaleString()})`)}
-          {tab("publications", `Publications (${publications.length.toLocaleString()})`)}
+        <nav className="flex gap-5 overflow-x-auto sm:gap-6" aria-label="Report views">
+          {tab("summary", "Learners", summary.length)}
+          {tab("mentors", "Mentors", mentorCount)}
+          {tab("publications", "Publications", publications.length)}
         </nav>
         {view !== "publications" ? (
           <input

@@ -448,10 +448,11 @@ describe("MentoredPublicationsTable — mentors", () => {
     const { getByTestId } = renderTable({ view: "mentors" });
     expect(getByTestId("mentored-pubs-view-mentors").textContent).toBe("Mentors (3)");
     const table = getByTestId("mentored-pubs-mentors");
+    // The first header also carries the phone-only count sorts (the count columns hide below md).
     expect([...table.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual([
-      "Mentor",
+      "Mentor·Learners↓·Papers",
       "Learners",
-      "Learners↓",
+      "Total↓",
       "Papers",
     ]);
     expect(mentorIds(table)).toEqual(["men0001", "men0002", "men0003"]);
@@ -468,8 +469,8 @@ describe("MentoredPublicationsTable — mentors", () => {
   });
 
   it("sorts by papers and by name; the find box matches a mentor or any of their learners", () => {
-    const { getByTestId, getByRole } = renderTable({ view: "mentors" });
-    fireEvent.click(getByRole("button", { name: "Papers" }));
+    const { getByTestId, getByRole, getAllByRole } = renderTable({ view: "mentors" });
+    fireEvent.click(getAllByRole("button", { name: "Papers" })[0]);
     expect(mentorIds(getByTestId("mentored-pubs-mentors"))).toEqual(["men0001", "men0003", "men0002"]);
     fireEvent.click(getByRole("button", { name: "Mentor" }));
     expect(mentorIds(getByTestId("mentored-pubs-mentors"))).toEqual(["men0001", "men0003", "men0002"]);
@@ -494,6 +495,14 @@ describe("MentoredPublicationsTable — mentors", () => {
   it("no learners → no mentors, an empty-state line", () => {
     const { getByTestId } = renderTable({ view: "mentors", summary: [], publications: [] });
     expect(getByTestId("mentored-pubs-mentors-empty").textContent).toBe("No mentors match these filters.");
+  });
+
+  it("a phone sees the active count sort in the first header; the two count headers are named apart", () => {
+    const { getByTestId } = renderTable({ view: "mentors" });
+    const first = getByTestId("mentored-pubs-mentors").querySelector("thead th")!;
+    expect(within(first as HTMLElement).getByRole("button", { name: "Learners" }).textContent).toBe("Learners↓");
+    const names = [...getByTestId("mentored-pubs-mentors").querySelectorAll("thead th")].slice(1).map((th) => th.textContent);
+    expect(new Set(names).size).toBe(names.length);
   });
 });
 
