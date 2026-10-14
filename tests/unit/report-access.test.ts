@@ -54,12 +54,15 @@ import {
   canManageReportAccess,
   getReportScopes,
   grantReportAccess,
+  isGrantableScopeKey,
   isMentoredPubsScopeKey,
+  isUnitScopeKey,
   listReportAccess,
   loadReportScopesForCwid,
   MENTORED_PUBS_REPORT,
   MENTORED_PUBS_SCOPE_OPTIONS,
   MENTORED_PUBS_SCOPES,
+  resolveMentoredPubsAccess,
   revokeReportAccess,
   scopeAdmits,
 } from "@/lib/edit/report-access";
@@ -375,3 +378,55 @@ describe("grantReportAccess / revokeReportAccess — one transaction + one audit
     expectReaderUntouched();
   });
 });
+
+describe("unit scopes (report 7)", () => {
+  it("isUnitScopeKey: a decodable dept / div / center value; never inst:, never a program key or junk", () => {
+    expect(["center:MCC", "dept:N1234", "div:D99"].map(isUnitScopeKey)).toEqual([true, true, true]);
+    expect(["inst:WCM", "md", "*", "center:", "bogus", "unit:MCC"].map(isUnitScopeKey)).toEqual([
+      false, false, false, false, false, false,
+    ]);
+  });
+
+  it("isGrantableScopeKey: report 7 takes its options or a unit; reports 8 / 9 never take a unit; a retired key takes nothing", () => {
+    expect(isGrantableScopeKey(MENTORED_PUBS_REPORT, "md")).toBe(true);
+    expect(isGrantableScopeKey(MENTORED_PUBS_REPORT, "center:MCC")).toBe(true);
+    expect(isGrantableScopeKey(MENTORED_PUBS_REPORT, "inst:WCM")).toBe(false);
+    expect(isGrantableScopeKey(MENTORED_PUBS_REPORT, "phd")).toBe(false);
+    expect(isGrantableScopeKey("article-count", "*")).toBe(true);
+    expect(isGrantableScopeKey("article-count", "center:MCC")).toBe(false);
+    expect(isGrantableScopeKey("display-titles", "*")).toBe(false);
+    expect(isGrantableScopeKey("toString", "*")).toBe(false);
+  });
+
+  it("a program holder chooses units freely; their scopes are untouched", () => {
+    expect(resolveMentoredPubsAccess(new Set(["md"]), ["center:MCC"])).toEqual({
+      scopes: new Set(["md"]),
+      units: ["center:MCC"],
+      pinnedUnits: null,
+    });
+    expect(resolveMentoredPubsAccess(new Set([ALL_SCOPES]), [])).toEqual({
+      scopes: new Set([ALL_SCOPES]),
+      units: [],
+      pinnedUnits: null,
+    });
+    // Both kinds: the program behaviour wins (documented ceiling).
+    expect(resolveMentoredPubsAccess(new Set(["md", "center:MCC"]), []).pinnedUnits).toBeNull();
+  });
+
+  it("a unit-only holder sees every program pinned to their units: the requested ones they hold, else all — never a foreign unit, never none", () => {
+    const held = new Set(["dept:N1", "center:MCC"]);
+    expect(resolveMentoredPubsAccess(held, [])).toEqual({
+      scopes: new Set([ALL_SCOPES]),
+      units: ["center:MCC", "dept:N1"],
+      pinnedUnits: ["center:MCC", "dept:N1"],
+    });
+    expect(resolveMentoredPubsAccess(held, ["dept:N1"]).units).toEqual(["dept:N1"]);
+    expect(resolveMentoredPubsAccess(held, ["dept:N1", "center:OTHER"]).units).toEqual(["dept:N1"]);
+    expect(resolveMentoredPubsAccess(held, ["center:OTHER"]).units).toEqual(["center:MCC", "dept:N1"]);
+  });
+
+  it("an empty scope set throws — it must never fall through to the wildcard", () => {
+    expect(() => resolveMentoredPubsAccess(new Set(), [])).toThrow();
+  });
+});
+

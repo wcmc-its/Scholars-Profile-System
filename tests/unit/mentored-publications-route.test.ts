@@ -318,5 +318,14 @@ describe("the rail's post-load facets (2026-09-24)", () => {
     expect(h.mockBuild).toHaveBeenLastCalledWith(expect.anything(), "All");
     expect(h.mockFacets).not.toHaveBeenCalled();
   });
+
+  it("a unit-only grant is pinned in the download too: a foreign unit requested loads the held one, every program", async () => {
+    h.mockGetReportScopes.mockResolvedValue(new Set(["center:MCC"]));
+    const set = new Set(["men0001"]);
+    h.mockLoadUnitMentors.mockResolvedValueOnce(set);
+    await GET(req("?unit=center:OTHER&years=2025"));
+    expect(h.mockLoadUnitMentors).toHaveBeenCalledWith(["center:MCC"]);
+    expect(h.mockLoadReport).toHaveBeenCalledWith(expect.objectContaining({ scopes: ["*"], mentorCwids: set }));
+  });
 });
 

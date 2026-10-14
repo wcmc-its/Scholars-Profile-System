@@ -1005,5 +1005,44 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     expect(links).toEqual([`${BASE}?view=mentors`]);
     expect(findByTestId(result, "mentored-pubs-download")?.props.href).not.toContain("view=");
   });
+
+  it("a unit-only grant: pinned to the held unit (a foreign one requested is refused), every program, no × on the unit chip, only the held unit offered", async () => {
+    h.mockGetReportScopes.mockResolvedValue(new Set(["center:MCC"]));
+    h.mockFacets.mockResolvedValueOnce({
+      roleCategories: [],
+      departments: [{ value: "dept:N100", label: "Medicine", count: 900, divisions: [] }],
+      centers: [
+        { value: "center:MCC", label: "Meyer Cancer Center", count: 300 },
+        { value: "center:OTHER", label: "Other Center", count: 50 },
+      ],
+      institutions: [],
+    });
+    const set = new Set(["men0001"]);
+    h.mockLoadUnitMentors.mockResolvedValueOnce(set);
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ unit: "center:OTHER" }) });
+    expect(h.mockLoadUnitMentors).toHaveBeenCalledWith(["center:MCC"]);
+    expect(h.mockLoadReport).toHaveBeenCalledWith(expect.objectContaining({ scopes: ["*"], mentorCwids: set }));
+    // Every confirmed program, as a '*' holder opens on.
+    const { types } = h.mockLoadReport.mock.calls[0][0] as { types: string[] };
+    expect(types).toEqual(expect.arrayContaining(["aoc", "mdphd", "ecr", "thesis", "postdoc"]));
+
+    const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; value: string; removeHref: string | null }>;
+    expect(chips.find((c) => c.group === "Mentor's unit")).toEqual({
+      group: "Mentor's unit",
+      value: "Meyer Cancer Center",
+      removeHref: null,
+    });
+    const lists: Array<Record<string, unknown>> = [];
+    const collect = (node: unknown) => {
+      if (node === null || node === undefined || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(collect);
+      const el = asEl(node);
+      if (el.type === h.mockChecklist && el.props.name === "unit") lists.push(el.props);
+      for (const c of childrenOf(el)) collect(c);
+    };
+    collect(findByType(result, h.mockAutoSubmitForm));
+    expect(lists.map((l) => (l.options as Array<{ value: string }>).map((o) => o.value))).toEqual([[], ["center:MCC"]]);
+    expect(findByTestId(result, "mentored-pubs-download")?.props.href).toContain("unit=center%3AMCC");
+  });
 });
 

@@ -108,6 +108,14 @@ vi.mock("@/lib/edit/article-count-report", () => ({ canViewArticleCountReport: m
 vi.mock("@/lib/db", () => ({
   db: { read: { reportMeta: { findMany: mockReportMetaFindMany } }, write: {} },
 }));
+// Report 7's popover props list the unit scope options (`loadDataQualityFacets`).
+vi.mock("@/lib/api/data-quality", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/data-quality")>();
+  return {
+    ...actual,
+    loadDataQualityFacets: vi.fn().mockResolvedValue({ roleCategories: [], departments: [], centers: [], institutions: [] }),
+  };
+});
 
 import EditReportsIndexPage from "@/app/edit/reports/page";
 
