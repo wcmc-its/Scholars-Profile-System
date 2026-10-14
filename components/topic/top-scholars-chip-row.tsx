@@ -10,6 +10,7 @@
  */
 import { TopScholarChip } from "./top-scholar-chip";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
+import { TopScholarsInfoText } from "./top-scholars-info-text";
 import type { TopScholarChipData } from "@/lib/api/topics";
 
 const DEFAULT_HEADING = "Scholars in this area";
@@ -22,6 +23,7 @@ export function TopScholarsChipRow({
   enablePopover,
   contextMethods,
   heading = DEFAULT_HEADING,
+  areaSignals = false,
 }: {
   scholars: TopScholarChipData[];
   scholarCount?: number;
@@ -37,6 +39,9 @@ export function TopScholarsChipRow({
   /** Eyebrow heading (also the info button's label). Defaults to the topic copy
    *  "Scholars in this area"; method pages pass "Scholars using this". */
   heading?: string;
+  /** TOPIC_RANK_AREA_SIGNALS is on and this is a topic page: the info text
+   *  names grants and trials. Read server-side by the page. */
+  areaSignals?: boolean;
 }) {
   const moreCount = scholarCount !== undefined ? scholarCount - scholars.length : 0;
 
@@ -46,9 +51,7 @@ export function TopScholarsChipRow({
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {heading}
           <SectionInfoButton label={heading} anchor="topScholars">
-            Full-time faculty identified by ReCiterAI from their first- or
-            senior-author publications in this research area. Curators do not
-            handpick this list; it updates weekly as new work appears.
+            <TopScholarsInfoText areaSignals={areaSignals} />
           </SectionInfoButton>
         </span>
       </div>

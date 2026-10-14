@@ -16,7 +16,11 @@ import {
   SCHOLAR_CARD_LIMIT,
   type ScholarCardData,
 } from "@/components/taxonomy/scholar-card-grid";
-import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import {
+  isTaxonomyFeedLoadMoreOn,
+  isTaxonomyScholarCardsOn,
+  isTopicRankAreaSignalsOn,
+} from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { TopicRailLayout } from "@/components/topic/topic-rail-layout";
 import {
@@ -107,6 +111,9 @@ export default async function TopicPage({
     }));
   }
 
+  // TOPIC_RANK_AREA_SIGNALS — the info text names grants and trials.
+  const areaSignals = isTopicRankAreaSignalsOn();
+
   const subtopicList = subtopicRail?.subtopics ?? [];
   // One count definition (phase 4): distinct research articles, every
   // relevance tier — the "All subareas" row, the Spotlight "View all N" and
@@ -173,6 +180,7 @@ export default async function TopicPage({
                 count: scholarCount,
               }}
               popover={{ label: topic.label, topicSlug: slug, filterable: true }}
+              areaSignals={areaSignals}
             />
           </div>
         ) : (
@@ -183,6 +191,7 @@ export default async function TopicPage({
                 scholarCount={scholarCount}
                 topicSlug={slug}
                 topicLabel={topic.label}
+                areaSignals={areaSignals}
               />
             </div>
           )
