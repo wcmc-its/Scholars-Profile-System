@@ -655,6 +655,29 @@ export class EtlStack extends Stack {
       ],
     });
 
+    // etl:area-signal-inputs queues grant and trial texts for ReciterAI's
+    // research-area scoring: Query (the keys already queued) + PutItem (new
+    // texts only, under attribute_not_exists), pinned to the AREAINPUT
+    // partition exactly as the SUBMISSION grants above are. No Update/Delete:
+    // the ReciterAI drain owns an item's status once it is queued, and the
+    // scored AREASIGNAL# items come back through etl:dynamodb's existing Scan.
+    // Both envs write the one shared table; keys are text hashes, so the two
+    // nightlies converge on the same items.
+    new iam.Policy(this, "EtlTaskRoleAreaSignalInputsPolicy", {
+      policyName: `sps-etl-task-${env}-area-signal-inputs`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["dynamodb:PutItem", "dynamodb:Query"],
+          resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
+          conditions: {
+            "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["AREAINPUT"] },
+          },
+        }),
+      ],
+    });
+
     // ------------------------------------------------------------------
     // Bedrock grant for the NCI Table 2A cancer-relevance judgment calls
     // (scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts, via
@@ -1709,6 +1732,14 @@ export class EtlStack extends Stack {
       // MSSQL credential (etl/jenzabar), external:true. Chips are ISR-only (not
       // indexed), so it only needs to precede the closing revalidate.
       { id: "JenzabarNightly", npmScript: "etl:jenzabar", external: true, tier: "continue" },
+      // Research-area signals: queue eligible grant and trial TEXTS for
+      // ReciterAI's area scoring (PutItem to the reciterai AREAINPUT partition,
+      // EtlTaskRoleAreaSignalInputsPolicy) and stamp grant/clinical_trial rows
+      // with their text key. After Infoed (tonight's grants) and BEFORE Dynamodb,
+      // so ReciterAI's daily drain scores tonight's inputs today and the next
+      // nightly's Dynamodb projects them. tier:"continue": a missed night only
+      // delays new texts by a day; the ranking it feeds is flag-gated.
+      { id: "AreaSignalInputs", npmScript: "etl:area-signal-inputs", external: true, tier: "continue" },
       // After the source ETLs (so a freshly matched publication is enriched the
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
@@ -1959,6 +1990,16 @@ export class EtlStack extends Stack {
       {
         id: "ClinicalTrialsWeekly",
         npmScript: "etl:clinical-trials",
+        external: true,
+        tier: "continue",
+      },
+      // etl:clinical-trials full-replaces clinical_trial, which nulls every
+      // trial's area_text_key; re-derive it now rather than leaving trials out
+      // of the research-area ranking until the next nightly. Same script as the
+      // nightly AreaSignalInputs step (idempotent: only new texts are queued).
+      {
+        id: "AreaSignalInputsWeekly",
+        npmScript: "etl:area-signal-inputs",
         external: true,
         tier: "continue",
       },

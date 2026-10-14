@@ -595,7 +595,7 @@ describe("producer stage wiring", () => {
     }
   });
 
-  it("covers all eight scheduled ReciterAI jobs", () => {
+  it("covers all nine scheduled ReciterAI jobs", () => {
     // The count is the point of the last three PRs. If a source is dropped here
     // the board silently stops asking about one of the eight, which is exactly
     // the invisible state this work exists to end.
@@ -615,6 +615,7 @@ describe("producer stage wiring", () => {
         "ReciterAI-taxonomy-drift", // reciterai-taxonomy-drift-daily
         "ReciterAI-cores", // reciterai-cores-daily
         "ReciterAI-grants", // reciterai-grants-daily
+        "ReciterAI-area-signals", // pipeline_area_signals daily (forward-declared)
       ]),
     );
   });

@@ -1125,8 +1125,15 @@ model ClinicalTrial {
   source           String    @default("reciterdb.clinical_trials") @db.VarChar(48)
   lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")
 
+  /// Research-area signal key (etl/area-signal-inputs), as on `Grant`. Null
+  /// when the trial is not eligible (no NCT id, started before 2020, hidden
+  /// status, no eligible PI). This table is full-replaced by the clinical-trials
+  /// ETL, which nulls the key; the area-signal-inputs step re-derives it after.
+  areaTextKey String? @map("area_text_key") @db.VarChar(64)
+
   investigators PersonClinicalTrial[]
 
+  @@index([areaTextKey])
   @@map("clinical_trial")
 }
 
@@ -1341,9 +1348,17 @@ model Grant {
   /// Mirrors `keywordsFetchedAt`.
   meshResolvedAt         DateTime? @map("mesh_resolved_at")
 
+  /// Research-area signal key (etl/area-signal-inputs): a hash of this grant's
+  /// normalized title + abstract, shared by every row with the same text
+  /// (multi-PI, subawards of one project). Joins to `area_signal_topic`. Null
+  /// when the row is not eligible as an area signal (role, source, start year,
+  /// training/conference award, suppression) — see lib/area-signals.ts.
+  areaTextKey String? @map("area_text_key") @db.VarChar(64)
+
   publications GrantPublication[]
 
   @@index([cwid])
+  @@index([areaTextKey])
   @@index([cwid, endDate]) // active-first ordering
   @@index([primeSponsor])
   @@index([programType])
@@ -1698,6 +1713,7 @@ model Topic {
   refreshedAt      DateTime @default(now()) @map("refreshed_at")
 
   publications           PublicationTopic[]
+  areaSignals            AreaSignalTopic[]
   subtopics              Subtopic[]
   publicationsAsTopTopic Publication[]      @relation("PublicationTopTopic")
 
@@ -2865,6 +2881,41 @@ model PublicationTopic {
   @@index([parentTopicId, cwid]) // Top scholars chip row group-by
   @@index([primarySubtopicId]) // subtopic-grain reverse matcher pool (grant→researcher)
   @@map("publication_topic")
+}
+
+/// A grant or trial text ReciterAI has scored into research areas
+/// (`PK=AREASIGNAL#{kind}:{textKey}`, `SK=META` in the `reciterai` table),
+/// projected by etl/dynamodb. Keyed by text, not by person or award: SPS sends
+/// ReciterAI text only (etl/area-signal-inputs) and joins back through
+/// `Grant.areaTextKey` / `ClinicalTrial.areaTextKey`.
+model AreaSignalText {
+  textKey         String    @id @map("text_key") @db.VarChar(64)
+  kind            String    @db.VarChar(16) // grant | trial
+  synopsis        String?   @db.Text
+  synopsisModel   String?   @map("synopsis_model") @db.VarChar(128)
+  taxonomyVersion String?   @map("taxonomy_version") @db.VarChar(64)
+  scoredAt        DateTime? @map("scored_at")
+  refreshedAt     DateTime  @default(now()) @map("refreshed_at")
+
+  topics AreaSignalTopic[]
+
+  @@map("area_signal_text")
+}
+
+/// One research-area score for an `AreaSignalText` (every dense score >= 0.3
+/// upstream). FK to `topic`, so an unpublished or retired area drops out the
+/// same way it does for `publication_topic`.
+model AreaSignalTopic {
+  textKey       String  @map("text_key") @db.VarChar(64)
+  parentTopicId String  @map("parent_topic_id") @db.VarChar(128)
+  score         Decimal @db.Decimal(8, 4)
+
+  text  AreaSignalText @relation(fields: [textKey], references: [textKey], onDelete: Cascade)
+  topic Topic          @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
+
+  @@id([textKey, parentTopicId])
+  @@index([parentTopicId])
+  @@map("area_signal_topic")
 }
 
 /// WCM core-facility catalog (Biomedical Imaging, Flow Cytometry, …).

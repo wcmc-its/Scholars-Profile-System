@@ -77,6 +77,7 @@ import {
 } from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
 import { partitionRecords } from "./partition";
+import { buildAreaSignalWrites, projectAreaSignals } from "./area-signal-mapper";
 import {
   CORES_SOURCE,
   DRIFT_SOURCES,
@@ -166,7 +167,7 @@ async function main() {
         `tools=${buckets.tools.length}, cores=${buckets.cores.length}, ` +
         `coreStaff=${buckets.coreStaff.length}, ` +
         `producerRuns=${buckets.producerRuns.length}, ` +
-        `driftDays=${buckets.driftDays.length}.`,
+        `driftDays=${buckets.driftDays.length}, areaSignals=${buckets.areaSignals.length}.`,
     );
 
     // ===================================================================
@@ -1022,6 +1023,47 @@ async function main() {
     });
 
     // ===================================================================
+    // Block 10: AREASIGNAL# -> area_signal_text + area_signal_topic
+    // ===================================================================
+    // Grant and trial TEXTS that etl/area-signal-inputs queued and ReciterAI
+    // scored into research areas; lib/api/topics.ts joins them back through
+    // grant/clinical_trial.area_text_key to re-rank a topic's scholars. See
+    // ./area-signal-mapper.ts for the item shape and the guards.
+    //
+    // Fail-soft ON PURPOSE: these rows only re-order scholars who already rank
+    // on their papers, behind TOPIC_RANK_AREA_SIGNALS, so a failure here must
+    // not page or stop the nightly (this step is abort-tier). It is safe to be:
+    // the writes are upserts and per-text replaces, and the prune is gated on
+    // the guardedReplace floor, so a failed or truncated pass leaves yesterday's
+    // rows in place rather than an empty table. Loud, so it is not a silent gap.
+    let areaSignalTextsUpserted = 0;
+    try {
+      const areaMap = buildAreaSignalWrites(buckets.areaSignals, knownTopicIds);
+      console.log(
+        `Found ${buckets.areaSignals.length} AREASIGNAL# record(s): ${areaMap.texts.length} text(s), ` +
+          `${areaMap.topics.length} area score(s) (skipped: ${areaMap.skippedBadKey} malformed key, ` +
+          `${areaMap.skippedUnknownTopic} unknown topic, ${areaMap.skippedBadScore} bad score).`,
+      );
+      const area = await projectAreaSignals(areaMap, db.write);
+      areaSignalTextsUpserted = area.texts;
+      if (area.pruneSkipped) {
+        console.warn(
+          `area_signal_text prune SKIPPED -- ${area.pruneSkipped}; likely a partial ` +
+            "AREASIGNAL# scan or a producer that stopped publishing, retaining rows this run.",
+        );
+      }
+      console.log(
+        `area signals: ${area.texts} text(s), ${area.topics} area row(s), ${area.pruned} stale text(s) pruned.`,
+      );
+    } catch (err) {
+      console.error(
+        "AREASIGNAL# projection FAILED (yesterday's area_signal rows retained; the " +
+          "next run retries): " +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+
+    // ===================================================================
     // Block 8: STAGE# -> etl_run  (ReciterAI PRODUCER liveness)
     // ===================================================================
     // Mirrors the engine's own stage ledger into `etl_run` so /edit/etl-status
@@ -1125,7 +1167,8 @@ async function main() {
       opportunityRowsUpserted +
       coreRowsUpserted +
       pubCoreRowsUpserted +
-      coreStaffRowsUpdated;
+      coreStaffRowsUpdated +
+      areaSignalTextsUpserted;
     await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
@@ -1138,7 +1181,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}, core_staff_counts=${coreStaffRowsUpdated}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}, core_staff_counts=${coreStaffRowsUpdated}, area_signal_text=${areaSignalTextsUpserted}`,
     );
   } catch (err) {
     await db.write.etlRun.update({

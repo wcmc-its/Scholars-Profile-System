@@ -92,6 +92,11 @@ export const PRODUCER_STAGES: Readonly<Record<string, string>> = {
   // etl/dynamodb/index.ts, which drops the output-age row whenever the ledger
   // supplied one so the two paths never both write for the same job.
   cores_run: "ReciterAI-cores",
+  // ReciterAI `pipeline_area_signals` (daily, after the SPS nightly): drains the
+  // AREAINPUT queue etl/area-signal-inputs fills and writes AREASIGNAL# items.
+  // FORWARD-DECLARED like cores_run: the stage row appears once that pipeline
+  // deploys; until then its TRACKED entry carries a dated ack.
+  area_signals: "ReciterAI-area-signals",
 };
 
 /** One `etl_run` row, ready for `create`. */

@@ -8,6 +8,7 @@
  */
 import { alsoIn, type AlsoInLink } from "@/lib/edit/clip-repeats";
 import { cache } from "react";
+import { isHiddenTrialStatus } from "@/lib/clinical-trial-status";
 import { prisma } from "@/lib/db";
 import {
   CENTER_ENTITY_TYPE,
@@ -983,17 +984,9 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(authors: T[], owner
   return next;
 }
 
-/** A trial we never display on the public profile: withdrawn / never-enrolled
- *  (ClinicalTrials.gov terms), or institutionally SUSPENDED — usually a
- *  temporary regulatory, safety or sponsor hold that a public "Suspended" label
- *  would misrepresent; if it reopens, OnCore flips it to OPEN TO ACCRUAL and it
- *  reappears. Admin reports still list it. Checked before the active test below
- *  so "no longer available" doesn't count as "available".
- *  @internal exported for tests. */
-export function isHiddenTrialStatus(status: string | null): boolean {
-  const s = (status ?? "").toLowerCase();
-  return s.includes("withdrawn") || s.includes("no longer available") || s.trim() === "suspended";
-}
+/** Moved to lib/clinical-trial-status.ts (import-free, so the area-signal
+ *  eligibility can share it); re-exported for the existing importers. */
+export { isHiddenTrialStatus };
 
 /** Coarse Active vs Completed split for the trial section, from the raw status.
  *  The live source is the institutional `overallCurrentStatus` — "OPEN TO

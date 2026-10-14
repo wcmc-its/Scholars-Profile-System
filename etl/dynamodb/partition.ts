@@ -196,6 +196,22 @@ export type DriftDayRecord = {
   [key: string]: unknown;
 };
 
+/**
+ * A grant or trial TEXT ReciterAI scored into research areas
+ * (etl/area-signal-inputs queued it): PK = `AREASIGNAL#{kind}:{text_key}`,
+ * SK = `META`. See ./area-signal-mapper.ts.
+ */
+export type AreaSignalRecord = {
+  PK: string;
+  SK?: string;
+  synopsis?: string;
+  synopsis_model?: string;
+  topic_scores?: unknown;
+  taxonomy_version?: string;
+  scored_at?: string;
+  [key: string]: unknown;
+};
+
 export type Buckets = {
   tax: TaxonomyRecord[];
   topics: TopicRecord[];
@@ -206,6 +222,7 @@ export type Buckets = {
   coreStaff: CoreStaffRecord[];
   producerRuns: ProducerRunRecord[];
   driftDays: DriftDayRecord[];
+  areaSignals: AreaSignalRecord[];
 };
 
 /**
@@ -221,6 +238,7 @@ export type Buckets = {
  *   Block 6b CORE#/STAFF_DICT -> core.staff_*  PK CORE# AND SK === "STAFF_DICT"
  *   Block 8  STAGE#    -> etl_run       begins_with(PK, "STAGE#")
  *   Block 9  DRIFT#    -> etl_run       begins_with(PK, "DRIFT#")
+ *   Block 10 AREASIGNAL# -> area_signal_text/_topic  begins_with(PK, "AREASIGNAL#")
  *
  * The buckets are disjoint (one `continue` per match), so the union exactly
  * reproduces what the six independent filtered scans kept. Block 7 (GRANT#) is
@@ -245,6 +263,7 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     coreStaff: [],
     producerRuns: [],
     driftDays: [],
+    areaSignals: [],
   };
   for (const it of items) {
     const pk = String(it.PK ?? "");
@@ -301,6 +320,13 @@ export function partitionRecords(items: Array<Record<string, unknown>>): Buckets
     // shape, so a different bucket; see ./producer-run-mapper.ts.
     if (pk.startsWith("DRIFT#")) {
       b.driftDays.push(it as DriftDayRecord);
+      continue;
+    }
+    // Block 10 — grant/trial texts scored into research areas. The sibling
+    // AREAINPUT partition (the queue SPS writes) is deliberately NOT matched:
+    // reading our own queue back would be a loop, not an ingest.
+    if (pk.startsWith("AREASIGNAL#")) {
+      b.areaSignals.push(it as AreaSignalRecord);
       continue;
     }
     // else: unmatched (e.g. a GRANT# item, or a PUB# item without an SK CORE#
