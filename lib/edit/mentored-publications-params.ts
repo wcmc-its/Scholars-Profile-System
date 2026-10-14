@@ -22,7 +22,8 @@
  *   - `pubs`    which publication set: `mentored` (co-pubs with an AOC mentor,
  *               the default) or `all` (every publication of the learner, from
  *               the `aoc_mentee_publication` bridge); the route honours it too;
- *   - `view`    which in-page view: `summary` (default) or `publications`
+ *   - `view`    which in-page view: `summary` (default), `mentors` (the
+ *               learners regrouped under each mentor) or `publications`
  *               (one row per publication, most recent first). Page-only — the
  *               route accepts and ignores it so one link shape serves both;
  *   - `grad_from` / `grad_to` / `grad_unknown`  what the rail's graduation-
@@ -77,7 +78,7 @@ import {
 export const MENTORED_PUBS_MODES = ["mentored", "all"] as const;
 export type MentoredPubsMode = (typeof MENTORED_PUBS_MODES)[number];
 
-export const MENTORED_PUBS_VIEWS = ["summary", "publications"] as const;
+export const MENTORED_PUBS_VIEWS = ["summary", "mentors", "publications"] as const;
 export type MentoredPubsView = (typeof MENTORED_PUBS_VIEWS)[number];
 
 /** The per-publication "In window" facet's values, in display order. */

@@ -55,6 +55,14 @@ one sentence.
   that learner's papers. "Find a learner or mentor" narrows the rows (name, CWID or mentor), never the
   counts or the download. Sort by the column headers (Learner or Grad year in the first); graduation
   year, newest first, by default. 25 rows, then "Show 25 more".
+- **Mentors (N)** tab: the Learners rows regrouped under each mentor (a learner with two mentors sits
+  under both), for an office that reads "our faculty, then their trainees" — the mentor's-unit
+  filter's audience. Mentor (name, "Department · Institution") · Learners (each with the pair's type
+  badge and grad year, newest class first) · Learners · Papers (distinct papers on which the mentor
+  and one of their learners both appear). Sort by learners (default), papers or name; ties read A–Z.
+  The find box matches a mentor or any of their learners. No new load: a client-side pivot of the
+  same rows, so every rail filter applies. Not in the workbook (Raw Data already has one row per
+  mentor, learner and paper).
 - **Publications (N)** tab: one entry per distinct paper: the Vancouver citation with its PMID link
   (Scopus-only rows print their Scopus id, no link), JIF, NIH iCite citations, date added to PubMed,
   each learner with their byline position and window badge, each mentor with the pair's type. Sort:
@@ -168,7 +176,7 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   the mentees of a mentor who has left the unit drop out (the footnote says so). The workbook's
   Query & Assumptions sheet states it ("Mentor's unit (current members)", worded by
   `personFilterCriteria`). It does not change who can open the report (the `report_access` gate).
-- `view=summary|publications`, `q=` — page-only (`q` is the "Find a learner or mentor" text); the
+- `view=summary|mentors|publications`, `q=` — page-only (`q` is the "Find a learner or mentor" text); the
   route accepts and ignores both so one link shape serves page and download.
 - Legacy `program=<scope>` — the select the types filter replaced (#2681); reads as that scope's
   roster type. `program=all` or an unknown value reads as absent. An old link never 400s.

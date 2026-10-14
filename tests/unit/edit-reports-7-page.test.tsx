@@ -631,6 +631,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       formIds: ["mentored-pubs-filters", "mentored-pubs-filters-sheet"],
       viewHrefs: {
         summary: `${BASE}?${base}&pubs=all`,
+        mentors: `${BASE}?${base}&pubs=all&view=mentors`,
         publications: `${BASE}?${base}&pubs=all&view=publications`,
       },
     });
@@ -678,6 +679,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       view: "summary",
       viewHrefs: {
         summary: `${BASE}?years=2026%2C2025&mtype=aoc&tail=1&pubs=mentored`,
+        mentors: `${BASE}?years=2026%2C2025&mtype=aoc&tail=1&pubs=mentored&view=mentors`,
         publications: `${BASE}?years=2026%2C2025&mtype=aoc&tail=1&pubs=mentored&view=publications`,
       },
       summary: [summaryRow],
@@ -985,6 +987,23 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     const href = chips.find((c) => c.group === "Mentor's unit")!.removeHref!;
     expect(href).not.toContain("unit=");
     expect(href).not.toContain("years=");
+  });
+
+  it("view=mentors reaches the island; Reset keeps the view; the download never carries it", async () => {
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ view: "mentors", tail: "2" }) });
+    expect(findByType(result, h.mockTable)?.props.view).toBe("mentors");
+    const rail = findByTestId(findByType(result, h.mockAutoSubmitForm), "mentored-pubs-rail");
+    const links: string[] = [];
+    const walk = (node: unknown) => {
+      if (node === null || node === undefined || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      const el = asEl(node);
+      if (typeof el.props?.href === "string") links.push(el.props.href as string);
+      for (const c of childrenOf(el)) walk(c);
+    };
+    walk(rail);
+    expect(links).toEqual([`${BASE}?view=mentors`]);
+    expect(findByTestId(result, "mentored-pubs-download")?.props.href).not.toContain("view=");
   });
 });
 

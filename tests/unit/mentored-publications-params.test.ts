@@ -47,11 +47,13 @@ describe("parseMentoredPubsParams", () => {
     expect(parseMentoredPubsParams({ pubs: "*" })).toEqual({ ok: false, error: "invalid_pubs" });
   });
 
-  it("view: summary | publications; anything else is an error", () => {
+  it("view: summary | mentors | publications; anything else is an error", () => {
     expect(parseMentoredPubsParams({ view: "publications" })).toMatchObject({
       ok: true,
       value: { view: "publications" },
     });
+    expect(parseMentoredPubsParams({ view: "mentors" })).toMatchObject({ ok: true, value: { view: "mentors" } });
+    expect(new URLSearchParams(mentoredPubsQueryString({ ...DEFAULTS, view: "mentors" })).get("view")).toBe("mentors");
     expect(parseMentoredPubsParams({ view: "SUMMARY" })).toMatchObject({ ok: true, value: { view: "summary" } });
     expect(parseMentoredPubsParams({ view: "raw" })).toEqual({ ok: false, error: "invalid_view" });
   });
