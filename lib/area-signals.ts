@@ -99,3 +99,17 @@ export function isEligibleAreaTrial(t: AreaTrialCandidate): boolean {
   if (!/^\d{4}/.test(start) || start.slice(0, 4) < AREA_SIGNAL_START_DATE.slice(0, 4)) return false;
   return !isHiddenTrialStatus(t.status);
 }
+
+/**
+ * Areas where grants never count: the pilot's Test A found no leading-indicator
+ * signal from grants here (infrastructure, workforce, methods and cross-cutting
+ * areas that many awards touch in passing). Trials still count in them.
+ */
+export const AREA_SIGNAL_GRANT_EXCLUDED_TOPICS: ReadonlySet<string> = new Set([
+  "research_infrastructure_workforce",
+  "translational_clinical_science",
+  "infectious_disease_immunology",
+  "medical_education_workforce",
+  "biostatistics_quantitative_sciences",
+  "biomedical_informatics",
+]);

@@ -40,3 +40,17 @@ export function isTaxonomyScholarCardsOn(): boolean {
 export function isTaxonomyFeedLoadMoreOn(): boolean {
   return process.env.TAXONOMY_FEED_LOAD_MORE === "on";
 }
+
+/**
+ * Research-area ranking with grants and trials (server-only, read like the ones
+ * above). `TOPIC_RANK_AREA_SIGNALS=on` adds PI grant and PI clinical-trial
+ * points (lib/ranking.ts `scoreAreaSignals`) to the topic page's top-scholar
+ * order, `getTopScholarsForTopic` only, and only for scholars who already rank
+ * there on their papers. Membership, counts, subarea lists, search and the CSV
+ * export are unchanged either way.
+ *
+ * Off (the default) is today's order exactly.
+ */
+export function isTopicRankAreaSignalsOn(): boolean {
+  return process.env.TOPIC_RANK_AREA_SIGNALS === "on";
+}
