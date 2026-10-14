@@ -26,7 +26,7 @@
  */
 import { KIND_LABEL, type MenteeKind } from "@/lib/mentee-suggestions/kind";
 
-export type MentorshipSource = "roster" | "jenzabar" | "ed" | "coauthor" | "faculty" | "frt";
+export type MentorshipSource = "roster" | "jenzabar" | "ed" | "coauthor" | "faculty" | "frt" | "volunteer";
 export type MentorshipTier = "confirmed" | "presumptive" | "ambiguous";
 /** One (learner, mentor) pair's provenance: the program bucket (a
  *  `MentoringProgramKey`, or a `MenteeKind` for co-author pairs) and where
@@ -83,6 +83,8 @@ export function mentorshipLabel(t: MentorshipType): string {
       return `${PROGRAM_LABEL[t.program] ?? t.program} · faculty-asserted`;
     case "frt":
       return MENTORSHIP_TYPE_LABEL.frt;
+    case "volunteer":
+      return MENTORSHIP_TYPE_LABEL.volunteer;
   }
 }
 
@@ -100,6 +102,7 @@ export const MENTORSHIP_TYPE_KEYS = [
   "possible",
   "faculty",
   "frt",
+  "volunteer",
 ] as const;
 export type MentorshipTypeKey = (typeof MENTORSHIP_TYPE_KEYS)[number];
 
@@ -113,6 +116,7 @@ export const MENTORSHIP_TYPE_LABEL: Record<MentorshipTypeKey, string> = {
   possible: "Possible mentee (from co-authorship)",
   faculty: "Faculty-asserted",
   frt: "Self-reported (Faculty Review)",
+  volunteer: "Volunteer or intern (ED sponsor)",
 };
 
 /** One sentence per key: what the source is and how sure it is — the
@@ -135,6 +139,8 @@ export const MENTORSHIP_TYPE_DESCRIPTION: Record<MentorshipTypeKey, string> = {
   faculty:
     "Added by the mentor on their Scholars profile, or confirmed there from a co-authorship suggestion.",
   frt: "Mentees the faculty member listed in the annual Faculty Review Tool, whether or not they added them to their profile. Counted only when linked to a WCM person (matched by name, or linked by the mentor in Scholars); no year.",
+  volunteer:
+    "A volunteer whose Enterprise Directory affiliate record names this faculty member as sponsor, or as manager when no faculty sponsor is recorded. ED records interns as volunteers. Years are the volunteer appointment's.",
 };
 
 /** `report_access` scope key (`MENTORED_PUBS_SCOPES`, `lib/edit/report-access.ts`)
@@ -161,6 +167,7 @@ const CONFIRMED_TYPE_KEYS: ReadonlyArray<MentorshipTypeKey> = [
   "postdoc",
   "faculty",
   "frt",
+  "volunteer",
 ];
 
 /** Which filter key a pair falls under; null for a roster bucket no scope
@@ -179,6 +186,8 @@ export function mentorshipTypeKey(t: MentorshipType): MentorshipTypeKey | null {
       return "faculty";
     case "frt":
       return "frt";
+    case "volunteer":
+      return "volunteer";
   }
 }
 

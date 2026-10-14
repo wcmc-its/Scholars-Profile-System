@@ -111,7 +111,7 @@ live in the table, never in this repo.
 
 ## Sources
 
-The "Type of mentorship" filter has eight keys (`MENTORSHIP_TYPE_KEYS`), each one source and one
+The "Type of mentorship" filter has ten keys (`MENTORSHIP_TYPE_KEYS`), each one source and one
 confidence. Every hover (the rail's Mentorship type / Inferred mentorship options and each pair's type
 badge) reads `MENTORSHIP_TYPE_DESCRIPTION`. The rail splits the one `mtype` param across two sections:
 the program pairings, then the two co-authorship inferences.
@@ -126,6 +126,7 @@ the program pairings, then the two co-authorship inferences.
 | Likely mentee (from co-authorship) | `mentee_suggestion`, tier `presumptive` (#2634) | A trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with the faculty member; pubs from the suggestion's own evidence list | Any year; confirmation | Off | #2677 |
 | Possible mentee (from co-authorship) | `mentee_suggestion`, tier `ambiguous` | The same inference for research staff or MD alumni, who may be peers | Any year; confirmation | Off | #2677 |
 | Faculty-asserted | `field_override` (`scholar`, `manualMentees`) — the mentor's own list on `/edit`, including accepted co-authorship suggestions | Mentee name, optional CWID, optional completion year, optional degree bucket | Entries with no CWID (counted in `droppedNoCwid`; named only in the page banner's "View list"); entry year | On, for a `*` holder | #2684 |
+| Volunteer or intern (ED sponsor) | `volunteer_mentor_relationship` (ED affiliate role records, `ou=affiliates,ou=sors`, `affiliate-volunteer`; nightly `etl:ed`) | The volunteer's faculty sponsor, else their faculty manager; appointment start and end dates (no end = ongoing). ED records interns as volunteers. | Pubs of their own (a volunteer holds no Scholar row: only the pair's co-authorship suggestion evidence); a pair whose sponsor is a faculty member but not the real PI | On, for a `*` holder | 2026-10-14 |
 
 Publications for the pairing-sheet, Jenzabar and ED sources come from the mentoring co-pub bridge
 (`mentee_copublication_pub`, one row per mentor × mentee × pub). Co-author pairs' pubs come from the
@@ -134,7 +135,9 @@ suggestion's `evidence` JSON (last 8 years, capped at 50 per pair), each resolve
 which the page names in one sentence. A faculty-asserted pair is not in the bridge: it reads the
 pair's suggestion evidence when a `mentee_suggestion` row exists (whatever its tier or dismissal),
 else the intersection of both people's confirmed `publication_author` rows. A Faculty Review Tool
-pair (`frt_mentee`, loaded weekly by `etl:frt`) takes the same intersection. Only FRT rows with a
+pair (`frt_mentee`, loaded weekly by `etl:frt`) takes the same intersection, and so does an ED
+volunteer pair, which in practice means the pair's suggestion evidence (volunteers have no
+`publication_author` rows). Only FRT rows with a
 `mentee_cwid` count: the name match, or the CWID the mentor linked on /edit Mentees. Accepted or not,
 dismissed or not, since the faculty member reported the mentee in their review. It carries no year,
 so it needs "No grad year" when a year filter is on, and it ranks below faculty-asserted and above

@@ -56,6 +56,7 @@ const hoisted = vi.hoisted(() => ({
   mockFrtFindMany: vi.fn(),
   mockAuthorFindMany: vi.fn(),
   mockQueryRaw: vi.fn(),
+  mockVolunteerFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -77,6 +78,7 @@ vi.mock("@/lib/db", () => ({
       frtMentee: { findMany: hoisted.mockFrtFindMany },
       publicationAuthor: { findMany: hoisted.mockAuthorFindMany },
       $queryRaw: hoisted.mockQueryRaw,
+      volunteerMentorRelationship: { findMany: hoisted.mockVolunteerFindMany },
     },
     write: {},
   },
@@ -188,6 +190,7 @@ beforeEach(() => {
   hoisted.mockOverrideFindMany.mockResolvedValue([]);
   hoisted.mockFrtFindMany.mockResolvedValue([]);
   hoisted.mockAuthorFindMany.mockResolvedValue([]);
+  hoisted.mockVolunteerFindMany.mockResolvedValue([]);
 });
 
 describe("mentorInstitution", () => {
@@ -1057,6 +1060,63 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     ]);
     expect(report.detail.filter((d) => d.learnerCwid === "phd0001").map((d) => [d.pmid, d.withMentor])).toEqual([["2", true]]);
   });
+
+  // ED volunteers (2026-10-14): the faculty sponsor / manager on the affiliate role record.
+  const volunteer = (o: Partial<Record<string, unknown>> & { mentorCwid: string; menteeCwid: string }) => ({
+    menteeFirstName: "Val",
+    menteeLastName: "Volunteer",
+    startDate: new Date("2024-06-01"),
+    endDate: new Date("2025-05-31"),
+    ...o,
+  });
+
+  it("a volunteer pair lands typed 'Volunteer or intern', dated by the appointment (end year as grad year, start as entry), pubs from the pair's suggestion evidence", async () => {
+    hoisted.mockVolunteerFindMany.mockResolvedValue([volunteer({ mentorCwid: "men0004", menteeCwid: "vol0001" })]);
+    // The pair's suggestion row (any tier) supplies the papers, as for a faculty-asserted pair.
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({ mentorCwid: "men0004", menteeCwid: "vol0001", tier: "presumptive", evidence: [{ id: "101", year: 2024, menteeRank: 1, mentorRank: 3, total: 3 }] }),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([localPub(101)]);
+    const report = await loadMentoredPublicationsReport({ types: ["volunteer"], scopes: ["*"] });
+    expect(report.summary).toHaveLength(1);
+    expect(report.summary[0]).toMatchObject({
+      cwid: "vol0001",
+      firstName: "Val",
+      lastName: "Volunteer",
+      gradYear: 2025,
+      entryYear: 2024,
+      program: "Volunteer",
+      pubsAllTime: 1,
+      pubsInWindow: 1,
+    });
+    expect(report.summary[0].mentors).toEqual([
+      expect.objectContaining({ cwid: "men0004", mentorship: { program: "volunteer", source: "volunteer", tier: "confirmed" } }),
+    ]);
+    expect(report.detail[0]).toMatchObject({ pmid: "101", mentorship: "Volunteer or intern (ED sponsor)", inWindow: true });
+  });
+
+  it("not read unless 'volunteer' is selected; a surer source (the ED postdoc pass) wins the same pair; no end date = ongoing", async () => {
+    hoisted.mockVolunteerFindMany.mockResolvedValue([
+      volunteer({ mentorCwid: "men0001", menteeCwid: "pd0001" }),
+      volunteer({ mentorCwid: "men0002", menteeCwid: "vol0002", endDate: null }),
+    ]);
+    hoisted.mockPostdocFindMany.mockResolvedValue([postdoc({ mentorCwid: "men0001", menteeCwid: "pd0001" })]);
+    await loadMentoredPublicationsReport({ types: ["postdoc"], scopes: ["*"] });
+    expect(hoisted.mockVolunteerFindMany).not.toHaveBeenCalled();
+
+    const report = await loadMentoredPublicationsReport({ types: ["postdoc", "volunteer"], scopes: ["*"] });
+    const byCwid = new Map(report.summary.map((r) => [r.cwid, r]));
+    expect(byCwid.get("pd0001")?.mentors.map((m) => m.mentorship.source)).toEqual(["ed"]);
+    expect(byCwid.get("vol0002")).toMatchObject({ gradYear: null, entryYear: 2024 });
+  });
+
+  it("loadMentoredGradYears offers the volunteers' end years, and 'unknown' for an open-ended one", async () => {
+    hoisted.mockVolunteerFindMany.mockResolvedValue([
+      volunteer({ mentorCwid: "men0001", menteeCwid: "vol0001" }),
+      volunteer({ mentorCwid: "men0001", menteeCwid: "vol0002", endDate: null }),
+    ]);
+    expect(await loadMentoredGradYears(["*"], ["volunteer"])).toEqual([2025, null]);
+  });
 });
 
 describe("types of mentorship (the server-side filter)", () => {
@@ -1681,6 +1741,18 @@ describe("the mentor's unit (`mentorCwids`)", () => {
         })),
       ).getMockImplementation()!,
     );
+    hoisted.mockVolunteerFindMany.mockImplementation(
+      honouring(
+        both((m, t) => ({
+          mentorCwid: m,
+          menteeCwid: `vol_${t}`,
+          menteeFirstName: "V",
+          menteeLastName: t,
+          startDate: new Date("2018-01-01"),
+          endDate: new Date(t === "in" ? "2019-06-30" : "2029-06-30"),
+        })),
+      ).getMockImplementation()!,
+    );
     hoisted.mockOverrideFindMany.mockImplementation(
       honouring(
         both((m, t) => ({
@@ -1697,14 +1769,14 @@ describe("the mentor's unit (`mentorCwids`)", () => {
   it("every source narrows to the set: only the in-unit mentor's learners land, and droppedNoCwid counts only theirs", async () => {
     const report = await loadMentoredPublicationsReport({ scopes: ["*"], types: ALL, mentorCwids: new Set([IN]) });
     expect(report.summary.map((r) => r.cwid).sort()).toEqual(
-      ["aoc_in", "fai0001", "frt_in", "pd_in", "phd_in", "sug_in"].sort(),
+      ["aoc_in", "fai0001", "frt_in", "pd_in", "phd_in", "sug_in", "vol_in"].sort(),
     );
     expect(report.summary.every((r) => r.mentors.every((m) => m.cwid === IN))).toBe(true);
     expect(report.droppedNoCwid).toBe(1);
 
     // No set → every mentor, as before.
     const all = await loadMentoredPublicationsReport({ scopes: ["*"], types: ALL });
-    expect(all.summary).toHaveLength(12);
+    expect(all.summary).toHaveLength(14);
     expect(all.droppedNoCwid).toBe(2);
   });
 
@@ -1715,8 +1787,8 @@ describe("the mentor's unit (`mentorCwids`)", () => {
   });
 
   it("loadMentoredGradYears offers only the in-unit mentors' years", async () => {
-    expect(await loadMentoredGradYears(["*"], ALL, new Set([IN]))).toEqual([2023, 2022, 2021, 2020, null]);
-    expect(await loadMentoredGradYears(["*"], ALL)).toEqual([2032, 2031, 2030, 2023, 2022, 2021, 2020, 2018, null]);
+    expect(await loadMentoredGradYears(["*"], ALL, new Set([IN]))).toEqual([2023, 2022, 2021, 2020, 2019, null]);
+    expect(await loadMentoredGradYears(["*"], ALL)).toEqual([2032, 2031, 2030, 2029, 2023, 2022, 2021, 2020, 2019, 2018, null]);
   });
 });
 
