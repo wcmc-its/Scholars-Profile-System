@@ -423,6 +423,8 @@ describe("unit scopes (report 7)", () => {
     expect(resolveMentoredPubsAccess(held, ["dept:N1"]).units).toEqual(["dept:N1"]);
     expect(resolveMentoredPubsAccess(held, ["dept:N1", "center:OTHER"]).units).toEqual(["dept:N1"]);
     expect(resolveMentoredPubsAccess(held, ["center:OTHER"]).units).toEqual(["center:MCC", "dept:N1"]);
+    // A repeated unit stays one unit — never mistaken for "every unit held".
+    expect(resolveMentoredPubsAccess(held, ["dept:N1", "dept:N1"]).units).toEqual(["dept:N1"]);
   });
 
   it("an empty scope set throws — it must never fall through to the wildcard", () => {
