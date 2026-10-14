@@ -136,6 +136,9 @@ describe("POST /api/edit/report-access — validation", () => {
     [{ ...VALID, reportKey: "article-count", scopeKey: "md" }, "invalid_scope_key"],
     [{ ...VALID, reportKey: "high-impact-publications", scopeKey: "md" }, "invalid_scope_key"],
     [{ ...VALID, scopeKey: "phd" }, "invalid_scope_key"],
+    [{ ...VALID, scopeKey: "inst:WCM" }, "invalid_scope_key"],
+    [{ ...VALID, scopeKey: "center:" }, "invalid_scope_key"],
+    [{ ...VALID, reportKey: "article-count", scopeKey: "center:MCC" }, "invalid_scope_key"],
     [{ ...VALID, cwid: "1abc" }, "invalid_cwid"],
     [{ ...VALID, cwid: "a" }, "invalid_cwid"],
     [{ ...VALID, cwid: "abcdefghijklm" }, "invalid_cwid"],
@@ -278,3 +281,15 @@ describe("POST /api/edit/report-access — ED names", () => {
     expect(body.rows[0]!.name).toBe("fake777");
   });
 });
+
+describe("POST /api/edit/report-access — unit scopes", () => {
+  it("report 7 grants and revokes a unit scope key", async () => {
+    const grant = await POST(post({ ...VALID, scopeKey: "center:MCC" }));
+    expect(grant.status).toBe(200);
+    expect(h.mockGrant).toHaveBeenCalledWith(expect.objectContaining({ scopeKey: "center:MCC" }));
+    const revoke = await POST(post({ ...VALID, op: "revoke", scopeKey: "dept:N1234" }));
+    expect(revoke.status).toBe(200);
+    expect(h.mockRevoke).toHaveBeenCalledWith(expect.objectContaining({ scopeKey: "dept:N1234" }));
+  });
+});
+

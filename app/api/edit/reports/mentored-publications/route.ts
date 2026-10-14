@@ -8,7 +8,8 @@
  * applied by the same `applyMentoredPubsFacets` the page uses, so the
  * workbook holds what the page shows — see `parseMentoredPubsParams`; `view`
  * and `q` are accepted and ignored, they are page-only),
- * same scope gate (`getReportScopes`), same type resolution
+ * same scope gate (`getReportScopes`) and unit pinning for a unit-only grant
+ * (`resolveMentoredPubsAccess`), same type resolution
  * (`resolveMentorshipTypes`: absent → the caller's default, a roster type
  * outside their scopes silently dropped, never widened). `pubs=all` builds
  * the "all learner publications" workbook (different Summary / Raw Data
@@ -41,7 +42,7 @@ import {
 } from "@/lib/edit/mentored-publications-xlsx";
 import { MENTORSHIP_TYPE_LABEL, resolveMentorshipTypes } from "@/lib/edit/mentorship-type";
 import { personFilterCriteria, unitLabels } from "@/lib/edit/person-filter";
-import { getReportScopes, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import { getReportScopes, MENTORED_PUBS_REPORT, resolveMentoredPubsAccess } from "@/lib/edit/report-access";
 
 export const dynamic = "force-dynamic";
 
@@ -59,9 +60,12 @@ export async function GET(request: Request) {
   if (!parsed.ok) {
     return new NextResponse(parsed.error, { status: 400 });
   }
-  const { tail, pubs, units } = parsed.value;
-  const types = resolveMentorshipTypes(parsed.value.types, scopes);
-  const loaderScopes = [...scopes];
+  const { tail, pubs } = parsed.value;
+  // The page's rule: a unit-only grant is pinned to its units, every program.
+  const access = resolveMentoredPubsAccess(scopes, parsed.value.units);
+  const { units } = access;
+  const types = resolveMentorshipTypes(parsed.value.types, access.scopes);
+  const loaderScopes = [...access.scopes];
   const mentorCwids = await loadUnitMentorCwids(units);
 
   // Same default as the page: the two most recent graduation years across

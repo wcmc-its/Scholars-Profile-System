@@ -220,6 +220,12 @@ describe("scope helpers", () => {
     // No wildcard for EA: each function is chosen explicitly.
     expect(validScopes("external_affairs", ["*"])).toBe(false);
     expect(validScopes("reporting", ["communications"])).toBe(false);
+    // A report 7 unit grant as the import mirrors it: valid on Reporting only.
+    expect(validScopes("reporting", ["mentored-publications:center:MCC"])).toBe(true);
+    expect(validScopes("reporting", ["mentored-publications:dept:N1234", "article-count"])).toBe(true);
+    expect(validScopes("reporting", ["mentored-publications:inst:WCM"])).toBe(false);
+    expect(validScopes("reporting", ["article-count:center:MCC"])).toBe(false);
+    expect(validScopes("external_affairs", ["mentored-publications:center:MCC"])).toBe(false);
   });
 
   it("only a superuser manages", () => {
