@@ -26,18 +26,7 @@ import {
   isEligibleAreaTrial,
 } from "@/lib/area-signals";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
-import {
-  AREA_SIGNAL_CAP,
-  collapseGrantProjects,
-  scoreAreaSignals,
-  type AreaSignalItem,
-} from "@/lib/ranking";
-
-/**
- * One scholar's signal points in one area, plus how many grant projects and
- * trials earned them (after the per-kind cap) for the card's evidence line.
- */
-export type AreaSignalContribution = { points: number; grants: number; trials: number };
+import { collapseGrantProjects, scoreAreaSignals, type AreaSignalItem } from "@/lib/ranking";
 
 /** "YYYY-MM" or "YYYY-MM-DD" (CT.gov precision varies) -> UTC date; null if unreadable. */
 function trialStart(s: string | null): Date | null {
@@ -51,8 +40,8 @@ export async function loadAreaSignalPoints(
   topicSlug: string,
   cwids: readonly string[],
   now: Date,
-): Promise<Map<string, AreaSignalContribution>> {
-  const out = new Map<string, AreaSignalContribution>();
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
   if (cwids.length === 0) return out;
   const cwidIn = { in: [...cwids] };
   const grantsCount = !AREA_SIGNAL_GRANT_EXCLUDED_TOPICS.has(topicSlug);
@@ -167,11 +156,7 @@ export async function loadAreaSignalPoints(
 
   for (const [cwid, its] of items) {
     const points = scoreAreaSignals(its, now);
-    // Every pushed item has score > 0 and recency > 0, so each one up to the
-    // cap contributed.
-    const counted = (kind: AreaSignalItem["kind"]) =>
-      Math.min(its.filter((i) => i.kind === kind).length, AREA_SIGNAL_CAP);
-    if (points > 0) out.set(cwid, { points, grants: counted("grant"), trials: counted("trial") });
+    if (points > 0) out.set(cwid, points);
   }
   return out;
 }

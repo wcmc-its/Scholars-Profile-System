@@ -108,7 +108,6 @@ export default async function TopicPage({
       primaryTitle: s.primaryTitle,
       identityImageEndpoint: s.identityImageEndpoint,
       areas: (areasByCwid.get(s.cwid) ?? []).map((a) => a.displayName),
-      ...(s.areaSignals ? { evidence: s.areaSignals } : {}),
     }));
   }
 

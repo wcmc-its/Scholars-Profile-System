@@ -90,14 +90,14 @@ export function FamilyScholarsRow({
     <>
       Researchers identified by ReCiterAI from their first- or senior-author
       publications using this method, with full-time faculty listed first.
-      Curators do not handpick this list; it updates weekly as new work
+      Curators do not handpick this list; it updates nightly as new work
       appears.
     </>
   ) : (
     <>
       Full-time faculty identified by ReCiterAI from their first- or
       senior-author publications using this method. Curators do not handpick
-      this list; it updates weekly as new work appears.
+      this list; it updates nightly as new work appears.
     </>
   );
   const capped = scholars.length >= ROSTER_CAP;
