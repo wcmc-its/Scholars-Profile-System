@@ -1092,7 +1092,7 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     expect(report.summary[0].mentors).toEqual([
       expect.objectContaining({ cwid: "men0004", mentorship: { program: "volunteer", source: "volunteer", tier: "confirmed" } }),
     ]);
-    expect(report.detail[0]).toMatchObject({ pmid: "101", mentorship: "Volunteer or intern (ED sponsor)", inWindow: true });
+    expect(report.detail[0]).toMatchObject({ pmid: "101", mentorship: "Volunteer or intern (sponsor)", inWindow: true });
   });
 
   it("not read unless 'volunteer' is selected; a surer source (the ED postdoc pass) wins the same pair; no end date = ongoing", async () => {
