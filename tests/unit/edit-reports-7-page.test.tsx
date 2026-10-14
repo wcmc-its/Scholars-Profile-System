@@ -961,5 +961,30 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; value: string }>;
     expect(chips.find((c) => c.group === "Mentor's unit")?.value).toBe("center:GONE");
   });
+
+  it("ticking a unit whose classes fall in other years falls back to the unit's default — never to its year-less learners alone", async () => {
+    // The rail submitted the previous selection's 2025–2026 + unknown.
+    h.mockLoadUnitMentors.mockResolvedValueOnce(new Set(["men0001"]));
+    h.mockLoadGradYears.mockResolvedValueOnce([2024, 2023, null]);
+    await EditReportsMentoredPublicationsPage({
+      searchParams: sp({ unit: "div:D1", grad_from: "2025", grad_to: "2026", grad_unknown: "1" }),
+    });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith(expect.objectContaining({ gradYears: [2024, 2023, null] }));
+
+    // An explicit "No graduation year" alone is still honoured.
+    h.mockLoadGradYears.mockResolvedValueOnce([2026, 2025, null]);
+    await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "unknown" }) });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith(expect.objectContaining({ gradYears: [null] }));
+  });
+
+  it("the unit chip's × also resets the years (they were resolved against the unit's choices)", async () => {
+    h.mockLoadUnitMentors.mockResolvedValueOnce(new Set());
+    h.mockLoadGradYears.mockResolvedValueOnce([]);
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ unit: "center:GONE" }) });
+    const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; removeHref: string | null }>;
+    const href = chips.find((c) => c.group === "Mentor's unit")!.removeHref!;
+    expect(href).not.toContain("unit=");
+    expect(href).not.toContain("years=");
+  });
 });
 

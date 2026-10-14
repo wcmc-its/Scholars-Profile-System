@@ -144,14 +144,20 @@ export async function renderMentoredPublicationsReport({
   ]);
 
   const yearChoices = await loadMentoredGradYears(loaderScopes, types, mentorCwids);
-  // Years the chosen types have no class in are dropped (a type checkbox
-  // auto-submits with the previous selection's years); nothing left → this
-  // selection's default.
+  // Years the chosen types / unit have no class in are dropped (a type or unit
+  // checkbox auto-submits with the previous selection's years); nothing left
+  // → this selection's default. "Nothing left" includes only "unknown"
+  // surviving a request that named real years: a unit whose classes fall in
+  // other years must not collapse to its year-less learners.
   const choiceSet = new Set(yearChoices);
   const kept = (requested.years ?? []).filter((y) => choiceSet.has(y));
   const defaultYears = defaultMentoredPubsYears(yearChoices);
+  const lostEveryKnownYear =
+    (requested.years ?? []).some((y) => y !== null) && !kept.some((y) => y !== null);
   const years =
-    requested.years === null || (requested.years.length > 0 && kept.length === 0) ? defaultYears : kept;
+    requested.years === null || (requested.years.length > 0 && (kept.length === 0 || lostEveryKnownYear))
+      ? defaultYears
+      : kept;
   const params: MentoredPubsParams = { ...requested, years, types };
 
   const loaded = await loadMentoredPublicationsReport({
@@ -271,7 +277,9 @@ export async function renderMentoredPublicationsReport({
         params.units.map((u) => unitLabel.get(u) ?? u),
         "units",
       ),
-      removeHref: href({ units: [] }),
+      // Years go back to the default too: the ones on the page were resolved
+      // against the unit's narrower choices.
+      removeHref: href({ units: [], years: null }),
     });
   }
 
