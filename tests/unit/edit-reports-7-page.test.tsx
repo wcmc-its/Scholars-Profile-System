@@ -1,5 +1,5 @@
 /**
- * `app/edit/reports/[report]/page.tsx` at the `mentored-publications` slug
+ * `app/edit/reports/[report]/page.tsx` at the `mentors-and-mentees` slug
  * (report 7, the registry's one person-gated entry) — the Mentored
  * publications page's gate and wiring. Mirrors
  * `edit-reports-index-page-gap5.test.tsx`'s scaffold: the page's
@@ -135,10 +135,10 @@ const EditReportsMentoredPublicationsPage = ({
 }: {
   searchParams: Promise<Record<string, string>>;
 }) =>
-  EditReportPage({ params: Promise.resolve({ report: "mentored-publications" }), searchParams }).then((t) =>
+  EditReportPage({ params: Promise.resolve({ report: "mentors-and-mentees" }), searchParams }).then((t) =>
     resolveSuspense(t),
   );
-const BASE = "/edit/reports/mentored-publications";
+const BASE = "/edit/reports/mentors-and-mentees";
 
 const HOLDER = { cwid: "usr0001", isSuperuser: false, isCommsSteward: false };
 const SUPERUSER = { cwid: "adm0001", isSuperuser: true, isCommsSteward: false };
@@ -285,11 +285,11 @@ function hiddenInputs(node: unknown): Array<[string, string]> {
   return out;
 }
 
-describe("/edit/reports/mentored-publications (7) — gate", () => {
+describe("/edit/reports/mentors-and-mentees (7) — gate", () => {
   it("no session → SSO login with the return path", async () => {
     h.mockGetEditSession.mockResolvedValue(null);
     await expect(EditReportsMentoredPublicationsPage({ searchParams: sp() })).rejects.toThrow(
-      "__REDIRECT__:/api/auth/saml/login?return=/edit/reports/mentored-publications",
+      "__REDIRECT__:/api/auth/saml/login?return=/edit/reports/mentors-and-mentees",
     );
   });
 
@@ -301,7 +301,7 @@ describe("/edit/reports/mentored-publications (7) — gate", () => {
   });
 });
 
-describe("/edit/reports/mentored-publications (7) — wiring", () => {
+describe("/edit/reports/mentors-and-mentees (7) — wiring", () => {
   it("a holder: loader gets their scopes, their roster type and the two most recent years; the download carries types; the popover is the header's access with canManage=false and the rows", async () => {
     h.mockListReportAccess.mockResolvedValue([ACCESS_ROW]);
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });

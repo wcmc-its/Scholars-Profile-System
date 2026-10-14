@@ -209,8 +209,8 @@ beforeEach(() => {
 describe("/edit/reports/[report] — session", () => {
   it("no session → SSO login with the segment as the return path, before any read", async () => {
     h.mockGetEditSession.mockResolvedValue(null);
-    await expect(page("mentored-publications")).rejects.toThrow(
-      "__REDIRECT__:/api/auth/saml/login?return=/edit/reports/mentored-publications",
+    await expect(page("mentors-and-mentees")).rejects.toThrow(
+      "__REDIRECT__:/api/auth/saml/login?return=/edit/reports/mentors-and-mentees",
     );
     await expect(page("7")).rejects.toThrow(
       "__REDIRECT__:/api/auth/saml/login?return=/edit/reports/7",
@@ -224,9 +224,9 @@ describe("/edit/reports/[report] — session", () => {
 describe("/edit/reports/[report] — number → slug", () => {
   it("a number 307s to the CURRENT slug with the query string carried, via redirect (never permanentRedirect), and no gate or loader runs", async () => {
     await expect(page("7", { years: "2025" })).rejects.toThrow(
-      "__REDIRECT__:/edit/reports/mentored-publications?years=2025",
+      "__REDIRECT__:/edit/reports/mentors-and-mentees?years=2025",
     );
-    expect(h.mockRedirect).toHaveBeenCalledWith("/edit/reports/mentored-publications?years=2025");
+    expect(h.mockRedirect).toHaveBeenCalledWith("/edit/reports/mentors-and-mentees?years=2025");
     expect(h.mockPermanentRedirect).not.toHaveBeenCalled();
     expect(h.mockGetReportScopes).not.toHaveBeenCalled();
     expect(h.mockResolveNumbered).not.toHaveBeenCalled();
@@ -280,7 +280,7 @@ describe("/edit/reports/[report] — slug resolution", () => {
       ["grants", "4"],
       ["clinical-trials", "5"],
       ["nih-funded-pubs", "6"],
-      ["mentored-publications", "7"],
+      ["mentors-and-mentees", "7"],
     ];
     for (const [slug, n] of expected) {
       cleanup();
@@ -329,12 +329,12 @@ describe("/edit/reports/[report] — the unit gate's kinds", () => {
 describe("/edit/reports/[report] — the person gate", () => {
   it("an empty scope set → 404 before any data read; a holder gets the person popover and the report", async () => {
     h.mockGetReportScopes.mockResolvedValue(new Set());
-    await expect(page("mentored-publications")).rejects.toThrow("__NOT_FOUND__");
+    await expect(page("mentors-and-mentees")).rejects.toThrow("__NOT_FOUND__");
     expect(h.mockListReportAccess).not.toHaveBeenCalled();
     expect(h.mockLoadMentoredReport).not.toHaveBeenCalled();
 
     h.mockGetReportScopes.mockResolvedValue(new Set(["md"]));
-    render((await page("mentored-publications")) as React.ReactElement);
+    render((await page("mentors-and-mentees")) as React.ReactElement);
     expect(h.mockGetReportScopes).toHaveBeenLastCalledWith(OWNER, "mentored-publications");
     expect(h.mockListReportAccess).toHaveBeenCalledWith("mentored-publications");
     expect(h.mockLoadMentoredReport).toHaveBeenCalledTimes(1);
@@ -358,7 +358,7 @@ describe("/edit/reports/[report] — the back link", () => {
 
     cleanup();
     h.mockGetEditSession.mockResolvedValue(SUPERUSER);
-    expect(renderBackHref(await page("mentored-publications"))).toBe("/edit/reports");
+    expect(renderBackHref(await page("mentors-and-mentees"))).toBe("/edit/reports");
   });
 });
 
@@ -377,7 +377,7 @@ describe("/edit/reports/[report] — generateMetadata", () => {
       title: "Papers — Scholars Console",
       robots: { index: false, follow: false },
     });
-    expect(await meta("mentored-publications")).toEqual({
+    expect(await meta("mentors-and-mentees")).toEqual({
       title: "Mentors and mentees — Scholars Console",
       robots: { index: false, follow: false },
     });
