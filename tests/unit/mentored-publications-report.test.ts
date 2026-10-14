@@ -1686,7 +1686,7 @@ describe("the mentor's unit (`mentorCwids`)", () => {
         both((m, t) => ({
           entityId: m,
           value: JSON.stringify([
-            { name: `Fac ${t}`, cwid: t === "in" ? "fai0001" : "fao0001" },
+            { name: `Fac ${t}`, cwid: t === "in" ? "fai0001" : "fao0001", year: t === "in" ? 2023 : 2033 },
             { name: `NoCwid ${t}` },
           ]),
         })),
@@ -1715,8 +1715,8 @@ describe("the mentor's unit (`mentorCwids`)", () => {
   });
 
   it("loadMentoredGradYears offers only the in-unit mentors' years", async () => {
-    expect(await loadMentoredGradYears(["*"], ALL, new Set([IN]))).toEqual([2022, 2021, 2020, null]);
-    expect(await loadMentoredGradYears(["*"], ALL)).toEqual([2032, 2031, 2030, 2022, 2021, 2020, null]);
+    expect(await loadMentoredGradYears(["*"], ALL, new Set([IN]))).toEqual([2023, 2022, 2021, 2020, null]);
+    expect(await loadMentoredGradYears(["*"], ALL)).toEqual([2033, 2032, 2031, 2030, 2023, 2022, 2021, 2020, null]);
   });
 });
 
