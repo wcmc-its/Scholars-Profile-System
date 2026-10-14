@@ -63,6 +63,8 @@ import {
 } from "@/components/edit/reports/mentored-publications-rail";
 import { FilterChips, ReportCard, ReportLayout, ReportStats, type FilterChip } from "@/components/edit/reports/report-ui";
 import { Button } from "@/components/ui/button";
+import { loadDataQualityFacets } from "@/lib/api/data-quality";
+import { db } from "@/lib/db";
 import {
   applyMentoredPubsFacets,
   mentoredPubsFacetOptions,
@@ -83,6 +85,7 @@ import {
   HIGH_IMPACT_THRESHOLD,
   loadMentoredGradYears,
   loadMentoredPublicationsReport,
+  loadUnitMentorCwids,
 } from "@/lib/edit/mentored-publications-report";
 import {
   allowedMentorshipTypes,
@@ -135,16 +138,26 @@ export async function renderMentoredPublicationsReport({
   // Types outside the caller's scopes are silently dropped — never a wider set.
   const types = resolveMentorshipTypes(requested.types, scopes);
   const loaderScopes = [...scopes];
+  const [mentorCwids, facets] = await Promise.all([
+    loadUnitMentorCwids(requested.units),
+    loadDataQualityFacets(db.read),
+  ]);
 
-  const yearChoices = await loadMentoredGradYears(loaderScopes, types);
-  // Years the chosen types have no class in are dropped (a type checkbox
-  // auto-submits with the previous selection's years); nothing left → this
-  // selection's default.
+  const yearChoices = await loadMentoredGradYears(loaderScopes, types, mentorCwids);
+  // Years the chosen types / unit have no class in are dropped (a type or unit
+  // checkbox auto-submits with the previous selection's years); nothing left
+  // → this selection's default. "Nothing left" includes only "unknown"
+  // surviving a request that named real years: a unit whose classes fall in
+  // other years must not collapse to its year-less learners.
   const choiceSet = new Set(yearChoices);
   const kept = (requested.years ?? []).filter((y) => choiceSet.has(y));
   const defaultYears = defaultMentoredPubsYears(yearChoices);
+  const lostEveryKnownYear =
+    (requested.years ?? []).some((y) => y !== null) && !kept.some((y) => y !== null);
   const years =
-    requested.years === null || (requested.years.length > 0 && kept.length === 0) ? defaultYears : kept;
+    requested.years === null || (requested.years.length > 0 && (kept.length === 0 || lostEveryKnownYear))
+      ? defaultYears
+      : kept;
   const params: MentoredPubsParams = { ...requested, years, types };
 
   const loaded = await loadMentoredPublicationsReport({
@@ -153,6 +166,7 @@ export async function renderMentoredPublicationsReport({
     gradYears: years.length > 0 ? years : null,
     tail: params.tail,
     pubs: params.pubs,
+    mentorCwids,
   });
   const report = applyMentoredPubsFacets(loaded, params, HIGH_IMPACT_THRESHOLD);
   const options = mentoredPubsFacetOptions(loaded, params);
@@ -169,6 +183,7 @@ export async function renderMentoredPublicationsReport({
     types: !sameSet(types, defaultTypes),
     tail: params.tail !== DEFAULT_TAIL,
     pubs: params.pubs !== "mentored",
+    units: params.units.length > 0,
   };
   // Chip × hrefs keep `q`; the tab hrefs (`viewHref`) don't — the island adds it.
   const href = (patch: Partial<MentoredPubsParams>) => pageHref(basePath, { ...params, ...patch }, true);
@@ -185,6 +200,24 @@ export async function renderMentoredPublicationsReport({
     (params.withPubs ? 1 : 0);
 
   const mentorName = new Map(options.mentors.map((m) => [m.value, m.label]));
+  // The mentor's-unit options: departments, then divisions (a division's label
+  // names its parent), then centers with members — report 8's lists. A
+  // selected value no list carries (a retired unit, a mangled link) still
+  // shows, raw, so it can be un-ticked.
+  const unitOptions = {
+    departments: [
+      ...facets.departments.map(({ value, label, count }) => ({ value, label, count })),
+      ...facets.departments
+        .flatMap((d) => d.divisions)
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    ],
+    centers: facets.centers.filter((c) => c.count > 0 || params.units.includes(c.value)),
+  };
+  const unitLabel = new Map(
+    [...unitOptions.departments, ...unitOptions.centers].map((o) => [o.value, o.label] as const),
+  );
+  const unknownUnits = params.units.filter((u) => !unitLabel.has(u));
+  unitOptions.departments.push(...unknownUnits.map((u) => ({ value: u, label: u, count: 0 })));
   const chips: FilterChip[] = [
     {
       group: "Graduation",
@@ -237,6 +270,18 @@ export async function renderMentoredPublicationsReport({
   if (params.withPubs) {
     chips.push({ group: "Learners", value: "With publications only", removeHref: href({ withPubs: false }) });
   }
+  if (params.units.length > 0) {
+    chips.push({
+      group: "Mentor's unit",
+      value: joinOrCount(
+        params.units.map((u) => unitLabel.get(u) ?? u),
+        "units",
+      ),
+      // Years go back to the default too: the ones on the page were resolved
+      // against the unit's narrower choices.
+      removeHref: href({ units: [], years: null }),
+    });
+  }
 
   const rail = (idSuffix = "") => (
     <MentoredPublicationsRail
@@ -245,6 +290,7 @@ export async function renderMentoredPublicationsReport({
       typeChoices={typeChoices}
       yearChoices={yearChoices}
       options={options}
+      unitOptions={unitOptions}
       resetHref={resetHref}
       idSuffix={idSuffix}
     />
@@ -363,7 +409,9 @@ export async function renderMentoredPublicationsReport({
             &ldquo;In window&rdquo; means entry year &le; publication year &le; graduation year + {params.tail}; an MD
             learner with no entry year on the pairing sheet is assumed to have entered four years before graduating.
             {loaded.droppedUnresolved > 0 &&
-              ` ${loaded.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}{" "}
+              ` ${loaded.droppedUnresolved.toLocaleString()} co-publications not yet in the local corpus are not shown.`}
+            {params.units.length > 0 &&
+              " The mentor's unit counts current members only, so mentees of faculty who have left the unit are not shown."}{" "}
             Historical numbers may change slightly as publication records and mentor pairings are updated.
           </p>
         </ReportCard>

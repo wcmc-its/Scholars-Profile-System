@@ -224,6 +224,7 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(items.get("Generated")).toBe("2026-09-18");
     expect(items.get("Graduation years")).toBe("2024, 2025");
     expect(items.get("Types of mentorship")).toBe("MD, PhD / MD-PhD thesis advisor");
+    expect(items.get("Mentor's unit (current members)")).toBe("All");
     expect(items.has("Programs")).toBe(false);
     expect(String(items.get("Window rule"))).toContain("entry year <= publication year <= graduation year + 1");
     expect(String(items.get("Entry year"))).toContain("from the AOC pairing sheet when present");
@@ -354,5 +355,15 @@ describe("buildMentoredPublicationsWorkbook", () => {
         .find((r) => String(r.getCell(1).value) === "Publication set");
       expect(String(row?.getCell(2).value)).toMatch(/^Mentored co-publications/);
     });
+  });
+
+  it("Query & Assumptions names the mentor's unit the route words via personFilterCriteria", async () => {
+    const wb = await load(await buildMentoredPublicationsWorkbook(REPORT, "Meyer Cancer Center"));
+    const ws = wb.getWorksheet(ASSUMPTIONS_SHEET)!;
+    const items = new Map<string, unknown>();
+    ws.eachRow((row, n) => {
+      if (n > 1) items.set(String(row.getCell(1).value), row.getCell(2).value);
+    });
+    expect(items.get("Mentor's unit (current members)")).toBe("Meyer Cancer Center");
   });
 });

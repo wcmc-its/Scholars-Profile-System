@@ -51,7 +51,14 @@
  *               filters); absent = show every learner;
  *   - `q`       the "Find a learner or mentor" box. Page-only and client-side
  *               (it narrows the Learners table, never the counts or the
- *               download); carried so a shared link reopens with it.
+ *               download); carried so a shared link reopens with it;
+ *   - `unit`    the MENTOR's unit, repeated (`dept:CODE` / `div:CODE` /
+ *               `center:CODE`): the reserved who-filter param, read only
+ *               through `parsePersonFilter` and resolved to the unit's current
+ *               members by the shared rule (`loadUnitMentorCwids`). Units are
+ *               OR'd; a value that decodes to nothing matches nothing, never
+ *               everyone. A LOADER filter (every source read narrows to these
+ *               mentors), unlike the post-load facets below.
  * The five facets (`window` … `withpubs`) are applied after the loader by
  * `applyMentoredPubsFacets` (`mentored-publications-facets.ts`), on the page
  * and in the download alike. None of them existed before the 2026-09-24
@@ -60,6 +67,7 @@
  * defaults) rather than a silent coercion. Pure — no DB, safe anywhere.
  */
 import { DEFAULT_TAIL, MAX_TAIL } from "@/lib/edit/mentored-publications-report";
+import { parsePersonFilter } from "@/lib/edit/person-filter";
 import {
   MENTORSHIP_TYPE_KEYS,
   ROSTER_TYPE_BY_SCOPE,
@@ -103,6 +111,8 @@ export type MentoredPubsParams = {
   withPubs: boolean;
   /** The client-side "Find a learner or mentor" text (page-only). */
   q: string;
+  /** The mentor's unit (raw `unit` values, in order); `[]` = any. */
+  units: string[];
 };
 
 /** Everything unset — the parser's result for an empty query string. */
@@ -118,6 +128,7 @@ export const MENTORED_PUBS_DEFAULT_PARAMS: MentoredPubsParams = {
   mentors: [],
   withPubs: false,
   q: "",
+  units: [],
 };
 
 /** Whether any of the post-load facets (`window` … `withpubs`) is set. */
@@ -314,6 +325,7 @@ export function parseMentoredPubsParams(
       mentors: [...mentorSet].sort(),
       withPubs,
       q,
+      units: parsePersonFilter(raw).unitValues,
     },
   };
 }
@@ -339,6 +351,7 @@ export function mentoredPubsQueryString(p: MentoredPubsParams): string {
   if (p.pubYears.length > 0) sp.set("pubyear", p.pubYears.join(","));
   if (p.mentors.length > 0) sp.set("mentor", p.mentors.join(","));
   if (p.withPubs) sp.set("withpubs", "1");
+  for (const u of p.units) sp.append("unit", u);
   if (p.view !== "summary") sp.set("view", p.view);
   if (p.q) sp.set("q", p.q);
   return sp.toString();

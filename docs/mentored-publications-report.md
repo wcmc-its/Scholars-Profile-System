@@ -33,7 +33,8 @@ one sentence.
   mentorship (likely / possible), Graduation year (from / to plus "Include learners with no graduation
   year"), Counting window (0–3 years after graduation), Publications (with a mentor / all), In window
   (per publication: in, outside, unknown), Author position (first / last / middle), Publication year,
-  Mentor (searchable), Learners shown ("Hide learners with no publications"). Every section is a
+  Mentor's unit (departments and divisions, then centers; searchable), Mentor (searchable), Learners
+  shown ("Hide learners with no publications"). Every section is a
   collapsible `<details>`; a collapsed section's inputs still submit. Filters apply on change (the
   `AutoSubmitForm`). "Reset to defaults" returns to the bare URL. Below `lg` the rail opens from a
   "Filters (n)" button (`FiltersSheet`).
@@ -155,6 +156,18 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   selected mentor). `withpubs` then drops learners left with no paper. A pair with no byline position
   or no year never matches a selected position or year. An unknowable window stays null. None set →
   the report is untouched. Not report 8's `pos` (single-valued, a different vocabulary).
+- `unit=` — the MENTOR's unit, repeated (`dept:CODE` / `div:CODE` / `center:CODE`): the reserved
+  who-filter param, read only through `parsePersonFilter` and resolved by `loadUnitMentorCwids` to the
+  unit's current members (active scholars; a department by `dept_code`, which takes in its divisions;
+  a division by `div_code` plus a manual division's roster; a center by current `center_membership`
+  — `personFilterSql`, the rule reports 8, 9 and 11 use). Units OR together. Unlike the facets above
+  it is a LOADER filter: every source read takes `mentorCwid IN (…)` (`field_override.entity_id`
+  for faculty-asserted), so the year choices, the counts, the publications and `droppedNoCwid` all
+  narrow with it. A learner keeps only their in-unit mentors. A value that decodes to nothing, or a
+  unit with no current members, matches nothing — never everyone. Ceiling: current members only, so
+  the mentees of a mentor who has left the unit drop out (the footnote says so). The workbook's
+  Query & Assumptions sheet states it ("Mentor's unit (current members)", worded by
+  `personFilterCriteria`). It does not change who can open the report (the `report_access` gate).
 - `view=summary|publications`, `q=` — page-only (`q` is the "Find a learner or mentor" text); the
   route accepts and ignores both so one link shape serves page and download.
 - Legacy `program=<scope>` — the select the types filter replaced (#2681); reads as that scope's

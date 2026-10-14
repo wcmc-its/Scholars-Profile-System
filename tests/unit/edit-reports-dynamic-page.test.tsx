@@ -87,6 +87,14 @@ vi.mock("@/lib/center-collaboration/collab-report-rows", () => ({
 vi.mock("@/lib/edit/nih-funded-publications-report", () => ({
   loadNihFundedPublicationsReport: vi.fn().mockResolvedValue({ totalPublications: 0, rows: [] }),
 }));
+// Report 7's rail lists the mentor's-unit options (`loadDataQualityFacets`).
+vi.mock("@/lib/api/data-quality", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/data-quality")>();
+  return {
+    ...actual,
+    loadDataQualityFacets: vi.fn().mockResolvedValue({ roleCategories: [], departments: [], centers: [], institutions: [] }),
+  };
+});
 vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/edit/mentored-publications-report")>();
   return {

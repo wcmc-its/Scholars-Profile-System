@@ -33,6 +33,7 @@ describe("parseMentoredPubsParams", () => {
       mentors: [],
       withPubs: false,
       q: "",
+      units: [],
     });
     expect(parseMentoredPubsParams({})).toEqual({ ok: true, value: DEFAULTS });
     expect(parseMentoredPubsParams(new URLSearchParams(""))).toEqual({ ok: true, value: DEFAULTS });
@@ -361,4 +362,23 @@ describe("the redesign's params (2026-09-24)", () => {
       error: "invalid_years",
     });
   });
+
+  it("unit: the reserved who-filter param via parsePersonFilter — repeated, raw values in order, blanks dropped; round-trips", () => {
+    const parsed = parseMentoredPubsParams(new URLSearchParams("unit=center:MCC&unit=dept:N123&unit=%20"));
+    expect(parsed).toMatchObject({ ok: true, value: { units: ["center:MCC", "dept:N123"] } });
+    expect(parseMentoredPubsParams({ unit: ["div:D1", "center:MCC"] })).toMatchObject({
+      ok: true,
+      value: { units: ["div:D1", "center:MCC"] },
+    });
+    // An undecodable value is kept (it matches nothing downstream), never an error.
+    expect(parseMentoredPubsParams({ unit: "bogus" })).toMatchObject({ ok: true, value: { units: ["bogus"] } });
+    const qs = mentoredPubsQueryString({ ...DEFAULTS, units: ["center:MCC", "dept:N123"] });
+    expect(new URLSearchParams(qs).getAll("unit")).toEqual(["center:MCC", "dept:N123"]);
+    expect(parseMentoredPubsParams(new URLSearchParams(qs))).toMatchObject({
+      ok: true,
+      value: { units: ["center:MCC", "dept:N123"] },
+    });
+    expect(new URLSearchParams(mentoredPubsQueryString(DEFAULTS)).has("unit")).toBe(false);
+  });
 });
+

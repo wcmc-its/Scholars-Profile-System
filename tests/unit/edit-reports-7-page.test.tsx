@@ -50,6 +50,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DataQualityFacets } from "@/lib/api/data-quality";
+
 const h = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockNotFound: vi.fn(() => {
@@ -69,6 +71,10 @@ const h = vi.hoisted(() => ({
   mockReportHeader: vi.fn(({ children }: { children: React.ReactNode }) => children),
   mockChecklist: vi.fn(() => null),
   mockFiltersSheet: vi.fn(() => null),
+  mockLoadUnitMentors: vi.fn(async (): Promise<Set<string> | null> => null),
+  mockFacets: vi.fn(
+    async (): Promise<DataQualityFacets> => ({ roleCategories: [], departments: [], centers: [], institutions: [] }),
+  ),
 }));
 
 vi.mock("next/navigation", () => ({ notFound: h.mockNotFound, redirect: h.mockRedirect }));
@@ -79,7 +85,16 @@ vi.mock("@/lib/edit/report-access", async (importOriginal) => {
 });
 vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/edit/mentored-publications-report")>();
-  return { ...actual, loadMentoredGradYears: h.mockLoadGradYears, loadMentoredPublicationsReport: h.mockLoadReport };
+  return {
+    ...actual,
+    loadMentoredGradYears: h.mockLoadGradYears,
+    loadMentoredPublicationsReport: h.mockLoadReport,
+    loadUnitMentorCwids: h.mockLoadUnitMentors,
+  };
+});
+vi.mock("@/lib/api/data-quality", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/data-quality")>();
+  return { ...actual, loadDataQualityFacets: h.mockFacets };
 });
 vi.mock("@/components/edit/report-access-popover", () => ({ ReportAccessPopover: h.mockPopover }));
 // The h1 + "About this report" disclosure live in `ReportHeader` (an async
@@ -290,8 +305,9 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
   it("a holder: loader gets their scopes, their roster type and the two most recent years; the download carries types; the popover is the header's access with canManage=false and the rows", async () => {
     h.mockListReportAccess.mockResolvedValue([ACCESS_ROW]);
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
-    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md"], ["aoc"]);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md"], ["aoc"], null);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2026, 2025],
@@ -329,7 +345,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       for (const c of childrenOf(el)) walk(c);
     };
     walk(form);
-    expect(sections).toEqual(["mtype", "inferred", "years", "tail", "pubs", "window", "position", "pubyear", "mentor", "withpubs"]);
+    expect(sections).toEqual(["mtype", "inferred", "years", "tail", "pubs", "window", "position", "pubyear", "unit", "mentor", "withpubs"]);
     // The phone copy: a second rail, its own form id.
     const sheet = findByType(result, h.mockFiltersSheet)!;
     expect(sheet.props.testId).toBe("mentored-pubs-filters-sheet-trigger");
@@ -477,8 +493,9 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     const result = await EditReportsMentoredPublicationsPage({
       searchParams: sp({ types: "likely,aoc", years: "2025", tail: "2" }),
     });
-    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md"], ["aoc", "likely"]);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md"], ["aoc", "likely"], null);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       types: ["aoc", "likely"],
       gradYears: [2025],
@@ -495,6 +512,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
 
     await EditReportsMentoredPublicationsPage({ searchParams: sp({ types: "mdphd,thesis", years: "2025" }) });
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       types: ["thesis"],
       gradYears: [2025],
@@ -503,6 +521,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     });
     await EditReportsMentoredPublicationsPage({ searchParams: sp({ types: "mdphd", years: "2025" }) });
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2025],
@@ -512,6 +531,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     // A legacy program=<scope> link reads as that roster type.
     await EditReportsMentoredPublicationsPage({ searchParams: sp({ program: "md", years: "2025" }) });
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2025],
@@ -523,6 +543,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
   it("malformed params fall back to the defaults instead of erroring", async () => {
     await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "nope", tail: "9" }) });
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2026, 2025],
@@ -533,6 +554,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       searchParams: sp({ pubs: "everything", view: "raw", types: "nope", position: "any" }),
     });
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2026, 2025],
@@ -545,6 +567,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     h.mockLoadGradYears.mockResolvedValue([2026, 2025, 2024, null]);
     const result = await EditReportsMentoredPublicationsPage({ searchParams: sp() });
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2026, 2025, null],
@@ -559,6 +582,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
   it("requested years the selection has no class in are dropped; nothing left → the default", async () => {
     await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "2018" }) });
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2026, 2025],
@@ -567,6 +591,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     });
     await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "2024,2018" }) });
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2024],
@@ -576,6 +601,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     // years=all is never "empty".
     await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "all" }) });
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: null,
@@ -589,6 +615,7 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       searchParams: sp({ years: "2025", tail: "2", pubs: "all", view: "publications", q: "ada" }),
     });
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md"],
       ...AOC,
       gradYears: [2025],
@@ -796,8 +823,8 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       for (const c of childrenOf(el)) collect(c);
     };
     collect(findByType(result, h.mockAutoSubmitForm));
-    expect(lists.map((p) => p.name)).toEqual(["pubyear", "mentor"]);
-    expect(lists[1].options).toEqual([{ value: "men0001", label: "Grace Mentor", count: 1 }]);
+    expect(lists.map((p) => p.name)).toEqual(["pubyear", "unit", "unit", "mentor"]);
+    expect(lists[3].options).toEqual([{ value: "men0001", label: "Grace Mentor", count: 1 }]);
   });
 
   it("all mode with an unloaded bridge renders the notice and no island", async () => {
@@ -834,8 +861,9 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
       ["mtype", "possible", false],
     ]);
     const confirmed = ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty", "frt"];
-    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], confirmed);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], confirmed, null);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["*"],
       types: confirmed,
       gradYears: [2026, 2025],
@@ -856,8 +884,9 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     const result = await EditReportsMentoredPublicationsPage({
       searchParams: sp({ types: "ecr" }),
     });
-    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], ["ecr"]);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], ["ecr"], null);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["*"],
       types: ["ecr"],
       gradYears: [2026, 2025],
@@ -883,4 +912,79 @@ describe("/edit/reports/mentored-publications (7) — wiring", () => {
     expect(header).not.toBeNull();
     expect(header!.props).toMatchObject({ n: "7", session: HOLDER });
   });
+
+  it("the mentor's unit: resolved once, the set reaches BOTH loaders, a removable chip names it, the rail lists it, the footnote and download carry it", async () => {
+    h.mockFacets.mockResolvedValueOnce({
+      roleCategories: [],
+      departments: [{ value: "dept:N100", label: "Medicine", count: 900, divisions: [] }],
+      centers: [
+        { value: "center:MCC", label: "Meyer Cancer Center", count: 300 },
+        { value: "center:EMPTY", label: "Empty Center", count: 0 },
+      ],
+      institutions: [],
+    });
+    const set = new Set(["men0001"]);
+    h.mockLoadUnitMentors.mockResolvedValueOnce(set);
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ unit: "center:MCC" }) });
+    expect(h.mockLoadUnitMentors).toHaveBeenCalledWith(["center:MCC"]);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md"], ["aoc"], set);
+    expect(h.mockLoadReport).toHaveBeenCalledWith(expect.objectContaining({ mentorCwids: set }));
+
+    const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; value: string; removeHref: string | null }>;
+    const chip = chips.find((c) => c.group === "Mentor's unit")!;
+    expect(chip.value).toBe("Meyer Cancer Center");
+    expect(chip.removeHref).not.toContain("unit=");
+
+    const lists: Array<Record<string, unknown>> = [];
+    const collect = (node: unknown) => {
+      if (node === null || node === undefined || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(collect);
+      const el = asEl(node);
+      if (el.type === h.mockChecklist && el.props.name === "unit") lists.push(el.props);
+      for (const c of childrenOf(el)) collect(c);
+    };
+    collect(findByType(result, h.mockAutoSubmitForm));
+    expect(lists.map((l) => (l.options as Array<{ value: string }>).map((o) => o.value))).toEqual([
+      ["dept:N100"],
+      ["center:MCC"], // a memberless center is hidden unless selected
+    ]);
+    expect(lists.every((l) => (l.selected as string[]).includes("center:MCC"))).toBe(true);
+
+    expect(textOf(findByTestId(result, "mentored-pubs-footnote"))).toContain("current members only");
+    expect(findByTestId(result, "mentored-pubs-download")?.props.href).toContain("unit=center%3AMCC");
+  });
+
+  it("an unknown unit value still shows (raw) so it can be un-ticked, and still filters", async () => {
+    h.mockLoadUnitMentors.mockResolvedValueOnce(new Set());
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ unit: "center:GONE" }) });
+    expect(h.mockLoadReport).toHaveBeenCalledWith(expect.objectContaining({ mentorCwids: new Set() }));
+    const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; value: string }>;
+    expect(chips.find((c) => c.group === "Mentor's unit")?.value).toBe("center:GONE");
+  });
+
+  it("ticking a unit whose classes fall in other years falls back to the unit's default — never to its year-less learners alone", async () => {
+    // The rail submitted the previous selection's 2025–2026 + unknown.
+    h.mockLoadUnitMentors.mockResolvedValueOnce(new Set(["men0001"]));
+    h.mockLoadGradYears.mockResolvedValueOnce([2024, 2023, null]);
+    await EditReportsMentoredPublicationsPage({
+      searchParams: sp({ unit: "div:D1", grad_from: "2025", grad_to: "2026", grad_unknown: "1" }),
+    });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith(expect.objectContaining({ gradYears: [2024, 2023, null] }));
+
+    // An explicit "No graduation year" alone is still honoured.
+    h.mockLoadGradYears.mockResolvedValueOnce([2026, 2025, null]);
+    await EditReportsMentoredPublicationsPage({ searchParams: sp({ years: "unknown" }) });
+    expect(h.mockLoadReport).toHaveBeenLastCalledWith(expect.objectContaining({ gradYears: [null] }));
+  });
+
+  it("the unit chip's × also resets the years (they were resolved against the unit's choices)", async () => {
+    h.mockLoadUnitMentors.mockResolvedValueOnce(new Set());
+    h.mockLoadGradYears.mockResolvedValueOnce([]);
+    const result = await EditReportsMentoredPublicationsPage({ searchParams: sp({ unit: "center:GONE" }) });
+    const chips = findByType(result, FilterChips)?.props.chips as Array<{ group: string; removeHref: string | null }>;
+    const href = chips.find((c) => c.group === "Mentor's unit")!.removeHref!;
+    expect(href).not.toContain("unit=");
+    expect(href).not.toContain("years=");
+  });
 });
+
