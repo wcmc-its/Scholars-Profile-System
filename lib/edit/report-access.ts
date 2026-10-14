@@ -16,6 +16,15 @@
  *   - anyone else → the union of their rows' `scopeKey`s for the report;
  *   - no rows → the EMPTY set, and the page/route treat empty as forbidden.
  * Fail closed: there is NO env flag — an empty table is the dark state.
+ *
+ * Unit scopes (Mentored publications only): a `scopeKey` may also be a unit
+ * value (`center:MCC`, `dept:CODE`, `div:CODE` — the mentor's-unit filter's
+ * vocabulary, `isUnitScopeKey`). A holder of ONLY unit scopes sees every
+ * program, pinned to their units' mentors (`resolveMentoredPubsAccess`) — a
+ * unit office (the MCC Education Office) sees its own faculty's learners and
+ * no one else's. Granted by a superuser from the same Viewers panel, NOT by
+ * unit Owner/Curator: that would put student names in front of every unit
+ * administrator, a FERPA call this table keeps to named grantees.
  * With `FUNCTIONAL_ROLES_AUTHZ` "on", a Reporting grant in the functional-roles
  * registry ADDS scopes on top of the rows here (a union, never a narrowing;
  * `lib/auth/functional-role-authz.ts`).
@@ -53,6 +62,7 @@ import type { EditSession } from "@/lib/auth/superuser";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { registryHasAnyReporting, registryReportScopes } from "@/lib/auth/functional-role-authz";
 import { PROGRAM_LABEL } from "@/lib/edit/mentorship-type";
+import { parseUnitValue } from "@/lib/edit/person-filter";
 
 /** The one report this table gates today. `reportKey` is a column, not an
  *  enum, so a second program report is one more constant, not a migration. */
@@ -133,6 +143,56 @@ export function isMentoredPubsScopeKey(value: unknown): value is MentoredPubsSco
     typeof value === "string" &&
     (value === ALL_SCOPES || (MENTORED_PUBS_SCOPES as readonly string[]).includes(value))
   );
+}
+
+/** Whether `value` is a unit scope key: a `unit` value naming a department,
+ *  division or center. Never an institution (`inst:`) — far too wide for a
+ *  list of student names. */
+export function isUnitScopeKey(value: string): boolean {
+  const u = parseUnitValue(value);
+  return u !== null && u.kind !== "institution";
+}
+
+/** Whether `scopeKey` may be granted on `reportKey`: one of its options, or —
+ *  on the Mentored publications report only — a unit scope key. */
+export function isGrantableScopeKey(reportKey: string, scopeKey: string): boolean {
+  if (!isGrantableReportKey(reportKey)) return false;
+  if (REPORT_ACCESS_SCOPE_OPTIONS[reportKey].some(([k]) => k === scopeKey)) return true;
+  return reportKey === MENTORED_PUBS_REPORT && isUnitScopeKey(scopeKey);
+}
+
+export type MentoredPubsAccess = {
+  /** The scopes the loader and the type resolution read. */
+  scopes: ReadonlySet<string>;
+  /** The mentor's units to load (`unit=` values). */
+  units: string[];
+  /** A unit-only holder's granted units, sorted — what they are pinned to;
+   *  null when not pinned (a program scope holder chooses freely). */
+  pinnedUnits: string[] | null;
+};
+
+/**
+ * What a non-empty scope set may load on the Mentored publications report.
+ * A holder of any program scope (`md` / `mdphd` / `ecr` / `*`) loads as
+ * before: their scopes, any unit they request. A holder of ONLY unit scopes
+ * loads every program (`*`) pinned to their units: the requested units they
+ * hold, else all of them — never a unit they were not granted, never no unit.
+ * ponytail: a holder of both kinds keeps only the program behaviour (their
+ * unit grants add nothing); a per-row union is the upgrade path if anyone
+ * ever holds both.
+ * Throws on an empty set: callers 404 / 403 before calling, and "no scope"
+ * must never fall through to the wildcard.
+ */
+export function resolveMentoredPubsAccess(
+  granted: ReadonlySet<string>,
+  requestedUnits: ReadonlyArray<string>,
+): MentoredPubsAccess {
+  if (granted.size === 0) throw new Error("resolveMentoredPubsAccess: empty scope set");
+  const program = [...granted].filter((s) => !isUnitScopeKey(s));
+  if (program.length > 0) return { scopes: new Set(program), units: [...requestedUnits], pinnedUnits: null };
+  const held = [...granted].sort();
+  const kept = requestedUnits.filter((u) => held.includes(u));
+  return { scopes: new Set([ALL_SCOPES]), units: kept.length > 0 ? kept : held, pinnedUnits: held };
 }
 
 /** The `EditSession` fields the verdicts read — a structural subset so a test

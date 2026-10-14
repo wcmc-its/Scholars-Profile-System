@@ -6,7 +6,9 @@
  *
  * Body: `{ op: "grant" | "revoke", reportKey, scopeKey, cwid, name? }`.
  *   - `reportKey` a key of `REPORT_ACCESS_SCOPE_OPTIONS` (reports 7, 8, 9);
- *   - `scopeKey` one of that report's options (`"*"` alone for 8 and 9);
+ *   - `scopeKey` one of that report's options (`"*"` alone for 8 and 9), or
+ *     on report 7 a unit scope key (`center:` / `dept:` / `div:`,
+ *     `isGrantableScopeKey`);
  *   - `cwid` lowercased, then `/^[a-z][a-z0-9]{1,11}$/`;
  *   - `name` (grant only, optional): the grantee's directory display name as
  *     the people picker returned it, stored on the row as `grantee_name` so
@@ -37,6 +39,7 @@ import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/r
 import {
   canManageReportAccess,
   grantReportAccess,
+  isGrantableScopeKey,
   REPORT_ACCESS_SCOPE_OPTIONS,
   revokeReportAccess,
   type ReportAccessWriteResult,
@@ -83,7 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof reportKey !== "string" || !Object.hasOwn(REPORT_ACCESS_SCOPE_OPTIONS, reportKey)) {
     return editError(400, "invalid_report_key", "reportKey");
   }
-  if (typeof scopeKey !== "string" || !REPORT_ACCESS_SCOPE_OPTIONS[reportKey].some(([k]) => k === scopeKey)) {
+  if (typeof scopeKey !== "string" || !isGrantableScopeKey(reportKey, scopeKey)) {
     return editError(400, "invalid_scope_key", "scopeKey");
   }
   const cwid = typeof body.cwid === "string" ? body.cwid.trim().toLowerCase() : "";

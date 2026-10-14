@@ -94,6 +94,7 @@ import {
   resolveMentorshipTypes,
   type MentorshipTypeKey,
 } from "@/lib/edit/mentorship-type";
+import { resolveMentoredPubsAccess } from "@/lib/edit/report-access";
 import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
 import { Caret, SUMMARY_NO_MARKER } from "@/components/ui/caret";
 
@@ -135,11 +136,14 @@ export async function renderMentoredPublicationsReport({
   // route, has nothing useful to say with a 400).
   const parsed = parseMentoredPubsParams(searchParams);
   const requested: MentoredPubsParams = parsed.ok ? parsed.value : MENTORED_PUBS_DEFAULT_PARAMS;
+  // A unit-only grant pins the report to its units, every program; a program
+  // grant picks units freely (`resolveMentoredPubsAccess`).
+  const access = resolveMentoredPubsAccess(scopes, requested.units);
   // Types outside the caller's scopes are silently dropped — never a wider set.
-  const types = resolveMentorshipTypes(requested.types, scopes);
-  const loaderScopes = [...scopes];
+  const types = resolveMentorshipTypes(requested.types, access.scopes);
+  const loaderScopes = [...access.scopes];
   const [mentorCwids, facets] = await Promise.all([
-    loadUnitMentorCwids(requested.units),
+    loadUnitMentorCwids(access.units),
     loadDataQualityFacets(db.read),
   ]);
 
@@ -158,7 +162,7 @@ export async function renderMentoredPublicationsReport({
     requested.years === null || (requested.years.length > 0 && (kept.length === 0 || lostEveryKnownYear))
       ? defaultYears
       : kept;
-  const params: MentoredPubsParams = { ...requested, years, types };
+  const params: MentoredPubsParams = { ...requested, years, types, units: access.units };
 
   const loaded = await loadMentoredPublicationsReport({
     scopes: loaderScopes,
@@ -170,8 +174,8 @@ export async function renderMentoredPublicationsReport({
   });
   const report = applyMentoredPubsFacets(loaded, params, HIGH_IMPACT_THRESHOLD);
   const options = mentoredPubsFacetOptions(loaded, params);
-  const typeChoices = allowedMentorshipTypes(scopes);
-  const defaultTypes = defaultMentorshipTypes(scopes);
+  const typeChoices = allowedMentorshipTypes(access.scopes);
+  const defaultTypes = defaultMentorshipTypes(access.scopes);
 
   const allMode = params.pubs === "all";
   const allPubsMissing = allMode && loaded.allPubsLoaded === false;
@@ -183,7 +187,8 @@ export async function renderMentoredPublicationsReport({
     types: !sameSet(types, defaultTypes),
     tail: params.tail !== DEFAULT_TAIL,
     pubs: params.pubs !== "mentored",
-    units: params.units.length > 0,
+    // A pinned holder's default is every unit they hold.
+    units: access.pinnedUnits ? !sameSet(params.units, access.pinnedUnits) : params.units.length > 0,
   };
   // Chip × hrefs keep `q`; the tab hrefs (`viewHref`) don't — the island adds it.
   const href = (patch: Partial<MentoredPubsParams>) => pageHref(basePath, { ...params, ...patch }, true);
@@ -204,14 +209,18 @@ export async function renderMentoredPublicationsReport({
   // names its parent), then centers with members — report 8's lists. A
   // selected value no list carries (a retired unit, a mangled link) still
   // shows, raw, so it can be un-ticked.
+  // A pinned holder is offered only their own units.
+  const pinned = access.pinnedUnits ? new Set(access.pinnedUnits) : null;
   const unitOptions = {
     departments: [
       ...facets.departments.map(({ value, label, count }) => ({ value, label, count })),
       ...facets.departments
         .flatMap((d) => d.divisions)
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
-    ],
-    centers: facets.centers.filter((c) => c.count > 0 || params.units.includes(c.value)),
+    ].filter((o) => !pinned || pinned.has(o.value)),
+    centers: facets.centers.filter((c) =>
+      pinned ? pinned.has(c.value) : c.count > 0 || params.units.includes(c.value),
+    ),
   };
   const unitLabel = new Map(
     [...unitOptions.departments, ...unitOptions.centers].map((o) => [o.value, o.label] as const),
@@ -278,8 +287,10 @@ export async function renderMentoredPublicationsReport({
         "units",
       ),
       // Years go back to the default too: the ones on the page were resolved
-      // against the unit's narrower choices.
-      removeHref: href({ units: [], years: null }),
+      // against the unit's narrower choices. Nothing to remove when a pinned
+      // holder already sees every unit they hold.
+      removeHref:
+        access.pinnedUnits && sameSet(params.units, access.pinnedUnits) ? null : href({ units: [], years: null }),
     });
   }
 

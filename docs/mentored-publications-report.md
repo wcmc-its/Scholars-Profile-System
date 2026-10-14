@@ -81,6 +81,15 @@ Access is NOT unit-scoped like reports 1–6. It is a row in `report_access` —
 - Anyone else sees the union of their rows' scope keys: `md` (AOC), `mdphd`, `ecr`, or `*`.
 - No rows → the empty set → the page `notFound()`s and the route 403s. There is no env flag; an
   empty table is the dark state.
+- A row's scope key may also be a UNIT (`center:CODE`, `dept:CODE`, `div:CODE`; never `inst:`),
+  for a unit office such as the MCC Education Office. A holder of only unit scopes sees every
+  program, pinned to their units' current members (`resolveMentoredPubsAccess`, page and download
+  alike): the units they request among those they hold, else all of them. A foreign unit in the URL
+  is ignored, never honoured, and the unit chip has no ×. A holder of both kinds keeps only the
+  program behaviour (documented ceiling). Unit grants are made by a superuser from the same Viewers
+  panel, whose select lists every center, department and division after the program options. They
+  are deliberately NOT unit Owner/Curator access: that would put student names in front of every
+  unit administrator, a FERPA call this table keeps to named grantees.
 
 Grants are made from the page itself: the "Viewers" panel (`ReportAccessPanel`) renders only for a
 superuser / comms steward and offers a CWID field plus a program select (All programs / AOC /
