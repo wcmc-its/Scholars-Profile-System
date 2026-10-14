@@ -55,6 +55,7 @@ const hoisted = vi.hoisted(() => ({
   mockOverrideFindMany: vi.fn(),
   mockFrtFindMany: vi.fn(),
   mockAuthorFindMany: vi.fn(),
+  mockQueryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -75,6 +76,7 @@ vi.mock("@/lib/db", () => ({
       fieldOverride: { findMany: hoisted.mockOverrideFindMany },
       frtMentee: { findMany: hoisted.mockFrtFindMany },
       publicationAuthor: { findMany: hoisted.mockAuthorFindMany },
+      $queryRaw: hoisted.mockQueryRaw,
     },
     write: {},
   },
@@ -88,6 +90,7 @@ import {
   inProgramWindow,
   loadMentoredGradYears,
   loadMentoredPublicationsReport,
+  loadUnitMentorCwids,
   mentorInstitution,
 } from "@/lib/edit/mentored-publications-report";
 import { MENTORSHIP_TYPE_KEYS } from "@/lib/edit/mentorship-type";
@@ -443,7 +446,7 @@ describe("loadMentoredPublicationsReport", () => {
     });
 
     await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"] });
-    expect(hoisted.mockAocFindMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: undefined }));
+    expect(hoisted.mockAocFindMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: {} }));
 
     // A null in the list admits the rows with no graduation year.
     await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"], gradYears: [2025, null] });
@@ -1608,5 +1611,125 @@ describe("loadMentoredGradYears", () => {
     expect(defaultMentoredPubsYears([2024])).toEqual([2024]);
     expect(defaultMentoredPubsYears([null])).toEqual([null]);
     expect(defaultMentoredPubsYears([])).toEqual([]);
+  });
+});
+
+describe("the mentor's unit (`mentorCwids`)", () => {
+  type Where = { mentorCwid?: { in: string[] }; entityId?: { in: string[] } } | undefined;
+  /** A findMany that honours the mentor predicate like Prisma would, so a read
+   *  that forgets it leaks the outside mentor's learner into the report. */
+  const honouring = <T extends { mentorCwid?: string; entityId?: string }>(rows: T[]) =>
+    vi.fn(async ({ where }: { where?: Where } = {}) =>
+      rows.filter((r) => {
+        const inSet = where?.mentorCwid?.in ?? where?.entityId?.in;
+        return inSet === undefined || inSet.includes((r.mentorCwid ?? r.entityId)!);
+      }),
+    );
+  const IN = "in0001";
+  const OUT = "out0001";
+  const both = <T,>(make: (mentor: string, tag: string) => T) => [make(IN, "in"), make(OUT, "out")];
+
+  beforeEach(() => {
+    hoisted.mockAocFindMany.mockImplementation(
+      honouring(both((m, t) => aoc({ mentorCwid: m, menteeCwid: `aoc_${t}`, graduationYear: t === "in" ? 2020 : 2030 })))
+        .getMockImplementation()!,
+    );
+    hoisted.mockPhdFindMany.mockImplementation(
+      honouring(
+        both((m, t) => ({
+          mentorCwid: m,
+          menteeCwid: `phd_${t}`,
+          menteeFirstName: "P",
+          menteeLastName: t,
+          conferralYear: t === "in" ? 2021 : 2031,
+          programType: "PhD",
+          mentorFirstName: null,
+          mentorLastName: null,
+          mentorDepartment: null,
+          mentorInstitution: null,
+        })),
+      ).getMockImplementation()!,
+    );
+    hoisted.mockPostdocFindMany.mockImplementation(
+      honouring(
+        both((m, t) => ({
+          mentorCwid: m,
+          menteeCwid: `pd_${t}`,
+          menteeFirstName: "D",
+          menteeLastName: t,
+          startDate: new Date("2019-01-01"),
+          endDate: new Date(t === "in" ? "2022-06-30" : "2032-06-30"),
+          mentorFirstName: null,
+          mentorLastName: null,
+          mentorDepartment: null,
+          mentorInstitution: null,
+        })),
+      ).getMockImplementation()!,
+    );
+    hoisted.mockFrtFindMany.mockImplementation(
+      honouring(both((m, t) => ({ mentorCwid: m, menteeCwid: `frt_${t}`, menteeName: `F ${t}` }))).getMockImplementation()!,
+    );
+    hoisted.mockSuggestionFindMany.mockImplementation(
+      honouring(
+        both((m, t) => ({
+          mentorCwid: m,
+          menteeCwid: `sug_${t}`,
+          menteeName: `S ${t}`,
+          kind: "volunteer",
+          tier: "presumptive",
+          evidence: [],
+        })),
+      ).getMockImplementation()!,
+    );
+    hoisted.mockOverrideFindMany.mockImplementation(
+      honouring(
+        both((m, t) => ({
+          entityId: m,
+          value: JSON.stringify([
+            { name: `Fac ${t}`, cwid: t === "in" ? "fai0001" : "fao0001" },
+            { name: `NoCwid ${t}` },
+          ]),
+        })),
+      ).getMockImplementation()!,
+    );
+  });
+
+  it("every source narrows to the set: only the in-unit mentor's learners land, and droppedNoCwid counts only theirs", async () => {
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"], types: ALL, mentorCwids: new Set([IN]) });
+    expect(report.summary.map((r) => r.cwid).sort()).toEqual(
+      ["aoc_in", "fai0001", "frt_in", "pd_in", "phd_in", "sug_in"].sort(),
+    );
+    expect(report.summary.every((r) => r.mentors.every((m) => m.cwid === IN))).toBe(true);
+    expect(report.droppedNoCwid).toBe(1);
+
+    // No set → every mentor, as before.
+    const all = await loadMentoredPublicationsReport({ scopes: ["*"], types: ALL });
+    expect(all.summary).toHaveLength(12);
+    expect(all.droppedNoCwid).toBe(2);
+  });
+
+  it("an empty set (a unit with no current members, or a value that decodes to nothing) matches nothing, never everyone", async () => {
+    const report = await loadMentoredPublicationsReport({ scopes: ["*"], types: ALL, mentorCwids: new Set() });
+    expect(report.summary).toEqual([]);
+    expect(report.droppedNoCwid).toBe(0);
+  });
+
+  it("loadMentoredGradYears offers only the in-unit mentors' years", async () => {
+    expect(await loadMentoredGradYears(["*"], ALL, new Set([IN]))).toEqual([2022, 2021, 2020, null]);
+    expect(await loadMentoredGradYears(["*"], ALL)).toEqual([2032, 2031, 2030, 2022, 2021, 2020, null]);
+  });
+});
+
+describe("loadUnitMentorCwids", () => {
+  it("no unit → null and no query; a unit → the active scholars the shared who-filter matches", async () => {
+    expect(await loadUnitMentorCwids([])).toBeNull();
+    expect(hoisted.mockQueryRaw).not.toHaveBeenCalled();
+
+    hoisted.mockQueryRaw.mockResolvedValue([{ cwid: "abc1001" }, { cwid: "def2002" }]);
+    expect(await loadUnitMentorCwids(["center:MCC"])).toEqual(new Set(["abc1001", "def2002"]));
+    const [strings, filter] = hoisted.mockQueryRaw.mock.calls[0] as [TemplateStringsArray, { sql: string; values: unknown[] }];
+    expect(strings.join("?")).toContain("s.deleted_at IS NULL AND s.status = 'active'");
+    expect(filter.sql).toContain("center_membership");
+    expect(filter.values).toContain("MCC");
   });
 });

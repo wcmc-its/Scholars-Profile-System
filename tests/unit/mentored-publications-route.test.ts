@@ -6,12 +6,18 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DataQualityFacets } from "@/lib/api/data-quality";
+
 const h = vi.hoisted(() => ({
   mockSession: vi.fn(),
   mockGetReportScopes: vi.fn(),
   mockLoadGradYears: vi.fn(),
   mockLoadReport: vi.fn(),
   mockBuild: vi.fn(),
+  mockLoadUnitMentors: vi.fn(async (): Promise<Set<string> | null> => null),
+  mockFacets: vi.fn(
+    async (): Promise<DataQualityFacets> => ({ roleCategories: [], departments: [], centers: [], institutions: [] }),
+  ),
 }));
 
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.mockSession }));
@@ -25,7 +31,12 @@ vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
     ...actual,
     loadMentoredGradYears: h.mockLoadGradYears,
     loadMentoredPublicationsReport: h.mockLoadReport,
+    loadUnitMentorCwids: h.mockLoadUnitMentors,
   };
+});
+vi.mock("@/lib/api/data-quality", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/data-quality")>();
+  return { ...actual, loadDataQualityFacets: h.mockFacets };
 });
 vi.mock("@/lib/edit/mentored-publications-xlsx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/edit/mentored-publications-xlsx")>();
@@ -85,6 +96,7 @@ describe("gating", () => {
     const res = await GET(req("?mtype=mdphd,thesis&years=2025"));
     expect(res.status).toBe(200);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       types: ["thesis"],
       gradYears: [2025],
@@ -93,6 +105,7 @@ describe("gating", () => {
     });
     await GET(req("?mtype=mdphd&years=2025"));
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       ...AOC_ECR,
       gradYears: [2025],
@@ -117,8 +130,9 @@ describe("response", () => {
   it("defaults to the caller's roster types and the two most recent years across them, and names the file for both", async () => {
     const res = await GET(req());
     expect(res.status).toBe(200);
-    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md", "ecr"], ["aoc", "ecr"]);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["md", "ecr"], ["aoc", "ecr"], null);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       ...AOC_ECR,
       gradYears: [2026, 2025],
@@ -139,6 +153,7 @@ describe("response", () => {
     h.mockLoadGradYears.mockResolvedValue([2026, 2025, 2024, null]);
     const res = await GET(req());
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       ...AOC_ECR,
       gradYears: [2026, 2025, null],
@@ -153,6 +168,7 @@ describe("response", () => {
     expect(res.status).toBe(200);
     expect(h.mockLoadGradYears).not.toHaveBeenCalled();
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       types: ["aoc"],
       gradYears: [2024, 2025],
@@ -175,6 +191,7 @@ describe("response", () => {
   it("a legacy program=<scope> link still works: it reads as that roster type", async () => {
     await GET(req("?program=md&years=2025"));
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       types: ["aoc"],
       gradYears: [2025],
@@ -186,6 +203,7 @@ describe("response", () => {
   it("years=all passes no year filter", async () => {
     await GET(req("?years=all"));
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       ...AOC_ECR,
       gradYears: null,
@@ -198,6 +216,7 @@ describe("response", () => {
     const res = await GET(req("?mtype=aoc&years=2025&pubs=all&view=publications"));
     expect(res.status).toBe(200);
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["md", "ecr"],
       types: ["aoc"],
       gradYears: [2025],
@@ -214,6 +233,7 @@ describe("response", () => {
     h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
     await GET(req("?mtype=mdphd&years=2025"));
     expect(h.mockLoadReport).toHaveBeenCalledWith({
+      mentorCwids: null,
       scopes: ["*"],
       types: ["mdphd"],
       gradYears: [2025],
@@ -222,6 +242,7 @@ describe("response", () => {
     });
     await GET(req("?years=2025"));
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
+      mentorCwids: null,
       scopes: ["*"],
       types: ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty", "frt"],
       gradYears: [2025],
@@ -274,6 +295,28 @@ describe("the rail's post-load facets (2026-09-24)", () => {
     const bad = await GET(req("?position=any"));
     expect(bad.status).toBe(400);
     expect(await bad.text()).toBe("invalid_position");
+  });
+
+  it("unit: resolved to the mentor set once, passed to both loaders, and named on the Query sheet; no unit → no facets read, 'All'", async () => {
+    h.mockGetReportScopes.mockResolvedValue(new Set(["*"]));
+    const set = new Set(["men0001"]);
+    h.mockLoadUnitMentors.mockResolvedValueOnce(set);
+    h.mockFacets.mockResolvedValueOnce({
+      roleCategories: [],
+      departments: [],
+      centers: [{ value: "center:MCC", label: "Meyer Cancer Center", count: 300 }],
+      institutions: [],
+    });
+    await GET(req("?unit=center:MCC"));
+    expect(h.mockLoadUnitMentors).toHaveBeenCalledWith(["center:MCC"]);
+    expect(h.mockLoadGradYears).toHaveBeenCalledWith(["*"], expect.any(Array), set);
+    expect(h.mockLoadReport).toHaveBeenCalledWith(expect.objectContaining({ mentorCwids: set }));
+    expect(h.mockBuild).toHaveBeenLastCalledWith(expect.anything(), "Meyer Cancer Center");
+
+    h.mockFacets.mockClear();
+    await GET(req("?years=2025"));
+    expect(h.mockBuild).toHaveBeenLastCalledWith(expect.anything(), "All");
+    expect(h.mockFacets).not.toHaveBeenCalled();
   });
 });
 

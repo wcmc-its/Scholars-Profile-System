@@ -149,6 +149,7 @@ import { db } from "@/lib/db";
 import { HIGH_IMPACT_THRESHOLD } from "@/lib/edit/cancer-center-publications-report";
 import { validateManualMentees, type ManualMentee } from "@/lib/edit/manual-mentee";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
+import { personFilterSql } from "@/lib/edit/person-filter";
 import type { AppliedMentoredPubsFacets } from "@/lib/edit/mentored-publications-facets";
 import {
   mentorshipKey,
@@ -442,6 +443,30 @@ const FACULTY_PROGRAM: Record<string, string> = {
   POSTDOC: "postdoc",
 };
 
+/** The mentors a `unit` selection keeps; null = no unit filter (every mentor). */
+export type MentorCwids = ReadonlySet<string> | null;
+
+/** `{ mentorCwid: { in } }` for a source read, `{}` with no unit filter. */
+function byMentor(mentorCwids: MentorCwids): { mentorCwid?: { in: string[] } } {
+  return mentorCwids ? { mentorCwid: { in: [...mentorCwids] } } : {};
+}
+
+/** The mentor set a `unit` selection names (raw values, `parsePersonFilter`):
+ *  the active scholars the shared who-filter rule matches — department and
+ *  institution by column, a division by column plus its hand-added roster, a
+ *  center by CURRENT membership (`personFilterSql`). null when no unit is
+ *  given; a value that decodes to nothing yields the empty set (match
+ *  nothing, never everyone). Current members only: a mentor who has left the
+ *  unit takes their mentees with them. */
+export async function loadUnitMentorCwids(unitValues: ReadonlyArray<string>): Promise<MentorCwids> {
+  if (unitValues.length === 0) return null;
+  const rows = await db.read.$queryRaw<{ cwid: string }[]>`
+    SELECT s.cwid FROM scholar s
+     WHERE s.deleted_at IS NULL AND s.status = 'active'
+     ${personFilterSql({ types: [], unitValues: [...unitValues] }, { scholar: "s", centerMembership: "cm" })}`;
+  return new Set(rows.map((r) => r.cwid));
+}
+
 /** Every faculty-asserted mentee with a cwid, across every mentor, plus the
  *  count of entries without one. One scan of the `manualMentees` overrides
  *  (ponytail: `field_override` is small and the unique (entityType,
@@ -449,12 +474,16 @@ const FACULTY_PROGRAM: Record<string, string> = {
  *  is the upgrade path if the table ever outgrows the scan). A malformed
  *  value is skipped, never thrown — `validateManualMentees` is the same
  *  gate the write path applies. Used by the loader and the year picker. */
-async function readFacultyPairs(): Promise<{
+async function readFacultyPairs(mentorCwids: MentorCwids = null): Promise<{
   pairs: FacultyPair[];
   noCwid: Array<{ mentorCwid: string; menteeName: string }>;
 }> {
   const rows = await db.read.fieldOverride.findMany({
-    where: { entityType: "scholar", fieldName: "manualMentees" },
+    where: {
+      entityType: "scholar",
+      fieldName: "manualMentees",
+      ...(mentorCwids ? { entityId: { in: [...mentorCwids] } } : {}),
+    },
     select: { entityId: true, value: true },
   });
   const pairs: FacultyPair[] = [];
@@ -674,6 +703,7 @@ function programLabel(buckets: ReadonlySet<string>): string {
 export async function loadMentoredGradYears(
   scopes: ReadonlyArray<string>,
   types: ReadonlyArray<MentorshipTypeKey>,
+  mentorCwids: MentorCwids = null,
 ): Promise<Array<number | null>> {
   const selected = new Set<string>(types);
   const scopeSet = new Set(scopes);
@@ -685,6 +715,7 @@ export async function loadMentoredGradYears(
   };
   if (rosterSelected(selected)) {
     const rows = await db.read.aocMentee.findMany({
+      where: byMentor(mentorCwids),
       select: { graduationYear: true, programType: true },
     });
     for (const r of rows) {
@@ -695,16 +726,22 @@ export async function loadMentoredGradYears(
     }
   }
   if (selected.has("thesis")) {
-    const rows = await db.read.phdMentorRelationship.findMany({ select: { conferralYear: true } });
+    const rows = await db.read.phdMentorRelationship.findMany({
+      where: byMentor(mentorCwids),
+      select: { conferralYear: true },
+    });
     for (const r of rows) add(r.conferralYear);
   }
   if (selected.has("postdoc")) {
-    const rows = await db.read.postdocMentorRelationship.findMany({ select: { endDate: true } });
+    const rows = await db.read.postdocMentorRelationship.findMany({
+      where: byMentor(mentorCwids),
+      select: { endDate: true },
+    });
     for (const r of rows) add(r.endDate?.getUTCFullYear() ?? null);
   }
   if (selected.has("likely") || selected.has("possible") || selected.has("frt")) unknown = true;
   if (selected.has("faculty")) {
-    for (const p of (await readFacultyPairs()).pairs) add(p.entry.year ?? null);
+    for (const p of (await readFacultyPairs(mentorCwids)).pairs) add(p.entry.year ?? null);
   }
   const out: Array<number | null> = [...years].sort((a, b) => b - a);
   if (unknown) out.push(null);
@@ -750,12 +787,17 @@ export async function loadMentoredPublicationsReport({
   gradYears = null,
   tail = DEFAULT_TAIL,
   pubs = "mentored",
+  mentorCwids = null,
 }: {
   scopes: ReadonlyArray<string>;
   types: ReadonlyArray<MentorshipTypeKey>;
   gradYears?: ReadonlyArray<number | null> | null;
   tail?: number;
   pubs?: MentoredPubsSet;
+  /** Keep only pairs whose mentor is in this set (`loadUnitMentorCwids`);
+   *  null = every mentor. Pushed into every source read, so everything
+   *  downstream (pubs, counts, `droppedNoCwid`) narrows with it. */
+  mentorCwids?: MentorCwids;
 }): Promise<MentoredPublicationsReport> {
   const generatedAt = new Date();
   const filters: MentoredPublicationsFilters = {
@@ -769,7 +811,7 @@ export async function loadMentoredPublicationsReport({
   const allMode = pubs === "all";
   // Faculty-asserted entries without a cwid are counted even when no learner
   // survives the other filters — the page's sentence must not vanish with them.
-  const facultyRead = selected.has("faculty") ? await readFacultyPairs() : { pairs: [], noCwid: [] };
+  const facultyRead = selected.has("faculty") ? await readFacultyPairs(mentorCwids) : { pairs: [], noCwid: [] };
   const faculty = {
     pairs: facultyRead.pairs,
     droppedNoCwid: facultyRead.noCwid.length,
@@ -792,11 +834,14 @@ export async function loadMentoredPublicationsReport({
   // Each source is read only when a selected type needs it (module doc).
   const aocRows = rosterSelected(selected)
     ? ((await db.read.aocMentee.findMany({
-        where: !gradYears
-          ? undefined
-          : gradYears.includes(null)
-            ? { OR: [{ graduationYear: { in: knownYears } }, { graduationYear: null }] }
-            : { graduationYear: { in: knownYears } },
+        where: {
+          ...byMentor(mentorCwids),
+          ...(!gradYears
+            ? {}
+            : gradYears.includes(null)
+              ? { OR: [{ graduationYear: { in: knownYears } }, { graduationYear: null }] }
+              : { graduationYear: { in: knownYears } }),
+        },
         select: {
           mentorCwid: true,
           menteeCwid: true,
@@ -822,6 +867,7 @@ export async function loadMentoredPublicationsReport({
     !gradYears || (y === null ? gradYears.includes(null) : knownYears.includes(y));
   const phdRows = selected.has("thesis")
     ? await db.read.phdMentorRelationship.findMany({
+        where: byMentor(mentorCwids),
         select: {
           mentorCwid: true,
           menteeCwid: true,
@@ -859,6 +905,7 @@ export async function loadMentoredPublicationsReport({
   }
   const postdocRows = selected.has("postdoc")
     ? await db.read.postdocMentorRelationship.findMany({
+        where: byMentor(mentorCwids),
         select: {
           mentorCwid: true,
           menteeCwid: true,
@@ -923,7 +970,7 @@ export async function loadMentoredPublicationsReport({
   const frtRows =
     selected.has("frt") && yearAdmitted(null)
       ? await db.read.frtMentee.findMany({
-          where: { menteeCwid: { not: null } },
+          where: { menteeCwid: { not: null }, ...byMentor(mentorCwids) },
           select: { mentorCwid: true, menteeCwid: true, menteeName: true },
         })
       : [];
@@ -952,7 +999,7 @@ export async function loadMentoredPublicationsReport({
   const suggestions =
     tiers.length > 0 && yearAdmitted(null)
       ? await db.read.menteeSuggestion.findMany({
-          where: { dismissedAt: null, tier: { in: tiers } },
+          where: { dismissedAt: null, tier: { in: tiers }, ...byMentor(mentorCwids) },
           select: {
             mentorCwid: true,
             menteeCwid: true,
@@ -1256,12 +1303,12 @@ export async function loadMentoredPublicationsReport({
 
   // Mentor display names: Scholar.preferredName → roster name → cwid;
   // department and institution likewise (module doc).
-  const mentorCwids = [...new Set(pairs.map((p) => p.mentorCwid))];
+  const pairMentors = [...new Set(pairs.map((p) => p.mentorCwid))];
   const scholarByCwid = new Map<
     string,
     { preferredName: string; primaryDepartment: string | null; primaryOrgCode: string | null }
   >();
-  for (const batch of chunks(mentorCwids, PMID_BATCH)) {
+  for (const batch of chunks(pairMentors, PMID_BATCH)) {
     const found = await db.read.scholar.findMany({
       where: { cwid: { in: batch } },
       select: { cwid: true, preferredName: true, primaryDepartment: true, primaryOrgCode: true },

@@ -18,7 +18,9 @@
  *   7. Author position (`position`)
  *      then Publication year (`pubyear`) — the live Publications tab's Year
  *      facet, kept (not in the spec's list; see the PR body)
- *   8. Mentor (`mentor`)
+ *   8. Mentor's unit (`unit`) — departments / divisions, then centers; a
+ *      LOADER filter (the mentor set), unlike its neighbours
+ *      then Mentor (`mentor`)
  *   9. Learners shown — "Hide learners with no publications" (`withpubs`)
  * Sections 1–5 are what the loader reads; 6–9 narrow its result
  * (`applyMentoredPubsFacets`) and carry counts from
@@ -32,7 +34,7 @@
 import type * as React from "react";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
-import { RailChecklist } from "@/components/edit/reports/rail-checklist";
+import { RailChecklist, type RailChecklistOption } from "@/components/edit/reports/rail-checklist";
 import { RailSection, ReportRail } from "@/components/edit/reports/report-ui";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import type { MentoredPubsFacetOptions } from "@/lib/edit/mentored-publications-facets";
@@ -151,6 +153,7 @@ export function MentoredPublicationsRail({
   typeChoices,
   yearChoices,
   options,
+  unitOptions,
   resetHref,
   idSuffix = "",
 }: {
@@ -160,6 +163,8 @@ export function MentoredPublicationsRail({
   typeChoices: ReadonlyArray<MentorshipTypeKey>;
   yearChoices: ReadonlyArray<number | null>;
   options: MentoredPubsFacetOptions;
+  /** The `unit` choices (report 8's lists): departments then divisions, and centers. */
+  unitOptions: { departments: RailChecklistOption[]; centers: RailChecklistOption[] };
   resetHref: string | null;
   idSuffix?: string;
 }) {
@@ -180,6 +185,9 @@ export function MentoredPublicationsRail({
   const windowSel = new Set<string>(params.window);
   const position = new Set<string>(params.position);
   const mentorLabels = new Map(options.mentors.map((m) => [m.value, m.label]));
+  const unitLabels = new Map(
+    [...unitOptions.departments, ...unitOptions.centers].map((o) => [o.value, o.label] as const),
+  );
 
   return (
     <AutoSubmitForm
@@ -367,6 +375,31 @@ export function MentoredPublicationsRail({
             selected={params.pubYears.map(String)}
             countLabel="Publications"
             collapseAfter={6}
+          />
+        </RailSection>
+
+        <RailSection
+          label="Mentor's unit"
+          summary={listSummary(params.units.map((u) => unitLabels.get(u) ?? u))}
+          defaultOpen={params.units.length > 0}
+          testId="mentored-pubs-section-unit"
+        >
+          <p className={NOTE}>Learners of the unit&rsquo;s current members only.</p>
+          <RailChecklist
+            name="unit"
+            options={unitOptions.departments}
+            selected={params.units}
+            countLabel="People"
+            collapseAfter={6}
+            searchPlaceholder="Search departments…"
+          />
+          <RailChecklist
+            name="unit"
+            options={unitOptions.centers}
+            selected={params.units}
+            countLabel="People"
+            collapseAfter={6}
+            searchPlaceholder="Search centers…"
           />
         </RailSection>
 

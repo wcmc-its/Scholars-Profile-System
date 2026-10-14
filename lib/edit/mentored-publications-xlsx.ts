@@ -215,6 +215,8 @@ function mentorshipTypes(mentors: ReadonlyArray<MentorPair>): string | null {
 /** Build the workbook and return it as a `Buffer`. */
 export async function buildMentoredPublicationsWorkbook(
   report: MentoredPublicationsReport,
+  /** The mentor's-unit selection as `personFilterCriteria` words it; "All" when unset. */
+  mentorUnit = "All",
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Scholars Profile System";
@@ -291,6 +293,7 @@ export async function buildMentoredPublicationsWorkbook(
     ["Generated", isoDate(report.generatedAt)],
     ["Graduation years", years],
     ["Types of mentorship", filters.types.map((k) => MENTORSHIP_TYPE_LABEL[k]).join(", ")],
+    ["Mentor's unit (current members)", mentorUnit],
     [
       "Publication set",
       allMode
