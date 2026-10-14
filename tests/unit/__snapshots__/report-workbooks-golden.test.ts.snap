@@ -394,6 +394,16 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
           "size": 12,
         },
         "values": [
+          "Mentor's unit (current members)",
+          "All",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
           "Publication set",
           "Mentored co-publications: every PubMed- or Scopus-indexed publication on which the learner and one of their selected mentors are both WCM-identified authors.",
         ],
