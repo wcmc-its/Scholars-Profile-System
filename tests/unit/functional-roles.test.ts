@@ -190,7 +190,7 @@ describe("scope helpers", () => {
     // Report 10 (Display titles) is the Titles queue now: not a Reporting scope.
     expect(keys.some((k) => k === "display-titles" || k.startsWith("display-titles:"))).toBe(false);
     const md = reportingScopeOptions().find((o) => o.key === "mentored-publications:md");
-    expect(md?.label).toBe("Mentored publications · MD");
+    expect(md?.label).toBe("Mentors and mentees · MD");
   });
 
   it("the roles are External Affairs and Reporting; EA's scopes are its two functions", () => {

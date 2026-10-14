@@ -378,7 +378,7 @@ describe("/edit/reports/[report] — generateMetadata", () => {
       robots: { index: false, follow: false },
     });
     expect(await meta("mentored-publications")).toEqual({
-      title: "Mentored publications — Scholars Console",
+      title: "Mentors and mentees — Scholars Console",
       robots: { index: false, follow: false },
     });
     expect(await meta("publications")).toEqual({

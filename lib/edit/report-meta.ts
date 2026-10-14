@@ -141,9 +141,9 @@ export const REPORT_META_DEFAULTS: Record<
   },
   "7": {
     slug: "mentored-publications",
-    name: "Mentored publications",
+    name: "Mentors and mentees",
     summary:
-      "Every publication a learner co-authored with a mentor — the MD program's AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc appointments, co-authorship inferences — with impact factor and citations. Access is granted per person.",
+      "Who mentors whom, and every publication a learner co-authored with a mentor — the MD program's AOC pairing sheet, MD-PhD program office, Jenzabar thesis advisors, ED postdoc and volunteer appointments, faculty-reported mentees, co-authorship inferences — with impact factor and citations. Access is granted per person or per unit.",
     descriptionHtml: MENTORED_PUBS_DESCRIPTION_HTML,
   },
   "8": {
