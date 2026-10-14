@@ -1103,11 +1103,16 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     hoisted.mockPostdocFindMany.mockResolvedValue([postdoc({ mentorCwid: "men0001", menteeCwid: "pd0001" })]);
     await loadMentoredPublicationsReport({ types: ["postdoc"], scopes: ["*"] });
     expect(hoisted.mockVolunteerFindMany).not.toHaveBeenCalled();
+    // The open-ended volunteer has a 2026 paper with their sponsor: ongoing → in window.
+    hoisted.mockSuggestionFindMany.mockResolvedValue([
+      suggestion({ mentorCwid: "men0002", menteeCwid: "vol0002", evidence: [{ id: "101", year: 2026, menteeRank: 1, mentorRank: 2, total: 2 }] }),
+    ]);
+    hoisted.mockPubFindMany.mockResolvedValue([{ ...localPub(101), year: 2026 }]);
 
     const report = await loadMentoredPublicationsReport({ types: ["postdoc", "volunteer"], scopes: ["*"] });
     const byCwid = new Map(report.summary.map((r) => [r.cwid, r]));
     expect(byCwid.get("pd0001")?.mentors.map((m) => m.mentorship.source)).toEqual(["ed"]);
-    expect(byCwid.get("vol0002")).toMatchObject({ gradYear: null, entryYear: 2024 });
+    expect(byCwid.get("vol0002")).toMatchObject({ gradYear: null, entryYear: 2024, pubsAllTime: 1, pubsInWindow: 1 });
   });
 
   it("loadMentoredGradYears offers the volunteers' end years, and 'unknown' for an open-ended one", async () => {
