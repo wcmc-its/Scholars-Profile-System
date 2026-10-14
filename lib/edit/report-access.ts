@@ -22,9 +22,9 @@
  * vocabulary, `isUnitScopeKey`). A holder of ONLY unit scopes sees every
  * program, pinned to their units' mentors (`resolveMentoredPubsAccess`) — a
  * unit office (the MCC Education Office) sees its own faculty's learners and
- * no one else's. Granted by a superuser from the same Viewers panel, NOT by
- * unit Owner/Curator: that would put student names in front of every unit
- * administrator, a FERPA call this table keeps to named grantees.
+ * no one else's. Granted by a superuser from the same Viewers panel, AND
+ * inherited: a unit's Owners and Curators (`unit_admin`) hold that unit's
+ * scope with no row here (`unitRoleScopes`; Paul's FERPA call, 2026-10-14).
  * With `FUNCTIONAL_ROLES_AUTHZ` "on", a Reporting grant in the functional-roles
  * registry ADDS scopes on top of the rows here (a union, never a narrowing;
  * `lib/auth/functional-role-authz.ts`).
@@ -62,7 +62,7 @@ import type { EditSession } from "@/lib/auth/superuser";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { registryHasAnyReporting, registryReportScopes } from "@/lib/auth/functional-role-authz";
 import { PROGRAM_LABEL } from "@/lib/edit/mentorship-type";
-import { parseUnitValue } from "@/lib/edit/person-filter";
+import { parseUnitValue, UNIT_KINDS } from "@/lib/edit/person-filter";
 
 /** The one report this table gates today. `reportKey` is a column, not an
  *  enum, so a second program report is one more constant, not a migration. */
@@ -220,11 +220,27 @@ export async function loadReportScopesForCwid(
     select: { scopeKey: true },
   });
   const scopes = new Set(rows.map((r) => r.scopeKey));
+  if (reportKey === MENTORED_PUBS_REPORT) {
+    for (const s of await unitRoleScopes(cwid)) scopes.add(s);
+  }
   // Additive: the scopes a Reporting grant in the functional-roles registry
   // admits on this report, only while FUNCTIONAL_ROLES_AUTHZ is "on" (an
   // empty set without a read otherwise). A union: nothing is taken away.
   for (const s of await registryReportScopes(cwid, reportKey)) scopes.add(s);
   return scopes;
+}
+
+/** The unit scope keys `cwid` inherits on the Mentored publications report
+ *  from a unit Owner or Curator grant (`unit_admin`, either role) on a
+ *  department, division or center: `dept:CODE` / `div:CODE` / `center:CODE`.
+ *  The unit's own administrators see its mentors' learners without a
+ *  Viewers-panel row (Paul, 2026-10-14). Other entity types are ignored. */
+async function unitRoleScopes(cwid: string): Promise<string[]> {
+  const rows = await db.read.unitAdmin.findMany({
+    where: { cwid, entityType: { in: ["department", "division", "center"] } },
+    select: { entityType: true, entityId: true },
+  });
+  return rows.map((r) => `${UNIT_KINDS[r.entityType as "department" | "division" | "center"].prefix}:${r.entityId}`);
 }
 
 /**

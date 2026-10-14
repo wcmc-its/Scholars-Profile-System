@@ -18,6 +18,7 @@ const hoisted = vi.hoisted(() => ({
   // READER — only the gate (`loadReportScopesForCwid`) and the page's list
   // read may touch these.
   mockReadFindMany: vi.fn(),
+  mockReadUnitAdminFindMany: vi.fn(),
   mockReadFindUnique: vi.fn(),
   mockReadScholarFindMany: vi.fn(),
   // WRITER, outside a transaction — the existence probes and the list a
@@ -39,6 +40,7 @@ vi.mock("@/lib/db", () => ({
     read: {
       reportAccess: { findMany: hoisted.mockReadFindMany, findUnique: hoisted.mockReadFindUnique },
       scholar: { findMany: hoisted.mockReadScholarFindMany },
+      unitAdmin: { findMany: hoisted.mockReadUnitAdminFindMany },
     },
     write: {
       reportAccess: { findMany: hoisted.mockWriteFindMany, findUnique: hoisted.mockWriteFindUnique },
@@ -51,6 +53,7 @@ vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: hoisted.mockAppendAuditRow 
 
 import {
   ALL_SCOPES,
+  ARTICLE_COUNT_REPORT,
   canManageReportAccess,
   getReportScopes,
   grantReportAccess,
@@ -124,6 +127,7 @@ beforeEach(() => {
 describe("getReportScopes — fail closed", () => {
   beforeEach(() => {
     hoisted.mockReadFindMany.mockResolvedValue([]);
+    hoisted.mockReadUnitAdminFindMany.mockResolvedValue([]);
   });
 
   it("returns the EMPTY set for a plain session with no rows", async () => {
@@ -158,6 +162,44 @@ describe("getReportScopes — fail closed", () => {
   it("loadReportScopesForCwid: an empty cwid never touches the table", async () => {
     expect((await loadReportScopesForCwid("", MENTORED_PUBS_REPORT)).size).toBe(0);
     expect(hoisted.mockReadFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("getReportScopes — unit Owners and Curators inherit their unit", () => {
+  beforeEach(() => {
+    hoisted.mockReadFindMany.mockResolvedValue([]);
+    hoisted.mockReadUnitAdminFindMany.mockResolvedValue([
+      { entityType: "center", entityId: "meyer_cancer_center" },
+      { entityType: "department", entityId: "N1280" },
+      { entityType: "division", entityId: "N2856" },
+    ]);
+  });
+
+  it("a unit_admin row on a dept / div / center is that unit's scope key on report 7", async () => {
+    const scopes = await getReportScopes(PLAIN, MENTORED_PUBS_REPORT);
+    expect([...scopes].sort()).toEqual(["center:meyer_cancer_center", "dept:N1280", "div:N2856"]);
+    expect(hoisted.mockReadUnitAdminFindMany).toHaveBeenCalledWith({
+      where: { cwid: "abc1234", entityType: { in: ["department", "division", "center"] } },
+      select: { entityType: true, entityId: true },
+    });
+    // Unit-only, so the holder is pinned to exactly those units.
+    expect(resolveMentoredPubsAccess(scopes, ["dept:N9999"]).pinnedUnits).toEqual([
+      "center:meyer_cancer_center",
+      "dept:N1280",
+      "div:N2856",
+    ]);
+  });
+
+  it("is a union with the holder's report_access rows", async () => {
+    hoisted.mockReadFindMany.mockResolvedValue([{ scopeKey: "center:other" }]);
+    const scopes = await getReportScopes(PLAIN, MENTORED_PUBS_REPORT);
+    expect(scopes.has("center:other")).toBe(true);
+    expect(scopes.has("center:meyer_cancer_center")).toBe(true);
+  });
+
+  it("never applies to another report", async () => {
+    expect((await getReportScopes(PLAIN, ARTICLE_COUNT_REPORT)).size).toBe(0);
+    expect(hoisted.mockReadUnitAdminFindMany).not.toHaveBeenCalled();
   });
 });
 
