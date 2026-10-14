@@ -26,7 +26,7 @@ import {
 /**
  * Report 7's results as a client island (reports redesign, 2026-09-24; mockup
  * `Pub Reports/Mentored Publications Redesign.dc.html`): the Learners (N) /
- * Publications (N) tabs, the "Find a learner or mentor" box, the tables and
+ * Mentors (N) / Publications (N) tabs, the "Find a learner or mentor" box, the tables and
  * "Show 25 more". Everything that FILTERS lives in the body's rail (URL
  * params, a server round trip, applied before the rows reach this island);
  * what stays here is what never changes a count: the tab, the find box, the
@@ -52,21 +52,29 @@ import {
  * width reason. Sort select: date added to PubMed (default, the loader's
  * order), publication year, JIF, citations, title.
  *
- * Tabs: both views ride on the same loaded rows, so a click swaps the view in
+ * Mentors: the Learners rows pivoted on each learner's mentors (a learner
+ * with two mentors sits under both), for an office that thinks "our faculty,
+ * then their trainees" (the mentor's-unit filter's audience). Mentor (name,
+ * "Department · Institution") · Learners (each with the pair's type badge and
+ * grad year) · Learners · Papers (distinct papers on which the mentor and one
+ * of their learners both appear). No new load: the same rows, regrouped.
+ *
+ * Tabs: all three views ride on the same loaded rows, so a click swaps the view in
  * state and rewrites the URL (`history.replaceState`); without JS the tab is
  * a plain link. The current view and find text reach the rail's GET forms as
  * hidden inputs bound by `form=` to each form id (the desktop rail and the
  * phone sheet's copy), so a filter change keeps them.
  */
 
-type View = "summary" | "publications";
+type View = "summary" | "mentors" | "publications";
 
 const TH = "text-muted-foreground px-3 py-2.5 align-bottom text-xs font-semibold tracking-[0.08em] uppercase";
 const TD = "px-3 py-3 align-top";
 const NUM_TD = `${TD} text-right tabular-nums hidden md:table-cell`;
-const TAB_ACTIVE = "border-apollo-maroon text-foreground -mb-px border-b-2 py-2.5 text-base font-semibold";
+const TAB_ACTIVE =
+  "border-apollo-maroon text-foreground -mb-px border-b-2 py-2.5 text-base font-semibold whitespace-nowrap";
 const TAB_IDLE =
-  "text-muted-foreground hover:text-foreground -mb-px border-b-2 border-transparent py-2.5 text-base";
+  "text-muted-foreground hover:text-foreground -mb-px border-b-2 border-transparent py-2.5 text-base whitespace-nowrap";
 
 const learnerName = (l: { firstName: string | null; lastName: string | null }) =>
   [l.lastName, l.firstName].filter(Boolean).join(", ");
@@ -293,7 +301,7 @@ function SortButton({
   title,
   children,
 }: {
-  col: SortCol<MentoredPubsSummaryRow>;
+  col: { key: string };
   sort: SortState;
   onSort: (key: string) => void;
   title?: string;
@@ -567,6 +575,193 @@ function PublicationsView({
   );
 }
 
+// ---- Mentors -----------------------------------------------------------------------
+
+export type MentorRow = MentorRef & {
+  learners: Array<{ learner: MentoredPubsSummaryRow; mentorship: MentorshipType }>;
+  /** Distinct papers listing this mentor (each lists only its learners' mentors). */
+  papers: number;
+};
+
+/** The Mentors view's rows: `summary` pivoted on each learner's mentors, in
+ *  first-seen order (the sort reorders); `papers` from `publications`. */
+export function pivotMentors(
+  summary: ReadonlyArray<MentoredPubsSummaryRow>,
+  publications: ReadonlyArray<MentoredPubsPublicationRow>,
+): MentorRow[] {
+  const by = new Map<string, MentorRow>();
+  for (const learner of summary) {
+    for (const { mentorship, ...m } of learner.mentors) {
+      const row = by.get(m.cwid) ?? { ...m, learners: [], papers: 0 };
+      row.learners.push({ learner, mentorship });
+      by.set(m.cwid, row);
+    }
+  }
+  // A paper's mentors are already one per cwid (the loader keys them by cwid).
+  for (const p of publications) {
+    for (const m of p.mentors) {
+      const row = by.get(m.cwid);
+      if (row) row.papers += 1;
+    }
+  }
+  return [...by.values()];
+}
+
+const MENTOR_COLS: Record<string, SortCol<MentorRow>> = {
+  mentor: { key: "mentor", get: (r) => r.name || null, dir: "asc" },
+  learners: { key: "learners", get: (r) => r.learners.length, dir: "desc" },
+  papers: { key: "papers", get: (r) => r.papers, dir: "desc" },
+};
+
+/** One mentor's learners, newest class first: name, the pair's type, grad year. */
+function LearnerList({ learners }: { learners: MentorRow["learners"] }) {
+  const sorted = [...learners].sort(
+    (a, b) =>
+      compareNullsLast(a.learner.gradYear, b.learner.gradYear, "desc") ||
+      compareNullsLast(learnerName(a.learner) || null, learnerName(b.learner) || null, "asc"),
+  );
+  return (
+    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+      {sorted.map(({ learner, mentorship }) => (
+        <li key={learner.cwid} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <ScholarHoverCard cwid={learner.cwid}>
+            <span className="hover:underline">{learnerName(learner) || learner.cwid}</span>
+          </ScholarHoverCard>
+          <TypeBadge type={mentorship} />
+          <span className="text-muted-foreground text-[13px]">
+            {learner.gradYear !== null ? `Grad ${learner.gradYear}` : "No grad year"}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function MentorsView({
+  summary,
+  publications,
+  query,
+}: {
+  summary: MentoredPubsSummaryRow[];
+  publications: MentoredPubsPublicationRow[];
+  query: string;
+}) {
+  const [sort, setSort] = React.useState<SortState>({ key: "learners", dir: "desc" });
+  const onSort = (key: string) =>
+    setSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: MENTOR_COLS[key].dir },
+    );
+  const rows = React.useMemo(() => pivotMentors(summary, publications), [summary, publications]);
+  const q = query.trim().toLowerCase();
+  const found = React.useMemo(
+    () =>
+      q
+        ? rows.filter((r) =>
+            [r.name, r.cwid, ...r.learners.flatMap(({ learner }) => [learnerName(learner), learner.cwid])].some((s) =>
+              s.toLowerCase().includes(q),
+            ),
+          )
+        : rows,
+    [rows, q],
+  );
+  // Name first, then the chosen column: the sort is stable, so ties read A–Z.
+  const sorted = React.useMemo(
+    () => sortRows(sortRows(found, MENTOR_COLS.mentor, "asc"), MENTOR_COLS[sort.key], sort.dir),
+    [found, sort],
+  );
+  const { visible, hasMore, showMore, rangeLabel } = useShowMore(sorted);
+
+  if (rows.length === 0 || found.length === 0) {
+    return (
+      <p className="text-muted-foreground py-7 text-sm" data-testid="mentored-pubs-mentors-empty">
+        {rows.length === 0 ? "No mentors match these filters." : `No learners or mentors match “${query.trim()}”.`}
+      </p>
+    );
+  }
+  const C = MENTOR_COLS;
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-left text-sm" data-testid="mentored-pubs-mentors">
+          <thead className="bg-apollo-surface-2">
+            <tr>
+              <th className={TH} aria-sort={ariaSort(sort, "mentor")}>
+                <span className="inline-flex flex-wrap items-end gap-x-2">
+                  <SortButton col={C.mentor} sort={sort} onSort={onSort}>
+                    Mentor
+                  </SortButton>
+                  {/* Below md the count columns hide; their sorts live here. */}
+                  <span className="inline-flex items-end gap-x-2 md:hidden">
+                    <span aria-hidden>·</span>
+                    <SortButton col={C.learners} sort={sort} onSort={onSort} title="Sort by number of learners">
+                      Learners
+                    </SortButton>
+                    <span aria-hidden>·</span>
+                    <SortButton col={C.papers} sort={sort} onSort={onSort} title="Sort by papers">
+                      Papers
+                    </SortButton>
+                  </span>
+                </span>
+              </th>
+              <th className={`${TH} hidden md:table-cell`}>Learners</th>
+              <th className={`${TH} hidden w-16 text-right md:table-cell`} aria-sort={ariaSort(sort, "learners")}>
+                <SortButton col={C.learners} sort={sort} onSort={onSort} title="Learners of this mentor under the filters">
+                  Total
+                </SortButton>
+              </th>
+              <th className={`${TH} hidden w-16 text-right md:table-cell`} aria-sort={ariaSort(sort, "papers")}>
+                <SortButton
+                  col={C.papers}
+                  sort={sort}
+                  onSort={onSort}
+                  title="Distinct papers on which this mentor and one of their learners both appear"
+                >
+                  Papers
+                </SortButton>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => (
+              <tr key={r.cwid} className="border-apollo-border border-t" data-testid={`mentored-pubs-mentor-${r.cwid}`}>
+                <td className={TD}>
+                  <ScholarHoverCard cwid={r.cwid}>
+                    <span className="font-semibold leading-snug hover:underline">{r.name}</span>
+                  </ScholarHoverCard>
+                  <div className="text-muted-foreground mt-0.5 text-[13px]">{where(r)}</div>
+                  {/* Below md: the learners and the numbers stack here. */}
+                  <div className="mt-2.5 md:hidden" data-testid="mentored-pubs-mentor-stacked">
+                    <LearnerList learners={r.learners} />
+                    <div className="text-muted-foreground mt-2 text-[13px] tabular-nums">
+                      {r.learners.length.toLocaleString()} {r.learners.length === 1 ? "learner" : "learners"} ·{" "}
+                      {r.papers.toLocaleString()} {r.papers === 1 ? "paper" : "papers"}
+                    </div>
+                  </div>
+                </td>
+                <td className={`${TD} hidden md:table-cell`}>
+                  <LearnerList learners={r.learners} />
+                </td>
+                <td className={NUM_TD}>
+                  <Count v={r.learners.length} />
+                </td>
+                <td className={NUM_TD}>
+                  <Count v={r.papers} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ShowMoreRow
+        label={`${rangeLabel} ${found.length === 1 ? "mentor" : "mentors"}`}
+        hasMore={hasMore}
+        onMore={showMore}
+        testId="mentored-pubs-mentors"
+      />
+    </>
+  );
+}
+
 // ---- the island ---------------------------------------------------------------------
 
 export function MentoredPublicationsTable({
@@ -601,6 +796,7 @@ export function MentoredPublicationsTable({
   const [query, setQuery] = React.useState(initialQuery);
   const [pubSort, setPubSort] = React.useState<PubSort>("date");
   const allMode = pubsMode === "all";
+  const mentorCount = React.useMemo(() => new Set(summary.flatMap((l) => l.mentors.map((m) => m.cwid))).size, [summary]);
 
   // The server's hrefs never carry `q` (the body strips it), so appending is enough.
   const withQuery = (href: string, q: string) =>
@@ -615,7 +811,8 @@ export function MentoredPublicationsTable({
     setQuery(e.target.value);
     window.history.replaceState(null, "", withQuery(viewHrefs[view], e.target.value));
   };
-  const tab = (v: View, label: string) => (
+  // Below sm the counts hide (the stats above carry them) so three tabs fit a phone on one line.
+  const tab = (v: View, label: string, count: number) => (
     <a
       href={withQuery(viewHrefs[v], query)}
       onClick={pick(v)}
@@ -624,6 +821,7 @@ export function MentoredPublicationsTable({
       data-testid={`mentored-pubs-view-${v}`}
     >
       {label}
+      <span className="hidden sm:inline"> ({count.toLocaleString()})</span>
     </a>
   );
 
@@ -636,11 +834,12 @@ export function MentoredPublicationsTable({
         </React.Fragment>
       ))}
       <div className="border-apollo-border mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b">
-        <nav className="flex gap-6" aria-label="Report views">
-          {tab("summary", `Learners (${summary.length.toLocaleString()})`)}
-          {tab("publications", `Publications (${publications.length.toLocaleString()})`)}
+        <nav className="flex gap-5 overflow-x-auto sm:gap-6" aria-label="Report views">
+          {tab("summary", "Learners", summary.length)}
+          {tab("mentors", "Mentors", mentorCount)}
+          {tab("publications", "Publications", publications.length)}
         </nav>
-        {view === "summary" ? (
+        {view !== "publications" ? (
           <input
             type="search"
             value={query}
@@ -670,6 +869,8 @@ export function MentoredPublicationsTable({
       </div>
       {view === "publications" ? (
         <PublicationsView rows={publications} allMode={allMode} sort={pubSort} />
+      ) : view === "mentors" ? (
+        <MentorsView summary={summary} publications={publications} query={query} />
       ) : (
         <LearnersView
           rows={summary}
