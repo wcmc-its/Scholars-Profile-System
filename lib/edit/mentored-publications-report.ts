@@ -963,8 +963,12 @@ export async function loadMentoredPublicationsReport({
       })
     : [];
   for (const r of volunteerRows) {
+    // A learner a surer source already placed (an MD student who volunteered
+    // before matriculating) keeps that source's years and window: the stint
+    // only adds the mentor, whatever its own years.
+    const placed = learners.has(r.menteeCwid);
     const endYear = r.endDate?.getUTCFullYear() ?? null;
-    if (!yearAdmitted(endYear)) continue;
+    if (!placed && !yearAdmitted(endYear)) continue;
     mergePair(
       learners,
       {
@@ -972,10 +976,10 @@ export async function loadMentoredPublicationsReport({
         menteeCwid: r.menteeCwid,
         firstName: r.menteeFirstName,
         lastName: r.menteeLastName,
-        gradYear: endYear,
-        entryYear: r.startDate?.getUTCFullYear() ?? null,
+        gradYear: placed ? null : endYear,
+        entryYear: placed ? null : (r.startDate?.getUTCFullYear() ?? null),
         type: { program: "volunteer", source: "volunteer", tier: "confirmed" },
-        ongoing: r.endDate === null,
+        ongoing: !placed && r.endDate === null,
       },
       selected,
     );

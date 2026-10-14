@@ -25,7 +25,7 @@ import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import { NON_ACADEMIC_DEPT_NAMES } from "../../lib/non-academic-units";
 import { resolveScholarTitles } from "./title-resolution";
-import { pairVolunteers, VOLUNTEER_MENTOR_ROLES } from "./volunteers";
+import { syncVolunteerMentors } from "./volunteers";
 import {
   loadUnitOverridesForETL,
   resolveUnitLeaderForETL,
@@ -55,7 +55,6 @@ import {
   type EdFacultyEntry,
   type EdNypAffiliateTitle,
   type EdPostdocEmploymentRecord,
-  type EdVolunteerRoleRecord,
   fetchActiveEmployeeRecords,
   fetchActiveFaculty,
   fetchActiveMembersByCwid,
@@ -2025,97 +2024,14 @@ async function main() {
       }
     }
 
-    // Volunteers (and interns, whom ED records as volunteers) → the faculty
-    // sponsor, else the faculty manager, on their affiliate role record
-    // (`pairVolunteers`, ./volunteers.ts) — report 7's "Volunteer or intern"
-    // type. Best-effort like the postdoc pass: a failed fetch, or one that
-    // returns nothing, leaves the existing rows in place.
-    {
-      let volunteerRecords: EdVolunteerRoleRecord[] = [];
-      try {
-        console.log("Fetching volunteer affiliate role records (active + expired)...");
-        volunteerRecords = await fetchAllVolunteerRoleRecords();
-        console.log(`ED returned ${volunteerRecords.length} volunteer role records.`);
-      } catch (err) {
-        console.warn(
-          `Volunteer role-record fetch skipped: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-
-      if (volunteerRecords.length > 0) {
-        const faculty = new Set(
-          (
-            await db.write.scholar.findMany({
-              where: { deletedAt: null, status: "active", roleCategory: { in: [...VOLUNTEER_MENTOR_ROLES] } },
-              select: { cwid: true },
-            })
-          ).map((s) => s.cwid.toLowerCase()),
-        );
-        const { pairs, facultyVolunteers, noFacultyMentor } = pairVolunteers(volunteerRecords, faculty);
-
-        // Volunteers hold no Scholar row: names come from ou=people (narrow
-        // attributes). Best-effort: a failed lookup writes null names, and the
-        // report falls back to the CWID.
-        let names = new Map<string, { firstName: string | null; lastName: string | null }>();
-        try {
-          names = await fetchPersonNamesByCwid(Array.from(new Set(pairs.map((p) => p.cwid))));
-        } catch (err) {
-          console.warn(
-            `Volunteer name lookup skipped: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-
-        const seen = new Set<string>();
-        for (const p of pairs) {
-          const externalId = `ED-VOLUNTEER-${p.sorId}`;
-          seen.add(externalId);
-          const name = names.get(p.cwid);
-          const fields = {
-            mentorCwid: p.mentorCwid,
-            menteeCwid: p.cwid,
-            menteeFirstName: name?.firstName ?? null,
-            menteeLastName: name?.lastName ?? null,
-            mentorRole: p.mentorRole,
-            startDate: p.startDate,
-            endDate: p.endDate,
-            status: p.status,
-          };
-          await db.write.volunteerMentorRelationship.upsert({
-            where: { externalId },
-            create: { externalId, ...fields },
-            update: { ...fields, lastRefreshedAt: new Date() },
-          });
-        }
-
-        // Tombstone: rows whose role record ED no longer returns. Reached only
-        // with a non-empty fetch (a failed or empty one never deletes), and
-        // capped: a feed silently scoped to active records (the postdoc pass's
-        // incident) would otherwise delete every past volunteer. Over the cap,
-        // the tombstone is skipped with a warning — never the whole ED run.
-        const existing = await db.write.volunteerMentorRelationship.findMany({ select: { externalId: true } });
-        const stale = existing.map((r) => r.externalId).filter((eid) => !seen.has(eid));
-        let deleted = 0;
-        try {
-          assertPruneVolume("ed-volunteers", { pruning: stale.length, of: existing.length, maxPct: 20 });
-          if (stale.length > 0) {
-            deleted = (
-              await db.write.volunteerMentorRelationship.deleteMany({ where: { externalId: { in: stale } } })
-            ).count;
-          }
-        } catch (err) {
-          console.warn(
-            `[ED] volunteer tombstone skipped: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-        const viaSponsor = pairs.filter((p) => p.mentorRole === "sponsor").length;
-        console.log(
-          `[ED] volunteer mentees: ${pairs.length} relationships upserted ` +
-            `(${viaSponsor} via sponsor, ${pairs.length - viaSponsor} via manager; ` +
-            `${noFacultyMentor} records name no faculty sponsor or manager; ` +
-            `${facultyVolunteers} faculty volunteers skipped; ${deleted} stale rows tombstoned)`,
-        );
-      }
-    }
+    // Volunteers (and interns, whom ED records as volunteers) → their faculty
+    // sponsor / manager, for report 7 (`syncVolunteerMentors`,
+    // ./volunteers.ts). Never fatal to the ED run.
+    await syncVolunteerMentors({
+      db: db.write,
+      fetchRecords: fetchAllVolunteerRoleRecords,
+      fetchNames: fetchPersonNamesByCwid,
+    });
 
     if (adminOverridesApplied > 0) {
       console.log(

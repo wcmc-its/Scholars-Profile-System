@@ -1115,6 +1115,22 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
     expect(byCwid.get("vol0002")).toMatchObject({ gradYear: null, entryYear: 2024, pubsAllTime: 1, pubsInWindow: 1 });
   });
 
+  it("an MD student who volunteered before matriculating keeps the roster's years and window; the stint only adds the mentor", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", graduationYear: 2025, entryYear: null }),
+    ]);
+    hoisted.mockVolunteerFindMany.mockResolvedValue([
+      volunteer({ mentorCwid: "men0009", menteeCwid: "stu0001", startDate: new Date("2019-06-01"), endDate: null }),
+    ]);
+    const report = await loadMentoredPublicationsReport({ types: ["aoc", "volunteer"], scopes: ["*"], gradYears: [2025] });
+    expect(report.summary).toHaveLength(1);
+    expect(report.summary[0]).toMatchObject({ cwid: "stu0001", gradYear: 2025, entryYear: 2021, entryYearSource: "fallback" });
+    expect(report.summary[0].mentors.map((m) => [m.cwid, m.mentorship.source])).toEqual([
+      ["men0001", "roster"],
+      ["men0009", "volunteer"],
+    ]);
+  });
+
   it("loadMentoredGradYears offers the volunteers' end years, and 'unknown' for an open-ended one", async () => {
     hoisted.mockVolunteerFindMany.mockResolvedValue([
       volunteer({ mentorCwid: "men0001", menteeCwid: "vol0001" }),
