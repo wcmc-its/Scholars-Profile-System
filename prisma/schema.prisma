@@ -505,6 +505,38 @@ model PostdocMentorRelationship {
   @@map("postdoc_mentor_relationship")
 }
 
+/// A volunteer (or intern: ED records interns as volunteers) and the faculty
+/// member ED names on their affiliate role record — `ou=affiliates,ou=sors`,
+/// `weillCornellEduRoleCode=affiliate-volunteer`, active and expired. The
+/// mentor is the record's `manager;sponsor` when that CWID is a faculty
+/// Scholar, else its `manager;manager` when THAT is; a record naming no
+/// faculty member makes no row, and neither does one whose volunteer is
+/// faculty themselves. Written nightly by `etl:ed`; read by the Mentored
+/// publications report's "Volunteer or intern" type. Report-only: the public
+/// profile's Mentoring section never reads it.
+model VolunteerMentorRelationship {
+  id              Int       @id @default(autoincrement())
+  mentorCwid      String    @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid      String    @map("mentee_cwid") @db.VarChar(32)
+  menteeFirstName String?   @map("mentee_first_name") @db.VarChar(64)
+  menteeLastName  String?   @map("mentee_last_name") @db.VarChar(64)
+  /// Which attribute named the mentor: "sponsor" or "manager".
+  mentorRole      String    @map("mentor_role") @db.VarChar(16)
+  startDate       DateTime? @map("start_date") @db.Date
+  /// Null when ED returns the 2099 open-ended sentinel (the LDAP parser maps it).
+  endDate         DateTime? @map("end_date") @db.Date
+  /// `weillCornellEduStatus` at the last ETL run, as ED spells it.
+  status          String?   @db.VarChar(32)
+  /// `ED-VOLUNTEER-<weillCornellEduSORID>`, stable across reruns.
+  externalId      String    @unique @map("external_id") @db.VarChar(64)
+  source          String    @default("ED-AFFILIATE-SOR") @db.VarChar(32)
+  lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
+
+  @@index([mentorCwid])
+  @@index([menteeCwid])
+  @@map("volunteer_mentor_relationship")
+}
+
 /// #2634 — co-authorship-derived mentee SUGGESTIONS for the mentor's /edit
 /// "Mentees › From your publications" sub-view. Built nightly by
 /// `etl/reciter/mentee-suggestions.ts` from ReCiterDB's
