@@ -17,7 +17,15 @@
  * Suppressed grants are not sent; `hideFunding` / `hideClinicalTrials` are
  * applied at read time instead, since a scholar can flip them back any day.
  *
- * `--dry-run` reads and reports, writes nothing (neither SPS nor DynamoDB).
+ * `--dry-run` reads and reports, writes nothing (neither SPS nor DynamoDB, nor
+ * an etl_run row: a green dry run would read as a real pass on the freshness
+ * board, the same rule as etl/orcid-registry).
+ *
+ * rowsProcessed is the VOLUME of eligible texts this run planned, not the count
+ * of new AREAINPUT items put. The put count is a change count (thousands on the
+ * backfill, a handful on an ordinary night), which the integrity volume guard
+ * would read as a collapse. The planned-text volume is stable night to night, so
+ * the guard stays meaningful: a >50% drop is a truncated grant or trial read.
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
@@ -61,8 +69,9 @@ function byKey(set: ReadonlyMap<string, string>): Map<string, string[]> {
   return out;
 }
 
+const dryRun = process.argv.includes("--dry-run");
+
 async function main(): Promise<number> {
-  const dryRun = process.argv.includes("--dry-run");
   const now = new Date();
 
   // ----- grants -----------------------------------------------------------
@@ -168,7 +177,7 @@ async function main(): Promise<number> {
       trialKeysToClear: trialCols.clear.length,
     })}`,
   );
-  if (dryRun) return 0;
+  if (dryRun) return plan.items.size;
 
   for (const [key, ids] of byKey(grantCols.set)) {
     for (const c of chunks(ids, UPDATE_BATCH)) {
@@ -206,7 +215,7 @@ async function main(): Promise<number> {
   console.log(
     `[AreaSignalInputs] ${JSON.stringify({ event: "area_signal_inputs_complete", queuedBefore: queued.size, ...res })}`,
   );
-  return res.put;
+  return plan.items.size;
 }
 
 if (
@@ -214,7 +223,8 @@ if (
   process.argv[1] &&
   /etl[\\/]area-signal-inputs/.test(process.argv[1])
 ) {
-  withEtlRun("AreaSignal-inputs", main)
+  // A dry run must not leave a green etl_run row behind (see the header).
+  (dryRun ? main().then(() => undefined) : withEtlRun("AreaSignal-inputs", main))
     .catch((e) => {
       console.error(e);
       process.exitCode = 1;
