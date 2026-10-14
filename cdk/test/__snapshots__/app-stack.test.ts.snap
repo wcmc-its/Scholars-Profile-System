@@ -1266,6 +1266,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "TOPIC_RANK_AREA_SIGNALS",
+                "Value": "off",
+              },
+              {
                 "Name": "SECURITY_CSP_MODE",
                 "Value": "enforce",
               },
@@ -6226,6 +6230,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "TAXONOMY_FEED_LOAD_MORE",
+                "Value": "on",
+              },
+              {
+                "Name": "TOPIC_RANK_AREA_SIGNALS",
                 "Value": "on",
               },
               {

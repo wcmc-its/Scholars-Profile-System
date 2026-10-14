@@ -3098,6 +3098,13 @@ export class AppStack extends Stack {
         // while off). Off = the pre-flag feeds.
         // ON in both envs (2026-09-26), signed off on staging.
         TAXONOMY_FEED_LOAD_MORE: env === "staging" ? "on" : "on",
+        // Research-area ranking with PI grants and PI trials (lib/taxonomy-flags.ts
+        // isTopicRankAreaSignalsOn). When "on": a topic page's top-scholar order
+        // adds grant and trial points (lib/api/area-signal-points.ts) to scholars
+        // who already rank there on papers; nobody is added. Off = today's
+        // papers-only order. Staging first; prod stays off until the first prod
+        // AREASIGNAL# projection has landed and staging is signed off.
+        TOPIC_RANK_AREA_SIGNALS: env === "staging" ? "on" : "off",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the

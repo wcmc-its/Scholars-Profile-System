@@ -200,3 +200,133 @@ export function rankForSelectedHighlights<T extends RankablePublication>(
 ): ScoredPublication<T>[] {
   return rankBy(pubs, "selected_highlights", true, now);
 }
+
+// ---------------------------------------------------------------------------
+// Research-area signals: PI grants and PI clinical trials (TOPIC_RANK_AREA_SIGNALS)
+//
+// Ported from the 2026-10-14 pilot builder, which passed Gate 2 as "option A":
+// grants and trials add to the totals of scholars who ALREADY rank in an area
+// on their first/last-author papers, and never add anyone (blind raters picked
+// option A at W = 2 for 111 of 120 visible slots vs 87 for papers only). The
+// consumer (lib/api/topics.ts) enforces "never add"; these functions only score.
+// ---------------------------------------------------------------------------
+
+/**
+ * Paper-equivalents per grant project or trial, at full recency and an area
+ * score of 1. The pilot tested W = 1 and W = 2 (W = 2 won in every area); a
+ * weight above 2 was never tested, so tuning is a one-line change here.
+ */
+export const AREA_SIGNAL_WEIGHT = 2;
+
+/**
+ * Grant projects and trials counted per scholar-area, each kind separately. The
+ * pilot's backtest hit rate saturated at about three grants in an area (28% at
+ * 1, 37% at 2, 56% at 3-4, 56% at 5+), so a fourth adds nothing but volume.
+ */
+export const AREA_SIGNAL_CAP = 3;
+
+/**
+ * Recency from START date (end dates move with no-cost extensions): full weight
+ * for 36 months (the pilot's median lead of a grant over the papers it predicts
+ * was 37 months), then 0.6 to 60 months, then 0.3. Newest is weightiest; no
+ * under-3-month dip, unlike the publication curves.
+ */
+export function signalRecencyWeight(ageMonths: number): number {
+  if (ageMonths < 36) return 1.0;
+  if (ageMonths < 60) return 0.6;
+  return 0.3;
+}
+
+export type AreaSignalItem = {
+  kind: "grant" | "trial";
+  /** The item's area score for this topic (0-1). */
+  score: number;
+  /** Start date (a grant project's earliest scored row). Null = oldest band. */
+  start: Date | null;
+};
+
+/**
+ * One scholar's signal points in one area: per kind, score x W x recency for
+ * each item, the top `cap` summed. Papers are added by the caller, uncapped.
+ */
+export function scoreAreaSignals(
+  items: readonly AreaSignalItem[],
+  now: Date = new Date(),
+  opts: { w?: number; cap?: number } = {},
+): number {
+  const w = opts.w ?? AREA_SIGNAL_WEIGHT;
+  const cap = opts.cap ?? AREA_SIGNAL_CAP;
+  let total = 0;
+  for (const kind of ["grant", "trial"] as const) {
+    const contributions = items
+      .filter((i) => i.kind === kind && i.score > 0)
+      .map((i) => i.score * w * signalRecencyWeight(monthsBetween(i.start, now)))
+      .sort((a, b) => b - a)
+      .slice(0, cap);
+    for (const c of contributions) total += c;
+  }
+  return total;
+}
+
+/** NIH IC + serial (e.g. "CA246080" out of "1 R01 CA 246080-01A1"). */
+const NIH_CORE = /[A-Z]{2}\s*0*(\d{6})/;
+
+export type GrantProjectRow = {
+  id: string;
+  cwid: string;
+  title: string;
+  awardNumber: string | null;
+  mechanism: string | null;
+};
+
+/** The keys that make two of one scholar's grant rows the same project. */
+function projectKeys(g: GrantProjectRow): string[] {
+  // Python's Unicode \W, which the pilot used: anything not a letter, digit or underscore.
+  const keys = ["t:" + g.title.toLowerCase().replace(/[^\p{L}\p{N}_]+/gu, " ").trim()];
+  if (g.mechanism) {
+    const m = NIH_CORE.exec((g.awardNumber ?? "").toUpperCase().replace(/-/g, " "));
+    if (m) keys.push("n:" + m[0].replace(/ /g, ""));
+  }
+  return keys;
+}
+
+/**
+ * Collapse grant rows into funding projects, per scholar: yearly foundation
+ * renewals, NIH supplements, K99 -> R00 and re-issued award numbers are separate
+ * rows that are one piece of work. Rows sharing a normalized title or an NIH
+ * IC + serial are merged (union-find, so A~B by title and B~C by serial puts
+ * A, B, C together). Never merges across scholars. Groups come back in the
+ * order their first row appears.
+ */
+export function collapseGrantProjects<T extends GrantProjectRow>(rows: readonly T[]): T[][] {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r)!;
+    let c = x;
+    while (c !== r) {
+      const next = parent.get(c)!;
+      parent.set(c, r);
+      c = next;
+    }
+    if (!parent.has(r)) parent.set(r, r);
+    return r;
+  };
+  const union = (a: string, b: string) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  const scoped = (g: T) => projectKeys(g).map((k) => JSON.stringify([g.cwid, k]));
+  for (const g of rows) {
+    const ks = scoped(g);
+    for (const k of ks.slice(1)) union(ks[0], k);
+    find(ks[0]);
+  }
+  const groups = new Map<string, T[]>();
+  for (const g of rows) {
+    const root = find(scoped(g)[0]);
+    groups.set(root, [...(groups.get(root) ?? []), g]);
+  }
+  return [...groups.values()];
+}

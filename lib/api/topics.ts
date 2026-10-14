@@ -35,6 +35,8 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { headshotUrl } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
+import { loadAreaSignalPoints } from "@/lib/api/area-signal-points";
+import { isTopicRankAreaSignalsOn } from "@/lib/taxonomy-flags";
 import {
   HIDDEN_ROLE_CATEGORIES,
   SEARCH_BOOST_ELIGIBLE_ROLES,
@@ -210,6 +212,28 @@ export async function getTopScholarsForTopic(
       } as AggEntry);
     entry.total += score;
     byCwid.set(r.cwid, entry);
+  }
+
+  // TOPIC_RANK_AREA_SIGNALS — PI grants and PI trials re-rank the scholars the
+  // publication aggregation above already admitted; they never add one (the
+  // pilot's option A: adding no-paper scholars failed review). Fail-soft: a
+  // failed read leaves today's papers-only order rather than failing the page.
+  if (isTopicRankAreaSignalsOn() && byCwid.size > 0) {
+    try {
+      const points = await loadAreaSignalPoints(topicSlug, [...byCwid.keys()], now);
+      for (const [cwid, p] of points) {
+        const entry = byCwid.get(cwid);
+        if (entry) entry.total += p;
+      }
+    } catch (err) {
+      console.warn(
+        JSON.stringify({
+          event: "area_signal_points_failed",
+          topic: topicSlug,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
   }
 
   const sorted = Array.from(byCwid.values()).sort((a, b) => b.total - a.total);
