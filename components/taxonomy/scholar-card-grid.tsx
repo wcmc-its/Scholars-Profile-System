@@ -31,6 +31,7 @@ import {
   type ScholarCardPopover,
 } from "@/components/taxonomy/scholar-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
+import { TopScholarsInfoText } from "@/components/topic/top-scholars-info-text";
 
 export type { ScholarCardData, ScholarCardPopover };
 
@@ -41,12 +42,16 @@ export function ScholarCardGrid({
   scholars,
   viewAll,
   popover,
+  areaSignals = false,
 }: {
   heading: string;
   scholars: ScholarCardData[];
   /** "View all N scholars →". Omitted where no scholars page exists. */
   viewAll?: { href: string; count: number } | null;
   popover: ScholarCardPopover;
+  /** TOPIC_RANK_AREA_SIGNALS is on and this is a topic page: the info text
+   *  names grants and trials. Read server-side by the page. */
+  areaSignals?: boolean;
 }) {
   const shown = scholars.slice(0, SCHOLAR_CARD_LIMIT);
   if (shown.length === 0) return null;
@@ -58,9 +63,7 @@ export function ScholarCardGrid({
         <h2 id={headingId} className="inline-flex items-center gap-1.5 text-xl font-medium">
           {heading}
           <SectionInfoButton label={heading} anchor="topScholars">
-            Full-time faculty identified by ReCiterAI from their first- or senior-author
-            publications in this research area. Curators do not handpick this list; it updates
-            weekly as new work appears.
+            <TopScholarsInfoText areaSignals={areaSignals} />
           </SectionInfoButton>
         </h2>
         {viewAll && viewAll.count > 0 && (

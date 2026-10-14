@@ -24,7 +24,31 @@ export type ScholarCardData = {
   identityImageEndpoint: string;
   /** Up to 3 area labels (subareas / families). Empty → no bullets. */
   areas: string[];
+  /**
+   * TOPIC_RANK_AREA_SIGNALS: the grant projects and trials that added to this
+   * scholar's place in the area (after the cap). Absent → no evidence line.
+   */
+  evidence?: { grants: number; trials: number };
 };
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The card's one-line evidence ("PI on 2 grants in this area"); null when
+ * nothing contributed. Combined form: "PI on 2 grants · leads 1 trial in this area".
+ */
+export function areaSignalEvidenceText(
+  evidence: { grants: number; trials: number } | undefined,
+): string | null {
+  const grants = evidence?.grants ?? 0;
+  const trials = evidence?.trials ?? 0;
+  if (grants > 0 && trials > 0) {
+    return `PI on ${plural(grants, "grant", "grants")} · leads ${plural(trials, "trial", "trials")} in this area`;
+  }
+  if (grants > 0) return `PI on ${plural(grants, "grant", "grants")} in this area`;
+  if (trials > 0) return `Leads ${plural(trials, "clinical trial", "clinical trials")} in this area`;
+  return null;
+}
 
 export type ScholarCardPopover = {
   /** Names the scope in the popover ("N publications in {label}"). */
@@ -85,6 +109,7 @@ function ScholarCardLink({
   activeArea?: string;
 } & ComponentProps<"a">) {
   const areas = scholar.areas.slice(0, AREA_LIMIT);
+  const evidence = areaSignalEvidenceText(scholar.evidence);
   const skin = bare
     ? "hover:bg-apollo-surface-2 data-[state=open]:bg-apollo-surface-2 p-3"
     : "border-border bg-background border px-3.5 py-3 hover:border-[var(--color-accent-slate)] group-data-[pick=picked]/pick:border-apollo-slate group-data-[pick=picked]/pick:bg-apollo-slate-tint sm:h-full";
@@ -134,6 +159,14 @@ function ScholarCardLink({
               </li>
             ))}
           </ul>
+        )}
+        {evidence && (
+          <span
+            data-testid="scholar-card-evidence"
+            className="text-muted-foreground mt-1 text-[12.5px] leading-[1.4] text-pretty [overflow-wrap:anywhere]"
+          >
+            {evidence}
+          </span>
         )}
       </div>
     </a>

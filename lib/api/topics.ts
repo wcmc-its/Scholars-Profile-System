@@ -77,6 +77,9 @@ export type TopScholarChipData = {
    *  (or subtopic). Surfaced on the chip's hover popover so the rank shown
    *  there matches the chip's visual position — see #264. */
   rank: number;
+  /** TOPIC_RANK_AREA_SIGNALS: grant projects / trials that added points to this
+   *  scholar's rank (after the cap). Absent when the flag is off or none did. */
+  areaSignals?: { grants: number; trials: number };
 };
 
 /**
@@ -177,6 +180,7 @@ export async function getTopScholarsForTopic(
       hasHeadshot: boolean | null;
     };
     total: number;
+    areaSignals?: { grants: number; trials: number };
   };
   const byCwid = new Map<string, AggEntry>();
 
@@ -223,7 +227,9 @@ export async function getTopScholarsForTopic(
       const points = await loadAreaSignalPoints(topicSlug, [...byCwid.keys()], now);
       for (const [cwid, p] of points) {
         const entry = byCwid.get(cwid);
-        if (entry) entry.total += p;
+        if (!entry) continue;
+        entry.total += p.points;
+        entry.areaSignals = { grants: p.grants, trials: p.trials };
       }
     } catch (err) {
       console.warn(
@@ -255,6 +261,7 @@ export async function getTopScholarsForTopic(
     primaryTitle: e.scholar.primaryTitle,
     identityImageEndpoint: headshotUrl(e.scholar.cwid, e.scholar.hasHeadshot),
     rank: i + 1,
+    ...(e.areaSignals ? { areaSignals: e.areaSignals } : {}),
   }));
 }
 

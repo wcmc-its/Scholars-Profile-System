@@ -192,6 +192,22 @@ describe("TOPIC_RANK_AREA_SIGNALS on", () => {
     expect(await order()).toEqual(["s3", "s4", "s1", "s2"]);
   });
 
+  it("carries the counted grants and trials (after the cap) for the card", async () => {
+    state.grants = [1, 2, 3, 4, 5].map((i) => grant("s4", `k${i}`));
+    state.trials = [trial("s4", "kT")];
+    state.scores = {
+      ...Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`k${i}`, { [TOPIC]: 0.25 }])),
+      kT: { [TOPIC]: 0.25 },
+    };
+    const rows = (await getTopScholarsForTopic(TOPIC, NOW))!;
+    expect(rows.find((r) => r.cwid === "s4")!.areaSignals).toEqual({ grants: 3, trials: 1 });
+    // No contribution -> no field (the card renders as before).
+    expect(rows.find((r) => r.cwid === "s1")).not.toHaveProperty("areaSignals");
+    vi.stubEnv("TOPIC_RANK_AREA_SIGNALS", "off");
+    const off = (await getTopScholarsForTopic(TOPIC, NOW))!;
+    expect(off.every((r) => !("areaSignals" in r))).toBe(true);
+  });
+
   it("never adds a scholar who has no papers in the area", async () => {
     state.grants = [grant("nopapers", "kA"), grant("nopapers", "kB")];
     state.trials = [trial("nopapers", "kT")];
