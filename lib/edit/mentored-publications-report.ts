@@ -739,6 +739,13 @@ export async function loadMentoredGradYears(
     });
     for (const r of rows) add(r.endDate?.getUTCFullYear() ?? null);
   }
+  if (selected.has("volunteer")) {
+    const rows = await db.read.volunteerMentorRelationship.findMany({
+      where: byMentor(mentorCwids),
+      select: { endDate: true },
+    });
+    for (const r of rows) add(r.endDate?.getUTCFullYear() ?? null);
+  }
   if (selected.has("likely") || selected.has("possible") || selected.has("frt")) unknown = true;
   if (selected.has("faculty")) {
     for (const p of (await readFacultyPairs(mentorCwids)).pairs) add(p.entry.year ?? null);
@@ -938,6 +945,45 @@ export async function loadMentoredPublicationsReport({
       selected,
     );
   }
+  // ED volunteers (and interns, whom ED records as volunteers): the faculty
+  // sponsor / manager on the affiliate role record. A system of record, so
+  // after the postdoc pass and before the mentor's own word; dated like a
+  // postdoc (end year as the "graduation" year, no end = ongoing).
+  const volunteerRows = selected.has("volunteer")
+    ? await db.read.volunteerMentorRelationship.findMany({
+        where: byMentor(mentorCwids),
+        select: {
+          mentorCwid: true,
+          menteeCwid: true,
+          menteeFirstName: true,
+          menteeLastName: true,
+          startDate: true,
+          endDate: true,
+        },
+      })
+    : [];
+  for (const r of volunteerRows) {
+    // A learner a surer source already placed (an MD student who volunteered
+    // before matriculating) keeps that source's years and window: the stint
+    // only adds the mentor, whatever its own years.
+    const placed = learners.has(r.menteeCwid);
+    const endYear = r.endDate?.getUTCFullYear() ?? null;
+    if (!placed && !yearAdmitted(endYear)) continue;
+    mergePair(
+      learners,
+      {
+        mentorCwid: r.mentorCwid,
+        menteeCwid: r.menteeCwid,
+        firstName: r.menteeFirstName,
+        lastName: r.menteeLastName,
+        gradYear: placed ? null : endYear,
+        entryYear: placed ? null : (r.startDate?.getUTCFullYear() ?? null),
+        type: { program: "volunteer", source: "volunteer", tier: "confirmed" },
+        ongoing: !placed && r.endDate === null,
+      },
+      selected,
+    );
+  }
   // Faculty-asserted pairs: after the systems of record, before the
   // inferences — the mentor's own word beats a co-author pattern for the
   // same pair, and a roster / Jenzabar / ED row beats the mentor's word.
@@ -1081,9 +1127,17 @@ export async function loadMentoredPublicationsReport({
   // tier filter: the tier read above only covers the selected inference keys.
   const pairKey = (p: { mentorCwid: string; menteeCwid: string }) =>
     `${p.mentorCwid}::${p.menteeCwid}`;
-  const facultyPairs = faculty.pairs
-    .map(({ mentorCwid, entry }) => ({ mentorCwid, menteeCwid: entry.cwid }))
-    .filter((p) => learners.get(p.menteeCwid)?.mentors.get(p.mentorCwid)?.source === "faculty");
+  // Volunteer pairs are not in the bridge either and take the same route
+  // (a volunteer holds no Scholar row, so in practice their pubs are the
+  // pair's suggestion evidence).
+  const facultyPairs = [
+    ...faculty.pairs
+      .map(({ mentorCwid, entry }) => ({ mentorCwid, menteeCwid: entry.cwid }))
+      .filter((p) => learners.get(p.menteeCwid)?.mentors.get(p.mentorCwid)?.source === "faculty"),
+    ...volunteerRows
+      .map(({ mentorCwid, menteeCwid }) => ({ mentorCwid, menteeCwid }))
+      .filter((p) => learners.get(p.menteeCwid)?.mentors.get(p.mentorCwid)?.source === "volunteer"),
+  ];
   const facultySuggestions: Array<{ mentorCwid: string; menteeCwid: string; evidence: unknown }> =
     [];
   for (const batch of chunks(facultyPairs, PAIR_BATCH)) {
@@ -1106,7 +1160,7 @@ export async function loadMentoredPublicationsReport({
     // faculty pair reads its evidence too (the same row may arrive twice
     // when its inference tier is also selected; `addPub` dedupes by pmid).
     const source = learners.get(s.menteeCwid)?.mentors.get(s.mentorCwid)?.source;
-    if (source !== "coauthor" && source !== "faculty") continue;
+    if (source !== "coauthor" && source !== "faculty" && source !== "volunteer") continue;
     // A malformed evidence blob (not an array, or a non-object entry) is
     // skipped, never thrown — one bad row must not take the whole report down.
     const list = Array.isArray(s.evidence) ? (s.evidence as unknown[]) : [];

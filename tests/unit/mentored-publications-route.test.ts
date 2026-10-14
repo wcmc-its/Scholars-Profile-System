@@ -244,7 +244,7 @@ describe("response", () => {
     expect(h.mockLoadReport).toHaveBeenLastCalledWith({
       mentorCwids: null,
       scopes: ["*"],
-      types: ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty", "frt"],
+      types: ["aoc", "mdphd", "ecr", "thesis", "postdoc", "faculty", "frt", "volunteer"],
       gradYears: [2025],
       tail: 1,
       ...MENTORED,

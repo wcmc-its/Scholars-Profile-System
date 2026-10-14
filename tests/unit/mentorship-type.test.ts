@@ -101,7 +101,7 @@ describe("mentorship type", () => {
   });
 });
 
-describe("mentorshipTypeKey — every pair folds into one of the nine filter keys", () => {
+describe("mentorshipTypeKey — every pair folds into one of the ten filter keys", () => {
   const KEYS: Array<[MentorshipType, string]> = [
     [{ program: "md", source: "roster", tier: "confirmed" }, "aoc"],
     [{ program: "mdphd", source: "roster", tier: "confirmed" }, "mdphd"],
@@ -114,6 +114,7 @@ describe("mentorshipTypeKey — every pair folds into one of the nine filter key
     [{ program: "postdoc", source: "faculty", tier: "confirmed" }, "faculty"],
     [{ program: "other", source: "faculty", tier: "confirmed" }, "faculty"],
     [{ program: "other", source: "frt", tier: "confirmed" }, "frt"],
+    [{ program: "volunteer", source: "volunteer", tier: "confirmed" }, "volunteer"],
   ];
   it.each(KEYS)("%o → %s", (t, key) => {
     expect(mentorshipTypeKey(t)).toBe(key);
@@ -130,6 +131,7 @@ describe("mentorshipTypeKey — every pair folds into one of the nine filter key
       "possible",
       "faculty",
       "frt",
+      "volunteer",
     ]);
     for (const k of MENTORSHIP_TYPE_KEYS) {
       expect(MENTORSHIP_TYPE_LABEL[k]).toBeTruthy();
@@ -151,10 +153,11 @@ describe("allowed / default / resolved selections per scope", () => {
       "postdoc",
       "faculty",
       "frt",
+      "volunteer",
     ]);
   });
 
-  it("an md holder: only AOC of the roster keys, plus the six non-roster keys; default = [aoc] (faculty and frt are selectable, not default)", () => {
+  it("an md holder: only AOC of the roster keys, plus the seven non-roster keys; default = [aoc] (faculty and frt are selectable, not default)", () => {
     const md = new Set(["md"]);
     expect(allowedMentorshipTypes(md)).toEqual([
       "aoc",
@@ -164,6 +167,7 @@ describe("allowed / default / resolved selections per scope", () => {
       "possible",
       "faculty",
       "frt",
+      "volunteer",
     ]);
     expect(defaultMentorshipTypes(md)).toEqual(["aoc"]);
     expect(resolveMentorshipTypes(["faculty"], md)).toEqual(["faculty"]);
@@ -180,6 +184,7 @@ describe("allowed / default / resolved selections per scope", () => {
       "possible",
       "faculty",
       "frt",
+      "volunteer",
     ]);
   });
 

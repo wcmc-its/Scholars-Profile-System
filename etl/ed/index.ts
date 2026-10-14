@@ -25,6 +25,7 @@ import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import { NON_ACADEMIC_DEPT_NAMES } from "../../lib/non-academic-units";
 import { resolveScholarTitles } from "./title-resolution";
+import { syncVolunteerMentors } from "./volunteers";
 import {
   loadUnitOverridesForETL,
   resolveUnitLeaderForETL,
@@ -61,6 +62,7 @@ import {
   fetchActiveNypAffiliates,
   fetchHistoricalFacultyAppointments,
   fetchAllPostdocEmploymentRecords,
+  fetchAllVolunteerRoleRecords,
   fetchDoctoralStudents,
   fetchFacultySorDegrees,
   fetchPersonNamesByCwid,
@@ -2021,6 +2023,15 @@ async function main() {
         );
       }
     }
+
+    // Volunteers (and interns, whom ED records as volunteers) → their faculty
+    // sponsor / manager, for report 7 (`syncVolunteerMentors`,
+    // ./volunteers.ts). Never fatal to the ED run.
+    await syncVolunteerMentors({
+      db: db.write,
+      fetchRecords: fetchAllVolunteerRoleRecords,
+      fetchNames: fetchPersonNamesByCwid,
+    });
 
     if (adminOverridesApplied > 0) {
       console.log(

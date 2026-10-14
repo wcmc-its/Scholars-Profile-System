@@ -712,6 +712,78 @@ export async function fetchAllPostdocEmploymentRecords(): Promise<
   }
 }
 
+/** A volunteer's affiliate role record from `ou=affiliates,ou=sors` (2026-10-14,
+ *  report 7's "Volunteer or intern" type). ED records interns as volunteers:
+ *  9,199 of 9,245 `affiliate-volunteer` records are titled just "Volunteer",
+ *  and no intern role code exists. Active and expired alike, so past
+ *  volunteers pair too.
+ *
+ *  `manager` is option-tagged on these records — `manager;sponsor`,
+ *  `manager;manager`, `manager;requester` (each a `uid=<cwid>,ou=people` DN).
+ *  Requesting the bare `manager` returns every tagged variant; the sponsor
+ *  and the manager are kept, the requester is not.
+ *
+ *  Privacy: CWIDs, the two people DNs, the dates and the status only. */
+export type EdVolunteerRoleRecord = {
+  cwid: string;
+  sorId: string;
+  status: string | null;
+  sponsorCwid: string | null;
+  managerCwid: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
+};
+
+export const DEFAULT_AFFILIATE_SOR_BASE = "ou=affiliates,ou=sors,dc=weill,dc=cornell,dc=edu";
+export const VOLUNTEER_ROLE_FILTER =
+  "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduRoleCode=affiliate-volunteer))";
+const VOLUNTEER_ROLE_ATTRS = [
+  "weillCornellEduCWID",
+  "weillCornellEduSORID",
+  "weillCornellEduStatus",
+  "manager",
+  "weillCornellEduStartDate",
+  "weillCornellEduEndDate",
+] as const;
+
+/** Every volunteer affiliate role record (active + expired). Its own
+ *  short-lived client, like `fetchAllPostdocEmploymentRecords` (the shared
+ *  ETL client's late-run paged-search `0x20` errors). */
+export async function fetchAllVolunteerRoleRecords(): Promise<EdVolunteerRoleRecord[]> {
+  const client = await openLdap();
+  try {
+    const { searchEntries } = await client.search(DEFAULT_AFFILIATE_SOR_BASE, {
+      scope: "sub",
+      filter: VOLUNTEER_ROLE_FILTER,
+      attributes: [...VOLUNTEER_ROLE_ATTRS],
+      paged: { pageSize: 500 },
+    });
+    const out: EdVolunteerRoleRecord[] = [];
+    for (const e of searchEntries) {
+      const entry = e as Record<string, unknown>;
+      const cwid = firstString(entry.weillCornellEduCWID);
+      const sorId = firstString(entry.weillCornellEduSORID);
+      if (!cwid || !sorId) continue;
+      out.push({
+        cwid: cwid.toLowerCase(),
+        sorId,
+        status: firstString(entry.weillCornellEduStatus),
+        sponsorCwid: parseManagerCwid(firstString(entry["manager;sponsor"])),
+        managerCwid: parseManagerCwid(firstString(entry["manager;manager"])),
+        startDate: parseLdapGeneralizedTime(firstString(entry.weillCornellEduStartDate)),
+        endDate: parseLdapGeneralizedTime(firstString(entry.weillCornellEduEndDate)),
+      });
+    }
+    return out;
+  } finally {
+    try {
+      await client.unbind();
+    } catch {
+      // non-fatal, as in fetchAllPostdocEmploymentRecords
+    }
+  }
+}
+
 /** Resolve display names for a batch of CWIDs against `ou=people`. Used by
  *  the postdoc-mentor ETL (issue #183) to populate
  *  `postdoc_mentor_relationship.mentee_first_name` / `mentee_last_name`
