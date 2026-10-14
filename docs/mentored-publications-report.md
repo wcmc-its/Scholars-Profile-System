@@ -87,12 +87,14 @@ Access is NOT unit-scoped like reports 1–6. It is a row in `report_access` —
   alike): the units they request among those they hold, else all of them. A foreign unit in the URL
   is ignored, never honoured, and the unit chip has no ×. A holder of both kinds keeps only the
   program behaviour (documented ceiling). Unit grants are made by a superuser from the same Viewers
-  panel, whose select lists every center, department and division after the program options. They
-  are deliberately NOT unit Owner/Curator access: that would put student names in front of every
-  unit administrator, a FERPA call this table keeps to named grantees.
+  panel, whose select lists every center, department and division after the program options. A
+  unit's Owners and Curators (`unit_admin`, either role) also INHERIT that unit's scope with no
+  Viewers row (`unitRoleScopes`, report 7 only; decided 2026-10-14). The inherited scope is unioned
+  with any rows, so an Owner who also holds a program row loses the pin (see below). The Viewers
+  panel lists only explicit rows, not inherited holders.
   - Known limit: the grant is bounded by the unit's ROSTER, and a unit's Owners/Curators edit that
-    roster in-app (center membership; a manual division's hand-added members). A grantee who also
-    curates their unit can add a faculty member to it and so see that person's learners. The roster
+    roster in-app (center membership; a manual division's hand-added members). An inheriting Owner or
+    Curator (or a grantee who also curates the unit) can add a faculty member to it and so see that person's learners. The roster
     change is audited (`roster_change`), but nothing on `report_access` records it. Freezing the
     pinned set to non-manual membership is the upgrade path if that is unacceptable.
   - Known limit: grants are not monotonic across kinds. Adding a program scope (a Viewers row or a

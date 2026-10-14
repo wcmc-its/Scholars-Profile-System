@@ -21,6 +21,7 @@ vi.mock("@/lib/db", () => ({
     read: {
       functionalRoleGrant: { findMany: h.frgFindMany },
       reportAccess: { findMany: h.reportAccessFindMany },
+      unitAdmin: { findMany: async () => [] },
     },
     write: {},
   },
