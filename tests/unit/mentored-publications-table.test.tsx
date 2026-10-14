@@ -31,7 +31,7 @@ vi.mock("@/components/ui/hover-tooltip", () => ({
   ),
 }));
 
-import { MentoredPublicationsTable } from "@/components/edit/mentored-publications-table";
+import { MentoredPublicationsTable, pivotMentors } from "@/components/edit/mentored-publications-table";
 import type {
   MentoredPubsPublicationRow,
   MentoredPubsSummaryRow,
@@ -162,6 +162,7 @@ const LEARNERS: MentoredPubsSummaryRow[] = [
 
 const HREFS = {
   summary: "/edit/reports/mentored-publications?years=2025&mtype=aoc&tail=1&pubs=mentored",
+  mentors: "/edit/reports/mentored-publications?years=2025&mtype=aoc&tail=1&pubs=mentored&view=mentors",
   publications: "/edit/reports/mentored-publications?years=2025&mtype=aoc&tail=1&pubs=mentored&view=publications",
 };
 
@@ -417,3 +418,82 @@ describe("MentoredPublicationsTable — view tabs", () => {
     expect(replaceState).not.toHaveBeenCalled();
   });
 });
+
+describe("MentoredPublicationsTable — mentors", () => {
+  const mentorIds = (table: HTMLElement) =>
+    [...table.querySelectorAll("tbody tr[data-testid^='mentored-pubs-mentor-']")].map((tr) =>
+      tr.getAttribute("data-testid")?.replace("mentored-pubs-mentor-", ""),
+    );
+
+  it("pivotMentors: a learner with two mentors sits under both; papers = distinct papers listing the mentor", () => {
+    const rows = pivotMentors(LEARNERS, PUBS);
+    const byCwid = new Map(rows.map((r) => [r.cwid, r]));
+    expect(byCwid.get("men0001")?.learners.map((l) => [l.learner.cwid, l.mentorship])).toEqual([
+      ["stu0001", MD],
+      ["stu0004", MD],
+    ]);
+    expect(byCwid.get("men0002")?.learners.map((l) => [l.learner.cwid, l.mentorship])).toEqual([
+      ["stu0003", MDPHD],
+      ["stu0001", PHD],
+    ]);
+    expect(rows.map((r) => [r.cwid, r.papers])).toEqual([
+      ["men0003", 1],
+      ["men0002", 1],
+      ["men0001", 3],
+    ]);
+    expect(byCwid.get("men0001")).toMatchObject({ name: "Chen, Lin", department: "Medicine", institution: "WCM" });
+  });
+
+  it("the tab counts distinct mentors; the view lists them by learners (ties A–Z), each learner with the pair's type and grad year", () => {
+    const { getByTestId } = renderTable({ view: "mentors" });
+    expect(getByTestId("mentored-pubs-view-mentors").textContent).toBe("Mentors (3)");
+    const table = getByTestId("mentored-pubs-mentors");
+    expect([...table.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual([
+      "Mentor",
+      "Learners",
+      "Learners↓",
+      "Papers",
+    ]);
+    expect(mentorIds(table)).toEqual(["men0001", "men0002", "men0003"]);
+    const chen = within(getByTestId("mentored-pubs-mentor-men0001"));
+    expect(chen.getByText("Medicine · WCM", { selector: "div" })).toBeTruthy();
+    const chenLearners = within(getByTestId("mentored-pubs-mentor-men0001").querySelectorAll("td")[1] as HTMLElement);
+    // Newest class first.
+    expect([...chenLearners.getAllByRole("listitem")].map((li) => li.textContent)).toEqual([
+      "Zed, ZoMDGrad 2026",
+      "Learner, AdaMDGrad 2025",
+    ]);
+    const cells = [...getByTestId("mentored-pubs-mentor-men0001").querySelectorAll("td")].map((td) => td.textContent);
+    expect(cells.slice(2)).toEqual(["2", "3"]);
+  });
+
+  it("sorts by papers and by name; the find box matches a mentor or any of their learners", () => {
+    const { getByTestId, getByRole } = renderTable({ view: "mentors" });
+    fireEvent.click(getByRole("button", { name: "Papers" }));
+    expect(mentorIds(getByTestId("mentored-pubs-mentors"))).toEqual(["men0001", "men0003", "men0002"]);
+    fireEvent.click(getByRole("button", { name: "Mentor" }));
+    expect(mentorIds(getByTestId("mentored-pubs-mentors"))).toEqual(["men0001", "men0003", "men0002"]);
+    fireEvent.click(getByRole("button", { name: "Mentor" }));
+    expect(mentorIds(getByTestId("mentored-pubs-mentors"))).toEqual(["men0002", "men0003", "men0001"]);
+
+    fireEvent.change(getByTestId("mentored-pubs-find"), { target: { value: "wu" } });
+    expect(mentorIds(getByTestId("mentored-pubs-mentors"))).toEqual(["men0002"]);
+    fireEvent.change(getByTestId("mentored-pubs-find"), { target: { value: "nobody" } });
+    expect(getByTestId("mentored-pubs-mentors-empty").textContent).toContain("No learners or mentors match");
+  });
+
+  it("clicking the tab swaps the view in place and writes the mentors href", () => {
+    const replace = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
+    const { getByTestId, queryByTestId } = renderTable();
+    fireEvent.click(getByTestId("mentored-pubs-view-mentors"));
+    expect(queryByTestId("mentored-pubs-summary")).toBeNull();
+    expect(getByTestId("mentored-pubs-mentors")).toBeTruthy();
+    expect(replace).toHaveBeenLastCalledWith(null, "", HREFS.mentors);
+  });
+
+  it("no learners → no mentors, an empty-state line", () => {
+    const { getByTestId } = renderTable({ view: "mentors", summary: [], publications: [] });
+    expect(getByTestId("mentored-pubs-mentors-empty").textContent).toBe("No mentors match these filters.");
+  });
+});
+

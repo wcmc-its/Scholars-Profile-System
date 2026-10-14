@@ -190,8 +190,8 @@ export async function renderMentoredPublicationsReport({
   const viewHref = (view: MentoredPubsParams["view"]) => pageHref(basePath, { ...params, view }, false);
   const resetHref =
     Object.values(nonDefault).some(Boolean) || hasMentoredPubsFacets(params)
-      ? params.view === "publications"
-        ? `${basePath}?view=publications`
+      ? params.view !== "summary"
+        ? `${basePath}?view=${params.view}`
         : basePath
       : null;
   const activeCount =
@@ -393,6 +393,7 @@ export async function renderMentoredPublicationsReport({
                 view={params.view}
                 viewHrefs={{
                   summary: viewHref("summary"),
+                  mentors: viewHref("mentors"),
                   publications: viewHref("publications"),
                 }}
                 summary={report.summary}
