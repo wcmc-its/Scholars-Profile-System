@@ -596,9 +596,10 @@ export function pivotMentors(
       by.set(m.cwid, row);
     }
   }
+  // A paper's mentors are already one per cwid (the loader keys them by cwid).
   for (const p of publications) {
-    for (const m of new Set(p.mentors.map((x) => x.cwid))) {
-      const row = by.get(m);
+    for (const m of p.mentors) {
+      const row = by.get(m.cwid);
       if (row) row.papers += 1;
     }
   }
