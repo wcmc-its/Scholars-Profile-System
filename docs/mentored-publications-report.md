@@ -11,7 +11,7 @@ The Areas of Concentration (AOC) office — the MD scholarly-concentration progr
 for a spreadsheet: for each learner, every publication they co-authored with one of their mentors,
 with Journal Impact Factor and NIH iCite citations, plus per-learner counts. They built it by hand.
 `/edit/reports/7` (the permanent link; it redirects to the report's current slug URL,
-`/edit/reports/mentored-publications` by default) is that spreadsheet on demand: a Learners table (one row per learner) and a Publications list
+`/edit/reports/mentors-and-mentees` by default; the former `/edit/reports/mentored-publications` redirects there via `next.config.ts`. The `report_access` key, API path and file names keep `mentored-publications`) is that spreadsheet on demand: a Learners table (one row per learner) and a Publications list
 in-page, and the full three-sheet workbook (Summary / Raw Data / Query & Assumptions) behind
 "Download .xlsx" (`/api/edit/reports/mentored-publications`, same query string, same filters).
 

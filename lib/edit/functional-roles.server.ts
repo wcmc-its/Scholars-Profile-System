@@ -77,9 +77,12 @@ import {
   type FunctionalRoleScopeOptions,
 } from "@/lib/edit/functional-roles";
 import {
+  ARTICLE_COUNT_REPORT,
+  HIGH_IMPACT_PUBS_REPORT,
   isGrantableReportKey,
   isGrantableScopeKey,
   isUnitScopeKey,
+  MENTORED_PUBS_REPORT,
   REPORT_ACCESS_SCOPE_OPTIONS,
 } from "@/lib/edit/report-access";
 import { REPORT_META_DEFAULTS } from "@/lib/edit/report-meta";
@@ -91,12 +94,18 @@ export function canManageFunctionalRoles(session: Pick<EditSession, "isSuperuser
   return session.isSuperuser;
 }
 
-/** The report's display name by `report_access.report_key` (= its slug). */
+/** `report_access.report_key` → report number. The key is a stable grant id,
+ *  NOT the slug: report 7's slug was renamed (2026-10-14) and its key kept. */
+const REPORT_N_BY_ACCESS_KEY: Record<string, keyof typeof REPORT_META_DEFAULTS> = {
+  [MENTORED_PUBS_REPORT]: "7",
+  [ARTICLE_COUNT_REPORT]: "8",
+  [HIGH_IMPACT_PUBS_REPORT]: "9",
+};
+
+/** The report's display name by `report_access.report_key`. */
 function reportName(reportKey: string): string {
-  for (const meta of Object.values(REPORT_META_DEFAULTS)) {
-    if (meta.slug === reportKey) return meta.name;
-  }
-  return reportKey;
+  const n = REPORT_N_BY_ACCESS_KEY[reportKey];
+  return n ? REPORT_META_DEFAULTS[n].name : reportKey;
 }
 
 /**
