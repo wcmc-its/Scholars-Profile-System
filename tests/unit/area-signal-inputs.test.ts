@@ -6,6 +6,7 @@ import {
   AREA_INPUT_PK,
   areaTextKey,
   buildInputPlan,
+  grantScoredAbstract,
   grantTextKey,
   normalizeAreaText,
   planKeyColumn,
@@ -225,6 +226,55 @@ describe("buildInputPlan", () => {
     expect([...plan.items.values()][0]).toMatchObject({ mode: "title", text: "Short funder text." });
     const none = buildInputPlan([g({ abstract: null })], [], NOW);
     expect([...none.items.values()][0]).toMatchObject({ mode: "title", text: "" });
+  });
+
+  it("sends a grant whose abstract belongs to another project as title-only (#3071)", () => {
+    const title = "Zebrafish fin regeneration signaling in chronic wound repair";
+    const own =
+      "Adult zebrafish regrow an amputated fin within weeks. We define how regeneration signaling " +
+      "from the fin epidermis is lost during chronic wound repair, and test whether restoring that " +
+      "signaling in older fish rescues the repair response.";
+    const other =
+      "This field survey compares two irrigation schedules for dwarf citrus orchards across " +
+      "coastal farms, measuring fruit yield and soil salinity over three growing seasons.";
+    const plan = buildInputPlan(
+      [
+        g({ id: "right", title, abstract: own }),
+        g({ id: "wrong", title, abstract: other }),
+        g({ id: "bare", title, abstract: null }),
+      ],
+      [],
+      NOW,
+    );
+    expect(grantScoredAbstract({ title, abstract: other })).toBeNull();
+    expect(grantScoredAbstract({ title, abstract: own })).toBe(own);
+    // The wrong abstract never reaches the queue: the row keys and reads exactly
+    // like a grant that had no abstract at all.
+    expect(plan.grantKeys.get("wrong")).toBe(plan.grantKeys.get("bare"));
+    expect(plan.grantKeys.get("wrong")).toBe(grantTextKey({ title, abstract: null }));
+    expect(plan.grantKeys.get("right")).not.toBe(plan.grantKeys.get("wrong"));
+    expect(plan.items.size).toBe(2);
+    expect(plan.items.get(`grant#${plan.grantKeys.get("wrong")}`)).toMatchObject({ mode: "title", text: "" });
+    expect(plan.items.get(`grant#${plan.grantKeys.get("right")}`)).toMatchObject({ mode: "full", text: own });
+    expect(JSON.stringify([...plan.items.values()])).not.toContain("irrigation");
+    expect(plan.grantAbstractsDropped).toBe(1);
+  });
+
+  it("re-keys a row whose abstract is newly dropped, without clearing it", () => {
+    const title = "Zebrafish fin regeneration signaling in chronic wound repair";
+    const other = "A field survey of irrigation schedules for dwarf citrus orchards on coastal farms.";
+    const before = areaTextKey("grant", [title, other]);
+    const plan = buildInputPlan([g({ id: "wrong", title, abstract: other })], [], NOW);
+    const cols = planKeyColumn(plan.grantKeys, new Map([["wrong", before]]));
+    expect([...cols.set]).toEqual([["wrong", grantTextKey({ title, abstract: null })]]);
+    expect(cols.clear).toEqual([]);
+    expect(cols.clearSkipped).toBeNull();
+    // The queued item is the title-only text, not the dropped abstract.
+    expect(plan.items.get(`grant#${plan.grantKeys.get("wrong")}`)).toMatchObject({ mode: "title", text: "" });
+  });
+
+  it("counts no drops when every abstract matches or is empty", () => {
+    expect(buildInputPlan([g(), g({ id: "g2", abstract: null })], [], NOW).grantAbstractsDropped).toBe(0);
   });
 
   it("gives a trial with no summary title mode", () => {
