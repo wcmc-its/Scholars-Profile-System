@@ -117,16 +117,44 @@ async function requestRevalidate(p: string): Promise<void> {
 }
 
 /**
+ * Enqueue one CloudFront purge of every path (`/*`, a single invalidation path)
+ * on the `cdn_invalidation` outbox. The ETL task has no CloudFront grant; the
+ * cdn-reconcile machine (which does) drains the outbox every ~5 min and is
+ * dormant where no distribution id is set. Best-effort like the rest of the
+ * sweep: a failure is logged, never thrown.
+ */
+export async function enqueueEdgePurgeAll(): Promise<void> {
+  try {
+    await db.write.cdnInvalidation.create({
+      data: { paths: JSON.stringify(["/*"]), attempts: 0 },
+    });
+    console.log("[Revalidate] enqueued CloudFront /* purge");
+  } catch (err) {
+    console.warn(
+      `[Revalidate] could not enqueue CloudFront purge: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/**
  * Walk the corpus and revalidate every cached surface a cadence run could have
  * dirtied: the home page, every topic page, the browse hub, every department
  * page, and the dynamic sitemap.
  *
  * Profiles: the canonical profile route `app/(public)/[slug]/page.tsx` is ISR
  * (6 h, since the 2026-10-01 load test; it was force-dynamic before). One
- * request for the route pattern `ALL_PROFILES_ROUTE` marks every cached profile
- * stale, so an ETL data change shows on the next view instead of waiting out the
- * TTL; no per-scholar loop. Each stale profile regenerates lazily on its next
- * request (stale-while-revalidate), so this costs no burst of origin renders.
+ * request for the route pattern `ALL_PROFILES_ROUTE` EXPIRES every cached
+ * profile: the S3 cache handler treats a newer tag as a miss
+ * (lib/cache/s3-cache-handler.js `get`), so the next view of each profile
+ * blocks on a fresh render rather than being served stale. Renders stay lazy —
+ * only profiles someone visits are rebuilt — but each visited one is rebuilt.
+ *
+ * Edge: expiring the origin does not purge CloudFront, which keeps serving its
+ * copy under the origin's `stale-while-revalidate` window (up to a year by
+ * Next's default `expireTime`). So the sweep also enqueues one `/*` purge on
+ * the `cdn_invalidation` outbox; the ≤5 min cdn-reconcile machine sends it.
+ * Without it the first visitor per edge location after a cadence saw the
+ * pre-ETL page (an appointment deleted upstream still showing, 2026-10-15).
  *
  * The shared Prisma read client is disconnected on every exit path so the
  * process can terminate cleanly.
@@ -146,6 +174,7 @@ export async function runRevalidate(): Promise<void> {
 
     await requestRevalidate(ALL_PROFILES_ROUTE);
     console.log("[Revalidate] queued all profiles");
+    await enqueueEdgePurgeAll();
 
     const depts = await db.read.department.findMany({ select: { slug: true } });
     for (const d of depts) {

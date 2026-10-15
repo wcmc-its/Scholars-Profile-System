@@ -36,6 +36,7 @@ import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeMethodsAction, logEditDenial } from "@/lib/edit/authz";
 import { apiError } from "@/lib/api/error-response";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { reflectAllProfilesChange } from "@/lib/edit/revalidation";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { FAMILY_TIERS, type FamilyTier } from "@/lib/api/methods-families";
 import { bust } from "@/lib/api/swr-cache";
@@ -170,6 +171,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // #1537 — the /methods rollup is served through the swr-cache; a tier change
   // must evict it so a newly suppressed family disappears immediately.
   bust("methods:");
+  // Every profile's methods section reads these overlays, so a newly
+  // suppressed family must leave the cached profile pages too, not wait for
+  // the nightly sweep.
+  await reflectAllProfilesChange();
 
   return editOk({ supercategory, familyLabel, tier: nextTier });
 }

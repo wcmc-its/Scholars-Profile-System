@@ -160,7 +160,7 @@ The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) liv
 
 | Service | Role in SPS | Resource name / pattern | Prod size | Staging size |
 |---|---|---|---|---|
-| **CloudFront** | CDN/edge; per-route HTML cache (default behavior clamped to **60 s**; **profile pages are not edge-cached at all** — `force-dynamic`); injects `X-Origin-Verify` | dist id: prod `E28NKDFXC7K2ZL`, staging `E17NRWINXLP3B3` | 1 dist | 1 dist |
+| **CloudFront** | CDN/edge; per-route HTML cache (default behavior clamped to **60 s**, but the origin's `stale-while-revalidate` lets the edge serve an older copy while it refetches; profiles are ISR + edge-cached since #3002, see `docs/cloudfront-cache-spec.md`); injects `X-Origin-Verify` | dist id: prod `E28NKDFXC7K2ZL`, staging `E17NRWINXLP3B3` | 1 dist | 1 dist |
 | **AWS WAF (WAFv2)** | Edge filter on the distribution: rate rule (1000 req / 5 min / IP) + AWS Managed Rules; WCM-only gate | attached to CloudFront | — | — |
 | **ECS Fargate (app)** | Runs Next.js + OTel sidecar; 24×7 + autoscale | svc/family `sps-app-${env}`, cluster `sps-cluster-${env}` | 2 × (1024/2048), min 2 / max 6 | 1 × (512/1024), min 1 / max 3 |
 | **ECS Fargate (ETL)** | Runs `npm run etl:<source>` per Step Functions step | family `sps-etl-${env}` | per-run 2048 / 8192 | same |
