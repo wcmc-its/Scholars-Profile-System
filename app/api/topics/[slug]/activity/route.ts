@@ -10,7 +10,7 @@
  *   kind      → KIND_ALLOWLIST (required)
  *   sort      → SORT_ALLOWLIST (default "newest")
  *   tier      → TIER_ALLOWLIST (optional; omitted = both tiers)
- *   subtopic  → SUBTOPIC_RE (accepted, not yet applied; see the service)
+ *   subtopic  → SUBTOPIC_RE (primary subarea only; see the service)
  *   cwid      → CWID_PATTERN; the service refuses unknown / inactive /
  *               #536-hidden cwids with the same empty result
  *   limit     → `parseFeedLimit` (whole 20-row chunks, at most 200)

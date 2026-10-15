@@ -57,6 +57,8 @@ const state = vi.hoisted(() => ({
   suppressions: [] as { entityType: string; entityId: string; revokedAt: Date | null }[],
   /** `${textKey}|${topic}` -> score */
   scores: {} as Record<string, number>,
+  /** `${textKey}|${topic}` -> primary subarea slug (absent = unassigned) */
+  primaries: {} as Record<string, string>,
 }));
 
 vi.mock("@/lib/db", () => {
@@ -107,10 +109,25 @@ vi.mock("@/lib/db", () => {
           active(where.cwid) ? { roleCategory: state.scholars[where.cwid].roleCategory } : null,
       },
       areaSignalTopic: {
-        findMany: async ({ where }: { where: { parentTopicId: string; score: { gte: number } } }) =>
+        findMany: async ({
+          where,
+        }: {
+          where: { parentTopicId: string; score: { gte: number }; primarySubtopicId?: string };
+        }) =>
           Object.entries(state.scores)
-            .map(([k, score]) => ({ textKey: k.split("|")[0], topic: k.split("|")[1], score }))
-            .filter((r) => r.topic === where.parentTopicId && r.score >= where.score.gte)
+            .map(([k, score]) => ({
+              textKey: k.split("|")[0],
+              topic: k.split("|")[1],
+              score,
+              primary: state.primaries[k] ?? null,
+            }))
+            .filter(
+              (r) =>
+                r.topic === where.parentTopicId &&
+                r.score >= where.score.gte &&
+                // SQL equality: a NULL primary never matches a slug.
+                (!("primarySubtopicId" in where) || r.primary === where.primarySubtopicId),
+            )
             .map((r) => ({ textKey: r.textKey, score: r.score })),
       },
       grant: {
@@ -289,6 +306,10 @@ const suppress = (
 const score = (key: string, s: number, topic = AREA) => {
   state.scores[`${key}|${topic}`] = s;
 };
+/** The text's primary subarea within `topic`. */
+const assign = (key: string, subarea: string, topic = AREA) => {
+  state.primaries[`${key}|${topic}`] = subarea;
+};
 
 const grants = async (opts: Parameters<typeof getTopicActivity>[1] | object = {}, topic = AREA) =>
   (await getTopicActivity(topic, { kind: "grant", ...opts }, NOW))!;
@@ -305,6 +326,7 @@ beforeEach(() => {
   state.overrides = [];
   state.suppressions = [];
   state.scores = {};
+  state.primaries = {};
   n = 0;
   for (const c of ["tst001", "tst002", "tst003", "tst004"]) scholar(c);
 });
@@ -530,12 +552,76 @@ describe("getTopicActivity", () => {
     expect(refused.counts.grant).toEqual({ strongly: 0, also: 0 });
   });
 
-  it("accepts subtopic but does not apply it yet", async () => {
-    score("a", 0.9);
-    grant("tst001", "a");
-    const r = await grants({ subtopic: "some_subarea" });
-    expect(r.total).toBe(1);
-    expect(r.subtopicApplied).toBe(false);
+  describe("subarea (subtopic)", () => {
+    beforeEach(() => {
+      state.topics.other_area = { displayThreshold: null };
+      score("a", 0.9);
+      assign("a", "sub_a");
+      grant("tst001", "a", { title: "in sub_a" });
+      score("b", 0.4);
+      assign("b", "sub_a");
+      grant("tst002", "b", { title: "also in sub_a" });
+      score("c", 0.9);
+      assign("c", "sub_b");
+      grant("tst003", "c", { title: "in sub_b" });
+      // Unassigned in this area ("none fits"), though assigned in another.
+      score("u", 0.9);
+      score("u", 0.9, "other_area");
+      assign("u", "sub_a", "other_area");
+      grant("tst004", "u", { title: "unassigned" });
+      score("t1", 0.9);
+      assign("t1", "sub_a");
+      trial("tst001", "t1", { title: "trial in sub_a" });
+      score("t2", 0.9);
+      trial("tst002", "t2", { title: "trial unassigned" });
+    });
+
+    it("keeps only items whose primary subarea it is, and says it applied", async () => {
+      const r = await grants({ subtopic: "sub_a" });
+      expect(r.subtopicApplied).toBe(true);
+      expect(((r.hits as TopicGrantActivityHit[]).map((h) => h.title)).sort()).toEqual(
+        ["also in sub_a", "in sub_a"],
+      );
+      expect(r.total).toBe(2);
+      const t = await trials({ subtopic: "sub_a" });
+      expect((t.hits as TopicTrialActivityHit[]).map((h) => h.title)).toEqual(["trial in sub_a"]);
+    });
+
+    it("an unassigned item is absent from every subarea view but shown at the area level", async () => {
+      expect(await grantTitles({ subtopic: "sub_b" })).toEqual(["in sub_b"]);
+      expect(await grantTitles({ subtopic: "sub_a" })).not.toContain("unassigned");
+      expect(await grantTitles({ subtopic: "no_such_subarea" })).toEqual([]);
+      const area = await grants();
+      expect(area.subtopicApplied).toBe(false);
+      expect(area.total).toBe(4);
+      expect(await grantTitles()).toContain("unassigned");
+      expect(((await trials()).hits as TopicTrialActivityHit[]).map((h) => h.title).sort()).toEqual(
+        ["trial in sub_a", "trial unassigned"],
+      );
+    });
+
+    it("counts and tierTotals are scoped to the subarea", async () => {
+      const r = await grants({ subtopic: "sub_a" });
+      expect(r.counts).toEqual({ grant: { strongly: 1, also: 1 }, trial: { strongly: 1, also: 0 } });
+      expect(r.tierTotals).toEqual({ strongly: 1, also: 1 });
+      const strong = await grants({ subtopic: "sub_a", tier: "strongly" });
+      expect(strong.total).toBe(1);
+      const empty = await grants({ subtopic: "no_such_subarea" });
+      expect(empty.counts).toEqual({ grant: { strongly: 0, also: 0 }, trial: { strongly: 0, also: 0 } });
+      expect(empty.subtopicApplied).toBe(true);
+    });
+
+    it("combines with the scholar filter", async () => {
+      const r = await grants({ subtopic: "sub_a", cwid: "tst002" });
+      expect((r.hits as TopicGrantActivityHit[]).map((h) => h.title)).toEqual(["also in sub_a"]);
+      expect(r.counts.trial).toEqual({ strongly: 0, also: 0 });
+    });
+
+    it("an empty subtopic string is the area view", async () => {
+      const r = await grants({ subtopic: "" });
+      expect(r.subtopicApplied).toBe(false);
+      expect(r.total).toBe(4);
+    });
   });
 
   describe("trials", () => {

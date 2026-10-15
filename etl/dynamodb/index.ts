@@ -1041,7 +1041,7 @@ async function main() {
       const areaMap = buildAreaSignalWrites(buckets.areaSignals, knownTopicIds);
       console.log(
         `Found ${buckets.areaSignals.length} AREASIGNAL# record(s): ${areaMap.texts.length} text(s), ` +
-          `${areaMap.topics.length} area score(s) (skipped: ${areaMap.skippedBadKey} malformed key, ` +
+          `${areaMap.topics.length} area score(s), ${areaMap.withPrimarySubarea} with a primary subarea (skipped: ${areaMap.skippedBadKey} malformed key, ` +
           `${areaMap.skippedUnknownTopic} unknown topic, ${areaMap.skippedBadScore} bad score).`,
       );
       const area = await projectAreaSignals(areaMap, db.write);

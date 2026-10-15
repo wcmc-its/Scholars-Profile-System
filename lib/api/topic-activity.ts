@@ -27,8 +27,12 @@
  * the Funding search tab uses, so a multi-PI award or a renewal is ONE item;
  * trials by NCT number. An item's area score is its best text's score.
  *
- * `subtopic` is accepted and ignored until grant and trial texts carry subarea
- * assignments (plan step S7); the result says so in `subtopicApplied`.
+ * Subarea (`subtopic`, plan S7): the publication feed's rule, primary subarea
+ * only. A text is in a subarea view when its `area_signal_topic` row for THIS
+ * area carries that `primarySubtopicId`. A text with no assignment (not yet
+ * assigned, or "none fits") is absent from every subarea view and still shown
+ * at the area level; it is never shown everywhere. The counts and tierTotals
+ * are scoped to the subarea like the rows.
  *
  * Volumes are small (an area holds tens to low hundreds of items), so the whole
  * qualifying set is loaded, sorted and counted in memory and only the page is
@@ -98,8 +102,8 @@ export type TopicActivityResult = {
   tierTotals: TierCounts;
   /** The display threshold the tiers were cut at. */
   displayThreshold: number;
-  /** False until grant and trial texts carry subarea assignments (S7): a
-   *  `subtopic` request returns the whole area's items. */
+  /** True when the request named a subtopic and the rows and counts are
+   *  narrowed to it. */
   subtopicApplied: boolean;
   page: number;
   pageSize: number;
@@ -113,6 +117,7 @@ function emptyResult(
   page: number,
   pageSize: number,
   displayThreshold: number,
+  subtopicApplied: boolean,
 ): TopicActivityResult {
   const zero = { strongly: 0, also: 0 };
   return {
@@ -122,7 +127,7 @@ function emptyResult(
     counts: { grant: zero, trial: zero },
     tierTotals: zero,
     displayThreshold,
-    subtopicApplied: false,
+    subtopicApplied,
     page,
     pageSize,
   };
@@ -184,7 +189,7 @@ export async function getTopicActivity(
     kind: TopicActivityKind;
     sort?: TopicActivitySort;
     tier?: TopicPublicationTier;
-    /** Accepted, not applied until S7 (see the header). */
+    /** A subarea slug of this area: only items whose primary subarea it is. */
     subtopic?: string;
     /** Only items this scholar is a qualifying investigator on (a PI-role
      *  grant row or a PI trial row in the area). The route validates the
@@ -207,12 +212,18 @@ export async function getTopicActivity(
   const pageSize = opts.pageSize ?? TOPIC_ACTIVITY_PAGE_SIZE;
   const displayThreshold = topic.displayThreshold ?? TOPIC_PUBLICATIONS_DEFAULT_DISPLAY_THRESHOLD;
   const cwid = opts.cwid && opts.cwid.length > 0 ? opts.cwid : undefined;
+  const subtopic = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
   if (cwid && !(await isPublicScholarCwid(cwid))) {
-    return emptyResult(opts.kind, page, pageSize, displayThreshold);
+    return emptyResult(opts.kind, page, pageSize, displayThreshold, subtopic !== undefined);
   }
 
   const scoreRows = await prisma.areaSignalTopic.findMany({
-    where: { parentTopicId: topicSlug, score: { gte: TOPIC_ACTIVITY_SCORE_FLOOR } },
+    where: {
+      parentTopicId: topicSlug,
+      score: { gte: TOPIC_ACTIVITY_SCORE_FLOOR },
+      // Equality on a non-null slug: an unassigned (NULL) row never matches.
+      ...(subtopic ? { primarySubtopicId: subtopic } : {}),
+    },
     select: { textKey: true, score: true },
   });
   const areaScore = new Map(scoreRows.map((r) => [r.textKey, Number(r.score)]));
@@ -223,7 +234,7 @@ export async function getTopicActivity(
     loadTrialCandidates(keys, areaScore),
   ]);
 
-  // The scholar filter is part of the scope, like the area: it narrows every
+  // The scholar filter is part of the scope, like the area and subarea: it narrows every
   // count, not just the visible rows.
   const inScope = <R extends { cwid: string }>(c: Candidate<R>) =>
     !cwid || c.rows.some((r) => r.cwid === cwid);
@@ -245,7 +256,7 @@ export async function getTopicActivity(
     counts,
     tierTotals: counts[opts.kind],
     displayThreshold,
-    subtopicApplied: false,
+    subtopicApplied: subtopic !== undefined,
     page,
     pageSize,
   };

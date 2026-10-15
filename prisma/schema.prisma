@@ -2906,15 +2906,23 @@ model AreaSignalText {
 /// upstream). FK to `topic`, so an unpublished or retired area drops out the
 /// same way it does for `publication_topic`.
 model AreaSignalTopic {
-  textKey       String  @map("text_key") @db.VarChar(64)
-  parentTopicId String  @map("parent_topic_id") @db.VarChar(128)
-  score         Decimal @db.Decimal(8, 4)
+  textKey             String  @map("text_key") @db.VarChar(64)
+  parentTopicId       String  @map("parent_topic_id") @db.VarChar(128)
+  score               Decimal @db.Decimal(8, 4)
+  /// The subarea ReciterAI assigned this text within this area (plan S7).
+  /// Slug, NO FK, like `PublicationTopic.primarySubtopicId`: a hierarchy
+  /// recompute retires slugs, and a stale one simply matches no rail row.
+  /// Null = unassigned ("none fits" is a valid answer, never defaulted).
+  primarySubtopicId   String? @map("primary_subtopic_id") @db.VarChar(128)
+  subtopicIds         Json?   @map("subtopic_ids") // ["slug1","slug2",...]
+  subtopicConfidences Json?   @map("subtopic_confidences") // {slug: score}
 
   text  AreaSignalText @relation(fields: [textKey], references: [textKey], onDelete: Cascade)
   topic Topic          @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
 
   @@id([textKey, parentTopicId])
   @@index([parentTopicId])
+  @@index([parentTopicId, primarySubtopicId]) // area activity feed, subarea view
   @@map("area_signal_topic")
 }
 
