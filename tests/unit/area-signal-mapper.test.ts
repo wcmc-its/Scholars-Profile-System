@@ -133,6 +133,15 @@ describe("subarea fields (S7)", () => {
     });
   });
 
+  it("a non-object entry has no subareas", () => {
+    for (const e of [null, undefined, "sub_a", 3]) {
+      const r = readSubareas(e);
+      expect(r.primarySubtopicId).toBeNull();
+      expect(r.subtopicIds).toBe(Prisma.DbNull);
+      expect(r.subtopicConfidences).toBe(Prisma.DbNull);
+    }
+  });
+
   it("drops a primary that is not in subtopic_ids, or not a string", () => {
     expect(readSubareas(entry({ primary_subtopic_id: "sub_c", subtopic_ids: ["sub_a"] })).primarySubtopicId).toBeNull();
     expect(readSubareas(entry({ primary_subtopic_id: "sub_a" })).primarySubtopicId).toBeNull();
