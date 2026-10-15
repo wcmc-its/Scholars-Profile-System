@@ -57,13 +57,21 @@ export function ScholarCardPickState({ cwid, children }: { cwid: string; childre
 }
 
 /** "Showing publications by X ×" above the filtered feed. */
-export function ScholarFilterChip({ scholar }: { scholar: PickedScholar }) {
+export function ScholarFilterChip({
+  scholar,
+  noun = "publications",
+}: {
+  scholar: PickedScholar;
+  /** What the filtered feed lists ("grants" / "clinical trials" on the topic
+   *  Activities feed). */
+  noun?: string;
+}) {
   return (
     <div
       className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-sm"
       data-testid="scholar-filter-chip"
     >
-      <span className="text-muted-foreground">Showing publications by</span>
+      <span className="text-muted-foreground">{`Showing ${noun} by`}</span>
       <span className="border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border py-0.5 pr-0.5 pl-3 font-medium">
         <span className="truncate">{scholar.name}</span>
         <button
