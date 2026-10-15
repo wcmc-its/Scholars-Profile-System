@@ -20,7 +20,7 @@ import { canonicalProfilePath } from "@/lib/profile-url";
 // force-dynamic rather than getting statically optimized as a fixed redirect.
 // Not edge-cached: verified against prod, repeat requests return
 // `x-cache: Miss from cloudfront`. See docs/cloudfront-cache-spec.md
-// §"Profile pages are not edge-cached".
+// §"Profile pages: ISR at the origin, cached at the edge".
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata() {
