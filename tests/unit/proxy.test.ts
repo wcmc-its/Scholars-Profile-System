@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
@@ -82,20 +80,13 @@ describe("proxy — local-dev login bounce (no IdP)", () => {
   });
 });
 
-// B14 — legacy VIVO URL redirect set (issue #113).
+// B14 — legacy VIVO URL redirects (issue #113; #1940 dropped the set gate).
 //
-// The CWID corpus is the build-time-generated `data/vivo-redirects.json`
-// produced by `scripts/etl/generate-vivo-redirect-set.ts`. Read it directly
-// so the assertions track the real generated set; pick the first and last
-// CWIDs as in-set anchors plus an obviously-fake one for the negative path.
-const REDIRECT_SET = JSON.parse(
-  readFileSync(
-    path.resolve(process.cwd(), "data", "vivo-redirects.json"),
-    "utf8",
-  ),
-) as string[];
-const KNOWN_CWID = REDIRECT_SET[0]!;
-const KNOWN_CWID_LATE = REDIRECT_SET[REDIRECT_SET.length - 1]!;
+// Every syntactically valid legacy CWID path redirects to the by-cwid
+// resolver, which owns "does this scholar exist" (301 or a real 404). The
+// CWIDs below are synthetic -- never put a real CWID in this public repo.
+const KNOWN_CWID = "zzz9001";
+const KNOWN_CWID_LATE = "zzz9002";
 const UNKNOWN_CWID = "zzz9999notincorpus";
 
 describe("proxy — B14 legacy VIVO redirects", () => {
@@ -126,12 +117,33 @@ describe("proxy — B14 legacy VIVO redirects", () => {
     expect(loc.pathname).toBe(`/scholars/by-cwid/${KNOWN_CWID}`);
   });
 
-  it("passes through (no redirect) when the CWID is not in the set (B14-4)", async () => {
+  it("301s a CWID that was never in the old ED redirect set too (#1940)", async () => {
+    // The by-cwid resolver 404s an unknown CWID; the proxy no longer guesses.
     const res = await proxy(
       new NextRequest(`${ORIGIN}/display/cwid-${UNKNOWN_CWID}`),
     );
-    // NextResponse.next() yields a non-redirect; default status is 200 with a
-    // x-middleware-next: 1 marker. The location header is unset.
+    expect(res.status).toBe(301);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
+    expect(loc.pathname).toBe(`/scholars/by-cwid/${UNKNOWN_CWID}`);
+  });
+
+  it("keeps a trailing slash out of the redirect target", async () => {
+    const res = await proxy(
+      new NextRequest(`${ORIGIN}/display/cwid-${KNOWN_CWID}/`),
+    );
+    expect(res.status).toBe(301);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
+    expect(loc.pathname).toBe(`/scholars/by-cwid/${KNOWN_CWID}`);
+  });
+
+  it.each([
+    "/display/n12345",
+    "/display/cwid-",
+    "/display/cwid-abc%2Fdef",
+    "/display/cwid-abc/extra",
+    "/individual/n12345",
+  ])("does not redirect a non-CWID legacy path (%s)", async (p) => {
+    const res = await proxy(new NextRequest(`${ORIGIN}${p}`));
     expect(res.headers.get("location")).toBeNull();
     expect(res.status).not.toBe(301);
     expect(res.status).not.toBe(302);
@@ -259,8 +271,6 @@ describe("proxy — absolute Location is built from SITE_URL, not the viewer Hos
 
   it("ignores a spoofed Host on a legacy VIVO 301", async () => {
     process.env.SITE_URL = SITE;
-    // Reuse the corpus-derived anchor rather than a literal cwid, so this
-    // keeps working when the redirect set is regenerated.
     const res = await proxy(
       new NextRequest(`${SITE}/display/cwid-${KNOWN_CWID}`, {
         headers: { host: "evil.example.com" },
