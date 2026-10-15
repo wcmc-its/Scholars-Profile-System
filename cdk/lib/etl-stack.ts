@@ -927,6 +927,13 @@ export class EtlStack extends Stack {
       // signed off). Applied via cdk deploy --exclusively Sps-Etl-<env> (CD
       // only rolls the image, never deploys infra).
       REPORTER_MATCH_V2: "on",
+      // #3071 — etl:reporter-grants default-hides (system Suppression, created_by
+      // "system-unverified", user-revocable) an award from a NAME-ONLY resolved
+      // NIH profile (name_query / name_match) when neither a WCM org in its
+      // history nor a confirmed publication ties it to the scholar. Staging
+      // first; prod stays off until the staging run's hide count is reviewed.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      REPORTER_GRANTS_CORROBORATION_HIDE: env === "staging" ? "on" : "off",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is

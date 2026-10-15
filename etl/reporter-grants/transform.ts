@@ -34,6 +34,39 @@ export function recencyShouldSuppress(
   return currentYear - maxFiscalYear > RECENCY_YEARS;
 }
 
+/**
+ * #3071 — `person_nih_profile.resolution_source` values that mean the profile_id
+ * was linked to the scholar by NAME alone. A same-named investigator elsewhere
+ * then brings their whole NIH portfolio onto the WCM profile.
+ */
+export const NAME_ONLY_RESOLUTION_SOURCES: ReadonlySet<string> = new Set([
+  "name_query",
+  "name_match",
+]);
+
+/** True when any of a scholar's profile rows was resolved by name alone. Any,
+ *  not all: the materializer unions every profile_id a scholar has, so one
+ *  name-only row is enough to bring in another person's awards. */
+export function hasNameOnlyProfile(resolutionSources: Iterable<string>): boolean {
+  for (const s of resolutionSources) if (NAME_ONLY_RESOLUTION_SOURCES.has(s)) return true;
+  return false;
+}
+
+/**
+ * #3071 — default-hide a RePORTER award from a name-only profile unless
+ * something ties it to this scholar: WCM appears in the award's org history, or
+ * one of the scholar's confirmed publications is linked to the award's core
+ * project number (RePORTER publication linkage or ReCiter's grant citation).
+ * Awards from a profile resolved by grant join are never touched here. Pure.
+ */
+export function unverifiedShouldSuppress(args: {
+  nameOnlyProfile: boolean;
+  wcmOrgHistory: boolean;
+  publicationCorroborated: boolean;
+}): boolean {
+  return args.nameOnlyProfile && !args.wcmOrgHistory && !args.publicationCorroborated;
+}
+
 /** One award (all its fiscal years collapsed) for one scholar. */
 export interface GroupedProject {
   coreProjectNum: string;
@@ -42,7 +75,8 @@ export interface GroupedProject {
   /** appl_id of the most recent fiscal year — keys the RePORTER project-detail
    *  outbound link (`nihReporterProjectUrl`). */
   applId: number | null;
-  /** Grantee org, preferring WCM when any fiscal year was WCM-administered. */
+  /** Grantee org, preferring WCM when any fiscal year was WCM-administered — so
+   *  `isWcmOrg(orgName)` is true iff WCM is anywhere in the award's org history. */
   orgName: string | null;
   title: string | null;
   startDate: Date | null;
@@ -53,7 +87,7 @@ export interface GroupedProject {
   awardAmount: number | null;
 }
 
-const isWcmOrg = (org: string | null | undefined): boolean =>
+export const isWcmOrg = (org: string | null | undefined): boolean =>
   /weill|cornell/i.test(org ?? "");
 
 function parseReporterDate(s: string | null): Date | null {
