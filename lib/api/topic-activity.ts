@@ -336,11 +336,18 @@ async function hydrateGrants(
     },
     select: {
       ...GRANT_INDEX_SELECT,
+      id: true,
       scholar: {
         select: { ...GRANT_INDEX_SELECT.scholar.select, roleCategory: true, hasHeadshot: true },
       },
     },
+    orderBy: [{ externalId: "asc" }, { id: "asc" }],
   });
+  // `projectFromRows` takes a project's canonical fields (title, sponsor) from
+  // its head row, so the order must be stable: the qualifying rows first (the
+  // ones that put the project in the area), then by externalId.
+  const qualifyingIds = new Set(qualifying.map((g) => g.id));
+  rows.sort((a, b) => Number(qualifyingIds.has(b.id)) - Number(qualifyingIds.has(a.id)));
   const [hiders, suppressed] = await Promise.all([
     loadHiders(
       rows.map((r) => r.cwid),
@@ -364,7 +371,9 @@ async function hydrateGrants(
     if (!doc) continue;
     const endDate = new Date(doc.endDate);
     hits.push({
-      projectId: doc.projectId,
+      // The grouping key, as the funding index sets it (etl/search-index), so
+      // the id is stable and matches the Funding search tab's.
+      projectId: c.key,
       title: doc.title,
       primeSponsor: doc.primeSponsor,
       primeSponsorRaw: doc.primeSponsorRaw,
