@@ -8,8 +8,9 @@
  * included, the scholar filter, the per-kind counts, sorts and paging.
  *
  * The fake db honors the `where` clauses the service relies on the database
- * for (area scores by topic and floor, text keys, sibling arms, override and
- * suppression ids, active scholars), so a row the query excludes cannot leak.
+ * for (area scores by topic and floor, text keys, sibling arms, override ids
+ * and value, suppression ids, entity type and revocation, active scholars), so
+ * a row the query excludes cannot leak.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -52,8 +53,8 @@ const state = vi.hoisted(() => ({
   scholars: {} as Record<string, Scholar>,
   grants: [] as Grant[],
   trials: [] as PersonTrial[],
-  overrides: [] as { entityId: string; fieldName: string }[],
-  suppressed: [] as string[],
+  overrides: [] as { entityId: string; fieldName: string; value: string }[],
+  suppressions: [] as { entityType: string; entityId: string; revokedAt: Date | null }[],
   /** `${textKey}|${topic}` -> score */
   scores: {} as Record<string, number>,
 }));
@@ -175,17 +176,44 @@ vi.mock("@/lib/db", () => {
             })),
       },
       fieldOverride: {
-        findMany: async ({ where }: { where: { entityId: { in: string[] }; fieldName: string } }) =>
-          state.overrides.filter((o) => where.entityId.in.includes(o.entityId) && o.fieldName === where.fieldName),
+        findMany: async ({
+          where,
+        }: {
+          where: {
+            entityType: string;
+            entityId: { in: string[] };
+            fieldName: string;
+            value?: string;
+          };
+        }) =>
+          state.overrides.filter(
+            (o) =>
+              where.entityType === "scholar" &&
+              where.entityId.in.includes(o.entityId) &&
+              o.fieldName === where.fieldName &&
+              (where.value === undefined || o.value === where.value),
+          ),
       },
       suppression: {
-        findMany: async ({ where }: { where: { entityId: { in: string[] } } }) =>
-          state.suppressed.filter((id) => where.entityId.in.includes(id)).map((entityId) => ({ entityId })),
+        findMany: async ({
+          where,
+        }: {
+          where: { entityType?: string; entityId: { in: string[] }; revokedAt?: null };
+        }) =>
+          state.suppressions
+            .filter(
+              (s) =>
+                where.entityId.in.includes(s.entityId) &&
+                (where.entityType === undefined || s.entityType === where.entityType) &&
+                (!("revokedAt" in where) || s.revokedAt === null),
+            )
+            .map((s) => ({ entityId: s.entityId })),
       },
     },
   };
 });
 
+import { coreProjectNum } from "@/lib/award-number";
 import { getTopicActivity, type TopicGrantActivityHit, type TopicTrialActivityHit } from "@/lib/api/topic-activity";
 
 const NOW = new Date("2026-10-15T00:00:00Z");
@@ -247,6 +275,17 @@ function trial(cwid: string, key: string | null, over: Partial<Trial> = {}): Per
   state.trials.push(t);
   return t;
 }
+/** A hide-section override; `value` "true" is the only one that hides. */
+const hide = (cwid: string, fieldName: string, value = "true") => {
+  state.overrides.push({ entityId: cwid, fieldName, value });
+};
+/** An active grant suppression unless `over` says otherwise. */
+const suppress = (
+  externalId: string,
+  over: Partial<{ entityType: string; revokedAt: Date | null }> = {},
+) => {
+  state.suppressions.push({ entityType: "grant", entityId: externalId, revokedAt: null, ...over });
+};
 const score = (key: string, s: number, topic = AREA) => {
   state.scores[`${key}|${topic}`] = s;
 };
@@ -264,7 +303,7 @@ beforeEach(() => {
   state.grants = [];
   state.trials = [];
   state.overrides = [];
-  state.suppressed = [];
+  state.suppressions = [];
   state.scores = {};
   n = 0;
   for (const c of ["tst001", "tst002", "tst003", "tst004"]) scholar(c);
@@ -293,9 +332,9 @@ describe("getTopicActivity", () => {
     score("k4", 0.9);
     score("k5", 0.9);
     const sup = grant("tst001", "k1", { title: "suppressed" });
-    state.suppressed.push(sup.externalId);
+    suppress(sup.externalId);
     grant("tst002", "k2", { title: "hidden funding" });
-    state.overrides.push({ entityId: "tst002", fieldName: "hideFunding" });
+    hide("tst002", "hideFunding");
     scholar("tstgone", { status: "suppressed" });
     grant("tstgone", "k3", { title: "inactive scholar" });
     grant("tst003", "k4", { title: "reporter row", source: "RePORTER", externalId: "reporter:s3:R01XX000001" });
@@ -310,8 +349,8 @@ describe("getTopicActivity", () => {
     score("t", 0.9);
     grant("tst001", "g", { title: "grant" });
     trial("tst002", "t", { title: "trial" });
-    state.overrides.push({ entityId: "tst001", fieldName: "hideClinicalTrials" });
-    state.overrides.push({ entityId: "tst002", fieldName: "hideFunding" });
+    hide("tst001", "hideClinicalTrials");
+    hide("tst002", "hideFunding");
     expect(await grantTitles()).toEqual(["grant"]);
     expect(((await trials()).hits as TopicTrialActivityHit[]).map((h) => h.title)).toEqual(["trial"]);
   });
@@ -324,13 +363,61 @@ describe("getTopicActivity", () => {
     grant("tst002", "k1", { account: "A101", awardNumber: "5R01HL123456-02", role: "Co-PI", title: "MPI award" });
     grant("tst003", null, { account: "A100", awardNumber: "1R01HL123456-01", role: "Co-I", title: "MPI award" });
     grant("tst004", "k1", { account: "A100", awardNumber: "1R01HL123456-01", role: "Co-PI", title: "MPI award" });
-    state.overrides.push({ entityId: "tst004", fieldName: "hideFunding" });
+    hide("tst004", "hideFunding");
     const r = await grants();
     expect(r.total).toBe(1);
     expect(r.counts.grant).toEqual({ strongly: 1, also: 0 });
     const hit = r.hits[0] as TopicGrantActivityHit;
     expect(hit.isMultiPi).toBe(true);
     expect(hit.people.map((p) => p.cwid)).toEqual(["tst001", "tst002", "tst003"]);
+  });
+
+  it("a suppressed sibling row on a qualifying project is left off the chips", async () => {
+    score("k1", 0.9);
+    grant("tst001", "k1", { account: "A200", title: "sibling suppression" });
+    // Not a qualifying row (no area key, Co-I): it only enters at hydration.
+    const sib = grant("tst002", null, {
+      account: "A200",
+      role: "Co-I",
+      title: "sibling suppression",
+    });
+    suppress(sib.externalId);
+    const hit = (await grants()).hits[0] as TopicGrantActivityHit;
+    expect(hit.people.map((p) => p.cwid)).toEqual(["tst001"]);
+  });
+
+  it("projectId is the project's grouping key, as in the funding index", async () => {
+    score("k1", 0.9);
+    grant("tst001", "k1", { account: "A300", awardNumber: "5R01HL654321-03" });
+    grant("tst002", "k1", { account: "A301", awardNumber: "1R01HL654321-01", role: "Co-PI" });
+    score("k2", 0.9);
+    grant("tst003", "k2", { account: "A302" });
+    const ids = ((await grants()).hits as TopicGrantActivityHit[]).map((h) => h.projectId).sort();
+    expect(ids).toEqual([coreProjectNum("1R01HL654321-01"), "A302"].sort());
+  });
+
+  it("a project's canonical fields come from a qualifying row, not a sibling", async () => {
+    score("k1", 0.9);
+    grant("tst002", null, { account: "A400", role: "Co-I", title: "sibling title" });
+    grant("tst001", "k1", { account: "A400", title: "qualifying title" });
+    expect(await grantTitles()).toEqual(["qualifying title"]);
+  });
+
+  it("only an active, grant-typed suppression and a 'true' override exclude a grant", async () => {
+    for (const k of ["a", "b", "c", "d"]) score(k, 0.9);
+    grant("tst001", "a", { title: "override false" });
+    hide("tst001", "hideFunding", "false");
+    const other = grant("tst002", "b", { title: "other entity type" });
+    suppress(other.externalId, { entityType: "publication" });
+    const revoked = grant("tst003", "c", { title: "revoked" });
+    suppress(revoked.externalId, { revokedAt: new Date("2026-01-01T00:00:00Z") });
+    grant("tst004", "d", { title: "plain" });
+    expect((await grantTitles()).sort()).toEqual([
+      "other entity type",
+      "override false",
+      "plain",
+      "revoked",
+    ]);
   });
 
   it("a project's score is its best text's score", async () => {
@@ -468,7 +555,7 @@ describe("getTopicActivity", () => {
       for (const k of ["a", "b", "c", "d", "e"]) score(k, 0.9);
       trial("tst001", "a", { status: "WITHDRAWN", title: "withdrawn" });
       trial("tst002", "b", { title: "hidden section" });
-      state.overrides.push({ entityId: "tst002", fieldName: "hideClinicalTrials" });
+      hide("tst002", "hideClinicalTrials");
       trial("tst003", "c", { title: "investigator" }).role = "Investigator";
       trial("tst003", "d", { nctNumber: null, title: "no nct" });
       trial("tst004", "e", { title: "kept" });
