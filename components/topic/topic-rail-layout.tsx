@@ -9,6 +9,7 @@ import { useMemo } from "react";
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
 import { TopicPublicationFeed } from "@/components/taxonomy/publication-feed";
+import { TopicActivityFeed } from "@/components/taxonomy/activity-feed";
 import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
 
 export type SubtopicRailItem = {
@@ -30,6 +31,7 @@ export function TopicRailLayout({
   totalPubCount,
   scholarNames = false,
   loadMore = false,
+  activityFeed = false,
 }: {
   topicSlug: string;
   /** Scope label for the scholar chips' hover card. */
@@ -44,6 +46,9 @@ export function TopicRailLayout({
   /** TAXONOMY_FEED_LOAD_MORE — Load more, one "All relevant" list and the
    *  per-row subarea label. */
   loadMore?: boolean;
+  /** TOPIC_FEED_GRANTS_TRIALS — the "Activities" feed with its Type select
+   *  (publications, grants, clinical trials). */
+  activityFeed?: boolean;
 }) {
   const items: TaxonomyRailItem[] = subtopics.map((s) => ({
     id: s.id,
@@ -105,12 +110,21 @@ export function TopicRailLayout({
                 variant={scholarNames ? "names" : "inline"}
               />
             )}
-            <TopicPublicationFeed
-              topicSlug={topicSlug}
-              activeSubtopic={activeSubtopic}
-              loadMore={loadMore}
-              subtopicLabels={subtopicLabels}
-            />
+            {activityFeed ? (
+              <TopicActivityFeed
+                topicSlug={topicSlug}
+                activeSubtopic={activeSubtopic}
+                loadMore={loadMore}
+                subtopicLabels={subtopicLabels}
+              />
+            ) : (
+              <TopicPublicationFeed
+                topicSlug={topicSlug}
+                activeSubtopic={activeSubtopic}
+                loadMore={loadMore}
+                subtopicLabels={subtopicLabels}
+              />
+            )}
           </>
         );
       }}

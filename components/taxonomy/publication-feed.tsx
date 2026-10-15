@@ -154,6 +154,14 @@ export type PublicationFeedProps = {
   /** Honor the scholar-card hover's "Filter publications" pick (`?cwid=`);
    *  only for routes that accept it (topic, method family). */
   scholarFilter?: boolean;
+  /** TOPIC_FEED_GRANTS_TRIALS — keep the scholar pick when this feed unmounts
+   *  (the topic Activities feed swaps it for a grant / trial list and owns the
+   *  clear itself). */
+  retainScholarFilter?: boolean;
+  /** Heading text; defaults to "Publications". */
+  heading?: string;
+  /** TOPIC_FEED_GRANTS_TRIALS — the Type select, rendered before Show / Sort. */
+  leadControl?: ReactNode;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -198,11 +206,17 @@ export function PublicationFeed({
   loadMore = false,
   areaLabelFor,
   scholarFilter = false,
+  retainScholarFilter = false,
+  heading,
+  leadControl,
 }: PublicationFeedProps) {
   const pickedScholar = useScholarFilter();
   const scholar = scholarFilter ? pickedScholar : null;
   // The pick belongs to this page's feed; drop it when the feed goes away.
-  useEffect(() => (scholarFilter ? () => setScholarFilter(null) : undefined), [scholarFilter]);
+  useEffect(
+    () => (scholarFilter && !retainScholarFilter ? () => setScholarFilter(null) : undefined),
+    [scholarFilter, retainScholarFilter],
+  );
   const scopeParams: Array<[string, string | null]> = scholar
     ? [...baseScopeParams, ["cwid", scholar.cwid]]
     : baseScopeParams;
@@ -317,9 +331,11 @@ export function PublicationFeed({
   return (
     <section className="flex flex-col gap-4">
       <PublicationsHeadingRow
+        heading={heading}
         countLabel={countLabel}
         badge={isCuratedSort ? <CuratedTag surface="publication_centric" /> : null}
       >
+        {leadControl}
         {showTierSelect && tierTotals && (
           <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
             Show
@@ -579,7 +595,7 @@ type RowProps = {
   areaLabelFor?: (hit: FeedHit) => string | null;
 };
 
-function FeedSkeleton() {
+export function FeedSkeleton() {
   return (
     <div className="flex flex-col gap-4">
       {[0, 1, 2].map((i) => (
@@ -589,18 +605,18 @@ function FeedSkeleton() {
   );
 }
 
-function FeedError() {
+export function FeedError({ noun = "publications" }: { noun?: string }) {
   return (
     <div className="text-sm text-muted-foreground">
-      Could not load publications. Try refreshing.
+      {`Could not load ${noun}. Try refreshing.`}
     </div>
   );
 }
 
-function FeedEmpty({ body }: { body: string }) {
+export function FeedEmpty({ body, noun = "publications" }: { body: string; noun?: string }) {
   return (
     <div className="py-8 text-center">
-      <h3 className="text-base font-semibold">No publications found</h3>
+      <h3 className="text-base font-semibold">{`No ${noun} found`}</h3>
       <p className="text-sm text-muted-foreground">{body}</p>
     </div>
   );
@@ -951,6 +967,9 @@ export function TopicPublicationFeed({
   activeSubtopic,
   loadMore = false,
   subtopicLabels,
+  heading,
+  leadControl,
+  retainScholarFilter,
 }: {
   topicSlug: string;
   /** The subtopic title/description live in the rail layout's subhead. */
@@ -960,6 +979,12 @@ export function TopicPublicationFeed({
   /** TAXONOMY_FEED_LOAD_MORE — subtopic id → display name for the per-row
    *  area label, shown only when no subarea is selected. */
   subtopicLabels?: Record<string, string>;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): "Activities". */
+  heading?: string;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): the Type select. */
+  leadControl?: ReactNode;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed) owns the scholar pick. */
+  retainScholarFilter?: boolean;
 }) {
   const areaLabelFor = useMemo(() => {
     if (!loadMore || activeSubtopic || !subtopicLabels) return undefined;
@@ -983,6 +1008,9 @@ export function TopicPublicationFeed({
       emptyBody="Publications in this area will appear as they are indexed."
       loadMore={loadMore}
       areaLabelFor={areaLabelFor}
+      heading={heading}
+      leadControl={leadControl}
+      retainScholarFilter={retainScholarFilter}
     />
   );
 }

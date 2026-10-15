@@ -16,7 +16,11 @@ import {
   SCHOLAR_CARD_LIMIT,
   type ScholarCardData,
 } from "@/components/taxonomy/scholar-card-grid";
-import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
+import {
+  isTaxonomyFeedLoadMoreOn,
+  isTaxonomyScholarCardsOn,
+  isTopicFeedGrantsTrialsOn,
+} from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { TopicRailLayout } from "@/components/topic/topic-rail-layout";
 import {
@@ -204,6 +208,7 @@ export default async function TopicPage({
           totalPubCount={totalPubsForStats}
           scholarNames={scholarCards}
           loadMore={isTaxonomyFeedLoadMoreOn()}
+          activityFeed={isTopicFeedGrantsTrialsOn()}
         />
       </section>
     </main>
