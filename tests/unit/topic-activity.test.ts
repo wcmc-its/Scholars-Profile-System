@@ -59,6 +59,9 @@ const state = vi.hoisted(() => ({
   scores: {} as Record<string, number>,
   /** `${textKey}|${topic}` -> primary subarea slug (absent = unassigned) */
   primaries: {} as Record<string, string>,
+  /** Publication counts the two raw queries return (area totals, per-scholar rows). */
+  pubTotals: { s: 0n, a: 0n } as { s: bigint; a: bigint },
+  pubRows: [] as { cwid: string; s: bigint; a: bigint }[],
 }));
 
 vi.mock("@/lib/db", () => {
@@ -100,11 +103,15 @@ vi.mock("@/lib/db", () => {
     (a.awardNumber && (g.awardNumber ?? "").includes(a.awardNumber.contains));
   return {
     prisma: {
+      $queryRaw: async (strings: TemplateStringsArray) =>
+        strings.join("?").includes("GROUP BY") ? state.pubRows : [state.pubTotals],
       topic: {
         findUnique: async ({ where }: { where: { id: string } }) =>
           where.id in state.topics ? { id: where.id, ...state.topics[where.id] } : null,
       },
       scholar: {
+        findMany: async ({ where }: { where: { cwid: { in: string[] } } }) =>
+          where.cwid.in.filter(active).map((cwid) => ({ cwid, ...scholarOut(cwid) })),
         findFirst: async ({ where }: { where: { cwid: string } }) =>
           active(where.cwid) ? { roleCategory: state.scholars[where.cwid].roleCategory } : null,
       },
@@ -231,7 +238,12 @@ vi.mock("@/lib/db", () => {
 });
 
 import { coreProjectNum } from "@/lib/award-number";
-import { getTopicActivity, type TopicGrantActivityHit, type TopicTrialActivityHit } from "@/lib/api/topic-activity";
+import {
+  getTopicActivity,
+  getTopicActivityScholars,
+  type TopicGrantActivityHit,
+  type TopicTrialActivityHit,
+} from "@/lib/api/topic-activity";
 
 const NOW = new Date("2026-10-15T00:00:00Z");
 const AREA = "cardio_example";
@@ -327,6 +339,8 @@ beforeEach(() => {
   state.suppressions = [];
   state.scores = {};
   state.primaries = {};
+  state.pubTotals = { s: 0n, a: 0n };
+  state.pubRows = [];
   n = 0;
   for (const c of ["tst001", "tst002", "tst003", "tst004"]) scholar(c);
 });
@@ -523,6 +537,26 @@ describe("getTopicActivity", () => {
     expect(await grantTitles({ sort: "best_match" })).toEqual(["old", "new"]);
   });
 
+  it("status sort: open grants first; ending sort: soonest open end, then latest ended", async () => {
+    score("k", 0.9);
+    const d = (s: string) => new Date(`${s}T00:00:00Z`);
+    grant("tst001", "k", { title: "ended-old", startDate: d("2021-01-01"), endDate: d("2022-01-01") });
+    grant("tst001", "k", { title: "ended-new", startDate: d("2022-01-01"), endDate: d("2024-01-01") });
+    grant("tst001", "k", { title: "open-late", startDate: d("2023-01-01"), endDate: d("2030-01-01") });
+    grant("tst001", "k", { title: "open-soon", startDate: d("2021-06-01"), endDate: d("2027-01-01") });
+    expect(await grantTitles({ sort: "status" })).toEqual(["open-late", "open-soon", "ended-new", "ended-old"]);
+    expect(await grantTitles({ sort: "ending" })).toEqual(["open-soon", "open-late", "ended-new", "ended-old"]);
+  });
+
+  it("status sort ranks trials recruiting, then active not recruiting, then closed", async () => {
+    score("k", 0.9);
+    trial("tst001", "k", { title: "done", ctgovStatus: "COMPLETED", startDate: "2025-01" } as Partial<Trial>);
+    trial("tst001", "k", { title: "active", ctgovStatus: "ACTIVE_NOT_RECRUITING", startDate: "2024-01" } as Partial<Trial>);
+    trial("tst001", "k", { title: "recruiting", ctgovStatus: "RECRUITING", startDate: "2021-01" } as Partial<Trial>);
+    const titles = ((await trials({ sort: "status" })).hits as TopicTrialActivityHit[]).map((h) => h.title);
+    expect(titles).toEqual(["recruiting", "active", "done"]);
+  });
+
   it("pages in memory and counts the whole scope", async () => {
     for (let i = 0; i < 25; i += 1) {
       score(`k${i}`, 0.9);
@@ -657,5 +691,42 @@ describe("getTopicActivity", () => {
       expect((r.hits as TopicTrialActivityHit[]).map((h) => h.title)).toEqual(["lo"]);
       expect(r.tierTotals).toEqual({ strongly: 1, also: 1 });
     });
+  });
+});
+
+describe("getTopicActivityScholars", () => {
+  it("returns null for an unknown area", async () => {
+    expect(await getTopicActivityScholars("nope", {}, NOW)).toBeNull();
+  });
+
+  it("counts each scholar's papers, grants and trials per tier, public scholars only", async () => {
+    score("hi", 0.9);
+    score("lo", 0.4);
+    grant("tst001", "hi");
+    grant("tst001", "lo");
+    grant("tst002", "hi", { account: "SHARED" });
+    grant("tst003", "hi", { account: "SHARED", role: "Co-PI" });
+    trial("tst002", "lo");
+    scholar("tst004", { status: "inactive" });
+    state.pubTotals = { s: 5n, a: 7n };
+    state.pubRows = [
+      { cwid: "tst001", s: 2n, a: 3n },
+      { cwid: "tst004", s: 1n, a: 1n },
+    ];
+    const r = (await getTopicActivityScholars(AREA, {}, NOW))!;
+    expect(r.totals).toEqual({
+      pubs: { strongly: 5, also: 2 },
+      grant: { strongly: 2, also: 1 },
+      trial: { strongly: 0, also: 1 },
+    });
+    const by = Object.fromEntries(r.scholars.map((s) => [s.cwid, s]));
+    expect(Object.keys(by).sort()).toEqual(["tst001", "tst002", "tst003"]);
+    expect(by.tst001.pubs).toEqual({ strongly: 2, also: 1 });
+    expect(by.tst001.grant).toEqual({ strongly: 1, also: 1 });
+    // The multi-PI project counts once for each of its investigators.
+    expect(by.tst002.grant).toEqual({ strongly: 1, also: 0 });
+    expect(by.tst003.grant).toEqual({ strongly: 1, also: 0 });
+    expect(by.tst002.trial).toEqual({ strongly: 0, also: 1 });
+    expect(by.tst001.name).toBe("Scholar tst001");
   });
 });

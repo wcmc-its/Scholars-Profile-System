@@ -82,7 +82,7 @@ type Sort = "newest" | "most_cited" | "by_impact";
 type Filter = "research_articles_only" | "all";
 /** #326 — "strongly" shows the strongly-relevant tier only (default); "all"
  *  adds the also-relevant tier. */
-type ShowTier = "strongly" | "all";
+export type ShowTier = "strongly" | "all";
 
 export type FeedHit = {
   pmid: string;
@@ -160,8 +160,11 @@ export type PublicationFeedProps = {
   retainScholarFilter?: boolean;
   /** Heading text; defaults to "Publications". */
   heading?: string;
-  /** TOPIC_FEED_GRANTS_TRIALS — the Type select, rendered before Show / Sort. */
-  leadControl?: ReactNode;
+  /** TOPIC_FEED_GRANTS_TRIALS — the Activities header replaces the heading row,
+   *  the Show select and the scholar chip; it gets this feed's Sort control. */
+  renderHeader?: (sortControl: ReactNode) => ReactNode;
+  /** TOPIC_FEED_GRANTS_TRIALS — the Show tier, set by the header's switch. */
+  showTier?: ShowTier;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -208,7 +211,8 @@ export function PublicationFeed({
   scholarFilter = false,
   retainScholarFilter = false,
   heading,
-  leadControl,
+  renderHeader,
+  showTier: showTierProp,
 }: PublicationFeedProps) {
   const pickedScholar = useScholarFilter();
   const scholar = scholarFilter ? pickedScholar : null;
@@ -223,7 +227,8 @@ export function PublicationFeed({
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   // #326 — defaults to "strongly" on every mount (no persistence).
-  const [showTier, setShowTier] = useState<ShowTier>("strongly");
+  const [ownShowTier, setShowTier] = useState<ShowTier>("strongly");
+  const showTier = showTierProp ?? ownShowTier;
   const scopeKey = JSON.stringify(scopeParams);
   const isCuratedSort = sort === "by_impact";
 
@@ -328,14 +333,35 @@ export function PublicationFeed({
 
   const rowProps = { modalTopicSlug, entityTerm, areaLabelFor };
 
+  const sortSelect = (
+    <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
+      <SelectTrigger className={renderHeader ? "w-[170px]" : "w-[200px]"} aria-label="Sort by">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="newest">Newest</SelectItem>
+        <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
+        <SelectItem value="most_cited">Most cited</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+
   return (
     <section className="flex flex-col gap-4">
+      {renderHeader ? (
+        renderHeader(
+          <>
+            Sort
+            {sortSelect}
+            {isCuratedSort && <CuratedTag surface="publication_centric" />}
+          </>,
+        )
+      ) : (
       <PublicationsHeadingRow
         heading={heading}
         countLabel={countLabel}
         badge={isCuratedSort ? <CuratedTag surface="publication_centric" /> : null}
       >
-        {leadControl}
         {showTierSelect && tierTotals && (
           <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
             Show
@@ -356,25 +382,17 @@ export function PublicationFeed({
         )}
         <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
           Sort by
-          <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
-            <SelectTrigger className="w-[200px]" aria-label="Sort by">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
-              <SelectItem value="most_cited">Most cited</SelectItem>
-            </SelectContent>
-          </Select>
+          {sortSelect}
         </div>
       </PublicationsHeadingRow>
+      )}
 
       {scholarFilter && (
         <p className="sr-only" role="status" aria-live="polite">
           {scholar ? `Showing publications by ${scholar.name}` : ""}
         </p>
       )}
-      {scholar && <ScholarFilterChip scholar={scholar} />}
+      {scholar && !renderHeader && <ScholarFilterChip scholar={scholar} />}
       {headerSlot}
 
       <FilterToggleRow data={data} filter={filter} setFilter={setFilter} />
@@ -967,8 +985,8 @@ export function TopicPublicationFeed({
   activeSubtopic,
   loadMore = false,
   subtopicLabels,
-  heading,
-  leadControl,
+  renderHeader,
+  showTier,
   retainScholarFilter,
 }: {
   topicSlug: string;
@@ -979,10 +997,10 @@ export function TopicPublicationFeed({
   /** TAXONOMY_FEED_LOAD_MORE — subtopic id → display name for the per-row
    *  area label, shown only when no subarea is selected. */
   subtopicLabels?: Record<string, string>;
-  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): "Activities". */
-  heading?: string;
-  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): the Type select. */
-  leadControl?: ReactNode;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): the Activities header. */
+  renderHeader?: (sortControl: ReactNode) => ReactNode;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): the related switch. */
+  showTier?: ShowTier;
   /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed) owns the scholar pick. */
   retainScholarFilter?: boolean;
 }) {
@@ -1008,8 +1026,8 @@ export function TopicPublicationFeed({
       emptyBody="Publications in this area will appear as they are indexed."
       loadMore={loadMore}
       areaLabelFor={areaLabelFor}
-      heading={heading}
-      leadControl={leadControl}
+      renderHeader={renderHeader}
+      showTier={showTier}
       retainScholarFilter={retainScholarFilter}
     />
   );

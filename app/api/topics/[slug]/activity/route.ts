@@ -1,5 +1,8 @@
 /**
- * GET /api/topics/[slug]/activity?kind=grant|trial
+ * GET /api/topics/[slug]/activity?kind=grant|trial|scholars
+ *
+ * `kind=scholars` returns the Activities Scholars chips' per-scholar counts
+ * (`getTopicActivityScholars`); it reads only `subtopic`.
  *
  * CSR endpoint for a research area's grants and clinical trials
  * (TOPIC_FEED_GRANTS_TRIALS; service lib/api/topic-activity.ts). 404 while the
@@ -27,6 +30,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
 import {
   getTopicActivity,
+  getTopicActivityScholars,
   type TopicActivityKind,
   type TopicActivitySort,
 } from "@/lib/api/topic-activity";
@@ -38,7 +42,12 @@ import { clampFeedPage, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 export const dynamic = "force-dynamic";
 
 const KIND_ALLOWLIST: ReadonlySet<TopicActivityKind> = new Set(["grant", "trial"]);
-const SORT_ALLOWLIST: ReadonlySet<TopicActivitySort> = new Set(["newest", "best_match"]);
+const SORT_ALLOWLIST: ReadonlySet<TopicActivitySort> = new Set([
+  "newest",
+  "best_match",
+  "status",
+  "ending",
+]);
 const TIER_ALLOWLIST: ReadonlySet<TopicPublicationTier> = new Set(["strongly", "also"]);
 const SUBTOPIC_RE = /^[a-z0-9_]+$/;
 const TOPIC_SLUG_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
@@ -58,6 +67,17 @@ export async function GET(
   const sp = request.nextUrl.searchParams;
 
   const kindRaw = sp.get("kind");
+  if (kindRaw === "scholars") {
+    const sub = sp.get("subtopic");
+    if (sub !== null && !SUBTOPIC_RE.test(sub)) {
+      return apiError("invalid subtopic", 400);
+    }
+    const result = await getTopicActivityScholars(slug, { subtopic: sub ?? undefined });
+    if (result === null) {
+      return apiError("topic not found", 404);
+    }
+    return NextResponse.json(result);
+  }
   if (kindRaw === null || !KIND_ALLOWLIST.has(kindRaw as TopicActivityKind)) {
     return apiError("invalid kind", 400);
   }

@@ -4,11 +4,12 @@
  *
  *   - flag off: `TopicPublicationFeed` is today's feed ("Publications" heading,
  *     no Type select, only the publications route);
- *   - flag on: "Activities" heading, a Type select with Show / Sort; a type
- *     with a zero count is not offered; switching to Grants / Clinical trials
- *     fetches `/api/topics/[slug]/activity?kind=…`, renders the Search rows,
- *     hides the research-articles toggle and writes `?feed=` on the client;
- *     `?feed=` is read back on load.
+ *   - flag on: the Activities header (Scholars chips from `?kind=scholars`, type
+ *     tabs with counts, Sort, the "Include related …" switch); a zero-count tab
+ *     is disabled; switching to Grants / Clinical trials fetches
+ *     `/api/topics/[slug]/activity?kind=…`, renders the Search rows, hides the
+ *     research-articles toggle and writes `?feed=` on the client; `?feed=` is
+ *     read back on load.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -57,7 +58,9 @@ vi.mock("@/components/ui/select", () => {
 import { TopicPublicationFeed } from "@/components/taxonomy/publication-feed";
 import { readFeedParam, TopicActivityFeed } from "@/components/taxonomy/activity-feed";
 
-type Counts = { grant: { strongly: number; also: number }; trial: { strongly: number; also: number } };
+type Tiers = { strongly: number; also: number };
+type Counts = { grant: Tiers; trial: Tiers };
+const PUBS: Tiers = { strongly: 1, also: 0 };
 
 function stubServer(counts: Counts) {
   const calls: URL[] = [];
@@ -68,7 +71,24 @@ function stubServer(counts: Counts) {
       calls.push(url);
       const q = url.searchParams;
       let body: unknown;
-      if (url.pathname.endsWith("/activity")) {
+      if (url.pathname.endsWith("/activity") && q.get("kind") === "scholars") {
+        body = {
+          totals: { pubs: PUBS, ...counts },
+          scholars: [
+            { cwid: "aaa1001", name: "Ann Able", slug: "ann-able", headshot: "", pubs: PUBS, ...counts },
+            {
+              cwid: "bbb2002",
+              name: "Bob Baker",
+              slug: "bob-baker",
+              headshot: "",
+              pubs: { strongly: 0, also: 0 },
+              grant: { strongly: 1, also: 0 },
+              trial: { strongly: 0, also: 0 },
+            },
+          ],
+          displayThreshold: 0.5,
+        };
+      } else if (url.pathname.endsWith("/activity")) {
         const kind = q.get("kind") as "grant" | "trial";
         const t = counts[kind];
         const total = q.get("tier") === "strongly" ? t.strongly : t.strongly + t.also;
@@ -121,7 +141,6 @@ function stubServer(counts: Counts) {
 }
 
 const heading = () => screen.getByTestId("publications-heading-row").querySelector("h3")!.textContent;
-const count = () => screen.getByTestId("publications-count").textContent;
 const select = (aria: string) =>
   document.querySelector(`optgroup[data-trigger-aria='${aria}']`)?.closest("select") ?? null;
 const options = (aria: string) =>
@@ -148,66 +167,65 @@ describe("flag off: TopicPublicationFeed is unchanged", () => {
   });
 });
 
+const tab = (name: RegExp) => screen.getByRole("tab", { name });
+const tabCount = (name: RegExp) => tab(name).querySelector("span")!.textContent;
+
 describe("flag on: TopicActivityFeed", () => {
-  it("Activities heading; Type select first; a zero-count type is not offered", async () => {
-    stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 0, also: 0 } });
+  it("Activities header: tabs with counts, zero-count tab disabled, Scholars chips", async () => {
+    const calls = stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 0, also: 0 } });
     render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} />);
     await screen.findByText("Paper one");
-    expect(heading()).toBe("Activities");
-    await waitFor(() => expect(select("Type")).not.toBeNull());
-    expect(options("Type")).toEqual(["publications", "grants"]);
-    expect(select("Type")!.value).toBe("publications");
-    // Type sits before Sort in the controls.
-    const selects = Array.from(document.querySelectorAll("select"));
-    expect(selects.indexOf(select("Type")!)).toBeLessThan(selects.indexOf(select("Sort by")!));
-    // Publications view keeps the research-articles toggle.
+    expect(screen.getByRole("heading", { name: "Activities" })).toBeTruthy();
+    await waitFor(() => expect(tabCount(/Grants/)).toBe("3"));
+    expect(tab(/Publications/).getAttribute("aria-selected")).toBe("true");
+    expect(tabCount(/Publications/)).toBe("1");
+    expect((tab(/Clinical trials/) as HTMLButtonElement).disabled).toBe(true);
+    // Chips: All = 1 paper + 3 grants; sorted by count.
+    const chips = screen.getByTestId("activities-scholars").querySelectorAll("button[aria-pressed]");
+    expect(Array.from(chips).map((c) => c.textContent)).toEqual(["All4", "AAAnn Able4", "BBBob Baker1"]);
+    expect(calls.some((u) => u.searchParams.get("kind") === "scholars")).toBe(true);
+    // Publications view keeps the research-articles toggle; no related switch (no also tier).
     expect(screen.getByText(/Show all publication types/)).toBeTruthy();
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  it("no grants and no trials: no Type select", async () => {
-    const calls = stubServer({ grant: { strongly: 0, also: 0 }, trial: { strongly: 0, also: 0 } });
-    render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} />);
-    await screen.findByText("Paper one");
-    await waitFor(() => expect(activityCalls(calls).length).toBeGreaterThan(0));
-    expect(select("Type")).toBeNull();
-    expect(heading()).toBe("Activities");
-  });
-
-  it("switching to Grants fetches the activity route and renders grant rows", async () => {
+  it("switching to Grants fetches the activity route; Sort and the related switch reach it", async () => {
     const calls = stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 2, also: 0 } });
     render(<TopicActivityFeed topicSlug="cardio" activeSubtopic="sub_a" />);
-    await waitFor(() => expect(select("Type")).not.toBeNull());
-    expect(options("Type")).toEqual(["publications", "grants", "trials"]);
+    await waitFor(() => expect(tabCount(/Grants/)).toBe("3"));
     const before = activityCalls(calls).length;
 
-    fireEvent.change(select("Type")!, { target: { value: "grants" } });
+    fireEvent.click(tab(/Grants/));
     await waitFor(() => expect(screen.getAllByTestId("grant-row")).toHaveLength(3));
-    const req = activityCalls(calls).slice(before)[0];
-    expect(req.pathname).toBe("/api/topics/cardio/activity");
-    expect(req.searchParams.get("kind")).toBe("grant");
-    expect(req.searchParams.get("sort")).toBe("newest");
+    const req = activityCalls(calls).slice(before).find((u) => u.searchParams.get("kind") === "grant")!;
+    expect(req.searchParams.get("sort")).toBe("status");
     expect(req.searchParams.get("tier")).toBe("strongly");
     expect(req.searchParams.get("subtopic")).toBe("sub_a");
-    expect(heading()).toBe("Activities");
-    expect(count()).toBe("4");
-    expect(screen.getByTestId("activity-note").textContent).toMatch(/InfoEd awards since 2020/);
     expect(screen.queryByText(/Show all publication types/)).toBeNull();
-    expect(options("Sort by")).toEqual(["newest", "best_match"]);
-    expect(options("Show")).toEqual(["strongly", "all"]);
+    expect(options("Sort by")).toEqual(["status", "newest", "ending", "best_match"]);
+    expect(screen.getByText("Include related grants")).toBeTruthy();
     expect(new URLSearchParams(window.location.search).get("feed")).toBe("grants");
 
-    // Sort and Show reach the route.
-    fireEvent.change(select("Sort by")!, { target: { value: "best_match" } });
-    await waitFor(() =>
-      expect(activityCalls(calls).at(-1)!.searchParams.get("sort")).toBe("best_match"),
-    );
-    fireEvent.change(select("Show")!, { target: { value: "all" } });
+    fireEvent.change(select("Sort by")!, { target: { value: "ending" } });
+    await waitFor(() => expect(activityCalls(calls).at(-1)!.searchParams.get("sort")).toBe("ending"));
+    fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(screen.getAllByTestId("grant-row")).toHaveLength(4));
     expect(activityCalls(calls).at(-1)!.searchParams.has("tier")).toBe(false);
+    expect(tabCount(/Grants/)).toBe("4");
+
+    // A chip pick filters the list by cwid.
+    fireEvent.click(screen.getByRole("button", { name: /Bob Baker/ }));
+    await waitFor(() => expect(activityCalls(calls).at(-1)!.searchParams.get("cwid")).toBe("bbb2002"));
+    expect(tabCount(/Grants/)).toBe("1");
+
+    // Bob has no papers: Publications is disabled until "All" clears the pick.
+    expect((tab(/Publications/) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
 
     // Back to Publications drops ?feed=.
-    fireEvent.change(select("Type")!, { target: { value: "publications" } });
-    await screen.findByText("Paper one");
+    fireEvent.click(tab(/Publications/));
+    // The switch is still on: the stub serves the paper in both tiers.
+    await screen.findAllByText("Paper one");
     expect(new URLSearchParams(window.location.search).has("feed")).toBe(false);
   });
 
@@ -217,11 +235,9 @@ describe("flag on: TopicActivityFeed", () => {
     render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} />);
     await waitFor(() => expect(screen.getAllByTestId("trial-row")).toHaveLength(2));
     expect(activityCalls(calls).some((u) => u.searchParams.get("kind") === "trial")).toBe(true);
-    expect(options("Type")).toEqual(["publications", "trials"]);
-    expect(count()).toBe("2");
-    expect(screen.getByTestId("activity-note").textContent).toMatch(/NCT-registered/);
-    // No also tier: no Show select.
-    expect(select("Show")).toBeNull();
+    expect(tab(/Clinical trials/).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("button", { name: /NCT-registered/ })).toBeTruthy();
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("?feed= for a type with nothing in scope falls back to publications", async () => {
@@ -229,8 +245,8 @@ describe("flag on: TopicActivityFeed", () => {
     stubServer({ grant: { strongly: 0, also: 0 }, trial: { strongly: 2, also: 0 } });
     render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} />);
     await screen.findByText("Paper one");
-    await waitFor(() => expect(options("Type")).toEqual(["publications", "trials"]));
-    expect(select("Type")!.value).toBe("publications");
+    await waitFor(() => expect(tab(/Publications/).getAttribute("aria-selected")).toBe("true"));
+    expect((tab(/Grants/) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("readFeedParam accepts only grants / trials", () => {
