@@ -48,7 +48,7 @@ import { revalidatePath } from "next/cache";
 import { bust } from "@/lib/api/swr-cache";
 import { db } from "@/lib/db";
 import { runAfterResponse } from "@/lib/edit/after-response";
-import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
+import { ALL_PROFILES_ROUTE, isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
 import { canonicalProfilePath } from "@/lib/profile-url";
 
 /** Bust the Next.js ISR cache for each allow-listed path. */
@@ -301,6 +301,21 @@ export async function reflectVisibilityChange(
   // the /methods pages re-serve the suppressed work for up to MAX_STALE_MS.
   bust("methods:");
   await invalidateCloudFront(paths);
+}
+
+/**
+ * Reflect an edit that can change ANY profile — a methods family tier change
+ * rewrites the overlay every profile's methods section is filtered through.
+ * Expires every cached profile (the same route-pattern bust the nightly sweep
+ * sends) and purges the edge with one `/*` path.
+ *
+ * ponytail: all profiles, not just the family's scholars — tier edits are rare
+ * steward actions and renders stay lazy (only visited profiles rebuild). Resolve
+ * the affected cwids if tier edits ever become frequent.
+ */
+export async function reflectAllProfilesChange(): Promise<void> {
+  revalidatePath(ALL_PROFILES_ROUTE, "page");
+  await invalidateCloudFront(["/*"]);
 }
 
 /** The slug + cwid pair for one profile a suppression or revoke touches. */
