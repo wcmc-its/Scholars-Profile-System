@@ -159,7 +159,7 @@ export async function loadTrialEvidenceByCwid(
   return out;
 }
 
-function trialStatusFields(statusKey: TrialStatusKey) {
+export function trialStatusFields(statusKey: TrialStatusKey) {
   const active = ["recruiting", "not_yet_recruiting", "enrolling_by_invitation", "active_not_recruiting"];
   return {
     statusKey,
@@ -169,7 +169,7 @@ function trialStatusFields(statusKey: TrialStatusKey) {
 }
 
 /** CT.gov dates; a trial without them (no NCT) starts at OnCore's first open-to-accrual date. */
-function trialDates(t: {
+export function trialDates(t: {
   startDate: string | null;
   startDateType: string | null;
   primaryCompletionDate: string | null;

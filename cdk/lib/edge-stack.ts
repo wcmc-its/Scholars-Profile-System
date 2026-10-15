@@ -904,6 +904,11 @@ export class EdgeStack extends Stack {
       // and (TAXONOMY_SCHOLAR_CARDS) `cwid`. Never cached, so the per-scholar
       // filter needs no cache-key change.
       ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Topic grants and trials feed (TOPIC_FEED_GRANTS_TRIALS) -- reads `kind`/
+      // `sort`/`tier`/`subtopic`/`cwid`/`page`/`limit`. Same shape as the
+      // publication feed above: unlisted it falls to the cacheable default,
+      // which strips the query string. GET-only (a read).
+      ["/api/topics/*/activity", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
       // `page` (#824), `entity` (#1166), `cwid` (TAXONOMY_SCHOLAR_CARDS) and
       // `limit` (TAXONOMY_FEED_LOAD_MORE). Same shape as
