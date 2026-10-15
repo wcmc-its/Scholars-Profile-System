@@ -6,7 +6,10 @@ import {
   RECENCY_YEARS,
   buildReporterGrantRow,
   groupProjectsByCore,
+  hasNameOnlyProfile,
+  isWcmOrg,
   recencyShouldSuppress,
+  unverifiedShouldSuppress,
   type GroupedProject,
 } from "@/etl/reporter-grants/transform";
 import type { ReporterGrantProject } from "@/etl/nih-profile/fetcher";
@@ -44,6 +47,67 @@ describe("recencyShouldSuppress", () => {
 
   it("leaves an undatable grant (null fiscal year) visible", () => {
     expect(recencyShouldSuppress(null, 2026)).toBe(false);
+  });
+});
+
+describe("#3071 uncorroborated name-only default-hide", () => {
+  it("treats a scholar as name-only when ANY profile row was resolved by name", () => {
+    expect(hasNameOnlyProfile(["name_query"])).toBe(true);
+    expect(hasNameOnlyProfile(["name_match"])).toBe(true);
+    // Profiles are unioned, so one name-only row is enough to import a namesake.
+    expect(hasNameOnlyProfile(["grant_join_contact", "name_query"])).toBe(true);
+    expect(hasNameOnlyProfile(["grant_join_contact"])).toBe(false);
+    expect(hasNameOnlyProfile(["grant_join_pi", "pmid-overlap-auto"])).toBe(false);
+    expect(hasNameOnlyProfile([])).toBe(false);
+  });
+
+  it("hides a name-only award that nothing ties to the scholar", () => {
+    expect(
+      unverifiedShouldSuppress({
+        nameOnlyProfile: true,
+        wcmOrgHistory: false,
+        publicationCorroborated: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps an award with any corroborating signal", () => {
+    expect(
+      unverifiedShouldSuppress({
+        nameOnlyProfile: true,
+        wcmOrgHistory: true,
+        publicationCorroborated: false,
+      }),
+    ).toBe(false);
+    expect(
+      unverifiedShouldSuppress({
+        nameOnlyProfile: true,
+        wcmOrgHistory: false,
+        publicationCorroborated: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("never touches an award from a profile resolved by grant join", () => {
+    expect(
+      unverifiedShouldSuppress({
+        nameOnlyProfile: false,
+        wcmOrgHistory: false,
+        publicationCorroborated: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("sees WCM anywhere in the award's org history, not just its latest year", () => {
+    const [g] = groupProjectsByCore([
+      fyProj({ fiscal_year: 2012, org_name: "WEILL MEDICAL COLL OF CORNELL UNIV" }),
+      fyProj({ fiscal_year: 2016, org_name: "UNIVERSITY OF ELSEWHERE" }),
+    ]);
+    expect(isWcmOrg(g!.orgName)).toBe(true);
+    const [other] = groupProjectsByCore([
+      fyProj({ fiscal_year: 2016, org_name: "UNIVERSITY OF ELSEWHERE" }),
+    ]);
+    expect(isWcmOrg(other!.orgName)).toBe(false);
   });
 });
 
@@ -151,6 +215,26 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
 
   it("the recency default-hide reflects what it mints (#2284)", () => {
     expect(REPORTER).toContain("await reflectGrantSuppressions(minted)");
+  });
+
+  it("the #3071 unverified hide is flag-gated and reflected through the same minted batch", () => {
+    expect(REPORTER).toContain(
+      'process.env.REPORTER_GRANTS_CORROBORATION_HIDE === "on"',
+    );
+    // lastIndexOf: the first occurrence is the existing-hides read.
+    const mintStart = REPORTER.lastIndexOf("createdBy: SYSTEM_UNVERIFIED");
+    expect(mintStart).toBeGreaterThan(-1);
+    const after = REPORTER.slice(mintStart, mintStart + 400);
+    expect(after).toContain("minted.push(");
+  });
+
+  it("the #3071 corroboration read fails open on no PMIDs or a fetch error", () => {
+    const fn = REPORTER.slice(REPORTER.indexOf("async function uncorroboratedRowIds"));
+    expect(fn).toContain('if (pmids.size === 0) return "no-pmids"');
+    expect(fn).toContain('return "fetch-error"');
+    // Neither outcome may mint a hide: main() only judges rows on a Set result.
+    expect(REPORTER).toContain('uncorroborated === "no-pmids"');
+    expect(REPORTER).toContain('uncorroborated === "fetch-error"');
   });
 
   it("the v2 auto-lock write appends a B03 audit row, inside the same transaction", () => {

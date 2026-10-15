@@ -4,6 +4,7 @@ import {
   ABSTRACT_TITLE_MIN_OVERLAP,
   abstractTitleOverlap,
   grantAbstractMatchesTitle,
+  reporterAbstractIsAnotherProjects,
 } from "@/lib/grant-abstract-match";
 
 // Synthetic fixtures only (public repo): the shapes the pilot calibration found,
@@ -93,5 +94,30 @@ describe("grantAbstractMatchesTitle", () => {
     expect(grantAbstractMatchesTitle(TITLE, undefined)).toBe(true);
     expect(grantAbstractMatchesTitle(TITLE, "")).toBe(true);
     expect(grantAbstractMatchesTitle(TITLE, "   \n ")).toBe(true);
+  });
+});
+
+describe("reporterAbstractIsAnotherProjects (etl/reporter enrichment, #3071)", () => {
+  it("rejects another project's abstract on an InfoEd row", () => {
+    expect(
+      reporterAbstractIsAnotherProjects({ source: "InfoEd", title: TITLE }, OTHER_PROJECT),
+    ).toBe(true);
+  });
+
+  it("keeps the row's own abstract", () => {
+    expect(
+      reporterAbstractIsAnotherProjects({ source: "InfoEd", title: TITLE }, OWN_ABSTRACT),
+    ).toBe(false);
+  });
+
+  it("never judges a RePORTER-sourced row: its title comes from the same project", () => {
+    expect(
+      reporterAbstractIsAnotherProjects({ source: "RePORTER", title: TITLE }, OTHER_PROJECT),
+    ).toBe(false);
+  });
+
+  it("has nothing to judge without an abstract", () => {
+    expect(reporterAbstractIsAnotherProjects({ source: "InfoEd", title: TITLE }, null)).toBe(false);
+    expect(reporterAbstractIsAnotherProjects({ source: "InfoEd", title: TITLE }, "")).toBe(false);
   });
 });

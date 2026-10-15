@@ -85,3 +85,18 @@ export function grantAbstractMatchesTitle(
   if (titleTokens < ABSTRACT_TITLE_MIN_TOKENS) return true;
   return matched / titleTokens >= ABSTRACT_TITLE_MIN_OVERLAP;
 }
+
+/**
+ * #3071 — RePORTER enrichment (`etl/reporter`) keys on the award number, so an
+ * InfoEd row carrying another project's number fetches that project. True when
+ * the fetched abstract fails {@link grantAbstractMatchesTitle} against the
+ * InfoEd title: the row should be treated as unmatched. RePORTER-sourced rows
+ * are never judged — their title comes from the same RePORTER project.
+ */
+export function reporterAbstractIsAnotherProjects(
+  grant: { source: string; title: string | null },
+  reporterAbstract: string | null | undefined,
+): boolean {
+  if (grant.source !== "InfoEd" || !reporterAbstract) return false;
+  return !grantAbstractMatchesTitle(grant.title, reporterAbstract);
+}

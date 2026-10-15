@@ -48,6 +48,7 @@
  */
 import { db, disconnect } from "../../lib/db";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
+import { reporterAbstractIsAnotherProjects } from "@/lib/grant-abstract-match";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { fetchProjectEnrichmentByCoreProjectNums } from "../nih-profile/fetcher";
@@ -84,8 +85,11 @@ async function step1_GrantAbstracts() {
     select: {
       id: true,
       awardNumber: true,
+      title: true,
+      source: true,
       applId: true,
       abstract: true,
+      abstractSource: true,
       keywords: true,
     },
   });
@@ -115,12 +119,13 @@ async function step1_GrantAbstracts() {
   let matched = 0;
   const toUpdate: Array<{
     id: string;
-    applId: number;
+    applId: number | null;
     abstract: string | null;
     keywords: string[] | null;
   }> = [];
   let unparsable = 0;
   let unmatched = 0;
+  let titleMismatch = 0;
 
   for (const g of grants) {
     const core = coreProjectNum(g.awardNumber);
@@ -133,6 +138,22 @@ async function step1_GrantAbstracts() {
       unmatched++;
       continue;
     }
+    // #3071 — an InfoEd row with the wrong award number matches ANOTHER
+    // project, and would carry its abstract, terms and RePORTER link. When the
+    // fetched abstract shares (almost) no content words with the InfoEd title
+    // (the same lenient check #3083 applies to area scoring), treat the row as
+    // unmatched and clear anything a previous run wrote from that project.
+    // InfoEd only: a RePORTER-sourced row's title comes from the project itself.
+    const reporterAbstract = repairEncodingOrNull(r.abstractText);
+    if (reporterAbstractIsAnotherProjects(g, reporterAbstract)) {
+      titleMismatch++;
+      // Never clear an abstract another source (NSF, PCORI, ...) wrote.
+      const ours = g.abstractSource === null || g.abstractSource === "reporter";
+      if (ours && (g.applId !== null || g.abstract !== null || g.keywords !== null)) {
+        toUpdate.push({ id: g.id, applId: null, abstract: null, keywords: null });
+      }
+      continue;
+    }
     matched++;
     const keywords = parseReporterTerms(r.prefTerms, r.projectTerms);
     // Only update when something actually changed — avoids churning
@@ -143,7 +164,7 @@ async function step1_GrantAbstracts() {
     // Never replace a real abstract with an upstream NULL: RePORTER returns
     // no abstract on some awards it has otherwise published (and the mirror
     // this replaced had the same hole). applId/keywords still update normally.
-    const abstract = repairEncodingOrNull(r.abstractText) ?? g.abstract;
+    const abstract = reporterAbstract ?? g.abstract;
     if (
       g.applId !== r.applId ||
       g.abstract !== abstract ||
@@ -160,7 +181,8 @@ async function step1_GrantAbstracts() {
 
   console.log(
     `Matched ${matched} grants to RePORTER projects ` +
-    `(${unparsable} unparsable awardNumber, ${unmatched} parsable but no RePORTER match). ` +
+    `(${unparsable} unparsable awardNumber, ${unmatched} parsable but no RePORTER match, ` +
+    `${titleMismatch} InfoEd rows whose title does not match the RePORTER abstract). ` +
     `${toUpdate.length} need update.`
   );
 
