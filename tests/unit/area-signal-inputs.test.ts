@@ -229,14 +229,14 @@ describe("buildInputPlan", () => {
   });
 
   it("sends a grant whose abstract belongs to another project as title-only (#3071)", () => {
-    const title = "Thymic regulation of T cell aging in chronic inflammation";
+    const title = "Zebrafish fin regeneration signaling in chronic wound repair";
     const own =
-      "Age-related decline of the thymus limits naive T cell output. We define how thymic signals " +
-      "regulate T cell aging during chronic inflammation, and test whether restoring those signals " +
-      "in older animals reverses the inflammatory phenotype.";
+      "Adult zebrafish regrow an amputated fin within weeks. We define how regeneration signaling " +
+      "from the fin epidermis is lost during chronic wound repair, and test whether restoring that " +
+      "signaling in older fish rescues the repair response.";
     const other =
-      "This randomized trial compares two psychotherapy protocols for adolescents with major " +
-      "depressive disorder across community clinics, measuring remission and school attendance.";
+      "This field survey compares two irrigation schedules for dwarf citrus orchards across " +
+      "coastal farms, measuring fruit yield and soil salinity over three growing seasons.";
     const plan = buildInputPlan(
       [
         g({ id: "right", title, abstract: own }),
@@ -256,19 +256,21 @@ describe("buildInputPlan", () => {
     expect(plan.items.size).toBe(2);
     expect(plan.items.get(`grant#${plan.grantKeys.get("wrong")}`)).toMatchObject({ mode: "title", text: "" });
     expect(plan.items.get(`grant#${plan.grantKeys.get("right")}`)).toMatchObject({ mode: "full", text: own });
-    expect(JSON.stringify([...plan.items.values()])).not.toContain("psychotherapy");
+    expect(JSON.stringify([...plan.items.values()])).not.toContain("irrigation");
     expect(plan.grantAbstractsDropped).toBe(1);
   });
 
   it("re-keys a row whose abstract is newly dropped, without clearing it", () => {
-    const title = "Thymic regulation of T cell aging in chronic inflammation";
-    const other = "A trial of psychotherapy protocols for adolescent depression in community clinics.";
+    const title = "Zebrafish fin regeneration signaling in chronic wound repair";
+    const other = "A field survey of irrigation schedules for dwarf citrus orchards on coastal farms.";
     const before = areaTextKey("grant", [title, other]);
     const plan = buildInputPlan([g({ id: "wrong", title, abstract: other })], [], NOW);
     const cols = planKeyColumn(plan.grantKeys, new Map([["wrong", before]]));
     expect([...cols.set]).toEqual([["wrong", grantTextKey({ title, abstract: null })]]);
     expect(cols.clear).toEqual([]);
     expect(cols.clearSkipped).toBeNull();
+    // The queued item is the title-only text, not the dropped abstract.
+    expect(plan.items.get(`grant#${plan.grantKeys.get("wrong")}`)).toMatchObject({ mode: "title", text: "" });
   });
 
   it("counts no drops when every abstract matches or is empty", () => {

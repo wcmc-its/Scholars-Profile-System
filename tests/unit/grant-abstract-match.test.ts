@@ -8,19 +8,18 @@ import {
 
 // Synthetic fixtures only (public repo): the shapes the pilot calibration found,
 // written fresh, no real titles or abstracts.
-const TITLE = "Thymic regulation of T cell aging in a mouse model of chronic inflammation";
+const TITLE = "Zebrafish fin regeneration signaling in a model of chronic wound repair";
 const OWN_ABSTRACT =
-  "PROJECT SUMMARY Age-related decline of the thymus limits the output of naive T cells. " +
-  "We will use a mouse model of chronic inflammation to define how thymic epithelial signals " +
-  "regulate T cell aging, and test whether restoring them reverses inflammatory phenotypes.";
+  "PROJECT SUMMARY Adult zebrafish regrow an amputated fin within weeks. We will use a model of " +
+  "chronic wound repair to define how regeneration signaling from the fin epidermis is lost, and " +
+  "test whether restoring that signaling rescues repair in older fish.";
 const OTHER_PROJECT =
-  "ABSTRACT This randomized trial compares two psychotherapy protocols for adolescents with " +
-  "major depressive disorder across community clinics, measuring symptom remission, school " +
-  "attendance and family functioning over eighteen months of follow-up.";
+  "ABSTRACT This field survey compares two irrigation schedules for dwarf citrus orchards across " +
+  "coastal farms, measuring fruit yield, leaf color and soil salinity over three growing seasons.";
 const NETWORK_SUMMARY =
-  "PROJECT SUMMARY The overarching goal of the Example Trials Network is to identify acceptable, " +
-  "feasible and scalable interventions. The network supports clinical research sites, a data " +
-  "management center and a laboratory center that serve all protocols.";
+  "PROJECT SUMMARY The overarching goal of the Example Lunar Agriculture Consortium is to identify " +
+  "acceptable, feasible and scalable crop systems. The consortium supports field stations, a data " +
+  "management center and a seed bank that serve all protocols.";
 
 describe("grantAbstractMatchesTitle", () => {
   it("keeps a matching abstract", () => {
@@ -34,19 +33,35 @@ describe("grantAbstractMatchesTitle", () => {
 
   it("drops a parent network summary attached to a site award", () => {
     expect(
-      grantAbstractMatchesTitle("Vaccine Site Preparation - Uptown and Riverside", NETWORK_SUMMARY),
+      grantAbstractMatchesTitle(
+        "Greenhouse Plot Readiness - Northfield and Lakeside",
+        NETWORK_SUMMARY,
+      ),
     ).toBe(false);
   });
 
   it("keeps an abstract that paraphrases most title words but restates one (1 of 6 clears the cut)", () => {
-    const title = "Imaging of Cognition, Learning and Memory in Aging (ExRes)";
+    const title = "Mapping of Vigilance, Foraging and Memory in Aging Meerkats";
     const abs =
-      "The proposed work aims to understand the neural basis of cognitive reserve: why some older " +
-      "adults keep their function despite brain pathology. We will scan participants repeatedly.";
+      "The proposed work asks why some elderly meerkats keep their alertness and food-finding " +
+      "skill despite decline. We will observe wild colonies repeatedly across several seasons.";
     const o = abstractTitleOverlap(title, abs);
     expect(o).toEqual({ titleTokens: 6, matched: 1 });
     expect(o.matched / o.titleTokens).toBeGreaterThanOrEqual(ABSTRACT_TITLE_MIN_OVERLAP);
     expect(grantAbstractMatchesTitle(title, abs)).toBe(true);
+  });
+
+  it("drops an abstract just under the cut (1 of 7, 1 of 8 title words)", () => {
+    const abs = "We will observe wild meerkats repeatedly across several seasons.";
+    for (const [title, titleTokens] of [
+      ["Mapping of Vigilance, Foraging, Burrowing and Memory in Aging Meerkats", 7],
+      ["Mapping of Vigilance, Foraging, Burrowing, Grooming and Memory in Aging Meerkats", 8],
+    ] as const) {
+      const o = abstractTitleOverlap(title, abs);
+      expect(o).toEqual({ titleTokens, matched: 1 });
+      expect(o.matched / o.titleTokens).toBeLessThan(ABSTRACT_TITLE_MIN_OVERLAP);
+      expect(grantAbstractMatchesTitle(title, abs)).toBe(false);
+    }
   });
 
   it("matches word forms on a shared 5-char prefix, case and punctuation aside", () => {
@@ -70,7 +85,7 @@ describe("grantAbstractMatchesTitle", () => {
     expect(grantAbstractMatchesTitle("", OTHER_PROJECT)).toBe(true);
     expect(grantAbstractMatchesTitle(null, OTHER_PROJECT)).toBe(true);
     // Three content words is enough to judge.
-    expect(grantAbstractMatchesTitle("Pathway Analysis Tuberculosis", OTHER_PROJECT)).toBe(false);
+    expect(grantAbstractMatchesTitle("Pathway Analysis Glimmerpox", OTHER_PROJECT)).toBe(false);
   });
 
   it("treats an empty abstract as a match (nothing to drop)", () => {

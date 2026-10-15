@@ -12,6 +12,10 @@
  * title's subject almost word for word; another project's abstract shares a
  * word or two by chance. Pure, no imports, safe in a client bundle.
  *
+ * It is deliberately lenient: a 5-char prefix counts as the same word, and the
+ * cut sits low, so it mostly catches abstracts that share no title word at all.
+ * A wrong abstract that happens to share a few title words still passes.
+ *
  * Calibrated on the 820 abstract-bearing grants of the area-signals pilot export
  * (local, not committed): 10 fall under the cutoff (1.2%), every one a
  * consortium/center/network summary or an unrelated project, apart from one
