@@ -9,9 +9,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockGetTopicActivity } = vi.hoisted(() => ({ mockGetTopicActivity: vi.fn() }));
+const { mockGetTopicActivity, mockGetScholars } = vi.hoisted(() => ({
+  mockGetTopicActivity: vi.fn(),
+  mockGetScholars: vi.fn(),
+}));
 
-vi.mock("@/lib/api/topic-activity", () => ({ getTopicActivity: mockGetTopicActivity }));
+vi.mock("@/lib/api/topic-activity", () => ({
+  getTopicActivity: mockGetTopicActivity,
+  getTopicActivityScholars: mockGetScholars,
+}));
 
 import { GET } from "@/app/api/topics/[slug]/activity/route";
 
@@ -36,6 +42,8 @@ const RESULT = {
 beforeEach(() => {
   mockGetTopicActivity.mockReset();
   mockGetTopicActivity.mockResolvedValue(RESULT);
+  mockGetScholars.mockReset();
+  mockGetScholars.mockResolvedValue({ totals: {}, scholars: [], displayThreshold: 0.5 });
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -112,5 +120,20 @@ describe("flag on", () => {
       page: 1,
       pageSize: 40,
     });
+  });
+
+  it.each(["status", "ending"])("accepts sort=%s", async (sort) => {
+    expect((await call(`?kind=trial&sort=${sort}`)).status).toBe(200);
+    expect(mockGetTopicActivity.mock.calls[0][1].sort).toBe(sort);
+  });
+
+  it("kind=scholars reads only subtopic and calls the scholars service", async () => {
+    const res = await call("?kind=scholars&subtopic=sub_a&sort=bogus");
+    expect(res.status).toBe(200);
+    expect(mockGetScholars).toHaveBeenCalledWith(SLUG, { subtopic: "sub_a" });
+    expect(mockGetTopicActivity).not.toHaveBeenCalled();
+    expect((await call("?kind=scholars&subtopic=Bad-Slug!")).status).toBe(400);
+    mockGetScholars.mockResolvedValueOnce(null);
+    expect((await call("?kind=scholars")).status).toBe(404);
   });
 });

@@ -3,18 +3,18 @@
 /**
  * TOPIC_FEED_GRANTS_TRIALS — the topic page's "Activities" feed: the
  * publication feed plus the area's grants and clinical trials
- * (`/api/topics/[slug]/activity`, lib/api/topic-activity.ts), switched by a
- * Type select that sits with Show and Sort in the heading row.
+ * (`/api/topics/[slug]/activity`, lib/api/topic-activity.ts), under one
+ * header (`ActivitiesHeader`, per the Activities Redesign mockup):
  *
- *   - Publications (the default) is the publication feed exactly, under an
- *     "Activities" heading with the Type select first in its controls.
+ *   - Scholars chips: every scholar with work in scope and their count across
+ *     the three types (`?kind=scholars`); a chip sets the shared scholar filter.
+ *   - Type tabs with counts; a tab with nothing in scope is disabled. Sort sits
+ *     on the right of the tab row.
+ *   - "Include related …": one switch for every tab that has both relevance
+ *     tiers (the old Show select). Tab and chip counts follow it.
  *   - Grants / Clinical trials list the activity route's items with the Search
- *     page's `FundingResultRow` / `TrialResultRow`, Sort (Newest / Best match),
- *     the same Show tiers and the same Load more frame. No research-articles
- *     toggle.
- *   - A Type option whose count is 0 is hidden; with neither grants nor trials
- *     the select is not shown at all (like Show without an also-tier).
- *   - The choice lives in `?feed=grants|trials`, read and written on the client
+ *     page's `FundingResultRow` / `TrialResultRow` and the Load more frame.
+ *   - The type lives in `?feed=grants|trials`, read and written on the client
  *     only (history.replaceState), never by the server render.
  *
  * Off (the flag), the page renders `TopicPublicationFeed` directly and none of
@@ -31,43 +31,72 @@ import {
 } from "@/components/ui/select";
 import { FundingResultRow } from "@/components/search/funding-result-row";
 import { TrialResultRow } from "@/components/search/trial-result-row";
-import { PublicationsHeadingRow } from "@/components/taxonomy/publications-heading-row";
+import { ActivitiesHeader, type ScholarChip } from "@/components/taxonomy/activities-header";
 import {
   FeedEmpty,
   FeedError,
   FeedSkeleton,
   TopicPublicationFeed,
+  type ShowTier,
 } from "@/components/taxonomy/publication-feed";
-import {
-  ScholarFilterChip,
-  setScholarFilter,
-  useScholarFilter,
-} from "@/components/taxonomy/scholar-filter";
+import { setScholarFilter, useScholarFilter } from "@/components/taxonomy/scholar-filter";
 import { FEED_CHUNK, loadMoreLabel, nextChunkSize, writeShownParam } from "@/lib/taxonomy/feed-load-more";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 import type {
   TopicActivityKind,
   TopicActivityResult,
+  TopicActivityScholarsResult,
+  TopicActivitySort,
   TopicGrantActivityHit,
   TopicTrialActivityHit,
 } from "@/lib/api/topic-activity";
 
 export type FeedType = "publications" | "grants" | "trials";
-type ActivitySort = "newest" | "best_match";
-type ShowTier = "strongly" | "all";
-type Counts = TopicActivityResult["counts"];
+type Tiers = { strongly: number; also: number };
+type TierKey = keyof TopicActivityScholarsResult["totals"];
 
+const TIER_KEY: Record<FeedType, TierKey> = { publications: "pubs", grants: "grant", trials: "trial" };
 const KIND_OF: Record<Exclude<FeedType, "publications">, TopicActivityKind> = {
   grants: "grant",
   trials: "trial",
 };
-
 const NOUN: Record<TopicActivityKind, string> = { grant: "grants", trial: "clinical trials" };
-
-const NOTE: Record<TopicActivityKind, string> = {
-  grant: "PI-led InfoEd awards since 2020.",
-  trial: "NCT-registered studies led by WCM PIs.",
+const TAB_LABEL: Record<FeedType, string> = {
+  publications: "Publications",
+  grants: "Grants",
+  trials: "Clinical trials",
 };
+const RELATED_LABEL: Record<FeedType, string> = {
+  publications: "Include related papers",
+  grants: "Include related grants",
+  trials: "Include related trials",
+};
+const SORTS: Record<TopicActivityKind, Array<[TopicActivitySort, string]>> = {
+  trial: [
+    ["status", "Recruiting first"],
+    ["newest", "Newest start"],
+    ["ending", "Ending soonest"],
+    ["best_match", "Best match"],
+  ],
+  grant: [
+    ["status", "Active first"],
+    ["newest", "Newest"],
+    ["ending", "Ending soonest"],
+    ["best_match", "Best match"],
+  ],
+};
+
+function infoFor(t: FeedType, subarea: boolean): string {
+  if (t === "grants") return "PI-led awards since 2020.";
+  if (t === "trials") return "NCT-registered studies led by WCM PIs.";
+  return `Papers mapped to this ${subarea ? "subarea" : "area"}.`;
+}
+
+/** What a list shows: the strongly tier, or every tier when the switch is on
+ *  or the strongly tier is empty (the #326 fallback). */
+function shownCount(t: Tiers, related: boolean): number {
+  return related || t.strongly === 0 ? t.strongly + t.also : t.strongly;
+}
 
 /** `?feed=` → type; anything unknown is the default. */
 export function readFeedParam(search: string): FeedType {
@@ -88,15 +117,11 @@ function writeFeedParam(t: FeedType): void {
   }
 }
 
-function kindTotal(counts: Counts | null, kind: TopicActivityKind): number | null {
-  return counts ? counts[kind].strongly + counts[kind].also : null;
-}
-
 function activityUrl(
   topicSlug: string,
   o: {
     kind: TopicActivityKind;
-    sort: ActivitySort;
+    sort: TopicActivitySort;
     page: number;
     tier?: "strongly";
     subtopic: string | null;
@@ -113,67 +138,38 @@ function activityUrl(
   return url.toString();
 }
 
-async function fetchActivity(url: string): Promise<TopicActivityResult> {
+async function fetchJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return (await r.json()) as TopicActivityResult;
+  return (await r.json()) as T;
 }
+const fetchActivity = (url: string) => fetchJson<TopicActivityResult>(url);
 
-/** Per-kind counts for the Type options (one request per scope). Null while
- *  loading or after an error. */
-function useActivityCounts(
+/** The Scholars chips' and tabs' counts for the area or subarea. Null while
+ *  loading or after an error (no chips, tabs without counts). */
+function useActivityScholars(
   topicSlug: string,
   subtopic: string | null,
-  cwid: string | null,
-): Counts | null {
-  const [counts, setCounts] = useState<Counts | null>(null);
+): TopicActivityScholarsResult | null {
+  const [data, setData] = useState<TopicActivityScholarsResult | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setCounts(null);
-    fetchActivity(activityUrl(topicSlug, { kind: "grant", sort: "newest", page: 1, subtopic, cwid }))
+    setData(null);
+    const url = new URL(`/api/topics/${encodeURIComponent(topicSlug)}/activity`, window.location.origin);
+    url.searchParams.set("kind", "scholars");
+    if (subtopic) url.searchParams.set("subtopic", subtopic);
+    fetchJson<TopicActivityScholarsResult>(url.toString())
       .then((d) => {
-        if (!cancelled) setCounts(d.counts);
+        if (!cancelled) setData(d);
       })
       .catch(() => {
-        // No counts ⇒ no grant / trial options; the publication feed is unaffected.
+        // No chips and no counts; the feeds are unaffected.
       });
     return () => {
       cancelled = true;
     };
-  }, [topicSlug, subtopic, cwid]);
-  return counts;
-}
-
-function TypeSelect({
-  value,
-  onChange,
-  counts,
-}: {
-  value: FeedType;
-  onChange: (t: FeedType) => void;
-  counts: Counts | null;
-}) {
-  const grants = kindTotal(counts, "grant") ?? 0;
-  const trials = kindTotal(counts, "trial") ?? 0;
-  // The current type stays listed even before its count arrives.
-  const showGrants = grants > 0 || value === "grants";
-  const showTrials = trials > 0 || value === "trials";
-  if (!showGrants && !showTrials) return null;
-  return (
-    <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
-      Type
-      <Select value={value} onValueChange={(v) => onChange(v as FeedType)}>
-        <SelectTrigger className="w-[200px]" aria-label="Type">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="publications">Publications</SelectItem>
-          {showGrants && <SelectItem value="grants">Grants</SelectItem>}
-          {showTrials && <SelectItem value="trials">Clinical trials</SelectItem>}
-        </SelectContent>
-      </Select>
-    </div>
-  );
+  }, [topicSlug, subtopic]);
+  return data;
 }
 
 /** Topic page feed under TOPIC_FEED_GRANTS_TRIALS. */
@@ -194,18 +190,49 @@ export function TopicActivityFeed({
   useEffect(() => {
     setRequested(readFeedParam(window.location.search));
   }, []);
+  const [related, setRelated] = useState(false);
   const scholar = useScholarFilter();
-  const counts = useActivityCounts(topicSlug, activeSubtopic, scholar?.cwid ?? null);
+  const data = useActivityScholars(topicSlug, activeSubtopic);
+
+  // Tab counts: the picked scholar's, else the area's.
+  const pickedRow = scholar ? data?.scholars.find((s) => s.cwid === scholar.cwid) : undefined;
+  const zero = { strongly: 0, also: 0 };
+  const scopeTiers = (t: FeedType): Tiers | null =>
+    data ? (scholar ? (pickedRow?.[TIER_KEY[t]] ?? zero) : data.totals[TIER_KEY[t]]) : null;
+  const tabCount = (t: FeedType) => {
+    const tiers = scopeTiers(t);
+    return tiers ? shownCount(tiers, related) : null;
+  };
   // A type with nothing in scope (e.g. after a scholar pick) falls back to
   // publications once the counts say so.
-  const type: FeedType =
-    requested !== "publications" && counts !== null && kindTotal(counts, KIND_OF[requested]) === 0
-      ? "publications"
-      : requested;
+  const type: FeedType = requested !== "publications" && tabCount(requested) === 0 ? "publications" : requested;
+
+  // Chips: each kind counted as its tab counts it (the area's fallback rule).
+  let chips: ScholarChip[] | null = null;
+  let allCount: number | null = null;
+  if (data) {
+    const kinds: FeedType[] = ["publications", "grants", "trials"];
+    const asShown = (k: FeedType, t: Tiers) =>
+      related || data.totals[TIER_KEY[k]].strongly === 0 ? t.strongly + t.also : t.strongly;
+    allCount = kinds.reduce((n, k) => n + asShown(k, data.totals[TIER_KEY[k]]), 0);
+    chips = data.scholars
+      .map((s) => ({
+        cwid: s.cwid,
+        name: s.name,
+        headshot: s.headshot,
+        count: kinds.reduce((n, k) => n + asShown(k, s[TIER_KEY[k]]), 0),
+      }))
+      .filter((c) => c.count > 0)
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }
 
   const onTypeChange = (t: FeedType) => {
     setRequested(t);
     writeFeedParam(t);
+  };
+  const onPick = (cwid: string | null) => {
+    const s = cwid ? data?.scholars.find((x) => x.cwid === cwid) : undefined;
+    setScholarFilter(s ? { cwid: s.cwid, name: s.name, slug: s.slug } : null);
   };
 
   // The publication feed keeps the pick across a type switch; this feed clears
@@ -218,7 +245,30 @@ export function TopicActivityFeed({
     setScholarFilter(null);
   }, [activeSubtopic]);
 
-  const typeControl = <TypeSelect value={type} onChange={onTypeChange} counts={counts} />;
+  const activeTiers = scopeTiers(type);
+  const renderHeader = (sortControl: ReactNode) => (
+    <ActivitiesHeader
+      info={infoFor(type, activeSubtopic !== null)}
+      scholars={chips}
+      allCount={allCount}
+      pickedCwid={scholar?.cwid ?? null}
+      onPick={onPick}
+      tabs={(["publications", "grants", "trials"] as const).map((t) => ({
+        value: t,
+        label: TAB_LABEL[t],
+        count: tabCount(t),
+      }))}
+      activeTab={type}
+      onTab={onTypeChange}
+      sortControl={sortControl}
+      related={
+        activeTiers && activeTiers.strongly > 0 && activeTiers.also > 0
+          ? { label: RELATED_LABEL[type], count: activeTiers.also, on: related, onChange: setRelated }
+          : null
+      }
+    />
+  );
+  const showTier: ShowTier = related ? "all" : "strongly";
 
   if (type === "publications") {
     return (
@@ -227,8 +277,8 @@ export function TopicActivityFeed({
         activeSubtopic={activeSubtopic}
         loadMore={loadMore}
         subtopicLabels={subtopicLabels}
-        heading="Activities"
-        leadControl={typeControl}
+        renderHeader={renderHeader}
+        showTier={showTier}
         retainScholarFilter
       />
     );
@@ -240,7 +290,8 @@ export function TopicActivityFeed({
       topicSlug={topicSlug}
       kind={kind}
       subtopic={activeSubtopic}
-      typeControl={typeControl}
+      showTier={showTier}
+      renderHeader={renderHeader}
     />
   );
 }
@@ -281,17 +332,18 @@ function ActivityKindFeed({
   topicSlug,
   kind,
   subtopic,
-  typeControl,
+  showTier,
+  renderHeader,
 }: {
   topicSlug: string;
   kind: TopicActivityKind;
   subtopic: string | null;
-  typeControl: ReactNode;
+  showTier: ShowTier;
+  renderHeader: (sortControl: ReactNode) => ReactNode;
 }) {
   const scholar = useScholarFilter();
   const cwid = scholar?.cwid ?? null;
-  const [sort, setSort] = useState<ActivitySort>("newest");
-  const [showTier, setShowTier] = useState<ShowTier>("strongly");
+  const [sort, setSort] = useState<TopicActivitySort>("status");
   const [list, setList] = useState<ListState>(EMPTY_LIST);
   const listRef = useRef(list);
   listRef.current = list;
@@ -386,9 +438,6 @@ function ActivityKindFeed({
   );
 
   const { data, rows } = list;
-  const tierTotals = data?.tierTotals ?? null;
-  const showTierSelect = tierTotals !== null && tierTotals.strongly > 0 && tierTotals.also > 0;
-  const countLabel = data ? kindTotal(data.counts, kind)!.toLocaleString() : null;
   const noun = NOUN[kind];
 
   let body: ReactNode;
@@ -448,47 +497,26 @@ function ActivityKindFeed({
 
   return (
     <section className="flex flex-col gap-4">
-      <PublicationsHeadingRow heading="Activities" countLabel={countLabel}>
-        {typeControl}
-        {showTierSelect && tierTotals && (
-          <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
-            Show
-            <Select value={showTier} onValueChange={(v) => setShowTier(v as ShowTier)}>
-              <SelectTrigger className="w-[200px]" aria-label="Show">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="strongly">
-                  Strongly relevant ({tierTotals.strongly.toLocaleString()})
-                </SelectItem>
-                <SelectItem value="all">
-                  All relevant ({(tierTotals.strongly + tierTotals.also).toLocaleString()})
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-        <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
-          Sort by
-          <Select value={sort} onValueChange={(v) => setSort(v as ActivitySort)}>
-            <SelectTrigger className="w-[200px]" aria-label="Sort by">
+      {renderHeader(
+        <>
+          Sort
+          <Select value={sort} onValueChange={(v) => setSort(v as TopicActivitySort)}>
+            <SelectTrigger className="w-[170px]" aria-label="Sort by">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="best_match">Best match</SelectItem>
+              {SORTS[kind].map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-        </div>
-      </PublicationsHeadingRow>
-
-      <p className="text-xs text-muted-foreground" data-testid="activity-note">
-        {NOTE[kind]}
-      </p>
+        </>,
+      )}
       <p className="sr-only" role="status" aria-live="polite">
         {scholar ? `Showing ${noun} by ${scholar.name}` : ""}
       </p>
-      {scholar && <ScholarFilterChip scholar={scholar} noun={noun} />}
 
       {body}
       <div aria-live="polite" role="status" className="sr-only" data-testid="feed-announcement">

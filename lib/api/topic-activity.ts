@@ -39,6 +39,9 @@
  * hydrated (people chips, abstract, linked pubs).
  */
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   AREA_GRANT_ROLES,
   AREA_GRANT_SOURCE,
@@ -75,8 +78,10 @@ import {
 } from "@/lib/search-trial-evidence";
 
 export type TopicActivityKind = "grant" | "trial";
-/** `newest` = latest start first (the default); `best_match` = highest area score first. */
-export type TopicActivitySort = "newest" | "best_match";
+/** `newest` = latest start first; `best_match` = highest area score first;
+ *  `status` = open items first (recruiting, then active, for trials), newest
+ *  within; `ending` = open items by soonest end, then closed ones by latest end. */
+export type TopicActivitySort = "newest" | "best_match" | "status" | "ending";
 
 /** Upstream score floor: ReciterAI writes every area score >= 0.3, the same
  *  floor `publication_topic` carries. Re-applied here so "also" means
@@ -109,8 +114,17 @@ export type TopicActivityResult = {
   pageSize: number;
 };
 
-/** One qualifying feed item before hydration. */
-type Candidate<R> = { key: string; score: number; start: string; rows: R[] };
+/** One qualifying feed item before hydration. `end` is "" when unknown;
+ *  `rank` orders the `status` sort (0 first); `open` = not ended. */
+type Candidate<R> = {
+  key: string;
+  score: number;
+  start: string;
+  end: string;
+  rank: number;
+  open: boolean;
+  rows: R[];
+};
 
 function emptyResult(
   kind: TopicActivityKind,
@@ -144,6 +158,7 @@ const GRANT_ROW_SELECT = {
   mechanism: true,
   programType: true,
   startDate: true,
+  endDate: true,
   areaTextKey: true,
 } as const;
 
@@ -182,6 +197,44 @@ const byNewest = <R>(a: Candidate<R>, b: Candidate<R>) =>
   b.start.localeCompare(a.start) || b.score - a.score || a.key.localeCompare(b.key);
 const byBestMatch = <R>(a: Candidate<R>, b: Candidate<R>) =>
   b.score - a.score || b.start.localeCompare(a.start) || a.key.localeCompare(b.key);
+const byStatus = <R>(a: Candidate<R>, b: Candidate<R>) => a.rank - b.rank || byNewest(a, b);
+// An open item with no end date sorts after the dated ones.
+const byEnding = <R>(a: Candidate<R>, b: Candidate<R>) =>
+  Number(b.open) - Number(a.open) ||
+  (a.open
+    ? (a.end || "9999").localeCompare(b.end || "9999")
+    : b.end.localeCompare(a.end)) ||
+  byNewest(a, b);
+const ORDER = { newest: byNewest, best_match: byBestMatch, status: byStatus, ending: byEnding };
+
+type Scope = {
+  grants: Array<Candidate<GrantRow>>;
+  trials: Array<Candidate<TrialRow>>;
+};
+
+/** Every qualifying grant and trial of the area (or subarea), unpaged. */
+async function loadScope(
+  topicSlug: string,
+  subtopic: string | undefined,
+  now: Date,
+): Promise<Scope> {
+  const scoreRows = await prisma.areaSignalTopic.findMany({
+    where: {
+      parentTopicId: topicSlug,
+      score: { gte: TOPIC_ACTIVITY_SCORE_FLOOR },
+      // Equality on a non-null slug: an unassigned (NULL) row never matches.
+      ...(subtopic ? { primarySubtopicId: subtopic } : {}),
+    },
+    select: { textKey: true, score: true },
+  });
+  const areaScore = new Map(scoreRows.map((r) => [r.textKey, Number(r.score)]));
+  const keys = [...areaScore.keys()];
+  const [grants, trials] = await Promise.all([
+    loadGrantCandidates(topicSlug, keys, areaScore, now),
+    loadTrialCandidates(keys, areaScore),
+  ]);
+  return { grants, trials };
+}
 
 export async function getTopicActivity(
   topicSlug: string,
@@ -217,22 +270,7 @@ export async function getTopicActivity(
     return emptyResult(opts.kind, page, pageSize, displayThreshold, subtopic !== undefined);
   }
 
-  const scoreRows = await prisma.areaSignalTopic.findMany({
-    where: {
-      parentTopicId: topicSlug,
-      score: { gte: TOPIC_ACTIVITY_SCORE_FLOOR },
-      // Equality on a non-null slug: an unassigned (NULL) row never matches.
-      ...(subtopic ? { primarySubtopicId: subtopic } : {}),
-    },
-    select: { textKey: true, score: true },
-  });
-  const areaScore = new Map(scoreRows.map((r) => [r.textKey, Number(r.score)]));
-  const keys = [...areaScore.keys()];
-
-  const [grants, trials] = await Promise.all([
-    loadGrantCandidates(topicSlug, keys, areaScore),
-    loadTrialCandidates(keys, areaScore),
-  ]);
+  const { grants, trials } = await loadScope(topicSlug, subtopic, now);
 
   // The scholar filter is part of the scope, like the area and subarea: it narrows every
   // count, not just the visible rows.
@@ -249,7 +287,7 @@ export async function getTopicActivity(
   const counts = { grant: tierCounts(scopedGrants), trial: tierCounts(scopedTrials) };
   const inTier = (c: { score: number }) =>
     opts.tier === "strongly" ? isStrongly(c) : opts.tier === "also" ? !isStrongly(c) : true;
-  const order = opts.sort === "best_match" ? byBestMatch : byNewest;
+  const order = ORDER[opts.sort ?? "newest"];
 
   const base = {
     kind: opts.kind,
@@ -281,6 +319,7 @@ type GrantRow = {
   mechanism: string | null;
   programType: string;
   startDate: Date;
+  endDate: Date;
   areaTextKey: string | null;
 };
 
@@ -289,6 +328,7 @@ async function loadGrantCandidates(
   topicSlug: string,
   keys: string[],
   areaScore: Map<string, number>,
+  now: Date,
 ): Promise<Array<Candidate<GrantRow>>> {
   if (keys.length === 0 || AREA_SIGNAL_GRANT_EXCLUDED_TOPICS.has(topicSlug)) return [];
   const rows = (await prisma.grant.findMany({
@@ -319,7 +359,17 @@ async function loadGrantCandidates(
     // displayed range also spans the hydrated sibling rows, so it can start
     // earlier on a renewal of a pre-2020 award.
     const startMs = Math.min(...project.map((g) => g.startDate.getTime()));
-    out.push({ key, score, start: new Date(startMs).toISOString().slice(0, 10), rows: project });
+    const end = new Date(Math.max(...project.map((g) => g.endDate.getTime())));
+    const open = isFundingActive(end, now);
+    out.push({
+      key,
+      score,
+      start: new Date(startMs).toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+      rank: open ? 0 : 1,
+      open,
+      rows: project,
+    });
   }
   return out;
 }
@@ -481,12 +531,19 @@ async function loadTrialCandidates(
     const nct = r.trial.nctNumber as string; // eligibility requires one
     byNct.set(nct, [...(byNct.get(nct) ?? []), r]);
   }
-  return [...byNct].map(([key, group]) => ({
-    key,
-    score: Math.max(...group.map((r) => areaScore.get(r.trial.areaTextKey as string) ?? 0)),
-    start: trialDates(group[0].trial).startDate ?? "",
-    rows: group,
-  }));
+  return [...byNct].map(([key, group]) => {
+    const t = group[0].trial;
+    const { statusRank } = trialStatusFields(trialStatusKey(t.ctgovStatus, t.status));
+    return {
+      key,
+      score: Math.max(...group.map((r) => areaScore.get(r.trial.areaTextKey as string) ?? 0)),
+      start: trialDates(t).startDate ?? "",
+      end: trialDates(t).endDate ?? "",
+      rank: statusRank,
+      open: statusRank < 2,
+      rows: group,
+    };
+  });
 }
 
 /** The search tab's row shape; the first protocol (by number) stands for the NCT. */
@@ -522,4 +579,106 @@ function trialHit(c: Candidate<TrialRow>): TopicTrialActivityHit {
     matchedFields: [],
     areaScore: c.score,
   };
+}
+
+type ScholarTiers = { pubs: TierCounts; grant: TierCounts; trial: TierCounts };
+
+export type TopicActivityScholar = ScholarTiers & {
+  cwid: string;
+  name: string;
+  slug: string;
+  /** "" when the scholar has no headshot. */
+  headshot: string;
+};
+
+export type TopicActivityScholarsResult = {
+  /** Area (or subarea) totals per kind. Publications count DISTINCT papers
+   *  (research types only, the feed's default); a paper is "strongly" when any
+   *  of its author rows clears the threshold. */
+  totals: ScholarTiers;
+  /** Every public scholar with at least one item in scope, unsorted. */
+  scholars: TopicActivityScholar[];
+  displayThreshold: number;
+};
+
+/**
+ * The Activities Scholars chips (`?kind=scholars`): each scholar's count of
+ * papers, grants and trials in the area or subarea, per tier, plus the area
+ * totals for the type tabs. Same scope rules as the feeds; a paper the scholar
+ * hid from their own profile is not counted for them.
+ */
+export async function getTopicActivityScholars(
+  topicSlug: string,
+  opts: { subtopic?: string },
+  now: Date = new Date(),
+): Promise<TopicActivityScholarsResult | null> {
+  const topic = await prisma.topic.findUnique({
+    where: { id: topicSlug },
+    select: { id: true, displayThreshold: true },
+  });
+  if (!topic) return null;
+  const displayThreshold = topic.displayThreshold ?? TOPIC_PUBLICATIONS_DEFAULT_DISPLAY_THRESHOLD;
+  const subtopic = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
+
+  const where = Prisma.sql`pt.parent_topic_id = ${topicSlug}
+    ${subtopic ? Prisma.sql`AND pt.primary_subtopic_id = ${subtopic}` : Prisma.empty}
+    AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.publication_type NOT IN (${Prisma.join([...FEED_EXCLUDED_TYPES])}))`;
+  const [scope, pubTotals, pubRows] = await Promise.all([
+    loadScope(topicSlug, subtopic, now),
+    prisma.$queryRaw<Array<{ s: bigint; a: bigint }>>`
+      SELECT COUNT(DISTINCT CASE WHEN pt.score >= ${displayThreshold} THEN pt.pmid END) AS s,
+             COUNT(DISTINCT pt.pmid) AS a
+      FROM publication_topic pt WHERE ${where}`,
+    prisma.$queryRaw<Array<{ cwid: string; s: bigint; a: bigint }>>`
+      SELECT pt.cwid,
+             SUM(pt.score >= ${displayThreshold}) AS s,
+             COUNT(*) AS a
+      FROM publication_topic pt
+      WHERE ${where}
+        AND NOT EXISTS (
+          SELECT 1 FROM suppression x
+          WHERE x.entity_type = 'publication' AND x.entity_id = pt.pmid
+            AND x.contributor_cwid = pt.cwid AND x.revoked_at IS NULL)
+      GROUP BY pt.cwid`,
+  ]);
+
+  const tiers = (s: number, a: number): TierCounts => ({ strongly: s, also: a - s });
+  const zero = (): ScholarTiers => ({
+    pubs: { strongly: 0, also: 0 },
+    grant: { strongly: 0, also: 0 },
+    trial: { strongly: 0, also: 0 },
+  });
+  const by = new Map<string, ScholarTiers>();
+  const at = (cwid: string) => by.get(cwid) ?? by.set(cwid, zero()).get(cwid)!;
+  // publication_topic is keyed (pmid, cwid, parent_topic_id): one row per paper per scholar.
+  for (const r of pubRows) at(r.cwid).pubs = tiers(Number(r.s), Number(r.a));
+  const tally = <R extends { cwid: string }>(cs: Array<Candidate<R>>, kind: "grant" | "trial") => {
+    const out = { strongly: 0, also: 0 };
+    for (const c of cs) {
+      const tier = c.score >= displayThreshold ? "strongly" : "also";
+      out[tier]++;
+      for (const cwid of new Set(c.rows.map((r) => r.cwid))) at(cwid)[kind][tier]++;
+    }
+    return out;
+  };
+  const totals: ScholarTiers = {
+    pubs: tiers(Number(pubTotals[0]?.s ?? 0), Number(pubTotals[0]?.a ?? 0)),
+    grant: tally(scope.grants, "grant"),
+    trial: tally(scope.trials, "trial"),
+  };
+
+  const people = await prisma.scholar.findMany({
+    where: { cwid: { in: [...by.keys()] }, deletedAt: null, status: "active", ...publicRoleWhere() },
+    select: { cwid: true, preferredName: true, slug: true, roleCategory: true, hasHeadshot: true },
+  });
+  const scholars = people
+    .filter((p) => isPubliclyDisplayed(p.roleCategory))
+    .map((p) => ({
+      cwid: p.cwid,
+      name: p.preferredName,
+      slug: p.slug,
+      headshot: headshotUrl(p.cwid, p.hasHeadshot),
+      ...by.get(p.cwid)!,
+    }));
+  return { totals, scholars, displayThreshold };
 }
