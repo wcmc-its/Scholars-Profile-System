@@ -209,16 +209,15 @@ export function TopicActivityFeed({
 
   // Chips: each kind counted as its tab counts it (the area's fallback rule).
   let chips: ScholarChip[] | null = null;
-  let allCount: number | null = null;
   if (data) {
     const kinds: FeedType[] = ["publications", "grants", "trials"];
     const asShown = (k: FeedType, t: Tiers) =>
       related || data.totals[TIER_KEY[k]].strongly === 0 ? t.strongly + t.also : t.strongly;
-    allCount = kinds.reduce((n, k) => n + asShown(k, data.totals[TIER_KEY[k]]), 0);
     chips = data.scholars
       .map((s) => ({
         cwid: s.cwid,
         name: s.name,
+        slug: s.slug,
         headshot: s.headshot,
         count: kinds.reduce((n, k) => n + asShown(k, s[TIER_KEY[k]]), 0),
       }))
@@ -250,7 +249,6 @@ export function TopicActivityFeed({
     <ActivitiesHeader
       info={infoFor(type, activeSubtopic !== null)}
       scholars={chips}
-      allCount={allCount}
       pickedCwid={scholar?.cwid ?? null}
       onPick={onPick}
       tabs={(["publications", "grants", "trials"] as const).map((t) => ({
