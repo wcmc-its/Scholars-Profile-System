@@ -68,7 +68,24 @@ export type ProjectKeyRow = {
 export async function loadProjectSiblingRows(
   grants: ReadonlyArray<{ externalId: string | null; awardNumber: string | null }>,
 ): Promise<ProjectKeyRow[]> {
-  const arms: Array<{ externalId?: { startsWith: string } } | { awardNumber: { contains: string } }> =
+  const arms = projectSiblingArms(grants);
+  if (arms.length === 0) return [];
+  return (await prisma.grant.findMany({
+    where: { AND: [GRANT_INDEX_WHERE, { OR: arms }] },
+    select: { cwid: true, role: true, externalId: true, awardNumber: true },
+  })) as ProjectKeyRow[];
+}
+
+/**
+ * The OR arms behind {@link loadProjectSiblingRows} (see its comment for the
+ * two arms and the arm-count warning), for a caller that needs other columns
+ * or a narrower population (lib/api/topic-activity.ts: InfoEd rows only).
+ * Empty when no input row yields a project key.
+ */
+export function projectSiblingArms(
+  grants: ReadonlyArray<{ externalId: string | null; awardNumber: string | null }>,
+): Array<{ externalId: { startsWith: string } } | { awardNumber: { contains: string } }> {
+  const arms: Array<{ externalId: { startsWith: string } } | { awardNumber: { contains: string } }> =
     [];
   const seenAccounts = new Set<string>();
   const seenSerials = new Set<string>();
@@ -84,9 +101,5 @@ export async function loadProjectSiblingRows(
       arms.push({ awardNumber: { contains: serial } });
     }
   }
-  if (arms.length === 0) return [];
-  return (await prisma.grant.findMany({
-    where: { AND: [GRANT_INDEX_WHERE, { OR: arms }] },
-    select: { cwid: true, role: true, externalId: true, awardNumber: true },
-  })) as ProjectKeyRow[];
+  return arms;
 }

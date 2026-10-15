@@ -54,3 +54,16 @@ export function isTaxonomyFeedLoadMoreOn(): boolean {
 export function isTopicRankAreaSignalsOn(): boolean {
   return process.env.TOPIC_RANK_AREA_SIGNALS === "on";
 }
+
+/**
+ * Research-area feed of grants and trials (server-only, read like the ones
+ * above). `TOPIC_FEED_GRANTS_TRIALS=on` serves `/api/topics/[slug]/activity`
+ * (lib/api/topic-activity.ts): the area's PI grants and PI clinical trials as
+ * feed items, cut at the area's display threshold like its papers.
+ *
+ * Off (the default) the route answers 404. The page control ("Activities")
+ * that reads it lands in a later PR behind the same flag.
+ */
+export function isTopicFeedGrantsTrialsOn(): boolean {
+  return process.env.TOPIC_FEED_GRANTS_TRIALS === "on";
+}

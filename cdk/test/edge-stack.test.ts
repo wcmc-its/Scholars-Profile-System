@@ -292,7 +292,7 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus thirty-six additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus thirty-seven additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -309,8 +309,9 @@ describe("EdgeStack", () => {
         // + the `/api/scholar/*/grants` funding-row fetcher
         // + `/edge-ip`, the off-network block page's IP echo (CloudFront
         // Function only, never reaches the origin)
-        // + `/_sps-errors/*`, the #2503 origin-down page (S3 origin, direct).
-        expect(cacheBehaviors).toHaveLength(36);
+        // + `/_sps-errors/*`, the #2503 origin-down page (S3 origin, direct)
+        // + `/api/topics/*/activity`, the topic grants and trials feed.
+        expect(cacheBehaviors).toHaveLength(37);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -356,6 +357,8 @@ describe("EdgeStack", () => {
           // Funding-row representative grants -- reads `?q=`.
           "/api/scholar/*/grants",
           "/api/topics/*/publications",
+          // Topic grants and trials feed (TOPIC_FEED_GRANTS_TRIALS).
+          "/api/topics/*/activity",
           "/api/methods/*/*/publications",
           // #974 Phase 2 dept/division method-facet roster -- reads `?method=`;
           // AllViewer forwards it past the cacheable default's allow-list.
@@ -717,6 +720,8 @@ describe("EdgeStack", () => {
           // Funding-row representative grants -- GET-only read.
           "/api/scholar/*/grants",
           "/api/topics/*/publications",
+          // Topic grants and trials feed (TOPIC_FEED_GRANTS_TRIALS).
+          "/api/topics/*/activity",
           "/api/methods/*/*/publications",
           // #866 internal-viewer reveal -- GET-only read.
           "/api/profile/*",
