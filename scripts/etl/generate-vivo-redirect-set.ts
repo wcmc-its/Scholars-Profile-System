@@ -1,6 +1,12 @@
 /**
  * Generate the legacy-URL redirect set for B14.
  *
+ * NOT CONSUMED AT RUNTIME since #1940: `proxy.ts` now redirects every
+ * `/display/cwid-{cwid}` to `/scholars/by-cwid/{cwid}` and lets the resolver
+ * 404 unknown CWIDs, because this set covered only 3,281 of the 8,596 CWID
+ * pages in VIVO's sitemap. The output is kept as a reference snapshot of ED's
+ * `labeledURI;vivo` population; regenerating it changes nothing deployed.
+ *
  * Pulls academic-faculty CWIDs from WCM Enterprise Directory and writes them
  * to `data/vivo-redirects.json` as a sorted, deduped array. The B14 middleware
  * uses this set to decide whether a path like `/display/cwid-{cwid}`,

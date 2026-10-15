@@ -4,23 +4,23 @@ import {
   buildCspResponseHeaders,
   resolveCspMode,
 } from "@/lib/security-headers";
-import vivoRedirectCwids from "@/data/vivo-redirects.json";
-
-/**
- * B14 — legacy VIVO URL redirect set.
- *
- * Static import of the build-time-generated CWID list from
- * `scripts/etl/generate-vivo-redirect-set.ts`. Wrapped in a Set so lookups are
- * O(1) per request. No runtime dependency, ~3-4 k strings (~50 KB
- * uncompressed), evaluated once at cold start.
- */
-const VIVO_CWID_SET = new Set<string>(vivoRedirectCwids as readonly string[]);
 
 /**
  * Legacy VIVO path shapes -- after the CNAME cutover, all three land on the
  * new CloudFront. `/display/cwid-*` is the documented form; `/individual/*`
  * and `/profile/*` are defensive coverage for well-known VIVO route schemes
  * (per plan D1).
+ *
+ * #1940: EVERY match redirects to `/scholars/by-cwid/{cwid}`, with no
+ * set-membership check. The old gate (`data/vivo-redirects.json`, an ED
+ * academic-faculty + `labeledURI;vivo` list) covered 3,281 of the 8,596
+ * `/display/cwid-*` pages in VIVO's own sitemap, so most legacy links 404'd
+ * even though SPS could resolve them. The set only existed to avoid redirecting
+ * to a dead page; the by-cwid resolver answers that directly (a permanent
+ * redirect to the canonical slug, or a real 404 for an unknown / non-public
+ * CWID), so the static list only added misses. The resolver also applies the
+ * #2268 hidden-class carve, so redirecting unconditionally reveals nothing a
+ * direct by-cwid request would not.
  */
 const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)\/?$/;
 
@@ -36,7 +36,7 @@ const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)
  *
  * B14 legacy-URL redirects (issue #113) run before the SSO gate: matching
  * `/display/cwid-{cwid}` (and `/individual/`, `/profile/` variants) 301 to
- * `/scholars/by-cwid/{cwid}` when the CWID is in the academic-faculty set;
+ * `/scholars/by-cwid/{cwid}` for any syntactically valid CWID (#1940);
  * non-matching paths fall through. The `/scholars/by-cwid/` page then chains
  * a second 301 to the current canonical slug, keeping slug currency /
  * aliasing in `lib/url-resolver.ts` (a single source of truth).
@@ -108,6 +108,13 @@ function isGatedOrLegacyPath(pathname: string): boolean {
     pathname.startsWith("/api/edit/") ||
     pathname === "/api/impersonation" ||
     pathname.startsWith("/api/impersonation/") ||
+    isLegacyVivoPath(pathname)
+  );
+}
+
+/** The legacy VIVO prefixes the B14 redirect layer owns. Public, never gated. */
+function isLegacyVivoPath(pathname: string): boolean {
+  return (
     pathname.startsWith("/display/") ||
     pathname.startsWith("/individual/") ||
     pathname.startsWith("/profile/")
@@ -193,26 +200,27 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // B14 legacy-URL redirect layer. Runs before the SSO gate because the
   // legacy paths are public and should never trigger an SSO redirect
   // (they neither overlap the matcher's `/edit*` prefixes nor require a
-  // session). Unknown CWIDs fall through to the existing 404 handling.
+  // session). Unknown CWIDs 404 at the by-cwid resolver (#1940).
   // ------------------------------------------------------------------
   const vivoMatch = VIVO_PATH_RE.exec(request.nextUrl.pathname);
   if (vivoMatch) {
     const cwid = vivoMatch[1];
-    if (cwid && VIVO_CWID_SET.has(cwid)) {
-      // Absolute Location via the configured origin (see absoluteLocation):
-      // the runtime parses the target through new URL(), which rejects a
-      // relative path. cwid is regex-constrained ([A-Za-z0-9._-]) so it is safe
-      // in the header. Returned directly, NOT through withSecurityHeaders — see
-      // its doc for why mutating a redirect 500s.
-      return new NextResponse(null, {
-        status: 301,
-        headers: {
-          Location: absoluteLocation(request, `/scholars/by-cwid/${cwid}`),
-        },
-      });
-    }
-    // Out-of-set CWID -- not in the academic-faculty roster. Fall through
-    // so the existing 404 handling renders without a redirect.
+    // Absolute Location via the configured origin (see absoluteLocation):
+    // the runtime parses the target through new URL(), which rejects a
+    // relative path. cwid is regex-constrained ([A-Za-z0-9._-]) so it is safe
+    // in the header. Returned directly, NOT through withSecurityHeaders — see
+    // its doc for why mutating a redirect 500s.
+    return new NextResponse(null, {
+      status: 301,
+      headers: {
+        Location: absoluteLocation(request, `/scholars/by-cwid/${cwid}`),
+      },
+    });
+  }
+  // Any other legacy VIVO path (org/publication pages like `/display/n123`,
+  // ~1k entries in VIVO's sitemap) is public: fall through to the 404, never
+  // to the SSO gate below, which would 302 an anonymous visitor to login.
+  if (isLegacyVivoPath(request.nextUrl.pathname)) {
     return withSecurityHeaders(NextResponse.next());
   }
 
