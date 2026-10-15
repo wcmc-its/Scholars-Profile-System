@@ -16,6 +16,9 @@
  * full-time faculty), so nothing is scored that could never move a card.
  * Suppressed grants are not sent; `hideFunding` / `hideClinicalTrials` are
  * applied at read time instead, since a scholar can flip them back any day.
+ * A grant whose abstract fails the title check (lib/grant-abstract-match.ts,
+ * #3071) goes title-only; `grantAbstractsDropped` in the plan line counts them.
+ * That re-keys the row (one new scoring call), and never shrinks the volume.
  *
  * `--dry-run` reads and reports, writes nothing (neither SPS nor DynamoDB, nor
  * an etl_run row: a green dry run would read as a real pass on the freshness
@@ -169,6 +172,7 @@ async function main(): Promise<number> {
       grantRowsEligible: grants.length,
       grantTexts: grantItems.length,
       grantTextsFull: grantItems.filter((i) => i.mode === "full").length,
+      grantAbstractsDropped: plan.grantAbstractsDropped,
       trialsEligible: trials.length,
       trialTexts: plan.items.size - grantItems.length,
       grantKeysToSet: grantCols.set.size,

@@ -12,6 +12,7 @@
 import { createHash } from "node:crypto";
 
 import { AREA_GRANT_FULL_TEXT_MIN_CHARS } from "@/lib/area-signals";
+import { grantAbstractMatchesTitle } from "@/lib/grant-abstract-match";
 import { replaceFloor } from "../dynamodb/projection-replace";
 
 /** The constant partition every input item shares (IAM pins `dynamodb:LeadingKeys` to it). */
@@ -93,8 +94,19 @@ export type TrialInputRow = {
   interventions: string | null;
 };
 
+/**
+ * The abstract this grant is scored on: its own, unless it fails the title check
+ * (#3071 — a wrong award number pulls in another project's RePORTER abstract).
+ * A dropped abstract sends the grant as title-only, and the key follows the text
+ * actually sent, so the wrong abstract's scores go inert the night it is dropped
+ * and the title-only text is queued as a new key.
+ */
+export function grantScoredAbstract(g: Pick<GrantInputRow, "title" | "abstract">): string | null {
+  return grantAbstractMatchesTitle(g.title, g.abstract) ? g.abstract : null;
+}
+
 export function grantTextKey(g: Pick<GrantInputRow, "title" | "abstract">): string {
-  return areaTextKey("grant", [g.title, g.abstract]);
+  return areaTextKey("grant", [g.title, grantScoredAbstract(g)]);
 }
 
 export function trialTextKey(
@@ -104,7 +116,7 @@ export function trialTextKey(
 }
 
 function grantItem(g: GrantInputRow, key: string, createdAt: string): AreaInputItem {
-  const text = (g.abstract ?? "").trim();
+  const text = (grantScoredAbstract(g) ?? "").trim();
   return {
     PK: AREA_INPUT_PK,
     SK: `grant#${key}`,
@@ -158,6 +170,8 @@ export type InputPlan = {
   trialKeys: Map<string, string>;
   /** One item per distinct key, by SK. */
   items: Map<string, AreaInputItem>;
+  /** Grant rows whose abstract failed the title check and went title-only. */
+  grantAbstractsDropped: number;
 };
 
 /**
@@ -174,10 +188,12 @@ export function buildInputPlan(
   const grantKeys = new Map<string, string>();
   const trialKeys = new Map<string, string>();
   const items = new Map<string, AreaInputItem>();
+  let grantAbstractsDropped = 0;
   const grantOrder = [...grants].sort(
     (a, b) => a.startDate.getTime() - b.startDate.getTime() || a.id.localeCompare(b.id),
   );
   for (const g of grantOrder) {
+    if (g.abstract && grantScoredAbstract(g) === null) grantAbstractsDropped += 1;
     const key = grantTextKey(g);
     grantKeys.set(g.id, key);
     if (!items.has(`grant#${key}`)) items.set(`grant#${key}`, grantItem(g, key, createdAt));
@@ -192,7 +208,7 @@ export function buildInputPlan(
     trialKeys.set(t.protocolNumber, key);
     if (!items.has(`trial#${key}`)) items.set(`trial#${key}`, trialItem(t, key, createdAt));
   }
-  return { grantKeys, trialKeys, items };
+  return { grantKeys, trialKeys, items, grantAbstractsDropped };
 }
 
 export type KeyColumnPlan = {
