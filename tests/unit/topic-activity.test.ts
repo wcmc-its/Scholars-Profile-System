@@ -509,17 +509,25 @@ describe("getTopicActivity", () => {
       for (const k of ["a", "b", "c", "d", "e"]) grant("tst001", k, { title: k });
     });
 
-    it("defaults displayThreshold to 0.5: strongly >= 0.5, also in [0.3, 0.5)", async () => {
-      expect(await grantTitles({ tier: "strongly", sort: "best_match" })).toEqual(["a", "b"]);
-      expect(await grantTitles({ tier: "also", sort: "best_match" })).toEqual(["c", "d"]);
+    it("raises the papers' 0.5 default to 0.7: strongly >= 0.7, also in [0.3, 0.7)", async () => {
+      expect(await grantTitles({ tier: "strongly", sort: "best_match" })).toEqual(["a"]);
+      expect(await grantTitles({ tier: "also", sort: "best_match" })).toEqual(["b", "c", "d"]);
       const all = await grants({ sort: "best_match" });
       expect(all.total).toBe(4);
-      expect(all.tierTotals).toEqual({ strongly: 2, also: 2 });
-      expect(all.displayThreshold).toBe(0.5);
+      expect(all.tierTotals).toEqual({ strongly: 1, also: 3 });
+      expect(all.displayThreshold).toBe(0.7);
+    });
+
+    it("uses the area's own displayThreshold when it is above 0.7", async () => {
+      state.topics[AREA].displayThreshold = 0.95;
+      expect(await grantTitles({ tier: "strongly" })).toEqual([]);
+      expect((await grants({})).tierTotals).toEqual({ strongly: 0, also: 4 });
     });
 
     it("uses the area's own displayThreshold when set", async () => {
       state.topics[AREA].displayThreshold = 0.7;
+      expect(await grantTitles({ tier: "strongly" })).toEqual(["a"]);
+      state.topics[AREA].displayThreshold = 0.4; // never below 0.7 for grants and trials
       expect(await grantTitles({ tier: "strongly" })).toEqual(["a"]);
       const also = await grants({ tier: "also", sort: "best_match" });
       expect((also.hits as TopicGrantActivityHit[]).map((h) => h.title)).toEqual(["b", "c", "d"]);
@@ -682,14 +690,16 @@ describe("getTopicActivity", () => {
       expect(((await trials()).hits as TopicTrialActivityHit[]).map((h) => h.title)).toEqual(["kept"]);
     });
 
-    it("cuts trials at the same display threshold", async () => {
-      score("hi", 0.6);
+    it("cuts trials at the same display cut", async () => {
+      score("hi", 0.7);
+      score("mid", 0.6);
       score("lo", 0.4);
       trial("tst001", "hi", { title: "hi" });
+      trial("tst001", "mid", { title: "mid" });
       trial("tst001", "lo", { title: "lo" });
-      const r = await trials({ tier: "also" });
-      expect((r.hits as TopicTrialActivityHit[]).map((h) => h.title)).toEqual(["lo"]);
-      expect(r.tierTotals).toEqual({ strongly: 1, also: 1 });
+      const r = await trials({ tier: "also", sort: "best_match" });
+      expect((r.hits as TopicTrialActivityHit[]).map((h) => h.title)).toEqual(["mid", "lo"]);
+      expect(r.tierTotals).toEqual({ strongly: 1, also: 2 });
     });
   });
 });

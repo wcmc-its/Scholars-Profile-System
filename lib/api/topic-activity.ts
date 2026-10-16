@@ -6,10 +6,11 @@
  *
  * Membership comes from the area scores ReciterAI produced for each grant or
  * trial TEXT (`area_signal_topic`, keyed by `grant.area_text_key` /
- * `clinical_trial.area_text_key`). The display cut is the papers' rule: an
- * item's area score against the area's `displayThreshold` (default 0.5), with
- * the same `tier` semantics as the publication route ("strongly" >= threshold,
- * "also" below it but at or over the 0.3 floor, omitted = both).
+ * `clinical_trial.area_text_key`). The display cut is the papers' rule raised
+ * to at least 0.7 (`activityDisplayCut`): an item's area score against
+ * max(area `displayThreshold`, 0.7), with the same `tier` semantics as the
+ * publication route ("strongly" >= cut, "also" below it but at or over the 0.3
+ * floor, omitted = both).
  *
  * What never appears, in the order it is applied:
  *   - rows failing the shared eligibility (lib/area-signals.ts: InfoEd PI /
@@ -87,6 +88,14 @@ export type TopicActivitySort = "newest" | "best_match" | "status" | "ending";
  *  floor `publication_topic` carries. Re-applied here so "also" means
  *  [0.3, threshold) even if a lower score ever lands. */
 export const TOPIC_ACTIVITY_SCORE_FLOOR = 0.3;
+
+/** Grants and trials need a higher default cut than papers: in the V3 spot
+ *  check (2026-10-16) a third of items scoring 0.5-0.69 were off-topic and none
+ *  at 0.7 or above. Below the cut they stay one click away, as "related". */
+export const TOPIC_ACTIVITY_MIN_DISPLAY_CUT = 0.7;
+
+export const activityDisplayCut = (displayThreshold: number): number =>
+  Math.max(displayThreshold, TOPIC_ACTIVITY_MIN_DISPLAY_CUT);
 const TOPIC_ACTIVITY_PAGE_SIZE = 20;
 
 export type TopicGrantActivityHit = FundingHit & { areaScore: number };
@@ -267,7 +276,7 @@ export async function getTopicActivity(
   const cwid = opts.cwid && opts.cwid.length > 0 ? opts.cwid : undefined;
   const subtopic = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
   if (cwid && !(await isPublicScholarCwid(cwid))) {
-    return emptyResult(opts.kind, page, pageSize, displayThreshold, subtopic !== undefined);
+    return emptyResult(opts.kind, page, pageSize, activityDisplayCut(displayThreshold), subtopic !== undefined);
   }
 
   const { grants, trials } = await loadScope(topicSlug, subtopic, now);
@@ -279,7 +288,8 @@ export async function getTopicActivity(
   const scopedGrants = grants.filter(inScope);
   const scopedTrials = trials.filter(inScope);
 
-  const isStrongly = (c: { score: number }) => c.score >= displayThreshold;
+  const cut = activityDisplayCut(displayThreshold);
+  const isStrongly = (c: { score: number }) => c.score >= cut;
   const tierCounts = (cs: Array<{ score: number }>): TierCounts => {
     const strongly = cs.filter(isStrongly).length;
     return { strongly, also: cs.length - strongly };
@@ -293,7 +303,7 @@ export async function getTopicActivity(
     kind: opts.kind,
     counts,
     tierTotals: counts[opts.kind],
-    displayThreshold,
+    displayThreshold: cut,
     subtopicApplied: subtopic !== undefined,
     page,
     pageSize,
@@ -655,7 +665,7 @@ export async function getTopicActivityScholars(
   const tally = <R extends { cwid: string }>(cs: Array<Candidate<R>>, kind: "grant" | "trial") => {
     const out = { strongly: 0, also: 0 };
     for (const c of cs) {
-      const tier = c.score >= displayThreshold ? "strongly" : "also";
+      const tier = c.score >= activityDisplayCut(displayThreshold) ? "strongly" : "also";
       out[tier]++;
       for (const cwid of new Set(c.rows.map((r) => r.cwid))) at(cwid)[kind][tier]++;
     }
