@@ -3107,12 +3107,13 @@ export class AppStack extends Stack {
         TOPIC_RANK_AREA_SIGNALS: env === "staging" ? "on" : "off",
         // Research-area feed of PI grants and PI trials (lib/taxonomy-flags.ts
         // isTopicFeedGrantsTrialsOn). When "on": /api/topics/[slug]/activity
-        // serves the area's grants and trials, cut at the area's display
-        // threshold like its papers (lib/api/topic-activity.ts). Off = that
-        // route answers 404. The route also needs its uncacheable edge behavior
-        // (cdk/lib/edge-stack.ts) deployed per env. Staging first; prod stays
-        // off with TOPIC_RANK_AREA_SIGNALS.
-        TOPIC_FEED_GRANTS_TRIALS: env === "staging" ? "on" : "off",
+        // serves the area's grants and trials, cut at max(area display
+        // threshold, 0.7) (lib/api/topic-activity.ts). Off = that route answers
+        // 404. The route also needs its uncacheable edge behavior
+        // (cdk/lib/edge-stack.ts) deployed per env, and prod needs Sps-Etl-prod's
+        // AreaSignalInputs step to have stamped area_text_key once. On in both
+        // envs (Paul, 2026-10-16); the ranking flag above stays off in prod.
+        TOPIC_FEED_GRANTS_TRIALS: env === "staging" ? "on" : "on",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the
