@@ -8,7 +8,7 @@
  *
  *   - Scholars chips: every scholar with work in scope and their count across
  *     the three types (`?kind=scholars`); a chip sets the shared scholar filter.
- *   - Type tabs with counts; a tab with nothing in scope is disabled. Sort sits
+ *   - Type tabs with counts; a type with nothing in scope gets no tab. Sort sits
  *     on the right of the tab row.
  *   - "Include related …": one switch for every tab that has both relevance
  *     tiers (the old Show select). Tab and chip counts follow it.
