@@ -101,7 +101,8 @@ export function TopicRailLayout({
         const subtopicLabel = labelFor(activeSubtopic);
         return (
           <>
-            {activeSubtopic && (
+            {/* With the Activities feed, its Scholars chips are the subarea's one people row. */}
+            {activeSubtopic && !activityFeed && (
               <SubtopicScholarsRow
                 topicSlug={topicSlug}
                 subtopicId={activeSubtopic}

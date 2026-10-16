@@ -122,7 +122,13 @@ function stubServer(counts: Counts) {
               doi: null,
               pmcid: null,
               impactScore: null,
-              authors: [],
+              authors: ["Cy", "Di", "Ed", "Flo", "Gus"].map((n, i) => ({
+                name: `${n} Author`,
+                cwid: `zzz${i}`,
+                slug: `${n.toLowerCase()}-author`,
+                isFirst: i === 0,
+                isLast: i === 4,
+              })),
             },
           ],
           total: 1,
@@ -180,9 +186,10 @@ describe("flag on: TopicActivityFeed", () => {
     expect(tab(/Publications/).getAttribute("aria-selected")).toBe("true");
     expect(tabCount(/Publications/)).toBe("1");
     expect((tab(/Clinical trials/) as HTMLButtonElement).disabled).toBe(true);
-    // Chips: All = 1 paper + 3 grants; sorted by count.
+    // Chips: "All" (no number), then each scholar's activity count, sorted by count.
     const chips = screen.getByTestId("activities-scholars").querySelectorAll("button[aria-pressed]");
-    expect(Array.from(chips).map((c) => c.textContent)).toEqual(["All4", "AAAnn Able4", "BBBob Baker1"]);
+    expect(Array.from(chips).map((c) => c.textContent)).toEqual(["All", "AAAnn Able4", "BBBob Baker1"]);
+    expect(screen.queryByRole("link", { name: /View .*'s profile/ })).toBeNull();
     expect(calls.some((u) => u.searchParams.get("kind") === "scholars")).toBe(true);
     // Publications view keeps the research-articles toggle; no related switch (no also tier).
     expect(screen.getByText(/Show all publication types/)).toBeTruthy();
@@ -216,17 +223,28 @@ describe("flag on: TopicActivityFeed", () => {
     // A chip pick filters the list by cwid.
     fireEvent.click(screen.getByRole("button", { name: /Bob Baker/ }));
     await waitFor(() => expect(activityCalls(calls).at(-1)!.searchParams.get("cwid")).toBe("bbb2002"));
+    expect(screen.getByRole("link", { name: /View Bob Baker's profile/ }).getAttribute("href")).toMatch(/bob-baker/);
     expect(tabCount(/Grants/)).toBe("1");
 
     // Bob has no papers: Publications is disabled until "All" clears the pick.
     expect((tab(/Publications/) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
 
     // Back to Publications drops ?feed=.
     fireEvent.click(tab(/Publications/));
     // The switch is still on: the stub serves the paper in both tiers.
     await screen.findAllByText("Paper one");
     expect(new URLSearchParams(window.location.search).has("feed")).toBe(false);
+  });
+
+  it("publication authors are plain profile links, four then +N more", async () => {
+    stubServer({ grant: { strongly: 0, also: 0 }, trial: { strongly: 0, also: 0 } });
+    render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} />);
+    await screen.findByText("Paper one");
+    expect(screen.getByRole("link", { name: "Cy Author" }).getAttribute("href")).toMatch(/cy-author/);
+    expect(screen.queryByRole("link", { name: "Gus Author" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "+1 more" }));
+    expect(screen.getByRole("link", { name: "Gus Author" })).toBeTruthy();
   });
 
   it("?feed=trials is read on the client and opens the trials list", async () => {

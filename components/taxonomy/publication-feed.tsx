@@ -75,6 +75,8 @@ import {
   readShownParam,
   writeShownParam,
 } from "@/lib/taxonomy/feed-load-more";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 import { sanitizePubTitle } from "@/lib/utils";
 import { Caret } from "@/components/ui/caret";
 
@@ -331,7 +333,7 @@ export function PublicationFeed({
     }
   }
 
-  const rowProps = { modalTopicSlug, entityTerm, areaLabelFor };
+  const rowProps = { modalTopicSlug, entityTerm, areaLabelFor, plainAuthors: !!renderHeader };
 
   const sortSelect = (
     <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
@@ -611,7 +613,45 @@ type RowProps = {
   modalTopicSlug?: string;
   entityTerm: string | null;
   areaLabelFor?: (hit: FeedHit) => string | null;
+  plainAuthors?: boolean;
 };
+
+const PLAIN_AUTHOR_LIMIT = 4;
+
+/** TOPIC_FEED_GRANTS_TRIALS — authors as comma-separated profile links (the
+ *  Activities mockup), so the feed's Scholars chips are the only chips. */
+function PlainAuthors({ authors: raw }: { authors: FeedHit["authors"] }) {
+  const [all, setAll] = useState(false);
+  // AuthorChipRow's rules: no cwid ⇒ dropped; a non-public scholar (#536) is unlinked.
+  const authors = raw.filter((a) => a.cwid);
+  if (authors.length === 0) return null;
+  const shown = all ? authors : authors.slice(0, PLAIN_AUTHOR_LIMIT);
+  const more = authors.length - shown.length;
+  return (
+    <div className="text-muted-foreground text-[13.5px] leading-normal">
+      {shown.map((a, i) => (
+        <span key={a.cwid ?? `${a.name}-${i}`}>
+          {a.slug && isPubliclyDisplayed(a.roleCategory) ? (
+            <Link href={profilePath(a.slug)} className="text-apollo-slate hover:underline">
+              {a.name}
+            </Link>
+          ) : (
+            a.name
+          )}
+          {i < shown.length - 1 ? ", " : ""}
+        </span>
+      ))}
+      {more > 0 && (
+        <>
+          {", "}
+          <button type="button" onClick={() => setAll(true)} className="text-apollo-slate hover:underline">
+            +{more} more
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function FeedSkeleton() {
   return (
@@ -798,12 +838,14 @@ export function PubRow({
   modalTopicSlug,
   entityTerm = null,
   areaLabelFor,
+  plainAuthors = false,
   focusable = false,
 }: {
   hit: FeedHit;
   modalTopicSlug?: string;
   entityTerm?: string | null;
   areaLabelFor?: (hit: FeedHit) => string | null;
+  plainAuthors?: boolean;
   /** Load more: rows take programmatic focus (tabIndex -1). */
   focusable?: boolean;
 }) {
@@ -868,7 +910,11 @@ export function PubRow({
           </span>
         </div>
       )}
-      <AuthorChipRow authors={hit.authors} pmid={hit.pmid} />
+      {plainAuthors ? (
+        <PlainAuthors authors={hit.authors} />
+      ) : (
+        <AuthorChipRow authors={hit.authors} pmid={hit.pmid} />
+      )}
       <PublicationMeta
         citationCount={hit.citationCount}
         impactScore={hit.impactScore}

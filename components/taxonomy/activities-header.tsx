@@ -7,13 +7,22 @@
  * the "Include related …" switch. Presentational only; the feeds own the state.
  */
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
+import { profilePath } from "@/lib/profile-url";
 import { cn } from "@/lib/utils";
 
 export type ActivityTab<T extends string> = { value: T; label: string; count: number | null };
 
-export type ScholarChip = { cwid: string; name: string; headshot: string; count: number };
+export type ScholarChip = {
+  cwid: string;
+  name: string;
+  slug: string;
+  headshot: string;
+  /** Activities in scope (papers + grants + trials). */
+  count: number;
+};
 
 const SCHOLAR_LIMIT = 6;
 
@@ -53,7 +62,6 @@ function Chip({
 export function ActivitiesHeader<T extends string>({
   info,
   scholars,
-  allCount,
   pickedCwid,
   onPick,
   tabs,
@@ -66,7 +74,6 @@ export function ActivitiesHeader<T extends string>({
   info: string;
   /** Null while loading; sorted by count. */
   scholars: ScholarChip[] | null;
-  allCount: number | null;
   pickedCwid: string | null;
   onPick: (cwid: string | null) => void;
   tabs: Array<ActivityTab<T>>;
@@ -103,7 +110,6 @@ export function ActivitiesHeader<T extends string>({
             <Chip on={!pickedCwid} onClick={() => onPick(null)}>
               <span className="w-1" />
               <span>All</span>
-              <span className="text-muted-foreground">{allCount?.toLocaleString() ?? ""}</span>
             </Chip>
             {visible.map((s) => (
               <Chip
@@ -116,7 +122,12 @@ export function ActivitiesHeader<T extends string>({
                   <AvatarFallback className="text-[10px]">{initials(s.name)}</AvatarFallback>
                 </Avatar>
                 <span>{s.name}</span>
-                <span className="text-muted-foreground">{s.count.toLocaleString()}</span>
+                <span
+                  className="text-muted-foreground"
+                  aria-label={`${s.count} ${s.count === 1 ? "activity" : "activities"}`}
+                >
+                  {s.count.toLocaleString()}
+                </span>
               </Chip>
             ))}
             {list.length > SCHOLAR_LIMIT && (
@@ -129,6 +140,15 @@ export function ActivitiesHeader<T extends string>({
               </button>
             )}
           </div>
+          {picked && (
+            <Link
+              href={profilePath(picked.slug)}
+              className="text-apollo-slate w-max text-[13px] hover:underline"
+              data-testid="activities-picked-profile"
+            >
+              View {picked.name}&apos;s profile →
+            </Link>
+          )}
         </div>
       )}
 
