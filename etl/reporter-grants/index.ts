@@ -20,7 +20,8 @@
  *   5. Default-hide awards older than RECENCY_YEARS via a system `Suppression`
  *      (user-revocable to surface; spec §6c). Behind
  *      REPORTER_GRANTS_CORROBORATION_HIDE, also default-hide an award from a
- *      name-only profile that nothing ties to the scholar (#3071).
+ *      name-only or grant-join profile that nothing ties to the scholar (#3071;
+ *      see `corroborationPolicy`).
  *   6. Reconcile: delete `source='RePORTER'` rows no longer returned. NEVER
  *      touches `source='InfoEd'` rows.
  *
@@ -47,12 +48,14 @@ import {
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
+  corroborationPolicy,
   groupProjectsByCore,
-  hasNameOnlyProfile,
   isWcmOrg,
   recencyShouldSuppress,
   toReporterProject,
   unverifiedShouldSuppress,
+  wcmOrgCorroborates,
+  type CorroborationPolicy,
   type ReporterGrantRow,
 } from "./transform";
 import {
@@ -74,11 +77,24 @@ import {
 const SYSTEM_RECENCY = "system-recency";
 
 /** createdBy marker for the #3071 default-hide of an uncorroborated award from a
- *  name-only profile. Same lifecycle as SYSTEM_RECENCY: minted once per row,
- *  user-revocable, and a revoked one is never re-minted. */
+ *  name-only or grant-join profile. Same lifecycle as SYSTEM_RECENCY: minted
+ *  once per row, user-revocable, and a revoked one is never re-minted. */
 const SYSTEM_UNVERIFIED = "system-unverified";
 
-/** #3071 — gates the uncorroborated name-only default-hide. Off ⇒ behaviour is
+/** #3071 — the Suppression.reason for an unverified hide, by policy. */
+const UNVERIFIED_REASON: Record<Exclude<CorroborationPolicy, "none">, string> = {
+  "wcm-or-publication":
+    `RePORTER grant default-hidden as unverified: the scholar's NIH profile was ` +
+    `matched by name only, and neither a WCM org nor a confirmed publication ` +
+    `ties this award to them. Revoke to surface it on the profile.`,
+  "publication-only":
+    `RePORTER grant default-hidden as unverified: the scholar's NIH profile was ` +
+    `matched through a WCM grant and a name check, which a similarly named WCM ` +
+    `colleague can pass, and no confirmed publication ties this award to them. ` +
+    `Revoke to surface it on the profile.`,
+};
+
+/** #3071 — gates the uncorroborated-award default-hide. Off ⇒ behaviour is
  *  exactly as before. Wired per env in cdk/lib/etl-stack.ts. */
 const CORROBORATION_HIDE_ENABLED = process.env.REPORTER_GRANTS_CORROBORATION_HIDE === "on";
 
@@ -510,7 +526,7 @@ async function main() {
         ).map((s) => s.entityId)
       : [],
   );
-  let unverifiedHidden = 0;
+  const unverifiedHidden = { "wcm-or-publication": 0, "publication-only": 0 };
   let unverifiedSkippedNoPmids = 0;
   let unverifiedSkippedFetchError = 0;
 
@@ -571,13 +587,13 @@ async function main() {
 
     // #3071 — which of this scholar's awards to default-hide as uncorroborated.
     const unverifiedIds = new Set<string>();
-    const nameOnlyProfile = hasNameOnlyProfile(sourcesByCwid.get(cwid) ?? []);
-    if (CORROBORATION_HIDE_ENABLED && nameOnlyProfile) {
+    const policy = corroborationPolicy(sourcesByCwid.get(cwid) ?? []);
+    if (CORROBORATION_HIDE_ENABLED && policy !== "none") {
       // Only rows no system hide has ever decided, and that the age rule is not
       // about to hide anyway (one system hide per row, so one revoke surfaces it).
       const pending = toWrite.filter(
         ({ row, maxFiscalYear, wcmOrgHistory }) =>
-          !wcmOrgHistory &&
+          !wcmOrgCorroborates(policy, wcmOrgHistory) &&
           !existingUnverifiedHides.has(row.externalId) &&
           !existingRecencyHides.has(row.externalId) &&
           !recencyShouldSuppress(maxFiscalYear, currentYear),
@@ -595,7 +611,7 @@ async function main() {
           for (const { row, wcmOrgHistory } of pending) {
             if (
               unverifiedShouldSuppress({
-                nameOnlyProfile,
+                policy,
                 wcmOrgHistory,
                 publicationCorroborated: !uncorroborated.has(row.id),
               })
@@ -646,22 +662,18 @@ async function main() {
             });
             existingRecencyHides.add(row.externalId);
             minted.push({ suppressionId: sup.id, entityId: row.externalId });
-          } else if (unverifiedIds.has(row.externalId)) {
+          } else if (policy !== "none" && unverifiedIds.has(row.externalId)) {
             const sup = await tx.suppression.create({
               data: {
                 entityType: "grant",
                 entityId: row.externalId,
-                reason:
-                  `RePORTER grant default-hidden as unverified: the scholar's NIH ` +
-                  `profile was matched by name only, and neither a WCM org nor ` +
-                  `a confirmed publication ties this award to them. Revoke to ` +
-                  `surface it on the profile.`,
+                reason: UNVERIFIED_REASON[policy],
                 createdBy: SYSTEM_UNVERIFIED,
               },
             });
             existingUnverifiedHides.add(row.externalId);
             minted.push({ suppressionId: sup.id, entityId: row.externalId });
-            unverifiedHidden++;
+            unverifiedHidden[policy]++;
           }
         }
       });
@@ -680,17 +692,21 @@ async function main() {
 
   await reflectGrantSuppressions(minted);
 
+  const unverifiedTotal =
+    unverifiedHidden["wcm-or-publication"] + unverifiedHidden["publication-only"];
   console.log(
     `\nMaterialized ${grantsUpserted} net-new RePORTER grants across ` +
       `${processed} scholars ` +
-      `(${minted.length - unverifiedHidden} default-hidden by age, ${skippedNoDate} skipped: no dates, ` +
+      `(${minted.length - unverifiedTotal} default-hidden by age, ${skippedNoDate} skipped: no dates, ` +
       `${errored} fetch errors).`,
   );
   if (CORROBORATION_HIDE_ENABLED) {
     console.log(
-      `#3071 corroboration: ${unverifiedHidden} name-only awards default-hidden as ` +
-        `unverified (scholars left unjudged: ${unverifiedSkippedNoPmids} with no ` +
-        `confirmed PMIDs, ${unverifiedSkippedFetchError} with a publication fetch error).`,
+      `#3071 corroboration: ${unverifiedTotal} awards default-hidden as unverified ` +
+        `(${unverifiedHidden["wcm-or-publication"]} from name-only profiles, ` +
+        `${unverifiedHidden["publication-only"]} from grant-join profiles; scholars left ` +
+        `unjudged: ${unverifiedSkippedNoPmids} with no confirmed PMIDs, ` +
+        `${unverifiedSkippedFetchError} with a publication fetch error).`,
     );
   }
 
