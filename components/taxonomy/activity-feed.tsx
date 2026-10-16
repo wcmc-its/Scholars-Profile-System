@@ -455,7 +455,7 @@ function ActivityKindFeed({
                 key={key}
                 tabIndex={-1}
                 data-key={key}
-                className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="outline-none focus-visible:ring-2 focus-visible:ring-ring [&:first-child>article]:border-t-0"
               >
                 {kind === "grant" ? (
                   <FundingResultRow
