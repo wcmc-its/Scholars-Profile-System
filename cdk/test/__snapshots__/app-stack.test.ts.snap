@@ -1271,7 +1271,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "TOPIC_FEED_GRANTS_TRIALS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
