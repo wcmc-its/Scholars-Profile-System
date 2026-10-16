@@ -88,6 +88,9 @@ export function FundingResultRow({
   const [expanded, setExpanded] = useState(false);
   const effectiveApplId = hit.applId ?? applId ?? null;
   const canExpand = hit.pubCount > 0 || !!hit.abstract;
+  const titleHtml = hit.titleHighlight
+    ? highlightedTitleHtml(hit.titleHighlight)
+    : sanitizePubTitle(hit.title);
 
   function trackClick(cwid: string) {
     if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
@@ -116,14 +119,19 @@ export function FundingResultRow({
             title, render the highlighted fragment (same sanitize + pale-tint
             pill as the Publications row) so the literal hit is self-evident and
             the reason line is suppressed below. */}
-        <h3
-          className="text-[15px] font-medium leading-snug text-[#1a1a1a] line-clamp-2"
-          dangerouslySetInnerHTML={{
-            __html: hit.titleHighlight
-              ? highlightedTitleHtml(hit.titleHighlight)
-              : sanitizePubTitle(hit.title),
-          }}
-        />
+        <h3 className="text-[15px] font-medium leading-snug text-[#1a1a1a] line-clamp-2">
+          {effectiveApplId ? (
+            <a
+              href={`https://reporter.nih.gov/project-details/${effectiveApplId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+              dangerouslySetInnerHTML={{ __html: titleHtml }}
+            />
+          ) : (
+            <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
+          )}
+        </h3>
 
         {/* People row + inline pills. */}
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -262,7 +270,7 @@ export function FundingResultRow({
 
       {/* Right column: award identifier. */}
       <div className="text-right">
-        <AwardId hit={hit} applId={applId} />
+        <AwardId hit={hit} applId={effectiveApplId ?? undefined} />
         {hit.status === "active" ? (
           <div className="mt-1.5 inline-flex items-center rounded-full bg-[#eaf3de] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#27500a]">
             Active
