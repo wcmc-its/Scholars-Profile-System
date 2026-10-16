@@ -154,7 +154,8 @@ export function ActivitiesHeader<T extends string>({
 
       <div className="border-apollo-border flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b">
         <div role="tablist" className="flex gap-6">
-          {tabs.map((t) => {
+          {/* A type with nothing in scope gets no tab (the active one always stays). */}
+          {tabs.filter((t) => t.value === activeTab || t.count !== 0).map((t) => {
             const active = t.value === activeTab;
             return (
               <button
@@ -162,10 +163,9 @@ export function ActivitiesHeader<T extends string>({
                 type="button"
                 role="tab"
                 aria-selected={active}
-                disabled={!active && t.count === 0}
                 onClick={() => onTab(t.value)}
                 className={cn(
-                  "-mb-px flex items-baseline gap-1.5 pt-2.5 pb-[11px] text-[15px] disabled:cursor-default disabled:opacity-50",
+                  "-mb-px flex items-baseline gap-1.5 pt-2.5 pb-[11px] text-[15px]",
                   active
                     ? "font-medium text-[#1a1a1a] shadow-[inset_0_-2px_0_var(--apollo-maroon)]"
                     : "text-muted-foreground hover:text-[#1a1a1a]",

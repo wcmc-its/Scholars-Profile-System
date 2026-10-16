@@ -6,7 +6,7 @@
  *     no Type select, only the publications route);
  *   - flag on: the Activities header (Scholars chips from `?kind=scholars`, type
  *     tabs with counts, Sort, the "Include related …" switch); a zero-count tab
- *     is disabled; switching to Grants / Clinical trials fetches
+ *     is hidden; switching to Grants / Clinical trials fetches
  *     `/api/topics/[slug]/activity?kind=…`, renders the Search rows, hides the
  *     research-articles toggle and writes `?feed=` on the client; `?feed=` is
  *     read back on load.
@@ -177,7 +177,7 @@ const tab = (name: RegExp) => screen.getByRole("tab", { name });
 const tabCount = (name: RegExp) => tab(name).querySelector("span")!.textContent;
 
 describe("flag on: TopicActivityFeed", () => {
-  it("Activities header: tabs with counts, zero-count tab disabled, Scholars chips", async () => {
+  it("Activities header: tabs with counts, zero-count tab hidden, Scholars chips", async () => {
     const calls = stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 0, also: 0 } });
     render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} />);
     await screen.findByText("Paper one");
@@ -185,7 +185,7 @@ describe("flag on: TopicActivityFeed", () => {
     await waitFor(() => expect(tabCount(/Grants/)).toBe("3"));
     expect(tab(/Publications/).getAttribute("aria-selected")).toBe("true");
     expect(tabCount(/Publications/)).toBe("1");
-    expect((tab(/Clinical trials/) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("tab", { name: /Clinical trials/ })).toBeNull();
     // Chips: "All" (no number), then each scholar's activity count, sorted by count.
     const chips = screen.getByTestId("activities-scholars").querySelectorAll("button[aria-pressed]");
     expect(Array.from(chips).map((c) => c.textContent)).toEqual(["All", "AAAnn Able4", "BBBob Baker1"]);
@@ -226,8 +226,8 @@ describe("flag on: TopicActivityFeed", () => {
     expect(screen.getByRole("link", { name: /View Bob Baker's profile/ }).getAttribute("href")).toMatch(/bob-baker/);
     expect(tabCount(/Grants/)).toBe("1");
 
-    // Bob has no papers: Publications is disabled until "All" clears the pick.
-    expect((tab(/Publications/) as HTMLButtonElement).disabled).toBe(true);
+    // Bob has no papers: Publications has no tab until "All" clears the pick.
+    expect(screen.queryByRole("tab", { name: /Publications/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "All" }));
 
     // Back to Publications drops ?feed=.
@@ -264,7 +264,7 @@ describe("flag on: TopicActivityFeed", () => {
     render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} />);
     await screen.findByText("Paper one");
     await waitFor(() => expect(tab(/Publications/).getAttribute("aria-selected")).toBe("true"));
-    expect((tab(/Grants/) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("tab", { name: /Grants/ })).toBeNull();
   });
 
   it("readFeedParam accepts only grants / trials", () => {
