@@ -136,29 +136,18 @@ describe("ActivityGrantRow", () => {
     expect(screen.getByText("+2 more", { exact: false })).toBeTruthy();
   });
 
-  it("Abstract & N publications opens the abstract and the papers", () => {
-    const publications = Array.from({ length: 6 }, (_, i) => ({
-      pmid: `${100 + i}`,
-      title: `Paper ${i}`,
-      journal: "J Test",
-      year: 2025,
-      citationCount: 0,
-      isLowerConfidence: false,
-    }));
-    render(
-      <ActivityGrantRow hit={grant({ abstract: "An abstract.", pubCount: 6, publications })} />,
-    );
+  it("Abstract & N publications opens the abstract only, as in the mockup", () => {
+    render(<ActivityGrantRow hit={grant({ abstract: "An abstract.", pubCount: 6 })} />);
     const toggle = screen.getByRole("button", { name: "Abstract & 6 publications" });
     expect(screen.queryByText("An abstract.")).toBeNull();
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("An abstract.")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Paper 0" }).getAttribute("href")).toBe(
-      "https://pubmed.ncbi.nlm.nih.gov/100/",
-    );
-    expect(screen.queryByRole("link", { name: "Paper 5" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show 1 more" }));
-    expect(screen.getByRole("link", { name: "Paper 5" })).toBeTruthy();
+  });
+
+  it("no abstract, no toggle (mockup: sc-if hasAbstract)", () => {
+    render(<ActivityGrantRow hit={grant({ abstract: null, pubCount: 3 })} />);
+    expect(screen.queryByRole("button", { name: /publications/ })).toBeNull();
   });
 });
 

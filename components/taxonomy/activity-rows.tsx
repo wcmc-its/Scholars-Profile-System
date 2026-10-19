@@ -13,7 +13,7 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { Caret } from "@/components/ui/caret";
-import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
+import { PubAbstract } from "@/components/publication/pub-html";
 import { expandLabel } from "@/components/funding/expanded-grant";
 import {
   studyTypeLabel,
@@ -33,7 +33,6 @@ import { sanitizePubTitle } from "@/lib/utils";
 import type { TopicGrantActivityHit, TopicTrialActivityHit } from "@/lib/api/topic-activity";
 
 const PEOPLE_LIMIT = 4;
-const PUBS_LIMIT = 5;
 
 type Tone = "hi" | "warn" | "lo";
 const PILL: Record<Tone, string> = {
@@ -143,13 +142,11 @@ const GRANT_STATUS: Record<TopicGrantActivityHit["status"], [Tone, string]> = {
 
 export function ActivityGrantRow({ hit, applId }: { hit: TopicGrantActivityHit; applId?: number }) {
   const [open, setOpen] = useState(false);
-  const [allPubs, setAllPubs] = useState(false);
   const [tone, statusLabel] = GRANT_STATUS[hit.status];
   const reporterId = hit.applId ?? applId ?? null;
   const titleHtml = sanitizePubTitle(hit.title);
   const funder = funderVerbose(hit.primeSponsor);
   const via = hit.isSubaward && hit.directSponsor ? funderVerbose(hit.directSponsor) : null;
-  const pubs = allPubs ? hit.publications : hit.publications.slice(0, PUBS_LIMIT);
   const people: Person[] = hit.people.map((p) => ({
     key: p.cwid,
     name: p.preferredName,
@@ -197,47 +194,17 @@ export function ActivityGrantRow({ hit, applId }: { hit: TopicGrantActivityHit; 
           {via ? ` · via ${via}` : ""}
         </span>
       </div>
-      {hit.abstract || hit.pubCount > 0 ? (
+      {hit.abstract ? (
         <Disclosure open={open} onToggle={() => setOpen((o) => !o)}>
-          {expandLabel(hit.pubCount, !!hit.abstract)}
+          {expandLabel(hit.pubCount, true)}
         </Disclosure>
       ) : null}
-      {open ? (
-        <div className={`${PANEL} flex flex-col gap-2.5 leading-[1.55] text-pretty text-[#4a4540]`}>
-          {hit.abstract ? <p>{hit.abstract}</p> : null}
-          {pubs.length > 0 ? (
-            <ul className="flex flex-col gap-2">
-              {pubs.map((p) => (
-                <li key={p.pmid}>
-                  <a
-                    href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    {...pubTitleProps(
-                      sanitizePubTitle(p.title),
-                      "text-apollo-slate hover:underline",
-                    )}
-                  />
-                  <div className="text-muted-foreground text-[12.5px]">
-                    <PubJournal value={p.journal} />
-                    {p.year ? <> · {p.year}</> : null}
-                    {" · PMID "}
-                    {p.pmid}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {pubs.length < hit.publications.length ? (
-            <button
-              type="button"
-              onClick={() => setAllPubs(true)}
-              className="text-apollo-slate w-max text-[13px] hover:underline"
-            >
-              Show {hit.publications.length - pubs.length} more
-            </button>
-          ) : null}
-        </div>
+      {open && hit.abstract ? (
+        <PubAbstract
+          as="p"
+          value={hit.abstract}
+          className={`${PANEL} leading-[1.55] text-pretty text-[#4a4540]`}
+        />
       ) : null}
     </article>
   );
