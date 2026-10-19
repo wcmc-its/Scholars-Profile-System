@@ -314,7 +314,17 @@ export type AuditAction =
    *  `targetEntityType='scholar'`, `targetEntityId` the cwid; before/after carry
    *  `{ opportunityId, status, reason }` (status null = no feedback). Requires
    *  the `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
-  | "grant_rec_feedback";
+  | "grant_rec_feedback"
+  /** #3071 — a curator decided a queued RePORTER award on
+   *  `/edit/grant-attribution-queue` (`POST /api/edit/grant-attribution/decision`):
+   *  confirmed it as the scholar's (revokes the system hide), marked it "Not
+   *  this person" (a curator-owned suppression), or undid either.
+   *  `targetEntityType='grant'`, `targetEntityId` the grant externalId;
+   *  before/after carry `{ review_id, status, score, band, effects }`. Requires
+   *  the `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
+  | "grant_attribution_confirm"
+  | "grant_attribution_reject"
+  | "grant_attribution_undo";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
