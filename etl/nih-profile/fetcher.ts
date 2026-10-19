@@ -631,6 +631,9 @@ export type ReporterGrantProject = {
   award_amount: number | null;
   org_name: string | null;
   project_title: string | null;
+  /** Every PI on this fiscal year's award, contact and multi-PI alike. Feeds
+   *  the #3071 attribution cues (middle initial, co-PI co-authorship). */
+  principal_investigators?: ReporterPI[];
 };
 
 /**
@@ -664,6 +667,7 @@ export async function fetchGrantProjectsByProfileIds(
           "AwardAmount",
           "Organization",
           "ProjectTitle",
+          "PrincipalInvestigators",
         ],
         limit: PAGE_LIMIT,
         offset,
@@ -688,6 +692,7 @@ export async function fetchGrantProjectsByProfileIds(
         award_amount: number | null;
         organization?: { org_name?: string | null } | null;
         project_title: string | null;
+        principal_investigators?: ReporterPI[] | null;
       }>;
     };
     const results = data.results ?? [];
@@ -702,6 +707,7 @@ export async function fetchGrantProjectsByProfileIds(
         award_amount: r.award_amount,
         org_name: r.organization?.org_name ?? null,
         project_title: r.project_title,
+        principal_investigators: r.principal_investigators ?? [],
       });
     }
     if (total === null) total = data.meta?.total ?? 0;

@@ -11,7 +11,7 @@
 import { parseNihAward } from "@/lib/award-number";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import type { ReporterProject } from "@/lib/edit/reporter-grants";
-import type { ReporterGrantProject } from "@/etl/nih-profile/fetcher";
+import type { ReporterGrantProject, ReporterPI } from "@/etl/nih-profile/fetcher";
 
 /**
  * Net-new RePORTER grants are inherently old (the whole point — prior-institution
@@ -128,6 +128,11 @@ export interface GroupedProject {
   /** Summed across fiscal years. Not persisted (the Grant schema has no $) —
    *  carried for the dedup shape and possible CV-side display. */
   awardAmount: number | null;
+  /** #3071 — every (org, fiscal year) the award was held at, for the
+   *  prior-institution cue. `orgName` above keeps only one. */
+  orgHistory: Array<{ orgName: string | null; fiscalYear: number | null }>;
+  /** #3071 — every PI across the fiscal years, one per profile_id. */
+  pis: ReporterPI[];
 }
 
 export const isWcmOrg = (org: string | null | undefined): boolean =>
@@ -148,7 +153,15 @@ function parseReporterDate(s: string | null): Date | null {
 export function groupProjectsByCore(
   projects: ReporterGrantProject[],
 ): GroupedProject[] {
-  type Acc = GroupedProject & { latestFyForMeta: number };
+  type Acc = GroupedProject & { latestFyForMeta: number; piIds: Set<number> };
+  const addHistory = (acc: Acc, p: ReporterGrantProject, fy: number | null) => {
+    acc.orgHistory.push({ orgName: p.org_name ?? null, fiscalYear: fy });
+    for (const pi of p.principal_investigators ?? []) {
+      if (acc.piIds.has(pi.profile_id)) continue;
+      acc.piIds.add(pi.profile_id);
+      acc.pis.push(pi);
+    }
+  };
   const byCore = new Map<string, Acc>();
 
   for (const p of projects) {
@@ -160,7 +173,7 @@ export function groupProjectsByCore(
 
     const existing = byCore.get(core);
     if (!existing) {
-      byCore.set(core, {
+      const acc: Acc = {
         coreProjectNum: core,
         awardNumber: p.project_num ?? null,
         applId: p.appl_id ?? null,
@@ -170,10 +183,16 @@ export function groupProjectsByCore(
         endDate: end,
         maxFiscalYear: fy,
         awardAmount: p.award_amount ?? null,
+        orgHistory: [],
+        pis: [],
         latestFyForMeta: fy ?? -Infinity,
-      });
+        piIds: new Set(),
+      };
+      addHistory(acc, p, fy);
+      byCore.set(core, acc);
       continue;
     }
+    addHistory(existing, p, fy);
 
     if (start && (!existing.startDate || start < existing.startDate)) {
       existing.startDate = start;
@@ -210,6 +229,8 @@ export function groupProjectsByCore(
     endDate: acc.endDate,
     maxFiscalYear: acc.maxFiscalYear,
     awardAmount: acc.awardAmount,
+    orgHistory: acc.orgHistory,
+    pis: acc.pis,
   }));
 }
 

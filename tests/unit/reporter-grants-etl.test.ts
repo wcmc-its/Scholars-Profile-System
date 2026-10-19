@@ -192,6 +192,29 @@ describe("groupProjectsByCore", () => {
     expect(grouped[0]!.orgName).toMatch(/weill/i);
   });
 
+  it("#3071 keeps every (org, fiscal year) and one entry per PI across fiscal years", () => {
+    const pi = (profile_id: number, middle_name: string | null) => ({
+      profile_id,
+      first_name: "Pat",
+      middle_name,
+      last_name: "Example",
+      full_name: null,
+      is_contact_pi: profile_id === 1,
+      title: null,
+    });
+    const [g] = groupProjectsByCore([
+      fyProj({ fiscal_year: 2012, org_name: "UNIVERSITY OF ELSEWHERE", principal_investigators: [pi(1, "Q")] }),
+      fyProj({ fiscal_year: 2016, org_name: "WEILL MEDICAL COLL OF CORNELL UNIV", principal_investigators: [pi(1, "Q"), pi(2, null)] }),
+      fyProj({ fiscal_year: 2017, org_name: "WEILL MEDICAL COLL OF CORNELL UNIV" }),
+    ]);
+    expect(g!.orgHistory).toEqual([
+      { orgName: "UNIVERSITY OF ELSEWHERE", fiscalYear: 2012 },
+      { orgName: "WEILL MEDICAL COLL OF CORNELL UNIV", fiscalYear: 2016 },
+      { orgName: "WEILL MEDICAL COLL OF CORNELL UNIV", fiscalYear: 2017 },
+    ]);
+    expect(g!.pis.map((p) => p.profile_id)).toEqual([1, 2]);
+  });
+
   it("drops rows with no core_project_num and keeps distinct cores separate", () => {
     const grouped = groupProjectsByCore([
       fyProj({ core_project_num: null }),
@@ -215,6 +238,8 @@ const grouped = (over: Partial<GroupedProject>): GroupedProject => ({
   endDate: new Date("2023-08-31"),
   maxFiscalYear: 2020,
   awardAmount: 120000,
+  orgHistory: [],
+  pis: [],
   ...over,
 });
 
