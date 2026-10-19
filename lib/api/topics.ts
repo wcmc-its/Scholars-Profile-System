@@ -36,7 +36,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { headshotUrl } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import { loadAreaSignalPoints } from "@/lib/api/area-signal-points";
-import { isTopicRankAreaSignalsOn } from "@/lib/taxonomy-flags";
+import { isTopicRankAreaSignalsOn, isTopicSubareaRankAreaSignalsOn } from "@/lib/taxonomy-flags";
 import {
   HIDDEN_ROLE_CATEGORIES,
   SEARCH_BOOST_ELIGIBLE_ROLES,
@@ -507,6 +507,31 @@ export async function getSubtopicScholars(
       ({ scholar: r.scholar, total: 0 } as AggEntry);
     entry.total += score;
     byCwid.set(r.cwid, entry);
+  }
+
+  // TOPIC_SUBAREA_RANK_AREA_SIGNALS — PI grants and PI trials ReciterAI put in
+  // THIS subarea re-rank the paper pool above at W = 1; they never add a
+  // scholar. Fail-soft: a failed read leaves today's papers-only order. The
+  // popover counts below stay publication counts.
+  if (isTopicSubareaRankAreaSignalsOn() && byCwid.size > 0) {
+    try {
+      const points = await loadAreaSignalPoints(topicSlug, [...byCwid.keys()], now, {
+        subtopicId,
+      });
+      for (const [cwid, p] of points) {
+        const entry = byCwid.get(cwid);
+        if (entry) entry.total += p;
+      }
+    } catch (err) {
+      console.warn(
+        JSON.stringify({
+          event: "area_signal_points_failed",
+          topic: topicSlug,
+          subtopic: subtopicId,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
   }
 
   const sorted = Array.from(byCwid.values()).sort((a, b) => b.total - a.total);
