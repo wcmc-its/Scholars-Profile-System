@@ -52,6 +52,7 @@ import {
 } from "./change-detection";
 import { buildMenteeSuggestions } from "./mentee-suggestions";
 import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
+import { syncRejectedPmids } from "./rejected-pmids";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {
@@ -1078,6 +1079,17 @@ async function main() {
     } catch (err) {
       console.error(
         "[mentee-suggestions] failed (non-fatal):",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
+    // #3071 — best-effort: the RePORTER grant scorer's rejected-papers cue reads
+    // this mirror; a stale or missing one only switches that cue off.
+    try {
+      await syncRejectedPmids(cwidList);
+    } catch (err) {
+      console.error(
+        "[rejected-pmids] failed (non-fatal):",
         err instanceof Error ? err.message : err,
       );
     }
