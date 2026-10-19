@@ -54,6 +54,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "grantMatcha",
   "roleVocabulary",
   "titles",
+  "grantAttribution",
 ];
 
 // --- the matrix --------------------------------------------------------
@@ -99,6 +100,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "cores",
       "roleVocabulary",
       "titles",
+      "grantAttribution",
     ],
     pins:
       "Gap 2 — news via isNewsQueueTabVisible, never via a profilesTab piggyback; " +
@@ -128,6 +130,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "orcidCoverage",
       "coi",
       "administrators",
+      "grantAttribution",
     ],
     pins:
       "2026-10-01 — an observer sees every queue and dashboard read-only, COI " +
@@ -158,6 +161,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "orcidCoverage",
       "coi",
       "administrators",
+      "grantAttribution",
     ],
     pins: "2026-10-01 — a content editor reads what an observer reads; its writes are allowlisted",
   },
@@ -244,6 +248,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "cores",
       "roleVocabulary",
       "titles",
+      "grantAttribution",
     ],
     pins: "Gap 4b — a comms_steward loses Units on /edit/administrators (unitsTab={session.isSuperuser})",
   },

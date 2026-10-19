@@ -41,6 +41,7 @@ export type AdminSubnavActive =
   | "news-queue"
   | "media-highlights-queue"
   | "titles-queue"
+  | "grant-attribution-queue"
   | "slugs"
   | "administrators"
   | "methods"
@@ -100,6 +101,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   "media-highlights-queue": "queues",
   /** Display titles needing review, resolved by pinning (formerly report 10). */
   "titles-queue": "queues",
+  "grant-attribution-queue": "queues",
   cores: "queues",
   /** Reference/config data you look up; rarely mutated. */
   slugs: "registries",
@@ -142,6 +144,8 @@ export function AdminSubnav({
   pendingHonors,
   titlesTab = false,
   pendingTitles = null,
+  grantAttributionTab = false,
+  pendingGrantAttribution = null,
   administratorsTab,
   methodsTab,
   roleVocabularyTab,
@@ -186,6 +190,11 @@ export function AdminSubnav({
    *  (`countTitlesNeedingReview`). `null` (the count failed, or was not read)
    *  shows the tab with no pill; it never hides the tab. */
   pendingTitles?: number | null;
+  /** #3071 — show the "Grants" queue tab (`/edit/grant-attribution-queue`):
+   *  `TAB_PREDICATES.grantAttribution`. Default `false`. */
+  grantAttributionTab?: boolean;
+  /** Its pill: pending reviews. `null` shows the tab with no pill. */
+  pendingGrantAttribution?: number | null;
   /** `null` hides the "Administrators" tab — the feature is flag-gated
    *  (`SELF_EDIT_ADMINISTRATORS_TAB`), mirroring the `pendingSlugRequests`
    *  hide pattern. A number shows the tab (Phase B passes `0` — no badge). */
@@ -331,6 +340,14 @@ export function AdminSubnav({
         href: "/edit/titles-queue",
         label: "Titles",
         count: pendingTitles ?? undefined,
+      },
+      // #3071 — RePORTER awards the attribution scorer could not settle.
+      {
+        show: grantAttributionTab,
+        id: "grant-attribution-queue",
+        href: "/edit/grant-attribution-queue",
+        label: "Grants",
+        count: pendingGrantAttribution ?? undefined,
       },
       // Always visible to superusers — the slug namespace exists regardless of the
       // slug-request flag. The request queue lives on the same page (design canvas

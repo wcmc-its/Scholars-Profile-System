@@ -644,11 +644,14 @@ export function ReasonSelect({
   onChange,
   disabled,
   small = false,
+  reasons = REJECTION_REASONS,
 }: {
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
   small?: boolean;
+  /** The choices; the honors reasons unless a queue passes its own (#3071). */
+  reasons?: ReadonlyArray<string>;
 }) {
   return (
     <select
@@ -663,7 +666,7 @@ export function ReasonSelect({
       data-slot="honor-reject-reason"
     >
       <option value="">Reason (required to reject)</option>
-      {REJECTION_REASONS.map((r) => (
+      {reasons.map((r) => (
         <option key={r} value={r}>
           {r}
         </option>

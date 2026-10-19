@@ -8,6 +8,7 @@ import {
   isNewsQueueEnabled,
 } from "@/lib/edit/news-queue";
 import { countTitlesNeedingReview } from "@/lib/edit/titles-queue";
+import { countPendingGrantAttribution } from "@/lib/edit/grant-attribution-queue.server";
 import type { EditSession } from "@/lib/auth/superuser";
 
 /**
@@ -49,6 +50,7 @@ export async function ConsoleShell({
   pendingSlugRequests,
   pendingHonors,
   pendingTitles,
+  pendingGrantAttribution,
   unitsTab,
   reportsTab,
   children,
@@ -64,6 +66,9 @@ export async function ConsoleShell({
    *  the same pill with no per-page wiring. `/edit/titles-queue` passes the
    *  exact count it just computed. */
   pendingTitles?: number | null;
+  /** #3071 — the Grants queue pill. Omitted, the shell counts it for a viewer
+   *  who has the tab (fail-soft to null = no pill). */
+  pendingGrantAttribution?: number | null;
   /** OR-in escape hatch for `/edit/units`, which has no unit-admin gate of its
    *  own (any signed-in viewer can land there) — see the module doc comment. */
   unitsTab?: boolean;
@@ -80,6 +85,11 @@ export async function ConsoleShell({
     : pendingTitles !== undefined
       ? pendingTitles
       : await countTitlesNeedingReview(db.read);
+  const grantsPill = !tabs.grantAttribution
+    ? null
+    : pendingGrantAttribution !== undefined
+      ? pendingGrantAttribution
+      : await countPendingGrantAttribution(db.read).catch(() => null);
   const [newsPill, clipsPill] = await Promise.all([
     tabs.news && isNewsQueueEnabled() ? countPendingNews(db.read, "newsroom") : null,
     tabs.news && isMediaHighlightsQueueEnabled() ? countPendingNews(db.read, "clips") : null,
@@ -100,6 +110,8 @@ export async function ConsoleShell({
           pendingHonors={pendingHonors}
           titlesTab={tabs.titles}
           pendingTitles={titlesPill}
+          grantAttributionTab={tabs.grantAttribution}
+          pendingGrantAttribution={grantsPill}
           superuserSurfaces={session.isSuperuser}
           profilesTab={tabs.profiles}
           unitsTab={tabs.units || unitsTab}
