@@ -12,6 +12,9 @@
  *   - `corrected`     — `"human"`, and the value differs from the AI's
  *                       ("Corrected · AI said X%").
  *   - `ai`            — an LLM value nobody has reviewed yet.
+ *   - `rule`          — MCC's rubric decided it outright (an NCI award, Lynch
+ *                       syndrome → 100%); shown as "MCC rule", needs no review
+ *                       and is left out of bulk Accept.
  *   - `not-inferred`  — the percent is null (the Bedrock call failed or the
  *                       import skipped it). Counts under Needs review, and is
  *                       left out of the Cancer-relevant $ figure.
@@ -38,9 +41,11 @@ export type Nci2aAward = {
   projectEndDate: string;
   annualProjectDirectCosts: number;
   cancerRelevantPercent: number | null;
-  cancerRelevantPercentSource: "llm" | "human";
-  /** What Bedrock proposed (`cancer_relevant_percent_ai`); null = no AI value. */
+  cancerRelevantPercentSource: "llm" | "rule" | "human";
+  /** What Bedrock (or MCC's rule) proposed (`cancer_relevant_percent_ai`); null = no AI value. */
   cancerRelevantPercentAi: number | null;
+  /** Bedrock model id, or `rule:nci` / `rule:lynch`; null = not recorded. */
+  cancerRelevantModel: string | null;
   cancerRelevantRationale: string | null;
   cancerRelevantAnnualProjectDc: number | null;
   isPeerReviewed: boolean;
@@ -55,7 +60,10 @@ export type Nci2aAward = {
 
 export type Nci2aData = { cycle: string | null; programs: Nci2aProgram[]; awards: Nci2aAward[] };
 
-export type Nci2aStatus = "confirmed" | "corrected" | "ai" | "not-inferred";
+export type Nci2aStatus = "confirmed" | "corrected" | "ai" | "rule" | "not-inferred";
+
+/** The AI-or-rule value came from an MCC rule, not a model. */
+export const isRuleModel = (model: string | null) => model?.startsWith("rule:") ?? false;
 
 export function nci2aStatus(
   a: Pick<
@@ -64,20 +72,25 @@ export function nci2aStatus(
   >,
 ): Nci2aStatus {
   if (a.cancerRelevantPercent == null) return "not-inferred";
+  if (a.cancerRelevantPercentSource === "rule") return "rule";
   if (a.cancerRelevantPercentSource !== "human") return "ai";
   return a.cancerRelevantPercentAi != null && a.cancerRelevantPercentAi !== a.cancerRelevantPercent
     ? "corrected"
     : "confirmed";
 }
 
-/** Reviewed = a human saved or accepted it (Confirmed or Corrected). */
-const reviewed = (s: Nci2aStatus) => s === "confirmed" || s === "corrected";
+/** Reviewed = a human saved or accepted it (Confirmed or Corrected), or MCC's
+ *  rule decided it (nothing for a reviewer to judge). */
+const reviewed = (s: Nci2aStatus) => s === "confirmed" || s === "corrected" || s === "rule";
 
 export const needsReview = (a: Nci2aAward) => !reviewed(nci2aStatus(a));
 
-/** The CSV Review Status column: Confirmed / Corrected / Needs review. */
-export function reviewStatusLabel(a: Nci2aAward): "Confirmed" | "Corrected" | "Needs review" {
+/** The CSV Review Status column: Confirmed / Corrected / MCC rule / Needs review. */
+export function reviewStatusLabel(
+  a: Nci2aAward,
+): "Confirmed" | "Corrected" | "MCC rule" | "Needs review" {
   const s = nci2aStatus(a);
+  if (s === "rule") return "MCC rule";
   return s === "confirmed" ? "Confirmed" : s === "corrected" ? "Corrected" : "Needs review";
 }
 
@@ -261,7 +274,9 @@ export function nci2aStats(rows: ReadonlyArray<Nci2aAward>): Nci2aStats {
  * agrees with the Needs review segment, the CSV note and the reports index).
  */
 export function reviewProgress(awards: ReadonlyArray<Nci2aAward>) {
-  const suggested = awards.filter((a) => a.cancerRelevantPercentAi != null);
+  const suggested = awards.filter(
+    (a) => a.cancerRelevantPercentAi != null && !isRuleModel(a.cancerRelevantModel),
+  );
   const done = suggested.filter((a) => !needsReview(a)).length;
   const total = suggested.length;
   return {
@@ -394,16 +409,21 @@ export const bulkAcceptTargets = (shown: ReadonlyArray<Nci2aAward>) =>
 export function statusPillLabel(
   a: Pick<
     Nci2aAward,
-    "cancerRelevantPercent" | "cancerRelevantPercentSource" | "cancerRelevantPercentAi"
+    | "cancerRelevantPercent"
+    | "cancerRelevantPercentSource"
+    | "cancerRelevantPercentAi"
+    | "cancerRelevantModel"
   >,
 ): string {
   switch (nci2aStatus(a)) {
     case "ai":
       return "AI-suggested";
+    case "rule":
+      return "MCC rule";
     case "not-inferred":
       return "Not inferred";
     case "corrected":
-      return `Corrected · AI said ${a.cancerRelevantPercentAi}%`;
+      return `Corrected · ${isRuleModel(a.cancerRelevantModel) ? "MCC rule" : "AI"} said ${a.cancerRelevantPercentAi}%`;
     default:
       return "Confirmed";
   }

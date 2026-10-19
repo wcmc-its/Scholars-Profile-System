@@ -49,6 +49,7 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     cancerRelevantPercentSource: "llm",
     // The AI original defaults to the fixture's percent (so a human row is Confirmed).
     cancerRelevantPercentAi: pct,
+    cancerRelevantModel: null,
     cancerRelevantRationale: "because",
     cancerRelevantAnnualProjectDc: pct == null ? null : pct * 1000,
     isPeerReviewed: true,
@@ -144,7 +145,7 @@ beforeEach(() => {
 });
 
 describe("report 2 body", () => {
-  it("progress is cycle-wide, the banner says title and funding source, tiles exclude not-inferred", async () => {
+  it("progress is cycle-wide, the banner describes MCC's rubric, tiles exclude not-inferred", async () => {
     const q = await renderBody();
     expect(h.load).toHaveBeenCalledWith(CENTER);
     const progress = q.getByTestId("nci-2a-progress");
@@ -152,7 +153,7 @@ describe("report 2 body", () => {
     expect(progress.textContent).toContain("1 of 2");
     expect(progress.textContent).toContain("AI-suggested percentages reviewed");
     expect(within(progress).getByTestId("nci-2a-banner").textContent).toContain(
-      "from the project title and funding source",
+      "100, 50, 25 or 0, read from the project title, abstract and Public Health Relevance statement",
     );
     expect(within(progress).getByTestId("nci-2a-review-link").getAttribute("href")).toBe(
       `${U}&status=needs`,

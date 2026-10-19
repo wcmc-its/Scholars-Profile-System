@@ -19,7 +19,8 @@
  * the act is the confirmation) — no new audit action, no ENUM edit.
  *
  * Skipped and reported back, never an error: an id outside this center
- * (`not_found`), a row a human already reviewed (`already_reviewed`), and a
+ * (`not_found`), a row a human already reviewed or MCC's rule decided
+ * (`already_reviewed` — a rule row is never an AI suggestion to accept), and a
  * row with no percent (`no_percent` — there is nothing to accept).
  */
 import { type NextRequest, type NextResponse } from "next/server";
@@ -98,7 +99,7 @@ export async function POST(
           out.skipped.push({ awardId, reason: "not_found" });
           continue;
         }
-        if (row.cancerRelevantPercentSource === "human") {
+        if (row.cancerRelevantPercentSource !== "llm") {
           out.skipped.push({ awardId, reason: "already_reviewed" });
           continue;
         }

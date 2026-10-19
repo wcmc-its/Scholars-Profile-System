@@ -340,8 +340,10 @@ describe("loadReportLiveness", () => {
       funding: [
         fundingGroup("meyer", "osra-2026-07-14", "llm", 50, d("2026-07-14")),
         fundingGroup("meyer", "osra-2026-07-14", "human", 30, d("2026-07-20")),
-        // Any source other than 'human' is still awaiting review.
+        // Any source other than 'human' or 'rule' is still awaiting review.
         fundingGroup("meyer", "osra-2026-07-14", "import", 8, d("2026-07-14")),
+        // MCC's rule decided these outright: nothing to review.
+        fundingGroup("meyer", "osra-2026-07-14", "rule", 20, d("2026-07-14")),
         // An older cycle's unreviewed rows never count toward today's review.
         fundingGroup("meyer", "osra-2026-01-10", "llm", 40, d("2026-01-10")),
       ],

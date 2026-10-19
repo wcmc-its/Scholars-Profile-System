@@ -30,6 +30,9 @@
  *      own nihAward/specificFundingSource alone, independent of membership/Bedrock; it's
  *      a plain scalar in applyPlan, so it ALWAYS overwrites on update -- unlike
  *      cancerRelevantPercent there is no human override to clobber.
+ *  10. MCC's rubric rules (an NCI award, Lynch syndrome → 100, `source: "rule"`, no
+ *      Bedrock call), the Grant abstract/PHR reaching the prompt, and provenance
+ *      written with the AI/rule value but never over a human one.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +49,7 @@ import {
   parseArgs,
   normalizeAwardNumber,
   buildAwardNumberIndex,
+  buildGrantTextIndex,
   buildMembershipIndex,
   buildMembershipExistenceSet,
   filterMembersOnly,
@@ -58,6 +62,7 @@ import {
   type ImportRow,
   type Nci2aImportDb,
   type ApplyCounts,
+  type RowPlan,
 } from "@/scripts/backfills/2026-08-08-cancer-center-nci-2a-import";
 
 const ROW: ImportRow = {
@@ -73,6 +78,24 @@ const ROW: ImportRow = {
   annualProjectDirectCosts: 200000,
   nihActivityCode: "R01",
   nihAward: true,
+};
+
+/** A non-NCI award, so `planRow` asks Bedrock rather than applying MCC's NCI rule. */
+const LLM_ROW: ImportRow = {
+  ...ROW,
+  sourceAwardNumber: "5 R01 GM059736-01",
+  projectNumber: "5 R01 GM059736-01",
+  specificFundingSource: "National Institute of General Medical Sciences",
+  projectTitle: "Ion channel gating",
+};
+
+const INFERENCE = {
+  cancerRelevantPercent: 25,
+  cancerRelevantRationale: "r",
+  cancerRelevantModel: "us.anthropic.claude-sonnet-test",
+  cancerRelevantPromptHash: "abcdef012345",
+  cancerRelevantInputHash: "f".repeat(64),
+  cancerRelevantInferredAt: new Date("2026-10-19T00:00:00Z"),
 };
 
 const RUN: ImportOptions = { dryRun: false, limit: null, concurrency: 5, file: "x", membersOnly: false };
@@ -266,10 +289,10 @@ describe("scopeAndLimitRows", () => {
 describe("planRow", () => {
   it("resolves the allocation from a membership match, and calls inferCancerFundingJudgments with no `programs` field at all", async () => {
     mockInfer.mockResolvedValue({ cancerRelevantPercent: 90, cancerRelevantRationale: "r" });
-    const awardIndex = new Map([["5 R01 CA059736-01", "abc1234"]]);
+    const awardIndex = new Map([["5 R01 GM059736-01", "abc1234"]]);
     const membershipIndex = new Map([["abc1234", "CB"]]);
 
-    const plan = await planRow(ROW, awardIndex, membershipIndex);
+    const plan = await planRow(LLM_ROW, awardIndex, membershipIndex);
 
     expect(plan.allocation).toEqual({ programCode: "CB", source: "membership" });
     expect(mockInfer).toHaveBeenCalledTimes(1);
@@ -279,7 +302,7 @@ describe("planRow", () => {
 
   it("resolves { programCode: null, source: \"membership\" } — NEVER \"llm\" — when there's no membership match, and still asks Bedrock for the percent", async () => {
     mockInfer.mockResolvedValue({ cancerRelevantPercent: 40, cancerRelevantRationale: "r" });
-    const plan = await planRow(ROW, new Map(), new Map());
+    const plan = await planRow(LLM_ROW, new Map(), new Map());
 
     expect(plan.allocation).toEqual({ programCode: null, source: "membership" });
     expect(plan.cancerRelevantPercent).toBe(40);
@@ -289,14 +312,14 @@ describe("planRow", () => {
   it("keeps the program allocation resolving correctly from the membership index even when the Bedrock percent call fails outright — the two are decoupled", async () => {
     mockInfer.mockResolvedValue(null);
 
-    const awardIndex = new Map([["5 R01 CA059736-01", "abc1234"]]);
+    const awardIndex = new Map([["5 R01 GM059736-01", "abc1234"]]);
     const membershipIndex = new Map([["abc1234", "CB"]]);
-    const withMembership = await planRow(ROW, awardIndex, membershipIndex);
+    const withMembership = await planRow(LLM_ROW, awardIndex, membershipIndex);
     expect(withMembership.allocation).toEqual({ programCode: "CB", source: "membership" });
     expect(withMembership.cancerRelevantPercent).toBeNull();
     expect(withMembership.cancerRelevantRationale).toBeNull();
 
-    const withoutMembership = await planRow(ROW, new Map(), new Map());
+    const withoutMembership = await planRow(LLM_ROW, new Map(), new Map());
     expect(withoutMembership.allocation).toEqual({ programCode: null, source: "membership" });
     expect(withoutMembership.cancerRelevantPercent).toBeNull();
     expect(withoutMembership.cancerRelevantRationale).toBeNull();
@@ -312,6 +335,61 @@ describe("planRow", () => {
 
     const neitherRow = { ...ROW, nihAward: false, specificFundingSource: "Columbia University" };
     expect((await planRow(neitherRow, new Map(), new Map())).isPeerReviewed).toBe(false);
+  });
+
+  it("a CA award number gets 100 by MCC's NCI rule with no Bedrock call", async () => {
+    const plan = await planRow({ ...ROW, specificFundingSource: "Some University" }, new Map(), new Map());
+    expect(mockInfer).not.toHaveBeenCalled();
+    expect(plan.cancerRelevantPercent).toBe(100);
+    expect(plan.cancerRelevantPercentSource).toBe("rule");
+    expect(plan.cancerRelevantRationale).toBe("NCI award: 100% under MCC's rubric.");
+    expect(plan.provenance.cancerRelevantModel).toBe("rule:nci");
+    expect(plan.provenance.cancerRelevantPromptHash).toBeNull();
+    expect(plan.provenance.cancerRelevantInferredAt).toBeInstanceOf(Date);
+  });
+
+  it("a funding source naming the National Cancer Institute gets 100 even without a CA number", async () => {
+    const plan = await planRow(
+      { ...LLM_ROW, specificFundingSource: "NIH/National Cancer Institute (via Columbia University)" },
+      new Map(),
+      new Map(),
+    );
+    expect(mockInfer).not.toHaveBeenCalled();
+    expect(plan.provenance.cancerRelevantModel).toBe("rule:nci");
+  });
+
+  it("Lynch syndrome in the abstract gets 100 by rule", async () => {
+    const textIndex = buildGrantTextIndex([
+      { awardNumber: "5 R01 GM059736-01", cwid: "abc1234", abstract: "Mismatch repair in Lynch syndrome carriers.", phrText: null },
+    ]);
+    const plan = await planRow(LLM_ROW, new Map(), new Map(), textIndex);
+    expect(mockInfer).not.toHaveBeenCalled();
+    expect(plan.cancerRelevantPercent).toBe(100);
+    expect(plan.provenance.cancerRelevantModel).toBe("rule:lynch");
+  });
+
+  it("sends the Grant abstract and PHR to Bedrock when present, and carries its provenance", async () => {
+    mockInfer.mockResolvedValue(INFERENCE);
+    const textIndex = buildGrantTextIndex([
+      { awardNumber: "5 R01 GM059736-01", cwid: "abc1234", abstract: null, phrText: null },
+      { awardNumber: "5 r01 gm059736-01", cwid: "xyz9999", abstract: "An abstract.", phrText: "A PHR." },
+    ]);
+    const plan = await planRow(LLM_ROW, new Map(), new Map(), textIndex);
+    expect(mockInfer.mock.calls[0][0]).toMatchObject({ abstract: "An abstract.", phrText: "A PHR." });
+    expect(plan.cancerRelevantPercentSource).toBe("llm");
+    expect(plan.provenance).toEqual({
+      cancerRelevantModel: INFERENCE.cancerRelevantModel,
+      cancerRelevantPromptHash: INFERENCE.cancerRelevantPromptHash,
+      cancerRelevantInputHash: INFERENCE.cancerRelevantInputHash,
+      cancerRelevantInferredAt: INFERENCE.cancerRelevantInferredAt,
+    });
+  });
+
+  it("sends null abstract/PHR when no Grant matches, and null provenance when inference fails", async () => {
+    mockInfer.mockResolvedValue(null);
+    const plan = await planRow(LLM_ROW, new Map(), new Map());
+    expect(mockInfer.mock.calls[0][0]).toMatchObject({ abstract: null, phrText: null });
+    expect(plan.provenance.cancerRelevantModel).toBeNull();
   });
 });
 
@@ -348,13 +426,33 @@ function makeDb(
   return { db, created, updated };
 }
 
-const PLAN = {
+const PLAN: RowPlan = {
   row: ROW,
   grantCwid: "abc1234",
   allocation: { programCode: "CB", source: "membership" as const },
   cancerRelevantPercent: 90,
   cancerRelevantRationale: "r",
+  cancerRelevantPercentSource: "llm",
+  provenance: {
+    cancerRelevantModel: INFERENCE.cancerRelevantModel,
+    cancerRelevantPromptHash: INFERENCE.cancerRelevantPromptHash,
+    cancerRelevantInputHash: INFERENCE.cancerRelevantInputHash,
+    cancerRelevantInferredAt: INFERENCE.cancerRelevantInferredAt,
+  },
   isPeerReviewed: true,
+};
+
+const RULE_PLAN: RowPlan = {
+  ...PLAN,
+  cancerRelevantPercent: 100,
+  cancerRelevantRationale: "NCI award: 100% under MCC's rubric.",
+  cancerRelevantPercentSource: "rule",
+  provenance: {
+    cancerRelevantModel: "rule:nci",
+    cancerRelevantPromptHash: null,
+    cancerRelevantInputHash: null,
+    cancerRelevantInferredAt: INFERENCE.cancerRelevantInferredAt,
+  },
 };
 
 describe("applyPlan", () => {
@@ -487,6 +585,51 @@ describe("applyPlan", () => {
     });
     await applyPlan(db, { ...PLAN, cancerRelevantPercent: null, cancerRelevantRationale: null }, RUN, emptyCounts());
     expect(updated[0].data).not.toHaveProperty("cancerRelevantPercentAi");
+  });
+
+  it("writes provenance with the AI value on create and on an unreviewed update", async () => {
+    const { db, created, updated } = makeDb({
+      "1": { id: "award-1", cancerRelevantPercent: 40, cancerRelevantPercentSource: "llm", allocations: [] },
+    });
+    await applyPlan(db, PLAN, RUN, emptyCounts());
+    await applyPlan(db, { ...PLAN, row: { ...ROW, institutionNumber: 1 } }, RUN, emptyCounts());
+    for (const data of [(created[0] as { data: Record<string, unknown> }).data, updated[0].data]) {
+      expect(data).toMatchObject({
+        cancerRelevantModel: INFERENCE.cancerRelevantModel,
+        cancerRelevantPromptHash: INFERENCE.cancerRelevantPromptHash,
+        cancerRelevantInputHash: INFERENCE.cancerRelevantInputHash,
+        cancerRelevantInferredAt: INFERENCE.cancerRelevantInferredAt,
+      });
+    }
+  });
+
+  it("leaves a human override's provenance alone", async () => {
+    const { db, updated } = makeDb({
+      "12345": { id: "award-1", cancerRelevantPercent: 40, cancerRelevantPercentSource: "human", allocations: [] },
+    });
+    await applyPlan(db, PLAN, RUN, emptyCounts());
+    expect(updated[0].data).not.toHaveProperty("cancerRelevantModel");
+    expect(updated[0].data).not.toHaveProperty("cancerRelevantInferredAt");
+  });
+
+  it("a rule row replaces an older AI value, as source rule, but never a human one", async () => {
+    const { db, created, updated } = makeDb({
+      "12345": { id: "award-1", cancerRelevantPercent: 50, cancerRelevantPercentSource: "llm", allocations: [] },
+      "2": { id: "award-2", cancerRelevantPercent: 40, cancerRelevantPercentSource: "human", allocations: [] },
+    });
+    await applyPlan(db, RULE_PLAN, RUN, emptyCounts());
+    expect(updated[0].data).toMatchObject({
+      cancerRelevantPercent: 100,
+      cancerRelevantPercentSource: "rule",
+      cancerRelevantPercentAi: 100,
+      cancerRelevantModel: "rule:nci",
+    });
+    const counts = emptyCounts();
+    await applyPlan(db, { ...RULE_PLAN, row: { ...ROW, institutionNumber: 2 } }, RUN, counts);
+    expect(updated[1].data).not.toHaveProperty("cancerRelevantPercent");
+    expect(counts.percentSkippedHuman).toBe(1);
+    await applyPlan(db, { ...RULE_PLAN, row: { ...ROW, institutionNumber: 3 } }, RUN, emptyCounts());
+    expect((created[0] as { data: Record<string, unknown> }).data.cancerRelevantPercentSource).toBe("rule");
   });
 
   it("--dry-run writes nothing", async () => {
