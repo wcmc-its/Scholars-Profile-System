@@ -242,7 +242,7 @@ export function isFundingActive(endDate: Date, now: Date): boolean {
   return endDate.getTime() + NCE_GRACE_MS > now.getTime();
 }
 
-function statusForGrant(endDate: Date, now: Date): FundingStatus | "ended" {
+export function statusForGrant(endDate: Date, now: Date): FundingStatus | "ended" {
   const t = endDate.getTime();
   const n = now.getTime();
   if (t + NCE_GRACE_MS <= n) {

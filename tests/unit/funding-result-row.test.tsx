@@ -157,6 +157,21 @@ describe("FundingResultRow — subaward", () => {
   });
 });
 
+describe("FundingResultRow — title link", () => {
+  it("links the title to NIH RePORTER when the grant has an applId", () => {
+    render(<FundingResultRow hit={{ ...baseHit, applId: 11223344 }} />);
+    const title = screen.getByText(/PARP inhibitor combination/).closest("a");
+    expect(title?.getAttribute("href")).toBe(
+      "https://reporter.nih.gov/project-details/11223344",
+    );
+  });
+
+  it("leaves the title as plain text without an applId", () => {
+    render(<FundingResultRow hit={baseHit} />);
+    expect(screen.getByText(/PARP inhibitor combination/).closest("a")).toBeNull();
+  });
+});
+
 describe("FundingResultRow — award identifier", () => {
   it("splits NIH awards into MechanismAbbr + serial", () => {
     render(<FundingResultRow hit={baseHit} />);

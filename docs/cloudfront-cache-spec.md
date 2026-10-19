@@ -36,7 +36,7 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 | 17 | `/about/feedback` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `force-dynamic` page; reads `?from=` for contextual mode **and** the session cookie to prefill. |
 | 18 | `/scholars/*/co-pubs/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `no-store` download; reads `?format=`. **Must precede #20** (`/scholars/*` would otherwise swallow it). |
 | 19 | `/scholars/*/co-pubs/*/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Per-mentee variant of #18. |
-| 20 | `/scholars/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ⚠ **STALE since #671.** Written when the profile lived at `/scholars/{slug}`. With `PROFILE_CANONICAL=root` (live in **both** envs) that path is now a **permanent redirect**; the profile renders at `/{slug}` and therefore falls through to the default behavior (#24). This behavior keys `mentees-sort` for a route that no longer reads it, and the highest-traffic page no longer gets the policy written for it. The co-pubs sub-pages (#18/#19) DO still live under this prefix, so the behavior is not dead — it is just mislabeled. See §"Profile pages are not edge-cached" below. |
+| 20 | `/scholars/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ⚠ **STALE since #671.** Written when the profile lived at `/scholars/{slug}`. With `PROFILE_CANONICAL=root` (live in **both** envs) that path is now a **permanent redirect**; the profile renders at `/{slug}` and therefore falls through to the default behavior (#24). This behavior keys `mentees-sort` for a route that no longer reads it, and the highest-traffic page no longer gets the policy written for it. The co-pubs sub-pages (#18/#19) DO still live under this prefix, so the behavior is not dead — it is just mislabeled. See §"Profile pages: ISR at the origin, cached at the edge" below. |
 | 21 | `/departments/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Dept + `…/divisions/*` listings; read `page`/`tab`/`sort`. |
 | 22 | `/centers/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Center listings; read `page`/`tab`/`sort`. |
 | 23 | `/topics/*/scholars` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ISR page; reads `q`/`role`/`page`. Stays cacheable, keyed per query. |
@@ -126,7 +126,7 @@ A distribution-level `CustomErrorResponses` block (CDK `errorResponses` on the `
 
 | Status | `ErrorCachingMinTTL` | Custom page? | Why |
 |---|---|---|---|
-| **404** | **60 s** | No (pass-through) | Absorb dead-URL crawler floods (the legacy-VIVO cutover) at the edge instead of hitting the `force-dynamic` origin every time. 60 s is safe — profiles are 24 h-cached, so the edge is never the freshness bottleneck for a URL that later becomes valid. |
+| **404** | **60 s** | No (pass-through) | Absorb dead-URL crawler floods (the legacy-VIVO cutover) at the edge instead of hitting the `force-dynamic` origin every time. 60 s is safe: a URL that later becomes valid waits at most 60 s for the edge to drop its cached 404. |
 | **500 / 502 / 503 / 504** | **0** | No | **Never cache.** A transient Aurora / OpenSearch blip must not get pinned at the edge — otherwise a 10-second hiccup becomes a multi-minute outage for every cache-cold path. |
 
 Two invariants, both enforced by the synth guard in `cdk/test/edge-stack.test.ts`:
@@ -134,26 +134,30 @@ Two invariants, both enforced by the synth guard in `cdk/test/edge-stack.test.ts
 1. **No soft-404.** The 404 entry sets neither `responseHttpStatus` nor `responsePagePath`, so CloudFront passes the origin's branded 404 body **and** its 404 status through unchanged. A cached 404 stays a real 404 — never rewritten to 200. (The branded body is rendered by `app/not-found.tsx` / `app/(public)/not-found.tsx`, not by CloudFront.)
 2. **Never-cache-5xx (ratcheted).** Every 5xx `CustomErrorResponse` must carry `ErrorCachingMinTTL: 0`; the test fails if any 5xx is ever given a non-zero TTL.
 
-## Profile pages are not edge-cached
+## Profile pages: ISR at the origin, cached at the edge
 
-Behavior #20 (`/scholars/*`) was written when the profile lived at that path. It no longer does. Since **#671** the `PROFILE_CANONICAL=root` flag is live in **both** envs: the profile renders at **`/{slug}`** (`app/(public)/[slug]/page.tsx`) and `/scholars/{slug}` permanently redirects to it.
+History: from #640 to #3002 the canonical profile route was `force-dynamic` and nothing cached it. That is no longer true. Since #3002 and #3005 (2026-10-02), `app/(public)/[slug]/page.tsx` is ISR (`revalidate = 21600`, empty `generateStaticParams`), stored in the shared S3 cache handler (`lib/cache/s3-cache-handler.js`, #1503). Since #671 the profile renders at **`/{slug}`**, so it falls through to the default behavior (#24), not behavior #20 (`/scholars/*`, which now only redirects).
 
-Two consequences, both currently true in prod:
+A profile therefore has **two** caches, and a stale page can come from either.
 
-1. **The canonical profile route is `export const dynamic = "force-dynamic"`.** It re-renders from Aurora on every request. It holds no ISR entry, and the origin sends `Cache-Control: max-age=0, must-revalidate`, so CloudFront does not cache it either. Measured 2026-07-14 against prod — two consecutive requests to a profile from the same PoP:
+| Layer | Lifetime | How it is refreshed |
+|---|---|---|
+| Origin ISR entry (S3) | 6 h `revalidate`, then stale-while-revalidate. Every deploy starts an empty namespace (keyed by deploy SHA); the S3 lifecycle drops entries after 7 days. | A tag bust is a **hard expire**: the handler's `get` treats an entry older than its tag as a miss, so the next request blocks on a fresh render. It is never served stale. |
+| CloudFront (default behavior) | `maxTtl` 60 s clamps the origin's `s-maxage`, **but** the origin also sends `stale-while-revalidate=31514400` (Next's default `expireTime`, unset in `next.config.ts`). The edge may keep serving its old copy past 60 s while it refetches. | Only a CloudFront invalidation. Expiring the origin does not purge the edge. |
 
-   ```
-   req1: 200  cache-control: public, max-age=0, must-revalidate  x-cache: Miss from cloudfront
-   req2: 200  cache-control: public, max-age=0, must-revalidate  x-cache: Miss from cloudfront
-   ```
+Who refreshes what:
 
-   (A department page, ISR at `revalidate=21600`, returns `Hit from cloudfront` on `req2` — so the edge *is* caching, just not profiles.)
+- **`/edit` writes** bust the profile path and queue a CloudFront invalidation of `/{slug}` (`lib/edit/revalidation.ts`, `reflectOverviewEdit` / `reflectVisibilityChange`).
+- **A methods family tier change** expires every profile and purges `/*` (`reflectAllProfilesChange`, #3086). Every profile's methods section reads the family overlays.
+- **The nightly and weekly cadences** close with `etl:revalidate`. It expires every profile (`ALL_PROFILES_ROUTE`, a route-pattern bust) and enqueues one `/*` row on the `cdn_invalidation` outbox. The cdn-reconcile machine (every 5 min) sends it (#3086). Before #3086 the cadence never purged the edge, so the first visitor per edge location after a run could see the pre-ETL page (2026-10-15, a deleted appointment still under Past Appointments).
 
-2. **The highest-traffic page falls through to the default behavior (#24)**, not the `sps-query-keyed` policy written for it.
+**Triage a stale profile.** Work from the source toward the viewer:
 
-**Operational consequence.** A stale profile is **never** a cache problem — there is no cache. It is stale *data*: look at the source ETL. Do not reach for `POST /api/revalidate` (which only accepts the legacy `/scholars/{slug}` redirect path, and only busts ISR, never the CDN) or `create-invalidation`; neither can change what a force-dynamic page renders.
+1. **Data.** Query the row in prod Aurora (`scripts/run-staging-probe.sh <probe> prod`). If the DB is wrong, it is an ETL or source problem, not a cache problem.
+2. **Origin.** Fetch the page and read the headers. `x-nextjs-cache: HIT` with a recent `age` and the correct content means the origin is fresh.
+3. **Edge.** `x-cache: Hit from cloudfront` with `age` well over 60 s means CloudFront served a stale copy under the stale-while-revalidate window. Check that the newest `cdn_invalidation` row is stamped `invalidated_at`. A pending row with rising `attempts` means the reconciler cannot purge (IAM, distribution id).
 
-**Performance consequence (open, not addressed here).** Every profile view is an origin round-trip plus a DB render. If profiles are made static/ISR to fix that, then per-scholar revalidation becomes mandatory *at the same time* — no ETL emits it today (see `etl/revalidate/index.ts`), and the allow-list would need the canonical `/{slug}` pattern added.
+`POST /api/revalidate?path=/{slug}` busts the origin only, never the edge. To clear one profile at the edge as well, use an `/edit` action, or `aws cloudfront create-invalidation --paths "/{slug}"`.
 
 ## Verification
 

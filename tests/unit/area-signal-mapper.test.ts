@@ -4,8 +4,10 @@ import {
   buildAreaSignalWrites,
   planAreaSignalPrune,
   projectAreaSignals,
+  readSubareas,
   type AreaSignalWriter,
 } from "@/etl/dynamodb/area-signal-mapper";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { partitionRecords } from "@/etl/dynamodb/partition";
 
 const K1 = "a".repeat(32);
@@ -89,6 +91,131 @@ describe("buildAreaSignalWrites", () => {
     );
     expect(m.skippedBadKey).toBe(3);
     expect(m.texts.map((t) => [t.kind, t.textKey])).toEqual([["trial", K2]]);
+  });
+});
+
+describe("subarea fields (S7)", () => {
+  const entry = (over: Record<string, unknown>) => ({ topic_id: "cardio_example", score: 0.8, ...over });
+  const one = (over: Record<string, unknown>) =>
+    buildAreaSignalWrites([rec(K1, { topic_scores: [entry(over)] })], TOPICS);
+
+  it("maps all three fields when present and well formed", () => {
+    const m = one({
+      primary_subtopic_id: "sub_a",
+      subtopic_ids: ["sub_a", "sub_b"],
+      subtopic_confidences: { sub_a: 0.9, sub_b: 0.4 },
+    });
+    expect(m.topics[0]).toMatchObject({
+      primarySubtopicId: "sub_a",
+      subtopicIds: ["sub_a", "sub_b"],
+      subtopicConfidences: { sub_a: 0.9, sub_b: 0.4 },
+    });
+    expect(m.withPrimarySubarea).toBe(1);
+  });
+
+  it("absent fields are SQL NULL (DbNull, not JsonNull) and not counted", () => {
+    const m = one({});
+    expect(m.topics[0].primarySubtopicId).toBeNull();
+    expect(m.topics[0].subtopicIds).toBe(Prisma.DbNull);
+    expect(m.topics[0].subtopicConfidences).toBe(Prisma.DbNull);
+    expect(m.topics[0].subtopicIds).not.toBe(Prisma.JsonNull);
+    expect(m.withPrimarySubarea).toBe(0);
+    // The area score itself still lands.
+    expect(m.topics[0].score.toString()).toBe("0.8");
+  });
+
+  it('"none fits" (null primary, empty list) stays unassigned', () => {
+    const r = readSubareas(entry({ primary_subtopic_id: null, subtopic_ids: [], subtopic_confidences: {} }));
+    expect(r).toEqual({
+      primarySubtopicId: null,
+      subtopicIds: Prisma.DbNull,
+      subtopicConfidences: Prisma.DbNull,
+    });
+  });
+
+  it("a non-object entry has no subareas", () => {
+    for (const e of [null, undefined, "sub_a", 3]) {
+      const r = readSubareas(e);
+      expect(r.primarySubtopicId).toBeNull();
+      expect(r.subtopicIds).toBe(Prisma.DbNull);
+      expect(r.subtopicConfidences).toBe(Prisma.DbNull);
+    }
+  });
+
+  it("drops a primary that is not in subtopic_ids, or not a string", () => {
+    expect(readSubareas(entry({ primary_subtopic_id: "sub_c", subtopic_ids: ["sub_a"] })).primarySubtopicId).toBeNull();
+    expect(readSubareas(entry({ primary_subtopic_id: "sub_a" })).primarySubtopicId).toBeNull();
+    expect(readSubareas(entry({ primary_subtopic_id: 7, subtopic_ids: ["sub_a"] })).primarySubtopicId).toBeNull();
+    expect(readSubareas(entry({ primary_subtopic_id: "", subtopic_ids: ["sub_a"] })).primarySubtopicId).toBeNull();
+    // The list survives a bad primary.
+    expect(readSubareas(entry({ primary_subtopic_id: "sub_c", subtopic_ids: ["sub_a"] })).subtopicIds).toEqual([
+      "sub_a",
+    ]);
+  });
+
+  it("malformed lists and maps are NULL, each field on its own", () => {
+    const bad = readSubareas(
+      entry({ primary_subtopic_id: "sub_a", subtopic_ids: "sub_a", subtopic_confidences: ["sub_a"] }),
+    );
+    expect(bad).toEqual({ primarySubtopicId: null, subtopicIds: Prisma.DbNull, subtopicConfidences: Prisma.DbNull });
+    expect(readSubareas(entry({ subtopic_ids: ["sub_a", 3] })).subtopicIds).toBe(Prisma.DbNull);
+    expect(readSubareas(entry({ subtopic_ids: ["x".repeat(129)] })).subtopicIds).toBe(Prisma.DbNull);
+    expect(readSubareas(entry({ subtopic_confidences: { sub_a: "0.9" } })).subtopicConfidences).toBe(Prisma.DbNull);
+    expect(readSubareas(entry({ subtopic_confidences: { sub_a: Number.NaN } })).subtopicConfidences).toBe(
+      Prisma.DbNull,
+    );
+    // A bad confidence map does not cost a good primary.
+    const mixed = readSubareas(
+      entry({ primary_subtopic_id: "sub_a", subtopic_ids: ["sub_a"], subtopic_confidences: "high" }),
+    );
+    expect(mixed.primarySubtopicId).toBe("sub_a");
+    expect(mixed.subtopicConfidences).toBe(Prisma.DbNull);
+  });
+
+  it("keeps the existing guards and takes subareas from the best-scoring duplicate entry", () => {
+    const m = buildAreaSignalWrites(
+      [
+        rec(K1, {
+          topic_scores: [
+            entry({ score: 0.5, primary_subtopic_id: "sub_low", subtopic_ids: ["sub_low"] }),
+            entry({ score: 0.9, primary_subtopic_id: "sub_high", subtopic_ids: ["sub_high"] }),
+            { topic_id: "unknown_area", score: 0.9, primary_subtopic_id: "x", subtopic_ids: ["x"] },
+            { topic_id: "onc_example", score: "bad", primary_subtopic_id: "y", subtopic_ids: ["y"] },
+          ],
+        }),
+      ],
+      TOPICS,
+    );
+    expect(m.topics).toHaveLength(1);
+    expect(m.topics[0]).toMatchObject({ parentTopicId: "cardio_example", primarySubtopicId: "sub_high" });
+    expect(m.topics[0].score.toString()).toBe("0.9");
+    expect(m.skippedUnknownTopic).toBe(1);
+    expect(m.skippedBadScore).toBe(1);
+    expect(m.withPrimarySubarea).toBe(1);
+  });
+
+  it("the writer passes the subarea fields through to createMany", async () => {
+    const db = fakeDb();
+    let written: unknown[] = [];
+    const create = db.client.areaSignalTopic.createMany;
+    db.client.areaSignalTopic.createMany = async (args) => {
+      written = args.data;
+      return create(args);
+    };
+    await projectAreaSignals(
+      buildAreaSignalWrites(
+        [rec(K1, { topic_scores: [entry({ primary_subtopic_id: "sub_a", subtopic_ids: ["sub_a"] })] })],
+        TOPICS,
+      ),
+      db.client,
+    );
+    expect(written).toEqual([
+      expect.objectContaining({
+        primarySubtopicId: "sub_a",
+        subtopicIds: ["sub_a"],
+        subtopicConfidences: Prisma.DbNull,
+      }),
+    ]);
   });
 });
 

@@ -50,6 +50,7 @@ vi.mock("@aws-sdk/client-cloudfront", () => ({
 }));
 
 import {
+  reflectAllProfilesChange,
   reflectOverviewEdit,
   reflectUnitChange,
   reflectVisibilityChange,
@@ -237,6 +238,22 @@ describe("reflectUnitChange", () => {
       parentDeptSlug: "medicine",
     });
     expect(mockBust.mock.calls).toEqual([["division:"], ["department:"]]);
+  });
+});
+
+describe("reflectAllProfilesChange", () => {
+  it("expires the all-profiles route pattern as a page bust", async () => {
+    await reflectAllProfilesChange();
+    expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/(public)/[slug]", "page");
+  });
+
+  it("enqueues a single /* edge purge", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E123";
+    await reflectAllProfilesChange();
+    expect(mockCdnCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ paths: JSON.stringify(["/*"]) }) }),
+    );
   });
 });
 

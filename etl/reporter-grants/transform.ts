@@ -34,6 +34,82 @@ export function recencyShouldSuppress(
   return currentYear - maxFiscalYear > RECENCY_YEARS;
 }
 
+/**
+ * #3071 — `person_nih_profile.resolution_source` values that mean the profile_id
+ * was linked to the scholar by NAME alone. A same-named investigator elsewhere
+ * then brings their whole NIH portfolio onto the WCM profile.
+ */
+export const NAME_ONLY_RESOLUTION_SOURCES: ReadonlySet<string> = new Set([
+  "name_query",
+  "name_match",
+]);
+
+/** True when any of a scholar's profile rows was resolved by name alone. Any,
+ *  not all: the materializer unions every profile_id a scholar has, so one
+ *  name-only row is enough to bring in another person's awards. */
+export function hasNameOnlyProfile(resolutionSources: Iterable<string>): boolean {
+  for (const s of resolutionSources) if (NAME_ONLY_RESOLUTION_SOURCES.has(s)) return true;
+  return false;
+}
+
+/**
+ * #3071 case D — `person_nih_profile.resolution_source` values that mean the
+ * profile_id was linked through a WCM grant row joined to a RePORTER project,
+ * then a name check (`namesMatch`: same surname plus one matching token or
+ * initial). A different WCM investigator with a similar name passes that check,
+ * and every one of THEIR awards is WCM-administered, so WCM in the award's org
+ * history says nothing about which WCM person it belongs to.
+ */
+export const GRANT_JOIN_RESOLUTION_SOURCES: ReadonlySet<string> = new Set([
+  "grant_join_contact",
+  "grant_join_pi",
+]);
+
+/**
+ * #3071 — what must tie a scholar's RePORTER awards to them before they show.
+ *   - "none": no name-only or grant-join profile (e.g. every profile was
+ *     confirmed by publications, pmid-overlap-*). Never hidden here.
+ *   - "wcm-or-publication": a name-only profile (name_query / name_match). The
+ *     failure is a same-named investigator ELSEWHERE, so WCM in the award's org
+ *     history is enough, as is a confirmed linked publication.
+ *   - "publication-only": a grant-join profile. The failure is another WCM
+ *     person, so only a confirmed publication linked to the award counts.
+ * Strictest wins: the materializer unions every profile_id a scholar has into
+ * one fetch, so an award can't be traced back to the profile that brought it,
+ * and a grant-join profile next to a name-only one can still bring in another
+ * WCM person's awards.
+ */
+export type CorroborationPolicy = "none" | "wcm-or-publication" | "publication-only";
+
+export function corroborationPolicy(resolutionSources: Iterable<string>): CorroborationPolicy {
+  const sources = [...resolutionSources];
+  if (sources.some((s) => GRANT_JOIN_RESOLUTION_SOURCES.has(s))) return "publication-only";
+  if (hasNameOnlyProfile(sources)) return "wcm-or-publication";
+  return "none";
+}
+
+/** True when WCM in the award's org history settles it under `policy`, so the
+ *  publication lookup can be skipped for that award. */
+export function wcmOrgCorroborates(policy: CorroborationPolicy, wcmOrgHistory: boolean): boolean {
+  return policy === "wcm-or-publication" && wcmOrgHistory;
+}
+
+/**
+ * #3071 — default-hide a RePORTER award unless something the scholar's `policy`
+ * accepts ties it to them: WCM in the award's org history (only under
+ * "wcm-or-publication"), or one of the scholar's confirmed publications linked
+ * to the award's core project number (RePORTER publication linkage or ReCiter's
+ * grant citation). Pure.
+ */
+export function unverifiedShouldSuppress(args: {
+  policy: CorroborationPolicy;
+  wcmOrgHistory: boolean;
+  publicationCorroborated: boolean;
+}): boolean {
+  if (args.policy === "none" || args.publicationCorroborated) return false;
+  return !wcmOrgCorroborates(args.policy, args.wcmOrgHistory);
+}
+
 /** One award (all its fiscal years collapsed) for one scholar. */
 export interface GroupedProject {
   coreProjectNum: string;
@@ -42,7 +118,8 @@ export interface GroupedProject {
   /** appl_id of the most recent fiscal year — keys the RePORTER project-detail
    *  outbound link (`nihReporterProjectUrl`). */
   applId: number | null;
-  /** Grantee org, preferring WCM when any fiscal year was WCM-administered. */
+  /** Grantee org, preferring WCM when any fiscal year was WCM-administered — so
+   *  `isWcmOrg(orgName)` is true iff WCM is anywhere in the award's org history. */
   orgName: string | null;
   title: string | null;
   startDate: Date | null;
@@ -53,7 +130,7 @@ export interface GroupedProject {
   awardAmount: number | null;
 }
 
-const isWcmOrg = (org: string | null | undefined): boolean =>
+export const isWcmOrg = (org: string | null | undefined): boolean =>
   /weill|cornell/i.test(org ?? "");
 
 function parseReporterDate(s: string | null): Date | null {

@@ -160,6 +160,10 @@ const nextConfig: NextConfig = {
           permanent: true,
         })),
       { source: "/edit/find-researchers", destination: "/edit/grant-matcha", permanent: false },
+      // Report 7's former slug (renamed 2026-10-14). Via the number, which 307s
+      // to the CURRENT slug with the query string, so a later rename in "Edit
+      // details" can't strand old bookmarks.
+      { source: "/edit/reports/mentored-publications", destination: "/edit/reports/7", permanent: false },
     ];
   },
   webpack: (config, { isServer }) => {

@@ -256,7 +256,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     ).toEqual([
       {
         n: 7,
-        slug: "mentored-publications",
+        slug: "mentors-and-mentees",
         name: "Mentors and mentees",
         description: expect.stringContaining("Access is granted per person or per unit."),
         accessText: "Superusers and comms stewards",

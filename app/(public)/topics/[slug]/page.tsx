@@ -19,6 +19,7 @@ import {
 import {
   isTaxonomyFeedLoadMoreOn,
   isTaxonomyScholarCardsOn,
+  isTopicFeedGrantsTrialsOn,
   isTopicRankAreaSignalsOn,
 } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
@@ -213,6 +214,7 @@ export default async function TopicPage({
           totalPubCount={totalPubsForStats}
           scholarNames={scholarCards}
           loadMore={isTaxonomyFeedLoadMoreOn()}
+          activityFeed={isTopicFeedGrantsTrialsOn()}
         />
       </section>
     </main>

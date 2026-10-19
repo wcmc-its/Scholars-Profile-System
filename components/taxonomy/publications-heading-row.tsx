@@ -9,10 +9,13 @@
 import type { ReactNode } from "react";
 
 export function PublicationsHeadingRow({
+  heading = "Publications",
   countLabel,
   badge,
   children,
 }: {
+  /** Heading text ("Activities" on the topic feed under TOPIC_FEED_GRANTS_TRIALS). */
+  heading?: string;
   /** Muted text beside the heading ("1,234", "12 of 40 articles"); null while loading. */
   countLabel: string | null;
   /** Inline after the heading text (e.g. the curated-sort tag). */
@@ -26,7 +29,7 @@ export function PublicationsHeadingRow({
       data-testid="publications-heading-row"
     >
       <h3 className="m-0 flex items-center gap-2 text-xl font-medium">
-        <span>Publications</span>
+        <span>{heading}</span>
         {badge}
       </h3>
       <span

@@ -10,12 +10,12 @@ import { canonicalProfilePath } from "@/lib/profile-url";
  * emits a permanent 301 to the canonical profile URL (`/scholars/{slug}` or
  * the root `/{slug}` form per PROFILE_CANONICAL, #671). Unknown cwids 404.
  *
- * Consumed by the B14 legacy-URL redirect layer in `middleware.ts`:
+ * Consumed by the B14 legacy-URL redirect layer in `proxy.ts`:
  * `/display/cwid-{cwid}`, `/individual/cwid-{cwid}`, and
- * `/profile/cwid-{cwid}` from the old VIVO host all 301 here, and this
- * page chains a second 301 to the current canonical slug. The chained
- * redirect keeps the legacy-URL JSON map small (cwids only -- no slug
- * snapshot to drift) and centralizes slug currency / aliasing in
+ * `/profile/cwid-{cwid}` from the old VIVO host all 301 here for ANY cwid
+ * (#1940), and this page chains a permanent redirect to the current canonical
+ * slug or 404s. This page is therefore the only "does this legacy CWID still
+ * have a profile" check; slug currency / aliasing stays in
  * `lib/url-resolver.ts`.
  */
 export const dynamic = "force-dynamic";

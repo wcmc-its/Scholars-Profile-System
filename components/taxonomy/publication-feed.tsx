@@ -75,6 +75,8 @@ import {
   readShownParam,
   writeShownParam,
 } from "@/lib/taxonomy/feed-load-more";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 import { sanitizePubTitle } from "@/lib/utils";
 import { Caret } from "@/components/ui/caret";
 
@@ -82,7 +84,7 @@ type Sort = "newest" | "most_cited" | "by_impact";
 type Filter = "research_articles_only" | "all";
 /** #326 — "strongly" shows the strongly-relevant tier only (default); "all"
  *  adds the also-relevant tier. */
-type ShowTier = "strongly" | "all";
+export type ShowTier = "strongly" | "all";
 
 export type FeedHit = {
   pmid: string;
@@ -154,6 +156,17 @@ export type PublicationFeedProps = {
   /** Honor the scholar-card hover's "Filter publications" pick (`?cwid=`);
    *  only for routes that accept it (topic, method family). */
   scholarFilter?: boolean;
+  /** TOPIC_FEED_GRANTS_TRIALS — keep the scholar pick when this feed unmounts
+   *  (the topic Activities feed swaps it for a grant / trial list and owns the
+   *  clear itself). */
+  retainScholarFilter?: boolean;
+  /** Heading text; defaults to "Publications". */
+  heading?: string;
+  /** TOPIC_FEED_GRANTS_TRIALS — the Activities header replaces the heading row,
+   *  the Show select and the scholar chip; it gets this feed's Sort control. */
+  renderHeader?: (sortControl: ReactNode) => ReactNode;
+  /** TOPIC_FEED_GRANTS_TRIALS — the Show tier, set by the header's switch. */
+  showTier?: ShowTier;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -198,18 +211,26 @@ export function PublicationFeed({
   loadMore = false,
   areaLabelFor,
   scholarFilter = false,
+  retainScholarFilter = false,
+  heading,
+  renderHeader,
+  showTier: showTierProp,
 }: PublicationFeedProps) {
   const pickedScholar = useScholarFilter();
   const scholar = scholarFilter ? pickedScholar : null;
   // The pick belongs to this page's feed; drop it when the feed goes away.
-  useEffect(() => (scholarFilter ? () => setScholarFilter(null) : undefined), [scholarFilter]);
+  useEffect(
+    () => (scholarFilter && !retainScholarFilter ? () => setScholarFilter(null) : undefined),
+    [scholarFilter, retainScholarFilter],
+  );
   const scopeParams: Array<[string, string | null]> = scholar
     ? [...baseScopeParams, ["cwid", scholar.cwid]]
     : baseScopeParams;
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   // #326 — defaults to "strongly" on every mount (no persistence).
-  const [showTier, setShowTier] = useState<ShowTier>("strongly");
+  const [ownShowTier, setShowTier] = useState<ShowTier>("strongly");
+  const showTier = showTierProp ?? ownShowTier;
   const scopeKey = JSON.stringify(scopeParams);
   const isCuratedSort = sort === "by_impact";
 
@@ -312,11 +333,34 @@ export function PublicationFeed({
     }
   }
 
-  const rowProps = { modalTopicSlug, entityTerm, areaLabelFor };
+  const rowProps = { modalTopicSlug, entityTerm, areaLabelFor, plainAuthors: !!renderHeader };
+
+  const sortSelect = (
+    <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
+      <SelectTrigger className={renderHeader ? "w-[170px]" : "w-[200px]"} aria-label="Sort by">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="newest">Newest</SelectItem>
+        <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
+        <SelectItem value="most_cited">Most cited</SelectItem>
+      </SelectContent>
+    </Select>
+  );
 
   return (
     <section className="flex flex-col gap-4">
+      {renderHeader ? (
+        renderHeader(
+          <>
+            Sort
+            {sortSelect}
+            {isCuratedSort && <CuratedTag surface="publication_centric" />}
+          </>,
+        )
+      ) : (
       <PublicationsHeadingRow
+        heading={heading}
         countLabel={countLabel}
         badge={isCuratedSort ? <CuratedTag surface="publication_centric" /> : null}
       >
@@ -340,25 +384,17 @@ export function PublicationFeed({
         )}
         <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
           Sort by
-          <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
-            <SelectTrigger className="w-[200px]" aria-label="Sort by">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
-              <SelectItem value="most_cited">Most cited</SelectItem>
-            </SelectContent>
-          </Select>
+          {sortSelect}
         </div>
       </PublicationsHeadingRow>
+      )}
 
       {scholarFilter && (
         <p className="sr-only" role="status" aria-live="polite">
           {scholar ? `Showing publications by ${scholar.name}` : ""}
         </p>
       )}
-      {scholar && <ScholarFilterChip scholar={scholar} />}
+      {scholar && !renderHeader && <ScholarFilterChip scholar={scholar} />}
       {headerSlot}
 
       <FilterToggleRow data={data} filter={filter} setFilter={setFilter} />
@@ -577,9 +613,47 @@ type RowProps = {
   modalTopicSlug?: string;
   entityTerm: string | null;
   areaLabelFor?: (hit: FeedHit) => string | null;
+  plainAuthors?: boolean;
 };
 
-function FeedSkeleton() {
+const PLAIN_AUTHOR_LIMIT = 4;
+
+/** TOPIC_FEED_GRANTS_TRIALS — authors as comma-separated profile links (the
+ *  Activities mockup), so the feed's Scholars chips are the only chips. */
+function PlainAuthors({ authors: raw }: { authors: FeedHit["authors"] }) {
+  const [all, setAll] = useState(false);
+  // AuthorChipRow's rules: no cwid ⇒ dropped; a non-public scholar (#536) is unlinked.
+  const authors = raw.filter((a) => a.cwid);
+  if (authors.length === 0) return null;
+  const shown = all ? authors : authors.slice(0, PLAIN_AUTHOR_LIMIT);
+  const more = authors.length - shown.length;
+  return (
+    <div className="text-muted-foreground text-[13.5px] leading-normal">
+      {shown.map((a, i) => (
+        <span key={a.cwid ?? `${a.name}-${i}`}>
+          {a.slug && isPubliclyDisplayed(a.roleCategory) ? (
+            <Link href={profilePath(a.slug)} className="text-apollo-slate hover:underline">
+              {a.name}
+            </Link>
+          ) : (
+            a.name
+          )}
+          {i < shown.length - 1 ? ", " : ""}
+        </span>
+      ))}
+      {more > 0 && (
+        <>
+          {", "}
+          <button type="button" onClick={() => setAll(true)} className="text-apollo-slate hover:underline">
+            +{more} more
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function FeedSkeleton() {
   return (
     <div className="flex flex-col gap-4">
       {[0, 1, 2].map((i) => (
@@ -589,18 +663,18 @@ function FeedSkeleton() {
   );
 }
 
-function FeedError() {
+export function FeedError({ noun = "publications" }: { noun?: string }) {
   return (
     <div className="text-sm text-muted-foreground">
-      Could not load publications. Try refreshing.
+      {`Could not load ${noun}. Try refreshing.`}
     </div>
   );
 }
 
-function FeedEmpty({ body }: { body: string }) {
+export function FeedEmpty({ body, noun = "publications" }: { body: string; noun?: string }) {
   return (
     <div className="py-8 text-center">
-      <h3 className="text-base font-semibold">No publications found</h3>
+      <h3 className="text-base font-semibold">{`No ${noun} found`}</h3>
       <p className="text-sm text-muted-foreground">{body}</p>
     </div>
   );
@@ -764,12 +838,14 @@ export function PubRow({
   modalTopicSlug,
   entityTerm = null,
   areaLabelFor,
+  plainAuthors = false,
   focusable = false,
 }: {
   hit: FeedHit;
   modalTopicSlug?: string;
   entityTerm?: string | null;
   areaLabelFor?: (hit: FeedHit) => string | null;
+  plainAuthors?: boolean;
   /** Load more: rows take programmatic focus (tabIndex -1). */
   focusable?: boolean;
 }) {
@@ -834,7 +910,11 @@ export function PubRow({
           </span>
         </div>
       )}
-      <AuthorChipRow authors={hit.authors} pmid={hit.pmid} />
+      {plainAuthors ? (
+        <PlainAuthors authors={hit.authors} />
+      ) : (
+        <AuthorChipRow authors={hit.authors} pmid={hit.pmid} />
+      )}
       <PublicationMeta
         citationCount={hit.citationCount}
         impactScore={hit.impactScore}
@@ -951,6 +1031,9 @@ export function TopicPublicationFeed({
   activeSubtopic,
   loadMore = false,
   subtopicLabels,
+  renderHeader,
+  showTier,
+  retainScholarFilter,
 }: {
   topicSlug: string;
   /** The subtopic title/description live in the rail layout's subhead. */
@@ -960,6 +1043,12 @@ export function TopicPublicationFeed({
   /** TAXONOMY_FEED_LOAD_MORE — subtopic id → display name for the per-row
    *  area label, shown only when no subarea is selected. */
   subtopicLabels?: Record<string, string>;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): the Activities header. */
+  renderHeader?: (sortControl: ReactNode) => ReactNode;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed): the related switch. */
+  showTier?: ShowTier;
+  /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed) owns the scholar pick. */
+  retainScholarFilter?: boolean;
 }) {
   const areaLabelFor = useMemo(() => {
     if (!loadMore || activeSubtopic || !subtopicLabels) return undefined;
@@ -983,6 +1072,9 @@ export function TopicPublicationFeed({
       emptyBody="Publications in this area will appear as they are indexed."
       loadMore={loadMore}
       areaLabelFor={areaLabelFor}
+      renderHeader={renderHeader}
+      showTier={showTier}
+      retainScholarFilter={retainScholarFilter}
     />
   );
 }

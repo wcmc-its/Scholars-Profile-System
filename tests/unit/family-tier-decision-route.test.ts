@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   readEditRequest: vi.fn(),
   appendAuditRow: vi.fn(),
+  reflectAllProfilesChange: vi.fn(),
   tx: {
     familySuppressionOverlay: {
       findUnique: vi.fn(),
@@ -38,6 +39,9 @@ vi.mock("@/lib/edit/request", async (importOriginal) => ({
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: h.appendAuditRow }));
 vi.mock("@/lib/api/swr-cache", () => ({ bust: vi.fn() }));
+vi.mock("@/lib/edit/revalidation", () => ({
+  reflectAllProfilesChange: h.reflectAllProfilesChange,
+}));
 vi.mock("@/lib/db", () => ({
   db: { write: { $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(h.tx)) } },
 }));
@@ -130,5 +134,19 @@ describe("FamilyTierDecision (#1993)", () => {
     const res = await POST(request("public") as never);
     expect(res.status).toBe(404);
     expect(h.tx.familyTierDecision.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("profile cache reflection", () => {
+  it("expires every cached profile after a tier change (methods sections read the overlays)", async () => {
+    const res = await POST(request("suppressed") as never);
+    expect(res.status).toBe(200);
+    expect(h.reflectAllProfilesChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not touch the profile cache when the route 404s", async () => {
+    process.env.COMMS_STEWARD_ENABLED = "off";
+    await POST(request("suppressed") as never);
+    expect(h.reflectAllProfilesChange).not.toHaveBeenCalled();
   });
 });

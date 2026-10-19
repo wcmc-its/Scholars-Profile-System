@@ -5,8 +5,13 @@ import { describe, expect, it } from "vitest";
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
+  corroborationPolicy,
   groupProjectsByCore,
+  hasNameOnlyProfile,
+  isWcmOrg,
   recencyShouldSuppress,
+  unverifiedShouldSuppress,
+  wcmOrgCorroborates,
   type GroupedProject,
 } from "@/etl/reporter-grants/transform";
 import type { ReporterGrantProject } from "@/etl/nih-profile/fetcher";
@@ -44,6 +49,121 @@ describe("recencyShouldSuppress", () => {
 
   it("leaves an undatable grant (null fiscal year) visible", () => {
     expect(recencyShouldSuppress(null, 2026)).toBe(false);
+  });
+});
+
+describe("#3071 uncorroborated name-only default-hide", () => {
+  it("treats a scholar as name-only when ANY profile row was resolved by name", () => {
+    expect(hasNameOnlyProfile(["name_query"])).toBe(true);
+    expect(hasNameOnlyProfile(["name_match"])).toBe(true);
+    // Profiles are unioned, so one name-only row is enough to import a namesake.
+    expect(hasNameOnlyProfile(["grant_join_contact", "name_query"])).toBe(true);
+    expect(hasNameOnlyProfile(["grant_join_contact"])).toBe(false);
+    expect(hasNameOnlyProfile(["grant_join_pi", "pmid-overlap-auto"])).toBe(false);
+    expect(hasNameOnlyProfile([])).toBe(false);
+  });
+
+  it("hides a name-only award that nothing ties to the scholar", () => {
+    expect(
+      unverifiedShouldSuppress({
+        policy: "wcm-or-publication",
+        wcmOrgHistory: false,
+        publicationCorroborated: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps a name-only award with any corroborating signal", () => {
+    expect(
+      unverifiedShouldSuppress({
+        policy: "wcm-or-publication",
+        wcmOrgHistory: true,
+        publicationCorroborated: false,
+      }),
+    ).toBe(false);
+    expect(
+      unverifiedShouldSuppress({
+        policy: "wcm-or-publication",
+        wcmOrgHistory: false,
+        publicationCorroborated: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("never touches an award when no profile is name-only or grant-join", () => {
+    expect(
+      unverifiedShouldSuppress({
+        policy: "none",
+        wcmOrgHistory: false,
+        publicationCorroborated: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("sees WCM anywhere in the award's org history, not just its latest year", () => {
+    const [g] = groupProjectsByCore([
+      fyProj({ fiscal_year: 2012, org_name: "WEILL MEDICAL COLL OF CORNELL UNIV" }),
+      fyProj({ fiscal_year: 2016, org_name: "UNIVERSITY OF ELSEWHERE" }),
+    ]);
+    expect(isWcmOrg(g!.orgName)).toBe(true);
+    const [other] = groupProjectsByCore([
+      fyProj({ fiscal_year: 2016, org_name: "UNIVERSITY OF ELSEWHERE" }),
+    ]);
+    expect(isWcmOrg(other!.orgName)).toBe(false);
+  });
+});
+
+describe("#3071 case D: grant-join profiles need a publication tie", () => {
+  it("maps resolution sources to a policy, strictest wins", () => {
+    expect(corroborationPolicy(["grant_join_contact"])).toBe("publication-only");
+    expect(corroborationPolicy(["grant_join_pi"])).toBe("publication-only");
+    expect(corroborationPolicy(["name_query"])).toBe("wcm-or-publication");
+    expect(corroborationPolicy(["name_match"])).toBe("wcm-or-publication");
+    // Profiles are unioned into one fetch, so a WCM award can't be traced to the
+    // name-only profile: the grant-join rule applies to the whole set.
+    expect(corroborationPolicy(["name_query", "grant_join_contact"])).toBe("publication-only");
+    expect(corroborationPolicy(["grant_join_contact", "pmid-overlap-confirmed"])).toBe(
+      "publication-only",
+    );
+    expect(corroborationPolicy(["pmid-overlap-auto"])).toBe("none");
+    expect(corroborationPolicy(["pmid-overlap-confirmed"])).toBe("none");
+    expect(corroborationPolicy([])).toBe("none");
+  });
+
+  it("does not let a WCM org corroborate a grant-join award (another WCM person's F30)", () => {
+    expect(
+      unverifiedShouldSuppress({
+        policy: "publication-only",
+        wcmOrgHistory: true,
+        publicationCorroborated: false,
+      }),
+    ).toBe(true);
+    expect(wcmOrgCorroborates("publication-only", true)).toBe(false);
+    expect(wcmOrgCorroborates("wcm-or-publication", true)).toBe(true);
+    expect(wcmOrgCorroborates("wcm-or-publication", false)).toBe(false);
+    expect(wcmOrgCorroborates("none", true)).toBe(false);
+  });
+
+  it("keeps a grant-join award a confirmed publication ties to the scholar", () => {
+    for (const wcmOrgHistory of [true, false]) {
+      expect(
+        unverifiedShouldSuppress({
+          policy: "publication-only",
+          wcmOrgHistory,
+          publicationCorroborated: true,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("hides a grant-join award with no tie at all", () => {
+    expect(
+      unverifiedShouldSuppress({
+        policy: "publication-only",
+        wcmOrgHistory: false,
+        publicationCorroborated: false,
+      }),
+    ).toBe(true);
   });
 });
 
@@ -151,6 +271,34 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
 
   it("the recency default-hide reflects what it mints (#2284)", () => {
     expect(REPORTER).toContain("await reflectGrantSuppressions(minted)");
+  });
+
+  it("the #3071 unverified hide is flag-gated and reflected through the same minted batch", () => {
+    expect(REPORTER).toContain(
+      'process.env.REPORTER_GRANTS_CORROBORATION_HIDE === "on"',
+    );
+    // lastIndexOf: the first occurrence is the existing-hides read.
+    const mintStart = REPORTER.lastIndexOf("createdBy: SYSTEM_UNVERIFIED");
+    expect(mintStart).toBeGreaterThan(-1);
+    const after = REPORTER.slice(mintStart, mintStart + 400);
+    expect(after).toContain("minted.push(");
+  });
+
+  it("the #3071 corroboration read fails open on no PMIDs or a fetch error", () => {
+    const fn = REPORTER.slice(REPORTER.indexOf("async function uncorroboratedRowIds"));
+    expect(fn).toContain('if (pmids.size === 0) return "no-pmids"');
+    expect(fn).toContain('return "fetch-error"');
+    // Neither outcome may mint a hide: main() only judges rows on a Set result.
+    expect(REPORTER).toContain('uncorroborated === "no-pmids"');
+    expect(REPORTER).toContain('uncorroborated === "fetch-error"');
+  });
+
+  it("the #3071 gate is the per-scholar policy, and only that policy lets WCM skip the lookup", () => {
+    expect(REPORTER).toContain('CORROBORATION_HIDE_ENABLED && policy !== "none"');
+    expect(REPORTER).toContain("!wcmOrgCorroborates(policy, wcmOrgHistory)");
+    // The pre-filter must not drop WCM awards unconditionally (case D).
+    expect(REPORTER).not.toMatch(/=>\s*!wcmOrgHistory\s*&&/);
+    expect(REPORTER).toContain("reason: UNVERIFIED_REASON[policy]");
   });
 
   it("the v2 auto-lock write appends a B03 audit row, inside the same transaction", () => {

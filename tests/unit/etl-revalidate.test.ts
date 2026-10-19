@@ -9,7 +9,36 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isAllowedBaseUrl } from "@/etl/revalidate";
+const { mockCdnCreate } = vi.hoisted(() => ({ mockCdnCreate: vi.fn() }));
+vi.mock("@/lib/db", () => ({
+  db: { write: { cdnInvalidation: { create: mockCdnCreate } } },
+}));
+
+import { enqueueEdgePurgeAll, isAllowedBaseUrl } from "@/etl/revalidate";
+
+describe("enqueueEdgePurgeAll", () => {
+  beforeEach(() => {
+    mockCdnCreate.mockReset();
+  });
+
+  it("enqueues one /* purge on the cdn_invalidation outbox", async () => {
+    mockCdnCreate.mockResolvedValue({ id: "row-1" });
+    await enqueueEdgePurgeAll();
+    expect(mockCdnCreate).toHaveBeenCalledWith({
+      data: { paths: JSON.stringify(["/*"]), attempts: 0 },
+    });
+  });
+
+  it("logs and swallows an enqueue failure (best-effort, never fails the cadence)", async () => {
+    mockCdnCreate.mockImplementation(async () => {
+      throw new Error("db down");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(enqueueEdgePurgeAll()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
 
 describe("isAllowedBaseUrl (#479)", () => {
   it("allows the local dev origin", () => {

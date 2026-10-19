@@ -1840,6 +1840,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -2496,6 +2500,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -3100,6 +3108,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -3633,6 +3645,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
+              },
+              {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -4603,6 +4619,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
+              },
+              {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -13182,6 +13202,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "on",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -13838,6 +13862,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "on",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -14442,6 +14470,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
+                "Value": "on",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -14974,6 +15006,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
+                "Value": "on",
+              },
+              {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
                 "Value": "on",
               },
               {
@@ -15944,6 +15980,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
+                "Value": "on",
+              },
+              {
+                "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
                 "Value": "on",
               },
               {

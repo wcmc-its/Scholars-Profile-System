@@ -15,8 +15,11 @@ import { NotFoundBeacon } from "@/components/site/not-found-beacon";
  *
  * `not_found` telemetry is sent from the client by `NotFoundBeacon`, with a
  * best-effort `pattern` from the path (`/scholars/*` or a bare root slug →
- * "profile", else "other"). VIVO URLs never reach this site (they are not in
- * the `(public)` group), so they are handled by the root `app/not-found.tsx`.
+ * "profile", else "other"). A legacy VIVO `/display/cwid-*` URL whose CWID no
+ * longer resolves lands here as a `/scholars/by-cwid/*` miss (#1940: the proxy
+ * redirects every legacy CWID to the resolver), so it counts as "profile".
+ * Other legacy VIVO paths are not in the `(public)` group and are handled by
+ * the root `app/not-found.tsx`.
  */
 export default function PublicNotFound() {
   return (

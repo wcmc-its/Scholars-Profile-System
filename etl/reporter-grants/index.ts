@@ -18,7 +18,10 @@
  *   3. Drop awards InfoEd already covers (`dedupeAgainstInfoEd`, spec §6a).
  *   4. Upsert a deterministic Grant row per net-new core (idempotent).
  *   5. Default-hide awards older than RECENCY_YEARS via a system `Suppression`
- *      (user-revocable to surface; spec §6c).
+ *      (user-revocable to surface; spec §6c). Behind
+ *      REPORTER_GRANTS_CORROBORATION_HIDE, also default-hide an award from a
+ *      name-only or grant-join profile that nothing ties to the scholar (#3071;
+ *      see `corroborationPolicy`).
  *   6. Reconcile: delete `source='RePORTER'` rows no longer returned. NEVER
  *      touches `source='InfoEd'` rows.
  *
@@ -45,9 +48,14 @@ import {
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
+  corroborationPolicy,
   groupProjectsByCore,
+  isWcmOrg,
   recencyShouldSuppress,
   toReporterProject,
+  unverifiedShouldSuppress,
+  wcmOrgCorroborates,
+  type CorroborationPolicy,
   type ReporterGrantRow,
 } from "./transform";
 import {
@@ -67,6 +75,28 @@ import {
  *  "not mine" hide, or a revoke of this row) carry a different createdBy and are
  *  never touched by this ETL. */
 const SYSTEM_RECENCY = "system-recency";
+
+/** createdBy marker for the #3071 default-hide of an uncorroborated award from a
+ *  name-only or grant-join profile. Same lifecycle as SYSTEM_RECENCY: minted
+ *  once per row, user-revocable, and a revoked one is never re-minted. */
+const SYSTEM_UNVERIFIED = "system-unverified";
+
+/** #3071 — the Suppression.reason for an unverified hide, by policy. */
+const UNVERIFIED_REASON: Record<Exclude<CorroborationPolicy, "none">, string> = {
+  "wcm-or-publication":
+    `RePORTER grant default-hidden as unverified: the scholar's NIH profile was ` +
+    `matched by name only, and neither a WCM org nor a confirmed publication ` +
+    `ties this award to them. Revoke to surface it on the profile.`,
+  "publication-only":
+    `RePORTER grant default-hidden as unverified: the scholar's NIH profile was ` +
+    `matched through a WCM grant and a name check, which a similarly named WCM ` +
+    `colleague can pass, and no confirmed publication ties this award to them. ` +
+    `Revoke to surface it on the profile.`,
+};
+
+/** #3071 — gates the uncorroborated-award default-hide. Off ⇒ behaviour is
+ *  exactly as before. Wired per env in cdk/lib/etl-stack.ts. */
+const CORROBORATION_HIDE_ENABLED = process.env.REPORTER_GRANTS_CORROBORATION_HIDE === "on";
 
 /** v2 PMID-overlap matcher (spec §9). Gates the entire v2 branch — cohort scan,
  *  candidate generation, auto-lock + pending writes. Off ⇒ ETL is v1-only.
@@ -369,6 +399,67 @@ async function runReporterMatchV2(): Promise<void> {
   );
 }
 
+/**
+ * #3071 — of `rows` (one scholar's RePORTER awards), the ids that NO confirmed
+ * publication of the scholar corroborates. Two sources, cheapest first:
+ * `grant_publication` (ReCiter grant citations + RePORTER linkage, already
+ * materialized for rows that existed before this run), then RePORTER's
+ * publications endpoint for the rest, restricted to the scholar's PMIDs.
+ *
+ * Fails OPEN, never closed: a scholar with no confirmed PMIDs ("no-pmids" — also
+ * what an empty or degraded publication read looks like) or a failed RePORTER
+ * call ("fetch-error") is left unjudged, so nothing is hidden for them this run.
+ * A blip must not become a wave of hides.
+ */
+async function uncorroboratedRowIds(
+  cwid: string,
+  rows: ReporterGrantRow[],
+): Promise<Set<string> | "no-pmids" | "fetch-error"> {
+  const pmids = new Set(
+    (
+      await db.write.publicationAuthor.findMany({
+        where: { cwid, isConfirmed: true },
+        select: { pmid: true },
+      })
+    ).map((r) => r.pmid),
+  );
+  if (pmids.size === 0) return "no-pmids";
+
+  const linked = new Set(
+    (
+      await db.write.grantPublication.findMany({
+        where: { grantId: { in: rows.map((r) => r.id) } },
+        select: { grantId: true, pmid: true },
+      })
+    )
+      .filter((l) => pmids.has(l.pmid))
+      .map((l) => l.grantId),
+  );
+  const remaining = rows.filter((r) => !linked.has(r.id));
+  if (remaining.length === 0) return new Set();
+
+  // Grant id = `reporter:{cwid}:{core}` (buildReporterGrantRow).
+  const coreOf = (r: ReporterGrantRow) => r.id.slice(`reporter:${cwid}:`.length);
+  let pubs;
+  try {
+    pubs = await fetchPublicationsByCoreProjectNums(
+      remaining.map(coreOf),
+      [...pmids].map(Number),
+    );
+  } catch (err) {
+    console.warn(`  [${cwid}] corroboration publications fetch failed: ${(err as Error).message}`);
+    return "fetch-error";
+  } finally {
+    await sleepBetweenRequests();
+  }
+  const corroboratedCores = new Set(
+    pubs
+      .filter((p) => pmids.has(String(p.pmid)) && p.coreProjectNum)
+      .map((p) => p.coreProjectNum!.toUpperCase()),
+  );
+  return new Set(remaining.filter((r) => !corroboratedCores.has(coreOf(r))).map((r) => r.id));
+}
+
 async function main() {
   console.log("\n=== RePORTER Grants ETL ===\n");
   const currentYear = new Date().getUTCFullYear();
@@ -383,13 +474,17 @@ async function main() {
   //    Union all of a scholar's profile_ids — the PK allows multiple.
   const profileRows = await db.write.personNihProfile.findMany({
     where: { scholar: { deletedAt: null, status: "active" } },
-    select: { cwid: true, nihProfileId: true },
+    select: { cwid: true, nihProfileId: true, resolutionSource: true },
   });
   const profilesByCwid = new Map<string, number[]>();
+  const sourcesByCwid = new Map<string, string[]>();
   for (const r of profileRows) {
     const arr = profilesByCwid.get(r.cwid) ?? [];
     arr.push(r.nihProfileId);
     profilesByCwid.set(r.cwid, arr);
+    const src = sourcesByCwid.get(r.cwid) ?? [];
+    src.push(r.resolutionSource);
+    sourcesByCwid.set(r.cwid, src);
   }
   console.log(
     `${profilesByCwid.size} active scholars with ≥1 confirmed RePORTER profile_id.`,
@@ -418,6 +513,22 @@ async function main() {
       })
     ).map((s) => s.entityId),
   );
+
+  // #3071 — existing uncorroborated-award hides, active OR revoked, for the same
+  // reason as above: a row a user surfaced is never re-hidden.
+  const existingUnverifiedHides = new Set(
+    CORROBORATION_HIDE_ENABLED
+      ? (
+          await db.write.suppression.findMany({
+            where: { entityType: "grant", createdBy: SYSTEM_UNVERIFIED },
+            select: { entityId: true },
+          })
+        ).map((s) => s.entityId)
+      : [],
+  );
+  const unverifiedHidden = { "wcm-or-publication": 0, "publication-only": 0 };
+  let unverifiedSkippedNoPmids = 0;
+  let unverifiedSkippedFetchError = 0;
 
   // 3. Per scholar: fetch → group → dedup → upsert (+ recency suppression).
   const keptIds = new Set<string>();
@@ -458,7 +569,11 @@ async function main() {
       infoedByCwid.get(cwid) ?? [],
     );
 
-    const toWrite: Array<{ row: ReporterGrantRow; maxFiscalYear: number | null }> = [];
+    const toWrite: Array<{
+      row: ReporterGrantRow;
+      maxFiscalYear: number | null;
+      wcmOrgHistory: boolean;
+    }> = [];
     for (const p of netNew) {
       const g = byCore.get(p.coreProjectNum.toUpperCase());
       if (!g) continue;
@@ -467,7 +582,45 @@ async function main() {
         skippedNoDate++;
         continue;
       }
-      toWrite.push({ row, maxFiscalYear: g.maxFiscalYear });
+      toWrite.push({ row, maxFiscalYear: g.maxFiscalYear, wcmOrgHistory: isWcmOrg(g.orgName) });
+    }
+
+    // #3071 — which of this scholar's awards to default-hide as uncorroborated.
+    const unverifiedIds = new Set<string>();
+    const policy = corroborationPolicy(sourcesByCwid.get(cwid) ?? []);
+    if (CORROBORATION_HIDE_ENABLED && policy !== "none") {
+      // Only rows no system hide has ever decided, and that the age rule is not
+      // about to hide anyway (one system hide per row, so one revoke surfaces it).
+      const pending = toWrite.filter(
+        ({ row, maxFiscalYear, wcmOrgHistory }) =>
+          !wcmOrgCorroborates(policy, wcmOrgHistory) &&
+          !existingUnverifiedHides.has(row.externalId) &&
+          !existingRecencyHides.has(row.externalId) &&
+          !recencyShouldSuppress(maxFiscalYear, currentYear),
+      );
+      if (pending.length > 0) {
+        const uncorroborated = await uncorroboratedRowIds(
+          cwid,
+          pending.map((p) => p.row),
+        );
+        if (uncorroborated === "no-pmids") {
+          unverifiedSkippedNoPmids++;
+        } else if (uncorroborated === "fetch-error") {
+          unverifiedSkippedFetchError++;
+        } else {
+          for (const { row, wcmOrgHistory } of pending) {
+            if (
+              unverifiedShouldSuppress({
+                policy,
+                wcmOrgHistory,
+                publicationCorroborated: !uncorroborated.has(row.id),
+              })
+            ) {
+              unverifiedIds.add(row.externalId);
+            }
+          }
+        }
+      }
     }
 
     if (toWrite.length > 0) {
@@ -509,6 +662,18 @@ async function main() {
             });
             existingRecencyHides.add(row.externalId);
             minted.push({ suppressionId: sup.id, entityId: row.externalId });
+          } else if (policy !== "none" && unverifiedIds.has(row.externalId)) {
+            const sup = await tx.suppression.create({
+              data: {
+                entityType: "grant",
+                entityId: row.externalId,
+                reason: UNVERIFIED_REASON[policy],
+                createdBy: SYSTEM_UNVERIFIED,
+              },
+            });
+            existingUnverifiedHides.add(row.externalId);
+            minted.push({ suppressionId: sup.id, entityId: row.externalId });
+            unverifiedHidden[policy]++;
           }
         }
       });
@@ -527,12 +692,23 @@ async function main() {
 
   await reflectGrantSuppressions(minted);
 
+  const unverifiedTotal =
+    unverifiedHidden["wcm-or-publication"] + unverifiedHidden["publication-only"];
   console.log(
     `\nMaterialized ${grantsUpserted} net-new RePORTER grants across ` +
       `${processed} scholars ` +
-      `(${minted.length} default-hidden by age, ${skippedNoDate} skipped: no dates, ` +
+      `(${minted.length - unverifiedTotal} default-hidden by age, ${skippedNoDate} skipped: no dates, ` +
       `${errored} fetch errors).`,
   );
+  if (CORROBORATION_HIDE_ENABLED) {
+    console.log(
+      `#3071 corroboration: ${unverifiedTotal} awards default-hidden as unverified ` +
+        `(${unverifiedHidden["wcm-or-publication"]} from name-only profiles, ` +
+        `${unverifiedHidden["publication-only"]} from grant-join profiles; scholars left ` +
+        `unjudged: ${unverifiedSkippedNoPmids} with no confirmed PMIDs, ` +
+        `${unverifiedSkippedFetchError} with a publication fetch error).`,
+    );
+  }
 
   // 4. Reconcile (ADR-005). Delete RePORTER rows no longer returned — a
   //    profile_id was unlinked, or a grant aged out of fetch. Suppressions are
