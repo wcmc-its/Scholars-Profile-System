@@ -87,8 +87,10 @@ const SORTS: Record<TopicActivityKind, Array<[TopicActivitySort, string]>> = {
 };
 
 function infoFor(t: FeedType, subarea: boolean): string {
-  if (t === "grants") return "PI-led awards since 2020.";
-  if (t === "trials") return "NCT-registered studies led by WCM PIs.";
+  if (t === "grants")
+    return "PI-led awards since 2020. Shown by default at a ReCiterAI area score of 0.7 or higher; Include related grants shows the rest.";
+  if (t === "trials")
+    return "NCT-registered studies led by WCM PIs. Shown by default at a ReCiterAI area score of 0.7 or higher; Include related trials shows the rest.";
   return `Papers mapped to this ${subarea ? "subarea" : "area"}.`;
 }
 

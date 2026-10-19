@@ -254,7 +254,7 @@ describe("flag on: TopicActivityFeed", () => {
     await waitFor(() => expect(screen.getAllByTestId("trial-row")).toHaveLength(2));
     expect(activityCalls(calls).some((u) => u.searchParams.get("kind") === "trial")).toBe(true);
     expect(tab(/Clinical trials/).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("button", { name: /NCT-registered/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /NCT-registered.*0\.7 or higher/ })).toBeTruthy();
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
