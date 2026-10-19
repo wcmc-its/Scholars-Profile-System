@@ -56,6 +56,22 @@ export function isTopicRankAreaSignalsOn(): boolean {
 }
 
 /**
+ * Subarea scholar ranking with grants and trials (server-only, read like the
+ * ones above). `TOPIC_SUBAREA_RANK_AREA_SIGNALS=on` adds PI grant and PI
+ * clinical-trial points to a subarea's "Scholars N" row (`getSubtopicScholars`)
+ * at W = 1 (lib/ranking.ts `AREA_SIGNAL_SUBAREA_WEIGHT`), counting only items
+ * ReciterAI assigned to that subarea (`area_signal_topic.primary_subtopic_id`),
+ * and only for scholars already in the row's paper pool. Separate from
+ * TOPIC_RANK_AREA_SIGNALS because the subarea grain was validated separately.
+ * The popover's counts stay publication counts either way.
+ *
+ * Off (the default) is today's order exactly.
+ */
+export function isTopicSubareaRankAreaSignalsOn(): boolean {
+  return process.env.TOPIC_SUBAREA_RANK_AREA_SIGNALS === "on";
+}
+
+/**
  * Research-area feed of grants and trials (server-only, read like the ones
  * above). `TOPIC_FEED_GRANTS_TRIALS=on` serves `/api/topics/[slug]/activity`
  * (lib/api/topic-activity.ts): the area's PI grants and PI clinical trials as

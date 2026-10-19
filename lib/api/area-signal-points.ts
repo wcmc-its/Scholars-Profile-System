@@ -1,7 +1,8 @@
 /**
  * Grant and trial points for one research area, for the scholars who already
- * rank there on their papers (TOPIC_RANK_AREA_SIGNALS; lib/api/topics.ts
- * `getTopScholarsForTopic` is the only caller).
+ * rank there on their papers (TOPIC_RANK_AREA_SIGNALS, lib/api/topics.ts
+ * `getTopScholarsForTopic`), or for one subarea of it with `subtopicId`
+ * (TOPIC_SUBAREA_RANK_AREA_SIGNALS, `getSubtopicScholars`).
  *
  * Joins each scholar's eligible rows to the area scores ReciterAI produced for
  * their TEXT (`grant.area_text_key` / `clinical_trial.area_text_key` ->
@@ -14,6 +15,11 @@
  *     who hid Clinical Trials (`hideClinicalTrials`): a hidden section never
  *     moves its owner;
  *   - trials in a status the profile hides.
+ *
+ * With `subtopicId`, an item counts only when ReciterAI assigned its text to
+ * that subarea within this area (`area_signal_topic.primary_subtopic_id`); a
+ * text in another subarea, or unassigned, scores 0 here. Points are the
+ * area score at W = 1 (`AREA_SIGNAL_SUBAREA_WEIGHT`), same cap and recency.
  */
 import { prisma } from "@/lib/db";
 import {
@@ -26,7 +32,12 @@ import {
   isEligibleAreaTrial,
 } from "@/lib/area-signals";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
-import { collapseGrantProjects, scoreAreaSignals, type AreaSignalItem } from "@/lib/ranking";
+import {
+  AREA_SIGNAL_SUBAREA_WEIGHT,
+  collapseGrantProjects,
+  scoreAreaSignals,
+  type AreaSignalItem,
+} from "@/lib/ranking";
 
 /** "YYYY-MM" or "YYYY-MM-DD" (CT.gov precision varies) -> UTC date; null if unreadable. */
 function trialStart(s: string | null): Date | null {
@@ -40,7 +51,9 @@ export async function loadAreaSignalPoints(
   topicSlug: string,
   cwids: readonly string[],
   now: Date,
+  opts: { subtopicId?: string } = {},
 ): Promise<Map<string, number>> {
+  const { subtopicId } = opts;
   const out = new Map<string, number>();
   if (cwids.length === 0) return out;
   const cwidIn = { in: [...cwids] };
@@ -120,9 +133,18 @@ export async function loadAreaSignalPoints(
   if (keys.length === 0) return out;
   const texts = await prisma.areaSignalText.findMany({
     where: { textKey: { in: keys } },
-    select: { textKey: true, topics: { where: { parentTopicId: topicSlug }, select: { score: true } } },
+    select: {
+      textKey: true,
+      topics: {
+        where: subtopicId
+          ? { parentTopicId: topicSlug, primarySubtopicId: subtopicId }
+          : { parentTopicId: topicSlug },
+        select: { score: true },
+      },
+    },
   });
-  // key -> this area's score; 0 = scored, but not into this area; absent = not scored yet.
+  // key -> this area's score; 0 = scored, but not into this area (or, with
+  // subtopicId, not into this subarea); absent = not scored yet.
   const areaScore = new Map(texts.map((t) => [t.textKey, t.topics.length ? Number(t.topics[0].score) : 0]));
 
   const items = new Map<string, AreaSignalItem[]>();
@@ -155,7 +177,9 @@ export async function loadAreaSignalPoints(
   }
 
   for (const [cwid, its] of items) {
-    const points = scoreAreaSignals(its, now);
+    const points = subtopicId
+      ? scoreAreaSignals(its, now, { w: AREA_SIGNAL_SUBAREA_WEIGHT })
+      : scoreAreaSignals(its, now);
     if (points > 0) out.set(cwid, points);
   }
   return out;

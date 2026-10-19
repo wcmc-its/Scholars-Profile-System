@@ -3105,6 +3105,13 @@ export class AppStack extends Stack {
         // papers-only order. Staging first; prod stays off until the first prod
         // AREASIGNAL# projection has landed and staging is signed off.
         TOPIC_RANK_AREA_SIGNALS: env === "staging" ? "on" : "off",
+        // Subarea "Scholars N" row ranking with PI grants and PI trials
+        // (lib/taxonomy-flags.ts isTopicSubareaRankAreaSignalsOn). When "on":
+        // getSubtopicScholars adds W = 1 points for items ReciterAI assigned to
+        // that subarea, to scholars already in its paper pool; nobody is added.
+        // Off = today's papers-only order. Staging first (V2 blind test,
+        // 2026-10-19); prod stays off until staging is signed off.
+        TOPIC_SUBAREA_RANK_AREA_SIGNALS: env === "staging" ? "on" : "off",
         // Research-area feed of PI grants and PI trials (lib/taxonomy-flags.ts
         // isTopicFeedGrantsTrialsOn). When "on": /api/topics/[slug]/activity
         // serves the area's grants and trials, cut at max(area display

@@ -219,6 +219,15 @@ export function rankForSelectedHighlights<T extends RankablePublication>(
 export const AREA_SIGNAL_WEIGHT = 2;
 
 /**
+ * W at SUBAREA grain (TOPIC_SUBAREA_RANK_AREA_SIGNALS, `getSubtopicScholars`).
+ * Subarea paper totals are a fraction of area totals, so one grant weighs more
+ * there. The V2 blind test (2026-10-19, 10 subareas) picked W = 1: it beat or
+ * tied papers only in every subarea, and W = 2 made the same swaps plus three
+ * that dropped rows raters liked. Cap and recency are the area-level ones.
+ */
+export const AREA_SIGNAL_SUBAREA_WEIGHT = 1;
+
+/**
  * Grant projects and trials counted per scholar-area, each kind separately. The
  * pilot's backtest hit rate saturated at about three grants in an area (28% at
  * 1, 37% at 2, 56% at 3-4, 56% at 5+), so a fourth adds nothing but volume.
