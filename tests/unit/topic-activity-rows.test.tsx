@@ -103,7 +103,9 @@ describe("ActivityGrantRow", () => {
     );
     expect(screen.getByText("Active")).toBeTruthy();
     expect(screen.getByText("2023–2027")).toBeTruthy();
-    expect(screen.getByText("R01 CA000001-04")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "R01 CA000001-04" }).getAttribute("href")).toBe(
+      "https://reporter.nih.gov/project-details/123",
+    );
     expect(
       screen
         .getByRole("link", { name: "Stem cell fitness in a test disease" })
