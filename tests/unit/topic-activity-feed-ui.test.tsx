@@ -7,7 +7,7 @@
  *   - flag on: the Activities header (Scholars chips from `?kind=scholars`, type
  *     tabs with counts, Sort, the "Include related …" switch); a zero-count tab
  *     is hidden; switching to Grants / Clinical trials fetches
- *     `/api/topics/[slug]/activity?kind=…`, renders the Search rows, hides the
+ *     `/api/topics/[slug]/activity?kind=…`, renders the feed's grant / trial rows, hides the
  *     research-articles toggle and writes `?feed=` on the client; `?feed=` is
  *     read back on load.
  */
@@ -27,11 +27,9 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/topics/cardio",
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock("@/components/search/funding-result-row", () => ({
-  FundingResultRow: ({ hit }: { hit: { title: string } }) => <div data-testid="grant-row">{hit.title}</div>,
-}));
-vi.mock("@/components/search/trial-result-row", () => ({
-  TrialResultRow: ({ hit }: { hit: { title: string } }) => <div data-testid="trial-row">{hit.title}</div>,
+vi.mock("@/components/taxonomy/activity-rows", () => ({
+  ActivityGrantRow: ({ hit }: { hit: { title: string } }) => <div data-testid="grant-row">{hit.title}</div>,
+  ActivityTrialRow: ({ hit }: { hit: { title: string } }) => <div data-testid="trial-row">{hit.title}</div>,
 }));
 vi.mock("@/lib/use-nih-resolve", () => ({ useNihApplIdMap: () => ({}) }));
 vi.mock("@/components/ui/select", () => {

@@ -12,8 +12,9 @@
  *     on the right of the tab row.
  *   - "Include related …": one switch for every tab that has both relevance
  *     tiers (the old Show select). Tab and chip counts follow it.
- *   - Grants / Clinical trials list the activity route's items with the Search
- *     page's `FundingResultRow` / `TrialResultRow` and the Load more frame.
+ *   - Grants / Clinical trials list the activity route's items with the
+ *     mockup's rows (`ActivityGrantRow` / `ActivityTrialRow`) and the Load more
+ *     frame.
  *   - The type lives in `?feed=grants|trials`, read and written on the client
  *     only (history.replaceState), never by the server render.
  *
@@ -29,8 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FundingResultRow } from "@/components/search/funding-result-row";
-import { TrialResultRow } from "@/components/search/trial-result-row";
+import { ActivityGrantRow, ActivityTrialRow } from "@/components/taxonomy/activity-rows";
 import { ActivitiesHeader, type ScholarChip } from "@/components/taxonomy/activities-header";
 import {
   FeedEmpty,
@@ -457,10 +457,10 @@ function ActivityKindFeed({
                 key={key}
                 tabIndex={-1}
                 data-key={key}
-                className="outline-none focus-visible:ring-2 focus-visible:ring-ring [&:first-child>article]:border-t-0"
+                className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {kind === "grant" ? (
-                  <FundingResultRow
+                  <ActivityGrantRow
                     hit={h as TopicGrantActivityHit}
                     applId={
                       (h as TopicGrantActivityHit).awardNumber
@@ -469,7 +469,7 @@ function ActivityKindFeed({
                     }
                   />
                 ) : (
-                  <TrialResultRow hit={h as TopicTrialActivityHit} q="" conceptLabel={null} />
+                  <ActivityTrialRow hit={h as TopicTrialActivityHit} />
                 )}
               </li>
             );
