@@ -175,6 +175,78 @@ export interface AttributionEvidence {
 }
 
 // ---------------------------------------------------------------------------
+// Cue 1 helpers.
+// ---------------------------------------------------------------------------
+
+/** How the RePORTER PI's first name agrees with a person's: the same full
+ *  first name, only the initial, or not at all. */
+export function firstNameAgreement(
+  piFirstName: string | null | undefined,
+  names: ReadonlyArray<string | null | undefined>,
+): "full" | "initial" | "none" {
+  const pi = (piFirstName ?? "").replace(/[^A-Za-z]/g, "").toLowerCase();
+  if (!pi) return "none";
+  let best: "full" | "initial" | "none" = "none";
+  for (const n of names) {
+    if (!n) continue;
+    const first = nameTokens(n)[0]?.replace(/-/g, "");
+    if (!first) continue;
+    if (pi.length > 1 && first.length > 1 && pi === first) return "full";
+    if (pi[0] === first[0]) best = "initial";
+  }
+  return best;
+}
+
+/** InfoEd roles that make the other WCM investigator the award's holder.
+ *  Co-I, key personnel and PI-Subaward (the core is another institution's
+ *  prime) do not. */
+export function isInfoedPiLevel(role: string): boolean {
+  return role === "PI" || role === "Co-PI";
+}
+
+/**
+ * Cue 1 evidence from the other WCM investigators InfoEd lists on the core.
+ * `profileNameMatchesOther` needs the RePORTER PI (our NIH profile) to share
+ * the other person's surname (`namesMatch`) AND full first name, while NOT
+ * sharing the scholar's full first name: a grant-join profile already passed a
+ * surname-plus-initial check against the scholar, so that alone proves
+ * nothing. Pure; `namesMatch` is injected so this module stays free of the
+ * resolver.
+ */
+export function infoedOtherEvidence(args: {
+  ourPis: ReadonlyArray<{ first_name: string | null; piName: string }>;
+  scholarNames: ReadonlyArray<string | null | undefined>;
+  others: ReadonlyArray<{ role: string; names: ReadonlyArray<string | null | undefined> }>;
+  namesMatch: (a: string, b: string) => boolean;
+}): { piLevel: boolean; profileNameMatchesOther: boolean } | null {
+  const piLevel = args.others.filter((o) => isInfoedPiLevel(o.role));
+  if (args.others.length === 0) return null;
+  if (piLevel.length === 0) return { piLevel: false, profileNameMatchesOther: false };
+  const matches = args.ourPis.some(
+    (pi) =>
+      firstNameAgreement(pi.first_name, args.scholarNames) !== "full" &&
+      piLevel.some(
+        (o) =>
+          o.names.some((n) => !!n && args.namesMatch(pi.piName, n)) &&
+          firstNameAgreement(pi.first_name, o.names) === "full",
+      ),
+  );
+  return { piLevel: true, profileNameMatchesOther: matches };
+}
+
+// ---------------------------------------------------------------------------
+// Cue 2 helpers.
+// ---------------------------------------------------------------------------
+
+/** Individual research, career and fellowship awards. Center, program,
+ *  training and resource cores (P, T, UL1, U54, S10 ...) link thousands of
+ *  papers by many people, so a rejected paper among them proves nothing. */
+export function isIndividualAward(code: string | null): boolean {
+  if (!code) return false;
+  return /^(R\d|K\d|F\d|DP\d|U01)/i.test(code) && !/^(R25|K12|KL2)/i.test(code);
+}
+
+// ---------------------------------------------------------------------------
 // Cue 3 helpers.
 // ---------------------------------------------------------------------------
 
@@ -466,7 +538,7 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
     }
   }
 
-  if (e.rejected && e.rejected.overlap > 0) {
+  if (e.rejected && e.rejected.overlap > 0 && isIndividualAward(e.activityCode)) {
     const { overlap, linkedTotal } = e.rejected;
     if (linkedTotal <= REJECTED_SMALL_SET || overlap >= REJECTED_MIN_OVERLAP_LARGE) {
       add(

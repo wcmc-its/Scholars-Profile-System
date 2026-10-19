@@ -19,9 +19,11 @@
  *   4. Upsert a deterministic Grant row per net-new core (idempotent).
  *   5. Default-hide awards older than RECENCY_YEARS via a system `Suppression`
  *      (user-revocable to surface; spec §6c). Behind
- *      REPORTER_GRANTS_CORROBORATION_HIDE, also default-hide an award from a
- *      name-only or grant-join profile that nothing ties to the scholar (#3071;
- *      see `corroborationPolicy`).
+ *      REPORTER_GRANTS_CORROBORATION_HIDE, score every award from a name-only
+ *      or grant-join profile (#3071, `score.ts`) and act on the band: hide
+ *      mints a system-unverified hide, queue mints one AND files a curator
+ *      review (`grant_attribution_review`), show revokes a hide an earlier run
+ *      minted (see `attribution-plan.ts` for what is never overridden).
  *   6. Reconcile: delete `source='RePORTER'` rows no longer returned. NEVER
  *      touches `source='InfoEd'` rows.
  *
@@ -30,7 +32,8 @@
 import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { withEtlRun } from "@/lib/etl-run";
-import type { Prisma } from "@/lib/generated/prisma/client";
+import { Prisma } from "@/lib/generated/prisma/client";
+import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
   dedupeAgainstInfoEd,
@@ -45,6 +48,23 @@ import {
   searchProjectsByPiName,
   sleepBetweenRequests,
 } from "../nih-profile/fetcher";
+import { namesMatch, reporterPiName } from "../nih-profile/resolver";
+import { SYSTEM_RESCORED, planAward, type AwardPlan, type ReviewStatus } from "./attribution-plan";
+import {
+  authorKey,
+  coauthorCounts,
+  doctoralYearRange,
+  evidenceKey,
+  infoedOtherEvidence,
+  middleInitialConflict,
+  priorInstitutionMatch,
+  scholarInitials,
+  scoreAttribution,
+  topicOverlap,
+  type AttributionEvidence,
+  type AttributionScore,
+  type CueId,
+} from "./score";
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
@@ -53,9 +73,8 @@ import {
   isWcmOrg,
   recencyShouldSuppress,
   toReporterProject,
-  unverifiedShouldSuppress,
-  wcmOrgCorroborates,
   type CorroborationPolicy,
+  type GroupedProject,
   type ReporterGrantRow,
 } from "./transform";
 import {
@@ -93,6 +112,12 @@ const UNVERIFIED_REASON: Record<Exclude<CorroborationPolicy, "none">, string> = 
     `colleague can pass, and no confirmed publication ties this award to them. ` +
     `Revoke to surface it on the profile.`,
 };
+
+/** #3071 — the Suppression.reason for a queued award (hidden until a curator
+ *  decides on /edit/grant-attribution-queue). */
+const QUEUED_REASON =
+  `RePORTER grant hidden pending curator review: the evidence tying it to the ` +
+  `scholar is weak or points both ways.`;
 
 /** #3071 — gates the uncorroborated-award default-hide. Off ⇒ behaviour is
  *  exactly as before. Wired per env in cdk/lib/etl-stack.ts. */
@@ -399,65 +424,211 @@ async function runReporterMatchV2(): Promise<void> {
   );
 }
 
+/** #3071 — one award the scorer judges, with what it needs from the grouping. */
+interface ScoredCandidate {
+  row: ReporterGrantRow;
+  group: GroupedProject;
+}
+
+/** #3071 — the run-wide inputs the attribution scorer reads, loaded once. */
+interface AttributionContext {
+  profileIdsByCwid: Map<string, number[]>;
+  /** Other WCM investigators per core project number (InfoEd). */
+  infoedByCore: Map<string, Array<{ cwid: string; role: string }>>;
+  namesByCwid: Map<string, { fullName: string; preferredName: string }>;
+  educationByCwid: Map<string, Array<{ degree: string; institution: string; year: number | null }>>;
+  /** False until etl:reciter has mirrored ReCiter rejections at least once:
+   *  cue 2 is then unavailable, not "no rejections". */
+  rejectedAvailable: boolean;
+}
+
+/** What `scoreScholarAwards` returns per award: the scorer's verdict plus the
+ *  card facts a queued review stores. */
+interface ScoredAward {
+  score: AttributionScore;
+  key: string;
+  award: Prisma.InputJsonValue;
+}
+
+const yearOf = (d: Date | null): number | null => (d ? d.getUTCFullYear() : null);
+
+/** The card's award facts: what RePORTER says, as printed. */
+function awardFacts(c: ScoredCandidate): Prisma.InputJsonValue {
+  const orgs = new Map<string, { name: string; from: number | null; to: number | null }>();
+  for (const o of c.group.orgHistory) {
+    if (!o.orgName) continue;
+    const e = orgs.get(o.orgName) ?? { name: o.orgName, from: o.fiscalYear, to: o.fiscalYear };
+    if (o.fiscalYear !== null) {
+      if (e.from === null || o.fiscalYear < e.from) e.from = o.fiscalYear;
+      if (e.to === null || o.fiscalYear > e.to) e.to = o.fiscalYear;
+    }
+    orgs.set(o.orgName, e);
+  }
+  return {
+    title: c.row.title,
+    awardNumber: c.row.awardNumber,
+    coreProjectNum: c.group.coreProjectNum,
+    activityCode: c.row.mechanism,
+    applId: c.group.applId,
+    startYear: yearOf(c.row.startDate),
+    endYear: yearOf(c.row.endDate),
+    orgs: [...orgs.values()],
+    piNames: c.group.pis.map(reporterPiName).filter((n) => n.length > 0),
+  };
+}
+
 /**
- * #3071 — of `rows` (one scholar's RePORTER awards), the ids that NO confirmed
- * publication of the scholar corroborates. Two sources, cheapest first:
- * `grant_publication` (ReCiter grant citations + RePORTER linkage, already
- * materialized for rows that existed before this run), then RePORTER's
- * publications endpoint for the rest, restricted to the scholar's PMIDs.
+ * #3071 — score every candidate award of one scholar. One pass of reads, all
+ * this scholar's: confirmed publications (with authors and MeSH), ReCiter
+ * rejections, the RePORTER publication links for the candidate cores, and the
+ * MeSH descriptors already on the grant rows.
  *
- * Fails OPEN, never closed: a scholar with no confirmed PMIDs ("no-pmids" — also
- * what an empty or degraded publication read looks like) or a failed RePORTER
- * call ("fetch-error") is left unjudged, so nothing is hidden for them this run.
- * A blip must not become a wave of hides.
+ * Fails OPEN, never closed: a scholar with no confirmed PMIDs ("no-pmids") or a
+ * failed RePORTER call ("fetch-error") is left unjudged, so nothing is hidden,
+ * queued or revoked for them this run. A blip must not become a wave of hides.
  */
-async function uncorroboratedRowIds(
+async function scoreScholarAwards(
   cwid: string,
-  rows: ReporterGrantRow[],
-): Promise<Set<string> | "no-pmids" | "fetch-error"> {
-  const pmids = new Set(
-    (
-      await db.write.publicationAuthor.findMany({
-        where: { cwid, isConfirmed: true },
-        select: { pmid: true },
-      })
-    ).map((r) => r.pmid),
-  );
+  policy: CorroborationPolicy,
+  candidates: ScoredCandidate[],
+  ctx: AttributionContext,
+): Promise<Map<string, ScoredAward> | "no-pmids" | "fetch-error"> {
+  const confirmed = await db.write.publicationAuthor.findMany({
+    where: { cwid, isConfirmed: true },
+    select: { pmid: true, publication: { select: { authorsString: true, meshTerms: true } } },
+  });
+  const pmids = new Set(confirmed.map((r) => r.pmid));
   if (pmids.size === 0) return "no-pmids";
 
-  const linked = new Set(
+  const ids = candidates.map((c) => c.row.id);
+  const linkedViaGrantPub = new Set(
     (
       await db.write.grantPublication.findMany({
-        where: { grantId: { in: rows.map((r) => r.id) } },
+        where: { grantId: { in: ids } },
         select: { grantId: true, pmid: true },
       })
     )
       .filter((l) => pmids.has(l.pmid))
       .map((l) => l.grantId),
   );
-  const remaining = rows.filter((r) => !linked.has(r.id));
-  if (remaining.length === 0) return new Set();
+  const rejected = ctx.rejectedAvailable
+    ? new Set(
+        (
+          await db.write.reciterRejectedPmid.findMany({ where: { cwid }, select: { pmid: true } })
+        ).map((r) => r.pmid),
+      )
+    : null;
 
-  // Grant id = `reporter:{cwid}:{core}` (buildReporterGrantRow).
-  const coreOf = (r: ReporterGrantRow) => r.id.slice(`reporter:${cwid}:`.length);
+  // Every candidate core, not only the ones grant_publication left open: cue 2
+  // needs each award's full linked set. The PMID list only restricts a core
+  // over RePORTER's offset cap (center grants); confirmed plus rejected keeps
+  // both cues answerable there.
   let pubs;
   try {
     pubs = await fetchPublicationsByCoreProjectNums(
-      remaining.map(coreOf),
-      [...pmids].map(Number),
+      candidates.map((c) => c.group.coreProjectNum),
+      [...pmids, ...(rejected ?? [])].map(Number).filter((n) => Number.isFinite(n) && n > 0),
     );
   } catch (err) {
-    console.warn(`  [${cwid}] corroboration publications fetch failed: ${(err as Error).message}`);
+    console.warn(`  [${cwid}] attribution publications fetch failed: ${(err as Error).message}`);
     return "fetch-error";
   } finally {
     await sleepBetweenRequests();
   }
-  const corroboratedCores = new Set(
-    pubs
-      .filter((p) => pmids.has(String(p.pmid)) && p.coreProjectNum)
-      .map((p) => p.coreProjectNum!.toUpperCase()),
+  const linkedByCore = new Map<string, Set<string>>();
+  for (const p of pubs) {
+    if (!p.coreProjectNum) continue;
+    const core = p.coreProjectNum.toUpperCase();
+    const set = linkedByCore.get(core) ?? new Set<string>();
+    set.add(String(p.pmid));
+    linkedByCore.set(core, set);
+  }
+
+  const meshByGrant = new Map(
+    (
+      await db.write.grant.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, meshDescriptorUis: true },
+      })
+    ).map((g) => [g.id, Array.isArray(g.meshDescriptorUis) ? (g.meshDescriptorUis as unknown[]) : []]),
   );
-  return new Set(remaining.filter((r) => !corroboratedCores.has(coreOf(r))).map((r) => r.id));
+
+  // Scholar-side facts, shared by every award.
+  const names = ctx.namesByCwid.get(cwid);
+  const scholarNames = [names?.fullName, names?.preferredName];
+  const initials = scholarInitials(scholarNames);
+  const { firstName, lastName } = parseFirstLast(names?.fullName ?? "");
+  const coauthors = coauthorCounts(
+    confirmed.map((c) => c.publication.authorsString),
+    lastName ? authorKey(lastName, firstName) : null,
+  );
+  const meshCounts = new Map<string, number>();
+  let taggedPapers = 0;
+  for (const c of confirmed) {
+    const terms = c.publication.meshTerms;
+    if (!Array.isArray(terms)) continue;
+    const uis = new Set<string>();
+    for (const t of terms as Array<{ ui?: unknown }>) if (typeof t?.ui === "string") uis.add(t.ui);
+    if (uis.size === 0) continue;
+    taggedPapers++;
+    for (const u of uis) meshCounts.set(u, (meshCounts.get(u) ?? 0) + 1);
+  }
+  const educations = ctx.educationByCwid.get(cwid) ?? [];
+  const doctoralYears = doctoralYearRange(educations);
+  const profileIds = new Set(ctx.profileIdsByCwid.get(cwid) ?? []);
+
+  const out = new Map<string, ScoredAward>();
+  for (const c of candidates) {
+    const core = c.group.coreProjectNum;
+    const ourPis = c.group.pis.filter((pi) => profileIds.has(pi.profile_id));
+    const coPis = c.group.pis.filter((pi) => !profileIds.has(pi.profile_id));
+    const linked = linkedByCore.get(core) ?? new Set<string>();
+    const others = (ctx.infoedByCore.get(core) ?? []).filter((o) => o.cwid !== cwid);
+
+    const evidence: AttributionEvidence = {
+      policy,
+      wcmOrgHistory: isWcmOrg(c.group.orgName),
+      publicationLinked: linkedViaGrantPub.has(c.row.id) || [...linked].some((p) => pmids.has(p)),
+      activityCode: parseNihAward(core).mechanism,
+      startYear: yearOf(c.row.startDate),
+      infoedOther: infoedOtherEvidence({
+        ourPis: ourPis.map((pi) => ({ first_name: pi.first_name, piName: reporterPiName(pi) })),
+        scholarNames,
+        others: others.map((o) => {
+          const n = ctx.namesByCwid.get(o.cwid);
+          return { role: o.role, names: [n?.fullName, n?.preferredName] };
+        }),
+        namesMatch,
+      }),
+      rejected: rejected
+        ? { overlap: [...linked].filter((p) => rejected.has(p)).length, linkedTotal: linked.size }
+        : null,
+      doctoralYears,
+      middleInitialConflict: middleInitialConflict(
+        ourPis.map((pi) => pi.middle_name),
+        initials,
+      ),
+      priorInstitution: priorInstitutionMatch(c.group.orgHistory, educations, isWcmOrg),
+      coPiSharedPapers:
+        coPis.length === 0
+          ? null
+          : Math.max(
+              0,
+              ...coPis.map((pi) => {
+                const k = pi.last_name ? authorKey(pi.last_name, pi.first_name) : null;
+                return k ? (coauthors.get(k) ?? 0) : 0;
+              }),
+            ),
+      topic: topicOverlap(
+        (meshByGrant.get(c.row.id) ?? []).filter((u): u is string => typeof u === "string"),
+        meshCounts,
+        taggedPapers,
+      ),
+    };
+    const score = scoreAttribution(evidence);
+    out.set(c.row.externalId, { score, key: evidenceKey(score), award: awardFacts(c) });
+  }
+  return out;
 }
 
 async function main() {
@@ -494,7 +665,7 @@ async function main() {
   //    so these rows are the WCM-administered floor a RePORTER award must clear.
   const infoedRows = await db.write.grant.findMany({
     where: { source: "InfoEd", awardNumber: { not: null } },
-    select: { cwid: true, awardNumber: true },
+    select: { cwid: true, awardNumber: true, role: true },
   });
   const infoedByCwid = new Map<string, InfoedGrant[]>();
   for (const r of infoedRows) {
@@ -514,21 +685,97 @@ async function main() {
     ).map((s) => s.entityId),
   );
 
-  // #3071 — existing uncorroborated-award hides, active OR revoked, for the same
-  // reason as above: a row a user surfaced is never re-hidden.
-  const existingUnverifiedHides = new Set(
-    CORROBORATION_HIDE_ENABLED
-      ? (
-          await db.write.suppression.findMany({
-            where: { entityType: "grant", createdBy: SYSTEM_UNVERIFIED },
-            select: { entityId: true },
+  // #3071 — attribution scoring state, loaded once. Off ⇒ nothing is read.
+  //   unverified: per award, the active system-unverified hide, and whether a
+  //     PERSON revoked one (never re-minted). A SYSTEM_RESCORED revoke is the
+  //     ETL's own and does not count.
+  //   reviews: the curator queue's ledger, by award.
+  //   attribution: the run-wide cue inputs.
+  const unverified = new Map<string, { activeId: string | null; humanRevoked: boolean }>();
+  const reviews = new Map<string, { status: ReviewStatus; evidenceKey: string }>();
+  let attribution: AttributionContext | null = null;
+  // Revoking needs every NEGATIVE cue source: without one, missing evidence
+  // against an award would read as "show" and lift its hide.
+  let allowRevoke = false;
+  if (CORROBORATION_HIDE_ENABLED) {
+    for (const s of await db.write.suppression.findMany({
+      where: { entityType: "grant", createdBy: SYSTEM_UNVERIFIED },
+      select: { id: true, entityId: true, revokedAt: true, revokedBy: true },
+    })) {
+      const e = unverified.get(s.entityId) ?? { activeId: null, humanRevoked: false };
+      if (s.revokedAt === null) e.activeId = s.id;
+      else if (s.revokedBy !== SYSTEM_RESCORED) e.humanRevoked = true;
+      unverified.set(s.entityId, e);
+    }
+    for (const r of await db.write.grantAttributionReview.findMany({
+      select: { grantExternalId: true, status: true, evidenceKey: true },
+    })) {
+      reviews.set(r.grantExternalId, {
+        status: r.status as ReviewStatus,
+        evidenceKey: r.evidenceKey,
+      });
+    }
+
+    if (infoedRows.length === 0) {
+      // InfoEd is the dedup floor AND cue 1. An empty read is a degraded one:
+      // score nothing rather than read its absence as "no other WCM holder".
+      console.warn("#3071 attribution: InfoEd returned no rows; scoring skipped this run.");
+    } else {
+      const infoedByCore = new Map<string, Array<{ cwid: string; role: string }>>();
+      for (const r of infoedRows) {
+        const core = coreProjectNum(r.awardNumber);
+        if (!core) continue;
+        const arr = infoedByCore.get(core) ?? [];
+        arr.push({ cwid: r.cwid, role: r.role });
+        infoedByCore.set(core, arr);
+      }
+      const namesByCwid = new Map(
+        (
+          await db.write.scholar.findMany({
+            where: { deletedAt: null },
+            select: { cwid: true, fullName: true, preferredName: true },
           })
-        ).map((s) => s.entityId)
-      : [],
-  );
-  const unverifiedHidden = { "wcm-or-publication": 0, "publication-only": 0 };
-  let unverifiedSkippedNoPmids = 0;
-  let unverifiedSkippedFetchError = 0;
+        ).map((s) => [s.cwid, { fullName: s.fullName, preferredName: s.preferredName }]),
+      );
+      const educationByCwid = new Map<
+        string,
+        Array<{ degree: string; institution: string; year: number | null }>
+      >();
+      for (const e of await db.write.education.findMany({
+        where: { cwid: { in: [...profilesByCwid.keys()] } },
+        select: { cwid: true, degree: true, institution: true, year: true },
+      })) {
+        const arr = educationByCwid.get(e.cwid) ?? [];
+        arr.push({ degree: e.degree, institution: e.institution, year: e.year });
+        educationByCwid.set(e.cwid, arr);
+      }
+      const rejectedAvailable = (await db.write.reciterRejectedPmid.count()) > 0;
+      if (!rejectedAvailable) {
+        console.warn(
+          "#3071 attribution: no ReCiter rejections mirrored yet (etl:reciter); the " +
+            "rejected-papers cue is off and no hide is revoked this run.",
+        );
+      }
+      attribution = {
+        profileIdsByCwid: profilesByCwid,
+        infoedByCore,
+        namesByCwid,
+        educationByCwid,
+        rejectedAvailable,
+      };
+      allowRevoke = rejectedAvailable;
+    }
+  }
+  const tally = {
+    band: { show: 0, hide: 0, queue: 0 },
+    rule: { decisive: 0, conflict: 0, sum: 0 },
+    cue: {} as Partial<Record<CueId, number>>,
+    minted: { "wcm-or-publication": 0, "publication-only": 0, queue: 0 },
+    revoked: 0,
+    review: { create: 0, refresh: 0, reopen: 0, withdraw: 0 },
+    skippedNoPmids: 0,
+    skippedFetchError: 0,
+  };
 
   // 3. Per scholar: fetch → group → dedup → upsert (+ recency suppression).
   const keptIds = new Set<string>();
@@ -572,7 +819,7 @@ async function main() {
     const toWrite: Array<{
       row: ReporterGrantRow;
       maxFiscalYear: number | null;
-      wcmOrgHistory: boolean;
+      group: GroupedProject;
     }> = [];
     for (const p of netNew) {
       const g = byCore.get(p.coreProjectNum.toUpperCase());
@@ -582,42 +829,55 @@ async function main() {
         skippedNoDate++;
         continue;
       }
-      toWrite.push({ row, maxFiscalYear: g.maxFiscalYear, wcmOrgHistory: isWcmOrg(g.orgName) });
+      toWrite.push({ row, maxFiscalYear: g.maxFiscalYear, group: g });
     }
 
-    // #3071 — which of this scholar's awards to default-hide as uncorroborated.
-    const unverifiedIds = new Set<string>();
+    // #3071 — score this scholar's awards and plan what to do with each.
+    // Recency-hidden awards are out of scope: the ETL keeps one system hide
+    // per award, so one revoke surfaces it.
+    const plans = new Map<string, { plan: AwardPlan; scored: ScoredAward | null }>();
     const policy = corroborationPolicy(sourcesByCwid.get(cwid) ?? []);
-    if (CORROBORATION_HIDE_ENABLED && policy !== "none") {
-      // Only rows no system hide has ever decided, and that the age rule is not
-      // about to hide anyway (one system hide per row, so one revoke surfaces it).
-      const pending = toWrite.filter(
-        ({ row, maxFiscalYear, wcmOrgHistory }) =>
-          !wcmOrgCorroborates(policy, wcmOrgHistory) &&
-          !existingUnverifiedHides.has(row.externalId) &&
+    if (CORROBORATION_HIDE_ENABLED && attribution) {
+      const inScope = toWrite.filter(
+        ({ row, maxFiscalYear }) =>
           !existingRecencyHides.has(row.externalId) &&
           !recencyShouldSuppress(maxFiscalYear, currentYear),
       );
-      if (pending.length > 0) {
-        const uncorroborated = await uncorroboratedRowIds(
+      const stateOf = (externalId: string) => {
+        const u = unverified.get(externalId);
+        return {
+          activeHideId: u?.activeId ?? null,
+          humanRevoked: u?.humanRevoked ?? false,
+          review: reviews.get(externalId) ?? null,
+        };
+      };
+      if (policy === "none") {
+        // Every profile confirmed by publications: nothing to judge. An award a
+        // name-linked profile once hid is shown again (when revoking is safe).
+        for (const { row } of inScope) {
+          const plan = planAward("show", stateOf(row.externalId), "", allowRevoke);
+          if (plan.mintHide || plan.revokeHideId || plan.review !== "none") {
+            plans.set(row.externalId, { plan, scored: null });
+          }
+        }
+      } else if (inScope.length > 0) {
+        const scored = await scoreScholarAwards(
           cwid,
-          pending.map((p) => p.row),
+          policy,
+          inScope.map(({ row, group }) => ({ row, group })),
+          attribution,
         );
-        if (uncorroborated === "no-pmids") {
-          unverifiedSkippedNoPmids++;
-        } else if (uncorroborated === "fetch-error") {
-          unverifiedSkippedFetchError++;
+        if (scored === "no-pmids") {
+          tally.skippedNoPmids++;
+        } else if (scored === "fetch-error") {
+          tally.skippedFetchError++;
         } else {
-          for (const { row, wcmOrgHistory } of pending) {
-            if (
-              unverifiedShouldSuppress({
-                policy,
-                wcmOrgHistory,
-                publicationCorroborated: !uncorroborated.has(row.id),
-              })
-            ) {
-              unverifiedIds.add(row.externalId);
-            }
+          for (const [externalId, sc] of scored) {
+            tally.band[sc.score.band]++;
+            tally.rule[sc.score.rule]++;
+            for (const r of sc.score.reasons) tally.cue[r.id] = (tally.cue[r.id] ?? 0) + 1;
+            const plan = planAward(sc.score.band, stateOf(externalId), sc.key, allowRevoke);
+            plans.set(externalId, { plan, scored: sc });
           }
         }
       }
@@ -625,6 +885,7 @@ async function main() {
 
     if (toWrite.length > 0) {
       await db.write.$transaction(async (tx) => {
+        const now = new Date();
         for (const { row, maxFiscalYear } of toWrite) {
           await tx.grant.upsert({
             where: { id: row.id },
@@ -662,18 +923,124 @@ async function main() {
             });
             existingRecencyHides.add(row.externalId);
             minted.push({ suppressionId: sup.id, entityId: row.externalId });
-          } else if (policy !== "none" && unverifiedIds.has(row.externalId)) {
+            continue;
+          }
+
+          const entry = plans.get(row.externalId);
+          if (!entry) continue;
+          const { plan, scored } = entry;
+          const queued = scored?.score.band === "queue";
+
+          if (plan.mintHide && policy !== "none") {
             const sup = await tx.suppression.create({
               data: {
                 entityType: "grant",
                 entityId: row.externalId,
-                reason: UNVERIFIED_REASON[policy],
+                reason: queued ? QUEUED_REASON : UNVERIFIED_REASON[policy],
                 createdBy: SYSTEM_UNVERIFIED,
               },
             });
-            existingUnverifiedHides.add(row.externalId);
+            unverified.set(row.externalId, { activeId: sup.id, humanRevoked: false });
             minted.push({ suppressionId: sup.id, entityId: row.externalId });
-            unverifiedHidden[policy]++;
+            if (queued) tally.minted.queue++;
+            else tally.minted[policy]++;
+          }
+
+          if (plan.revokeHideId) {
+            // A SYSTEM revoke, recorded as such on the row (revokedBy) and in
+            // the audit log (actor), so it is never mistaken for a person's.
+            const res = await tx.suppression.updateMany({
+              where: { id: plan.revokeHideId, revokedAt: null },
+              data: { revokedAt: now, revokedBy: SYSTEM_RESCORED, searchReflectedAt: null },
+            });
+            if (res.count === 1) {
+              await appendAuditRow(tx, {
+                actorCwid: SYSTEM_RESCORED,
+                impersonatedCwid: null,
+                targetEntityType: "grant",
+                targetEntityId: row.externalId,
+                action: "suppression_revoke",
+                fieldsChanged: null,
+                beforeValues: { suppression_id: plan.revokeHideId },
+                afterValues: {
+                  revoked_by: SYSTEM_RESCORED,
+                  revoked_at: now.toISOString(),
+                  score: scored?.score.score ?? null,
+                  band: "show",
+                },
+                ts: now,
+                requestId: null,
+              });
+              unverified.set(row.externalId, { activeId: null, humanRevoked: false });
+              minted.push({ suppressionId: plan.revokeHideId, entityId: row.externalId });
+              tally.revoked++;
+            }
+          }
+
+          if (plan.review !== "none") {
+            const scoreFields = scored
+              ? {
+                  score: scored.score.score,
+                  band: scored.score.band,
+                  cues: scored.score.reasons as unknown as Prisma.InputJsonValue,
+                  award: scored.award,
+                  scoredAt: now,
+                  lastSeenAt: now,
+                }
+              : { band: "show", lastSeenAt: now };
+            const prior = reviews.get(row.externalId);
+            if (plan.review === "create" && scored) {
+              await tx.grantAttributionReview.create({
+                data: {
+                  cwid,
+                  grantExternalId: row.externalId,
+                  score: scored.score.score,
+                  band: scored.score.band,
+                  cues: scored.score.reasons as unknown as Prisma.InputJsonValue,
+                  evidenceKey: scored.key,
+                  award: scored.award,
+                  scoredAt: now,
+                },
+              });
+              reviews.set(row.externalId, { status: "pending", evidenceKey: scored.key });
+            } else if (plan.review === "refresh" && scored) {
+              await tx.grantAttributionReview.updateMany({
+                where: { grantExternalId: row.externalId, status: "pending" },
+                data: { ...scoreFields, evidenceKey: scored.key },
+              });
+            } else if (plan.review === "reopen" && scored && prior) {
+              // Conditional on the status read at load: a curator who decided
+              // in the meantime wins, and this matches nothing.
+              await tx.grantAttributionReview.updateMany({
+                where: { grantExternalId: row.externalId, status: prior.status },
+                data: {
+                  ...scoreFields,
+                  evidenceKey: scored.key,
+                  status: "pending",
+                  decidedByCwid: null,
+                  decidedAt: null,
+                  rejectionReason: null,
+                  decisionEffects: Prisma.DbNull,
+                  reopenedAt: now,
+                },
+              });
+              reviews.set(row.externalId, { status: "pending", evidenceKey: scored.key });
+            } else if (plan.review === "withdraw") {
+              await tx.grantAttributionReview.updateMany({
+                where: { grantExternalId: row.externalId, status: "pending" },
+                data: {
+                  ...scoreFields,
+                  status: "withdrawn",
+                  decidedByCwid: SYSTEM_RESCORED,
+                  decidedAt: now,
+                },
+              });
+              reviews.set(row.externalId, {
+                status: "withdrawn",
+                evidenceKey: prior?.evidenceKey ?? "",
+              });
+            }
+            tally.review[plan.review]++;
           }
         }
       });
@@ -690,24 +1057,36 @@ async function main() {
     await sleepBetweenRequests();
   }
 
+  // Minted hides AND system revokes: both are index-relevant transitions.
   await reflectGrantSuppressions(minted);
 
   const unverifiedTotal =
-    unverifiedHidden["wcm-or-publication"] + unverifiedHidden["publication-only"];
+    tally.minted["wcm-or-publication"] + tally.minted["publication-only"] + tally.minted.queue;
   console.log(
     `\nMaterialized ${grantsUpserted} net-new RePORTER grants across ` +
       `${processed} scholars ` +
-      `(${minted.length - unverifiedTotal} default-hidden by age, ${skippedNoDate} skipped: no dates, ` +
-      `${errored} fetch errors).`,
+      `(${minted.length - unverifiedTotal - tally.revoked} default-hidden by age, ` +
+      `${skippedNoDate} skipped: no dates, ${errored} fetch errors).`,
   );
   if (CORROBORATION_HIDE_ENABLED) {
+    // Aggregates only: never a cwid, name or award number.
+    const cues = Object.entries(tally.cue)
+      .sort((x, y) => y[1] - x[1])
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
     console.log(
-      `#3071 corroboration: ${unverifiedTotal} awards default-hidden as unverified ` +
-        `(${unverifiedHidden["wcm-or-publication"]} from name-only profiles, ` +
-        `${unverifiedHidden["publication-only"]} from grant-join profiles; scholars left ` +
-        `unjudged: ${unverifiedSkippedNoPmids} with no confirmed PMIDs, ` +
-        `${unverifiedSkippedFetchError} with a publication fetch error).`,
+      `#3071 attribution: scored show=${tally.band.show} hide=${tally.band.hide} ` +
+        `queue=${tally.band.queue} (decisive=${tally.rule.decisive}, ` +
+        `conflict=${tally.rule.conflict}); newly hidden ${unverifiedTotal} ` +
+        `(${tally.minted["wcm-or-publication"]} name-only, ${tally.minted["publication-only"]} ` +
+        `grant-join, ${tally.minted.queue} queued); revoked ${tally.revoked}` +
+        `${allowRevoke ? "" : " (revoking off this run)"}; reviews created ` +
+        `${tally.review.create}, refreshed ${tally.review.refresh}, reopened ` +
+        `${tally.review.reopen}, withdrawn ${tally.review.withdraw}; scholars left ` +
+        `unjudged: ${tally.skippedNoPmids} with no confirmed PMIDs, ` +
+        `${tally.skippedFetchError} with a publication fetch error.`,
     );
+    console.log(`#3071 attribution cues fired: ${cues || "none"}.`);
   }
 
   // 4. Reconcile (ADR-005). Delete RePORTER rows no longer returned — a

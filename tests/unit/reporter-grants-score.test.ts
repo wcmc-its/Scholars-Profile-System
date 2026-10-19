@@ -9,6 +9,9 @@ import {
   coauthorCounts,
   doctoralYearRange,
   evidenceKey,
+  firstNameAgreement,
+  infoedOtherEvidence,
+  isIndividualAward,
   isDoctoralForTimeline,
   middleInitialConflict,
   priorInstitutionMatch,
@@ -20,6 +23,7 @@ import {
   type AttributionEvidence,
 } from "@/etl/reporter-grants/score";
 import { isWcmOrg } from "@/etl/reporter-grants/transform";
+import { namesMatch } from "@/etl/nih-profile/resolver";
 
 /** An award with no evidence either way, under the name-only policy. */
 const ev = (over: Partial<AttributionEvidence> = {}): AttributionEvidence => ({
@@ -324,5 +328,61 @@ describe("evidenceKey", () => {
     expect(evidenceKey(a)).toBe(evidenceKey(b));
     const c = scoreAttribution(ev({ priorInstitution: "X University", coPiSharedPapers: 4 }));
     expect(evidenceKey(c)).not.toBe(evidenceKey(a));
+  });
+});
+
+describe("cue 1 evidence: whose name the NIH profile carries", () => {
+  const us = ["Jane Q Example", "Jane Example"];
+  const colleague = { role: "PI", names: ["Joan Example", "Joan Example"] };
+
+  it("grades first-name agreement", () => {
+    expect(firstNameAgreement("Joan", us)).toBe("initial");
+    expect(firstNameAgreement("Jane", us)).toBe("full");
+    expect(firstNameAgreement("Mark", us)).toBe("none");
+    expect(firstNameAgreement(null, us)).toBe("none");
+  });
+
+  it("is decisive-grade when the PI is the colleague by full first name and not us", () => {
+    const e = infoedOtherEvidence({
+      ourPis: [{ first_name: "Joan", piName: "Joan Example" }],
+      scholarNames: us,
+      others: [colleague],
+      namesMatch,
+    });
+    expect(e).toEqual({ piLevel: true, profileNameMatchesOther: true });
+  });
+
+  it("is only moderate when the PI's full first name is ours (a multi-PI award)", () => {
+    const e = infoedOtherEvidence({
+      ourPis: [{ first_name: "Jane", piName: "Jane Example" }],
+      scholarNames: us,
+      others: [colleague],
+      namesMatch,
+    });
+    expect(e).toEqual({ piLevel: true, profileNameMatchesOther: false });
+  });
+
+  it("does not count Co-I, key personnel or a subaward PI, and is null with no other holder", () => {
+    const args = { ourPis: [{ first_name: "Joan", piName: "Joan Example" }], scholarNames: us, namesMatch };
+    for (const role of ["Co-I", "Key Personnel", "PI-Subaward"]) {
+      expect(infoedOtherEvidence({ ...args, others: [{ ...colleague, role }] })).toEqual({
+        piLevel: false,
+        profileNameMatchesOther: false,
+      });
+    }
+    expect(infoedOtherEvidence({ ...args, others: [] })).toBeNull();
+  });
+});
+
+describe("cue 2 scope: individual awards only", () => {
+  it("covers R, K, F, DP and U01, not center, training or program cores", () => {
+    for (const c of ["R01", "R21", "K08", "K99", "F32", "DP2", "U01"]) expect(isIndividualAward(c)).toBe(true);
+    for (const c of ["P30", "P01", "T32", "UL1", "U54", "S10", "R25", "K12", "KL2", null]) {
+      expect(isIndividualAward(c)).toBe(false);
+    }
+  });
+
+  it("does not fire cue 2 on a center core", () => {
+    expect(ids(ev({ activityCode: "P30", rejected: { overlap: 5, linkedTotal: 10 } }))).toEqual([]);
   });
 });
