@@ -165,7 +165,18 @@ export function ActivityGrantRow({ hit, applId }: { hit: TopicGrantActivityHit; 
         </div>
         {hit.awardNumber ? (
           <span className="font-mono text-[12px] whitespace-nowrap text-[#4a4540]">
-            {grantAwardLabel(hit.awardNumber, hit.mechanism)}
+            {reporterId ? (
+              <a
+                href={`https://reporter.nih.gov/project-details/${reporterId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                {grantAwardLabel(hit.awardNumber, hit.mechanism)}
+              </a>
+            ) : (
+              grantAwardLabel(hit.awardNumber, hit.mechanism)
+            )}
           </span>
         ) : null}
       </div>
