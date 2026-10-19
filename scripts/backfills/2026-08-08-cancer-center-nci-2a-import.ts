@@ -20,11 +20,12 @@
  * should ever assert. A Meyer member with no program assigned yet (or a row
  * whose award number doesn't resolve at all) gets `programCode: null,
  * source: "membership"` — an explicit, honest gap, never a guess.
- * `cancerRelevantPercent` has no data source anywhere, so EVERY row asks
- * Bedrock for it regardless of program resolution — see
- * `lib/edit/cancer-center-funding-generator.ts`. That is a fully separate
- * concept from program assignment above: `cancerRelevantPercent` always
- * carries its own Bedrock-sourced `source: "llm"`, untouched by this change.
+ * `cancerRelevantPercent` has no data source anywhere. MCC's rubric decides
+ * two cases outright (`cancerRelevanceRule`: an NCI award, Lynch syndrome →
+ * 100, `source: "rule"`, no Bedrock call); every other row asks Bedrock, with
+ * the matching `Grant`'s abstract and PHR statement, regardless of program
+ * resolution — see `lib/edit/cancer-center-funding-generator.ts`. That is a
+ * fully separate concept from program assignment above.
  *
  * `isPeerReviewed` (DT2A rule #4) is a THIRD, fully separate concept again —
  * deterministic, no Bedrock, no override — see
@@ -39,12 +40,13 @@
  * replacing the allocation set entirely when ANY existing allocation is
  * `"human"`-sourced (never a partial clobber of a mixed set).
  *
- * AI ORIGINAL — every llm-sourced percent this script writes is also written
- * to `cancerRelevantPercentAi`, the model's own value, so the report can tell
- * a reviewer's correction from a confirmation. It moves with the percent: a
- * row whose percent is skipped (human-sourced, or this cycle's inference
- * failed) keeps its AI value too, so a human row's "AI said X%" stays the
- * value the reviewer actually saw.
+ * AI ORIGINAL — every llm- or rule-sourced percent this script writes is also
+ * written to `cancerRelevantPercentAi`, so the report can tell a reviewer's
+ * correction from a confirmation, with its provenance (`cancerRelevantModel`,
+ * prompt/input hashes, `cancerRelevantInferredAt`). They move with the
+ * percent: a row whose percent is skipped (human-sourced, or this cycle's
+ * inference failed) keeps its AI value and provenance too, so a human row's
+ * "AI said X%" stays the value the reviewer actually saw.
  *
  * NOT AUDITED — this is a machine-run batch import, not a signed-in actor's
  * `/api/edit` write; same posture as every other ETL ingest in this repo (see
@@ -78,7 +80,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { normalizeAwardNumber } from "@/lib/award-number";
+import { normalizeAwardNumber, parseNihAward } from "@/lib/award-number";
 import { inferCancerFundingJudgments } from "@/lib/edit/cancer-center-funding-generator";
 import { isPeerReviewedFundingSource } from "@/lib/edit/cancer-center-peer-review";
 
@@ -116,8 +118,8 @@ export type Nci2aImportDb = {
   grant: {
     findMany(args: {
       where: { awardNumber: { not: null } };
-      select: { awardNumber: true; cwid: true };
-    }): Promise<{ awardNumber: string | null; cwid: string }[]>;
+      select: { awardNumber: true; cwid: true; abstract: true; phrText: true };
+    }): Promise<GrantText[]>;
   };
   centerMembership: {
     findMany(args: {
@@ -131,6 +133,8 @@ export type Nci2aImportDb = {
     update(args: unknown): Promise<unknown>;
   };
 };
+
+type GrantText = { awardNumber: string | null; cwid: string; abstract: string | null; phrText: string | null };
 
 type ExistingAward = {
   id: string;
@@ -214,6 +218,22 @@ export function buildAwardNumberIndex(
   const index = new Map<string, string | "ambiguous">();
   for (const [key, cwids] of byNumber) {
     index.set(key, cwids.size === 1 ? [...cwids][0] : "ambiguous");
+  }
+  return index;
+}
+
+/** normalizedAwardNumber -> the abstract / PHR statement of a `Grant` row with
+ *  that number (first non-null of each). Text belongs to the project, not the
+ *  person, so an award number shared by several cwids still has one text. */
+export function buildGrantTextIndex(
+  grants: GrantText[],
+): Map<string, { abstract: string | null; phrText: string | null }> {
+  const index = new Map<string, { abstract: string | null; phrText: string | null }>();
+  for (const g of grants) {
+    if (!g.awardNumber) continue;
+    const key = normalizeAwardNumber(g.awardNumber);
+    const cur = index.get(key) ?? { abstract: null, phrText: null };
+    index.set(key, { abstract: cur.abstract ?? g.abstract, phrText: cur.phrText ?? g.phrText });
   }
   return index;
 }
@@ -317,40 +337,106 @@ export type RowPlan = {
   allocation: { programCode: string | null; source: "membership" };
   cancerRelevantPercent: number | null;
   cancerRelevantRationale: string | null;
+  /** `rule` = MCC's rubric decided it with no model call (`cancerRelevanceRule`). */
+  cancerRelevantPercentSource: "llm" | "rule";
+  /** Written with the percent; all null when inference failed. */
+  provenance: {
+    cancerRelevantModel: string | null;
+    cancerRelevantPromptHash: string | null;
+    cancerRelevantInputHash: string | null;
+    cancerRelevantInferredAt: Date | null;
+  };
   /** Deterministic (DT2A rule #4) -- never a model guess, never overridable,
    *  so unlike cancerRelevantPercent it always overwrites on a re-run. */
   isPeerReviewed: boolean;
 };
 
+const NCI_RATIONALE = "NCI award: 100% under MCC's rubric.";
+const LYNCH_RATIONALE = "Lynch syndrome: 100% under MCC's rubric.";
+
+/** MCC's rubric (10-01) cases that are ALWAYS 100% — decided here, before any
+ *  Bedrock call (deterministic, like `cancer-center-peer-review.ts`). NCI =
+ *  a CA infix on either award number, or a funding source naming the National
+ *  Cancer Institute (a flow-through row may carry a non-NIH number). */
+export function cancerRelevanceRule(
+  row: Pick<ImportRow, "sourceAwardNumber" | "projectNumber" | "specificFundingSource" | "projectTitle">,
+  text: { abstract: string | null; phrText: string | null },
+): { model: "rule:nci" | "rule:lynch"; rationale: string } | null {
+  if (
+    parseNihAward(row.sourceAwardNumber).nihIc === "NCI" ||
+    parseNihAward(row.projectNumber).nihIc === "NCI" ||
+    /national cancer institute/i.test(row.specificFundingSource)
+  ) {
+    return { model: "rule:nci", rationale: NCI_RATIONALE };
+  }
+  if (/\blynch syndrome\b/i.test([row.projectTitle, text.abstract, text.phrText].join(" "))) {
+    return { model: "rule:lynch", rationale: LYNCH_RATIONALE };
+  }
+  return null;
+}
+
 /** Decide one row's plan: resolve the program via Grant→CenterMembership only
- *  (never a model guess), and independently ask Bedrock for the
- *  cancer-relevant percent. Never throws — a Bedrock failure leaves the
- *  percent/rationale null (see `inferCancerFundingJudgments`'s own contract). */
+ *  (never a model guess), and independently decide the cancer-relevant
+ *  percent — MCC's rule when one applies, else Bedrock. Never throws — a
+ *  Bedrock failure leaves the percent/rationale null (see
+ *  `inferCancerFundingJudgments`'s own contract). */
 export async function planRow(
   row: ImportRow,
   awardIndex: Map<string, string | "ambiguous">,
   membershipIndex: Map<string, string>,
+  textIndex: Map<string, { abstract: string | null; phrText: string | null }> = new Map(),
 ): Promise<RowPlan> {
   const matched = awardIndex.get(normalizeAwardNumber(row.sourceAwardNumber));
   const grantCwid = matched && matched !== "ambiguous" ? matched : null;
   const membershipProgram = grantCwid ? (membershipIndex.get(grantCwid) ?? null) : null;
+  const text =
+    textIndex.get(normalizeAwardNumber(row.sourceAwardNumber)) ??
+    textIndex.get(normalizeAwardNumber(row.projectNumber)) ?? { abstract: null, phrText: null };
+
+  const allocation: RowPlan["allocation"] = { programCode: membershipProgram, source: "membership" };
+  const base = {
+    row,
+    grantCwid,
+    allocation,
+    isPeerReviewed: isPeerReviewedFundingSource(row.specificFundingSource, row.nihAward),
+  };
+
+  const rule = cancerRelevanceRule(row, text);
+  if (rule) {
+    return {
+      ...base,
+      cancerRelevantPercent: 100,
+      cancerRelevantRationale: rule.rationale,
+      cancerRelevantPercentSource: "rule",
+      provenance: {
+        cancerRelevantModel: rule.model,
+        cancerRelevantPromptHash: null,
+        cancerRelevantInputHash: null,
+        cancerRelevantInferredAt: new Date(),
+      },
+    };
+  }
 
   const inference = await inferCancerFundingJudgments({
     projectTitle: row.projectTitle,
     specificFundingSource: row.specificFundingSource,
     nihActivityCode: row.nihActivityCode,
+    abstract: text.abstract,
+    phrText: text.phrText,
     pi: row.pi,
   });
 
-  const allocation: RowPlan["allocation"] = { programCode: membershipProgram, source: "membership" };
-
   return {
-    row,
-    grantCwid,
-    allocation,
+    ...base,
     cancerRelevantPercent: inference?.cancerRelevantPercent ?? null,
     cancerRelevantRationale: inference?.cancerRelevantRationale ?? null,
-    isPeerReviewed: isPeerReviewedFundingSource(row.specificFundingSource, row.nihAward),
+    cancerRelevantPercentSource: "llm",
+    provenance: {
+      cancerRelevantModel: inference?.cancerRelevantModel ?? null,
+      cancerRelevantPromptHash: inference?.cancerRelevantPromptHash ?? null,
+      cancerRelevantInputHash: inference?.cancerRelevantInputHash ?? null,
+      cancerRelevantInferredAt: inference?.cancerRelevantInferredAt ?? null,
+    },
   };
 }
 
@@ -426,9 +512,10 @@ export async function applyPlan(
           institutionNumber: row.institutionNumber,
           ...awardScalars,
           cancerRelevantPercent: plan.cancerRelevantPercent,
-          cancerRelevantPercentSource: "llm",
+          cancerRelevantPercentSource: plan.cancerRelevantPercentSource,
           cancerRelevantPercentAi: plan.cancerRelevantPercent,
           cancerRelevantRationale: plan.cancerRelevantRationale,
+          ...plan.provenance,
           allocations: {
             create: [{ centerCode: CENTER_CODE, programCode: allocation.programCode, programPercent: 100, source: allocation.source }],
           },
@@ -473,9 +560,10 @@ export async function applyPlan(
       ...(touchPercent
         ? {
             cancerRelevantPercent: plan.cancerRelevantPercent,
-            cancerRelevantPercentSource: "llm",
+            cancerRelevantPercentSource: plan.cancerRelevantPercentSource,
             cancerRelevantPercentAi: plan.cancerRelevantPercent,
             cancerRelevantRationale: plan.cancerRelevantRationale,
+            ...plan.provenance,
           }
         : {}),
       ...(anyHumanAllocation
@@ -508,11 +596,15 @@ const main = async () => {
   const w = db.write as unknown as Nci2aImportDb;
 
   const [grants, memberships] = await Promise.all([
-    w.grant.findMany({ where: { awardNumber: { not: null } }, select: { awardNumber: true, cwid: true } }),
+    w.grant.findMany({
+      where: { awardNumber: { not: null } },
+      select: { awardNumber: true, cwid: true, abstract: true, phrText: true },
+    }),
     w.centerMembership.findMany({ where: { centerCode: CENTER_CODE }, select: { cwid: true, programCode: true } }),
   ]);
   const awardIndex = buildAwardNumberIndex(grants);
   const membershipIndex = buildMembershipIndex(memberships);
+  const textIndex = buildGrantTextIndex(grants);
   log(`Indexed ${grants.length} grant award numbers, ${memberships.length} Meyer memberships.`);
 
   const { rows, scopedCount, skipped } = scopeAndLimitRows(allRows, opts, awardIndex, memberships);
@@ -526,7 +618,7 @@ const main = async () => {
 
   log(`Planning ${rows.length} row(s) (Bedrock calls, concurrency=${opts.concurrency})...`);
   const plans = await mapWithConcurrency(rows, opts.concurrency, (row) =>
-    planRow(row, awardIndex, membershipIndex),
+    planRow(row, awardIndex, membershipIndex, textIndex),
   );
 
   const counts = emptyCounts();
@@ -534,8 +626,10 @@ const main = async () => {
     await applyPlan(w, plan, opts, counts);
   }
 
+  const ruleRows = plans.filter((p) => p.cancerRelevantPercentSource === "rule").length;
+  const notInferred = plans.filter((p) => p.cancerRelevantPercent === null).length;
   log(
-    `\nDone${opts.dryRun ? " (dry run)" : ""}. created=${counts.created}, updated=${counts.updated}, ` +
+    `\nDone${opts.dryRun ? " (dry run)" : ""}. rule=${ruleRows} not-inferred=${notInferred}. created=${counts.created}, updated=${counts.updated}, ` +
       `program: membership=${counts.membershipResolved} unresolved=${counts.unresolvedProgram}, ` +
       `skipped-for-human-override: percent=${counts.percentSkippedHuman} allocations=${counts.allocationsSkippedHuman}, ` +
       `percent-skipped-failed-retry=${counts.percentSkippedInferenceFailed}.`,

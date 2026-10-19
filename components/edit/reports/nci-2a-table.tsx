@@ -55,6 +55,7 @@ const SLATE = "text-apollo-slate bg-apollo-slate-tint border-apollo-slate-tint-b
 const PILL_CLASS: Record<Nci2aStatus, string> = {
   ai: AMBER,
   "not-inferred": AMBER,
+  rule: SLATE,
   confirmed: SLATE,
   corrected: SLATE,
 };
@@ -174,7 +175,7 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
               "bg-apollo-surface h-[30px] w-[58px] rounded-md border px-1.5 text-right text-sm tabular-nums",
               draft !== undefined
                 ? "border-apollo-slate"
-                : award.cancerRelevantPercentSource === "human"
+                : award.cancerRelevantPercentSource !== "llm"
                   ? "border-apollo-border-strong"
                   : "border-apollo-amber-tint-border",
             )}

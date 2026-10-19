@@ -1,7 +1,7 @@
 /**
  * RePORTER ETL — two steps:
  *
- *   1. Populate grant.{applId, abstract, keywords} straight from NIH
+ *   1. Populate grant.{applId, abstract, phrText, keywords} straight from NIH
  *      RePORTER's /projects/search, keyed by core project number
  *      (idempotent; only writes diffs).
  *
@@ -90,6 +90,7 @@ async function step1_GrantAbstracts() {
       applId: true,
       abstract: true,
       abstractSource: true,
+      phrText: true,
       keywords: true,
     },
   });
@@ -121,6 +122,7 @@ async function step1_GrantAbstracts() {
     id: string;
     applId: number | null;
     abstract: string | null;
+    phrText: string | null;
     keywords: string[] | null;
   }> = [];
   let unparsable = 0;
@@ -149,8 +151,8 @@ async function step1_GrantAbstracts() {
       titleMismatch++;
       // Never clear an abstract another source (NSF, PCORI, ...) wrote.
       const ours = g.abstractSource === null || g.abstractSource === "reporter";
-      if (ours && (g.applId !== null || g.abstract !== null || g.keywords !== null)) {
-        toUpdate.push({ id: g.id, applId: null, abstract: null, keywords: null });
+      if (ours && (g.applId !== null || g.abstract !== null || g.phrText !== null || g.keywords !== null)) {
+        toUpdate.push({ id: g.id, applId: null, abstract: null, phrText: null, keywords: null });
       }
       continue;
     }
@@ -165,15 +167,19 @@ async function step1_GrantAbstracts() {
     // no abstract on some awards it has otherwise published (and the mirror
     // this replaced had the same hole). applId/keywords still update normally.
     const abstract = reporterAbstract ?? g.abstract;
+    // Same rule for the PHR statement (read by the NCI Table 2A import).
+    const phrText = repairEncodingOrNull(r.phrText) ?? g.phrText;
     if (
       g.applId !== r.applId ||
       g.abstract !== abstract ||
+      g.phrText !== phrText ||
       keywordsChanged
     ) {
       toUpdate.push({
         id: g.id,
         applId: r.applId,
         abstract,
+        phrText,
         keywords,
       });
     }
@@ -204,6 +210,7 @@ async function step1_GrantAbstracts() {
             abstract: u.abstract,
             abstractFetchedAt: fetchedAt,
             abstractSource: u.abstract == null ? null : "reporter",
+            phrText: u.phrText,
             keywords: u.keywords ?? Prisma.DbNull,
             keywordsSource: u.keywords == null ? null : "reporter",
             keywordsFetchedAt: fetchedAt,

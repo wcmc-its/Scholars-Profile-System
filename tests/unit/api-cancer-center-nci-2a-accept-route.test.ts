@@ -86,6 +86,7 @@ beforeEach(() => {
     { id: "a2", cancerRelevantPercent: 75, cancerRelevantPercentSource: "llm" },
     { id: "h1", cancerRelevantPercent: 60, cancerRelevantPercentSource: "human" },
     { id: "n1", cancerRelevantPercent: null, cancerRelevantPercentSource: "llm" },
+    { id: "r1", cancerRelevantPercent: 100, cancerRelevantPercentSource: "rule" },
   ]);
 });
 
@@ -121,7 +122,7 @@ describe("POST /api/edit/center/[code]/nci-2a/accept", () => {
   });
 
   it("accepts the AI rows in one transaction with one before===after audit row each; skips the rest", async () => {
-    const res = await POST(post({ awardIds: ["a1", "h1", "n1", "zz", "a2"] }), {
+    const res = await POST(post({ awardIds: ["a1", "h1", "n1", "zz", "r1", "a2"] }), {
       params: params(),
     });
     expect(res.status).toBe(200);
@@ -134,11 +135,13 @@ describe("POST /api/edit/center/[code]/nci-2a/accept", () => {
       { awardId: "h1", reason: "already_reviewed" },
       { awardId: "n1", reason: "no_percent" },
       { awardId: "zz", reason: "not_found" },
+      // An MCC rule row is never an AI suggestion to accept.
+      { awardId: "r1", reason: "already_reviewed" },
     ]);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
     // Read on the writer (inside the tx), scoped to this center.
     expect(mockTxFindMany.mock.calls[0][0].where).toEqual({
-      id: { in: ["a1", "h1", "n1", "zz", "a2"] },
+      id: { in: ["a1", "h1", "n1", "zz", "r1", "a2"] },
       centerCode: CENTER.code,
     });
     expect(mockTxUpdateMany).toHaveBeenCalledTimes(2);

@@ -1322,6 +1322,11 @@ model Grant {
   /// fetched. Surfaces as small "Source: NSF" attribution in the
   /// expanded grant view.
   abstractSource    String?   @map("abstract_source") @db.VarChar(32)
+  /// RePORTER's Public Health Relevance statement (`phr_text`), fetched with
+  /// `abstract` from the same project. NIH only; null otherwise. Read by the
+  /// NCI Table 2A import, whose cancer-relevance rubric reads title, abstract
+  /// and PHR (`lib/edit/cancer-center-funding-generator.ts`).
+  phrText           String?   @map("phr_text") @db.Text
 
   /// Issue #291 — NIH-curated project keywords from RePORTER, parsed from the
   /// project's `pref_terms` (preferred) or `terms`. A `string[]`; null for
@@ -2514,6 +2519,16 @@ model CancerCenterFundingAward {
   /// The model's one-sentence rationale for `cancerRelevantPercent` — shown to
   /// the reviewer, never used as a scoring input.
   cancerRelevantRationale     String?  @map("cancer_relevant_rationale") @db.Text
+  /// Provenance of the AI or rule value (`cancerRelevantPercentAi`), written
+  /// with it by the import and left alone by a reviewer's override. Model is
+  /// the Bedrock model id, or `rule:nci` / `rule:lynch` for a row MCC's rubric
+  /// decides outright (`cancerRelevantPercentSource = "rule"`). Prompt hash =
+  /// first 12 hex chars of sha256(system prompt); input hash = sha256 of the
+  /// award prompt sent. Both null on a rule row (nothing was sent).
+  cancerRelevantModel         String?  @map("cancer_relevant_model") @db.VarChar(128)
+  cancerRelevantPromptHash    String?  @map("cancer_relevant_prompt_hash") @db.VarChar(12)
+  cancerRelevantInputHash     String?  @map("cancer_relevant_input_hash") @db.VarChar(64)
+  cancerRelevantInferredAt    DateTime? @map("cancer_relevant_inferred_at")
   /// DT2A rule #4 (CCSG Data Guide p.7): "Only grant and contracts from NCI,
   /// NIH, or organizations listed in [the closed allowlist] are considered
   /// peer-reviewed." Fully deterministic — no Bedrock call, no `source`

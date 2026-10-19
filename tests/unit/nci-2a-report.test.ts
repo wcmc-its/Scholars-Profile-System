@@ -27,6 +27,7 @@ import {
   NCI2A_ACCEPT_CAP,
   parseNci2aParams,
   reviewProgress,
+  reviewStatusLabel,
   statusPillLabel,
   sortQuery,
   type Nci2aAward,
@@ -47,6 +48,7 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     cancerRelevantPercentSource: "llm",
     // The AI original defaults to the fixture's percent (so a human row is Confirmed).
     cancerRelevantPercentAi: pct,
+    cancerRelevantModel: null,
     cancerRelevantRationale: null,
     cancerRelevantAnnualProjectDc: pct == null ? null : (dc * pct) / 100,
     isPeerReviewed: true,
@@ -116,6 +118,24 @@ describe("nci2aStatus", () => {
   it("a corrected row is reviewed: out of Needs review", () => {
     const corrected = { ...B, cancerRelevantPercentAi: 60 };
     expect(filterNci2a([A, corrected, C], params()).counts).toEqual({ all: 3, needs: 2, done: 1 });
+  });
+
+  it("an MCC rule row is its own status: no review needed, no bulk Accept, not an AI suggestion", () => {
+    const rule = award({
+      id: "9",
+      cancerRelevantPercent: 100,
+      cancerRelevantPercentSource: "rule",
+      cancerRelevantModel: "rule:nci",
+    });
+    expect(nci2aStatus(rule)).toBe("rule");
+    expect(statusPillLabel(rule)).toBe("MCC rule");
+    expect(reviewStatusLabel(rule)).toBe("MCC rule");
+    expect(filterNci2a([A, rule], params()).counts).toEqual({ all: 2, needs: 1, done: 1 });
+    expect(bulkAcceptTargets([A, rule]).map((a) => a.id)).toEqual(["1"]);
+    expect(reviewProgress([A, rule]).total).toBe(1);
+    // A reviewer's correction of a rule row names the rule, not an AI.
+    const corrected = { ...rule, cancerRelevantPercentSource: "human" as const, cancerRelevantPercent: 50 };
+    expect(statusPillLabel(corrected)).toBe("Corrected · MCC rule said 100%");
   });
 });
 

@@ -465,7 +465,7 @@ export const REPORT_CATALOG_SIZE = REPORT_NUMBERS_BY_KIND.center.length;
 
 /** One report's liveness. Report 2 (NCI Table 2A) also carries its latest
  *  import cycle and how many of that cycle's rows are still awaiting human
- *  review (`cancerRelevantPercentSource` other than `'human'`) — the index's
+ *  review (`cancerRelevantPercentSource` neither `'human'` nor `'rule'`) — the index's
  *  "In progress · N to review" pill and "Cycle …" label. Absent on 1 and 3–6. */
 export type ReportLivenessEntry = {
   n: ReportNumber;
@@ -565,7 +565,11 @@ function summarizeFunding(
   }
   for (const r of rows) {
     const cur = out.get(r.centerCode)!;
-    if (r.reportingCycle === cur.latestCycle && r.cancerRelevantPercentSource !== "human")
+    if (
+      r.reportingCycle === cur.latestCycle &&
+      r.cancerRelevantPercentSource !== "human" &&
+      r.cancerRelevantPercentSource !== "rule"
+    )
       cur.toReview += r._count._all;
   }
   return out;

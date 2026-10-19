@@ -515,6 +515,8 @@ export async function fetchProjectPeriodsByCoreProjectNums(
 export type ReporterEnrichment = {
   applId: number;
   abstractText: string | null;
+  /** RePORTER `phr_text`, the Public Health Relevance statement. */
+  phrText: string | null;
   projectTerms: string | null;
   prefTerms: string | null;
 };
@@ -556,6 +558,7 @@ export async function fetchProjectEnrichmentByCoreProjectNums(
             "ApplId",
             "CoreProjectNum",
             "AbstractText",
+            "PhrText",
             "Terms",
             "PrefTerms",
           ],
@@ -576,6 +579,7 @@ export async function fetchProjectEnrichmentByCoreProjectNums(
           appl_id?: number | null;
           core_project_num?: string | null;
           abstract_text?: string | null;
+          phr_text?: string | null;
           terms?: string | null;
           pref_terms?: string | null;
         }>;
@@ -592,6 +596,7 @@ export async function fetchProjectEnrichmentByCoreProjectNums(
         out.set(cpn, {
           applId: r.appl_id,
           abstractText: r.abstract_text ?? null,
+          phrText: r.phr_text ?? null,
           projectTerms: r.terms ?? null,
           prefTerms: r.pref_terms ?? null,
         });
