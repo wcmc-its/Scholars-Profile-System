@@ -270,6 +270,7 @@ describe("cue 7: topic is a tie-break", () => {
   it("ignores check tags and counts descriptors in two or more papers", () => {
     const t = topicOverlap(["D006801", "D000001", "D000002", "D000003", "D000004"], counts, 20);
     expect(t).toEqual({ share: 0.5, descriptors: 4, papers: 20 });
+    expect(topicOverlap(["D000003", "D000004", "D000005", "D000006", "D000007", "D000008", "D000009", "D000010", "D000011", "D000012", "D000001"], counts, 20)!.share).toBeCloseTo(1 / 11);
     expect(topicOverlap(["D006801"], counts, 20)).toBeNull();
     expect(topicOverlap(["D000001"], counts, 0)).toBeNull();
   });
@@ -287,6 +288,7 @@ describe("cue 7: topic is a tie-break", () => {
     const base = ev({ publicationLinked: true, infoedOther: { piLevel: true, profileNameMatchesOther: false } });
     expect(scoreAttribution(base).band).toBe("queue");
     expect(scoreAttribution({ ...base, topic: { share: 0.6, descriptors: 8, papers: 30 } }).band).toBe("show");
+    expect(scoreAttribution({ ...base, topic: { share: 0.05, descriptors: 8, papers: 30 } }).band).toBe("queue");
     // prior institution + middle-initial conflict = -1 (queue); a mismatch tips it to hide.
     const weak = ev({ priorInstitution: "Elsewhere University", middleInitialConflict: true });
     expect(scoreAttribution(weak).band).toBe("queue");
@@ -360,6 +362,17 @@ describe("cue 1 evidence: whose name the NIH profile carries", () => {
       namesMatch,
     });
     expect(e).toEqual({ piLevel: true, profileNameMatchesOther: false });
+  });
+
+  it("drops a holder a RePORTER co-PI accounts for (multi-PI award)", () => {
+    const e = infoedOtherEvidence({
+      ourPis: [{ first_name: "Joan", piName: "Joan Example" }],
+      coPiNames: ["Joan B Example"],
+      scholarNames: us,
+      others: [colleague],
+      namesMatch,
+    });
+    expect(e).toEqual({ piLevel: false, profileNameMatchesOther: false });
   });
 
   it("does not count Co-I, key personnel or a subaward PI, and is null with no other holder", () => {

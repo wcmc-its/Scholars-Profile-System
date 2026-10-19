@@ -593,6 +593,7 @@ async function scoreScholarAwards(
       startYear: yearOf(c.row.startDate),
       infoedOther: infoedOtherEvidence({
         ourPis: ourPis.map((pi) => ({ first_name: pi.first_name, piName: reporterPiName(pi) })),
+        coPiNames: coPis.map(reporterPiName).filter((n) => n.length > 0),
         scholarNames,
         others: others.map((o) => {
           const n = ctx.namesByCwid.get(o.cwid);

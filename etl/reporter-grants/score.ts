@@ -127,8 +127,10 @@ export const TIMELINE_SLACK_YEARS = 1;
  *  "unlikely". */
 export const TIMELINE_STRONG_YEARS = 5;
 /** Share of the award's MeSH descriptors in >= 2 of the scholar's papers at or
- *  above which cue 7 counts as a match. */
-export const TOPIC_MATCH_AT = 0.4;
+ *  above which cue 7 counts as a match. Staging, 2026-10-18 (award terms vs
+ *  paper MeSH): visible awards p75 4-6%, p90 8-10%; hidden-unverified p75 1%,
+ *  p90 3-5%. */
+export const TOPIC_MATCH_AT = 0.1;
 /** Cue 7 counts a mismatch only with this many descriptors on the award and
  *  this many MeSH-tagged papers on the scholar, and none shared. */
 export const TOPIC_MIN_DESCRIPTORS = 5;
@@ -206,8 +208,14 @@ export function isInfoedPiLevel(role: string): boolean {
 
 /**
  * Cue 1 evidence from the other WCM investigators InfoEd lists on the core.
- * `profileNameMatchesOther` needs the RePORTER PI (our NIH profile) to share
- * the other person's surname (`namesMatch`) AND full first name, while NOT
+ *
+ * A holder a RePORTER co-PI accounts for (`namesMatch` against the award's
+ * other PIs) is EXPLAINED and dropped: on a multi-PI award InfoEd naming the
+ * other PI is exactly what it should say. Staging, 2026-10-18: every visible,
+ * publication-linked award with another WCM PI in InfoEd was multi-PI.
+ *
+ * `profileNameMatchesOther` needs the RePORTER PI (our NIH profile) to share an
+ * unexplained holder's surname (`namesMatch`) AND full first name, while NOT
  * sharing the scholar's full first name: a grant-join profile already passed a
  * surname-plus-initial check against the scholar, so that alone proves
  * nothing. Pure; `namesMatch` is injected so this module stays free of the
@@ -215,12 +223,18 @@ export function isInfoedPiLevel(role: string): boolean {
  */
 export function infoedOtherEvidence(args: {
   ourPis: ReadonlyArray<{ first_name: string | null; piName: string }>;
+  coPiNames?: ReadonlyArray<string>;
   scholarNames: ReadonlyArray<string | null | undefined>;
   others: ReadonlyArray<{ role: string; names: ReadonlyArray<string | null | undefined> }>;
   namesMatch: (a: string, b: string) => boolean;
 }): { piLevel: boolean; profileNameMatchesOther: boolean } | null {
-  const piLevel = args.others.filter((o) => isInfoedPiLevel(o.role));
   if (args.others.length === 0) return null;
+  const coPis = args.coPiNames ?? [];
+  const piLevel = args.others.filter(
+    (o) =>
+      isInfoedPiLevel(o.role) &&
+      !coPis.some((c) => o.names.some((n) => !!n && args.namesMatch(c, n))),
+  );
   if (piLevel.length === 0) return { piLevel: false, profileNameMatchesOther: false };
   const matches = args.ourPis.some(
     (pi) =>
