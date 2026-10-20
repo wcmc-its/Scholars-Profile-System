@@ -31,6 +31,7 @@ import {
   reporterProjectUrl,
   type GrantAttributionItem,
 } from "@/lib/edit/grant-attribution-queue";
+import { profilePath } from "@/lib/profile-url";
 import { cn } from "@/lib/utils";
 
 type Tab = "pending" | "confirmed" | "rejected";
@@ -86,11 +87,16 @@ export function GrantAttributionQueue({
   pending,
   confirmed,
   rejected,
+  confirmedTotal,
+  rejectedTotal,
   readOnly,
 }: {
   pending: GrantAttributionItem[];
   confirmed: GrantAttributionItem[];
   rejected: GrantAttributionItem[];
+  /** Every decided item, for the pills: the lists themselves are capped. */
+  confirmedTotal?: number;
+  rejectedTotal?: number;
   readOnly: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("pending");
@@ -127,7 +133,7 @@ export function GrantAttributionQueue({
       setBar({
         text:
           decision === "confirm"
-            ? "Confirmed. The award now shows on the scholar's profile; search catches up after the nightly reindex."
+            ? "Confirmed. The award now shows on the scholar's profile; search updates within minutes."
             : "Hidden as not this person. The scholar's profile will not show it.",
         ids: [id],
       });
@@ -211,8 +217,8 @@ export function GrantAttributionQueue({
         {(
           [
             ["pending", "To review", remaining],
-            ["confirmed", "Confirmed", confirmed.length],
-            ["rejected", "Not this person", rejected.length],
+            ["confirmed", "Confirmed", confirmedTotal ?? confirmed.length],
+            ["rejected", "Not this person", rejectedTotal ?? rejected.length],
           ] as const
         ).map(([t, label, n]) => (
           <button
@@ -365,7 +371,7 @@ function ReviewCard({
           <span className="text-[13px]">
             {item.slug ? (
               <a
-                href={`/scholars/${item.slug}`}
+                href={profilePath(item.slug)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-apollo-slate hover:underline"
@@ -413,7 +419,9 @@ function ReviewCard({
           </span>
           {item.reopenedAt ? (
             <span className="border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber rounded-full border px-2 py-px text-[11.5px] font-semibold">
-              Reopened: the evidence changed after a decision
+              {item.status === "pending" && item.decidedByName
+                ? `Reopened: the evidence changed after a decision by ${item.decidedByName}, which stands until this is decided again`
+                : "Reopened: the evidence changed after a decision"}
             </span>
           ) : null}
         </div>
@@ -468,7 +476,7 @@ function ReviewCard({
         </div>
       ) : readOnly ? null : rejecting ? (
         <div className="border-apollo-border flex flex-wrap items-center gap-2.5 border-t px-4 py-3 sm:px-5">
-          <ReasonSelect value={reason} onChange={onReason} disabled={busy} small reasons={GRANT_REJECTION_REASONS} />
+          <ReasonSelect value={reason} onChange={onReason} disabled={busy} small reasons={GRANT_REJECTION_REASONS} placeholder="Reason (optional)" />
           <Button
             variant="ghost"
             disabled={busy}

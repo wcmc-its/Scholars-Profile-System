@@ -128,3 +128,12 @@ export function countPendingGrantAttribution(
 ): Promise<number> {
   return client.grantAttributionReview.count({ where: { status: "pending" } });
 }
+
+/** Every review in one status, for the decided tabs' pills (their lists are
+ *  capped). */
+export function countGrantAttribution(
+  client: Pick<PrismaClient, "grantAttributionReview">,
+  status: GrantAttributionStatus,
+): Promise<number> {
+  return client.grantAttributionReview.count({ where: { status } });
+}

@@ -16,6 +16,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 const h = vi.hoisted(() => ({
   session: vi.fn(),
+  rawSession: vi.fn(),
+  impersonating: vi.fn(() => false),
   load: vi.fn(),
   shell: vi.fn(),
   notFound: vi.fn(() => {
@@ -28,10 +30,15 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("next/navigation", () => ({ notFound: h.notFound, redirect: h.redirect }));
-vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.session }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: h.session,
+  impersonationActive: h.impersonating,
+}));
+vi.mock("@/lib/auth/session-server", () => ({ getSession: h.rawSession }));
 vi.mock("@/lib/edit/grant-attribution-queue.server", () => ({
   loadGrantAttributionQueue: h.load,
   countPendingGrantAttribution: vi.fn(),
+  countGrantAttribution: vi.fn(async (_c: unknown, status: string) => (status === "confirmed" ? 321 : 7)),
 }));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: (props: { children: unknown }) => {
@@ -64,8 +71,10 @@ import {
 
 const SUPER = { cwid: "zzs0001", isSuperuser: true };
 const STEWARD = { cwid: "zzc0001", isSuperuser: false, isCommsSteward: true };
-const OBSERVER = { cwid: "zzo0001", isSuperuser: false, isObserver: true };
-const EDITOR = { cwid: "zze0001", isSuperuser: false, isContentEditor: true };
+// The real READ-session shapes: both roles carry a SYNTHETIC steward grant
+// (lib/auth/observer-view.ts), which must not make them deciders.
+const OBSERVER = { cwid: "zzo0001", isSuperuser: false, isCommsSteward: true, isObserver: true };
+const EDITOR = { cwid: "zze0001", isSuperuser: false, isCommsSteward: true, isContentEditor: true };
 const SCHOLAR = { cwid: "zzn0001", isSuperuser: false };
 
 const ITEM: GrantAttributionItem = {
@@ -105,6 +114,8 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   vi.stubEnv("GRANT_ATTRIBUTION_QUEUE", "on");
   h.load.mockResolvedValue([]);
+  h.rawSession.mockResolvedValue({ cwid: "zzs0001" });
+  h.impersonating.mockReturnValue(false);
 });
 
 describe("predicates", () => {
@@ -118,7 +129,10 @@ describe("predicates", () => {
     for (const s of [SUPER, STEWARD, OBSERVER, EDITOR]) expect(canViewGrantAttributionQueue(s)).toBe(true);
     expect(canViewGrantAttributionQueue(SCHOLAR)).toBe(false);
     expect(isGrantAttributionQueueReadOnly(OBSERVER)).toBe(true);
+    expect(isGrantAttributionQueueReadOnly(EDITOR)).toBe(true);
     expect(isGrantAttributionQueueReadOnly(STEWARD)).toBe(false);
+    // Under View as, read-only even for a superuser: the route refuses it.
+    expect(isGrantAttributionQueueReadOnly(SUPER, true)).toBe(true);
   });
 
   it("the tab predicate admits exactly whom the page admits, and the flag gates both", () => {
@@ -157,6 +171,26 @@ describe("page gate", () => {
     expect(h.load.mock.calls.map((c) => c[1]).sort()).toEqual(["confirmed", "pending", "rejected"]);
     expect(el.props.pendingGrantAttribution).toBe(1);
   });
+
+  it("passes read-only to observers and content editors (synthetic steward), and under View as", async () => {
+    const queueProps = (el: { props: { children: unknown } }) => {
+      const kids = el.props.children as Array<{ props: Record<string, unknown> }>;
+      return kids[kids.length - 1]!.props;
+    };
+    for (const s of [OBSERVER, EDITOR]) {
+      h.session.mockResolvedValue(s);
+      expect(queueProps((await GrantAttributionQueuePage()) as never).readOnly).toBe(true);
+    }
+    h.session.mockResolvedValue(STEWARD);
+    expect(queueProps((await GrantAttributionQueuePage()) as never).readOnly).toBe(false);
+    h.session.mockResolvedValue(SUPER);
+    h.impersonating.mockReturnValue(true);
+    const props = queueProps((await GrantAttributionQueuePage()) as never);
+    expect(props.readOnly).toBe(true);
+    // The decided pills carry the full counts, not the capped list lengths.
+    expect(props.confirmedTotal).toBe(321);
+    expect(props.rejectedTotal).toBe(7);
+  });
 });
 
 describe("the card", () => {
@@ -183,5 +217,13 @@ describe("the card", () => {
     fireEvent.click(screen.getAllByText("Not this person").at(-1)!);
     expect(screen.getByText("Hide as not this person")).toBeTruthy();
     expect(screen.getByLabelText("Rejection reason")).toBeTruthy();
+    expect(screen.getByText("Reason (optional)")).toBeTruthy();
+  });
+
+  it("links the profile at its canonical path", () => {
+    render(<GrantAttributionQueue pending={[ITEM]} confirmed={[]} rejected={[]} readOnly />);
+    const hrefs = [...document.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("/pat-example");
+    expect(hrefs).not.toContain("/scholars/pat-example");
   });
 });

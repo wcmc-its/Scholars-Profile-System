@@ -15,14 +15,19 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { GrantAttributionQueue } from "@/components/edit/grant-attribution-queue";
-import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { getEffectiveEditSession, impersonationActive } from "@/lib/auth/effective-identity";
+import { nowSeconds } from "@/lib/auth/session";
+import { getSession } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import {
   canViewGrantAttributionQueue,
   isGrantAttributionQueueEnabled,
   isGrantAttributionQueueReadOnly,
 } from "@/lib/edit/grant-attribution-queue";
-import { loadGrantAttributionQueue } from "@/lib/edit/grant-attribution-queue.server";
+import {
+  countGrantAttribution,
+  loadGrantAttributionQueue,
+} from "@/lib/edit/grant-attribution-queue.server";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -55,10 +60,23 @@ export default async function GrantAttributionQueuePage() {
   }
 
   // The sub-nav's other pills stay truthful on this page too.
-  const [pending, confirmed, rejected, pendingSlugRequests, pendingHonors] = await Promise.all([
+  // The decided lists show the newest 200; the tab pills count them all.
+  const [
+    pending,
+    confirmed,
+    rejected,
+    confirmedTotal,
+    rejectedTotal,
+    rawSession,
+    pendingSlugRequests,
+    pendingHonors,
+  ] = await Promise.all([
     loadGrantAttributionQueue(db.read, "pending"),
     loadGrantAttributionQueue(db.read, "confirmed", { limit: 200 }),
     loadGrantAttributionQueue(db.read, "rejected", { limit: 200 }),
+    countGrantAttribution(db.read, "confirmed"),
+    countGrantAttribution(db.read, "rejected"),
+    getSession(),
     session.isSuperuser && isSlugRequestEnabled()
       ? countPendingSlugRequests(db.read)
       : Promise.resolve(null),
@@ -77,15 +95,20 @@ export default async function GrantAttributionQueuePage() {
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Grant attribution</h1>
         <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
           NIH awards matched to a scholar by name, where the evidence is weak or points both ways.
-          Each stays off the profile until it&rsquo;s confirmed. Profiles update within minutes;
-          search catches up after the nightly reindex.
+          Each stays off the profile until it&rsquo;s confirmed. Profiles and search update
+          within minutes of a decision.
         </p>
       </div>
       <GrantAttributionQueue
         pending={pending}
         confirmed={confirmed}
         rejected={rejected}
-        readOnly={isGrantAttributionQueueReadOnly(session)}
+        confirmedTotal={confirmedTotal}
+        rejectedTotal={rejectedTotal}
+        readOnly={isGrantAttributionQueueReadOnly(
+          session,
+          rawSession ? impersonationActive(rawSession, nowSeconds()) : false,
+        )}
       />
     </ConsoleShell>
   );

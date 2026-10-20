@@ -28,22 +28,34 @@ type Viewer = {
   isContentEditor?: boolean;
 };
 
-/** Who may decide a queued award (the decision route re-checks this). */
+/** Who may decide a queued award (the decision route re-checks this).
+ *
+ *  🔴 The READ session (`getEffectiveEditSession`) gives observers and content
+ *  editors a synthetic `isCommsSteward: true` so they can see steward pages;
+ *  the write path strips it. So this must refuse both explicitly, exactly as
+ *  `canPinTitles` does, or the page renders live controls the route 403s. */
 export function canDecideGrantAttribution(session: Viewer): boolean {
-  return session.isSuperuser || session.isCommsSteward === true;
+  return (
+    (session.isSuperuser || session.isCommsSteward === true) &&
+    session.isObserver !== true &&
+    session.isContentEditor !== true
+  );
 }
 
 /** Who may read the queue: the deciders, plus observers and content editors. */
 export function canViewGrantAttributionQueue(session: Viewer): boolean {
   return (
-    canDecideGrantAttribution(session) ||
+    session.isSuperuser ||
+    session.isCommsSteward === true ||
     session.isObserver === true ||
     session.isContentEditor === true
   );
 }
 
-export function isGrantAttributionQueueReadOnly(session: Viewer): boolean {
-  return !canDecideGrantAttribution(session);
+/** Read-only for anyone who cannot decide, and for anyone acting under View
+ *  as: the decision route refuses every impersonated decision. */
+export function isGrantAttributionQueueReadOnly(session: Viewer, viewingAs = false): boolean {
+  return viewingAs || !canDecideGrantAttribution(session);
 }
 
 /** The tab predicate AND the page gate: the same function, so the tab never
