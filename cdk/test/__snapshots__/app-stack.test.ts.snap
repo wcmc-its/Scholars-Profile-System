@@ -1271,7 +1271,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "TOPIC_SUBAREA_RANK_AREA_SIGNALS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "TOPIC_FEED_GRANTS_TRIALS",
