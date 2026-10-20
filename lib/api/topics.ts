@@ -420,6 +420,8 @@ async function loadAreaScholarConcentration(
 // the prior chip-row count of 7.
 const SUBTOPIC_SCHOLARS_TARGET = 10;
 const SUBTOPIC_SCHOLARS_FLOOR = 1;
+const SUBTOPIC_SCHOLARS_KEEP = 5;
+const SUBTOPIC_SCHOLARS_MIN_POINTS = 1;
 
 /**
  * Top scholars for a single subtopic, filtered to publication_topic rows whose
@@ -537,7 +539,13 @@ export async function getSubtopicScholars(
   const sorted = Array.from(byCwid.values()).sort((a, b) => b.total - a.total);
   if (sorted.length < SUBTOPIC_SCHOLARS_FLOOR) return null;
 
-  const top = sorted.slice(0, SUBTOPIC_SCHOLARS_TARGET);
+  // Below rank SUBTOPIC_SCHOLARS_KEEP, a row needs SUBTOPIC_SCHOLARS_MIN_POINTS
+  // (papers + signals). The V2 blind test's hidden rows were nearly all rated
+  // "doesn't belong", and no subarea fell below 6. Rides the S8 flag.
+  const floored = isTopicSubareaRankAreaSignalsOn()
+    ? sorted.filter((e, i) => i < SUBTOPIC_SCHOLARS_KEEP || e.total >= SUBTOPIC_SCHOLARS_MIN_POINTS)
+    : sorted;
+  const top = floored.slice(0, SUBTOPIC_SCHOLARS_TARGET);
   const cwids = top.map((e) => e.scholar.cwid);
 
   // Pub counts for the popover. "In this subtopic" mirrors the rail's count
