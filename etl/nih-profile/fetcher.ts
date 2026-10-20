@@ -320,6 +320,10 @@ export type ReporterPublication = {
 export async function fetchPublicationsByCoreProjectNums(
   coreNums: string[],
   restrictToPmids?: Iterable<number>,
+  /** #3071 — filled with each core (upper-cased) whose rows came back
+   *  restricted to `restrictToPmids` or not at all, i.e. whose returned link
+   *  set is NOT the core's full one. */
+  restrictedOut?: Set<string>,
 ): Promise<ReporterPublication[]> {
   const cores = coreNums.filter((c) => !!c && c.trim().length > 0);
   if (cores.length === 0) return [];
@@ -337,9 +341,11 @@ export async function fetchPublicationsByCoreProjectNums(
     // that overflows on its own is re-fetched restricted to `pmids`, and skipped
     // only if that is impossible, so the candidate is still evaluated.
     for (const core of batch) {
-      const coreRows =
-        (batch.length > 1 ? await fetchPublicationPages([core]) : null) ??
-        (await fetchCorePublicationsForPmids(core, pmids));
+      let coreRows = batch.length > 1 ? await fetchPublicationPages([core]) : null;
+      if (!coreRows) {
+        restrictedOut?.add(core.toUpperCase());
+        coreRows = await fetchCorePublicationsForPmids(core, pmids);
+      }
       if (coreRows) {
         out.push(...coreRows);
       } else {
@@ -631,6 +637,9 @@ export type ReporterGrantProject = {
   award_amount: number | null;
   org_name: string | null;
   project_title: string | null;
+  /** Every PI on this fiscal year's award, contact and multi-PI alike. Feeds
+   *  the #3071 attribution cues (middle initial, co-PI co-authorship). */
+  principal_investigators?: ReporterPI[];
 };
 
 /**
@@ -664,6 +673,7 @@ export async function fetchGrantProjectsByProfileIds(
           "AwardAmount",
           "Organization",
           "ProjectTitle",
+          "PrincipalInvestigators",
         ],
         limit: PAGE_LIMIT,
         offset,
@@ -688,6 +698,7 @@ export async function fetchGrantProjectsByProfileIds(
         award_amount: number | null;
         organization?: { org_name?: string | null } | null;
         project_title: string | null;
+        principal_investigators?: ReporterPI[] | null;
       }>;
     };
     const results = data.results ?? [];
@@ -702,6 +713,7 @@ export async function fetchGrantProjectsByProfileIds(
         award_amount: r.award_amount,
         org_name: r.organization?.org_name ?? null,
         project_title: r.project_title,
+        principal_investigators: r.principal_investigators ?? [],
       });
     }
     if (total === null) total = data.meta?.total ?? 0;

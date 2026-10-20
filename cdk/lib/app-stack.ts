@@ -1835,6 +1835,14 @@ export class AppStack extends Stack {
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`
         // -- the CD pipeline re-rolls the image and never deploys CDK.
         HONORS_APPROVAL_QUEUE: "on",
+        // #3071 -- the /edit grant attribution queue (RePORTER awards the
+        // etl/reporter-grants scorer could not settle). isGrantAttributionQueueEnabled()
+        // reads === "on" (lib/edit/grant-attribution-queue.ts); off => the page
+        // AND the decision endpoint 404, and the Grants tab is hidden. Tracks
+        // REPORTER_GRANTS_CORROBORATION_HIDE (cdk/lib/etl-stack.ts), which fills
+        // the queue: staging first, prod after the staging queue is reviewed.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        GRANT_ATTRIBUTION_QUEUE: envConfig.envName === "staging" ? "on" : "off",
         // #1762 — the `honors_curator` role. The approver is the RESEARCH DEAN's
         // office (a different org unit from the Dean's office), which self-serves
         // from day one, so this is not a fast-follow: without it the queue is

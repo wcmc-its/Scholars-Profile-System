@@ -259,6 +259,8 @@ const grouped = (over: Partial<GroupedProject>): GroupedProject => ({
   endDate: new Date("2019-08-31"),
   maxFiscalYear: 2018,
   awardAmount: 100000,
+  orgHistory: [],
+  pis: [],
   ...over,
 });
 

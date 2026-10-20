@@ -19,9 +19,10 @@ import { render, screen } from "@testing-library/react";
 import type { EditSession } from "@/lib/auth/superuser";
 import type { ConsoleTabState } from "@/lib/edit/console-tabs.server";
 
-const { mockLoadConsoleTabs, mockCountTitles } = vi.hoisted(() => ({
+const { mockLoadConsoleTabs, mockCountTitles, mockCountGrants } = vi.hoisted(() => ({
   mockLoadConsoleTabs: vi.fn(),
   mockCountTitles: vi.fn(),
+  mockCountGrants: vi.fn(),
 }));
 
 vi.mock("next/link", () => ({
@@ -44,6 +45,9 @@ vi.mock("@/components/site/account-menu", () => ({
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("@/lib/edit/console-tabs.server", () => ({ loadConsoleTabs: mockLoadConsoleTabs }));
 vi.mock("@/lib/edit/titles-queue", () => ({ countTitlesNeedingReview: mockCountTitles }));
+vi.mock("@/lib/edit/grant-attribution-queue.server", () => ({
+  countPendingGrantAttribution: mockCountGrants,
+}));
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 
@@ -72,6 +76,7 @@ const NO_TABS: ConsoleTabState = {
   grantMatcha: false,
   roleVocabulary: false,
   titles: false,
+  grantAttribution: false,
 };
 
 function tabs(overrides: Partial<ConsoleTabState>): ConsoleTabState {
@@ -235,6 +240,52 @@ describe("ConsoleShell", () => {
       }),
     );
     expect(screen.getByTestId("admin-tab-units")).toBeTruthy();
+  });
+
+  describe("#3071 the Grants queue tab and its pill", () => {
+    it("counts pending reviews itself for a viewer who has the tab", async () => {
+      mockCountGrants.mockReset().mockResolvedValue(4);
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ grantAttribution: true }));
+      render(
+        await ConsoleShell({
+          active: "activity",
+          session: session({ isSuperuser: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Edit activity</h1>,
+        }),
+      );
+      const tab = screen.getByTestId("admin-tab-grant-attribution-queue");
+      expect(tab.getAttribute("href")).toBe("/edit/grant-attribution-queue");
+      expect(tab.textContent).toBe("Grants4");
+    });
+
+    it("a failed count shows the tab with no pill; no tab means no count", async () => {
+      mockCountGrants.mockReset().mockRejectedValue(new Error("down"));
+      mockLoadConsoleTabs.mockResolvedValue(tabs({ grantAttribution: true }));
+      render(
+        await ConsoleShell({
+          active: "activity",
+          session: session({ isSuperuser: true }),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>Edit activity</h1>,
+        }),
+      );
+      expect(screen.getByTestId("admin-tab-grant-attribution-queue").textContent).toBe("Grants");
+      mockCountGrants.mockReset();
+      mockLoadConsoleTabs.mockResolvedValue(tabs({}));
+      render(
+        await ConsoleShell({
+          active: "activity",
+          session: session({}),
+          pendingSlugRequests: null,
+          pendingHonors: null,
+          children: <h1>x</h1>,
+        }),
+      );
+      expect(mockCountGrants).not.toHaveBeenCalled();
+    });
   });
 
   describe("the Titles queue tab and its pill", () => {

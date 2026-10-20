@@ -644,11 +644,17 @@ export function ReasonSelect({
   onChange,
   disabled,
   small = false,
+  reasons = REJECTION_REASONS,
+  placeholder = "Reason (required to reject)",
 }: {
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
   small?: boolean;
+  /** The choices; the honors reasons unless a queue passes its own (#3071). */
+  reasons?: ReadonlyArray<string>;
+  /** The empty option's label (#3071: the grant queue's reason is optional). */
+  placeholder?: string;
 }) {
   return (
     <select
@@ -662,8 +668,8 @@ export function ReasonSelect({
       )}
       data-slot="honor-reject-reason"
     >
-      <option value="">Reason (required to reject)</option>
-      {REJECTION_REASONS.map((r) => (
+      <option value="">{placeholder}</option>
+      {reasons.map((r) => (
         <option key={r} value={r}>
           {r}
         </option>

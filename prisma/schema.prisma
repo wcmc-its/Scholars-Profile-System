@@ -176,6 +176,7 @@ model Scholar {
   orcidCandidates      OrcidCandidate[]
   orcidDismissals      OrcidDismissal[]
   reporterCandidates   ReporterProfileCandidate[]
+  grantReviews         GrantAttributionReview[]
   clinicalTrials       PersonClinicalTrial[]
   datasetDeposits      PersonDatasetDeposit[]
   overviewGenerations  OverviewGeneration[]
@@ -1050,6 +1051,74 @@ model ReporterProfileCandidate {
   @@unique([cwid, externalProfileId])
   @@index([cwid, status])
   @@map("reporter_profile_candidate")
+}
+
+/// #3071 — a curator review of one RePORTER award the attribution scorer
+/// (`etl/reporter-grants/score.ts`) could not settle: the evidence was weak or
+/// pointed both ways. The ETL writes it `pending` and keeps the award hidden
+/// (a `system-unverified` suppression) until a curator decides on
+/// `/edit/grant-attribution-queue`:
+///   - confirmed: the curator revoked the hide; the award shows.
+///   - rejected:  "Not this person"; a curator-owned suppression the ETL never
+///                touches keeps it hidden.
+///   - withdrawn: a later run settled it on its own (show or hide) before
+///                anyone decided; a run that queues it again reopens the row.
+/// The ETL never changes the visibility of a decided award. It reopens one
+/// only when the new evidence contradicts the decision AND differs from the
+/// evidence the curator saw (`evidenceKey`).
+///
+/// No FK to `grant`, like `suppression`: a grant reconciled out of RePORTER
+/// must not cascade away the decision history.
+model GrantAttributionReview {
+  id              String    @id @default(uuid()) @db.VarChar(64)
+  cwid            String    @db.VarChar(32)
+  scholar         Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// `reporter:{cwid}:{core}`, the key the grant's suppressions use.
+  grantExternalId String    @unique @map("grant_external_id") @db.VarChar(64)
+  /// The scorer's sum and band at the last scoring.
+  score           Int
+  /// show | hide | queue
+  band            String    @db.VarChar(8)
+  /// The cues that fired: [{ id, weight, reason }], strongest first.
+  cues            Json
+  /// The band plus the deciding cue ids (`evidenceKey`), frozen once decided.
+  evidenceKey     String    @map("evidence_key") @db.VarChar(255)
+  /// Award facts for the card (title, award number, orgs, years, PI names as
+  /// RePORTER prints them), so the card survives the grant row aging out.
+  award           Json
+  /// pending | confirmed | rejected | withdrawn
+  status          String    @default("pending") @db.VarChar(16)
+  /// The REAL actor's cwid for a curator decision, or `system-rescored`.
+  decidedByCwid   String?   @map("decided_by_cwid") @db.VarChar(32)
+  decidedAt       DateTime? @map("decided_at")
+  rejectionReason String?   @map("rejection_reason") @db.VarChar(255)
+  /// What a curator decision changed, so undo reverses exactly that:
+  /// { revoked: suppressionId[], created: suppressionId[] }.
+  decisionEffects Json?     @map("decision_effects")
+  /// Set when the ETL reopened a decided or withdrawn review on new evidence.
+  reopenedAt      DateTime? @map("reopened_at")
+  scoredAt        DateTime  @map("scored_at")
+  firstSeenAt     DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt      DateTime  @default(now()) @map("last_seen_at")
+
+  @@index([status, cwid])
+  @@index([cwid])
+  @@map("grant_attribution_review")
+}
+
+/// #3071 cue 2 — (cwid, pmid) pairs a scholar rejected in ReCiter ("not me"),
+/// mirrored nightly by `etl/reciter` from reciterdb `person_article`
+/// (`userAssertion = 'REJECTED'`). SPS otherwise keeps only accepted
+/// authorships. Read by `etl/reporter-grants`: an award RePORTER links to
+/// papers the scholar rejected is probably a namesake's. No FK: the mirror
+/// covers the ingestion cohort, soft-deleted students included.
+model ReciterRejectedPmid {
+  cwid     String   @db.VarChar(32)
+  pmid     String   @db.VarChar(32)
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  @@id([cwid, pmid])
+  @@map("reciter_rejected_pmid")
 }
 
 /// A clinical trial, deduplicated to one row per institutional protocol.

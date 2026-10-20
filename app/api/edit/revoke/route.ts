@@ -19,6 +19,7 @@ import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/rev
 import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 import { isCwid } from "@/lib/cwid";
 import { isRejectReason } from "@/lib/edit/reject-reason";
+import { NOT_THIS_PERSON_REASON_PREFIX } from "@/lib/edit/grant-attribution-queue";
 import { findSuppressibleEntityOwner } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/revoke";
@@ -181,7 +182,15 @@ async function contentEditorRevokeSubject(s: {
   createdBy: string;
   reason: string | null;
 }): Promise<string | null> {
-  if (!isCwid(s.createdBy) || isRejectReason(s.reason)) return null;
+  // #3071 — a grant attribution curator's "Not this person" hide is a queue
+  // decision (undone from the queue), not a staff hide a content editor lifts.
+  if (
+    !isCwid(s.createdBy) ||
+    isRejectReason(s.reason) ||
+    (s.reason ?? "").startsWith(NOT_THIS_PERSON_REASON_PREFIX)
+  ) {
+    return null;
+  }
   if (s.entityType === "publication") return s.contributorCwid;
   if (s.entityType === "appointment" || s.entityType === "education" || s.entityType === "grant") {
     const owner = await findSuppressibleEntityOwner(s.entityType, s.entityId, db.read);

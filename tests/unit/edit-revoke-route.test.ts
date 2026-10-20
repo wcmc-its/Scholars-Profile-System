@@ -252,6 +252,17 @@ describe("POST /api/edit/revoke — content editor", () => {
     ["an ETL recency hold", { entityType: "grant", entityId: "g-1", contributorCwid: null, createdBy: "system-recency" }],
     // A superuser-applied ReCiter "Not mine" reject.
     ["a ReCiter reject", { createdBy: "adm001", reason: "Rejected as not the author's via /edit (#746)" }],
+    // #3071 — a grant attribution curator's "Not this person" decision.
+    [
+      "a grant attribution 'Not this person' decision",
+      {
+        entityType: "grant",
+        entityId: "g-1",
+        contributorCwid: null,
+        createdBy: "adm001",
+        reason: "Not this person (grant attribution review): A different person with the same name",
+      },
+    ],
     ["a whole-publication takedown", { contributorCwid: null }],
     ["a whole-scholar hide", { entityType: "scholar", entityId: "other9", contributorCwid: null }],
     ["a mentee hide", { entityType: "mentee", entityId: "other9:men01", contributorCwid: null }],

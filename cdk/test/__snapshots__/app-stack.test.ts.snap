@@ -789,6 +789,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "GRANT_ATTRIBUTION_QUEUE",
+                "Value": "off",
+              },
+              {
                 "Name": "HONORS_CURATOR_ENABLED",
                 "Value": "on",
               },
@@ -5761,6 +5765,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "HONORS_APPROVAL_QUEUE",
+                "Value": "on",
+              },
+              {
+                "Name": "GRANT_ATTRIBUTION_QUEUE",
                 "Value": "on",
               },
               {

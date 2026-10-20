@@ -51,6 +51,7 @@ import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isOrgUnitRoleConsoleTabVisible } from "@/lib/edit/org-unit-role-flags";
 import { canReviewTitles } from "@/lib/edit/titles-queue";
+import { isGrantAttributionQueueTabVisible } from "@/lib/edit/grant-attribution-queue";
 
 // ---------------------------------------------------------------------------
 // Tab ids — one per `AdminSubnavActive` entry in `admin-subnav.tsx`, minus
@@ -78,6 +79,7 @@ export const CONSOLE_TAB_IDS = [
   "grantMatcha",
   "roleVocabulary",
   "titles",
+  "grantAttribution",
 ] as const;
 
 export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
@@ -211,6 +213,11 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // the display-title pin gate, superuser or comms_steward; the page and its
   // export read the same `canReviewTitles`. No report grant reaches it.
   titles: (s) => canReviewTitles(s),
+
+  // #3071 — the RePORTER grant attribution queue. The page gate and this tab
+  // are the same function (flag + superuser/steward deciders + observer and
+  // content-editor readers).
+  grantAttribution: (s) => isGrantAttributionQueueTabVisible(s),
 };
 
 // ---------------------------------------------------------------------------
