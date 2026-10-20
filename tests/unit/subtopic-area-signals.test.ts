@@ -297,6 +297,16 @@ describe("TOPIC_SUBAREA_RANK_AREA_SIGNALS on", () => {
     expect(await order()).toEqual(["s1", "s2", "s3", "s4"]);
   });
 
+  it("drops rows under 1 point below rank 5, keeps the top 5 regardless", async () => {
+    state.ptRows = [
+      pt("t1", 1, 0.9), pt("t2", 2, 0.9), pt("t3", 3, 0.9), pt("t4", 4, 0.9), pt("t5", 5, 0.9),
+      pt("t6", 6, 1.0), pt("t7", 7, 0.9),
+    ];
+    expect(await order()).toEqual(["t6", "t1", "t2", "t3", "t4"]);
+    vi.stubEnv("TOPIC_SUBAREA_RANK_AREA_SIGNALS", "off");
+    expect(await order()).toHaveLength(7);
+  });
+
   it("keeps the popover counts as publication counts", async () => {
     state.grants = [grant("s4", "kA")];
     state.scores = { kA: inX(1) };
