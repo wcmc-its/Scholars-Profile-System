@@ -8,13 +8,16 @@
  *   1. A curator decision (confirmed / rejected) is never overridden: the plan
  *      changes no suppression. It may REOPEN the review, and only when the new
  *      band contradicts the decision AND the evidence differs from what the
- *      curator saw.
+ *      curator saw. A review reopened from a decision stays pending, with the
+ *      curator's last decision still in force, until a curator decides again:
+ *      later runs only refresh its score, never withdraw it or touch a hide.
  *   2. A system-unverified hide a PERSON revoked is never re-minted, and a
  *      pending review on it is withdrawn (the person already decided).
  *   3. A hide the ETL itself revoked (`SYSTEM_RESCORED`) may be minted again.
  *   4. The ETL revokes its own hide only when `allowRevoke`, which the caller
- *      clears whenever a negative cue source is unavailable: missing evidence
- *      against an award must never lift a hide.
+ *      clears whenever a negative cue source is unavailable, run-wide
+ *      (`attributionGate`) or for this award (`buildAwardEvidence`'s
+ *      `revocable`): missing evidence against an award must never lift a hide.
  *   5. queue keeps the award hidden: a queued award always has an active hide
  *      (minted now if needed) next to its pending review.
  */
@@ -32,7 +35,54 @@ export interface AwardState {
   activeHideId: string | null;
   /** A system-unverified suppression on this award was revoked by a person. */
   humanRevoked: boolean;
-  review: { status: ReviewStatus; evidenceKey: string } | null;
+  review: {
+    status: ReviewStatus;
+    evidenceKey: string;
+    /** Pending again after the ETL reopened a CURATOR decision (the decision
+     *  fields are kept on the row; see `isReopenedFromDecision`). */
+    reopenedFromDecision?: boolean;
+  } | null;
+}
+
+/** A pending review whose decision fields still name a person: the ETL
+ *  reopened a curator's decision. A withdrawn review the ETL re-queues carries
+ *  `SYSTEM_RESCORED` (or nothing) there instead. */
+export function isReopenedFromDecision(row: {
+  status: string;
+  decidedByCwid: string | null;
+}): boolean {
+  return row.status === "pending" && row.decidedByCwid !== null && row.decidedByCwid !== SYSTEM_RESCORED;
+}
+
+/**
+ * Run-wide gate: may the ETL score at all, and may it revoke? Scoring needs
+ * InfoEd (the dedup floor and cue 1): an empty read is a degraded one, never
+ * "no other WCM holder". Revoking also needs every other negative source run-
+ * wide: the ReCiter rejection mirror (cue 2) and the education read (cue 3).
+ * Pure; the counts are of the rows `index.ts` loaded.
+ */
+export function attributionGate(counts: {
+  infoedRows: number;
+  educationRows: number;
+  rejectedRows: number;
+}): { score: boolean; allowRevoke: boolean; warnings: string[] } {
+  if (counts.infoedRows === 0) {
+    return {
+      score: false,
+      allowRevoke: false,
+      warnings: ["InfoEd returned no rows; scoring skipped this run."],
+    };
+  }
+  const warnings: string[] = [];
+  if (counts.rejectedRows === 0) {
+    warnings.push(
+      "no ReCiter rejections mirrored yet (etl:reciter); the rejected-papers cue is off and no hide is revoked this run.",
+    );
+  }
+  if (counts.educationRows === 0) {
+    warnings.push("education returned no rows; the timeline cue is off and no hide is revoked this run.");
+  }
+  return { score: true, allowRevoke: warnings.length === 0, warnings };
 }
 
 export interface AwardPlan {
@@ -60,6 +110,11 @@ export function planAward(
     const contradicts =
       (r.status === "confirmed" && band === "hide") || (r.status === "rejected" && band === "show");
     return contradicts && r.evidenceKey !== newEvidenceKey ? { ...NOTHING, review: "reopen" } : NOTHING;
+  }
+
+  // 1b. Reopened from a decision: waiting on a curator. Refresh the card only.
+  if (r?.status === "pending" && r.reopenedFromDecision) {
+    return { ...NOTHING, review: "refresh" };
   }
 
   // 2. A person surfaced it by hand.

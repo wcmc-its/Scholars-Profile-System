@@ -33,7 +33,7 @@ import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { withEtlRun } from "@/lib/etl-run";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { coreProjectNum, parseNihAward } from "@/lib/award-number";
+import { coreProjectNum } from "@/lib/award-number";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
   dedupeAgainstInfoEd,
@@ -48,29 +48,22 @@ import {
   searchProjectsByPiName,
   sleepBetweenRequests,
 } from "../nih-profile/fetcher";
-import { namesMatch, reporterPiName } from "../nih-profile/resolver";
-import { SYSTEM_RESCORED, planAward, type AwardPlan, type ReviewStatus } from "./attribution-plan";
+import { reporterPiName } from "../nih-profile/resolver";
 import {
-  authorKey,
-  coauthorCounts,
-  doctoralYearRange,
-  evidenceKey,
-  infoedOtherEvidence,
-  middleInitialConflict,
-  priorInstitutionMatch,
-  scholarInitials,
-  scoreAttribution,
-  topicOverlap,
-  type AttributionEvidence,
-  type AttributionScore,
-  type CueId,
-} from "./score";
+  SYSTEM_RESCORED,
+  attributionGate,
+  isReopenedFromDecision,
+  planAward,
+  type AwardPlan,
+  type AwardState,
+} from "./attribution-plan";
+import { buildAwardEvidence, buildScholarFacts } from "./evidence";
+import { evidenceKey, scoreAttribution, type AttributionScore, type CueId } from "./score";
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
   corroborationPolicy,
   groupProjectsByCore,
-  isWcmOrg,
   recencyShouldSuppress,
   toReporterProject,
   type CorroborationPolicy,
@@ -448,6 +441,8 @@ interface ScoredAward {
   score: AttributionScore;
   key: string;
   award: Prisma.InputJsonValue;
+  /** Every per-award negative input was known (`buildAwardEvidence`). */
+  revocable: boolean;
 }
 
 const yearOf = (d: Date | null): number | null => (d ? d.getUTCFullYear() : null);
@@ -497,8 +492,22 @@ async function scoreScholarAwards(
     where: { cwid, isConfirmed: true },
     select: { pmid: true, publication: { select: { authorsString: true, meshTerms: true } } },
   });
-  const pmids = new Set(confirmed.map((r) => r.pmid));
-  if (pmids.size === 0) return "no-pmids";
+  if (confirmed.length === 0) return "no-pmids";
+
+  const rejected = ctx.rejectedAvailable
+    ? new Set(
+        (
+          await db.write.reciterRejectedPmid.findMany({ where: { cwid }, select: { pmid: true } })
+        ).map((r) => r.pmid),
+      )
+    : null;
+  const facts = buildScholarFacts({
+    names: ctx.namesByCwid.get(cwid),
+    confirmed,
+    educations: ctx.educationByCwid.get(cwid) ?? [],
+    profileIds: ctx.profileIdsByCwid.get(cwid) ?? [],
+    rejected,
+  });
 
   const ids = candidates.map((c) => c.row.id);
   const linkedViaGrantPub = new Set(
@@ -508,26 +517,22 @@ async function scoreScholarAwards(
         select: { grantId: true, pmid: true },
       })
     )
-      .filter((l) => pmids.has(l.pmid))
+      .filter((l) => facts.pmids.has(l.pmid))
       .map((l) => l.grantId),
   );
-  const rejected = ctx.rejectedAvailable
-    ? new Set(
-        (
-          await db.write.reciterRejectedPmid.findMany({ where: { cwid }, select: { pmid: true } })
-        ).map((r) => r.pmid),
-      )
-    : null;
 
   // Every candidate core, not only the ones grant_publication left open: cue 2
   // needs each award's full linked set. The PMID list only restricts a core
   // over RePORTER's offset cap (center grants); confirmed plus rejected keeps
-  // both cues answerable there.
+  // both cues answerable there, and `restricted` marks those cores so cue 2
+  // never reads the restricted set as the award's size.
+  const restricted = new Set<string>();
   let pubs;
   try {
     pubs = await fetchPublicationsByCoreProjectNums(
       candidates.map((c) => c.group.coreProjectNum),
-      [...pmids, ...(rejected ?? [])].map(Number).filter((n) => Number.isFinite(n) && n > 0),
+      [...facts.pmids, ...(rejected ?? [])].map(Number).filter((n) => Number.isFinite(n) && n > 0),
+      restricted,
     );
   } catch (err) {
     console.warn(`  [${cwid}] attribution publications fetch failed: ${(err as Error).message}`);
@@ -553,81 +558,26 @@ async function scoreScholarAwards(
     ).map((g) => [g.id, Array.isArray(g.meshDescriptorUis) ? (g.meshDescriptorUis as unknown[]) : []]),
   );
 
-  // Scholar-side facts, shared by every award.
-  const names = ctx.namesByCwid.get(cwid);
-  const scholarNames = [names?.fullName, names?.preferredName];
-  const initials = scholarInitials(scholarNames);
-  const { firstName, lastName } = parseFirstLast(names?.fullName ?? "");
-  const coauthors = coauthorCounts(
-    confirmed.map((c) => c.publication.authorsString),
-    lastName ? authorKey(lastName, firstName) : null,
-  );
-  const meshCounts = new Map<string, number>();
-  let taggedPapers = 0;
-  for (const c of confirmed) {
-    const terms = c.publication.meshTerms;
-    if (!Array.isArray(terms)) continue;
-    const uis = new Set<string>();
-    for (const t of terms as Array<{ ui?: unknown }>) if (typeof t?.ui === "string") uis.add(t.ui);
-    if (uis.size === 0) continue;
-    taggedPapers++;
-    for (const u of uis) meshCounts.set(u, (meshCounts.get(u) ?? 0) + 1);
-  }
-  const educations = ctx.educationByCwid.get(cwid) ?? [];
-  const doctoralYears = doctoralYearRange(educations);
-  const profileIds = new Set(ctx.profileIdsByCwid.get(cwid) ?? []);
-
   const out = new Map<string, ScoredAward>();
   for (const c of candidates) {
     const core = c.group.coreProjectNum;
-    const ourPis = c.group.pis.filter((pi) => profileIds.has(pi.profile_id));
-    const coPis = c.group.pis.filter((pi) => !profileIds.has(pi.profile_id));
-    const linked = linkedByCore.get(core) ?? new Set<string>();
-    const others = (ctx.infoedByCore.get(core) ?? []).filter((o) => o.cwid !== cwid);
-
-    const evidence: AttributionEvidence = {
+    const { evidence, revocable } = buildAwardEvidence({
       policy,
-      wcmOrgHistory: isWcmOrg(c.group.orgName),
-      publicationLinked: linkedViaGrantPub.has(c.row.id) || [...linked].some((p) => pmids.has(p)),
-      activityCode: parseNihAward(core).mechanism,
-      startYear: yearOf(c.row.startDate),
-      infoedOther: infoedOtherEvidence({
-        ourPis: ourPis.map((pi) => ({ first_name: pi.first_name, piName: reporterPiName(pi) })),
-        coPiNames: coPis.map(reporterPiName).filter((n) => n.length > 0),
-        scholarNames,
-        others: others.map((o) => {
+      facts,
+      group: c.group,
+      linkedViaGrantPub: linkedViaGrantPub.has(c.row.id),
+      linked: linkedByCore.get(core) ?? new Set<string>(),
+      linkedRestricted: restricted.has(core.toUpperCase()),
+      infoedOthers: (ctx.infoedByCore.get(core) ?? [])
+        .filter((o) => o.cwid !== cwid)
+        .map((o) => {
           const n = ctx.namesByCwid.get(o.cwid);
           return { role: o.role, names: [n?.fullName, n?.preferredName] };
         }),
-        namesMatch,
-      }),
-      rejected: rejected
-        ? { overlap: [...linked].filter((p) => rejected.has(p)).length, linkedTotal: linked.size }
-        : null,
-      doctoralYears,
-      middleInitialConflict: middleInitialConflict(
-        ourPis.map((pi) => pi.middle_name),
-        initials,
-      ),
-      priorInstitution: priorInstitutionMatch(c.group.orgHistory, educations, isWcmOrg),
-      coPiSharedPapers:
-        coPis.length === 0
-          ? null
-          : Math.max(
-              0,
-              ...coPis.map((pi) => {
-                const k = pi.last_name ? authorKey(pi.last_name, pi.first_name) : null;
-                return k ? (coauthors.get(k) ?? 0) : 0;
-              }),
-            ),
-      topic: topicOverlap(
-        (meshByGrant.get(c.row.id) ?? []).filter((u): u is string => typeof u === "string"),
-        meshCounts,
-        taggedPapers,
-      ),
-    };
+      meshUis: (meshByGrant.get(c.row.id) ?? []).filter((u): u is string => typeof u === "string"),
+    });
     const score = scoreAttribution(evidence);
-    out.set(c.row.externalId, { score, key: evidenceKey(score), award: awardFacts(c) });
+    out.set(c.row.externalId, { score, key: evidenceKey(score), award: awardFacts(c), revocable });
   }
   return out;
 }
@@ -693,7 +643,7 @@ async function main() {
   //   reviews: the curator queue's ledger, by award.
   //   attribution: the run-wide cue inputs.
   const unverified = new Map<string, { activeId: string | null; humanRevoked: boolean }>();
-  const reviews = new Map<string, { status: ReviewStatus; evidenceKey: string }>();
+  const reviews = new Map<string, NonNullable<AwardState["review"]>>();
   let attribution: AttributionContext | null = null;
   // Revoking needs every NEGATIVE cue source: without one, missing evidence
   // against an award would read as "show" and lift its hide.
@@ -709,18 +659,20 @@ async function main() {
       unverified.set(s.entityId, e);
     }
     for (const r of await db.write.grantAttributionReview.findMany({
-      select: { grantExternalId: true, status: true, evidenceKey: true },
+      select: { grantExternalId: true, status: true, evidenceKey: true, decidedByCwid: true },
     })) {
       reviews.set(r.grantExternalId, {
-        status: r.status as ReviewStatus,
+        status: r.status as NonNullable<AwardState["review"]>["status"],
         evidenceKey: r.evidenceKey,
+        reopenedFromDecision: isReopenedFromDecision(r),
       });
     }
 
-    if (infoedRows.length === 0) {
-      // InfoEd is the dedup floor AND cue 1. An empty read is a degraded one:
-      // score nothing rather than read its absence as "no other WCM holder".
-      console.warn("#3071 attribution: InfoEd returned no rows; scoring skipped this run.");
+    // InfoEd is the dedup floor AND cue 1. An empty read is a degraded one:
+    // score nothing rather than read its absence as "no other WCM holder".
+    const preGate = attributionGate({ infoedRows: infoedRows.length, educationRows: 1, rejectedRows: 1 });
+    if (!preGate.score) {
+      for (const w of preGate.warnings) console.warn(`#3071 attribution: ${w}`);
     } else {
       const infoedByCore = new Map<string, Array<{ cwid: string; role: string }>>();
       for (const r of infoedRows) {
@@ -742,21 +694,23 @@ async function main() {
         string,
         Array<{ degree: string; institution: string; year: number | null }>
       >();
-      for (const e of await db.write.education.findMany({
+      const educationRows = await db.write.education.findMany({
         where: { cwid: { in: [...profilesByCwid.keys()] } },
         select: { cwid: true, degree: true, institution: true, year: true },
-      })) {
+      });
+      for (const e of educationRows) {
         const arr = educationByCwid.get(e.cwid) ?? [];
         arr.push({ degree: e.degree, institution: e.institution, year: e.year });
         educationByCwid.set(e.cwid, arr);
       }
-      const rejectedAvailable = (await db.write.reciterRejectedPmid.count()) > 0;
-      if (!rejectedAvailable) {
-        console.warn(
-          "#3071 attribution: no ReCiter rejections mirrored yet (etl:reciter); the " +
-            "rejected-papers cue is off and no hide is revoked this run.",
-        );
-      }
+      const rejectedRows = await db.write.reciterRejectedPmid.count();
+      const rejectedAvailable = rejectedRows > 0;
+      const gate = attributionGate({
+        infoedRows: infoedRows.length,
+        educationRows: educationRows.length,
+        rejectedRows,
+      });
+      for (const w of gate.warnings) console.warn(`#3071 attribution: ${w}`);
       attribution = {
         profileIdsByCwid: profilesByCwid,
         infoedByCore,
@@ -764,7 +718,7 @@ async function main() {
         educationByCwid,
         rejectedAvailable,
       };
-      allowRevoke = rejectedAvailable;
+      allowRevoke = gate.allowRevoke;
     }
   }
   const tally = {
@@ -877,7 +831,12 @@ async function main() {
             tally.band[sc.score.band]++;
             tally.rule[sc.score.rule]++;
             for (const r of sc.score.reasons) tally.cue[r.id] = (tally.cue[r.id] ?? 0) + 1;
-            const plan = planAward(sc.score.band, stateOf(externalId), sc.key, allowRevoke);
+            const plan = planAward(
+              sc.score.band,
+              stateOf(externalId),
+              sc.key,
+              allowRevoke && sc.revocable,
+            );
             plans.set(externalId, { plan, scored: sc });
           }
         }
@@ -924,6 +883,25 @@ async function main() {
             });
             existingRecencyHides.add(row.externalId);
             minted.push({ suppressionId: sup.id, entityId: row.externalId });
+            // Falls through: an aged award has no plan (out of scope), but a
+            // review still pending on it is closed just below.
+          }
+
+          // An award the age rule hides is out of the scorer's scope, and the
+          // queue cannot confirm it (the decision route refuses: hidden_by_age).
+          // Close any review still pending on it, or it sits there for good.
+          if (
+            CORROBORATION_HIDE_ENABLED &&
+            existingRecencyHides.has(row.externalId) &&
+            reviews.get(row.externalId)?.status === "pending"
+          ) {
+            const prior = reviews.get(row.externalId)!;
+            await tx.grantAttributionReview.updateMany({
+              where: { grantExternalId: row.externalId, status: "pending" },
+              data: { status: "withdrawn", decidedByCwid: SYSTEM_RESCORED, decidedAt: now, lastSeenAt: now },
+            });
+            reviews.set(row.externalId, { status: "withdrawn", evidenceKey: prior.evidenceKey });
+            tally.review.withdraw++;
             continue;
           }
 
@@ -1011,21 +989,34 @@ async function main() {
               });
             } else if (plan.review === "reopen" && scored && prior) {
               // Conditional on the status read at load: a curator who decided
-              // in the meantime wins, and this matches nothing.
+              // in the meantime wins, and this matches nothing. Reopening a
+              // CURATOR decision keeps its fields (who, when, why, effects):
+              // they mark the row as reopened-from-decision, so later runs
+              // leave it pending (`planAward` rule 1b), and the card can say
+              // what was decided. A withdrawn review re-queued starts clean.
+              const fromDecision = prior.status === "confirmed" || prior.status === "rejected";
               await tx.grantAttributionReview.updateMany({
                 where: { grantExternalId: row.externalId, status: prior.status },
                 data: {
                   ...scoreFields,
                   evidenceKey: scored.key,
                   status: "pending",
-                  decidedByCwid: null,
-                  decidedAt: null,
-                  rejectionReason: null,
-                  decisionEffects: Prisma.DbNull,
+                  ...(fromDecision
+                    ? {}
+                    : {
+                        decidedByCwid: null,
+                        decidedAt: null,
+                        rejectionReason: null,
+                        decisionEffects: Prisma.DbNull,
+                      }),
                   reopenedAt: now,
                 },
               });
-              reviews.set(row.externalId, { status: "pending", evidenceKey: scored.key });
+              reviews.set(row.externalId, {
+                status: "pending",
+                evidenceKey: scored.key,
+                reopenedFromDecision: fromDecision,
+              });
             } else if (plan.review === "withdraw") {
               await tx.grantAttributionReview.updateMany({
                 where: { grantExternalId: row.externalId, status: "pending" },

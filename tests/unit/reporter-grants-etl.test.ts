@@ -15,7 +15,12 @@ import {
   type GroupedProject,
 } from "@/etl/reporter-grants/transform";
 import type { ReporterGrantProject } from "@/etl/nih-profile/fetcher";
-import { planAward } from "@/etl/reporter-grants/attribution-plan";
+import {
+  SYSTEM_RESCORED,
+  attributionGate,
+  isReopenedFromDecision,
+  planAward,
+} from "@/etl/reporter-grants/attribution-plan";
 
 const fyProj = (over: Partial<ReporterGrantProject>): ReporterGrantProject => ({
   appl_id: 1,
@@ -312,7 +317,7 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
 
   it("the #3071 scorer read fails open on no PMIDs or a fetch error", () => {
     const fn = REPORTER.slice(REPORTER.indexOf("async function scoreScholarAwards"));
-    expect(fn).toContain('if (pmids.size === 0) return "no-pmids"');
+    expect(fn).toContain('if (confirmed.length === 0) return "no-pmids"');
     expect(fn).toContain('return "fetch-error"');
     // Neither outcome plans anything: main() only plans on a Map result.
     expect(REPORTER).toContain('scored === "no-pmids"');
@@ -321,8 +326,11 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
 
   it("the #3071 scorer is flag-gated, skips an empty InfoEd read, and only revokes with every negative source", () => {
     expect(REPORTER).toContain("CORROBORATION_HIDE_ENABLED && attribution");
-    expect(REPORTER).toContain("if (infoedRows.length === 0)");
-    expect(REPORTER).toContain("allowRevoke = rejectedAvailable");
+    // The gate itself is pure and tested below (attributionGate); here, that
+    // main() obeys it run-wide and per award.
+    expect(REPORTER).toContain("if (!preGate.score)");
+    expect(REPORTER).toContain("allowRevoke = gate.allowRevoke");
+    expect(REPORTER).toContain("allowRevoke && sc.revocable");
     // Grant-join awards get no WCM-org pass: the scorer, not a pre-filter, decides.
     expect(REPORTER).not.toMatch(/=>\s*!wcmOrgHistory\s*&&/);
     expect(REPORTER).toContain("reason: queued ? QUEUED_REASON : UNVERIFIED_REASON[policy]");
@@ -342,6 +350,24 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
 
   it("only a PERSON's revoke counts as human: the ETL's own revoke does not", () => {
     expect(REPORTER).toContain("else if (s.revokedBy !== SYSTEM_RESCORED) e.humanRevoked = true");
+  });
+
+  it("an aged award's pending review is withdrawn, also in the run that mints its age hide", () => {
+    const mint = REPORTER.indexOf("createdBy: SYSTEM_RECENCY,");
+    const block = REPORTER.slice(mint, mint + 2000);
+    // No `continue` between the age-hide mint and the pending-review withdraw.
+    const withdraw = block.indexOf('existingRecencyHides.has(row.externalId) &&\n            reviews.get(row.externalId)?.status === "pending"');
+    expect(withdraw).toBeGreaterThan(-1);
+    expect(block.slice(0, withdraw)).not.toContain("continue;");
+    expect(block.slice(withdraw)).toContain('status: "withdrawn"');
+  });
+
+  it("reopening a curator decision keeps its decision fields; a withdrawn re-queue starts clean", () => {
+    const start = REPORTER.indexOf('plan.review === "reopen"');
+    const block = REPORTER.slice(start, start + 1800);
+    expect(block).toContain('const fromDecision = prior.status === "confirmed" || prior.status === "rejected"');
+    expect(block).toMatch(/fromDecision\s*\?\s*\{\}\s*:\s*\{\s*decidedByCwid: null/);
+    expect(block).toContain("reopenedFromDecision: fromDecision");
   });
 
   it("review writes are conditional on the status they were planned from", () => {
@@ -368,6 +394,39 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
     expect(txBlock).toContain('action: "reporter_profile_confirm"');
     expect(txBlock).toContain('actorCwid: "system-autolock"');
     expect(txBlock).toContain('targetEntityType: "reporter_profile_candidate"');
+  });
+});
+
+describe("#3071 attributionGate", () => {
+  it("scores nothing on an empty InfoEd read", () => {
+    expect(attributionGate({ infoedRows: 0, educationRows: 9, rejectedRows: 9 })).toMatchObject({
+      score: false,
+      allowRevoke: false,
+    });
+  });
+  it("revokes only with every negative source present", () => {
+    expect(attributionGate({ infoedRows: 9, educationRows: 9, rejectedRows: 9 })).toMatchObject({
+      score: true,
+      allowRevoke: true,
+      warnings: [],
+    });
+    expect(attributionGate({ infoedRows: 9, educationRows: 9, rejectedRows: 0 })).toMatchObject({
+      score: true,
+      allowRevoke: false,
+    });
+    expect(attributionGate({ infoedRows: 9, educationRows: 0, rejectedRows: 9 })).toMatchObject({
+      score: true,
+      allowRevoke: false,
+    });
+  });
+});
+
+describe("#3071 isReopenedFromDecision", () => {
+  it("is a pending row whose decider is a person", () => {
+    expect(isReopenedFromDecision({ status: "pending", decidedByCwid: "zzc0001" })).toBe(true);
+    expect(isReopenedFromDecision({ status: "pending", decidedByCwid: null })).toBe(false);
+    expect(isReopenedFromDecision({ status: "pending", decidedByCwid: SYSTEM_RESCORED })).toBe(false);
+    expect(isReopenedFromDecision({ status: "confirmed", decidedByCwid: "zzc0001" })).toBe(false);
   });
 });
 
@@ -426,5 +485,35 @@ describe("#3071 planAward", () => {
     expect(planAward("hide", rejected, "b", true)).toEqual(NOTHING);
     expect(planAward("show", rejected, "a", true)).toEqual(NOTHING);
     expect(planAward("show", rejected, "b", true)).toEqual({ ...NOTHING, review: "reopen" });
+  });
+
+  // Two runs: the reopen, then the next run. The reopened item must stay
+  // pending, with the curator's decision still in force, until a curator acts.
+  it("a reopened CONFIRMED review survives the next run (no withdraw)", () => {
+    const run1 = { activeHideId: null, humanRevoked: true, review: { status: "confirmed" as const, evidenceKey: "a" } };
+    expect(planAward("hide", run1, "b", true).review).toBe("reopen");
+    const run2 = { ...run1, review: { status: "pending" as const, evidenceKey: "b", reopenedFromDecision: true } };
+    const NOTHING_BUT_REFRESH = { mintHide: false, revokeHideId: null, review: "refresh" };
+    for (const band of ["hide", "queue", "show"] as const) {
+      expect(planAward(band, run2, "b", true)).toEqual(NOTHING_BUT_REFRESH);
+    }
+  });
+
+  it("a reopened REJECTED review survives the next run (no revoke, no withdraw)", () => {
+    const run1 = { activeHideId: "s1", humanRevoked: false, review: { status: "rejected" as const, evidenceKey: "a" } };
+    expect(planAward("show", run1, "b", true).review).toBe("reopen");
+    const run2 = { ...run1, review: { status: "pending" as const, evidenceKey: "b", reopenedFromDecision: true } };
+    for (const band of ["hide", "queue", "show"] as const) {
+      expect(planAward(band, run2, "b", true)).toEqual({ mintHide: false, revokeHideId: null, review: "refresh" });
+    }
+  });
+
+  it("a withdrawn review re-queued is an ordinary pending one on the next run", () => {
+    const run2 = {
+      activeHideId: "s1",
+      humanRevoked: false,
+      review: { status: "pending" as const, evidenceKey: "a", reopenedFromDecision: false },
+    };
+    expect(planAward("hide", run2, "a", true).review).toBe("withdraw");
   });
 });

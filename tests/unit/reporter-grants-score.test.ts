@@ -167,6 +167,33 @@ describe("cue 3: timeline", () => {
     expect(timelineGapYears("R01", null, md2000)).toBe(0);
   });
 
+  it("leaves institutional awards out of the before-the-doctorate branch (they pass PI to PI)", () => {
+    for (const c of ["T32", "P30", "P01", "U54", "S10", "R25", "K12"]) {
+      expect(timelineGapYears(c, 1980, md2000)).toBe(0);
+    }
+    expect(ids(ev({ activityCode: "T32", startYear: 1980 }))).toEqual([]);
+  });
+
+  it("pins the unlikely weight where it decides the band", () => {
+    // WCM (+5), another WCM PI in InfoEd (-2), unlikely timeline (-3):
+    // -2 + 5 - 2 - 3 lands exactly on HIDE_AT. A lighter unlikely weight
+    // would queue it.
+    const s = scoreAttribution(
+      ev({
+        wcmOrgHistory: true,
+        infoedOther: { piLevel: true, profileNameMatchesOther: false },
+        activityCode: "R21",
+        startYear: 1997,
+      }),
+    );
+    expect(s.reasons.map((r) => r.id).sort()).toEqual(
+      ["infoed_other_wcm_pi", "timeline_unlikely", "wcm_org"].sort(),
+    );
+    expect(WEIGHTS.timeline_unlikely).toBe(-3);
+    expect(s.score).toBe(HIDE_AT);
+    expect(s.band).toBe("hide");
+  });
+
   it("goes to the queue when a linked paper meets an impossible timeline", () => {
     const s = scoreAttribution(ev({ publicationLinked: true, startYear: 1985 }));
     expect(s.band).toBe("queue");
@@ -393,6 +420,14 @@ describe("cue 2 scope: individual awards only", () => {
     for (const c of ["P30", "P01", "T32", "UL1", "U54", "S10", "R25", "K12", "KL2", null]) {
       expect(isIndividualAward(c)).toBe(false);
     }
+  });
+
+  it("treats an over-cap core (unknown link total) as a large set", () => {
+    expect(ids(ev({ rejected: { overlap: 1, linkedTotal: null } }))).toEqual([]);
+    expect(ids(ev({ rejected: { overlap: 2, linkedTotal: null } }))).toEqual(["rejected_pmids"]);
+    expect(scoreAttribution(ev({ rejected: { overlap: 2, linkedTotal: null } })).reasons[0]!.reason).not.toMatch(
+      /of the/,
+    );
   });
 
   it("does not fire cue 2 on a center core", () => {

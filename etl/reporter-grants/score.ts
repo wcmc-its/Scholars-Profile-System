@@ -155,12 +155,15 @@ export interface AttributionEvidence {
   publicationLinked: boolean;
   /** NIH activity code (R01, F31, ...), or null when unparseable. */
   activityCode: string | null;
-  /** Calendar year the award started. */
+  /** First year the scholar held the award: their earliest fiscal year on the
+   *  core (cue 3). Not the project's start, which predates a transferred PI. */
   startYear: number | null;
   /** Cue 1. null ⇒ no other WCM investigator holds this core in InfoEd. */
   infoedOther: { piLevel: boolean; profileNameMatchesOther: boolean } | null;
-  /** Cue 2. null ⇒ the scholar's ReCiter rejections are unavailable. */
-  rejected: { overlap: number; linkedTotal: number } | null;
+  /** Cue 2. null ⇒ the scholar's ReCiter rejections are unavailable.
+   *  `linkedTotal` null ⇒ the core is over RePORTER's offset cap, so its true
+   *  link count is unknown and it counts as a large set. */
+  rejected: { overlap: number; linkedTotal: number | null } | null;
   /** Cue 3. The scholar's earliest and latest doctoral degree years, or null
    *  when none is on file. */
   doctoralYears: { earliest: number; latest: number } | null;
@@ -295,8 +298,16 @@ export function doctoralYearRange(
 }
 
 /** Years by which the award's start is out of place for its type, beyond the
- *  slack: a predoctoral award starting after the LATEST doctorate, or any
- *  other award starting before the EARLIEST one. 0 when plausible or unknown. */
+ *  slack: a predoctoral award starting after the LATEST doctorate, or an
+ *  individual award (`isIndividualAward`) starting before the EARLIEST one.
+ *  0 when plausible or unknown.
+ *
+ *  `startYear` must be the first year THIS scholar held the award (their first
+ *  fiscal year on the core), not the project's start: a T32, P or U award
+ *  passes from PI to PI, and its original start says nothing about the
+ *  current holder. Institutional awards are left out of the "before the
+ *  doctorate" branch for the same reason (staging, 2026-10-18: most of the
+ *  visible rows the cue hit were T, P, S and U awards). */
 export function timelineGapYears(
   activityCode: string | null,
   startYear: number | null,
@@ -306,6 +317,7 @@ export function timelineGapYears(
   if (isPredoctoralCode(activityCode)) {
     return Math.max(0, startYear - doctoral.latest - TIMELINE_SLACK_YEARS);
   }
+  if (!isIndividualAward(activityCode)) return 0;
   return Math.max(0, doctoral.earliest - startYear - TIMELINE_SLACK_YEARS);
 }
 
@@ -554,11 +566,14 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
 
   if (e.rejected && e.rejected.overlap > 0 && isIndividualAward(e.activityCode)) {
     const { overlap, linkedTotal } = e.rejected;
-    if (linkedTotal <= REJECTED_SMALL_SET || overlap >= REJECTED_MIN_OVERLAP_LARGE) {
+    const small = linkedTotal !== null && linkedTotal <= REJECTED_SMALL_SET;
+    if (small || overlap >= REJECTED_MIN_OVERLAP_LARGE) {
       add(
         "rejected_pmids",
-        `${overlap} of the ${linkedTotal} papers RePORTER links to this award were rejected ` +
-          `in ReCiter as not the scholar's`,
+        linkedTotal === null
+          ? `${overlap} papers RePORTER links to this award were rejected in ReCiter as not the scholar's`
+          : `${overlap} of the ${linkedTotal} papers RePORTER links to this award were rejected ` +
+              `in ReCiter as not the scholar's`,
       );
     }
   }
@@ -568,7 +583,7 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
     const when = isPredoctoralCode(e.activityCode)
       ? `${gap + TIMELINE_SLACK_YEARS} years after the scholar's last doctorate (${e.doctoralYears.latest})`
       : `${gap + TIMELINE_SLACK_YEARS} years before the scholar's first doctorate (${e.doctoralYears.earliest})`;
-    const what = `A ${e.activityCode} starting in ${e.startYear}, ${when}`;
+    const what = `A ${e.activityCode} first held in ${e.startYear}, ${when}`;
     if (gap + TIMELINE_SLACK_YEARS >= TIMELINE_STRONG_YEARS) add("timeline_impossible", what);
     else add("timeline_unlikely", what);
   }
