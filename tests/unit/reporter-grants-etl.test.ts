@@ -10,8 +10,6 @@ import {
   hasNameOnlyProfile,
   isWcmOrg,
   recencyShouldSuppress,
-  unverifiedShouldSuppress,
-  wcmOrgCorroborates,
   type GroupedProject,
 } from "@/etl/reporter-grants/transform";
 import type { ReporterGrantProject } from "@/etl/nih-profile/fetcher";
@@ -69,43 +67,6 @@ describe("#3071 uncorroborated name-only default-hide", () => {
     expect(hasNameOnlyProfile([])).toBe(false);
   });
 
-  it("hides a name-only award that nothing ties to the scholar", () => {
-    expect(
-      unverifiedShouldSuppress({
-        policy: "wcm-or-publication",
-        wcmOrgHistory: false,
-        publicationCorroborated: false,
-      }),
-    ).toBe(true);
-  });
-
-  it("keeps a name-only award with any corroborating signal", () => {
-    expect(
-      unverifiedShouldSuppress({
-        policy: "wcm-or-publication",
-        wcmOrgHistory: true,
-        publicationCorroborated: false,
-      }),
-    ).toBe(false);
-    expect(
-      unverifiedShouldSuppress({
-        policy: "wcm-or-publication",
-        wcmOrgHistory: false,
-        publicationCorroborated: true,
-      }),
-    ).toBe(false);
-  });
-
-  it("never touches an award when no profile is name-only or grant-join", () => {
-    expect(
-      unverifiedShouldSuppress({
-        policy: "none",
-        wcmOrgHistory: false,
-        publicationCorroborated: false,
-      }),
-    ).toBe(false);
-  });
-
   it("sees WCM anywhere in the award's org history, not just its latest year", () => {
     const [g] = groupProjectsByCore([
       fyProj({ fiscal_year: 2012, org_name: "WEILL MEDICAL COLL OF CORNELL UNIV" }),
@@ -134,42 +95,6 @@ describe("#3071 case D: grant-join profiles need a publication tie", () => {
     expect(corroborationPolicy(["pmid-overlap-auto"])).toBe("none");
     expect(corroborationPolicy(["pmid-overlap-confirmed"])).toBe("none");
     expect(corroborationPolicy([])).toBe("none");
-  });
-
-  it("does not let a WCM org corroborate a grant-join award (another WCM person's F30)", () => {
-    expect(
-      unverifiedShouldSuppress({
-        policy: "publication-only",
-        wcmOrgHistory: true,
-        publicationCorroborated: false,
-      }),
-    ).toBe(true);
-    expect(wcmOrgCorroborates("publication-only", true)).toBe(false);
-    expect(wcmOrgCorroborates("wcm-or-publication", true)).toBe(true);
-    expect(wcmOrgCorroborates("wcm-or-publication", false)).toBe(false);
-    expect(wcmOrgCorroborates("none", true)).toBe(false);
-  });
-
-  it("keeps a grant-join award a confirmed publication ties to the scholar", () => {
-    for (const wcmOrgHistory of [true, false]) {
-      expect(
-        unverifiedShouldSuppress({
-          policy: "publication-only",
-          wcmOrgHistory,
-          publicationCorroborated: true,
-        }),
-      ).toBe(false);
-    }
-  });
-
-  it("hides a grant-join award with no tie at all", () => {
-    expect(
-      unverifiedShouldSuppress({
-        policy: "publication-only",
-        wcmOrgHistory: false,
-        publicationCorroborated: false,
-      }),
-    ).toBe(true);
   });
 });
 

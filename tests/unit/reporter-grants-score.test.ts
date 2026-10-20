@@ -285,6 +285,11 @@ describe("cue 6: co-PIs who are co-authors", () => {
     expect(ids(ev({ coPiSharedPapers: 1 }))).toEqual([]);
     expect(ids(ev({ coPiSharedPapers: 2 }))).toEqual(["copi_coauthor"]);
   });
+
+  it("a co-PI co-author plus a topic match queues, never shows on its own", () => {
+    const r = scoreAttribution(ev({ coPiSharedPapers: 5, topic: { share: 0.9, descriptors: 10, papers: 50 } }));
+    expect(r.band).toBe("queue");
+  });
 });
 
 describe("cue 7: topic is a tie-break", () => {

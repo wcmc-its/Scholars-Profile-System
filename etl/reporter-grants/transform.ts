@@ -88,28 +88,6 @@ export function corroborationPolicy(resolutionSources: Iterable<string>): Corrob
   return "none";
 }
 
-/** True when WCM in the award's org history settles it under `policy`, so the
- *  publication lookup can be skipped for that award. */
-export function wcmOrgCorroborates(policy: CorroborationPolicy, wcmOrgHistory: boolean): boolean {
-  return policy === "wcm-or-publication" && wcmOrgHistory;
-}
-
-/**
- * #3071 — default-hide a RePORTER award unless something the scholar's `policy`
- * accepts ties it to them: WCM in the award's org history (only under
- * "wcm-or-publication"), or one of the scholar's confirmed publications linked
- * to the award's core project number (RePORTER publication linkage or ReCiter's
- * grant citation). Pure.
- */
-export function unverifiedShouldSuppress(args: {
-  policy: CorroborationPolicy;
-  wcmOrgHistory: boolean;
-  publicationCorroborated: boolean;
-}): boolean {
-  if (args.policy === "none" || args.publicationCorroborated) return false;
-  return !wcmOrgCorroborates(args.policy, args.wcmOrgHistory);
-}
-
 /** One award (all its fiscal years collapsed) for one scholar. */
 export interface GroupedProject {
   coreProjectNum: string;
