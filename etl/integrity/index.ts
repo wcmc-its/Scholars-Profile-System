@@ -134,7 +134,15 @@ export function staleSources(
 // a night with no digest in the bucket legitimately scores 0.
 // FundingDigest counts only NEW submissions (most digest links are already in
 // the corpus or queue), and is 0 on every non-prod env by design.
-export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set(["News", "NewsClips", "FundingDigest"]);
+// ReciterAI-area-signals drains the AREAINPUT queue, which etl/area-signal-inputs
+// fills only with texts whose key is new or changed: the 3,375-text subarea
+// backfill, then ~20 a night.
+export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
+  "News",
+  "NewsClips",
+  "FundingDigest",
+  "ReciterAI-area-signals",
+]);
 
 /**
  * A >50% overnight drop on a source that previously processed a substantial
