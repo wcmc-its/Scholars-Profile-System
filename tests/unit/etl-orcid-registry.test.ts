@@ -14,6 +14,7 @@ import {
   buildNameIndex,
   candidateNames,
   decide,
+  decideCrossref,
   dedupeRecords,
   emailToCwid,
   extractWorkIds,
@@ -23,7 +24,9 @@ import {
   matchEmails,
   matchNames,
   mergeForScholars,
+  normalizeOrcid,
   sharedPapers,
+  slotOrcid,
   type SourceRow,
   type WorksEvidence,
 } from "@/etl/orcid-registry/index";
@@ -314,5 +317,63 @@ describe("mergeForScholars", () => {
       ["a1", "orcid_email", 0],
       ["b2", "orcid_works", 3],
     ]);
+  });
+});
+
+describe("orcid_crossref", () => {
+  const ana = { cwid: "a1", fullName: "Ana María López", preferredName: "Ana López" };
+  const bo = { cwid: "b2", fullName: "Bo Chen", preferredName: "Bo Chen" };
+  const ID = "0000-0002-1825-0097";
+  const slot = (given: string, family: string, orcid?: string) => ({
+    given,
+    family,
+    ...(orcid ? { ORCID: `https://orcid.org/${orcid}` } : {}),
+  });
+
+  it("normalizes Crossref's URL form and rejects junk", () => {
+    expect(normalizeOrcid("http://orcid.org/0000-0002-1825-009x")).toBe("0000-0002-1825-009X");
+    expect(normalizeOrcid("https://orcid.org/0000-0002-1825-0097")).toBe(ID);
+    expect(normalizeOrcid("not an id")).toBeNull();
+    expect(normalizeOrcid(undefined)).toBeNull();
+  });
+
+  it("takes the iD only from the ONE slot naming the scholar (diacritics folded, initials ok)", () => {
+    expect(slotOrcid([slot("A. M.", "Lopez", ID), slot("Bo", "Chen")], ana)).toBe(ID);
+    expect(slotOrcid([slot("Ana", "López")], ana)).toBeNull(); // her slot has no iD
+    expect(slotOrcid([slot("Bo", "Chen", ID)], ana)).toBeNull(); // nobody named like her
+    // Two Lopez slots that both fit: can't tell whose iD it is.
+    expect(slotOrcid([slot("Ana", "Lopez", ID), slot("A", "Lopez", "0000-0001-0000-0001")], ana)).toBeNull();
+  });
+
+  const authors = (orcid: string | undefined, n: number, prefix: string) =>
+    new Map(Array.from({ length: n }, (_, i) => [`10.1/${prefix}${i}`, [slot("Ana", "Lopez", orcid)]]));
+  const dois = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `10.1/${prefix}${i}`);
+  const scholars = new Map([ana, bo].map((s) => [s.cwid, s]));
+
+  it("one iD on ≥3 distinct papers → a row with the paper count; 2 papers → nothing", () => {
+    expect(decideCrossref(new Map([["a1", [...dois("p", 4), "10.1/p0"]]]), authors(ID, 4, "p"), scholars)).toEqual([
+      { cwid: "a1", orcid: ID, source: "orcid_crossref", articlesAccepted: 4, articlesRejected: 0, sourceUpdatedAt: null },
+    ]);
+    expect(decideCrossref(new Map([["a1", dois("p", 2)]]), authors(ID, 2, "p"), scholars)).toEqual([]);
+  });
+
+  it("two iDs each on ≥3 papers (a duplicate record or a mix-up) → nothing", () => {
+    const other = "0000-0001-0000-0001";
+    const both = new Map([...authors(ID, 3, "p"), ...authors(other, 3, "q")]);
+    expect(decideCrossref(new Map([["a1", [...dois("p", 3), ...dois("q", 3)]]]), both, scholars)).toEqual([]);
+  });
+
+  it("an iD won by two scholars is dropped for both", () => {
+    const bothAna = { ...bo, fullName: "Ana Lopez", preferredName: "Ana Lopez" };
+    const twin = new Map([ana, bothAna].map((s) => [s.cwid, s]));
+    expect(decideCrossref(new Map([["a1", dois("p", 3)], ["b2", dois("p", 3)]]), authors(ID, 3, "p"), twin)).toEqual([]);
+  });
+
+  it("Crossref ranks between works and name in the merge", () => {
+    const r = (source: SourceRow["source"]): SourceRow => ({
+      cwid: "a1", orcid: ID, source, articlesAccepted: 3, articlesRejected: 0, sourceUpdatedAt: null,
+    });
+    expect(mergeForScholars([r("orcid_name"), r("orcid_crossref")], new Set(["a1"])).keep.map((x) => x.source)).toEqual(["orcid_crossref"]);
+    expect(mergeForScholars([r("orcid_crossref"), r("orcid_works")], new Set(["a1"])).keep.map((x) => x.source)).toEqual(["orcid_works"]);
   });
 });

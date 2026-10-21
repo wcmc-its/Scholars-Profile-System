@@ -144,7 +144,8 @@ function Definitions() {
       </Definition>
       <Definition term="Inferred, strong" swatch="bg-apollo-slate/45">
         Exactly one iD with strong support: a public WCM email on the registry record (orcid_email),{" "}
-        {STRONG_MIN_ACCEPTED}+ shared works (orcid_works), Publication Manager inference with{" "}
+        {STRONG_MIN_ACCEPTED}+ shared works (orcid_works), the same iD on {STRONG_MIN_ACCEPTED}+ of the
+        person&apos;s papers in Crossref (orcid_crossref), Publication Manager inference with{" "}
         {STRONG_MIN_ACCEPTED}+ accepted and no rejected articles, or both sources agreeing on the
         same iD. A rejected article vetoes an iD.
       </Definition>
@@ -276,7 +277,7 @@ function InferenceSources({ s }: { s: InferenceSourceCounts }) {
         <SourceCard
           title="ORCID registry sweep"
           cadence="Weekly · run by Scholars"
-          description="Pulls every public ORCID record that mentions WCM by affiliation text, organization identifier, or a public WCM email, then matches each record to a scholar, strongest rule first."
+          description="Pulls every public ORCID record that mentions WCM by affiliation text, organization identifier, or a public WCM email, then matches each record to a scholar, strongest rule first. For people still unmatched, it reads the iDs publishers deposited in Crossref on their own papers, whatever their ORCID record lists."
           methods={[
             {
               key: "orcid_email",
@@ -289,6 +290,12 @@ function InferenceSources({ s }: { s: InferenceSourceCounts }) {
               rule: `Name and full first name agree, ${STRONG_MIN_ACCEPTED}+ shared PMIDs/DOIs, no other scholar shares as many`,
               tier: "Strong",
               n: s.registryWorks,
+            },
+            {
+              key: "orcid_crossref",
+              rule: `Not reached above: publishers deposited one iD on the person's own author slot in ${STRONG_MIN_ACCEPTED}+ of their papers (Crossref)`,
+              tier: "Strong",
+              n: s.registryCrossref,
             },
             {
               key: "orcid_name",

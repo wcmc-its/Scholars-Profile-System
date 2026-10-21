@@ -950,9 +950,10 @@ model StudentPhdProgram {
 /// seen on the person's PubMed author record across the articles they accepted
 /// in RPM, `articlesAccepted` / `articlesRejected` the support; `rpm_admin`:
 /// hand-entered by an RPM administrator, treated as asserted) and
-/// `etl/orcid-registry` (weekly, pub.orcid.org — `orcid_email` / `orcid_works` /
-/// `orcid_name`; `articlesAccepted` = works shared with the person's own
-/// publications). `source` is part of the key so the two mirrors never overwrite
+/// `etl/orcid-registry` (weekly, pub.orcid.org + Crossref — `orcid_email` /
+/// `orcid_works` / `orcid_crossref` / `orcid_name`; `articlesAccepted` = works
+/// shared with the person's own publications, or for `orcid_crossref` their
+/// papers carrying the iD in Crossref). `source` is part of the key so the two mirrors never overwrite
 /// each other: the same (cwid, orcid) from RPM and from the registry is two
 /// rows, which is the "two sources agree" case `/edit/orcid-coverage` grades
 /// strong. Consumed ONLY by that page; never rendered on the public profile or

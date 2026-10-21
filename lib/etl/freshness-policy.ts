@@ -163,7 +163,7 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "Identity-orcid": { cadence: "nightly" },
   // RPM ORCID candidates (inferred + admin-entered) mirrored from reciterdb → orcid_candidate.
   "RPM-orcid-candidates": { cadence: "nightly" },
-  // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_name); weekly step.
+  // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_crossref / orcid_name); weekly step.
   "ORCID-registry": { cadence: "weekly" },
   // scholar.orcid → WCM Identity via the ReCiter API (etl/orcid-push), the nightly
   // OrcidPush step right BEFORE Identity in BOTH envs (push-then-pull, so the pull
