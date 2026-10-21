@@ -24,6 +24,7 @@ import type { EdVolunteerRoleRecord, PersonLookup } from "@/lib/sources/ldap";
  *  turns up outside them. */
 export const VOLUNTEER_MENTOR_ROLES = [
   "full_time_faculty",
+  "part_time_faculty",
   "affiliated_faculty",
   "instructor",
   "lecturer",

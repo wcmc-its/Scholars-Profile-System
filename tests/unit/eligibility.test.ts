@@ -11,8 +11,8 @@ import {
 } from "@/lib/eligibility";
 
 describe("ELIGIBLE_ROLES (design-spec-v1.7.1.md:377-385)", () => {
-  it("contains exactly the three eligibility-carve roles (doctoral_student removed in #536)", () => {
-    expect(ELIGIBLE_ROLES).toEqual(["full_time_faculty", "postdoc", "fellow"]);
+  it("contains exactly the eligibility-carve roles (doctoral_student removed in #536)", () => {
+    expect(ELIGIBLE_ROLES).toEqual(["full_time_faculty", "part_time_faculty", "postdoc", "fellow"]);
   });
 
   it("no longer includes doctoral_student — hidden from algorithmic home surfaces (#536)", () => {
@@ -23,6 +23,7 @@ describe("ELIGIBLE_ROLES (design-spec-v1.7.1.md:377-385)", () => {
 describe("isPubliclyDisplayed / PUBLICLY_DISPLAYED_ROLES (#536)", () => {
   const ALL_ROLES: RoleCategory[] = [
     "full_time_faculty",
+    "part_time_faculty",
     "affiliated_faculty",
     "affiliate_alumni",
     "postdoc",
@@ -143,17 +144,18 @@ describe("publicRoleWhere() — the shared #536 carve as a where-fragment (#2222
 });
 
 describe("TOP_SCHOLARS_ELIGIBLE_ROLES (CONTEXT.md D-14 narrowed override)", () => {
-  it("narrows to full-time faculty only — Phase 2 surface-specific carve", () => {
-    expect(TOP_SCHOLARS_ELIGIBLE_ROLES).toEqual(["full_time_faculty"]);
+  it("narrows to faculty (full- and part-time) only — Phase 2 surface-specific carve", () => {
+    expect(TOP_SCHOLARS_ELIGIBLE_ROLES).toEqual(["full_time_faculty", "part_time_faculty"]);
   });
 });
 
 describe("RoleCategory type (compile-time check)", () => {
-  it("includes all 11 spec-mandated categories", () => {
+  it("includes all 12 spec-mandated categories", () => {
     // Each literal asserted against the type via a typed array.
     // If any member is misspelled or missing from the union, this fails to compile.
     const allRoles: RoleCategory[] = [
       "full_time_faculty",
+      "part_time_faculty",
       "affiliated_faculty",
       "affiliate_alumni",
       "postdoc",
@@ -165,13 +167,13 @@ describe("RoleCategory type (compile-time check)", () => {
       "lecturer",
       "emeritus",
     ];
-    expect(allRoles).toHaveLength(11);
+    expect(allRoles).toHaveLength(12);
   });
 
   it("ELIGIBLE_ROLES is a subset of RoleCategory", () => {
     // If ELIGIBLE_ROLES contains a string that isn't a RoleCategory, this fails to compile.
     const carve: ReadonlyArray<RoleCategory> = ELIGIBLE_ROLES;
-    expect(carve.length).toBe(3);
+    expect(carve.length).toBe(4);
   });
 });
 
@@ -207,6 +209,7 @@ describe("isEnrolledDoctoralStudent (#2599)", () => {
     // would strip an earned doctorate.
     const NON_STUDENT_ROLES: RoleCategory[] = [
       "full_time_faculty",
+      "part_time_faculty",
       "affiliated_faculty",
       "affiliate_alumni",
       "postdoc",

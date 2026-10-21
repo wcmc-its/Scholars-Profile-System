@@ -348,7 +348,7 @@ describe("people-index topic-shape template — SPEC §6.1.3 (#310)", () => {
       },
     });
     expect(outer.functions).toContainEqual({
-      filter: { term: { personType: "full_time_faculty" } },
+      filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } },
       weight: 1.0,
     });
     expect(outer.functions).toContainEqual({

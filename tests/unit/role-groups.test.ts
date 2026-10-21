@@ -124,7 +124,7 @@ describe("groupMatchesDisplay — client-side counterpart", () => {
   it("ROLE_GROUPS shape matches role-chip-row.tsx verbatim (label + displayLabels count)", () => {
     const byLabel = new Map(ROLE_GROUPS.map((g) => [g.label, g.displayLabels.length]));
     expect(byLabel.get("All")).toBe(0);
-    expect(byLabel.get("Full-time faculty")).toBe(1);
+    expect(byLabel.get("Full-time faculty")).toBe(2);
     expect(byLabel.get("Affiliated faculty")).toBe(5);
     expect(byLabel.get("Postdocs & non-faculty")).toBe(6);
     expect(byLabel.get("Doctoral students")).toBe(1);

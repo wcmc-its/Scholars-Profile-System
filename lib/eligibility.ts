@@ -13,6 +13,8 @@
 /** All role categories derivable from ED ETL. Stored in scholar.role_category. */
 export type RoleCategory =
   | "full_time_faculty"
+  // Counts as full-time everywhere the carve applies (ELIGIBLE_ROLES etc.).
+  | "part_time_faculty"
   | "affiliated_faculty"
   // A WCM alumnus (ED person-type `affiliate-alumni`). A hidden identity class
   // like `doctoral_student` — not surfaced or faceted — but their publications
@@ -48,6 +50,7 @@ export type RoleCategory =
  */
 export const PUBLICLY_DISPLAYED_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
+  "part_time_faculty",
   "affiliated_faculty",
   "postdoc",
   "fellow",
@@ -271,6 +274,7 @@ export function isPublicRosterMember(
  */
 export const ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
+  "part_time_faculty",
   "postdoc",
   "fellow",
 ] as const;
@@ -284,6 +288,7 @@ export const ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
  */
 export const TOP_SCHOLARS_ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
+  "part_time_faculty",
 ] as const;
 
 /**
@@ -297,6 +302,7 @@ export const TOP_SCHOLARS_ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
  */
 export const SEARCH_BOOST_ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
+  "part_time_faculty",
   "affiliated_faculty",
   // #2211 — emeritus faculty were indistinguishable from `affiliated_faculty`
   // until the ED derivation stopped folding them in, so they have always been

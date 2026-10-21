@@ -92,6 +92,7 @@ const KIND_ORDER_WITH_CONCEPT: EntityKind[] = [
 // faculty as professors, not trainees.
 const PERSON_ROLE_RANK: Record<string, number> = {
   full_time_faculty: 0,
+  part_time_faculty: 0,
   affiliated_faculty: 1,
   // #2211 — emeritus used to arrive here spelled `affiliated_faculty`. Ranked
   // identically so splitting the bucket does not move anyone: an unmapped code

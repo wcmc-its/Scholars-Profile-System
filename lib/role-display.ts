@@ -8,6 +8,7 @@
  */
 export const ROLE_DISPLAY: Record<string, string> = {
   FULL_TIME_FACULTY: "Full-time faculty",
+  PART_TIME_FACULTY: "Part-time faculty",
   AFFILIATED_FACULTY: "Affiliated faculty",
   VOLUNTARY_FACULTY: "Voluntary faculty",
   ADJUNCT_FACULTY: "Adjunct faculty",
@@ -31,6 +32,7 @@ export const ROLE_DISPLAY: Record<string, string> = {
   NON_ACADEMIC: "Non-academic",
   AFFILIATE_ALUMNI: "Affiliate alumni",
   full_time_faculty: "Full-time faculty",
+  part_time_faculty: "Part-time faculty",
   affiliated_faculty: "Affiliated faculty",
   voluntary_faculty: "Voluntary faculty",
   adjunct_faculty: "Adjunct faculty",
@@ -60,6 +62,7 @@ export function formatRoleCategory(raw: string | null | undefined): string | nul
  *  spellings share one label). Unlisted labels sort last, A–Z. */
 export const CAREER_STAGE_ORDER: readonly string[] = [
   "Full-time faculty",
+  "Part-time faculty",
   "Affiliated faculty",
   "Voluntary faculty",
   "Adjunct faculty",

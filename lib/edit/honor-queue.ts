@@ -374,7 +374,10 @@ export async function loadHonorQueue(
 /** roleCategory values that count as full-time faculty for the queue's default
  *  filter. A single-member set today, but named so the intent is legible and a
  *  second FT code (were one ever added) has an obvious home. */
-export const FULL_TIME_FACULTY_ROLES: ReadonlySet<string> = new Set(["full_time_faculty"]);
+export const FULL_TIME_FACULTY_ROLES: ReadonlySet<string> = new Set([
+  "full_time_faculty",
+  "part_time_faculty",
+]);
 
 export function isFullTimeFaculty(roleCategory: string | null): boolean {
   return roleCategory !== null && FULL_TIME_FACULTY_ROLES.has(roleCategory);

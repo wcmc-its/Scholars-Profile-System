@@ -271,7 +271,7 @@ export async function buildMenteeSuggestions(): Promise<Summary> {
     for (const r of rows) excluded.add(r.personIdentifier);
   });
   const spsFaculty = await db.write.scholar.findMany({
-    where: { roleCategory: "full_time_faculty" },
+    where: { roleCategory: { in: ["full_time_faculty", "part_time_faculty"] } },
     select: { cwid: true },
   });
   for (const s of spsFaculty) excluded.add(s.cwid);

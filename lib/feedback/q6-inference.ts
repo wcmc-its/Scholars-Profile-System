@@ -17,6 +17,7 @@ import { FeedbackRole } from "@/lib/generated/prisma/client";
 
 const FACULTY: ReadonlySet<string> = new Set([
   "full_time_faculty",
+  "part_time_faculty",
   "affiliated_faculty",
   "voluntary_faculty",
   "adjunct_faculty",

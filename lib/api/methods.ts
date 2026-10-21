@@ -2091,7 +2091,7 @@ export type MethodScholarsResult = {
 };
 
 const ROLE_FILTER_CATEGORIES: Record<Exclude<MethodScholarRole, "all">, string[]> = {
-  faculty: ["full_time_faculty"],
+  faculty: ["full_time_faculty", "part_time_faculty"],
   postdocs: ["postdoc"],
 };
 
@@ -2159,7 +2159,8 @@ export async function getMethodScholars(
   for (const r of rows) {
     if (!r.scholar) continue;
     allCount += 1;
-    if (r.scholar.roleCategory === "full_time_faculty") facultyCount += 1;
+    const role = r.scholar.roleCategory;
+    if (role === "full_time_faculty" || role === "part_time_faculty") facultyCount += 1;
     else if (r.scholar.roleCategory === "postdoc") postdocsCount += 1;
   }
 
