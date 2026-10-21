@@ -133,6 +133,14 @@ describe("findVolumeRegressions — change-count sources (#2200)", () => {
     expect(out.map((r) => r.source)).toEqual(["ReCiter"]);
   });
 
+  it("exempts ReciterAI-area-signals, whose queue holds only new or changed texts", () => {
+    const out = findVolumeRegressions(
+      [{ source: "ReciterAI-area-signals", latest: 23, previous: 3_375, latestAt: hoursAgo(1) }],
+      { now: NOW },
+    );
+    expect(out).toHaveLength(0);
+  });
+
   it("exempts by exact source name, so a lookalike is still graded", () => {
     expect(CHANGE_COUNT_SOURCES.has("News")).toBe(true);
     const out = findVolumeRegressions(
