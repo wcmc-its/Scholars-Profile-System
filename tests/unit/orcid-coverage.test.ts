@@ -519,6 +519,11 @@ describe("orcidVerdict", () => {
     ).toBe("weak");
   });
 
+  it("orcid_crossref is strong at STRONG_MIN_ACCEPTED papers, weak below", () => {
+    expect(orcidVerdict([cand("x", "orcid_crossref", 3, 0, "iD-a")])).toEqual({ tier: "strong", orcid: "iD-a", accepted: 0 });
+    expect(orcidVerdict([cand("x", "orcid_crossref", 2, 0, "iD-a")]).tier).toBe("weak");
+  });
+
   it("two strong-eligible iDs → weak (no single answer to suggest)", () => {
     expect(
       orcidVerdict([cand("x", "orcid_email", 0, 0, "iD-a"), cand("x", "orcid_works", 5, 0, "iD-b")]).orcid,
@@ -643,15 +648,18 @@ describe("inferenceSourceCounts", () => {
       row("a5", "orcid_works", 2), // under the bar → registry weak
       row("a6", "orcid_name"), // registry weak
       row("a4", "orcid_name"), // a4 already strong in the registry → not weak
+      row("a8", "orcid_crossref", 4), // registry strong (Crossref)
+      row("a8", "orcid_name"), // a8 strong via Crossref → not weak
       row("a7", "rpm_admin"), // typed in by an admin: not an inference
       row("gone", "orcid_email"), // not in the active population
     ];
-    const population = new Set(["a1", "a2", "a3", "a4", "a5", "a6", "a7"]);
+    const population = new Set(["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]);
     expect(inferenceSourceCounts(candidates, population)).toEqual({
       rpmStrong: 1,
       rpmWeak: 2,
       registryEmail: 1,
       registryWorks: 1,
+      registryCrossref: 1,
       registryWeak: 2,
     });
   });

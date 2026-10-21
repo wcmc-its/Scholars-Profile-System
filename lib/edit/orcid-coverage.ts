@@ -21,10 +21,13 @@
  *    (`orcid_email`), by name plus ≥3 works shared with the person's own
  *    publications and no other scholar sharing ≥3 (`orcid_works`,
  *    `articles_accepted` = the shared count), or by name alone with 0–2 shared
- *    works or an ambiguous overlap (`orcid_name`). `articles_rejected` is 0 on
+ *    works or an ambiguous overlap (`orcid_name`); or, for people the
+ *    WCM-affiliated pool missed, by the iD publishers deposited in Crossref on
+ *    ≥3 of the person's papers (`orcid_crossref`, `articles_accepted` = papers).
+ *    `articles_rejected` is 0 on
  *    every registry row. STRONG = exactly one distinct strong-eligible ORCID
  *    across the person's rows, where strong-eligible is: any `orcid_email` row;
- *    an `orcid_works` row with ≥ STRONG_MIN_ACCEPTED shared works; the SOLE
+ *    an `orcid_works` or `orcid_crossref` row with ≥ STRONG_MIN_ACCEPTED papers; the SOLE
  *    `rpm_inferred` row when it has ≥ STRONG_MIN_ACCEPTED accepted articles and
  *    no rejected one; or an ORCID that an `rpm_*` row with NO rejected article
  *    and an `orcid_*` row agree on (two independent sources, so the accepted
@@ -251,7 +254,7 @@ export function orcidVerdict(
   );
   const strongEligible = (r: CandidateRow) =>
     r.source === "orcid_email" ||
-    (r.source === "orcid_works" && r.articlesAccepted >= minAccepted) ||
+    ((r.source === "orcid_works" || r.source === "orcid_crossref") && r.articlesAccepted >= minAccepted) ||
     (r === soleInferred && r.articlesRejected === 0 && r.articlesAccepted >= minAccepted) ||
     // Two independent sources agreeing on one iD outweighs either one's accepted counts.
     (rpmOrcids.has(r.orcid) && registryOrcids.has(r.orcid));
@@ -314,6 +317,8 @@ export type InferenceSourceCounts = {
   registryEmail: number;
   /** `orcid_works` with `STRONG_MIN_ACCEPTED`+ shared works. */
   registryWorks: number;
+  /** `orcid_crossref` with `STRONG_MIN_ACCEPTED`+ papers carrying the iD in Crossref. */
+  registryCrossref: number;
   /** `orcid_name`, or an `orcid_works` row under the strong bar, and no strong registry row. */
   registryWeak: number;
 };
@@ -328,6 +333,7 @@ export function inferenceSourceCounts(
     rpmAny: new Set<string>(),
     registryEmail: new Set<string>(),
     registryWorks: new Set<string>(),
+    registryCrossref: new Set<string>(),
     registryAny: new Set<string>(),
   };
   for (const c of candidates) {
@@ -341,14 +347,17 @@ export function inferenceSourceCounts(
       if (c.source === "orcid_email") sets.registryEmail.add(c.cwid);
       else if (c.source === "orcid_works" && c.articlesAccepted >= STRONG_MIN_ACCEPTED)
         sets.registryWorks.add(c.cwid);
+      else if (c.source === "orcid_crossref" && c.articlesAccepted >= STRONG_MIN_ACCEPTED)
+        sets.registryCrossref.add(c.cwid);
     }
   }
-  const registryStrong = new Set([...sets.registryEmail, ...sets.registryWorks]);
+  const registryStrong = new Set([...sets.registryEmail, ...sets.registryWorks, ...sets.registryCrossref]);
   return {
     rpmStrong: sets.rpmStrong.size,
     rpmWeak: [...sets.rpmAny].filter((c) => !sets.rpmStrong.has(c)).length,
     registryEmail: sets.registryEmail.size,
     registryWorks: sets.registryWorks.size,
+    registryCrossref: sets.registryCrossref.size,
     registryWeak: [...sets.registryAny].filter((c) => !registryStrong.has(c)).length,
   };
 }

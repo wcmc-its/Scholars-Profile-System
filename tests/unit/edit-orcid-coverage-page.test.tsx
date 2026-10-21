@@ -254,7 +254,7 @@ describe("/edit/orcid-coverage", () => {
       ],
       // Loader order: outreach (NIH-funded without ORCID) desc.
       byDept: [...depts].reverse(),
-      sources: { rpmStrong: 0, rpmWeak: 0, registryEmail: 0, registryWorks: 0, registryWeak: 0 },
+      sources: { rpmStrong: 0, rpmWeak: 0, registryEmail: 0, registryWorks: 0, registryCrossref: 0, registryWeak: 0 },
     });
     const { getByTestId } = render(await EditOrcidCoveragePage({ searchParams: sp() }));
     const page = within(getByTestId("orcid-coverage-page"));
