@@ -1528,7 +1528,7 @@ export type TopicScholarsResult = {
 };
 
 const ROLE_FILTER_CATEGORIES: Record<Exclude<TopicAllScholarRole, "all">, string[]> = {
-  faculty: ["full_time_faculty"],
+  faculty: ["full_time_faculty", "part_time_faculty"],
   postdocs: ["postdoc"],
 };
 
@@ -1604,7 +1604,8 @@ export async function getTopicScholars(
     if (!isPubliclyDisplayed(r.roleCategory)) continue;
     const n = r._count._all;
     allCount += n;
-    if (r.roleCategory === "full_time_faculty") facultyCount += n;
+    if (r.roleCategory === "full_time_faculty" || r.roleCategory === "part_time_faculty")
+      facultyCount += n;
     else if (r.roleCategory === "postdoc") postdocsCount += n;
   }
 

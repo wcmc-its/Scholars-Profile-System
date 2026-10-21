@@ -187,7 +187,7 @@ describe("getTopScholarsForTopic (RANKING-03 / D-13 / D-14)", () => {
     const where = mockPublicationTopicFindMany.mock.calls[0][0].where;
     // The narrowed carve — NOT the full ELIGIBLE_ROLES list.
     expect(where.scholar.roleCategory.in).toEqual([...TOP_SCHOLARS_ELIGIBLE_ROLES]);
-    expect(where.scholar.roleCategory.in).toEqual(["full_time_faculty"]);
+    expect(where.scholar.roleCategory.in).toEqual(["full_time_faculty", "part_time_faculty"]);
     // Postdoc / Fellow / Doctoral student MUST NOT be in this list.
     expect(where.scholar.roleCategory.in).not.toContain("postdoc");
     expect(where.scholar.roleCategory.in).not.toContain("fellow");

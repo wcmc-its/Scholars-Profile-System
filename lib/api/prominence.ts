@@ -213,7 +213,9 @@ export function scoreProminence(input: ProminenceInputs): ProminenceEntry {
     Math.max(input.chairLabel !== null ? W_CHAIR : 0, input.isChief ? W_CHIEF : 0) +
     piScore +
     nihPiScore +
-    (input.roleCategory === "full_time_faculty" ? W_FACULTY : 0);
+    (input.roleCategory === "full_time_faculty" || input.roleCategory === "part_time_faculty"
+      ? W_FACULTY
+      : 0);
 
   const { tier, label } = classifyLeadership(
     input.primaryTitle,

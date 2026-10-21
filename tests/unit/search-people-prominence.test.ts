@@ -140,7 +140,7 @@ const EXPECTED_PROMINENCE_FUNCTIONS = [
       missing: 0,
     },
   },
-  { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+  { filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 },
   { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
 ];
 
@@ -188,7 +188,7 @@ describe("people-index prominence factor — issue #513 / §5.4", () => {
     });
     // Faculty / active-grant are additive weights, not standalone multipliers.
     expect(fns).toContainEqual({
-      filter: { term: { personType: "full_time_faculty" } },
+      filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } },
       weight: 1.0,
     });
     expect(fns).toContainEqual({
@@ -405,7 +405,7 @@ describe("faculty-prominence lever — #1345", () => {
     await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", facultyProminence: false });
     const fns = functionScore(capturedBodies[0])!.functions;
     expect(fns).not.toContainEqual({
-      filter: { term: { personType: "full_time_faculty" } },
+      filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } },
       weight: 1.0,
     });
     expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 1);
@@ -434,7 +434,7 @@ describe("grant-prominence lever — topical-only (companion to #1345)", () => {
     expect(fns).not.toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
     expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 1);
     // Faculty term survives when only the grant lever is off.
-    expect(fns).toContainEqual({ filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 });
+    expect(fns).toContainEqual({ filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 });
   });
 
   it("both levers off ⇒ purely topical prominence (no faculty, no grant)", async () => {
@@ -446,7 +446,7 @@ describe("grant-prominence lever — topical-only (companion to #1345)", () => {
       grantProminence: false,
     });
     const fns = functionScore(capturedBodies[0])!.functions;
-    expect(fns).not.toContainEqual({ filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 });
+    expect(fns).not.toContainEqual({ filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 });
     expect(fns).not.toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
     expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 2);
     expect(fns).toContainEqual({ weight: 1.0 }); // BASE survives
@@ -493,7 +493,7 @@ describe("pubcount-prominence lever — the third prior", () => {
     expect(fns).not.toContainEqual(PUBCOUNT_FVF);
     expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 1);
     expect(fns).toContainEqual({ weight: 1.0 }); // BASE survives
-    expect(fns).toContainEqual({ filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 });
+    expect(fns).toContainEqual({ filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 });
     expect(fns).toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
   });
 

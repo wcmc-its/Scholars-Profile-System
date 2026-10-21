@@ -112,6 +112,7 @@ export function careerStageBucket(input: CareerStageInput, now: Date = new Date(
     case "emeritus":
       return "senior";
     case "full_time_faculty":
+    case "part_time_faculty":
       return facultyStage(input, now);
     default:
       // affiliate_alumni, non_academic, unknown/null → neutral default.

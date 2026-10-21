@@ -3333,7 +3333,10 @@ async function searchPeopleCore(opts: {
         ...(opts.facultyProminence !== false
           ? [
               {
-                filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
+                // Part-time faculty count as full-time.
+                filter: {
+                  terms: { personType: [PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE, "part_time_faculty"] },
+                },
                 weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
               },
             ]

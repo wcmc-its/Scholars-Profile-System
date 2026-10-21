@@ -118,7 +118,7 @@ const MASTER_PUBCOUNT_FUNCTION = {
 const MASTER_PROMINENCE_FUNCTIONS = [
   { weight: 1.0 },
   MASTER_PUBCOUNT_FUNCTION,
-  { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+  { filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 },
   { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
 ];
 
@@ -184,7 +184,7 @@ describe("#2068 — flag CAPPED swaps the factor for the ladder (topic + hybrid)
     expect(fs.functions).toEqual([
       { weight: 1.0 },
       ...EXPECTED_LADDER_FUNCTIONS,
-      { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+      { filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 },
       { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
     ]);
     // The unbounded factor is GONE — not merely joined by the ladder.
@@ -199,7 +199,7 @@ describe("#2068 — flag CAPPED swaps the factor for the ladder (topic + hybrid)
     expect(fs.functions).toEqual([
       { weight: 1.0 },
       ...EXPECTED_LADDER_FUNCTIONS,
-      { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+      { filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 },
       { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
     ]);
   });
@@ -214,7 +214,7 @@ describe("#2068 — flag CAPPED swaps the factor for the ladder (topic + hybrid)
     expect(fs.functions).toEqual([
       { weight: 1.0 },
       ...EXPECTED_LADDER_FUNCTIONS,
-      { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+      { filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 },
       { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
     ]);
     expect(fs.functions).not.toContainEqual(MASTER_PUBCOUNT_FUNCTION);
@@ -331,7 +331,7 @@ describe("#2068 — `pubCountDampen` is a CALLER opt; the env is only the fallba
     expect(outerFnScore(capturedBodies[0]).functions).toEqual([
       { weight: 1.0 },
       ...EXPECTED_LADDER_FUNCTIONS,
-      { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+      { filter: { terms: { personType: ["full_time_faculty", "part_time_faculty"] } }, weight: 1.0 },
       { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
     ]);
 

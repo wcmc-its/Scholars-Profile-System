@@ -331,8 +331,22 @@ export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   // (ELIGIBLE_ROLES / TOP_SCHOLARS_ELIGIBLE_ROLES) is untouched by this change.
   if (has("academic-faculty-emeritus")) return "emeritus";
 
+  // Part-time faculty — WCM employees on a part-time appointment. They used to
+  // fold into the affiliated bucket below, so a full-time professor who went
+  // part-time showed as "Affiliated faculty" (a voluntary/courtesy label) and
+  // dropped off every eligibility-carve surface. Same placement rule as
+  // emeritus: before the affiliated bucket, after the active full-time check.
+  // ponytail: primary `employee-faculty-*-parttime` is inferred from the
+  // `-fulltime` spelling above; the array leaf is the confirmed signal.
+  if (
+    /^employee-faculty-.+-parttime$/.test(primary ?? "") ||
+    has("academic-faculty-weillparttime")
+  ) {
+    return "part_time_faculty";
+  }
+
   // Affiliated faculty — the dominant bucket: voluntary, adjunct, courtesy,
-  // part-time, visiting, and the catch-all "faculty-affiliated-non-employee"
+  // visiting, and the catch-all "faculty-affiliated-non-employee"
   // primary value. Per design-spec-v1.7.1.md:354 these are explicitly NOT
   // eligible-carve scholars.
   if (
@@ -340,7 +354,6 @@ export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
     has("academic-faculty-voluntary") ||
     has("academic-faculty-adjunct") ||
     has("academic-faculty-courtesy") ||
-    has("academic-faculty-weillparttime") ||
     has("academic-faculty-visiting")
   ) {
     return "affiliated_faculty";

@@ -200,7 +200,7 @@ async function fillTier2(
       scholar: {
         deletedAt: null,
         status: "active",
-        roleCategory: "full_time_faculty",
+        roleCategory: { in: ["full_time_faculty", "part_time_faculty"] },
         ...scholarFilter,
       },
       publication: {
@@ -339,7 +339,7 @@ export async function getSpotlightCardsForTopic(
       scholar: {
         deletedAt: null,
         status: "active",
-        roleCategory: "full_time_faculty",
+        roleCategory: { in: ["full_time_faculty", "part_time_faculty"] },
       },
       publication: {
         publicationType: "Academic Article",
@@ -462,7 +462,7 @@ async function getSpotlightCardsForEntity(
       scholar: {
         deletedAt: null,
         status: "active",
-        roleCategory: "full_time_faculty",
+        roleCategory: { in: ["full_time_faculty", "part_time_faculty"] },
         ...scholarFilter,
       },
       publication: {

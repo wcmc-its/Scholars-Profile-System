@@ -153,6 +153,10 @@ const WHO_FILTER_ALLOWLIST: Record<string, { hits: number; reason: string }> = {
     hits: 1,
     reason: "dept→division cascade: expands the viewer's MANAGED departments into their scope, not a person filter",
   },
+  "lib/api/spotlight.ts": {
+    hits: 3,
+    reason: "public Spotlight/highlights author pool: full- and part-time faculty, not a person filter",
+  },
   "lib/api/browse.ts": {
     hits: 1,
     reason: "public browse tree: loads the divisions of the listed departments, not a person filter",

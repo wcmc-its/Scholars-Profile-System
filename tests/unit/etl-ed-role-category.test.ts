@@ -146,8 +146,39 @@ describe("deriveRoleCategory — emeritus (#2211)", () => {
     expect(deriveRoleCategory(entry({ personTypeCodes: ["academic-faculty-visiting"] }))).toBe(
       "affiliated_faculty",
     );
+  });
+});
+
+/** Part-time WCM faculty used to fold into affiliated_faculty ("Affiliated faculty"). */
+describe("deriveRoleCategory — part-time faculty", () => {
+  it("classifies the weillparttime leaf as part_time_faculty", () => {
     expect(deriveRoleCategory(entry({ personTypeCodes: ["academic-faculty-weillparttime"] }))).toBe(
-      "affiliated_faculty",
+      "part_time_faculty",
     );
+  });
+
+  it("classifies an employee-faculty-*-parttime primary as part_time_faculty", () => {
+    expect(
+      deriveRoleCategory(entry({ primaryPersonTypeCode: "employee-faculty-new-york-parttime" })),
+    ).toBe("part_time_faculty");
+  });
+
+  it("wins over co-occurring voluntary / affiliated-non-employee codes", () => {
+    expect(
+      deriveRoleCategory(
+        entry({
+          primaryPersonTypeCode: "faculty-affiliated-non-employee",
+          personTypeCodes: ["academic-faculty-voluntary", "academic-faculty-weillparttime"],
+        }),
+      ),
+    ).toBe("part_time_faculty");
+  });
+
+  it("loses to an active full-time appointment", () => {
+    expect(
+      deriveRoleCategory(
+        entry({ personTypeCodes: ["academic-faculty-weillfulltime", "academic-faculty-weillparttime"] }),
+      ),
+    ).toBe("full_time_faculty");
   });
 });

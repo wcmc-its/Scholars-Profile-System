@@ -48,7 +48,8 @@ export type RoleGroupDef = {
  */
 export const ROLE_GROUPS: readonly RoleGroupDef[] = [
   { label: "All", displayLabels: [] },
-  { label: "Full-time faculty", displayLabels: ["Full-time faculty"] },
+  // Part-time faculty ride with full-time (counted as full-time faculty).
+  { label: "Full-time faculty", displayLabels: ["Full-time faculty", "Part-time faculty"] },
   {
     label: "Affiliated faculty",
     displayLabels: [
