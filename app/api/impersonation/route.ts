@@ -136,7 +136,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .then((row) => row !== null)
           .catch(() => false);
   // …OR one of the other global LDAP-group roles (honors_curator,
-  // data_sharing_viewer, development, content_editor — `lib/auth/global-roles.ts`).
+  // data_sharing_viewer, development, content_editor, observer — `lib/auth/global-roles.ts`).
   // Same reasoning as the steward/unit-admin branches: each is a narrower
   // preview than the acting superuser already has, R2 below still rejects a
   // superuser target, and each is profile-less as often as not (Faculty

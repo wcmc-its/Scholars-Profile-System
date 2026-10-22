@@ -10,10 +10,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/auth/honors-curator", () => ({ isHonorsCurator: vi.fn(async () => false) }));
 vi.mock("@/lib/auth/data-sharing-viewer", () => ({ isDataSharingViewer: vi.fn(async () => false) }));
 vi.mock("@/lib/auth/development", () => ({ isDeveloper: vi.fn(async () => false) }));
+vi.mock("@/lib/auth/observer", () => ({ isObserver: vi.fn(async () => false) }));
 
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
+import { isObserver } from "@/lib/auth/observer";
 import { resolveGlobalRole } from "@/lib/auth/global-roles";
 
 describe("resolveGlobalRole", () => {
@@ -21,6 +23,7 @@ describe("resolveGlobalRole", () => {
     vi.mocked(isHonorsCurator).mockClear().mockResolvedValue(false);
     vi.mocked(isDataSharingViewer).mockClear().mockResolvedValue(false);
     vi.mocked(isDeveloper).mockClear().mockResolvedValue(false);
+    vi.mocked(isObserver).mockClear().mockResolvedValue(false);
   });
 
   it("returns null when no predicate matches", async () => {
@@ -45,6 +48,17 @@ describe("resolveGlobalRole", () => {
   it("resolves development", async () => {
     vi.mocked(isDeveloper).mockResolvedValueOnce(true);
     expect(await resolveGlobalRole("dev001")).toBe("development");
+  });
+
+  it("resolves observer (a profile-less observer is a View-as target and lands on Profiles)", async () => {
+    vi.mocked(isObserver).mockResolvedValueOnce(true);
+    expect(await resolveGlobalRole("obs001")).toBe("observer");
+  });
+
+  it("ranks observer last: a narrower role held alongside it wins", async () => {
+    vi.mocked(isDeveloper).mockResolvedValueOnce(true);
+    vi.mocked(isObserver).mockResolvedValueOnce(true);
+    expect(await resolveGlobalRole("devobs001")).toBe("development");
   });
 
   it("is fail-closed: a thrown predicate counts as not-this-role, not a grant", async () => {
