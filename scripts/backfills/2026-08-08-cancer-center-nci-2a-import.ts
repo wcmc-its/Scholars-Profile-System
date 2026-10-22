@@ -40,6 +40,13 @@
  * replacing the allocation set entirely when ANY existing allocation is
  * `"human"`-sourced (never a partial clobber of a mixed set).
  *
+ * CARRY-FORWARD — a reviewer's percent also outlives its cycle, renewals
+ * included (MCC, 2026-10-22). A NEW cycle row takes the latest prior cycle's
+ * "human" percent for the same award: same `institutionNumber` (OSRA's award
+ * record), or for NIH the same core project number, so a type-2 renewal under
+ * a new OSRA record still matches. A supplement (S1, S2...) is its own award.
+ * Bedrock still runs, so `cancerRelevantPercentAi` keeps the model's view.
+ *
  * AI ORIGINAL — every llm- or rule-sourced percent this script writes is also
  * written to `cancerRelevantPercentAi`, so the report can tell a reviewer's
  * correction from a confirmation, with its provenance (`cancerRelevantModel`,
@@ -80,7 +87,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { normalizeAwardNumber, parseNihAward } from "@/lib/award-number";
+import { coreProjectNum, normalizeAwardNumber, parseNihAward } from "@/lib/award-number";
 import { inferCancerFundingJudgments } from "@/lib/edit/cancer-center-funding-generator";
 import { isPeerReviewedFundingSource } from "@/lib/edit/cancer-center-peer-review";
 
@@ -129,10 +136,41 @@ export type Nci2aImportDb = {
   };
   cancerCenterFundingAward: {
     findUnique(args: unknown): Promise<ExistingAward | null>;
+    findMany(args: unknown): Promise<PriorHumanPercent[]>;
     create(args: unknown): Promise<unknown>;
     update(args: unknown): Promise<unknown>;
   };
 };
+
+/** A reviewer-set percent from any cycle — the carry-forward source. */
+export type PriorHumanPercent = {
+  reportingCycle: string;
+  institutionNumber: number;
+  projectNumber: string;
+  cancerRelevantPercent: unknown; // Prisma Decimal
+};
+
+/** NIH core project number plus any supplement tag ("3 U54 CA242639-06S1" ->
+ *  "U54CA242639S1"), stable across renewals; null for non-NIH numbers. */
+export function nihGrantKey(projectNumber: string): string | null {
+  const core = coreProjectNum(projectNumber);
+  return core ? core + (projectNumber.toUpperCase().match(/-\s*\d{2}\s*(S\d+)/)?.[1] ?? "") : null;
+}
+
+/** The latest prior cycle's human percent for `row`'s award, else null (see
+ *  CARRY-FORWARD). */
+export function carriedHumanPercent(row: ImportRow, prior: PriorHumanPercent[]): number | null {
+  const key = nihGrantKey(row.projectNumber);
+  const hit = prior
+    .filter(
+      (p) =>
+        p.reportingCycle !== row.reportingCycle &&
+        p.cancerRelevantPercent != null &&
+        (p.institutionNumber === row.institutionNumber || (key != null && nihGrantKey(p.projectNumber) === key)),
+    )
+    .sort((a, b) => b.reportingCycle.localeCompare(a.reportingCycle))[0];
+  return hit ? Number(hit.cancerRelevantPercent) : null;
+}
 
 type GrantText = { awardNumber: string | null; cwid: string; abstract: string | null; phrText: string | null };
 
@@ -450,6 +488,8 @@ export type ApplyCounts = {
    *  survived untouched — not a human override, just nothing new to write. */
   percentSkippedInferenceFailed: number;
   allocationsSkippedHuman: number;
+  /** Rows given a prior cycle's reviewer percent (CARRY-FORWARD). */
+  percentCarriedHuman: number;
 };
 
 function emptyCounts(): ApplyCounts {
@@ -461,6 +501,7 @@ function emptyCounts(): ApplyCounts {
     percentSkippedHuman: 0,
     percentSkippedInferenceFailed: 0,
     allocationsSkippedHuman: 0,
+    percentCarriedHuman: 0,
   };
 }
 
@@ -472,8 +513,17 @@ export async function applyPlan(
   plan: RowPlan,
   opts: ImportOptions,
   counts: ApplyCounts,
+  carried: number | null = null,
 ): Promise<void> {
   const { row, allocation } = plan;
+  // A carried reviewer percent wins; the model's value still lands in *Ai.
+  const percentData = {
+    cancerRelevantPercent: carried ?? plan.cancerRelevantPercent,
+    cancerRelevantPercentSource: carried != null ? "human" : plan.cancerRelevantPercentSource,
+    cancerRelevantPercentAi: plan.cancerRelevantPercent,
+    cancerRelevantRationale: plan.cancerRelevantRationale,
+    ...plan.provenance,
+  };
   if (allocation.programCode) counts.membershipResolved += 1;
   else counts.unresolvedProgram += 1;
 
@@ -503,7 +553,7 @@ export async function applyPlan(
 
   if (!existing) {
     if (opts.dryRun) {
-      log(`  [dry-run] create institutionNumber=${row.institutionNumber} program=${allocation.programCode ?? "—"}(${allocation.source})`);
+      log(`  [dry-run] create institutionNumber=${row.institutionNumber} program=${allocation.programCode ?? "—"}(${allocation.source})${carried != null ? ` [percent carried: ${carried}]` : ""}`);
     } else {
       await db.cancerCenterFundingAward.create({
         data: {
@@ -511,11 +561,7 @@ export async function applyPlan(
           reportingCycle: row.reportingCycle,
           institutionNumber: row.institutionNumber,
           ...awardScalars,
-          cancerRelevantPercent: plan.cancerRelevantPercent,
-          cancerRelevantPercentSource: plan.cancerRelevantPercentSource,
-          cancerRelevantPercentAi: plan.cancerRelevantPercent,
-          cancerRelevantRationale: plan.cancerRelevantRationale,
-          ...plan.provenance,
+          ...percentData,
           allocations: {
             create: [{ centerCode: CENTER_CODE, programCode: allocation.programCode, programPercent: 100, source: allocation.source }],
           },
@@ -523,6 +569,7 @@ export async function applyPlan(
       });
     }
     counts.created += 1;
+    if (carried != null) counts.percentCarriedHuman += 1;
     return;
   }
 
@@ -533,7 +580,8 @@ export async function applyPlan(
   // place (existing is also null). Without this, a transient Bedrock timeout
   // on a re-run reverts an already-inferred row back to "not yet inferred".
   const notHuman = existing.cancerRelevantPercentSource !== "human";
-  const hasNewValueOrNothingToLose = plan.cancerRelevantPercent !== null || existing.cancerRelevantPercent == null;
+  const hasNewValueOrNothingToLose =
+    carried != null || plan.cancerRelevantPercent !== null || existing.cancerRelevantPercent == null;
   const touchPercent = notHuman && hasNewValueOrNothingToLose;
   if (!touchPercent) {
     if (!notHuman) counts.percentSkippedHuman += 1;
@@ -557,15 +605,7 @@ export async function applyPlan(
     where: { id: existing.id },
     data: {
       ...awardScalars,
-      ...(touchPercent
-        ? {
-            cancerRelevantPercent: plan.cancerRelevantPercent,
-            cancerRelevantPercentSource: plan.cancerRelevantPercentSource,
-            cancerRelevantPercentAi: plan.cancerRelevantPercent,
-            cancerRelevantRationale: plan.cancerRelevantRationale,
-            ...plan.provenance,
-          }
-        : {}),
+      ...(touchPercent ? percentData : {}),
       ...(anyHumanAllocation
         ? {}
         : {
@@ -577,6 +617,7 @@ export async function applyPlan(
     },
   });
   counts.updated += 1;
+  if (touchPercent && carried != null) counts.percentCarriedHuman += 1;
 }
 
 const main = async () => {
@@ -621,9 +662,13 @@ const main = async () => {
     planRow(row, awardIndex, membershipIndex, textIndex),
   );
 
+  const priorHuman = await w.cancerCenterFundingAward.findMany({
+    where: { centerCode: CENTER_CODE, cancerRelevantPercentSource: "human" },
+    select: { reportingCycle: true, institutionNumber: true, projectNumber: true, cancerRelevantPercent: true },
+  });
   const counts = emptyCounts();
   for (const plan of plans) {
-    await applyPlan(w, plan, opts, counts);
+    await applyPlan(w, plan, opts, counts, carriedHumanPercent(plan.row, priorHuman));
   }
 
   const ruleRows = plans.filter((p) => p.cancerRelevantPercentSource === "rule").length;
@@ -632,7 +677,8 @@ const main = async () => {
     `\nDone${opts.dryRun ? " (dry run)" : ""}. rule=${ruleRows} not-inferred=${notInferred}. created=${counts.created}, updated=${counts.updated}, ` +
       `program: membership=${counts.membershipResolved} unresolved=${counts.unresolvedProgram}, ` +
       `skipped-for-human-override: percent=${counts.percentSkippedHuman} allocations=${counts.allocationsSkippedHuman}, ` +
-      `percent-skipped-failed-retry=${counts.percentSkippedInferenceFailed}.`,
+      `percent-skipped-failed-retry=${counts.percentSkippedInferenceFailed}, ` +
+      `percent-carried-from-prior-cycle=${counts.percentCarriedHuman}.`,
   );
 
   await db.write.$disconnect();
