@@ -457,7 +457,7 @@ export default async function EditSelfPage({
             etlStatusTab={tabs.etlStatus}
             coresTab={tabs.cores}
             slugsTab={tabs.slugs}
-            viewerIsDeveloper={developer}
+            viewerCanUseMatcha={developer || effectiveSession.isObserver === true}
           />
         ) : undefined
       }

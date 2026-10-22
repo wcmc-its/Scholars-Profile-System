@@ -197,12 +197,12 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
 
   // Gap 1b: developers get these from the `/edit` landing page too, because
   // visibility no longer depends on which page you're standing on.
-  matcha: (s) => (s.isSuperuser || s.isDeveloper === true) && isMatchaEnabled(),
+  matcha: (s) => (s.isSuperuser || s.isDeveloper === true || s.isObserver === true) && isMatchaEnabled(),
   // GRANT_MATCHA depends on MATCHA (the Matcha spine is what it seeds), so the
   // tab needs BOTH flags — mirroring the page's own `notFound()` gate
   // (`app/edit/grant-matcha/page.tsx`). Same audience as `matcha`.
   grantMatcha: (s) =>
-    (s.isSuperuser || s.isDeveloper === true) && isMatchaEnabled() && isGrantMatchaEnabled(),
+    (s.isSuperuser || s.isDeveloper === true || s.isObserver === true) && isMatchaEnabled() && isGrantMatchaEnabled(),
 
   // #2542 Phase 3 — the `OrgUnitRole` vocabulary editor. Delegates entirely to
   // the bundled `isXTabVisible` (flag + role together), per the convention

@@ -164,7 +164,7 @@ export function AdminSubnav({
   pendingClips = null,
   coresTab = false,
   slugsTab = false,
-  viewerIsDeveloper = false,
+  viewerCanUseMatcha = false,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
@@ -276,11 +276,10 @@ export function AdminSubnav({
    *  `TAB_PREDICATES.slugs`. Superusers already get it via `superuserSurfaces`.
    *  Default `false`. */
   slugsTab?: boolean;
-  /** Show the Matcha / Grant Matcha tabs to a pure development-role viewer who
-   *  is NOT a superuser. Superusers already get them via `superuserSurfaces`;
-   *  this is the dev-role escape hatch on `/edit/grant-matcha` (their console
-   *  landing since the find-researchers sunset). Default `false`. */
-  viewerIsDeveloper?: boolean;
+  /** Show the Matcha / Grant Matcha tabs to a development-role or observer
+   *  viewer who is NOT a superuser. Superusers already get them via
+   *  `superuserSurfaces`. Default `false`. */
+  viewerCanUseMatcha?: boolean;
 }) {
   /**
    * Visibility is computed BEFORE grouping. A group may render only if at least
@@ -441,10 +440,10 @@ export function AdminSubnav({
         href: "/edit/core",
         label: "Cores",
       },
-      // CTL sponsor match — `viewerIsDeveloper` is the escape hatch for a pure
-      // development-role viewer; dark while SPONSOR_MATCH is off.
+      // CTL sponsor match — `viewerCanUseMatcha` admits a development-role or
+      // observer viewer; dark while SPONSOR_MATCH is off.
       {
-        show: (superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled(),
+        show: (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled(),
         id: "matcha",
         href: "/edit/matcha",
         label: "Matcha",
@@ -455,7 +454,7 @@ export function AdminSubnav({
       // `lib/edit/console-tabs.server.ts`). Unlike Matcha this renders through
       // the plain `AdminTab` link — no Radix hover content (#1783).
       {
-        show: (superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled() && isGrantMatchaEnabled(),
+        show: (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled() && isGrantMatchaEnabled(),
         id: "grant-matcha",
         href: "/edit/grant-matcha",
         label: "Grant Matcha",

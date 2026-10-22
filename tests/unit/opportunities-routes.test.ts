@@ -205,6 +205,13 @@ describe("GET /api/opportunities (browse list, admin-gated, curated-first)", () 
     expect(opportunityFindMany).not.toHaveBeenCalled();
   });
 
+  it("admits an observer (Grant Matcha's Browse tab reads this list)", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "obs", isSuperuser: false, isObserver: true });
+    opportunityFindMany.mockResolvedValue([]);
+    const resp = await listGET(req("/api/opportunities"));
+    expect(resp.status).toBe(200);
+  });
+
   it("excludes grants.gov by default and orders curated first", async () => {
     getEffectiveEditSession.mockResolvedValue({ cwid: "dev", isSuperuser: false, isDeveloper: true });
     opportunityFindMany.mockResolvedValue([

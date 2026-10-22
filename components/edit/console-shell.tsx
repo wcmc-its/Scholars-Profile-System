@@ -130,7 +130,7 @@ export async function ConsoleShell({
           coiTab={tabs.coi}
           activityTab={tabs.activity}
           etlStatusTab={tabs.etlStatus}
-          viewerIsDeveloper={session.isDeveloper === true}
+          viewerCanUseMatcha={session.isDeveloper === true || session.isObserver === true}
         />
       </ConsoleTopBar>
       <main id="console-main" tabIndex={-1} className="mx-auto max-w-[var(--max-content)] px-6 py-8">

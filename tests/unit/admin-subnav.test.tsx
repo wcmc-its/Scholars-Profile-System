@@ -462,7 +462,7 @@ describe("AdminSubnav — the Grant Matcha tab", () => {
     );
   });
 
-  it("shows the tab to a pure dev-role viewer via viewerIsDeveloper", () => {
+  it("shows the tab to a pure dev-role viewer via viewerCanUseMatcha", () => {
     bothFlagsOn();
     render(
       <AdminSubnav
@@ -470,7 +470,7 @@ describe("AdminSubnav — the Grant Matcha tab", () => {
         pendingSlugRequests={null}
         pendingHonors={null}
         superuserSurfaces={false}
-        viewerIsDeveloper
+        viewerCanUseMatcha
       />,
     );
     expect(screen.getByTestId("admin-tab-grant-matcha")).toBeTruthy();
@@ -931,7 +931,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
         pendingSlugRequests: null,
         pendingHonors: null,
         superuserSurfaces: false,
-        viewerIsDeveloper: true,
+        viewerCanUseMatcha: true,
       } as const;
       const { unmount } = render(<AdminSubnav {...props} />);
       expect(screen.getByTestId("admin-tab-matcha").textContent).toContain("Matcha");
