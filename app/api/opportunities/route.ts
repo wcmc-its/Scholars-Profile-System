@@ -95,7 +95,7 @@ function eligibilityLabelsFrom(eligibilityFlags: unknown, eligibility: unknown):
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const session = await getEffectiveEditSession();
-  if (!session || !(session.isSuperuser || session.isDeveloper)) {
+  if (!session || !(session.isSuperuser || session.isDeveloper || session.isObserver)) {
     return new NextResponse(null, { status: 403 });
   }
 

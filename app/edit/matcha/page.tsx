@@ -38,8 +38,8 @@ export default async function MatchaPage() {
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/matcha");
   }
-  // Superuser OR development role — the same verdict the data route reads.
-  if (!(session.isSuperuser || session.isDeveloper)) {
+  // Superuser OR development role OR observer — the same verdict the data route reads.
+  if (!(session.isSuperuser || session.isDeveloper || session.isObserver)) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "sponsor-match",

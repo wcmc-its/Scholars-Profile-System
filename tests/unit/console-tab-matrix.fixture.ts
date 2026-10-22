@@ -131,10 +131,13 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "coi",
       "administrators",
       "grantAttribution",
+      "matcha",
+      "grantMatcha",
     ],
     pins:
       "2026-10-01 — an observer sees every queue and dashboard read-only, COI " +
-      "included (public data); Activity and ETL status stay superuser-only",
+      "included (public data); Activity and ETL status stay superuser-only; " +
+      "2026-10-22 — Matcha + Grant Matcha (own searches only; no intake/admin)",
   },
   {
     name: "content editor (synthetic steward read view)",
