@@ -140,11 +140,11 @@ export default async function EditSelfPage({
       redirect("/edit/methods");
     }
     // A holder of one of the other global LDAP-group roles
-    // (`honors_curator`/`data_sharing_viewer`/`development`/`content_editor`,
+    // (`honors_curator`/`data_sharing_viewer`/`development`/`content_editor`/`observer`,
     // `lib/auth/global-roles.ts`) has no self-profile either — each has
     // exactly one console entry point, none of them scholar-specific, so route
     // there before the proxy fallback below. One `resolveGlobalRole` call
-    // checks all four in parallel (a single bounded LDAPS round trip, not a
+    // checks them all in parallel (a single bounded LDAPS round trip, not a
     // chain of four sequential ones) — the same reuse `/api/impersonation`'s
     // POST route already makes for the identical "which global role, if any"
     // question. Was a single-role check (#2482); widened 2026-08-19 after

@@ -29,12 +29,14 @@ import { isContentEditor } from "@/lib/auth/content-editor";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
+import { isObserver } from "@/lib/auth/observer";
 
 export type GlobalRole =
   | "honors_curator"
   | "data_sharing_viewer"
   | "development"
-  | "content_editor";
+  | "content_editor"
+  | "observer";
 
 /** Display label per role — reused by the session route; client components
  *  (banner) keep their own copy rather than import this Node-only module. */
@@ -43,6 +45,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
   content_editor: "Content Editor",
+  observer: "Observer",
 };
 
 /** Each role's one console entry point (every one of these modules' own
@@ -60,6 +63,7 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
   development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
   content_editor: { href: "/edit/profiles", label: "Profiles" },
+  observer: { href: "/edit/profiles", label: "Profiles" },
 };
 
 const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string) => Promise<boolean> }> = [
@@ -67,6 +71,8 @@ const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string
   { role: "data_sharing_viewer", check: isDataSharingViewer },
   { role: "development", check: isDeveloper },
   { role: "content_editor", check: isContentEditor },
+  // Last: observer is the broadest read-only role, so any narrower one held alongside it wins.
+  { role: "observer", check: isObserver },
 ];
 
 /**
