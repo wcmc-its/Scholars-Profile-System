@@ -60,6 +60,9 @@ export interface CueHit {
   /** One short line for the curator. Built from the award and the scholar's own
    *  record; never logged by the ETL. */
   reason: string;
+  /** Cue 6 only: the co-PI and the scholar's PMIDs they co-authored, so the
+   *  queue can name them and list the papers. */
+  coPi?: { name: string; pmids: string[]; total: number };
 }
 
 export interface AttributionScore {
@@ -174,6 +177,9 @@ export interface AttributionEvidence {
   /** Cue 6. Most papers the scholar shares with any one co-PI on the award;
    *  null ⇒ single-PI award or no co-author data. */
   coPiSharedPapers: number | null;
+  /** Cue 6's detail for the curator: that co-PI's RePORTER name and the shared
+   *  PMIDs (capped). Absent in older callers. */
+  coPi?: { name: string; pmids: string[] } | null;
   /** Cue 7. null ⇒ the award has no MeSH descriptors yet, or the scholar has
    *  no MeSH-tagged papers. */
   topic: { share: number; descriptors: number; papers: number } | null;
@@ -455,14 +461,14 @@ export function authorKey(lastName: string, firstName: string | null | undefined
   return `${last} ${f}`;
 }
 
-/** Co-author keys and how many of the scholar's papers each appears on.
+/** Co-author keys and the PMIDs of the scholar's papers each appears on.
  *  `selfKey` is dropped so the scholar never counts as their own co-author. */
-export function coauthorCounts(
-  authorsStrings: ReadonlyArray<string | null>,
+export function coauthorPapers(
+  papers: ReadonlyArray<{ pmid: string; authorsString: string | null }>,
   selfKey: string | null,
-): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const s of authorsStrings) {
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const { pmid, authorsString: s } of papers) {
     if (!s) continue;
     const seen = new Set<string>();
     for (const a of s.split(/,\s*/)) {
@@ -471,10 +477,19 @@ export function coauthorCounts(
       const key = authorKey(m[1]!, m[2]!);
       if (!key || key === selfKey || seen.has(key)) continue;
       seen.add(key);
-      out.set(key, (out.get(key) ?? 0) + 1);
+      out.set(key, [...(out.get(key) ?? []), pmid]);
     }
   }
   return out;
+}
+
+/** Co-author keys and how many of the scholar's papers each appears on. */
+export function coauthorCounts(
+  authorsStrings: ReadonlyArray<string | null>,
+  selfKey: string | null,
+): Map<string, number> {
+  const papers = coauthorPapers(authorsStrings.map((authorsString, i) => ({ pmid: String(i), authorsString })), selfKey);
+  return new Map([...papers].map(([k, v]) => [k, v.length]));
 }
 
 // ---------------------------------------------------------------------------
@@ -596,6 +611,7 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
   }
   if (e.coPiSharedPapers !== null && e.coPiSharedPapers >= COAUTHOR_MIN_PAPERS) {
     add("copi_coauthor", `A co-PI on this award co-authored ${e.coPiSharedPapers} of the scholar's papers`);
+    if (e.coPi) hits[hits.length - 1]!.coPi = { ...e.coPi, total: e.coPiSharedPapers };
   }
 
   const base = PRIOR + hits.reduce((s, h) => s + h.weight, 0);

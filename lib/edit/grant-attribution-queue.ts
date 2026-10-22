@@ -66,7 +66,21 @@ export function isGrantAttributionQueueTabVisible(session: Viewer): boolean {
 
 export type GrantAttributionStatus = "pending" | "confirmed" | "rejected";
 
-export type GrantAttributionCue = { id: string; weight: number; reason: string };
+export type GrantAttributionPaper = {
+  pmid: string;
+  title: string;
+  journal: string | null;
+  year: number | null;
+};
+
+export type GrantAttributionCue = {
+  id: string;
+  weight: number;
+  reason: string;
+  /** Cue `copi_coauthor` from a run that recorded it: the co-PI, as RePORTER
+   *  names them, and the papers they share with the scholar (newest first). */
+  coPi?: { name: string; total: number; papers: GrantAttributionPaper[] };
+};
 
 export type GrantAttributionAward = {
   title: string | null;
@@ -76,7 +90,7 @@ export type GrantAttributionAward = {
   applId: number | null;
   startYear: number | null;
   endYear: number | null;
-  orgs: Array<{ name: string; from: number | null; to: number | null }>;
+  orgs: Array<{ name: string; from: number | null; to: number | null; wcm?: boolean }>;
   piNames: string[];
 };
 
@@ -86,6 +100,8 @@ export type GrantAttributionItem = {
   slug: string | null;
   /** The name as the profile renders it. */
   scholarName: string;
+  /** For marking the scholar in the RePORTER PI list. */
+  scholarSurname: string | null;
   title: string | null;
   department: string | null;
   score: number;
@@ -101,7 +117,8 @@ export type GrantAttributionItem = {
   rejectionReason: string | null;
 };
 
-/** "Not this person" reasons. Free text is allowed too (VARCHAR 255). */
+/** "Not this person" reasons. Free text is allowed too (VARCHAR 255). A reason
+ *  is required. */
 export const GRANT_REJECTION_REASONS = [
   "A different person with the same name",
   "Another WCM investigator's award",
@@ -142,4 +159,72 @@ export function cueLabel(id: string): string {
 /** RePORTER project page for the award, when its appl_id is known. */
 export function reporterProjectUrl(applId: number | null): string | null {
   return applId ? nihReporterProjectUrl(applId) : null;
+}
+
+/** Confidence levels, strongest first. Rule-based on the cues that fired, until
+ *  they can be checked against past decisions. */
+export const ATTRIBUTION_LEVELS = [
+  { key: "high", label: "High" },
+  { key: "likely", label: "Likely" },
+  { key: "conflict", label: "Conflicting" },
+  { key: "unclear", label: "Unclear" },
+  { key: "out", label: "Ruled out" },
+] as const;
+
+export type AttributionLevel = (typeof ATTRIBUTION_LEVELS)[number]["key"];
+
+/** A cue that settles an award against the scholar on its own: the scorer's
+ *  decisive cue, or a strong negative (|weight| ≥ STRONG in score.ts). */
+export function isVetoCue(c: Pick<GrantAttributionCue, "id" | "weight">): boolean {
+  return c.id === "infoed_other_wcm_pi_named" || c.weight <= -4;
+}
+
+/** The cues are only a co-PI co-author and a topic match: weak by design. */
+export function isCoauthorshipOnly(cues: ReadonlyArray<Pick<GrantAttributionCue, "id">>): boolean {
+  return cues.length > 0 && cues.every((c) => c.id === "copi_coauthor" || c.id === "topic_match");
+}
+
+export function attributionLevel(cues: ReadonlyArray<Pick<GrantAttributionCue, "id" | "weight">>): {
+  level: AttributionLevel;
+  veto: string | null;
+} {
+  const veto = cues.find(isVetoCue);
+  if (veto) return { level: "out", veto: veto.id };
+  const pos = cues.filter((c) => c.weight > 0);
+  const neg = cues.some((c) => c.weight < 0);
+  if (pos.length > 0 && neg) return { level: "conflict", veto: null };
+  if (pos.some((c) => c.id === "pub_linked") || pos.length >= 2)
+    return { level: "high", veto: null };
+  if (pos.length === 1) return { level: "likely", veto: null };
+  return { level: "unclear", veto: null };
+}
+
+const titleWord = (w: string) =>
+  w
+    .split("-")
+    .map((p) => (p.length <= 1 ? p.toUpperCase() : p[0]!.toUpperCase() + p.slice(1).toLowerCase()))
+    .join("-");
+
+/** "CHOI, AUGUSTINE M." → "Augustine M. Choi". Names without a comma are only
+ *  title-cased. */
+export function reporterNameForDisplay(raw: string): string {
+  const [last = "", rest = ""] = raw.split(",").map((x) => x.trim());
+  if (!raw.includes(",")) return raw.split(/\s+/).filter(Boolean).map(titleWord).join(" ");
+  return [...rest.split(/\s+/).filter(Boolean), last].map(titleWord).join(" ");
+}
+
+const letters = (x: string) =>
+  x
+    .normalize("NFD")
+    .replace(/[^A-Za-z]/g, "")
+    .toLowerCase();
+
+/** The RePORTER PI ("LAST, FIRST" or "First Last") carries the scholar's
+ *  surname. */
+export function isScholarPi(raw: string, surname: string | null): boolean {
+  if (!surname) return false;
+  const last = letters(
+    raw.includes(",") ? raw.split(",")[0]! : (raw.trim().split(/\s+/).pop() ?? ""),
+  );
+  return last.length > 0 && last === letters(surname);
 }

@@ -7,7 +7,7 @@ import { parseNihAward } from "@/lib/award-number";
 import { namesMatch, reporterPiName } from "@/etl/nih-profile/resolver";
 import {
   authorKey,
-  coauthorCounts,
+  coauthorPapers,
   doctoralYearRange,
   infoedOtherEvidence,
   middleInitialConflict,
@@ -19,6 +19,9 @@ import {
 import { isWcmOrg, type CorroborationPolicy, type GroupedProject } from "./transform";
 import { parseFirstLast } from "@/etl/reporter-grants/v2";
 
+/** Shared PMIDs kept on cue 6 for the queue to list. */
+const COPI_PMIDS_KEPT = 20;
+
 type NamePair = { fullName: string; preferredName: string } | undefined;
 
 /** The scholar-side facts every award of one scholar shares. */
@@ -28,7 +31,8 @@ export interface ScholarFacts {
    *  cue 4 cannot fire, so the award may not be revoked on their silence. */
   named: boolean;
   initials: ReturnType<typeof scholarInitials>;
-  coauthors: Map<string, number>;
+  /** Co-author key to the scholar's PMIDs they appear on. */
+  coauthors: Map<string, string[]>;
   meshCounts: Map<string, number>;
   taggedPapers: number;
   educations: ReadonlyArray<{ degree: string; institution: string; year: number | null }>;
@@ -52,8 +56,8 @@ export function buildScholarFacts(args: {
 }): ScholarFacts {
   const scholarNames = [args.names?.fullName, args.names?.preferredName];
   const { firstName, lastName } = parseFirstLast(args.names?.fullName ?? "");
-  const coauthors = coauthorCounts(
-    args.confirmed.map((c) => c.publication.authorsString),
+  const coauthors = coauthorPapers(
+    args.confirmed.map((c) => ({ pmid: c.pmid, authorsString: c.publication.authorsString })),
     lastName ? authorKey(lastName, firstName) : null,
   );
   const meshCounts = new Map<string, number>();
@@ -111,6 +115,14 @@ export function buildAwardEvidence(args: {
   const ourPis = group.pis.filter((pi) => facts.profileIds.has(pi.profile_id));
   const coPis = group.pis.filter((pi) => !facts.profileIds.has(pi.profile_id));
   const linked = args.linked;
+  // Cue 6: the co-PI who shares the most of the scholar's papers.
+  let coPi: { name: string; pmids: string[] } | null =
+    coPis.length === 0 ? null : { name: "", pmids: [] };
+  for (const pi of coPis) {
+    const k = pi.last_name ? authorKey(pi.last_name, pi.first_name) : null;
+    const pmids = k ? (facts.coauthors.get(k) ?? []) : [];
+    if (coPi && pmids.length > coPi.pmids.length) coPi = { name: reporterPiName(pi), pmids };
+  }
   const evidence: AttributionEvidence = {
     policy: args.policy,
     wcmOrgHistory: isWcmOrg(group.orgName),
@@ -136,16 +148,11 @@ export function buildAwardEvidence(args: {
       facts.initials,
     ),
     priorInstitution: priorInstitutionMatch(group.orgHistory, facts.educations, isWcmOrg),
-    coPiSharedPapers:
-      coPis.length === 0
-        ? null
-        : Math.max(
-            0,
-            ...coPis.map((pi) => {
-              const k = pi.last_name ? authorKey(pi.last_name, pi.first_name) : null;
-              return k ? (facts.coauthors.get(k) ?? 0) : 0;
-            }),
-          ),
+    coPiSharedPapers: coPi === null ? null : coPi.pmids.length,
+    coPi:
+      coPi && coPi.pmids.length > 0
+        ? { name: coPi.name, pmids: coPi.pmids.slice(0, COPI_PMIDS_KEPT) }
+        : null,
     topic: topicOverlap(args.meshUis, facts.meshCounts, facts.taggedPapers),
   };
   // A revoke lifts a hide on the strength of negative cues NOT firing. Cue 1's

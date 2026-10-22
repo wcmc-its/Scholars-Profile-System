@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildAwardEvidence, buildScholarFacts, firstHeldYear } from "@/etl/reporter-grants/evidence";
+import { scoreAttribution } from "@/etl/reporter-grants/score";
 import type { ReporterPI } from "@/etl/nih-profile/fetcher";
 
 const pi = (profile_id: number, first: string, middle: string | null, last: string): ReporterPI =>
@@ -81,5 +82,30 @@ describe("buildAwardEvidence", () => {
     expect(build({ group: group({ pis: [] }) }).revocable).toBe(false);
     expect(build({ group: group({ pis: [pi(99, "OTHER", "Z", "PERSON")] }) }).revocable).toBe(false);
     expect(build({ facts: facts({ names: undefined }) }).revocable).toBe(false);
+  });
+});
+
+describe("cue 6 detail (#3071 queue)", () => {
+  it("names the co-PI who shares the most papers and keeps those PMIDs", () => {
+    const f = facts({
+      confirmed: [
+        { pmid: "1", publication: { authorsString: "Example PQ, Sample L", meshTerms: [] } },
+        { pmid: "2", publication: { authorsString: "Sample L, Example PQ, Other A", meshTerms: [] } },
+        { pmid: "3", publication: { authorsString: "Other A, Example PQ", meshTerms: [] } },
+      ],
+    });
+    const { evidence } = build({
+      facts: f,
+      group: group({ pis: [pi(11, "PAT", "Q", "EXAMPLE"), pi(22, "LEE", null, "SAMPLE"), pi(33, "ANN", null, "OTHER")] }),
+    });
+    expect(evidence.coPiSharedPapers).toBe(2);
+    expect(evidence.coPi).toEqual({ name: "LEE SAMPLE", pmids: ["1", "2"] });
+    const hit = scoreAttribution(evidence).reasons.find((r) => r.id === "copi_coauthor");
+    expect(hit?.coPi).toEqual({ name: "LEE SAMPLE", pmids: ["1", "2"], total: 2 });
+  });
+
+  it("records nothing for a single-PI award or a co-PI with no shared papers", () => {
+    expect(build().evidence.coPi).toBeNull();
+    expect(build({ group: group({ pis: [pi(11, "PAT", "Q", "EXAMPLE"), pi(22, "NO", null, "MATCH")] }) }).evidence.coPi).toBeNull();
   });
 });
