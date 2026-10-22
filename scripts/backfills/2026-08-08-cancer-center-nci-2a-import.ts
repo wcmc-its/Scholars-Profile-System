@@ -40,11 +40,12 @@
  * replacing the allocation set entirely when ANY existing allocation is
  * `"human"`-sourced (never a partial clobber of a mixed set).
  *
- * CARRY-FORWARD — a reviewer's percent also outlives its cycle. A NEW cycle row
- * takes a prior cycle's "human" percent for the same `institutionNumber` (OSRA's
- * award record) while it's the same project period: the new row starts on or
- * before the prior row's `projectEndDate`. A renewal (new period) is judged
- * afresh. Bedrock still runs, so `cancerRelevantPercentAi` keeps the model's view.
+ * CARRY-FORWARD — a reviewer's percent also outlives its cycle, renewals
+ * included (MCC, 2026-10-22). A NEW cycle row takes the latest prior cycle's
+ * "human" percent for the same award: same `institutionNumber` (OSRA's award
+ * record), or for NIH the same core project number, so a type-2 renewal under
+ * a new OSRA record still matches. A supplement (S1, S2...) is its own award.
+ * Bedrock still runs, so `cancerRelevantPercentAi` keeps the model's view.
  *
  * AI ORIGINAL — every llm- or rule-sourced percent this script writes is also
  * written to `cancerRelevantPercentAi`, so the report can tell a reviewer's
@@ -86,7 +87,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { normalizeAwardNumber, parseNihAward } from "@/lib/award-number";
+import { coreProjectNum, normalizeAwardNumber, parseNihAward } from "@/lib/award-number";
 import { inferCancerFundingJudgments } from "@/lib/edit/cancer-center-funding-generator";
 import { isPeerReviewedFundingSource } from "@/lib/edit/cancer-center-peer-review";
 
@@ -145,20 +146,27 @@ export type Nci2aImportDb = {
 export type PriorHumanPercent = {
   reportingCycle: string;
   institutionNumber: number;
-  projectEndDate: Date;
+  projectNumber: string;
   cancerRelevantPercent: unknown; // Prisma Decimal
 };
 
-/** The latest prior cycle's human percent for `row`'s award, while `row` is
- *  still in that row's project period; else null (see CARRY-FORWARD). */
+/** NIH core project number plus any supplement tag ("3 U54 CA242639-06S1" ->
+ *  "U54CA242639S1"), stable across renewals; null for non-NIH numbers. */
+export function nihGrantKey(projectNumber: string): string | null {
+  const core = coreProjectNum(projectNumber);
+  return core ? core + (projectNumber.toUpperCase().match(/-\s*\d{2}\s*(S\d+)/)?.[1] ?? "") : null;
+}
+
+/** The latest prior cycle's human percent for `row`'s award, else null (see
+ *  CARRY-FORWARD). */
 export function carriedHumanPercent(row: ImportRow, prior: PriorHumanPercent[]): number | null {
+  const key = nihGrantKey(row.projectNumber);
   const hit = prior
     .filter(
       (p) =>
-        p.institutionNumber === row.institutionNumber &&
         p.reportingCycle !== row.reportingCycle &&
         p.cancerRelevantPercent != null &&
-        row.projectStartDate <= p.projectEndDate.toISOString().slice(0, 10),
+        (p.institutionNumber === row.institutionNumber || (key != null && nihGrantKey(p.projectNumber) === key)),
     )
     .sort((a, b) => b.reportingCycle.localeCompare(a.reportingCycle))[0];
   return hit ? Number(hit.cancerRelevantPercent) : null;
@@ -656,7 +664,7 @@ const main = async () => {
 
   const priorHuman = await w.cancerCenterFundingAward.findMany({
     where: { centerCode: CENTER_CODE, cancerRelevantPercentSource: "human" },
-    select: { reportingCycle: true, institutionNumber: true, projectEndDate: true, cancerRelevantPercent: true },
+    select: { reportingCycle: true, institutionNumber: true, projectNumber: true, cancerRelevantPercent: true },
   });
   const counts = emptyCounts();
   for (const plan of plans) {

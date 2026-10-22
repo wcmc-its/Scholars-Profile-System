@@ -652,20 +652,29 @@ describe("CENTER_CODE", () => {
 });
 
 describe("carry-forward of a reviewer's percent", () => {
-  const prior = (over: Partial<{ reportingCycle: string; institutionNumber: number; projectEndDate: string; pct: number | null }> = {}) => ({
+  const prior = (over: Partial<{ reportingCycle: string; institutionNumber: number; projectNumber: string; pct: number | null }> = {}) => ({
     reportingCycle: over.reportingCycle ?? "osra-2025-07-01",
     institutionNumber: over.institutionNumber ?? ROW.institutionNumber,
-    projectEndDate: new Date(`${over.projectEndDate ?? "2028-12-31"}T00:00:00Z`),
+    projectNumber: over.projectNumber ?? ROW.projectNumber,
     cancerRelevantPercent: over.pct === undefined ? 50 : over.pct,
   });
 
-  it("carries the same award's human percent within its project period, latest cycle first", () => {
+  it("carries the same award's human percent, latest cycle first", () => {
     expect(carriedHumanPercent(ROW, [prior(), prior({ reportingCycle: "osra-2025-12-01", pct: 25 })])).toBe(25);
   });
 
-  it("does not carry across a renewal, another award, or the same cycle", () => {
-    expect(carriedHumanPercent(ROW, [prior({ projectEndDate: "2023-12-31" })])).toBeNull();
-    expect(carriedHumanPercent(ROW, [prior({ institutionNumber: 999 })])).toBeNull();
+  it("carries across a renewal under a new OSRA record via the NIH core number", () => {
+    expect(carriedHumanPercent(ROW, [prior({ institutionNumber: 999, projectNumber: "2 R01 CA059736-06" })])).toBe(50);
+  });
+
+  it("keeps a supplement separate from its parent", () => {
+    const supp = { ...ROW, institutionNumber: 777, projectNumber: "3 R01 CA059736-02S1" };
+    expect(carriedHumanPercent(supp, [prior({ institutionNumber: 999 })])).toBeNull();
+    expect(carriedHumanPercent(supp, [prior({ institutionNumber: 998, projectNumber: "3 R01 CA059736-01S1" })])).toBe(50);
+  });
+
+  it("does not carry from another award, the same cycle, or a null percent", () => {
+    expect(carriedHumanPercent(ROW, [prior({ institutionNumber: 999, projectNumber: "5 R01 CA000001-01" })])).toBeNull();
     expect(carriedHumanPercent(ROW, [prior({ reportingCycle: ROW.reportingCycle })])).toBeNull();
     expect(carriedHumanPercent(ROW, [prior({ pct: null })])).toBeNull();
   });
