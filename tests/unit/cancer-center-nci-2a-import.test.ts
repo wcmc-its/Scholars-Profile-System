@@ -57,6 +57,7 @@ import {
   loadImportRows,
   planRow,
   applyPlan,
+  carriedHumanPercent,
   CENTER_CODE,
   type ImportOptions,
   type ImportRow,
@@ -110,6 +111,7 @@ function emptyCounts(): ApplyCounts {
     percentSkippedHuman: 0,
     percentSkippedInferenceFailed: 0,
     allocationsSkippedHuman: 0,
+    percentCarriedHuman: 0,
   };
 }
 
@@ -415,6 +417,7 @@ function makeDb(
         const row = existing[key];
         return row ? { ...row, cancerRelevantPercent: row.cancerRelevantPercent ?? null } : null;
       }),
+      findMany: vi.fn(async () => []),
       create: vi.fn(async (args) => {
         created.push(args);
       }),
@@ -645,5 +648,46 @@ describe("applyPlan", () => {
 describe("CENTER_CODE", () => {
   it("is the Meyer Cancer Center code", () => {
     expect(CENTER_CODE).toBe("meyer_cancer_center");
+  });
+});
+
+describe("carry-forward of a reviewer's percent", () => {
+  const prior = (over: Partial<{ reportingCycle: string; institutionNumber: number; projectEndDate: string; pct: number | null }> = {}) => ({
+    reportingCycle: over.reportingCycle ?? "osra-2025-07-01",
+    institutionNumber: over.institutionNumber ?? ROW.institutionNumber,
+    projectEndDate: new Date(`${over.projectEndDate ?? "2028-12-31"}T00:00:00Z`),
+    cancerRelevantPercent: over.pct === undefined ? 50 : over.pct,
+  });
+
+  it("carries the same award's human percent within its project period, latest cycle first", () => {
+    expect(carriedHumanPercent(ROW, [prior(), prior({ reportingCycle: "osra-2025-12-01", pct: 25 })])).toBe(25);
+  });
+
+  it("does not carry across a renewal, another award, or the same cycle", () => {
+    expect(carriedHumanPercent(ROW, [prior({ projectEndDate: "2023-12-31" })])).toBeNull();
+    expect(carriedHumanPercent(ROW, [prior({ institutionNumber: 999 })])).toBeNull();
+    expect(carriedHumanPercent(ROW, [prior({ reportingCycle: ROW.reportingCycle })])).toBeNull();
+    expect(carriedHumanPercent(ROW, [prior({ pct: null })])).toBeNull();
+  });
+
+  it("creates the new cycle's row as human with the carried value, keeping the model's in *Ai", async () => {
+    const { db, created } = makeDb({});
+    const counts = emptyCounts();
+    await applyPlan(db, PLAN, RUN, counts, 50);
+    const data = (created[0] as { data: Record<string, unknown> }).data;
+    expect(data).toMatchObject({ cancerRelevantPercent: 50, cancerRelevantPercentSource: "human", cancerRelevantPercentAi: 90 });
+    expect(counts.percentCarriedHuman).toBe(1);
+  });
+
+  it("upgrades an unreviewed row of this cycle, even when Bedrock failed", async () => {
+    const { db, updated } = makeDb({ "12345": { id: "a1", cancerRelevantPercent: 90, cancerRelevantPercentSource: "llm", allocations: [] } });
+    await applyPlan(db, { ...PLAN, cancerRelevantPercent: null }, RUN, emptyCounts(), 25);
+    expect(updated[0].data).toMatchObject({ cancerRelevantPercent: 25, cancerRelevantPercentSource: "human" });
+  });
+
+  it("never touches a row already reviewed in this cycle", async () => {
+    const { db, updated } = makeDb({ "12345": { id: "a1", cancerRelevantPercent: 75, cancerRelevantPercentSource: "human", allocations: [] } });
+    await applyPlan(db, PLAN, RUN, emptyCounts(), 25);
+    expect(updated[0].data).not.toHaveProperty("cancerRelevantPercent");
   });
 });
