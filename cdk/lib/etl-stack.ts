@@ -934,6 +934,13 @@ export class EtlStack extends Stack {
       // first; prod stays off until the staging run's hide count is reviewed.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       REPORTER_GRANTS_CORROBORATION_HIDE: env === "staging" ? "on" : "off",
+      // ORCID librarian queue — etl:orcid-evidence (OrcidEvidenceWeekly) confirms an
+      // iD whose public record lists the scholar's email as VERIFIED (method
+      // email_verified, never over an iD on file) only when this is exactly "on";
+      // otherwise it logs the would-confirm count and cwids. Off in every env
+      // until a librarian has reviewed a run's would-confirm list. Applied via
+      // cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_EMAIL_AUTOCONFIRM: "off",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
@@ -1980,6 +1987,12 @@ export class EtlStack extends Stack {
       // because the registry moves slowly; `continue` because the only consumer is
       // the advisory /edit/orcid-coverage dashboard, never the public profile.
       { id: "OrcidRegistryWeekly", npmScript: "etl:orcid-registry", external: false, tier: "continue" },
+      // ORCID candidate evidence (etl/orcid-evidence) -> orcid_candidate_evidence, the
+      // bands /edit/orcid-queue reads, then the email auto-confirm (behind
+      // ORCID_EMAIL_AUTOCONFIRM, off). Right after OrcidRegistryWeekly so it scores the
+      // fresh candidates; one public /record per iD over NAT egress with no credential,
+      // so external: false like the registry. `continue`: the queue is a librarian tool.
+      { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: false, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public
       // directory (no secret); reporter-grants + clinical-trials read ReciterDB
