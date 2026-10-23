@@ -7424,7 +7424,7 @@ service:
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
                 },
                 "StringLike": {
-                  "token.actions.githubusercontent.com:sub": "repo:wcmc-its/Scholars-Profile-System:*",
+                  "token.actions.githubusercontent.com:sub": "repo:wcmc-its/Scholars-Profile-System:environment:staging",
                 },
               },
               "Effect": "Allow",

@@ -2667,7 +2667,7 @@ describe("AppStack", () => {
       }
     });
 
-    it("OIDC sub claim admits any ref in the SPS repo for staging", () => {
+    it("OIDC sub claim admits only the staging GitHub Environment", () => {
       const roles = template.findResources("AWS::IAM::Role");
       const deployRole = Object.values(roles).find(
         (r) => r.Properties?.RoleName === "sps-deploy-staging",
@@ -2680,7 +2680,7 @@ describe("AppStack", () => {
         | undefined;
       const sub =
         subClaim?.StringLike?.["token.actions.githubusercontent.com:sub"];
-      expect(sub).toBe("repo:wcmc-its/Scholars-Profile-System:*");
+      expect(sub).toBe("repo:wcmc-its/Scholars-Profile-System:environment:staging");
     });
 
     describe("scheduled drift check role (#1765, #1987)", () => {

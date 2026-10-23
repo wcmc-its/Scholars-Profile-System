@@ -261,8 +261,8 @@ Migration log streams go to `/aws/ecs/sps-migrate-${env}` (separate log group fr
 `sps-deploy-${env}` is the IAM role the deploy workflow assumes via OIDC. The role exists after this PR but no workflow invokes it yet. Trust policy:
 
 - Audience: `sts.amazonaws.com`.
-- Subject (prod): `repo:wcmc-its/Scholars-Profile-System:ref:refs/heads/master` — only deploys originating from `master` branch.
-- Subject (staging): `repo:wcmc-its/Scholars-Profile-System:*` — feature branches can deploy to staging.
+- Subject (prod): `repo:wcmc-its/Scholars-Profile-System:environment:prod` — only jobs running in the `prod` GitHub Environment (master-only branch policy + required reviewer).
+- Subject (staging): `repo:wcmc-its/Scholars-Profile-System:environment:staging` — only jobs running in the `staging` GitHub Environment, whose branch policy admits `master` and `staging/*`.
 
 Permissions are tightly scoped to AppStack-owned resources: ECR push on this repo, `ecs:RunTask` on the migration task family ARN, `ecs:UpdateService`+`DescribeServices` on the SPS service ARN, `ecs:DescribeTasks`+`ListTasks` on `cluster/sps-cluster-${env}/*`, and `iam:PassRole` on the two task-side roles (conditioned to `iam:PassedToService=ecs-tasks.amazonaws.com`). The test suite asserts no `*` Resource on any non-`GetAuthorizationToken` statement.
 
