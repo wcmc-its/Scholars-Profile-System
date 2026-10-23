@@ -239,6 +239,29 @@ describe("undo", () => {
     );
   });
 
+  it("a decision on a requeued review keeps the requeue mark through undo", async () => {
+    // Pending with a curator as decider = sent back to review (rule 1b).
+    h.tx.grantAttributionReview.findUnique.mockResolvedValueOnce({ ...PENDING, decidedByCwid: "c000002" });
+    await POST(request({ id: "rev-1", decision: "confirm" }, SUPERUSER));
+    const effects = h.tx.grantAttributionReview.updateMany.mock.calls[0]![0].data.decisionEffects;
+    expect(effects).toMatchObject({ reopenedBy: "c000002" });
+
+    vi.clearAllMocks();
+    h.tx.suppression.updateMany.mockResolvedValue({ count: 1 });
+    h.tx.grantAttributionReview.updateMany.mockResolvedValue({ count: 1 });
+    h.tx.grantAttributionReview.findUnique.mockResolvedValue({
+      ...PENDING,
+      status: "confirmed",
+      decidedAt: new Date("2026-10-19T00:00:00Z"),
+      decisionEffects: effects,
+    });
+    expect((await POST(request({ id: "rev-1", decision: "undo" }, SUPERUSER))).status).toBe(200);
+    expect(h.tx.grantAttributionReview.updateMany.mock.calls[0]![0].data).toMatchObject({
+      status: "pending",
+      decidedByCwid: "c000002",
+    });
+  });
+
   it("revokes the curator hide a rejection created", async () => {
     h.tx.grantAttributionReview.findUnique.mockResolvedValue({
       ...PENDING,

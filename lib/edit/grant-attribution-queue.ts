@@ -115,7 +115,61 @@ export type GrantAttributionItem = {
   decidedAt: string | null;
   decidedByName: string | null;
   rejectionReason: string | null;
+  /** RePORTER's name for the scholar's PI entry, from the latest scoring. */
+  reporterName: string | null;
+  /** The scholar's names on record, to mark where RePORTER's differs. */
+  scholarNames: string[];
 };
+
+/** An award the weekly check hid or queued, then showed again on new evidence
+ *  (its hide revoked as `system-rescored`), that no curator has decided. */
+export type GrantAttributionAutoItem = {
+  /** The grant's externalId, `reporter:{cwid}:{core}`. */
+  id: string;
+  cwid: string;
+  slug: string | null;
+  scholarName: string;
+  scholarNames: string[];
+  department: string | null;
+  award: GrantAttributionAward;
+  reporterName: string | null;
+  /** What it was before the check showed it. */
+  was: "hidden" | "queued";
+  decidedAt: string;
+  reason: string;
+};
+
+/** One weekly scoring run's totals (`grant_attribution_run`). */
+export type GrantAttributionRunTotals = {
+  ranAt: string;
+  scholars: number;
+  show: number;
+  hide: number;
+  queue: number;
+  recovered: number;
+  cues: Record<string, number>;
+};
+
+/** The one-line "why" for an award's band, from its cues (strongest first). */
+export function decidingReason(
+  band: string,
+  cues: ReadonlyArray<Pick<GrantAttributionCue, "id" | "weight" | "reason">>,
+): string {
+  if (band === "show") {
+    return (
+      cues.find((c) => c.weight > 0)?.reason ??
+      "Every NIH profile was matched by the scholar's publications"
+    );
+  }
+  if (band === "hide") {
+    return (
+      cues.find(isVetoCue)?.reason ??
+      cues.find((c) => c.weight < 0)?.reason ??
+      "Nothing ties it to the scholar, and the NIH profile was matched by name only"
+    );
+  }
+  return "The evidence is weak or points both ways";
+}
 
 /** "Not this person" reasons. Free text is allowed too (VARCHAR 255). A reason
  *  is required. */
@@ -229,3 +283,59 @@ export function isScholarPi(raw: string, surname: string | null): boolean {
   );
   return last.length > 0 && last === letters(surname);
 }
+
+/** RePORTER's name for display, word by word, each marked when the scholar's
+ *  names on record have no match for it. An initial matches a word it starts
+ *  ("D." and "David"), so only a real difference is marked. */
+export function reporterNameParts(
+  raw: string,
+  scholarNames: ReadonlyArray<string>,
+): Array<{ text: string; differs: boolean }> {
+  // "Last, First M" lists the surname first; "First M Last" last. Initials
+  // match given names only, so a lone "H" never matches the surname.
+  const words = scholarNames.map((n) => {
+    const w = n
+      .split(/[\s,-]+/)
+      .map(letters)
+      .filter(Boolean);
+    return { all: w, given: n.includes(",") ? w.slice(1) : w.slice(0, -1) };
+  });
+  const all = words.flatMap((w) => w.all);
+  const given = words.flatMap((w) => w.given);
+  const matches = (t: string) =>
+    all.includes(t) ||
+    (t.length === 1 && given.some((g) => g.startsWith(t))) ||
+    given.some((g) => g.length === 1 && t.startsWith(g));
+  return reporterNameForDisplay(raw)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((text) => {
+      const parts = text.split("-").map(letters).filter(Boolean);
+      return { text, differs: parts.length > 0 && !parts.every(matches) };
+    });
+}
+
+/** Report 14's evidence rows: each cue in plain words and which way it
+ *  points. The named InfoEd cue counts with its sibling. */
+export const EVIDENCE_ROWS: ReadonlyArray<{
+  ids: readonly string[];
+  label: string;
+  toward: boolean;
+}> = [
+  { ids: ["pub_linked"], label: "A paper of theirs cites the award", toward: true },
+  { ids: ["profile_proven"], label: "NIH profile proven theirs", toward: true },
+  { ids: ["copi_coauthor"], label: "A co-PI co-authors with them", toward: true },
+  { ids: ["wcm_org"], label: "Held at WCM", toward: true },
+  { ids: ["prior_institution"], label: "They trained there", toward: true },
+  { ids: ["topic_match"], label: "Topics match their papers", toward: true },
+  { ids: ["middle_initial_conflict"], label: "Middle initial differs", toward: false },
+  { ids: ["timeline_impossible"], label: "Impossible timeline", toward: false },
+  { ids: ["rejected_pmids"], label: "Papers rejected in ReCiter", toward: false },
+  {
+    ids: ["infoed_other_wcm_pi", "infoed_other_wcm_pi_named"],
+    label: "Another WCM investigator’s award",
+    toward: false,
+  },
+  { ids: ["timeline_unlikely"], label: "Unlikely timeline", toward: false },
+  { ids: ["topic_mismatch"], label: "Topics differ", toward: false },
+];

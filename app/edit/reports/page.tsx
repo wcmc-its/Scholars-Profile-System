@@ -105,11 +105,13 @@ import {
   isAllCores,
 } from "@/lib/edit/core-report-common";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { isGrantAttributionQueueEnabled } from "@/lib/edit/grant-attribution-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
 import {
   ARTICLE_COUNT_ACCESS_NOTE,
   ARTICLE_COUNT_REPORT,
   getReportScopes,
+  GRANT_ATTRIBUTION_REPORT,
   HIGH_IMPACT_PUBS_REPORT,
   MENTORED_PUBS_REPORT,
 } from "@/lib/edit/report-access";
@@ -211,9 +213,10 @@ export default async function EditReportsIndexPage({
   // Reports 8 (Article counts: unit administrators + grants) and 9 (Top
   // clinical and high-impact journal publications: grants) ride a second
   // pseudo-unit. (Report 10, Display titles, is the Titles queue now.)
-  const [canArticleCount, highImpactScopes] = await Promise.all([
+  const [canArticleCount, highImpactScopes, grantAttributionScopes] = await Promise.all([
     canViewArticleCountReport(session),
     getReportScopes(session, HIGH_IMPACT_PUBS_REPORT),
+    isGrantAttributionQueueEnabled() ? getReportScopes(session, GRANT_ATTRIBUTION_REPORT) : new Set<string>(),
   ]);
   const institutionReports = [
     ...(canArticleCount
@@ -228,6 +231,9 @@ export default async function EditReportsIndexPage({
       : []),
     ...(highImpactScopes.size > 0
       ? [catalogEntry(meta, 9, await loadReportAccessPopoverProps(HIGH_IMPACT_PUBS_REPORT, session))]
+      : []),
+    ...(grantAttributionScopes.size > 0
+      ? [catalogEntry(meta, 14, await loadReportAccessPopoverProps(GRANT_ATTRIBUTION_REPORT, session))]
       : []),
   ];
   const institutionUnit = institutionReports.length > 0 ? buildInstitutionUnit(institutionReports) : null;

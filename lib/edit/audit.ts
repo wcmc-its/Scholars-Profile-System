@@ -324,7 +324,12 @@ export type AuditAction =
    *  the `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
   | "grant_attribution_confirm"
   | "grant_attribution_reject"
-  | "grant_attribution_undo";
+  | "grant_attribution_undo"
+  /** #3071 — a curator sent an award the weekly check settled on its own
+   *  (shown or hidden) back to the review queue. `targetEntityType='grant'`,
+   *  `targetEntityId` the grant externalId; before/after carry `{ band,
+   *  review_status, created }`. ENUM extended in scripts/sql/audit-log.sql. */
+  | "grant_attribution_requeue";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =

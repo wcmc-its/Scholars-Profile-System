@@ -27,6 +27,7 @@ import {
   HIGH_IMPACT_PUBS_REPORT,
   isGrantableReportKey,
   MENTORED_PUBS_REPORT,
+  GRANT_ATTRIBUTION_REPORT,
   REPORT_ACCESS_SCOPE_OPTIONS,
 } from "@/lib/edit/report-access";
 import { isReportKey, REPORT_KEYS, REPORT_META_DEFAULTS, type ReportKey } from "@/lib/edit/report-meta";
@@ -41,9 +42,11 @@ describe("REPORTS", () => {
     }
   });
 
-  it("reports 1–6 and 11–13 are unit-gated; 7 and 9 person-gated on their keys; 8 is admin-gated", () => {
+  it("reports 1–6 and 11–13 are unit-gated; 7, 9 and 14 person-gated on their keys; 8 is admin-gated", () => {
     const person = REPORT_KEYS.filter((k) => REPORTS[k].gate === "person");
-    expect(person).toEqual(["7", "9"]);
+    expect(person).toEqual(["7", "9", "14"]);
+    const fourteen = REPORTS["14"];
+    expect(fourteen.gate === "person" && fourteen.accessKey).toBe(GRANT_ATTRIBUTION_REPORT);
     const nine = REPORTS["9"];
     expect(nine.gate === "person" && nine.accessKey).toBe(HIGH_IMPACT_PUBS_REPORT);
     expect(REPORTS["8"].gate).toBe("admin");
@@ -88,6 +91,8 @@ describe("unitKindsFor", () => {
       "11": ["core"],
       "12": ["core"],
       "13": ["core"],
+      // Person-gated, institution-wide.
+      "14": [],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);

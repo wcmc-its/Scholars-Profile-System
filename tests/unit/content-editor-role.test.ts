@@ -228,6 +228,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   grant: "deny",
   // #3071 — a content editor reads the grant attribution queue, never decides it.
   "grant-attribution/decision": "deny",
+  "grant-attribution/requeue": "deny",
   // #1609 — Save / Not relevant is the scholar's own label (genuine self or a
   // genuine superuser), the mentee-suggestion actor rule.
   "grant-recs/feedback": "deny",

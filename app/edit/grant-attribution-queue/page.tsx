@@ -26,7 +26,9 @@ import {
 } from "@/lib/edit/grant-attribution-queue";
 import {
   countGrantAttribution,
+  loadAutoConfirmed,
   loadGrantAttributionQueue,
+  loadGrantAttributionRuns,
 } from "@/lib/edit/grant-attribution-queue.server";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -70,6 +72,8 @@ export default async function GrantAttributionQueuePage() {
     rawSession,
     pendingSlugRequests,
     pendingHonors,
+    auto,
+    runs,
   ] = await Promise.all([
     loadGrantAttributionQueue(db.read, "pending"),
     loadGrantAttributionQueue(db.read, "confirmed", { limit: 200 }),
@@ -81,6 +85,8 @@ export default async function GrantAttributionQueuePage() {
       ? countPendingSlugRequests(db.read)
       : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
+    loadAutoConfirmed(db.read, { limit: 200 }),
+    loadGrantAttributionRuns(db.read, 2),
   ]);
 
   return (
@@ -105,6 +111,9 @@ export default async function GrantAttributionQueuePage() {
         rejected={rejected}
         confirmedTotal={confirmedTotal}
         rejectedTotal={rejectedTotal}
+        auto={auto.items}
+        autoTotal={auto.total}
+        runs={runs}
         readOnly={isGrantAttributionQueueReadOnly(
           session,
           rawSession ? impersonationActive(rawSession, nowSeconds()) : false,
