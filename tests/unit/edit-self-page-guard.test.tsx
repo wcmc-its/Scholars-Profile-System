@@ -371,7 +371,7 @@ describe("/edit (self) — loadConsoleTabs migration (Gaps 1 / 1b)", () => {
     expect(result.props.consoleNav).toBeTruthy();
   });
 
-  it("Gap 1b — a pure development-role viewer gets viewerIsDeveloper threaded into AdminSubnav", async () => {
+  it("Gap 1b — a pure development-role viewer gets viewerCanUseMatcha threaded into AdminSubnav", async () => {
     // Since the find-researchers sunset the dev role's tabs are Matcha / Grant
     // Matcha, both flag-gated — stub them on (they are on in staging AND prod)
     // so the strip has something to show for a pure developer.
@@ -381,7 +381,7 @@ describe("/edit (self) — loadConsoleTabs migration (Gaps 1 / 1b)", () => {
     mockIsDeveloper.mockResolvedValue(true);
     const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
     const consoleNav = asElement(result.props.consoleNav);
-    expect(consoleNav.props.viewerIsDeveloper).toBe(true);
+    expect(consoleNav.props.viewerCanUseMatcha).toBe(true);
   });
 
   it("a plain scholar (no roles) still gets no console nav — the migration doesn't over-widen", async () => {

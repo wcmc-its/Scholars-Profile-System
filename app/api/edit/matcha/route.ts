@@ -79,9 +79,12 @@
  * the honest rendering of an engine that has no per-concept signal to edit. It does supply
  * `measures` + `evidence`, which the spine cannot.
  *
- * Authorization mirrors the surface this lives on (`/edit/matcha`) and
- * its sibling `/api/edit/opportunity-intake`: superuser OR development role,
- * with a denial log. 404 while `MATCHA` is off — the dark-ship posture.
+ * Authorization mirrors the surface this lives on (`/edit/matcha`): superuser OR
+ * development role OR observer, with a denial log. 404 while `MATCHA` is off — the
+ * dark-ship posture. Observers are the one deliberate exception to their read-only
+ * rule (decided 2026-10-22): a Matcha run writes only the observer's own retained
+ * search, and DELETE erases only their own. The write session has the observer flag
+ * stripped (`readEditRequest`), so POST/DELETE re-check it via `canUseMatchaForWrite`.
  */
 import { createHash } from "node:crypto";
 
@@ -108,6 +111,7 @@ import {
 } from "@/lib/api/matcha-grants-spine";
 import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { isObserver } from "@/lib/auth/observer";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
@@ -271,13 +275,21 @@ function bespokeToCandidate(r: MatchaRankedScholar): MatchaCandidate {
   };
 }
 
+/** The write-side gate. `readEditRequest` strips the observer's synthetic read view, so
+ *  `session.isObserver` is always false here; ask the directory for the EFFECTIVE cwid (a
+ *  superuser viewing as an observer sees what the observer sees). An observer's own View-as
+ *  overlay never reaches this: `readEditRequest` refuses writes under it. */
+async function canUseMatchaForWrite(session: EditSession): Promise<boolean> {
+  return session.isSuperuser || session.isDeveloper === true || (await isObserver(session.cwid));
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isMatchaEnabled()) return new NextResponse(null, { status: 404 });
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
   const { session, realCwid, body } = req.ctx;
 
-  if (!(session.isSuperuser || session.isDeveloper)) {
+  if (!(await canUseMatchaForWrite(session))) {
     logEditDenial({
       actorCwid: realCwid,
       targetCwid: "sponsor-match",
@@ -502,7 +514,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 /**
  * The ONE scope predicate for retained searches, shared by GET and DELETE so the two cannot
  * drift apart again (#1776: the read was scoped while DELETE erased any row by id).
- * Superuser ⇒ no filter (everyone's). Anyone else — INCLUDING a developer — ⇒ their own. The
+ * Superuser ⇒ no filter (everyone's). Anyone else — INCLUDING a developer or observer — ⇒ their own. The
  * TRUE leg is the privileged one so an absent flag fails closed. See GET's doc-comment.
  */
 function submissionScope(session: Pick<EditSession, "cwid" | "isSuperuser">) {
@@ -512,7 +524,7 @@ function submissionScope(session: Pick<EditSession, "cwid" | "isSuperuser">) {
 export async function GET(): Promise<NextResponse> {
   if (!isMatchaEnabled()) return new NextResponse(null, { status: 404 });
   const session = await getEffectiveEditSession();
-  if (!session || !(session.isSuperuser || session.isDeveloper)) {
+  if (!session || !(session.isSuperuser || session.isDeveloper || session.isObserver)) {
     return new NextResponse(null, { status: 403 });
   }
   try {
@@ -609,7 +621,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (!req.ok) return req.response;
   const { session, realCwid, body } = req.ctx;
 
-  if (!(session.isSuperuser || session.isDeveloper)) {
+  if (!(await canUseMatchaForWrite(session))) {
     logEditDenial({
       actorCwid: realCwid,
       targetCwid: "sponsor-match",

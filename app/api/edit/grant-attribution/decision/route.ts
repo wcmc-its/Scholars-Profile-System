@@ -118,6 +118,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (trimmed.length > GRANT_REJECTION_REASON_MAX) return editError(400, "invalid_body", "reason");
     reason = trimmed.length > 0 ? trimmed : null;
   }
+  // "Not this person" always says why: the Not this person tab lists it.
+  if (decision === "reject" && reason === null) return editError(400, "invalid_body", "reason");
 
   const ts = new Date();
   let result: { entities: string[]; suppressions: Array<{ suppressionId: string; entityId: string }> };

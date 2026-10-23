@@ -35,6 +35,7 @@ const {
   mockSubmissionFindUnique,
   mockSubmissionFindFirst,
   mockGetEffectiveEditSession,
+  mockIsObserver,
   mockCachedReasonAgg,
 } = vi.hoisted(() => ({
   mockRelevanceScoresForQuery: vi.fn(),
@@ -53,6 +54,7 @@ const {
   mockSubmissionFindUnique: vi.fn(),
   mockSubmissionFindFirst: vi.fn(),
   mockGetEffectiveEditSession: vi.fn(),
+  mockIsObserver: vi.fn(),
   // #1780 Phase 2 — the real `cachedReasonAgg` BYPASSES its cache under VITEST (returns `load()`
   // directly), so the route's cache KEY is never exercised by default. This capturing stub keeps
   // that pass-through behaviour (every existing test still runs the loader) while recording each
@@ -93,6 +95,7 @@ vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogEditDenial }));
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEffectiveEditSession,
 }));
+vi.mock("@/lib/auth/observer", () => ({ isObserver: mockIsObserver }));
 // The route consumes the mocked engine; the engine tests reach the real one
 // via `vi.importActual` below (its db/search imports stay mocked either way).
 vi.mock("@/lib/api/matcha", async (importOriginal) => ({
@@ -144,6 +147,7 @@ beforeEach(() => {
   mockRankForDescription.mockResolvedValue([]);
   mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
   mockSubmissionFindFirst.mockResolvedValue(null); // no persisted answer unless a test plants one
+  mockIsObserver.mockResolvedValue(false);
 });
 
 describe("rankResearchersForDescription (engine)", () => {
@@ -292,6 +296,20 @@ describe("POST /api/edit/matcha (route)", () => {
       expect.objectContaining({ path: "/api/edit/matcha", reason: "not_developer_post" }),
     );
     expect(mockRankForDescription).not.toHaveBeenCalled();
+  });
+
+  it("admits an observer: the write session has the flag stripped, so the directory is asked", async () => {
+    const observer = {
+      ...developerCtx,
+      session: { cwid: "obs1", isSuperuser: false, isDeveloper: false },
+      effective: { cwid: "obs1", isSuperuser: false, isDeveloper: false },
+      realCwid: "obs1",
+    };
+    mockIsObserver.mockResolvedValue(true);
+    const resp = await POST(postRequest(observer, { description: "x" }));
+    expect(resp.status).toBe(200);
+    expect(mockIsObserver).toHaveBeenCalledWith("obs1");
+    expect(mockLogEditDenial).not.toHaveBeenCalled();
   });
 
   it("400s on a missing/blank description", async () => {
@@ -904,6 +922,19 @@ describe("POST /api/edit/matcha (route)", () => {
       await GET();
 
       expect(mockSubmissionFindMany.mock.calls[0][0].where).toEqual({ submittedBy: "dev1" });
+    });
+
+    it("an OBSERVER reaches GET and sees ONLY THEIR OWN rows", async () => {
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "obs1",
+        isSuperuser: false,
+        isCommsSteward: true, // the observer's synthetic read grant — must not widen the scope
+        isObserver: true,
+      });
+      mockSubmissionFindMany.mockResolvedValue(historyRows());
+
+      expect((await GET()).status).toBe(200);
+      expect(mockSubmissionFindMany.mock.calls[0][0].where).toEqual({ submittedBy: "obs1" });
     });
 
     it("a SUPERUSER sees every officer's rows — an unfiltered read", async () => {

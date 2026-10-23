@@ -4,7 +4,7 @@
  * per-concept OpenSearch fan-out → RRF fuse). Same surface as `/edit/matcha`, but the ask is
  * SEEDED from an opportunity's title + synopsis instead of a pasted sponsor description.
  *
- * Gate mirrors `/edit/matcha` (superuser OR development role) AND adds
+ * Gate mirrors `/edit/matcha` (superuser OR development role OR observer) AND adds
  * `isGrantMatchaEnabled()`; `notFound()` while either flag is off so the dark surface is never
  * revealed. That is byte-for-byte the `grantMatcha` predicate in
  * `lib/edit/console-tabs.server.ts` — the page admits exactly whom the nav tab shows (I2),
@@ -44,8 +44,8 @@ export default async function GrantMatchaPage() {
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/grant-matcha");
   }
-  // Superuser OR development role — the same verdict the data route reads.
-  if (!(session.isSuperuser || session.isDeveloper)) {
+  // Superuser OR development role OR observer — the same verdict the data route reads.
+  if (!(session.isSuperuser || session.isDeveloper || session.isObserver)) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "grant-matcha",
@@ -64,6 +64,10 @@ export default async function GrantMatchaPage() {
     );
   }
 
+  // An observer runs the matcher but never reaches the opportunity intake / admin
+  // controls: their routes stay superuser-or-developer, so the tabs would only 403.
+  const observerOnly = !(session.isSuperuser || session.isDeveloper);
+
   // Fold into the shared console — mirrors `/edit/matcha`.
   const pendingSlugRequests =
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
@@ -79,8 +83,8 @@ export default async function GrantMatchaPage() {
       pendingHonors={pendingHonors}
     >
       <GrantMatchaTabs
-        intakeEnabled={isOpportunityIntakeEnabled()}
-        adminEnabled={isMatchaAdminEnabled()}
+        intakeEnabled={isOpportunityIntakeEnabled() && !observerOnly}
+        adminEnabled={isMatchaAdminEnabled() && !observerOnly}
       />
     </ConsoleShell>
   );

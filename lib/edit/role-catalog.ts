@@ -61,8 +61,8 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     description: "Read-only console access for staff who support users.",
     source: "ed_group",
     groupCn: ED("observer"),
-    can: ["Read every profile and unit", "Read every queue and dashboard", "Download CVs", "View as (read-only)"],
-    cannot: ["Any edit"],
+    can: ["Read every profile and unit", "Read every queue and dashboard", "Download CVs", "View as (read-only)", "Matcha and Grant Matcha"],
+    cannot: ["Any edit (Matcha searches excepted)"],
   },
   {
     key: "development",

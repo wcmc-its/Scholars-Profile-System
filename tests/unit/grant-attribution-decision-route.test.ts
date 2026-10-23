@@ -122,6 +122,12 @@ describe("validation", () => {
     expect((await POST(request({ id: "rev-1", decision: "reject", reason: long }, SUPERUSER))).status).toBe(400);
   });
 
+  it("requires a reason to reject, one or many", async () => {
+    expect((await POST(request({ id: "rev-1", decision: "reject" }, SUPERUSER))).status).toBe(400);
+    expect((await POST(request({ id: "rev-1", decision: "reject", reason: "   " }, SUPERUSER))).status).toBe(400);
+    expect((await POST(request({ ids: ["a", "b"], decision: "reject" }, SUPERUSER))).status).toBe(400);
+  });
+
   it("caps a bulk decision and refuses duplicates", async () => {
     const many = Array.from({ length: 51 }, (_, i) => `rev-${i}`);
     expect((await POST(request({ ids: many, decision: "confirm" }, SUPERUSER))).status).toBe(400);
