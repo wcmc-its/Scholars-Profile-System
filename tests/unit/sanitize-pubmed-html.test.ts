@@ -57,3 +57,54 @@ describe("sanitizePubmedHtml — whitelist", () => {
     expect(stray).toBeNull();
   });
 });
+
+// One-pass stripping splices the text around a removed tag into a new tag:
+// `<<x>script>` loses `<x>` and leaves `<script>`. Every `<` that doesn't open
+// a bare whitelisted tag must come out escaped.
+const SPLICE_PAYLOAD =
+  "Gene <mark>X</mark><<x>script>alert(document.domain)<<x>/script> " +
+  "<<x>a href=javascript:alert(1)>see <<x>img src=x onerror=alert(1)>";
+
+/** Parse as the browser would for `dangerouslySetInnerHTML`. */
+function render(html: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.innerHTML = html;
+  return el;
+}
+
+describe("sanitizePubmedHtml — tag-splicing bypass", () => {
+  it("escapes tags spliced together by removing the tag inside them", () => {
+    const out = sanitizePubmedHtml(SPLICE_PAYLOAD);
+    expect(out).not.toMatch(/<script/i);
+    expect(out).not.toMatch(/<a /i);
+    expect(out).not.toMatch(/<img/i);
+    expect(out).toContain("&lt;");
+    const el = render(out);
+    expect(el.querySelectorAll("*")).toHaveLength(0);
+    expect(el.textContent).toContain("<script>alert(document.domain)</script>");
+  });
+
+  it("escapes a spliced whitelisted tag that would carry an attribute", () => {
+    expect(sanitizePubmedHtml("<<x>i onclick=alert(1)>x</i>")).toBe("&lt;i onclick=alert(1)>x</i>");
+    const el = render(sanitizePubmedHtml("<<x>b onmouseover=alert(1)>x"));
+    expect(el.querySelectorAll("[onmouseover]")).toHaveLength(0);
+  });
+
+  it("escapes a stray < outside any tag (comparators, comment openers)", () => {
+    expect(sanitizePubmedHtml("p < 0.05 and q <0.01")).toBe("p &lt; 0.05 and q &lt;0.01");
+    expect(render(sanitizePubmedHtml("p < 0.05")).textContent).toBe("p < 0.05");
+    expect(sanitizePubmedHtml("<!-- x")).toBe("&lt;!-- x");
+  });
+
+  it("leaves legitimate markup as it was", () => {
+    expect(sanitizePubmedHtml("H<sub>2</sub>O")).toBe("H<sub>2</sub>O");
+    expect(sanitizePubmedHtml("<i>in vivo</i>")).toBe("<i>in vivo</i>");
+    expect(sanitizePubmedHtml('<I class="x">in vivo</I>')).toBe("<i>in vivo</i>");
+    expect(sanitizePubmedHtml("p &lt; 0.05")).toBe("p &lt; 0.05");
+  });
+
+  it("is idempotent, so a double-sanitized string is unchanged", () => {
+    const once = sanitizePubmedHtml(SPLICE_PAYLOAD + " p < 0.05 H<sub>2</sub>O");
+    expect(sanitizePubmedHtml(once)).toBe(once);
+  });
+});

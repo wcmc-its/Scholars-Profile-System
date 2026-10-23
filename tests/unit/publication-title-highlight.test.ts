@@ -59,3 +59,45 @@ describe("highlightedTitleHtml", () => {
     );
   });
 });
+
+describe("highlightedTitleHtml — tag-splicing bypass", () => {
+  // One-pass stripping splices the text around a removed tag into a new tag:
+  // `<<x>script>` loses `<x>` and leaves `<script>`.
+  const PAYLOAD =
+    "Gene <mark>X</mark><<x>script>alert(document.domain)<<x>/script> " +
+    "<<x>a href=javascript:alert(1)>see <<x>img src=x onerror=alert(1)>";
+
+  function render(html: string): HTMLDivElement {
+    const el = document.createElement("div");
+    el.innerHTML = html;
+    return el;
+  }
+
+  it("escapes spliced tags and keeps the legitimate mark", () => {
+    const out = highlightedTitleHtml(PAYLOAD);
+    expect(out).not.toMatch(/<script/i);
+    expect(out).not.toMatch(/<a /i);
+    expect(out).not.toMatch(/<img/i);
+    expect(out).toContain("&lt;");
+    expect(out.startsWith(`Gene ${mark("X")}`)).toBe(true);
+    const el = render(out);
+    expect(el.querySelectorAll("script, a, img")).toHaveLength(0);
+    expect(el.querySelectorAll("mark")).toHaveLength(1);
+  });
+
+  it("escapes a spliced mark that would carry an event handler", () => {
+    const out = highlightedTitleHtml("<<x>mark onmouseover=alert(1)>x</mark>");
+    expect(out).toBe("&lt;mark onmouseover=alert(1)>x</mark>");
+    expect(render(out).querySelectorAll("[onmouseover]")).toHaveLength(0);
+  });
+
+  it("leaves legitimate content as it was", () => {
+    expect(highlightedTitleHtml("<mark>p</mark> < 0.05")).toBe(`${mark("p")} &lt; 0.05`);
+    expect(highlightedTitleHtml('<i class="x">in vivo</i> H<sub>2</sub>O')).toBe(
+      "<i>in vivo</i> H<sub>2</sub>O",
+    );
+    expect(highlightedTitleHtml('<mark data-x="1">Gut</mark> <MARK>Microbiome</MARK>')).toBe(
+      mark("Gut Microbiome"),
+    );
+  });
+});
