@@ -10,12 +10,12 @@
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.700.0",
-    "mariadb": "^3.5.2"
+    "mariadb": "^3.5.4"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.150",
     "@types/node": "^24.10.1",
     "typescript": "~5.9.3",
-    "vitest": "^3.0.0"
+    "vitest": "^5.0.5"
   }
 }
