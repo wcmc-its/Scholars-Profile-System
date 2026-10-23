@@ -463,7 +463,9 @@ export function Nci2aTable({
                   <td className="py-3 pr-3 pl-5">
                     <div className="leading-snug font-semibold">
                       {a.grantCwid ? (
-                        <ScholarHoverCard cwid={a.grantCwid}>{a.pi}</ScholarHoverCard>
+                        <ScholarHoverCard cwid={a.grantCwid}>
+                          <span>{a.pi}</span>
+                        </ScholarHoverCard>
                       ) : (
                         a.pi
                       )}
@@ -490,7 +492,7 @@ export function Nci2aTable({
                       <div className="font-mono text-[13px] font-semibold">{a.projectNumber}</div>
                     )}
                     <div
-                      className="mt-0.5 line-clamp-2 text-[13px] leading-snug"
+                      className="mt-0.5 text-[13px] leading-snug"
                       title={a.projectTitle}
                     >
                       {a.projectTitle}

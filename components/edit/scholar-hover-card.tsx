@@ -4,7 +4,7 @@
  * The shared /edit scholar hover card (~300ms): larger headshot, cwid, email,
  * person type, current titles, an overview excerpt, and a public-profile link.
  * Given just a cwid, so any roster or report can wrap a name in it —
- * `<ScholarHoverCard cwid={r.cwid}>{r.name}</ScholarHoverCard>`. The data
+ * `<ScholarHoverCard cwid={r.cwid}><span>{r.name}</span></ScholarHoverCard>`. The data
  * comes from `GET /api/edit/scholar-card/[cwid]`, prefetched on pointer-enter
  * so it has usually landed by the time the card opens, and cached per page.
  *
