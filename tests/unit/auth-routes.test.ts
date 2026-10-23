@@ -143,6 +143,90 @@ describe("POST /api/auth/saml/callback", () => {
     const res = await callbackPOST(callbackRequest({ SAMLResponse: "x" }));
     expect(res.status).toBe(500);
   });
+
+  it("400s a non-urlencoded body, as request.formData() did", async () => {
+    const req = new NextRequest(CALLBACK, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "SAMLResponse=valid",
+    });
+    const res = await callbackPOST(req);
+    expect(res.status).toBe(400);
+    expect(mockedValidate).not.toHaveBeenCalled();
+  });
+
+  it("413s on an oversize Content-Length without reading the body", async () => {
+    // Handler-level only: deployed, the proxy's body clone has already drained
+    // the request before the handler runs (see the note in the route's POST).
+    const req = new NextRequest(CALLBACK, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "content-length": String(10 * 1024 * 1024),
+      },
+      body: "SAMLResponse=valid",
+    });
+    const res = await callbackPOST(req);
+    expect(res.status).toBe(413);
+    expect(req.bodyUsed).toBe(false);
+    expect(mockedValidate).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(
+      JSON.stringify({ event: "saml_callback_failed", reason: "body_too_large" }),
+    );
+  });
+
+  it("413s an oversize chunked body with no Content-Length, aborting the read", async () => {
+    // 1 MiB in 16 KiB chunks, no Content-Length: the cap must cut the handler's
+    // read off part-way and cancel the stream rather than drain it.
+    const chunk = new TextEncoder().encode("A".repeat(16 * 1024));
+    let sent = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("SAMLResponse="));
+      },
+      pull(controller) {
+        if (sent >= 64) return controller.close();
+        sent++;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new NextRequest(CALLBACK, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+      duplex: "half",
+    });
+    const res = await callbackPOST(req);
+    expect(res.status).toBe(413);
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThan(64);
+    expect(mockedValidate).not.toHaveBeenCalled();
+  });
+
+  it("parses a large but under-cap body unchanged", async () => {
+    mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234", assertion: ASSERTION });
+    const samlResponse = "P".repeat(200 * 1024);
+    const body = new URLSearchParams({
+      SAMLResponse: samlResponse,
+      RelayState: "/edit/foo",
+    }).toString();
+    const req = new NextRequest(CALLBACK, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "content-length": String(body.length),
+      },
+      body,
+    });
+    const res = await callbackPOST(req);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/edit/foo");
+    expect(mockedValidate).toHaveBeenCalledWith(samlResponse);
+  });
 });
 
 describe("POST /api/auth/logout", () => {
