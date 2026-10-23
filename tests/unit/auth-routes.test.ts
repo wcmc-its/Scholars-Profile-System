@@ -156,6 +156,8 @@ describe("POST /api/auth/saml/callback", () => {
   });
 
   it("413s on an oversize Content-Length without reading the body", async () => {
+    // Handler-level only: deployed, the proxy's body clone has already drained
+    // the request before the handler runs (see the note in the route's POST).
     const req = new NextRequest(CALLBACK, {
       method: "POST",
       headers: {
@@ -174,8 +176,8 @@ describe("POST /api/auth/saml/callback", () => {
   });
 
   it("413s an oversize chunked body with no Content-Length, aborting the read", async () => {
-    // 1 MiB in 16 KiB chunks, no Content-Length: the cap must cut the read off
-    // part-way and cancel the stream rather than drain it.
+    // 1 MiB in 16 KiB chunks, no Content-Length: the cap must cut the handler's
+    // read off part-way and cancel the stream rather than drain it.
     const chunk = new TextEncoder().encode("A".repeat(16 * 1024));
     let sent = 0;
     let cancelled = false;

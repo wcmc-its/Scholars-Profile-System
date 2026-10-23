@@ -40,9 +40,12 @@ function errorPage(status: number, message: string): NextResponse {
 }
 
 /**
- * Read the body as text, giving up once it passes `limit` bytes — so a chunked
- * body with no (or a lying) Content-Length is never buffered past the cap.
- * Returns null when the cap is exceeded.
+ * Read the body as text, giving up once it passes `limit` bytes, so a chunked
+ * body with no (or a lying) Content-Length never reaches URLSearchParams or the
+ * XML parser past the cap. Returns null when the cap is exceeded.
+ *
+ * This bounds what THIS handler holds and parses, not what the server ingests:
+ * see the note in POST about the proxy's body clone.
  */
 async function readBodyCapped(request: NextRequest, limit: number): Promise<string | null> {
   if (!request.body) return "";
@@ -70,8 +73,17 @@ function bodyTooLarge(): NextResponse {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // Cap the body BEFORE parsing: the XML is parsed ahead of the signature
   // check, so an unauthenticated multi-MB POST would otherwise cost CPU and
-  // memory. Reject on a declared Content-Length without reading the body, and
-  // enforce the same cap while streaming for chunked or under-declared bodies.
+  // memory in URLSearchParams and the XML parser. Reject an oversize declared
+  // Content-Length before the handler touches the body, and enforce the same
+  // cap while streaming for chunked or under-declared bodies.
+  //
+  // What this does NOT bound is ingestion. proxy.ts's matcher covers this path,
+  // and for any proxied POST Next 16 clones the body (one copy for the proxy,
+  // one buffered for the handler) and waits for the client to finish sending
+  // before the handler runs, so up to experimental.proxyClientMaxBodySize
+  // (default 10 MiB; not set in next.config.ts) is already in memory, twice,
+  // by the time this check runs (next-server runMiddleware: cloneBodyStream +
+  // finalize). That cost applies to every proxied POST route, not just this one.
   const declaredLength = Number(request.headers.get("content-length"));
   if (declaredLength > MAX_CALLBACK_BODY_BYTES) return bodyTooLarge();
 
