@@ -150,6 +150,7 @@ export const CUE_LABELS: Readonly<Record<string, string>> = {
   copi_coauthor: "Co-PI is a co-author",
   topic_match: "Topics match",
   topic_mismatch: "Topics differ",
+  profile_proven: "NIH profile proven",
 };
 
 export function cueLabel(id: string): string {

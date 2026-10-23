@@ -79,6 +79,16 @@ export const GRANT_JOIN_RESOLUTION_SOURCES: ReadonlySet<string> = new Set([
  * and a grant-join profile next to a name-only one can still bring in another
  * WCM person's awards.
  */
+/** A profile matched by neither name alone nor a WCM grant join: the v2
+ *  PMID-overlap matcher's sources, or a curator's link. Cue 8 trusts such a
+ *  profile's awards. */
+export function isPublicationMatchedSource(resolutionSource: string): boolean {
+  return (
+    !NAME_ONLY_RESOLUTION_SOURCES.has(resolutionSource) &&
+    !GRANT_JOIN_RESOLUTION_SOURCES.has(resolutionSource)
+  );
+}
+
 export type CorroborationPolicy = "none" | "wcm-or-publication" | "publication-only";
 
 export function corroborationPolicy(resolutionSources: Iterable<string>): CorroborationPolicy {

@@ -51,7 +51,8 @@ export type CueId =
   | "prior_institution"
   | "copi_coauthor"
   | "topic_match"
-  | "topic_mismatch";
+  | "topic_mismatch"
+  | "profile_proven";
 
 export interface CueHit {
   id: CueId;
@@ -119,8 +120,18 @@ export const WEIGHTS = {
   /** Tie-break only, see rule 3. */
   topic_match: 1,
   topic_mismatch: -1,
+  /** The award's PI profile is proven the scholar's: matched by publications,
+   *  or PROFILE_PROVEN_MIN_LINKED of its other awards cite the scholar's papers.
+   *  A pre-WCM award no paper cites (a conference grant, an old contract) then
+   *  shows on the strength of the profile. STRONG, so a strong negative still
+   *  queues it. */
+  profile_proven: 4,
 } as const satisfies Record<Exclude<CueId, "infoed_other_wcm_pi_named">, number>;
 
+/** Other awards on one NIH profile that a confirmed paper ties to the scholar
+ *  before that profile vouches for the rest. Two, so one stray citation by a
+ *  co-author does not prove a namesake's profile. */
+export const PROFILE_PROVEN_MIN_LINKED = 2;
 /** Shared papers with a co-PI before cue 6 fires. One shared paper is too easy
  *  to hit through a common surname and initial. */
 export const COAUTHOR_MIN_PAPERS = 2;
@@ -183,6 +194,11 @@ export interface AttributionEvidence {
   /** Cue 7. null ⇒ the award has no MeSH descriptors yet, or the scholar has
    *  no MeSH-tagged papers. */
   topic: { share: number; descriptors: number; papers: number } | null;
+  /** Cue 8. The award's PI profile is proven the scholar's, by its resolution
+   *  source ("matched") or by sibling awards a confirmed paper ties to them
+   *  ("siblings"). null ⇒ neither. Set by `profileProof`, after every award of
+   *  the scholar has its `publicationLinked`. */
+  profileProven: { kind: "matched" } | { kind: "siblings"; linked: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +624,14 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
   }
   if (e.priorInstitution) {
     add("prior_institution", `Held at an institution the scholar trained at (${e.priorInstitution})`);
+  }
+  if (e.profileProven?.kind === "matched") {
+    add("profile_proven", "The award is on the scholar's NIH profile that was matched by their publications");
+  } else if (e.profileProven?.kind === "siblings") {
+    add(
+      "profile_proven",
+      `${e.profileProven.linked} other awards on the same NIH profile are cited by the scholar's papers`,
+    );
   }
   if (e.coPiSharedPapers !== null && e.coPiSharedPapers >= COAUTHOR_MIN_PAPERS) {
     add("copi_coauthor", `A co-PI on this award co-authored ${e.coPiSharedPapers} of the scholar's papers`);

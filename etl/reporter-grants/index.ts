@@ -57,13 +57,14 @@ import {
   type AwardPlan,
   type AwardState,
 } from "./attribution-plan";
-import { buildAwardEvidence, buildScholarFacts } from "./evidence";
+import { buildAwardEvidence, buildScholarFacts, profileProof } from "./evidence";
 import { evidenceKey, scoreAttribution, type AttributionScore, type CueId } from "./score";
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
   corroborationPolicy,
   groupProjectsByCore,
+  isPublicationMatchedSource,
   recencyShouldSuppress,
   toReporterProject,
   type CorroborationPolicy,
@@ -426,6 +427,8 @@ interface ScoredCandidate {
 /** #3071 — the run-wide inputs the attribution scorer reads, loaded once. */
 interface AttributionContext {
   profileIdsByCwid: Map<string, number[]>;
+  /** The subset matched by publications or a curator (cue 8). */
+  matchedProfileIdsByCwid: Map<string, number[]>;
   /** Other WCM investigators per core project number (InfoEd). */
   infoedByCore: Map<string, Array<{ cwid: string; role: string }>>;
   namesByCwid: Map<string, { fullName: string; preferredName: string }>;
@@ -506,6 +509,7 @@ async function scoreScholarAwards(
     confirmed,
     educations: ctx.educationByCwid.get(cwid) ?? [],
     profileIds: ctx.profileIdsByCwid.get(cwid) ?? [],
+    matchedProfileIds: ctx.matchedProfileIdsByCwid.get(cwid) ?? [],
     rejected,
   });
 
@@ -558,10 +562,9 @@ async function scoreScholarAwards(
     ).map((g) => [g.id, Array.isArray(g.meshDescriptorUis) ? (g.meshDescriptorUis as unknown[]) : []]),
   );
 
-  const out = new Map<string, ScoredAward>();
-  for (const c of candidates) {
+  const built = candidates.map((c) => {
     const core = c.group.coreProjectNum;
-    const { evidence, revocable } = buildAwardEvidence({
+    return buildAwardEvidence({
       policy,
       facts,
       group: c.group,
@@ -576,9 +579,19 @@ async function scoreScholarAwards(
         }),
       meshUis: (meshByGrant.get(c.row.id) ?? []).filter((u): u is string => typeof u === "string"),
     });
-    const score = scoreAttribution(evidence);
+  });
+  // Cue 8 needs every award's publicationLinked first: a profile is proven by
+  // its OTHER awards.
+  const proof = profileProof(
+    built.map((b) => ({ ourProfileIds: b.ourProfileIds, publicationLinked: b.evidence.publicationLinked })),
+    facts.matchedProfileIds,
+  );
+  const out = new Map<string, ScoredAward>();
+  candidates.forEach((c, i) => {
+    const { evidence, revocable } = built[i]!;
+    const score = scoreAttribution({ ...evidence, profileProven: proof[i]! });
     out.set(c.row.externalId, { score, key: evidenceKey(score), award: awardFacts(c), revocable });
-  }
+  });
   return out;
 }
 
@@ -599,8 +612,12 @@ async function main() {
     select: { cwid: true, nihProfileId: true, resolutionSource: true },
   });
   const profilesByCwid = new Map<string, number[]>();
+  const matchedProfilesByCwid = new Map<string, number[]>();
   const sourcesByCwid = new Map<string, string[]>();
   for (const r of profileRows) {
+    if (isPublicationMatchedSource(r.resolutionSource)) {
+      matchedProfilesByCwid.set(r.cwid, [...(matchedProfilesByCwid.get(r.cwid) ?? []), r.nihProfileId]);
+    }
     const arr = profilesByCwid.get(r.cwid) ?? [];
     arr.push(r.nihProfileId);
     profilesByCwid.set(r.cwid, arr);
@@ -713,6 +730,7 @@ async function main() {
       for (const w of gate.warnings) console.warn(`#3071 attribution: ${w}`);
       attribution = {
         profileIdsByCwid: profilesByCwid,
+        matchedProfileIdsByCwid: matchedProfilesByCwid,
         infoedByCore,
         namesByCwid,
         educationByCwid,

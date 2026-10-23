@@ -6,6 +6,7 @@
 import { parseNihAward } from "@/lib/award-number";
 import { namesMatch, reporterPiName } from "@/etl/nih-profile/resolver";
 import {
+  PROFILE_PROVEN_MIN_LINKED,
   authorKey,
   coauthorPapers,
   doctoralYearRange,
@@ -38,6 +39,8 @@ export interface ScholarFacts {
   educations: ReadonlyArray<{ degree: string; institution: string; year: number | null }>;
   doctoralYears: { earliest: number; latest: number } | null;
   profileIds: Set<number>;
+  /** Profiles matched by publications (not by name or a WCM grant join). */
+  matchedProfileIds: Set<number>;
   /** Confirmed PMIDs (strings, as `publication_author.pmid`). */
   pmids: Set<string>;
   /** ReCiter rejections; null when the mirror is unavailable (cue 2 off). */
@@ -52,6 +55,7 @@ export function buildScholarFacts(args: {
   }>;
   educations: ReadonlyArray<{ degree: string; institution: string; year: number | null }>;
   profileIds: Iterable<number>;
+  matchedProfileIds?: Iterable<number>;
   rejected: Set<string> | null;
 }): ScholarFacts {
   const scholarNames = [args.names?.fullName, args.names?.preferredName];
@@ -81,6 +85,7 @@ export function buildScholarFacts(args: {
     educations: args.educations,
     doctoralYears: doctoralYearRange(args.educations),
     profileIds: new Set(args.profileIds),
+    matchedProfileIds: new Set(args.matchedProfileIds ?? []),
     pmids: new Set(args.confirmed.map((c) => c.pmid)),
     rejected: args.rejected,
   };
@@ -110,7 +115,7 @@ export function buildAwardEvidence(args: {
   /** Other WCM investigators InfoEd lists on the core (this scholar removed). */
   infoedOthers: ReadonlyArray<{ role: string; names: ReadonlyArray<string | null | undefined> }>;
   meshUis: ReadonlyArray<string>;
-}): { evidence: AttributionEvidence; revocable: boolean } {
+}): { evidence: AttributionEvidence; revocable: boolean; ourProfileIds: number[] } {
   const { facts, group } = args;
   const ourPis = group.pis.filter((pi) => facts.profileIds.has(pi.profile_id));
   const coPis = group.pis.filter((pi) => !facts.profileIds.has(pi.profile_id));
@@ -154,9 +159,42 @@ export function buildAwardEvidence(args: {
         ? { name: coPi.name, pmids: coPi.pmids.slice(0, COPI_PMIDS_KEPT) }
         : null,
     topic: topicOverlap(args.meshUis, facts.meshCounts, facts.taggedPapers),
+    profileProven: null,
   };
   // A revoke lifts a hide on the strength of negative cues NOT firing. Cue 1's
   // decisive branch and cue 4 read the RePORTER PI on our profile and the
   // scholar's name: without either, their silence proves nothing.
-  return { evidence, revocable: ourPis.length > 0 && facts.named };
+  return {
+    evidence,
+    revocable: ourPis.length > 0 && facts.named,
+    ourProfileIds: [...new Set(ourPis.map((pi) => pi.profile_id))],
+  };
+}
+
+/**
+ * Cue 8, for every award of one scholar at once: is the award's PI profile
+ * proven the scholar's? A profile is proven when it was matched by
+ * publications, or when at least PROFILE_PROVEN_MIN_LINKED of its OTHER awards
+ * carry a linked confirmed paper. The award itself never counts toward its own
+ * proof. Profiles are judged one by one, so a namesake's profile unioned in by
+ * name gains nothing from the scholar's real one. Pure; index.ts and the replay
+ * probe both call it.
+ */
+export function profileProof(
+  awards: ReadonlyArray<{ ourProfileIds: ReadonlyArray<number>; publicationLinked: boolean }>,
+  matchedProfileIds: ReadonlySet<number>,
+): Array<AttributionEvidence["profileProven"]> {
+  const linkedByProfile = new Map<number, number>();
+  for (const a of awards) {
+    if (!a.publicationLinked) continue;
+    for (const p of a.ourProfileIds) linkedByProfile.set(p, (linkedByProfile.get(p) ?? 0) + 1);
+  }
+  return awards.map((a) => {
+    if (a.ourProfileIds.some((p) => matchedProfileIds.has(p))) return { kind: "matched" };
+    let best = 0;
+    for (const p of a.ourProfileIds) {
+      best = Math.max(best, (linkedByProfile.get(p) ?? 0) - (a.publicationLinked ? 1 : 0));
+    }
+    return best >= PROFILE_PROVEN_MIN_LINKED ? { kind: "siblings", linked: best } : null;
+  });
 }

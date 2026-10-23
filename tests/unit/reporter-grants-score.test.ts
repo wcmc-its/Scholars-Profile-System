@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   HIDE_AT,
   PRIOR,
+  PROFILE_PROVEN_MIN_LINKED,
   SHOW_AT,
   WEIGHTS,
   authorKey,
@@ -23,6 +24,7 @@ import {
   type AttributionEvidence,
 } from "@/etl/reporter-grants/score";
 import { isWcmOrg } from "@/etl/reporter-grants/transform";
+import { profileProof } from "@/etl/reporter-grants/evidence";
 import { namesMatch } from "@/etl/nih-profile/resolver";
 
 /** An award with no evidence either way, under the name-only policy. */
@@ -39,6 +41,7 @@ const ev = (over: Partial<AttributionEvidence> = {}): AttributionEvidence => ({
   priorInstitution: null,
   coPiSharedPapers: null,
   topic: null,
+  profileProven: null,
   ...over,
 });
 
@@ -437,5 +440,68 @@ describe("cue 2 scope: individual awards only", () => {
 
   it("does not fire cue 2 on a center core", () => {
     expect(ids(ev({ activityCode: "P30", rejected: { overlap: 5, linkedTotal: 10 } }))).toEqual([]);
+  });
+});
+
+describe("cue 8: a proven NIH profile vouches for its awards", () => {
+  it("shows a pre-WCM award no paper cites when its profile was matched by publications", () => {
+    // A former institution's contract on the scholar's PMID-matched profile.
+    const s = scoreAttribution(ev({ activityCode: "N01", profileProven: { kind: "matched" } }));
+    expect(s.band).toBe("show");
+    expect(ids(ev({ profileProven: { kind: "matched" } }))).toEqual(["profile_proven"]);
+  });
+
+  it("shows a conference grant when two sibling awards on the profile are cited", () => {
+    const s = scoreAttribution(
+      ev({ policy: "publication-only", activityCode: "R13", profileProven: { kind: "siblings", linked: 3 } }),
+    );
+    expect(s.band).toBe("show");
+  });
+
+  it("queues, not shows, when a strong negative fires too", () => {
+    const s = scoreAttribution(
+      ev({ profileProven: { kind: "matched" }, rejected: { overlap: 3, linkedTotal: 10 } }),
+    );
+    expect(s.band).toBe("queue");
+    expect(s.rule).toBe("conflict");
+  });
+
+  it("never overrides the decisive other-WCM-investigator hide", () => {
+    const s = scoreAttribution(
+      ev({ profileProven: { kind: "matched" }, infoedOther: { piLevel: true, profileNameMatchesOther: true } }),
+    );
+    expect(s.band).toBe("hide");
+  });
+});
+
+describe("profileProof", () => {
+  const MATCHED = 1917230;
+  const NAMESAKE = 10404502;
+
+  it("judges each profile alone: the matched one vouches, a namesake's gains nothing", () => {
+    const proof = profileProof(
+      [
+        { ourProfileIds: [MATCHED], publicationLinked: false }, // old contract
+        { ourProfileIds: [MATCHED], publicationLinked: true },
+        { ourProfileIds: [NAMESAKE], publicationLinked: false }, // other person's R01
+      ],
+      new Set([MATCHED]),
+    );
+    expect(proof).toEqual([{ kind: "matched" }, { kind: "matched" }, null]);
+  });
+
+  it("proves a grant-join profile by two OTHER cited awards, never by the award itself", () => {
+    const P = 6602684;
+    const awards = [
+      { ourProfileIds: [P], publicationLinked: false }, // conference grant
+      { ourProfileIds: [P], publicationLinked: true },
+      { ourProfileIds: [P], publicationLinked: true },
+      { ourProfileIds: [P], publicationLinked: true },
+    ];
+    const proof = profileProof(awards, new Set());
+    expect(proof[0]).toEqual({ kind: "siblings", linked: 3 });
+    expect(proof[1]).toEqual({ kind: "siblings", linked: 2 });
+    expect(profileProof(awards.slice(0, 2), new Set())).toEqual([null, null]);
+    expect(PROFILE_PROVEN_MIN_LINKED).toBe(2);
   });
 });
