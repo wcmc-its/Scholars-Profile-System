@@ -21,14 +21,17 @@ export const MARK_CLASS =
 export function highlightedTitleHtml(fragment: string): string {
   // 1. Keep the scientific-notation whitelist + <mark>; drop everything else.
   //    Normalize marks to a bare tag; the pill class is applied in step 3.
-  const cleaned = fragment.replace(
-    /<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi,
-    (_, slash: string, raw: string) => {
+  //    Then escape every `<` that doesn't open a bare whitelisted tag: removing
+  //    a tag splices its neighbours together (`<<x>script>` → `<script>`), so
+  //    the strip alone can mint the markup it just dropped. This runs before
+  //    steps 2-3, which only ever see bare `<mark>`/`</mark>`.
+  const cleaned = fragment
+    .replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (_, slash: string, raw: string) => {
       const name = raw.toLowerCase();
       if (!TITLE_TAG_WHITELIST.test(name)) return "";
       return slash ? `</${name}>` : `<${name}>`;
-    },
-  );
+    })
+    .replace(/<(?!\/?(?:i|em|b|strong|sup|sub|mark)>)/gi, "&lt;");
   // 2. Merge adjacent marks separated only by whitespace into one pill, so a
   //    contiguous phrase ("Microbiome Research") reads as a single highlight
   //    rather than two abutting tinted boxes.

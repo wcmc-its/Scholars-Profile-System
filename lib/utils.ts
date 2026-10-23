@@ -98,15 +98,22 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
  * leak through (`<i class="foo">x</i>` → `<i>x</i>`). Any tag outside the
  * whitelist — including the orphaned closer of an attributed tag — is
  * removed entirely.
+ *
+ * Every other `<` left after that pass is escaped to `&lt;`. One pass cannot
+ * be trusted on its own: removing a tag splices its neighbours together, so
+ * `<<x>script>` would come out as a live `<script>`. A stray comparator
+ * (`p < 0.05`) renders the same escaped or not.
  */
 export function sanitizePubmedHtml(input: string): string {
-  return input.replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (_, slash, raw) => {
-    const name = (raw as string).toLowerCase();
-    if (/^(?:i|em|b|strong|sup|sub)$/.test(name)) {
-      return slash ? `</${name}>` : `<${name}>`;
-    }
-    return "";
-  });
+  return input
+    .replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (_, slash, raw) => {
+      const name = (raw as string).toLowerCase();
+      if (/^(?:i|em|b|strong|sup|sub)$/.test(name)) {
+        return slash ? `</${name}>` : `<${name}>`;
+      }
+      return "";
+    })
+    .replace(/<(?!\/?(?:i|em|b|strong|sup|sub)>)/gi, "&lt;");
 }
 
 /** @deprecated Renamed to {@link sanitizePubmedHtml} — kept for back-compat. */
