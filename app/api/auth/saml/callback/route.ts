@@ -16,6 +16,9 @@ import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
  */
 export const dynamic = "force-dynamic";
 
+/** Real SAML POST-binding responses are tens of KB; anything past this is not one. */
+const MAX_CALLBACK_BODY_BYTES = 256 * 1024;
+
 /** `message` must always be a fixed literal — it is interpolated into HTML. */
 function errorPage(status: number, message: string): NextResponse {
   const html = `<!doctype html>
@@ -36,16 +39,60 @@ function errorPage(status: number, message: string): NextResponse {
   });
 }
 
+/**
+ * Read the body as text, giving up once it passes `limit` bytes — so a chunked
+ * body with no (or a lying) Content-Length is never buffered past the cap.
+ * Returns null when the cap is exceeded.
+ */
+async function readBodyCapped(request: NextRequest, limit: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    total += value.byteLength;
+    if (total > limit) {
+      void reader.cancel().catch(() => {});
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+function bodyTooLarge(): NextResponse {
+  console.warn(JSON.stringify({ event: "saml_callback_failed", reason: "body_too_large" }));
+  return errorPage(413, "The sign-in response was too large.");
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let form: FormData;
+  // Cap the body BEFORE parsing: the XML is parsed ahead of the signature
+  // check, so an unauthenticated multi-MB POST would otherwise cost CPU and
+  // memory. Reject on a declared Content-Length without reading the body, and
+  // enforce the same cap while streaming for chunked or under-declared bodies.
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (declaredLength > MAX_CALLBACK_BODY_BYTES) return bodyTooLarge();
+
+  // The POST binding is an auto-submitted urlencoded HTML form, never multipart.
+  // Non-form content types were already a 400 under request.formData().
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.split(";")[0].trim().toLowerCase() !== "application/x-www-form-urlencoded") {
+    return errorPage(400, "The sign-in response was malformed.");
+  }
+
+  let form: URLSearchParams;
   try {
-    form = await request.formData();
+    const body = await readBodyCapped(request, MAX_CALLBACK_BODY_BYTES);
+    if (body === null) return bodyTooLarge();
+    form = new URLSearchParams(body);
   } catch {
     return errorPage(400, "The sign-in response was malformed.");
   }
 
   const samlResponse = form.get("SAMLResponse");
-  if (typeof samlResponse !== "string" || samlResponse.length === 0) {
+  if (!samlResponse) {
     return errorPage(400, "The sign-in response was missing.");
   }
 
@@ -87,11 +134,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return errorPage(401, "Your sign-in could not be verified. Please try again.");
   }
 
-  const relayState = form.get("RelayState");
-  const dest = safeReturnPath(
-    typeof relayState === "string" ? relayState : null,
-    getDefaultReturnPath(),
-  );
+  const dest = safeReturnPath(form.get("RelayState"), getDefaultReturnPath());
   // Relative Location, NOT new URL(dest, request.url): behind CloudFront -> ALB
   // -> Fargate, request.url is the container's internal address
   // (e.g. http://ip-10-0-0-0.ec2.internal:3000) -- absolutizing against it sends
