@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [master]
 
+# Read-only token. CI installs ~1,000 npm packages; none of them needs to write
+# to the repo. Jobs that need more must ask for it explicitly.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -41,7 +46,8 @@ jobs:
         run: npm ci
 
       - name: Validate OpenAPI spec
-        run: npx --yes @redocly/cli@latest lint openapi.yaml --format=github-actions
+        # Pinned: an unpinned @latest runs whatever was published most recently.
+        run: npx --yes @redocly/cli@2.62.1 lint openapi.yaml --format=github-actions
 
       - name: Lint
         run: npm run lint

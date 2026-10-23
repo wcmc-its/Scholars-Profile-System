@@ -1,0 +1,22 @@
+name: Dependency review
+
+# Fails a PR that ADDS a high or critical vulnerability in a runtime dependency.
+# Only what the PR's diff introduces is judged, so the existing alert backlog
+# does not turn every PR red. Dev-only dependencies are reported, not blocked.
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime
