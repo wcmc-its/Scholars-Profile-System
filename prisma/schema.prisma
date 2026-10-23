@@ -177,6 +177,7 @@ model Scholar {
   orcidDismissals      OrcidDismissal[]
   reporterCandidates   ReporterProfileCandidate[]
   grantReviews         GrantAttributionReview[]
+  grantScores          GrantAttributionScore[]
   clinicalTrials       PersonClinicalTrial[]
   datasetDeposits      PersonDatasetDeposit[]
   overviewGenerations  OverviewGeneration[]
@@ -1105,6 +1106,52 @@ model GrantAttributionReview {
   @@index([status, cwid])
   @@index([cwid])
   @@map("grant_attribution_review")
+}
+
+/// #3071 — the scorer's latest verdict on every RePORTER award it judged,
+/// whatever the band (`grant_attribution_review` holds only the queued ones).
+/// Rewritten each weekly run; a scholar's rows go when the scorer stops
+/// judging them. Feeds the queue's summary strip, its auto-confirmed rows and
+/// report 14. No FK to `grant`, like the review table.
+model GrantAttributionScore {
+  /// `reporter:{cwid}:{core}`, the key the grant's suppressions use.
+  grantExternalId String   @id @map("grant_external_id") @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// show | hide | queue
+  band            String   @db.VarChar(8)
+  score           Int
+  /// [{ id, weight, reason }], strongest first.
+  cues            Json
+  evidenceKey     String   @map("evidence_key") @db.VarChar(255)
+  /// The same award facts a review stores.
+  award           Json
+  /// RePORTER's name for the PI entry whose NIH profile is the scholar's,
+  /// as printed ("EXAMPLE, PAT D").
+  reporterName    String?  @map("reporter_name") @db.VarChar(255)
+  scoredAt        DateTime @map("scored_at")
+
+  @@index([band])
+  @@index([cwid])
+  @@map("grant_attribution_score")
+}
+
+/// #3071 — one row per weekly scoring run: the totals the strip and report 14
+/// show run over run. Aggregates only.
+model GrantAttributionRun {
+  id        Int      @id @default(autoincrement())
+  ranAt     DateTime @map("ran_at")
+  scholars  Int
+  show      Int
+  hide      Int
+  queue     Int
+  /// System hides lifted this run because the scorer now says show.
+  recovered Int
+  /// { cueId: awards it fired on }
+  cues      Json
+
+  @@index([ranAt])
+  @@map("grant_attribution_run")
 }
 
 /// #3071 cue 2 — (cwid, pmid) pairs a scholar rejected in ReCiter ("not me"),

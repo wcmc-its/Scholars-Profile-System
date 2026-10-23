@@ -78,6 +78,7 @@ import {
 } from "@/lib/edit/functional-roles";
 import {
   ARTICLE_COUNT_REPORT,
+  GRANT_ATTRIBUTION_REPORT,
   HIGH_IMPACT_PUBS_REPORT,
   isGrantableReportKey,
   isGrantableScopeKey,
@@ -100,6 +101,7 @@ const REPORT_N_BY_ACCESS_KEY: Record<string, keyof typeof REPORT_META_DEFAULTS> 
   [MENTORED_PUBS_REPORT]: "7",
   [ARTICLE_COUNT_REPORT]: "8",
   [HIGH_IMPACT_PUBS_REPORT]: "9",
+  [GRANT_ATTRIBUTION_REPORT]: "14",
 };
 
 /** The report's display name by `report_access.report_key`. */

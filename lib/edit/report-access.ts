@@ -96,6 +96,8 @@ export const MENTORED_PUBS_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string
  *  a grant is the wildcard alone. */
 export const ARTICLE_COUNT_REPORT = "article-count";
 export const HIGH_IMPACT_PUBS_REPORT = "high-impact-publications";
+/** Report 14 (Grant attribution, #3071). Whole-report grants, like 8 and 9. */
+export const GRANT_ATTRIBUTION_REPORT = "grant-attribution";
 export const WHOLE_REPORT_SCOPE_OPTIONS: ReadonlyArray<readonly [string, string]> = [[ALL_SCOPES, "Whole report"]];
 
 /** Every grantable `reportKey` → the `[scopeKey, label]` pairs it accepts.
@@ -110,6 +112,7 @@ export const REPORT_ACCESS_SCOPE_OPTIONS: Readonly<Record<string, ReadonlyArray<
   [MENTORED_PUBS_REPORT]: MENTORED_PUBS_SCOPE_OPTIONS,
   [ARTICLE_COUNT_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
   [HIGH_IMPACT_PUBS_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
+  [GRANT_ATTRIBUTION_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
 };
 
 /** Whether `reportKey` is a report a `report_access` row can still grant — a

@@ -31,6 +31,7 @@
  */
 import { type NextRequest, NextResponse } from "next/server";
 
+import { isReopenedFromDecision } from "@/etl/reporter-grants/attribution-plan";
 import { db } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { runAfterResponse } from "@/lib/edit/after-response";
@@ -55,7 +56,10 @@ const SYSTEM_UNVERIFIED = "system-unverified";
 const SYSTEM_RECENCY = "system-recency";
 
 type Decision = "confirm" | "reject" | "undo";
-type Effects = { revoked: string[]; created: string[] };
+/** `reopenedBy`: the review was pending as reopened-from-decision (a requeue,
+ *  or the ETL reopening a decision) when decided, by this cwid. Undo puts the
+ *  marker back, so the next run still leaves it to a curator. */
+type Effects = { revoked: string[]; created: string[]; reopenedBy?: string | null };
 
 class Refused extends Error {
   constructor(
@@ -70,7 +74,8 @@ function parseEffects(v: unknown): Effects | null {
   if (!v || typeof v !== "object") return null;
   const e = v as Partial<Effects>;
   const ok = (a: unknown): a is string[] => Array.isArray(a) && a.every((x) => typeof x === "string");
-  return ok(e.revoked) && ok(e.created) ? { revoked: e.revoked, created: e.created } : null;
+  if (!ok(e.revoked) || !ok(e.created)) return null;
+  return { revoked: e.revoked, created: e.created, reopenedBy: typeof e.reopenedBy === "string" ? e.reopenedBy : null };
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -161,8 +166,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             where: { id, status: row.status, decidedAt: row.decidedAt },
             data: {
               status: "pending",
-              decidedByCwid: null,
-              decidedAt: null,
+              decidedByCwid: effects.reopenedBy ?? null,
+              decidedAt: effects.reopenedBy ? ts : null,
               rejectionReason: null,
               decisionEffects: Prisma.DbNull,
             },
@@ -198,7 +203,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const systemHides = active.filter((s) => s.createdBy === SYSTEM_UNVERIFIED);
         const curatorHides = active.filter((s) => s.reason.startsWith(NOT_THIS_PERSON_REASON_PREFIX));
 
-        const effects: Effects = { revoked: [], created: [] };
+        const effects: Effects = {
+          revoked: [],
+          created: [],
+          reopenedBy: isReopenedFromDecision(row) ? row.decidedByCwid : null,
+        };
         if (decision === "confirm") {
           for (const s of [...systemHides, ...curatorHides]) {
             const r = await tx.suppression.updateMany({

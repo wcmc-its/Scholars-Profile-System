@@ -85,6 +85,7 @@ import { renderClinicalTrialsReport } from "@/components/edit/reports/clinical-t
 import { renderCoreGrantsReport } from "@/components/edit/reports/core-grants-body";
 import { renderCoreOutputReport } from "@/components/edit/reports/core-output-over-time-body";
 import { renderCoreUsersReport } from "@/components/edit/reports/core-users-body";
+import { renderGrantAttributionReport } from "@/components/edit/reports/grant-attribution-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -98,7 +99,11 @@ import {
   type ReportableUnitKind,
   type ReportsContext,
 } from "@/lib/edit/cancer-center-reports";
-import { HIGH_IMPACT_PUBS_REPORT, MENTORED_PUBS_REPORT } from "@/lib/edit/report-access";
+import {
+  GRANT_ATTRIBUTION_REPORT,
+  HIGH_IMPACT_PUBS_REPORT,
+  MENTORED_PUBS_REPORT,
+} from "@/lib/edit/report-access";
 import type { ReportKey } from "@/lib/edit/report-meta";
 
 /** The page's `searchParams`, awaited — Next's shape (a repeated key is an array). */
@@ -202,6 +207,13 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
   "11": { n: "11", gate: "unit", render: renderCoreUsersReport },
   "12": { n: "12", gate: "unit", render: renderCoreOutputReport },
   "13": { n: "13", gate: "unit", render: renderCoreGrantsReport },
+  // #3071 — 404s while GRANT_ATTRIBUTION_QUEUE is off (the body checks).
+  "14": {
+    n: "14",
+    gate: "person",
+    accessKey: GRANT_ATTRIBUTION_REPORT,
+    render: renderGrantAttributionReport,
+  },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page

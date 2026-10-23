@@ -446,6 +446,8 @@ interface ScoredAward {
   award: Prisma.InputJsonValue;
   /** Every per-award negative input was known (`buildAwardEvidence`). */
   revocable: boolean;
+  /** RePORTER's name for the PI entry on one of the scholar's NIH profiles. */
+  reporterName: string | null;
 }
 
 const yearOf = (d: Date | null): number | null => (d ? d.getUTCFullYear() : null);
@@ -588,9 +590,16 @@ async function scoreScholarAwards(
   );
   const out = new Map<string, ScoredAward>();
   candidates.forEach((c, i) => {
-    const { evidence, revocable } = built[i]!;
+    const { evidence, revocable, ourProfileIds } = built[i]!;
     const score = scoreAttribution({ ...evidence, profileProven: proof[i]! });
-    out.set(c.row.externalId, { score, key: evidenceKey(score), award: awardFacts(c), revocable });
+    const ours = c.group.pis.find((pi) => ourProfileIds.includes(pi.profile_id));
+    out.set(c.row.externalId, {
+      score,
+      key: evidenceKey(score),
+      award: awardFacts(c),
+      revocable,
+      reporterName: ours ? reporterPiName(ours) || null : null,
+    });
   });
   return out;
 }
@@ -745,6 +754,9 @@ async function main() {
     cue: {} as Partial<Record<CueId, number>>,
     minted: { "wcm-or-publication": 0, "publication-only": 0, queue: 0 },
     revoked: 0,
+    /** Scored awards whose hide the ETL lifted: the auto-confirmed rows. */
+    recovered: 0,
+    scholars: 0,
     review: { create: 0, refresh: 0, reopen: 0, withdraw: 0 },
     skippedNoPmids: 0,
     skippedFetchError: 0,
@@ -809,6 +821,8 @@ async function main() {
     // Recency-hidden awards are out of scope: the ETL keeps one system hide
     // per award, so one revoke surfaces it.
     const plans = new Map<string, { plan: AwardPlan; scored: ScoredAward | null }>();
+    // Every award judged this run, whatever its band (`grant_attribution_score`).
+    let judged: Map<string, ScoredAward> | null = null;
     const policy = corroborationPolicy(sourcesByCwid.get(cwid) ?? []);
     if (CORROBORATION_HIDE_ENABLED && attribution) {
       const inScope = toWrite.filter(
@@ -833,7 +847,11 @@ async function main() {
             plans.set(row.externalId, { plan, scored: null });
           }
         }
-      } else if (inScope.length > 0) {
+      } else if (inScope.length === 0) {
+        // Fetched, nothing left in scope (InfoEd covers it, aged out, gone
+        // from RePORTER): judged on zero awards, so last run's rows go.
+        judged = new Map();
+      } else {
         const scored = await scoreScholarAwards(
           cwid,
           policy,
@@ -845,6 +863,8 @@ async function main() {
         } else if (scored === "fetch-error") {
           tally.skippedFetchError++;
         } else {
+          judged = scored;
+          tally.scholars++;
           for (const [externalId, sc] of scored) {
             tally.band[sc.score.band]++;
             tally.rule[sc.score.rule]++;
@@ -926,6 +946,16 @@ async function main() {
           const entry = plans.get(row.externalId);
           if (!entry) continue;
           const { plan, scored } = entry;
+          // A curator may have sent this award back to review since the state
+          // was read: their pending review stands (rule 1b), so this run
+          // neither lifts its hide nor withdraws it.
+          if ((plan.revokeHideId || plan.review === "withdraw") && reviews.get(row.externalId)?.status !== "pending") {
+            const live = await tx.grantAttributionReview.findUnique({
+              where: { grantExternalId: row.externalId },
+              select: { status: true, decidedByCwid: true },
+            });
+            if (live && isReopenedFromDecision(live)) continue;
+          }
           const queued = scored?.score.band === "queue";
 
           if (plan.mintHide && policy !== "none") {
@@ -971,6 +1001,7 @@ async function main() {
               unverified.set(row.externalId, { activeId: null, humanRevoked: false });
               minted.push({ suppressionId: plan.revokeHideId, entityId: row.externalId });
               tally.revoked++;
+              if (scored) tally.recovered++;
             }
           }
 
@@ -1057,6 +1088,35 @@ async function main() {
       grantsUpserted += toWrite.length;
     }
 
+    // #3071 — the scorer's verdict on each award judged, for the queue's strip
+    // and report 14. A scholar judged this run replaces their rows; one whose
+    // profiles are all publication-matched ("none") is no longer judged at all.
+    // Unjudged runs (no PMIDs, fetch error) leave last week's rows standing.
+    if (judged !== null || (attribution && policy === "none")) {
+      const now = new Date();
+      await db.write.$transaction(async (tx) => {
+        await tx.grantAttributionScore.deleteMany({
+          where: { cwid, grantExternalId: { notIn: [...(judged?.keys() ?? [])] } },
+        });
+        for (const [externalId, sc] of judged ?? []) {
+          const data = {
+            band: sc.score.band,
+            score: sc.score.score,
+            cues: sc.score.reasons as unknown as Prisma.InputJsonValue,
+            evidenceKey: sc.key,
+            award: sc.award,
+            reporterName: sc.reporterName,
+            scoredAt: now,
+          };
+          await tx.grantAttributionScore.upsert({
+            where: { grantExternalId: externalId },
+            create: { grantExternalId: externalId, cwid, ...data },
+            update: data,
+          });
+        }
+      });
+    }
+
     processed++;
     if (processed % 50 === 0) {
       console.log(
@@ -1065,6 +1125,30 @@ async function main() {
       );
     }
     await sleepBetweenRequests();
+  }
+
+  if (attribution) {
+    // Scholars no longer linked to any NIH profile are no longer judged.
+    await db.write.grantAttributionScore.deleteMany({
+      where: { cwid: { notIn: [...profilesByCwid.keys()] } },
+    });
+    // A run that judged no one (RePORTER down) records no totals: a row of
+    // zeros would read as the latest week on the strip and report 14.
+    if (tally.scholars > 0) {
+      await db.write.grantAttributionRun.create({
+        data: {
+          ranAt: new Date(),
+          scholars: tally.scholars,
+          show: tally.band.show,
+          hide: tally.band.hide,
+          queue: tally.band.queue,
+          recovered: tally.recovered,
+          cues: tally.cue as Prisma.InputJsonValue,
+        },
+      });
+    } else {
+      console.warn("#3071 attribution: no scholar was scored; run totals not recorded.");
+    }
   }
 
   // Minted hides AND system revokes: both are index-relevant transitions.

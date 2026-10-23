@@ -54,7 +54,21 @@ export { isValidReportSlug, REPORT_SLUG_MAX } from "@/lib/edit/report-slug";
  *  or break a load (`scripts/sql/retire-report-10-display-titles.sql` is the
  *  optional cleanup). Reports 11–13 (Core users, Output over time, Grants
  *  citing the core) are core-only and skip it on purpose. */
-export const REPORT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "11", "12", "13"] as const;
+export const REPORT_KEYS = [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "11",
+  "12",
+  "13",
+  "14",
+] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
 /** Whether `v` is one of {@link REPORT_KEYS} — a string, never the number. */
@@ -180,6 +194,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Grants citing the core",
     summary:
       "NIH grants linked to this core's confirmed publications through NIH RePORTER and ReCiter, one row per award.",
+    descriptionHtml: null,
+  },
+  "14": {
+    slug: "grant-attribution",
+    name: "Grant attribution",
+    summary:
+      "How the weekly check sorted NIH awards matched to scholars by name: confirmed, hidden as someone else's, or sent to a curator.",
     descriptionHtml: null,
   },
 };

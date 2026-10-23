@@ -42,6 +42,8 @@ vi.mock("@/lib/edit/grant-attribution-queue.server", () => ({
   loadGrantAttributionQueue: h.load,
   countPendingGrantAttribution: vi.fn(),
   countGrantAttribution: vi.fn(async (_c: unknown, status: string) => (status === "confirmed" ? 321 : 7)),
+  loadAutoConfirmed: vi.fn(async () => ({ items: [], total: 0 })),
+  loadGrantAttributionRuns: vi.fn(async () => []),
 }));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: (props: { children: unknown }) => {
@@ -71,9 +73,13 @@ import {
   isCoauthorshipOnly,
   isScholarPi,
   reporterNameForDisplay,
+  reporterNameParts,
+  decidingReason,
   canViewGrantAttributionQueue,
   isGrantAttributionQueueReadOnly,
+  type GrantAttributionAutoItem,
   type GrantAttributionItem,
+  type GrantAttributionRunTotals,
 } from "@/lib/edit/grant-attribution-queue";
 
 const SUPER = { cwid: "zzs0001", isSuperuser: true };
@@ -115,6 +121,8 @@ const ITEM: GrantAttributionItem = {
   decidedAt: null,
   decidedByName: null,
   rejectionReason: null,
+  reporterName: "EXAMPLE, PAT Q",
+  scholarNames: ["Pat Example", "Example, Pat Q"],
 };
 
 beforeEach(() => {
@@ -250,6 +258,30 @@ describe("helpers", () => {
     expect(isScholarPi("SAMPLE, LEE", "Example")).toBe(false);
     expect(isScholarPi("EXAMPLE, PAT", null)).toBe(false);
   });
+
+  it("marks only the RePORTER words the scholar's names have no match for", () => {
+    const parts = (raw: string, names: string[]) =>
+      reporterNameParts(raw, names).map((p) => (p.differs ? `[${p.text}]` : p.text)).join(" ");
+    expect(parts("EXAMPLE, PAT D", ["Pat Q. Example"])).toBe("Pat [D] Example");
+    expect(parts("EXAMPLE, PAT Q", ["Example, Pat Quinn"])).toBe("Pat Q Example");
+    expect(parts("REYES-HART, DANIEL", ["Daniel L. Reyes-Hart"])).toBe("Daniel Reyes-Hart");
+    expect(parts("SAMPLE, LEE", ["Pat Example"])).toBe("[Lee] [Sample]");
+    // An initial matches a given name only, never the surname.
+    expect(parts("EXAMPLE, PAT E", ["Pat Example"])).toBe("Pat [E] Example");
+    // Each half of a hyphenated surname must match.
+    expect(parts("REYES-COLE, DANIEL", ["Daniel Reyes-Hart"])).toBe("Daniel [Reyes-Cole]");
+  });
+
+  it("gives the deciding reason for each band", () => {
+    const cues = [
+      { id: "profile_proven", weight: 3, reason: "proven" },
+      { id: "middle_initial_conflict", weight: -1, reason: "initial" },
+    ];
+    expect(decidingReason("show", cues)).toBe("proven");
+    expect(decidingReason("hide", cues)).toBe("initial");
+    expect(decidingReason("hide", [])).toMatch(/Nothing ties it/);
+    expect(decidingReason("queue", cues)).toMatch(/weak or points both ways/);
+  });
 });
 
 describe("the review", () => {
@@ -323,5 +355,90 @@ describe("the review", () => {
     const hrefs = [...document.querySelectorAll("a")].map((a) => a.getAttribute("href"));
     expect(hrefs).toContain("/pat-example");
     expect(hrefs).not.toContain("/scholars/pat-example");
+  });
+});
+
+const RUNS: GrantAttributionRunTotals[] = [
+  { ranAt: "2026-10-23T14:00:00.000Z", scholars: 900, show: 2288, hide: 495, queue: 44, recovered: 401, cues: {} },
+  { ranAt: "2026-10-22T14:00:00.000Z", scholars: 900, show: 1887, hide: 838, queue: 102, recovered: 0, cues: {} },
+];
+const AUTO: GrantAttributionAutoItem = {
+  id: "reporter:zza0002:R01XX000002",
+  cwid: "zza0002",
+  slug: "lee-sample",
+  scholarName: "Lee Sample, PhD",
+  scholarNames: ["Lee A. Sample"],
+  department: "Medicine",
+  award: { ...ITEM.award, title: "An auto-confirmed study", awardNumber: "R01XX000002" },
+  reporterName: "SAMPLE, LEE D",
+  was: "hidden",
+  decidedAt: "2026-10-23T14:00:00.000Z",
+  reason: "2 other awards on the same NIH profile are cited by the scholar's papers",
+};
+
+describe("showing the check's work", () => {
+  const withAuto = (readOnly = false) =>
+    render(
+      <GrantAttributionQueue
+        pending={[ITEM]}
+        confirmed={[]}
+        rejected={[]}
+        confirmedTotal={0}
+        rejectedTotal={0}
+        auto={[AUTO]}
+        autoTotal={401}
+        runs={RUNS}
+        readOnly={readOnly}
+      />,
+    );
+
+  it("summarizes the latest run above the tabs", () => {
+    withAuto();
+    const strip = within(screen.getByTestId("grant-attribution-strip"));
+    expect(strip.getByText(/2,827 NIH awards matched by name, across 900 scholars/)).toBeTruthy();
+    expect(strip.getByText("2,288")).toBeTruthy();
+    expect(strip.getByText(/401 recovered from hidden/)).toBeTruthy();
+    expect(strip.getByText("495")).toBeTruthy();
+    expect(strip.getByText("102 queued the run before")).toBeTruthy();
+    fireEvent.click(strip.getByText("How we check"));
+    expect(screen.getByRole("dialog", { name: "How we check" })).toBeTruthy();
+  });
+
+  it("shows no strip before any run is recorded", () => {
+    render(<GrantAttributionQueue pending={[]} confirmed={[]} rejected={[]} readOnly={false} />);
+    expect(screen.queryByTestId("grant-attribution-strip")).toBeNull();
+  });
+
+  it("opens Confirmed on the auto-confirmed rows, with the RePORTER name and its difference marked", () => {
+    withAuto();
+    fireEvent.click(screen.getByTestId("grant-attribution-strip-confirmed"));
+    expect(screen.getByTestId("grant-attribution-tab-confirmed").textContent).toContain("401");
+    expect(screen.getByTestId("grant-attribution-decided-auto").getAttribute("aria-checked")).toBe("true");
+    const row = within(screen.getByTestId(`grant-attribution-item-${AUTO.id}`));
+    expect(row.getByTestId("grant-attribution-auto-chip")).toBeTruthy();
+    expect(row.getByText("was hidden")).toBeTruthy();
+    expect(row.getByText(/2 other awards on the same NIH profile/)).toBeTruthy();
+    expect(row.getByTestId("reporter-name-line").querySelector("mark")?.textContent).toBe("D");
+  });
+
+  it("sends an auto-confirmed award back to review through the requeue route", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    withAuto();
+    fireEvent.click(screen.getByTestId("grant-attribution-tab-confirmed"));
+    await act(async () => {
+      fireEvent.click(screen.getByText("Move back to review"));
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/edit/grant-attribution/requeue");
+    expect(JSON.parse(init.body as string)).toEqual({ id: AUTO.id });
+    expect(screen.getByText("Back in To review after a refresh")).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("offers no requeue to a read-only viewer", () => {
+    withAuto(true);
+    fireEvent.click(screen.getByTestId("grant-attribution-tab-confirmed"));
+    expect(screen.queryByText("Move back to review")).toBeNull();
   });
 });
