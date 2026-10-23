@@ -2,8 +2,8 @@
  * ORCID public API (v3.0) client for the registry sweep. Optional
  * client-credentials token (`ORCID_CLIENT_ID` + `ORCID_CLIENT_SECRET`, else
  * anonymous with one warning), ≤10 req/s, 3 retries on 429/5xx/network honouring
- * `Retry-After`, paged `expanded-search`, and a per-run cache for `/works`.
- * The token and client id are never logged.
+ * `Retry-After`, paged `expanded-search`, and a per-run cache for `/works` and
+ * `/record` (etl/orcid-evidence). The token and client id are never logged.
  */
 const PUB = "https://pub.orcid.org/v3.0";
 const TOKEN_URL = "https://orcid.org/oauth/token";
@@ -31,14 +31,58 @@ export type ExternalId = {
   "external-id-relationship"?: string | null;
 };
 type ExternalIds = { "external-id": ExternalId[] | null } | null;
+type Value<T> = { value: T } | null;
+/** One source's copy of a work. `title` / `publication-date` / `source` are read
+ *  only by etl/orcid-evidence (the new-works sample); the registry reads ids. */
+export type WorkSummary = {
+  "external-ids": ExternalIds;
+  title?: { title: Value<string> | null } | null;
+  "publication-date"?: { year: Value<string> | null } | null;
+  source?: { "source-name": Value<string> | null } | null;
+};
 export type WorksResponse = {
   "last-modified-date": { value: number } | null;
   group:
     | Array<{
         "external-ids": ExternalIds;
-        "work-summary": Array<{ "external-ids": ExternalIds }> | null;
+        "work-summary": WorkSummary[] | null;
       }>
     | null;
+};
+
+/** An employment / education summary's organization. */
+export type AffiliationOrg = {
+  name: string | null;
+  "disambiguated-organization": {
+    "disambiguated-organization-identifier": string | null;
+    "disambiguation-source": string | null;
+  } | null;
+};
+type AffiliationGroups = {
+  "affiliation-group": Array<{
+    summaries: Array<Record<string, { organization: AffiliationOrg | null } | null>> | null;
+  }> | null;
+} | null;
+
+/** The parts of `/v3.0/{orcid}/record` etl/orcid-evidence reads. Only PUBLIC
+ *  fields are ever returned, so an absent block is "not public", not "none". */
+export type RecordResponse = {
+  history?: { "last-modified-date": Value<number> | null } | null;
+  person: {
+    name: {
+      "given-names": Value<string> | null;
+      "family-name": Value<string> | null;
+      "credit-name": Value<string> | null;
+    } | null;
+    "other-names": { "other-name": Array<{ content: string | null }> | null } | null;
+    emails: { email: Array<{ email: string | null; verified?: boolean | null }> | null } | null;
+  } | null;
+  "activities-summary": {
+    "last-modified-date": Value<number> | null;
+    employments: AffiliationGroups;
+    educations: AffiliationGroups;
+    works: WorksResponse | null;
+  } | null;
 };
 
 /** A non-2xx reply after retries. `status` lets the caller tell an auth/blocking
@@ -57,6 +101,7 @@ export class OrcidHttpError extends Error {
 let token: string | null = null;
 let lastRequestAt = 0;
 const worksCache = new Map<string, Promise<WorksResponse>>();
+const recordCache = new Map<string, Promise<RecordResponse>>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -145,6 +190,16 @@ export function fetchWorks(orcid: string): Promise<WorksResponse> {
   if (!p) {
     p = orcidGet(`${PUB}/${orcid}/works`) as Promise<WorksResponse>;
     worksCache.set(orcid, p);
+  }
+  return p;
+}
+
+/** `/v3.0/{orcid}/record`, fetched once per run per iD (shared across scholars). */
+export function fetchRecord(orcid: string): Promise<RecordResponse> {
+  let p = recordCache.get(orcid);
+  if (!p) {
+    p = orcidGet(`${PUB}/${orcid}/record`) as Promise<RecordResponse>;
+    recordCache.set(orcid, p);
   }
   return p;
 }

@@ -131,6 +131,15 @@ model Scholar {
   /// DIFFERENT non-null iD than a confirmed one, Identity wins (it is the
   /// authority) and this is cleared. Cleared with `orcid` on Remove.
   orcidConfirmedAt        DateTime? @map("orcid_confirmed_at")
+  /// Who confirmed `orcid`: `self` | `proxy` (`POST /api/edit/orcid`, the real
+  /// actor is or is not the scholar), `librarian` (`/edit/orcid-queue`) or
+  /// `email_verified` (etl/orcid-evidence's auto-confirm). `authenticated` is
+  /// reserved for #3115. Null = the iD came from WCM Identity, or none on file.
+  /// Cleared with `orcid` on Remove and by the identity ETL's conflict rule.
+  orcidConfirmMethod      String?   @map("orcid_confirm_method") @db.VarChar(16)
+  /// The real actor's cwid for `self` / `proxy` / `librarian` (never an
+  /// impersonation target); `"ETL"` for `email_verified`.
+  orcidConfirmedBy        String?   @map("orcid_confirmed_by") @db.VarChar(32)
   /// Issue #742 v3.1 C3 — ReciterAI FACULTY# rollup metrics (DynamoDB), for the
   /// overview generator's faculty-scale framing. Nullable so the additive
   /// migration applies cleanly; backfilled by etl/dynamodb on next run.
@@ -175,6 +184,8 @@ model Scholar {
   nihProfiles          PersonNihProfile[]
   orcidCandidates      OrcidCandidate[]
   orcidDismissals      OrcidDismissal[]
+  orcidEvidence        OrcidCandidateEvidence[]
+  orcidQueueSamples    OrcidQueueSample[]
   reporterCandidates   ReporterProfileCandidate[]
   grantReviews         GrantAttributionReview[]
   grantScores          GrantAttributionScore[]
@@ -991,6 +1002,64 @@ model OrcidDismissal {
 
   @@id([cwid, orcid])
   @@map("orcid_dismissal")
+}
+
+/// The evidence behind each ORCID candidate pair, for the librarian queue
+/// (`/edit/orcid-queue`). Written by etl/orcid-evidence (weekly, after
+/// etl:orcid-registry) from one `/record` fetch per iD; full replace per run.
+/// One row per (cwid, orcid) across every `orcid_candidate` source, minus
+/// dismissed pairs and pairs already on file. Never read by the public profile.
+model OrcidCandidateEvidence {
+  cwid             String    @db.VarChar(32)
+  scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid            String    @db.VarChar(19)
+  /// email_verified | strong | shared_only | moderate | weak (`bandOf`).
+  band             String    @db.VarChar(16)
+  instMatch        Boolean   @map("inst_match")
+  emailVerified    Boolean   @map("email_verified")
+  nameAgrees       Boolean   @map("name_agrees")
+  /// Distinct scholar papers the record's works also carry (PMID or DOI).
+  shared           Int
+  competitor       Boolean
+  /// string[] — other scholars who hold ≥3 of this record's papers.
+  competitorCwids  Json      @map("competitor_cwids")
+  /// string[] — this scholar's other candidate iDs with ≥3 shared papers.
+  competitorOrcids Json      @map("competitor_orcids")
+  worksTotal       Int       @map("works_total")
+  /// Works on the record that are not in the scholar's publications.
+  newWorks         Int       @map("new_works")
+  /// ≤5 of { title, year, doi, pmid, source }.
+  newWorksSample   Json      @map("new_works_sample")
+  recordModifiedAt DateTime? @map("record_modified_at")
+  computedAt       DateTime  @map("computed_at")
+
+  @@id([cwid, orcid])
+  @@index([band])
+  @@index([orcid])
+  @@map("orcid_candidate_evidence")
+}
+
+/// A librarian's review sample for one band of the ORCID queue: up to 50
+/// random undecided pairs, one row each, sharing the sample `id`. Bulk confirm
+/// of the band unlocks when every row is decided and none is `dismissed`.
+model OrcidQueueSample {
+  id        String    @db.VarChar(64)
+  /// strong | shared_only
+  band      String    @db.VarChar(16)
+  startedBy String    @map("started_by") @db.VarChar(32)
+  startedAt DateTime  @map("started_at")
+  cwid      String    @db.VarChar(32)
+  scholar   Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid     String    @db.VarChar(19)
+  /// confirmed | dismissed | null (not decided yet)
+  decision  String?   @db.VarChar(16)
+  decidedBy String?   @map("decided_by") @db.VarChar(32)
+  decidedAt DateTime? @map("decided_at")
+
+  @@id([id, cwid, orcid])
+  @@index([band, startedAt])
+  @@index([cwid])
+  @@map("orcid_queue_sample")
 }
 
 model PersonNihProfile {

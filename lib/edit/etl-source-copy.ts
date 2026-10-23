@@ -127,6 +127,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
       "ORCID iDs from the public ORCID registry matched to scholars by WCM email or by name plus shared publications. Feeds the ORCID coverage dashboard only.",
     origin: "external", // pub.orcid.org public API
   },
+  "ORCID-evidence": {
+    label: "ORCID candidate evidence",
+    description:
+      "The evidence on each candidate ORCID iD (a verified email, the institution, shared papers, name agreement, competing scholars) read from its public ORCID record. Feeds the ORCID librarian queue.",
+    origin: "external", // pub.orcid.org public API
+  },
   "ORCID-push": {
     label: "ORCID iDs pushed to Identity",
     description:

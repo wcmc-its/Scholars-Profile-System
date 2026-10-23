@@ -437,8 +437,9 @@ export function mergeForScholars(
 const chunk = <T>(xs: T[], n: number): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
-/** cwid → (doi:/pmid: key → owning pmid) from the scholar's matched publication_author rows. */
-async function loadScholarWorkIds(cwids: string[]): Promise<ScholarWorkIndex> {
+/** cwid → (doi:/pmid: key → owning pmid) from the scholar's matched publication_author rows.
+ *  Exported for etl/orcid-evidence, which counts shared papers the same way. */
+export async function loadScholarWorkIds(cwids: string[]): Promise<ScholarWorkIndex> {
   const flat: Array<{ cwid: string; pmid: string; doi: string | null }> = [];
   for (const part of chunk(cwids, BATCH)) {
     const rows = await db.write.publicationAuthor.findMany({

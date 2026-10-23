@@ -14,10 +14,13 @@
  * is NOT written: RPM stopped writing it 2026-04-05 and nothing reads it back
  * into Identity.
  *  - Set / confirm (`orcid` non-null): `scholar.orcid` = the iD,
- *    `orcid_confirmed_at` = now, and any `orcid_dismissal` for exactly this
- *    (cwid, iD) is deleted — the person re-confirming an iD they once removed.
- *  - Remove (`orcid: null`): `scholar.orcid` and `orcid_confirmed_at` are
- *    nulled and EVERY iD that made up "on file" (`scholar.orcid` and each
+ *    `orcid_confirmed_at` = now, `orcid_confirm_method` = `self` when the REAL
+ *    actor is the scholar and `proxy` otherwise (a View-as superuser is a
+ *    proxy), `orcid_confirmed_by` = the real actor, and any `orcid_dismissal`
+ *    for exactly this (cwid, iD) is deleted — the person re-confirming an iD
+ *    they once removed.
+ *  - Remove (`orcid: null`): `scholar.orcid`, `orcid_confirmed_at`,
+ *    `orcid_confirm_method` and `orcid_confirmed_by` are nulled and EVERY iD that made up "on file" (`scholar.orcid` and each
  *    `rpm_admin` row's iD) gets an `orcid_dismissal` row. The dismissal is
  *    what makes `etl:orcid-push` clear it from Identity, `etl:identity` not
  *    re-import it, and the `orcid_candidate` readers (`withoutDismissed`) drop
@@ -111,7 +114,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           ?.orcid ?? null;
       await tx.scholar.update({
         where: { cwid: scholar.cwid },
-        data: { orcid, orcidConfirmedAt: orcid === null ? null : new Date() },
+        data:
+          orcid === null
+            ? { orcid, orcidConfirmedAt: null, orcidConfirmMethod: null, orcidConfirmedBy: null }
+            : {
+                orcid,
+                orcidConfirmedAt: new Date(),
+                orcidConfirmMethod: realCwid === scholar.cwid ? "self" : "proxy",
+                orcidConfirmedBy: realCwid,
+              },
       });
       // The iD being removed is usually NOT on `scholar.orcid` (NULL for WCM —
       // the card reads it from the `rpm_admin` mirror row), so read it before
