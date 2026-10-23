@@ -16,8 +16,9 @@ vi.mock("@/lib/edit/nci-2a-report.server", () => ({ loadNci2aReport: h.load }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: h.refresh }) }));
 vi.mock("@/components/edit/scholar-hover-card", () => ({
   ScholarHoverCard: ({ cwid, children }: { cwid: string; children: React.ReactNode }) => (
+    // Radix asChild: a bare string trigger renders nothing, so mirror that here.
     <span data-testid="hover-card" data-cwid={cwid}>
-      {children}
+      {typeof children === "string" ? null : children}
     </span>
   ),
 }));
@@ -299,6 +300,7 @@ describe("report 2 table", () => {
       false,
     ]);
     expect(within(rows[0]).getByTestId("hover-card").getAttribute("data-cwid")).toBe("zzz1");
+    expect(within(rows[0]).getByTestId("hover-card").textContent).toBe("Alpha, Ann");
     expect(within(rows[2]).queryByTestId("hover-card")).toBeNull();
     expect(within(rows[1]).getByRole("link", { name: "P-2" }).getAttribute("href")).toContain(
       "777",
