@@ -3890,8 +3890,11 @@ export class AppStack extends Stack {
     // condition denied every prod deploy with AssumeRoleWithWebIdentity). The
     // master pin is still enforced, twice over: the prod Environment's
     // deployment-branch policy (master only) and deploy.yml's "Refuse prod from
-    // non-master ref" guard. Staging admits any ref so feature branches deploy
-    // to staging.
+    // non-master ref" guard. Staging admits only the `staging` Environment
+    // subject: a `repo:<repo>:*` sub let any branch or workflow in the repo
+    // assume this role without review. Which branches may deploy to staging is
+    // now the `staging` Environment's deployment-branch policy (master +
+    // staging/*), so a feature branch deploys after being pushed as staging/<x>.
     //
     // Permissions: tightly scoped to the AppStack-owned resources. ECR
     // push on both the app and the ETL (#454) image repos, ECS RunTask on
@@ -3928,10 +3931,7 @@ export class AppStack extends Stack {
             : `arn:aws:iam::${this.account}:oidc-provider/${githubOidcIssuerHost}`,
         );
 
-    const githubSubCondition =
-      env === "prod"
-        ? "repo:wcmc-its/Scholars-Profile-System:environment:prod"
-        : "repo:wcmc-its/Scholars-Profile-System:*";
+    const githubSubCondition = `repo:wcmc-its/Scholars-Profile-System:environment:${env}`;
 
     this.deployRole = new iam.Role(this, "DeployRole", {
       roleName: `sps-deploy-${env}`,
