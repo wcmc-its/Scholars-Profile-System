@@ -127,6 +127,7 @@ export async function ConsoleShell({
           slugsTab={tabs.slugs}
           usageTab={tabs.usage}
           orcidCoverageTab={tabs.orcidCoverage}
+          orcidQueueTab={tabs.orcidQueue}
           coiTab={tabs.coi}
           activityTab={tabs.activity}
           etlStatusTab={tabs.etlStatus}

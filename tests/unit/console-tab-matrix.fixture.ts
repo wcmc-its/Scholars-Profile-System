@@ -55,6 +55,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "roleVocabulary",
   "titles",
   "grantAttribution",
+  "orcidQueue",
 ];
 
 // --- the matrix --------------------------------------------------------

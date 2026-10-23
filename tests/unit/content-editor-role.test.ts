@@ -250,6 +250,10 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "opportunity-admin": "deny",
   "opportunity-intake": "deny",
   orcid: "allow",
+  // The ORCID librarian queue: superuser librarians only.
+  "orcid-queue/bulk-confirm": "deny",
+  "orcid-queue/decide": "deny",
+  "orcid-queue/sample": "deny",
   "overview/debug-payload": "deny",
   "overview/generate": "allow",
   "overview/history": "allow",
