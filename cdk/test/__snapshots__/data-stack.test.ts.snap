@@ -6,15 +6,15 @@ exports[`DataStack prod matches the snapshot 1`] = `
     "AuroraClusterRotationSingleUserSARMapping96A1A66E": {
       "aws": {
         "applicationId": "arn:aws:serverlessrepo:us-east-1:297356227824:applications/SecretsManagerRDSMySQLRotationSingleUser",
-        "semanticVersion": "1.1.618",
+        "semanticVersion": "1.1.671",
       },
       "aws-cn": {
         "applicationId": "arn:aws-cn:serverlessrepo:cn-north-1:193023089310:applications/SecretsManagerRDSMySQLRotationSingleUser",
-        "semanticVersion": "1.1.237",
+        "semanticVersion": "1.1.440",
       },
       "aws-us-gov": {
         "applicationId": "arn:aws-us-gov:serverlessrepo:us-gov-west-1:023102451235:applications/SecretsManagerRDSMySQLRotationSingleUser",
-        "semanticVersion": "1.1.213",
+        "semanticVersion": "1.1.384",
       },
     },
   },
@@ -124,7 +124,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "56f7467bbde8a5efebcf57ae9e460027607099bab9f844669dcf5d800172ee5a.zip",
+          "S3Key": "9b8fce7ae7f25ef82fdbaf6b72523b99d0875c0c9c826642819fb51f11d9b125.zip",
         },
         "Handler": "index.handler",
         "Role": {
@@ -133,7 +133,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
             "Arn",
           ],
         },
-        "Runtime": "nodejs22.x",
+        "Runtime": "nodejs24.x",
         "Timeout": 120,
       },
       "Type": "AWS::Lambda::Function",
@@ -604,7 +604,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "f06f7035054cb2aada184c7c251ec5cb31fb6b5e975284939b9ff097603ea769.zip",
+          "S3Key": "f8b7112ff78fd0b6fab4c6b048fc1da9945198135db9a1e6b1d5cb4599d5a3d2.zip",
         },
         "Handler": "__entrypoint__.handler",
         "MemorySize": 128,
@@ -614,7 +614,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
             "Arn",
           ],
         },
-        "Runtime": "nodejs22.x",
+        "Runtime": "nodejs24.x",
         "Timeout": 900,
       },
       "Type": "AWS::Lambda::Function",
@@ -679,7 +679,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "6e4c8667a258c7c2ae12fc90967452a761b99a87023a472fd428ff30cd7939b1.zip",
+          "S3Key": "ce2cd18a9da8beb80db9685db763ad0e90a8ec1771663b981e6af9a10bcc4388.zip",
         },
         "Environment": {
           "Variables": {
@@ -923,7 +923,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "07a90cc3efdfc34da22208dcd9d211f06f5b0e01b21e778edc7c3966b1f61d57.zip",
+          "S3Key": "e16ffb3b34af185b8b30c88fdb19faa13b6c42bb38580485c4e84b384ee48b63.zip",
         },
         "Description": "AWS CDK resource provider framework - onEvent (Sps-Data-prod/DbBootstrapSeederProvider)",
         "Environment": {
@@ -947,7 +947,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
             "Arn",
           ],
         },
-        "Runtime": "nodejs22.x",
+        "Runtime": "nodejs24.x",
         "Timeout": 900,
       },
       "Type": "AWS::Lambda::Function",
