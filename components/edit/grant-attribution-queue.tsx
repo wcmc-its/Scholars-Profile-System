@@ -178,14 +178,14 @@ function summaryOf(c: Card): string {
     likely: c.coOnly ? "Only link is a co-PI who co-authors with the scholar" : "One supporting cue, nothing against",
     conflict: "Evidence points both ways",
     unclear: "No real evidence either way",
-    out: "Ruled out by a single cue",
+    out: "Strong evidence against",
   }[c.level];
 }
 
 function scaleNoteOf(c: Card): string {
   const note = {
     out: c.veto
-      ? `${cueLabel(c.veto)} settles this on its own; supporting cues don't outweigh it. Most likely “Not this person”.`
+      ? `${cueLabel(c.veto)} points strongly to someone else, and nothing strong ties it to the scholar. Most likely “Not this person”.`
       : "",
     conflict: "Strong cues on both sides. Read the evidence before deciding.",
     high: c.cues.some((x) => x.id === "pub_linked")

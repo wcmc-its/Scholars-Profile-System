@@ -17,17 +17,19 @@
  * no tie means hidden. Positive weights are evidence the award is the scholar's,
  * negative weights evidence it is someone else's.
  *
- * Three rules sit on top of the sum:
- *   1. DECISIVE. Cue 1 (the award is in InfoEd under another WCM investigator
- *      whose name our NIH profile also matches) hides outright, whatever else
- *      fired, except a linked confirmed publication: that pair is a real
- *      conflict and goes to the queue.
+ * Rules on top of the sum:
+ *   1. (Retired 2026-10-24: cue 1's named branch used to hide outright. It is
+ *      now a strong weight like any other, so a strong tie the other way sends
+ *      the award to a curator instead of hiding it.)
  *   2. CONFLICT. A strong positive and a strong negative together go to the
  *      queue, whatever the sum says. A curator, not arithmetic, settles a
  *      linked paper against an impossible timeline.
  *   3. TIE-BREAK. Topic similarity (cue 7) only counts while the rest of the
  *      score sits inside the queue band. It can tip a borderline award but can
  *      never lift a hide, or sink a show, on its own.
+ *   4. NAME RARITY. How many NIH PI profiles share the scholar's name counts
+ *      only for a name-only profile, and only when another cue fired. With
+ *      nothing else found, the award stays where the prior puts it.
  *
  * DEGRADED INPUT. Every cue input is nullable, and null means "not known", never
  * "no". A null never fires a cue in either direction. The caller is responsible
@@ -42,6 +44,7 @@ export type AttributionBand = "show" | "hide" | "queue";
 export type CueId =
   | "pub_linked"
   | "wcm_org"
+  | "wcm_org_shared_name"
   | "infoed_other_wcm_pi_named"
   | "infoed_other_wcm_pi"
   | "rejected_pmids"
@@ -52,11 +55,14 @@ export type CueId =
   | "copi_coauthor"
   | "topic_match"
   | "topic_mismatch"
-  | "profile_proven";
+  | "profile_proven"
+  | "name_rare"
+  | "name_common";
 
 export interface CueHit {
   id: CueId;
-  /** Signed weight that went into the score (0 for the decisive cue). */
+  /** Signed weight that went into the score. Reviews stored before 2026-10-24
+   *  carry 0 for the named InfoEd cue, then decisive. */
   weight: number;
   /** One short line for the curator. Built from the award and the scholar's own
    *  record; never logged by the ETL. */
@@ -72,7 +78,7 @@ export interface AttributionScore {
   /** Every cue that fired, strongest first. */
   reasons: CueHit[];
   /** The rule that settled the band, when it was not the plain sum. */
-  rule: "decisive" | "conflict" | "sum";
+  rule: "conflict" | "sum";
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +103,15 @@ export const WEIGHTS = {
   /** WCM in the award's org history. Name-only profiles only: for a grant-join
    *  profile every candidate award is WCM's, so it says nothing (#3092). */
   wcm_org: 5,
+  /** WCM in the award's org history, but the WCM directory has another person,
+   *  current or former, who could hold an NIH award and shares the scholar's
+   *  first and last name. The award may be theirs, so WCM alone no longer
+   *  settles it: moderate, which queues an award with nothing else. */
+  wcm_org_shared_name: 2,
+  /** Another WCM investigator holds the award in InfoEd as PI, and our NIH
+   *  profile's name matches theirs. Strong, not an override: a strong tie the
+   *  other way queues the award (rule 2). */
+  infoed_other_wcm_pi_named: -5,
   /** Another WCM investigator holds the award in InfoEd as PI or Co-PI, but our
    *  NIH profile's name does not match theirs (a multi-PI award, or InfoEd
    *  listing only the contact PI). Moderate. */
@@ -108,9 +123,12 @@ export const WEIGHTS = {
   timeline_impossible: -5,
   /** Same, by two to four years. Degree years in ASMS are sometimes off. */
   timeline_unlikely: -3,
-  /** The RePORTER PI's middle initial matches none of the scholar's. Per
-   *  profile, not per award, and middle names are often missing: weak. */
-  middle_initial_conflict: -1,
+  /** The RePORTER PI's middle initial matches none of the scholar's. Fires
+   *  only when both sides have one, so a missing middle name never counts.
+   *  Strong: staging 2026-10-24 found it on 191 awards, 176 with nothing else
+   *  for the scholar, and on 12 a confirmed paper cites (a data error on one
+   *  side). Strong, so those 12 queue rather than hide (rule 2). */
+  middle_initial_conflict: -4,
   /** The award's institution and years match a degree the scholar earned
    *  there. */
   prior_institution: 2,
@@ -126,7 +144,30 @@ export const WEIGHTS = {
    *  shows on the strength of the profile. STRONG, so a strong negative still
    *  queues it. */
   profile_proven: 4,
-} as const satisfies Record<Exclude<CueId, "infoed_other_wcm_pi_named">, number>;
+  /** Name-only profiles: the only NIH PI profile in RePORTER with the
+   *  scholar's first and last name. Counts only next to other evidence (rule
+   *  4): a scholar never funded by NIH shares a rare name with a namesake. */
+  name_rare: 1,
+  /** Name-only profiles: NAME_COMMON_MIN or more NIH PI profiles share the
+   *  name. Same gate as name_rare. */
+  name_common: -1,
+} as const satisfies Record<CueId, number>;
+
+/** NIH PI profiles sharing the scholar's name at or above which it is common
+ *  (staging 2026-10-24: 348 of 472 name-only scholars have 1, 6 have 10+). */
+export const NAME_COMMON_MIN = 10;
+
+/** Rule 4's count from one page of a RePORTER name search. A full page may be
+ *  cut short, so its count is a lower bound: still safe to call common, never
+ *  rare. null ⇒ unknown. Pure. */
+export function nameProfileCountFrom(
+  distinctProfiles: number,
+  projectsReturned: number,
+  pageLimit: number,
+): number | null {
+  if (projectsReturned < pageLimit) return distinctProfiles;
+  return distinctProfiles >= NAME_COMMON_MIN ? distinctProfiles : null;
+}
 
 /** Other awards on one NIH profile that a confirmed paper ties to the scholar
  *  before that profile vouches for the rest. Two, so one stray citation by a
@@ -199,6 +240,15 @@ export interface AttributionEvidence {
    *  ("siblings"). null ⇒ neither. Set by `profileProof`, after every award of
    *  the scholar has its `publicationLinked`. */
   profileProven: { kind: "matched" } | { kind: "siblings"; linked: number } | null;
+  /** Rule 4. Distinct NIH PI profiles in RePORTER whose name matches the
+   *  scholar's, theirs included. null ⇒ unknown (the search failed or found
+   *  none, not even theirs). Absent in older callers. */
+  nameProfileCount?: number | null;
+  /** WCM directory people, other than the scholar, who share their first and
+   *  last name and could hold an NIH award (faculty, postdocs, students, other
+   *  academic staff; current or former). null ⇒ not looked up. Absent in older
+   *  callers. */
+  wcmNamesakes?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -570,26 +620,28 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
   if (e.policy === "none") return { band: "show", score: SHOW_AT, reasons: [], rule: "sum" };
 
   const hits: CueHit[] = [];
-  const add = (id: Exclude<CueId, "infoed_other_wcm_pi_named">, reason: string) =>
-    hits.push({ id, weight: WEIGHTS[id], reason });
+  const add = (id: CueId, reason: string) => hits.push({ id, weight: WEIGHTS[id], reason });
 
   if (e.publicationLinked) {
     add("pub_linked", "A confirmed publication of the scholar cites this award");
   }
   if (e.policy === "wcm-or-publication" && e.wcmOrgHistory) {
-    add("wcm_org", "Held at WCM at some point, and the NIH profile was matched by name only");
+    if (e.wcmNamesakes != null && e.wcmNamesakes > 0) {
+      add(
+        "wcm_org_shared_name",
+        `Held at WCM at some point, but ${e.wcmNamesakes === 1 ? "another WCM person shares" : `${e.wcmNamesakes} other WCM people share`} the scholar's name`,
+      );
+    } else {
+      add("wcm_org", "Held at WCM at some point, and the NIH profile was matched by name only");
+    }
   }
 
-  let decisive: CueHit | null = null;
   if (e.infoedOther?.piLevel) {
     if (e.infoedOther.profileNameMatchesOther) {
-      decisive = {
-        id: "infoed_other_wcm_pi_named",
-        weight: 0,
-        reason:
-          "InfoEd lists another WCM investigator as PI, and the NIH profile's name matches theirs",
-      };
-      hits.push(decisive);
+      add(
+        "infoed_other_wcm_pi_named",
+        "InfoEd lists another WCM investigator as PI, and the NIH profile's name matches theirs",
+      );
     } else {
       add("infoed_other_wcm_pi", "InfoEd lists another WCM investigator as PI or Co-PI");
     }
@@ -638,6 +690,13 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
     if (e.coPi) hits[hits.length - 1]!.coPi = { ...e.coPi, total: e.coPiSharedPapers };
   }
 
+  // Rule 4: name rarity, name-only profiles, next to other evidence only.
+  const n = e.nameProfileCount;
+  if (e.policy === "wcm-or-publication" && hits.length > 0 && n != null && n > 0) {
+    if (n === 1) add("name_rare", "The only NIH PI profile with the scholar's name");
+    else if (n >= NAME_COMMON_MIN) add("name_common", `${n} NIH PI profiles share the scholar's name`);
+  }
+
   const base = PRIOR + hits.reduce((s, h) => s + h.weight, 0);
   let score = base;
   // Rule 3: topic only inside the queue band.
@@ -656,16 +715,8 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
     }
   }
 
-  const reasons = [...hits].sort(
-    (a, b) => (a === decisive ? -1 : b === decisive ? 1 : Math.abs(b.weight) - Math.abs(a.weight)),
-  );
+  const reasons = [...hits].sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
 
-  // Rule 1: decisive, unless a linked paper contradicts it.
-  if (decisive) {
-    return e.publicationLinked
-      ? { band: "queue", score, reasons, rule: "conflict" }
-      : { band: "hide", score, reasons, rule: "decisive" };
-  }
   // Rule 2: strong evidence both ways.
   const strongFor = hits.some((h) => h.weight >= STRONG);
   const strongAgainst = hits.some((h) => h.weight <= -STRONG);
@@ -674,15 +725,19 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
   return { band: band(score), score, reasons, rule: "sum" };
 }
 
+/** Cues left out of the evidence key: tie-breaks, and name rarity, whose count
+ *  moves as other people win awards. */
+const KEYLESS_CUES: ReadonlySet<CueId> = new Set(["topic_match", "topic_mismatch", "name_rare", "name_common"]);
+
 /**
  * The cues that decide a review, for spotting changed evidence: the band plus
- * every non-tie-break cue. Topic is left out so enrichment landing a run later
- * does not reopen a decided item. Pure.
+ * every cue but KEYLESS_CUES. Topic is left out so enrichment landing a run
+ * later does not reopen a decided item. Pure.
  */
 export function evidenceKey(s: AttributionScore): string {
   const ids = s.reasons
     .map((r) => r.id)
-    .filter((id) => id !== "topic_match" && id !== "topic_mismatch")
+    .filter((id) => !KEYLESS_CUES.has(id))
     .sort();
   return `${s.band}|${ids.join(",")}`.slice(0, 255);
 }
