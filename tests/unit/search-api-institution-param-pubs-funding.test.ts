@@ -5,7 +5,7 @@
  * route hands the repeated `institution` param through to each tab's
  * `filters` object unchanged and records it in the `search_query` log.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/db", () => ({
@@ -52,7 +52,7 @@ async function runRoute(query: string) {
   await GET(new NextRequest(`http://localhost/api/search?${query}`));
 }
 
-function searchQueryLog(logSpy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
+function searchQueryLog(logSpy: MockInstance<typeof console.log>): Record<string, unknown> {
   const call = logSpy.mock.calls.find((c) => {
     try {
       return JSON.parse(c[0] as string).event === "search_query";

@@ -20,65 +20,65 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 // itself accepts the write end-to-end.
 // ---------------------------------------------------------------------------
 
-describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => {
-  const {
-    mockGetEditSession,
-    mockTransaction,
-    mockFieldOverrideFindUnique,
-    mockFieldOverrideUpsert,
-    mockExecuteRaw,
-    mockScholarFindFirst,
-    mockFieldOverrideFindFirst,
-    mockSlugHistoryFindFirst,
-    mockReflectOverviewEdit,
-    mockResolveProfiles,
-    mockTxScholarFindUnique,
-    mockTxScholarUpdate,
-    mockTxSlugHistoryUpsert,
-  } = vi.hoisted(() => ({
-    mockGetEditSession: vi.fn(),
-    mockTransaction: vi.fn(),
-    mockFieldOverrideFindUnique: vi.fn(),
-    mockFieldOverrideUpsert: vi.fn(),
-    mockExecuteRaw: vi.fn(),
-    mockScholarFindFirst: vi.fn(),
-    mockFieldOverrideFindFirst: vi.fn(),
-    mockSlugHistoryFindFirst: vi.fn(),
-    mockReflectOverviewEdit: vi.fn(),
-    mockResolveProfiles: vi.fn(),
-    mockTxScholarFindUnique: vi.fn(),
-    mockTxScholarUpdate: vi.fn(),
-    mockTxSlugHistoryUpsert: vi.fn(),
-  }));
+const {
+  mockGetEditSession,
+  mockTransaction,
+  mockFieldOverrideFindUnique,
+  mockFieldOverrideUpsert,
+  mockExecuteRaw,
+  mockScholarFindFirst,
+  mockFieldOverrideFindFirst,
+  mockSlugHistoryFindFirst,
+  mockReflectOverviewEdit,
+  mockResolveProfiles,
+  mockTxScholarFindUnique,
+  mockTxScholarUpdate,
+  mockTxSlugHistoryUpsert,
+} = vi.hoisted(() => ({
+  mockGetEditSession: vi.fn(),
+  mockTransaction: vi.fn(),
+  mockFieldOverrideFindUnique: vi.fn(),
+  mockFieldOverrideUpsert: vi.fn(),
+  mockExecuteRaw: vi.fn(),
+  mockScholarFindFirst: vi.fn(),
+  mockFieldOverrideFindFirst: vi.fn(),
+  mockSlugHistoryFindFirst: vi.fn(),
+  mockReflectOverviewEdit: vi.fn(),
+  mockResolveProfiles: vi.fn(),
+  mockTxScholarFindUnique: vi.fn(),
+  mockTxScholarUpdate: vi.fn(),
+  mockTxSlugHistoryUpsert: vi.fn(),
+}));
 
-  // `readEditRequest` resolves identity through the #637 effective-identity seam.
-  // Drive it from the same `mockGetEditSession` knob (non-impersonating).
-  vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
-  vi.mock("@/lib/auth/effective-identity", () => ({
-    getEffectiveEditSession: mockGetEditSession,
-    impersonationActive: vi.fn().mockReturnValue(false),
-  }));
-  vi.mock("@/lib/auth/session-server", () => ({
-    getSession: vi.fn(async () => {
-      const s = await mockGetEditSession();
-      return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
-    }),
-  }));
-  vi.mock("@/lib/db", () => ({
-    db: {
-      read: {
-        scholar: { findFirst: mockScholarFindFirst },
-        fieldOverride: { findFirst: mockFieldOverrideFindFirst },
-        slugHistory: { findFirst: mockSlugHistoryFindFirst },
-      },
-      write: { $transaction: mockTransaction },
+// `readEditRequest` resolves identity through the #637 effective-identity seam.
+// Drive it from the same `mockGetEditSession` knob (non-impersonating).
+vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEditSession,
+  impersonationActive: vi.fn().mockReturnValue(false),
+}));
+vi.mock("@/lib/auth/session-server", () => ({
+  getSession: vi.fn(async () => {
+    const s = await mockGetEditSession();
+    return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
+  }),
+}));
+vi.mock("@/lib/db", () => ({
+  db: {
+    read: {
+      scholar: { findFirst: mockScholarFindFirst },
+      fieldOverride: { findFirst: mockFieldOverrideFindFirst },
+      slugHistory: { findFirst: mockSlugHistoryFindFirst },
     },
-  }));
-  vi.mock("@/lib/edit/revalidation", () => ({
-    reflectOverviewEdit: mockReflectOverviewEdit,
-    resolveAffectedProfiles: mockResolveProfiles,
-  }));
+    write: { $transaction: mockTransaction },
+  },
+}));
+vi.mock("@/lib/edit/revalidation", () => ({
+  reflectOverviewEdit: mockReflectOverviewEdit,
+  resolveAffectedProfiles: mockResolveProfiles,
+}));
 
+describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => {
   const ADMIN = { cwid: "adm001", isSuperuser: true };
 
   beforeEach(() => {
@@ -154,11 +154,11 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
 // not the old "takes effect on the next directory sync" caveat.
 // ---------------------------------------------------------------------------
 
-describe("UI-SPEC #17 — slug save success copy", () => {
-  vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
-  }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+}));
 
+describe("UI-SPEC #17 — slug save success copy", () => {
   it("success copy after Save says the new URL is live and the old one redirects", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

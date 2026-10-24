@@ -11,7 +11,7 @@
  *
  * Log shape: { event: "vivo_404", url, ts: ISO8601 }
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 describe("VIVO_PATTERN regex", () => {
   it("matches /display/cwid-abc123 (canonical VIVO profile URL)", async () => {
@@ -62,7 +62,7 @@ describe("VIVO_PATTERN regex", () => {
 });
 
 describe("logVivoFourOhFour helper", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleSpy: MockInstance<typeof console.log>;
 
   beforeEach(() => {
     consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});

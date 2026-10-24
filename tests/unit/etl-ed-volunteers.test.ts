@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ search: vi.fn(), bind: vi.fn(), unbind: vi.fn() }));
 vi.mock("ldapts", () => ({
-  Client: vi.fn().mockImplementation(() => ({ bind: h.bind, search: h.search, unbind: h.unbind })),
+  Client: vi.fn().mockImplementation(function () {
+    return { bind: h.bind, search: h.search, unbind: h.unbind };
+  }),
 }));
 
 import { pairVolunteers, syncVolunteerMentors, VOLUNTEER_MENTOR_ROLES } from "@/etl/ed/volunteers";
