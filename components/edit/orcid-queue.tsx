@@ -56,10 +56,13 @@ function errorMessage(status: number, code: string | undefined): string {
     return "This scholar now has a different iD on file. Refresh to see it under Conflicts.";
   if (code === "on_file")
     return "This iD was confirmed by the scholar or a librarian. Remove it from the scholar's own editor.";
+  if (code === "dismissed")
+    return "This iD was removed by the scholar or marked Not this person, so it can't be confirmed here.";
   if (code === "state_changed")
     return "This row changed since the page loaded. Refresh to see where it is now.";
   if (code === "sample_row_decided") return "Someone already decided this sampled row.";
-  if (code === "stale_sample") return "A newer sample was started for this band. Refresh the page.";
+  if (code === "stale_sample")
+    return "This sample is out of date: a newer sample was started, or the band was re-scored since. Refresh the page.";
   if (code === "sample_locked")
     return "A sampled row was marked Not this person, so bulk confirm is off for this band.";
   if (code === "sample_not_passed") return "Decide every sampled row first.";
@@ -170,18 +173,21 @@ export function OrcidQueue({
     [canDecide, busy, sampleDecisions, data.sample],
   );
 
-  const startSample = useCallback(async () => {
-    if (!canDecide || busy || !isOrcidSampleBand(tab)) return;
-    setBusy("sample");
-    setError(null);
-    const r = await post("sample", { band: tab });
-    setBusy(null);
-    if (!r.ok) {
-      setError(r.message);
-      return;
-    }
-    router.refresh();
-  }, [canDecide, busy, tab, router]);
+  const startSample = useCallback(
+    async (restart: boolean) => {
+      if (!canDecide || busy || !isOrcidSampleBand(tab)) return;
+      setBusy("sample");
+      setError(null);
+      const r = await post("sample", { band: tab, ...(restart ? { restart: true } : {}) });
+      setBusy(null);
+      if (!r.ok) {
+        setError(r.message);
+        return;
+      }
+      router.refresh();
+    },
+    [canDecide, busy, tab, router],
+  );
 
   const bulkConfirm = useCallback(async () => {
     if (!canDecide || busy || !sample || !isOrcidSampleBand(tab)) return;
@@ -266,7 +272,7 @@ export function OrcidQueue({
           bandSize={counts[tab]}
           canDecide={canDecide}
           busy={busy !== null}
-          onStart={() => void startSample()}
+          onStart={(restart) => void startSample(restart)}
           onBulk={() => void bulkConfirm()}
         />
       ) : null}
@@ -333,17 +339,17 @@ function SamplePanel({
   bandSize: number;
   canDecide: boolean;
   busy: boolean;
-  onStart: () => void;
+  onStart: (restart: boolean) => void;
   onBulk: () => void;
 }) {
-  const start = (text: string) =>
+  const start = (text: string, restart = false) =>
     canDecide ? (
       <Button
         type="button"
         size="sm"
         variant="outline"
         disabled={busy || bandSize === 0}
-        onClick={onStart}
+        onClick={() => onStart(restart)}
         className="text-[13px]"
         data-testid="orcid-queue-start-sample"
       >
@@ -363,10 +369,13 @@ function SamplePanel({
     );
   } else if (sample.status === "open") {
     body = (
-      <span className="min-w-0 flex-1" data-testid="orcid-queue-sample-open">
-        Sample in review: {sample.decided} of {sample.total} decided. The sampled rows are listed
-        first.
-      </span>
+      <>
+        <span className="min-w-0 flex-1" data-testid="orcid-queue-sample-open">
+          Sample in review: {sample.decided} of {sample.total} decided. The sampled rows are listed
+          first.
+        </span>
+        {start("Start a new sample", true)}
+      </>
     );
   } else if (sample.status === "locked") {
     body = (
@@ -374,6 +383,16 @@ function SamplePanel({
         <span className="text-apollo-amber min-w-0 flex-1" data-testid="orcid-queue-sample-locked">
           A sampled row was marked Not this person, so bulk confirm is off for {label}. Keep
           deciding rows one at a time, or review another sample.
+        </span>
+        {start("Review another sample")}
+      </>
+    );
+  } else if (sample.stale) {
+    body = (
+      <>
+        <span className="min-w-0 flex-1" data-testid="orcid-queue-sample-stale">
+          The sample passed, but {label} was re-scored since it was drawn. Review a new sample to
+          unlock bulk confirm.
         </span>
         {start("Review another sample")}
       </>

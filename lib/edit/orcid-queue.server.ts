@@ -19,6 +19,7 @@ import { appendAuditRow } from "@/lib/edit/audit";
 import { formatPublishedName } from "@/lib/postnominal";
 
 import {
+  heldFor,
   isOrcidQueueTab,
   ORCID_QUEUE_BANDS,
   ORCID_QUEUE_SAMPLE_SIZE,
@@ -36,7 +37,7 @@ import {
 
 type Client = Pick<
   PrismaClient,
-  "orcidCandidateEvidence" | "orcidQueueSample" | "orcidDismissal" | "scholar"
+  "orcidCandidateEvidence" | "orcidQueueSample" | "orcidDismissal" | "scholar" | "orcidCandidate"
 >;
 type Tx = Prisma.TransactionClient;
 
@@ -53,6 +54,7 @@ export class OrcidQueueRefused extends Error {
       | "already_on_file"
       | "on_file_differs"
       | "on_file"
+      | "dismissed"
       | "state_changed"
       | "sample_row_not_found"
       | "sample_row_decided",
@@ -62,6 +64,62 @@ export class OrcidQueueRefused extends Error {
 }
 
 const pairKey = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
+
+/** Each scholar's undismissed `rpm_admin` iDs: with `scholar.orcid`, what makes
+ *  up "on file" (`heldFor`). */
+async function loadAdminIds(
+  client: Pick<PrismaClient, "orcidCandidate"> | Tx,
+  cwids: string[],
+  dismissed: Set<string>,
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (cwids.length === 0) return out;
+  const rows = await client.orcidCandidate.findMany({
+    where: { cwid: { in: cwids }, source: "rpm_admin" },
+    select: { cwid: true, orcid: true },
+  });
+  for (const r of rows) {
+    if (dismissed.has(pairKey(r.cwid, r.orcid))) continue;
+    const ids = out.get(r.cwid) ?? [];
+    if (!ids.includes(r.orcid)) ids.push(r.orcid);
+    out.set(r.cwid, ids);
+  }
+  return out;
+}
+
+/** One scholar's on-file state read on the writer: `scholar.orcid`, their
+ *  undismissed `rpm_admin` iDs, and every iD they dismissed. */
+async function readOnFile(tx: Tx, cwid: string) {
+  const held = await tx.scholar.findUnique({
+    where: { cwid },
+    select: { orcid: true, orcidConfirmMethod: true },
+  });
+  if (!held) throw new OrcidQueueRefused(404, "scholar_not_found");
+  const dismissed = new Set(
+    (await tx.orcidDismissal.findMany({ where: { cwid }, select: { orcid: true } })).map(
+      (d) => d.orcid,
+    ),
+  );
+  const admins =
+    (await loadAdminIds(tx, [cwid], new Set([...dismissed].map((o) => pairKey(cwid, o))))).get(
+      cwid,
+    ) ?? [];
+  return { held, admins, dismissed };
+}
+
+/** True when a later ETL run re-scored the band after the sample was drawn: the
+ *  sample measured a population that is gone, so it no longer authorizes bulk. */
+export async function isSampleStale(
+  client: Pick<PrismaClient, "orcidCandidateEvidence"> | Tx,
+  band: OrcidSampleBand,
+  startedAt: Date,
+): Promise<boolean> {
+  const newer = await client.orcidCandidateEvidence.findFirst({
+    where: { band, computedAt: { gt: startedAt } },
+    select: { cwid: true },
+  });
+  return newer !== null;
+}
 
 function asWorks(v: unknown): OrcidQueueWork[] {
   if (!Array.isArray(v)) return [];
@@ -112,10 +170,14 @@ export async function loadLatestSample(
 }
 
 /** The band's rows that still qualify for a confirm when read now: the band is
- *  unchanged, the scholar has no iD on file, and the pair is not dismissed. A
- *  scholar with two such rows is left out (only one can be theirs). */
+ *  unchanged, the scholar has no iD on file (`scholar.orcid` or an `rpm_admin`
+ *  iD), and the pair is not dismissed. A scholar with two such rows is left out
+ *  (only one can be theirs; a deliberate addition to the spec, see its
+ *  Deviations). */
 export async function loadQualifying(
-  client: Pick<PrismaClient, "orcidCandidateEvidence" | "scholar" | "orcidDismissal"> | Tx,
+  client:
+    | Pick<PrismaClient, "orcidCandidateEvidence" | "scholar" | "orcidDismissal" | "orcidCandidate">
+    | Tx,
   band: OrcidQueueBand,
 ): Promise<{ qualifying: Array<{ cwid: string; orcid: string }>; total: number }> {
   const rows = await client.orcidCandidateEvidence.findMany({
@@ -137,11 +199,15 @@ export async function loadQualifying(
     scholars.filter((s) => s.status === "active" && !s.deletedAt).map((s) => [s.cwid, s.orcid]),
   );
   const dismissed = new Set(dismissals.map((d) => pairKey(d.cwid, d.orcid)));
+  const admins = await loadAdminIds(client, cwids, dismissed);
   const open = rows.filter(
     (r) =>
       held.has(r.cwid) &&
-      pairState(r.orcid, held.get(r.cwid) ?? null, dismissed.has(pairKey(r.cwid, r.orcid))) ===
-        "queue",
+      pairState(
+        r.orcid,
+        heldFor(r.orcid, held.get(r.cwid) ?? null, admins.get(r.cwid) ?? []),
+        dismissed.has(pairKey(r.cwid, r.orcid)),
+      ) === "queue",
   );
   const perCwid = new Map<string, number>();
   for (const r of open) perCwid.set(r.cwid, (perCwid.get(r.cwid) ?? 0) + 1);
@@ -160,15 +226,20 @@ function pick<T>(xs: T[], n: number): T[] {
 
 /** Returns the band's open sample, or starts one: up to ORCID_QUEUE_SAMPLE_SIZE
  *  random rows that qualify now. A passed or locked sample is not open, so a
- *  call after one starts a fresh sample (which supersedes it for bulk). */
+ *  call after one starts a fresh sample (which supersedes it for bulk).
+ *  `restart` abandons an open sample the same way: a sampled pair can leave the
+ *  queue before it is decided (the scholar confirms it, or the ETL drops it), so
+ *  an open sample must never be the band's last word. The fresh sample still
+ *  has to pass in full, so this opens no way around the gate. */
 export async function openOrStartSample(
   tx: Tx,
   band: OrcidSampleBand,
   actor: string,
   now: Date,
+  opts: { restart?: boolean } = {},
 ): Promise<{ sample: OrcidQueueSampleState; created: boolean }> {
   const latest = await loadLatestSample(tx, band);
-  if (latest && latest.status === "open") {
+  if (latest && latest.status === "open" && !opts.restart) {
     const { id, band: b, startedAt, total, decided, dismissed, status } = latest;
     return {
       sample: { id, band: b, startedAt, total, decided, dismissed, status },
@@ -214,9 +285,11 @@ type WriteMeta = {
 };
 
 /** Confirm one pair (method `librarian`). The pair must be in the evidence
- *  table. An iD already on file is refused; a DIFFERENT iD on file (the
- *  Conflicts tab) is replaced only with `replace`, and the replaced iD is
- *  dismissed. Optimistic: the update re-checks what was read. */
+ *  table and not dismissed (a librarian never overrides the scholar's own
+ *  Remove or an earlier Not this person). "On file" is `scholar.orcid` or an
+ *  undismissed `rpm_admin` iD, as on /edit. An iD already on file is refused; a
+ *  DIFFERENT iD on file (the Conflicts tab) is replaced only with `replace`, and
+ *  every replaced iD is dismissed. Optimistic: the update re-checks what was read. */
 export async function confirmPair(
   tx: Tx,
   pair: { cwid: string; orcid: string; replace?: boolean },
@@ -227,13 +300,14 @@ export async function confirmPair(
     select: { band: true },
   });
   if (!evidence) throw new OrcidQueueRefused(404, "not_in_queue");
-  const held = await tx.scholar.findUnique({
-    where: { cwid: pair.cwid },
-    select: { orcid: true, orcidConfirmMethod: true },
-  });
-  if (!held) throw new OrcidQueueRefused(404, "scholar_not_found");
-  if (held.orcid === pair.orcid) throw new OrcidQueueRefused(409, "already_on_file");
-  if (held.orcid !== null && !pair.replace) throw new OrcidQueueRefused(409, "on_file_differs");
+  const { held, admins, dismissed } = await readOnFile(tx, pair.cwid);
+  const onFile = heldFor(pair.orcid, held.orcid, admins);
+  if (onFile === pair.orcid) throw new OrcidQueueRefused(409, "already_on_file");
+  if (dismissed.has(pair.orcid)) throw new OrcidQueueRefused(409, "dismissed");
+  if (onFile !== null && !pair.replace) throw new OrcidQueueRefused(409, "on_file_differs");
+  const replaced = [...new Set([held.orcid, ...admins])].filter(
+    (o): o is string => o !== null && o !== pair.orcid,
+  );
   const { count } = await tx.scholar.updateMany({
     where: { cwid: pair.cwid, orcid: held.orcid },
     data: {
@@ -244,11 +318,12 @@ export async function confirmPair(
     },
   });
   if (count !== 1) throw new OrcidQueueRefused(409, "state_changed");
+  // The /api/edit/orcid confirm write; a no-op here, since a dismissed pair is refused above.
   await tx.orcidDismissal.deleteMany({ where: { cwid: pair.cwid, orcid: pair.orcid } });
-  if (held.orcid !== null) {
+  for (const r of replaced) {
     await tx.orcidDismissal.upsert({
-      where: { cwid_orcid: { cwid: pair.cwid, orcid: held.orcid } },
-      create: { cwid: pair.cwid, orcid: held.orcid },
+      where: { cwid_orcid: { cwid: pair.cwid, orcid: r } },
+      create: { cwid: pair.cwid, orcid: r },
       update: {},
     });
   }
@@ -259,12 +334,12 @@ export async function confirmPair(
     targetEntityId: pair.cwid,
     action: "orcid_librarian_confirm",
     fieldsChanged: ["orcid"],
-    beforeValues: { orcid: held.orcid, method: held.orcidConfirmMethod },
+    beforeValues: { orcid: held.orcid ?? onFile, method: held.orcidConfirmMethod },
     afterValues: {
       orcid: pair.orcid,
       method: "librarian",
       band: evidence.band,
-      ...(held.orcid !== null ? { dismissed: [held.orcid] } : {}),
+      ...(replaced.length > 0 ? { dismissed: replaced } : {}),
       ...(meta.sampleId ? { sample_id: meta.sampleId } : {}),
       ...(meta.bulk ? { bulk: true } : {}),
     },
@@ -275,20 +350,18 @@ export async function confirmPair(
 
 /** "Not this person": an `orcid_dismissal` row. On the iD on file it is the
  *  Undo of an email auto-confirm, which also clears `scholar.orcid` and its
- *  confirmation; any other iD on file is refused (that is Remove on /edit). */
+ *  confirmation; any other iD on file, an `rpm_admin` one included, is refused
+ *  (that is Remove on /edit). */
 export async function dismissPair(
   tx: Tx,
   pair: { cwid: string; orcid: string },
   meta: WriteMeta,
 ): Promise<{ undid: boolean }> {
-  const held = await tx.scholar.findUnique({
-    where: { cwid: pair.cwid },
-    select: { orcid: true, orcidConfirmMethod: true },
-  });
-  if (!held) throw new OrcidQueueRefused(404, "scholar_not_found");
+  const { held, admins } = await readOnFile(tx, pair.cwid);
   let undid = false;
-  if (held.orcid === pair.orcid) {
-    if (held.orcidConfirmMethod !== "email_verified") throw new OrcidQueueRefused(409, "on_file");
+  if (heldFor(pair.orcid, held.orcid, admins) === pair.orcid) {
+    if (held.orcid !== pair.orcid || held.orcidConfirmMethod !== "email_verified")
+      throw new OrcidQueueRefused(409, "on_file");
     const { count } = await tx.scholar.updateMany({
       where: { cwid: pair.cwid, orcid: pair.orcid },
       data: {
@@ -376,6 +449,7 @@ export async function loadOrcidQueue(client: Client, rawTab: unknown): Promise<O
     held.filter((s) => s.status === "active" && !s.deletedAt).map((s) => [s.cwid, s.orcid]),
   );
   const dismissed = new Set(dismissals.map((d) => pairKey(d.cwid, d.orcid)));
+  const admins = await loadAdminIds(client, cwids, dismissed);
 
   const counts = Object.fromEntries(ORCID_QUEUE_TABS.map((t) => [t, 0])) as Record<
     OrcidQueueTab,
@@ -384,7 +458,7 @@ export async function loadOrcidQueue(client: Client, rawTab: unknown): Promise<O
   const inTab: Array<{ cwid: string; orcid: string; onFile: string | null }> = [];
   for (const r of all) {
     if (!heldBy.has(r.cwid)) continue;
-    const onFile = heldBy.get(r.cwid) ?? null;
+    const onFile = heldFor(r.orcid, heldBy.get(r.cwid) ?? null, admins.get(r.cwid) ?? []);
     const state = pairState(r.orcid, onFile, dismissed.has(pairKey(r.cwid, r.orcid)));
     const t: OrcidQueueTab | null =
       state === "conflict" ? "conflicts" : state === "queue" ? (r.band as OrcidQueueBand) : null;
@@ -406,7 +480,10 @@ export async function loadOrcidQueue(client: Client, rawTab: unknown): Promise<O
     const latest = await loadLatestSample(client, tab);
     if (latest) {
       const { pairs, ...state } = latest;
-      sample = state;
+      sample =
+        state.status === "passed" && (await isSampleStale(client, tab, new Date(state.startedAt)))
+          ? { ...state, stale: true }
+          : state;
       if (state.status === "open") {
         for (const p of pairs)
           sampled.set(pairKey(p.cwid, p.orcid), p.decision as "confirmed" | "dismissed" | null);
@@ -416,7 +493,7 @@ export async function loadOrcidQueue(client: Client, rawTab: unknown): Promise<O
           if (!listed.has(pairKey(p.cwid, p.orcid)))
             inTab.push({ cwid: p.cwid, orcid: p.orcid, onFile: null });
       }
-      if (state.status === "passed") {
+      if (state.status === "passed" && !sample.stale) {
         const done = new Set(pairs.map((p) => pairKey(p.cwid, p.orcid)));
         remaining = (await loadQualifying(client, tab)).qualifying.filter(
           (q) => !done.has(pairKey(q.cwid, q.orcid)),

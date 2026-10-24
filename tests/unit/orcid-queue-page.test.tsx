@@ -185,7 +185,11 @@ describe("loader", () => {
     ).loadOrcidQueue(c, t);
 
   const client = (
-    opts: { sample?: Array<{ cwid: string; orcid: string; decision: string | null }> } = {},
+    opts: {
+      sample?: Array<{ cwid: string; orcid: string; decision: string | null }>;
+      admins?: Array<{ cwid: string; orcid: string }>;
+      rescored?: boolean;
+    } = {},
   ) => {
     const evidence = [
       { cwid: "a00001", orcid: ORCID, band: "strong" },
@@ -226,7 +230,9 @@ describe("loader", () => {
                   }))
               : evidence,
         ),
+        findFirst: vi.fn(async () => (opts.rescored ? { cwid: "a00001" } : null)),
       },
+      orcidCandidate: { findMany: vi.fn(async () => opts.admins ?? []) },
       scholar: {
         findMany: vi.fn(
           async (args: { where: { orcidConfirmMethod?: string; cwid?: { in: string[] } } }) =>
@@ -257,6 +263,28 @@ describe("loader", () => {
     expect(q.counts).toMatchObject({ strong: 2, conflicts: 1, email_verified: 1 });
     const c = await realLoad(client(), "conflicts");
     expect(c.rows).toEqual([expect.objectContaining({ cwid: "c00001", onFileOrcid: OTHER })]);
+  });
+
+  it("an rpm_admin iD is on file: that scholar's other candidate goes to Conflicts", async () => {
+    const admins = [{ cwid: "a00001", orcid: OTHER }];
+    const q = await realLoad(client({ admins }), "strong");
+    expect(q.rows.map((r) => r.cwid)).toEqual(["d00001"]);
+    const c = await realLoad(client({ admins }), "conflicts");
+    expect(c.rows.map((r) => [r.cwid, r.onFileOrcid]).sort()).toEqual([
+      ["a00001", OTHER],
+      ["c00001", OTHER],
+    ]);
+  });
+
+  it("a passed sample the ETL re-scored since is stale: no Confirm remaining", async () => {
+    const sample = [{ cwid: "d00001", orcid: OTHER, decision: "confirmed" }];
+    const fresh = await realLoad(client({ sample }), "strong");
+    expect(fresh.sample).toMatchObject({ status: "passed" });
+    expect(fresh.sample?.stale).toBeUndefined();
+    expect(fresh.remaining).toBe(1);
+    const stale = await realLoad(client({ sample, rescored: true }), "strong");
+    expect(stale.sample).toMatchObject({ status: "passed", stale: true });
+    expect(stale.remaining).toBeNull();
   });
 
   it("Email verified lists the ETL's confirmed iDs, as auto-confirmed", async () => {
@@ -330,6 +358,39 @@ describe("client", () => {
       />,
     );
     expect(screen.getByTestId("orcid-queue-sample-locked")).toBeTruthy();
+    expect(screen.queryByTestId("orcid-queue-bulk-confirm")).toBeNull();
+    expect(screen.getByTestId("orcid-queue-start-sample").textContent).toBe(
+      "Review another sample",
+    );
+  });
+
+  it("an open sample offers Start a new sample; a passed but re-scored one offers no bulk confirm", () => {
+    const base = {
+      id: "s1",
+      band: "strong" as const,
+      startedAt: "",
+      total: 50,
+      decided: 3,
+      dismissed: 0,
+      status: "open" as const,
+    };
+    const { unmount } = render(
+      <OrcidQueue data={data({ sample: base })} basePath="/edit/orcid-queue" readOnly={false} />,
+    );
+    expect(screen.getByTestId("orcid-queue-sample-open")).toBeTruthy();
+    expect(screen.getByTestId("orcid-queue-start-sample").textContent).toBe("Start a new sample");
+    unmount();
+    render(
+      <OrcidQueue
+        data={data({
+          sample: { ...base, decided: 50, status: "passed", stale: true },
+          remaining: null,
+        })}
+        basePath="/edit/orcid-queue"
+        readOnly={false}
+      />,
+    );
+    expect(screen.getByTestId("orcid-queue-sample-stale")).toBeTruthy();
     expect(screen.queryByTestId("orcid-queue-bulk-confirm")).toBeNull();
     expect(screen.getByTestId("orcid-queue-start-sample").textContent).toBe(
       "Review another sample",

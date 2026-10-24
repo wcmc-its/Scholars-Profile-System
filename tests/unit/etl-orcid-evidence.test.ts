@@ -171,6 +171,11 @@ describe("surnamesAgree — every case the spec names", () => {
     ["Sanchez Garcia-Vao", "Maria Sanchez"],
     ["Prieto", "Ana Prieto Fernandez"],
     ["Prieto Fernandez", "Ana Prieto"],
+    // Equality has no length minimum: two-letter surnames agree with themselves.
+    ["Li", "Wei Li"],
+    ["Wu", "Jing Wu"],
+    ["Ng", "Kenneth Ng"],
+    ["Li", "Wei M Li"],
   ])("record %s agrees with scholar %s", (family, full) => {
     expect(surnamesAgree(family, scholar(full))).toBe(true);
   });
@@ -178,6 +183,8 @@ describe("surnamesAgree — every case the spec names", () => {
   it("different surnames, a short shared token, and no family name do not agree", () => {
     expect(surnamesAgree("Smith", scholar("Jane Doe"))).toBe(false);
     expect(surnamesAgree("Li", scholar("Wei Li Wang"))).toBe(false);
+    expect(surnamesAgree("Li", scholar("Wei Wu"))).toBe(false);
+    expect(surnamesAgree("L", scholar("Wei L"))).toBe(false); // an initial is not a surname
     expect(surnamesAgree(null, scholar("Jane Doe"))).toBe(false);
   });
 
@@ -248,11 +255,16 @@ describe("recordFacts + the per-pair evidence", () => {
     const rows = assembleEvidence({
       pairs: [
         { cwid: "jd0001", orcid: ORCID },
-        { cwid: "jd0001", orcid: ORCID_2 }, // no record fetched
+        // No record fetched: no row. (A failed iD of jd0001's own would make
+        // the pair above a competitor — the degraded-run test below.)
+        { cwid: "ab0001", orcid: ORCID_2 },
       ],
       onFile: new Set(),
       facts: new Map([[ORCID, f]]),
-      scholars: new Map([["jd0001", JANE]]),
+      scholars: new Map([
+        ["jd0001", JANE],
+        ["ab0001", { cwid: "ab0001", fullName: "Al Bee", preferredName: "Al Bee", email: null }],
+      ]),
       works: indexScholarWorks(JANE_PAPERS),
       active: [JANE],
     });
@@ -351,6 +363,52 @@ describe("findCompetitors", () => {
       ],
     });
     expect(r).toEqual({ competitor: true, cwids: ["c"], orcids: [] });
+  });
+
+  it("rule 2 reads an unscored iD (its /record fetch failed) as a competitor", () => {
+    const r = findCompetitors({
+      cwid: "a",
+      workIds,
+      mine,
+      sameSurname: [],
+      otherIds: [{ orcid: ORCID_2, shared: null }],
+      otherHolders: [],
+    });
+    expect(r).toMatchObject({ competitor: true, orcids: [ORCID_2] });
+  });
+
+  it("assembleEvidence: a failed fetch of the scholar's other candidate iD keeps this pair out of the confirmable bands", () => {
+    const f = recordFacts(ORCID, record());
+    const args = {
+      pairs: [
+        { cwid: "jd0001", orcid: ORCID },
+        { cwid: "jd0001", orcid: ORCID_2 },
+      ],
+      onFile: new Set<string>(),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+    };
+    // ORCID_2 fetched with no shared papers: no competitor, email band.
+    const ok = assembleEvidence({
+      ...args,
+      facts: new Map([
+        [ORCID, f],
+        [ORCID_2, { ...f, emails: [], workIds: new Set<string>(), works: [] }],
+      ]),
+    });
+    expect(ok.find((r) => r.orcid === ORCID)).toMatchObject({
+      competitor: false,
+      band: "email_verified",
+    });
+    // ORCID_2's fetch failed: unknown → competitor, and the pair drops to moderate.
+    const degraded = assembleEvidence({ ...args, facts: new Map([[ORCID, f]]) });
+    expect(degraded).toHaveLength(1);
+    expect(degraded[0]).toMatchObject({
+      competitor: true,
+      competitorOrcids: [ORCID_2],
+      band: "moderate",
+    });
   });
 
   it("assembleEvidence wires rule 3 across scholars: both holders of one iD with ≥3 shared compete", () => {

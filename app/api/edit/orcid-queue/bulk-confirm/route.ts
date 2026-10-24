@@ -4,16 +4,21 @@
  *
  * Refused (409) unless `sampleId` is the band's LATEST sample and it is passed
  * (every row decided, none "Not this person"): a stale sample, an open one and
- * a locked one all say so. Then every remaining row of the band is re-read on
+ * a locked one all say so. A passed sample is also stale once a later ETL run
+ * re-scored the band (any of its evidence rows `computed_at` after the sample
+ * started): it measured a population that is gone. Then every remaining row of the band is re-read on
  * the writer and confirmed only if it STILL qualifies — band unchanged, no iD
  * on file, no dismissal, one row for the scholar — so a row that changed since
  * the page loaded is skipped, not overwritten. Each confirm re-checks
  * `orcid IS NULL` in its own write.
  *
- * Writes go in batches of BATCH, one transaction each, every confirm with its
+ * Writes go in batches of BATCH, one transaction each (TX_OPTIONS: a batch is
+ * ~8 round trips per row, past Prisma's 5s default), every confirm with its
  * own `orcid_librarian_confirm` audit row (method `librarian`, the real
  * librarian as `orcid_confirmed_by`). One `orcid_bulk_confirm` row with the
- * counts and the sample id follows the batches. Returns `{ confirmed, skipped }`.
+ * counts and the sample id follows the batches; when a later batch fails after
+ * earlier ones committed, that row is still written with `partial: true` and
+ * the count that did commit, before the 500. Returns `{ confirmed, skipped }`.
  *
  * Same gates as the decide route: flag (404), preamble, View as (403),
  * `isSuperuser` (403).
@@ -27,6 +32,7 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { isOrcidLibrarianQueueEnabled, isOrcidSampleBand } from "@/lib/edit/orcid-queue";
 import {
   confirmPair,
+  isSampleStale,
   loadLatestSample,
   loadQualifying,
   OrcidQueueRefused,
@@ -37,7 +43,8 @@ import { reflectVisibilityChange } from "@/lib/edit/revalidation";
 export const dynamic = "force-dynamic";
 
 const PATH = "/api/edit/orcid-queue/bulk-confirm";
-const BATCH = 100;
+const BATCH = 50;
+const TX_OPTIONS = { maxWait: 5000, timeout: 30000 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidLibrarianQueueEnabled()) return new NextResponse(null, { status: 404 });
@@ -71,6 +78,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!latest || latest.id !== sampleId) return editError(409, "stale_sample");
     if (latest.status === "locked") return editError(409, "sample_locked");
     if (latest.status !== "passed") return editError(409, "sample_not_passed");
+    if (await isSampleStale(db.write, band, new Date(latest.startedAt)))
+      return editError(409, "stale_sample");
 
     const inSample = new Set(latest.pairs.map((p) => `${p.cwid}|${p.orcid}`));
     const { qualifying, total } = await loadQualifying(db.write, band);
@@ -106,40 +115,55 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           }
         }
         return ok;
-      });
+      }, TX_OPTIONS);
       confirmed = confirmed.concat(done);
     }
     skipped = total - latest.pairs.length - confirmed.length;
     if (skipped < 0) skipped = 0;
 
+    await writeBulkAudit({ band, confirmed: confirmed.length, skipped });
+  } catch (err) {
+    logEditFailure(PATH, err);
+    // Earlier batches committed: audit what did land, and reflect those profiles.
+    if (confirmed.length > 0) {
+      try {
+        await writeBulkAudit({ band, confirmed: confirmed.length, partial: true });
+      } catch (auditErr) {
+        logEditFailure(`${PATH}#partial-audit`, auditErr);
+      }
+      reflect(confirmed);
+    }
+    return editError(500, "write_failed");
+  }
+
+  reflect(confirmed);
+  return editOk({ confirmed: confirmed.length, skipped });
+
+  async function writeBulkAudit(afterValues: Record<string, unknown>) {
     await db.write.$transaction(async (tx) => {
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
         targetEntityType: "orcid_queue_sample",
-        targetEntityId: sampleId,
+        targetEntityId: sampleId as string,
         action: "orcid_bulk_confirm",
         fieldsChanged: null,
         beforeValues: null,
-        afterValues: { band, confirmed: confirmed.length, skipped },
+        afterValues,
         ts,
         requestId,
       });
     });
-  } catch (err) {
-    logEditFailure(PATH, err);
-    return editError(500, "write_failed");
   }
+}
 
-  if (confirmed.length > 0) {
-    const cwids = confirmed;
-    runAfterResponse(async () => {
-      const slugs = (
-        await db.read.scholar.findMany({ where: { cwid: { in: cwids } }, select: { slug: true } })
-      ).map((s) => s.slug);
-      await reflectVisibilityChange(slugs);
-    });
-  }
-
-  return editOk({ confirmed: confirmed.length, skipped });
+/** The confirmed iDs feed the profiles' JSON-LD sameAs: reflect them after the response. */
+function reflect(cwids: string[]) {
+  if (cwids.length === 0) return;
+  runAfterResponse(async () => {
+    const slugs = (
+      await db.read.scholar.findMany({ where: { cwid: { in: cwids } }, select: { slug: true } })
+    ).map((s) => s.slug);
+    await reflectVisibilityChange(slugs);
+  });
 }

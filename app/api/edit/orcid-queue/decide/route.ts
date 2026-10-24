@@ -13,7 +13,12 @@
  *    email-confirmed it is the Undo: `scholar.orcid` and its confirmation are
  *    cleared too. Any other iD on file is a 409 (that is Remove on /edit).
  *  - `sampleId`: the decision also stamps that sample's row, which must exist
- *    and be undecided.
+ *    and be undecided. A sampled confirm whose iD went on file by another route
+ *    since the sample was drawn (self or proxy confirm, the Identity import, an
+ *    `rpm_admin` row) stamps the row confirmed and writes nothing else, so the
+ *    sample can still finish. Returns `alreadyOnFile: true` then.
+ *  - confirm on a dismissed pair is a 409 `dismissed`: a librarian never
+ *    overrides the scholar's own Remove or an earlier Not this person.
  * One transaction with its audit row (`orcid_librarian_confirm` /
  * `orcid_librarian_dismiss`); the profile is re-reflected after commit.
  *
@@ -77,11 +82,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ts = new Date();
   const meta = { actor: realCwid, impersonatedCwid, requestId, ts, sampleId: sampleId ?? null };
   let undid = false;
+  let alreadyOnFile = false;
   try {
     await db.write.$transaction(async (tx) => {
-      if (decision === "confirm")
-        await confirmPair(tx, { cwid, orcid, replace: replace === true }, meta);
-      else undid = (await dismissPair(tx, { cwid, orcid }, meta)).undid;
+      if (decision === "confirm") {
+        try {
+          await confirmPair(tx, { cwid, orcid, replace: replace === true }, meta);
+        } catch (err) {
+          // confirmPair refuses before any write, so the stamp below is the only write.
+          const onFile = err instanceof OrcidQueueRefused && err.code === "already_on_file";
+          if (!onFile || typeof sampleId !== "string") throw err;
+          alreadyOnFile = true;
+        }
+      } else undid = (await dismissPair(tx, { cwid, orcid }, meta)).undid;
       if (typeof sampleId === "string") {
         await stampSampleRow(
           tx,
@@ -99,7 +112,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // The iD feeds the profile's JSON-LD sameAs: reflect a change to scholar.orcid.
-  if (decision === "confirm" || undid) {
+  if ((decision === "confirm" && !alreadyOnFile) || undid) {
     try {
       const s = await db.read.scholar.findUnique({ where: { cwid }, select: { slug: true } });
       if (s) await reflectOverviewEdit(s.slug);
@@ -108,5 +121,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  return editOk({ decision, undid });
+  return editOk({ decision, undid, ...(alreadyOnFile ? { alreadyOnFile: true } : {}) });
 }

@@ -4,8 +4,9 @@
  * `etl:orcid-registry`.
  *
  * Population: every distinct (cwid, orcid) in `orcid_candidate` (all sources)
- * for an active scholar, minus pairs in `orcid_dismissal`, minus pairs where
- * `scholar.orcid` already holds that iD. Each iD's public `/record` is fetched
+ * for an active scholar, minus pairs in `orcid_dismissal`, minus pairs already
+ * on file — `scholar.orcid`, or an undismissed `rpm_admin` iD (WCM leaves
+ * `scholar.orcid` NULL; /edit reads the RPM mirror, `heldFor`). Each iD's public `/record` is fetched
  * ONCE and shared by every scholar it is a candidate for. Per pair:
  *
  *   - `email_verified` — a public email on the record with `verified: true`
@@ -69,6 +70,7 @@ import {
   OrcidHttpError,
   type RecordResponse,
 } from "@/etl/orcid-registry/orcid-api";
+import { heldFor } from "@/lib/edit/orcid-queue";
 import { lastNameKey } from "@/lib/last-name-key";
 
 const BATCH = 500;
@@ -253,15 +255,19 @@ export function recordFamilyName(facts: Pick<RecordFacts, "given" | "family">): 
 type NamedScholar = { cwid: string; fullName: string; preferredName: string };
 
 /** Each tail of a token list glued with spaces and hyphens removed:
- *  ["k", "al", "hariri"] → kalhariri, alhariri, hariri. */
+ *  ["k", "al", "hariri"] → kalhariri, alhariri, hariri. A one-letter tail is an
+ *  initial, not a surname, and is dropped; two letters stay ("Li", "Wu", "Ng"). */
 const gluedTails = (tokens: string[]) =>
-  tokens.map((_, i) => tokens.slice(i).join("").replace(/-/g, "")).filter((t) => t.length >= 3);
+  tokens.map((_, i) => tokens.slice(i).join("").replace(/-/g, "")).filter((t) => t.length >= 2);
 
 /** The record's family name and the scholar's surname agree after folding: they
  *  share a token of ≥3 letters, or are equal with spaces and hyphens removed
  *  ("Al Hariri" = "Alhariri", compared tail by tail so a middle name on either
- *  side does not get in the way). The scholar's surname is everything after the
- *  first token of fullName or preferredName — there is no surname column. Pure. */
+ *  side does not get in the way). The equality rule has no ≥3 minimum, so a
+ *  two-letter surname agrees with itself ("Li" = "Wei Li") but a short token
+ *  inside a longer surname does not ("Li" ≠ "Wei Li Wang"). The scholar's
+ *  surname is everything after the first token of fullName or preferredName —
+ *  there is no surname column. Pure. */
 export function surnamesAgree(recordFamily: string | null, scholar: NamedScholar): boolean {
   if (!recordFamily) return false;
   const theirs = surnameTokens(recordFamily, { skipGiven: false });
@@ -299,14 +305,16 @@ export function newWorksOf(
 /** The three competitor rules for one (cwid, orcid) pair. Pure.
  *   1. another scholar with the same surname key holds ≥3 of the record's
  *      papers that are NOT in this scholar's publications;
- *   2. another candidate iD of this scholar has `shared` ≥3;
+ *   2. another candidate iD of this scholar has `shared` ≥3 — or could not be
+ *      scored (`shared: null`, its `/record` fetch failed), which counts as a
+ *      competitor so a degraded run never lifts a pair into a confirmable band;
  *   3. the same iD is a candidate for another scholar whose `shared` is ≥3. */
 export function findCompetitors(args: {
   cwid: string;
   workIds: Set<string>;
   mine: Map<string, string> | undefined;
   sameSurname: Array<{ cwid: string; works: Map<string, string> | undefined }>;
-  otherIds: Array<{ orcid: string; shared: number }>;
+  otherIds: Array<{ orcid: string; shared: number | null }>;
   otherHolders: Array<{ cwid: string; shared: number }>;
 }): { competitor: boolean; cwids: string[]; orcids: string[] } {
   const minePmids = new Set(args.mine?.values() ?? []);
@@ -319,7 +327,9 @@ export function findCompetitors(args: {
   for (const h of args.otherHolders)
     if (h.cwid !== args.cwid && h.shared >= MIN_SHARED) cwids.add(h.cwid);
   const orcids = [
-    ...new Set(args.otherIds.filter((o) => o.shared >= MIN_SHARED).map((o) => o.orcid)),
+    ...new Set(
+      args.otherIds.filter((o) => o.shared === null || o.shared >= MIN_SHARED).map((o) => o.orcid),
+    ),
   ];
   return {
     competitor: cwids.size > 0 || orcids.length > 0,
@@ -350,7 +360,10 @@ type EvidenceScholar = NamedScholar & { email: string | null };
 /** Every evidence row for a population, from the fetched facts and the scholars'
  *  work indexes. `pairs` is every non-dismissed (cwid, orcid) of an active scholar
  *  (on-file ones included: they still compete); `onFile` the pairs left out of
- *  the output. A pair whose record could not be fetched gets no row. Pure. */
+ *  the output. A pair whose record could not be fetched gets no row, and makes
+ *  the scholar's other pairs competitors (rule 2 cannot be ruled out). Rule 3
+ *  needs no such guard: every holder of an iD is scored from the same record.
+ *  Pure. */
 export function assembleEvidence(args: {
   pairs: Array<{ cwid: string; orcid: string }>;
   onFile: Set<string>;
@@ -395,7 +408,11 @@ export function assembleEvidence(args: {
       })),
       otherIds: (byCwid.get(p.cwid) ?? [])
         .filter((o) => o !== p.orcid)
-        .map((o) => ({ orcid: o, shared: shared.get(key(p.cwid, o)) ?? 0 })),
+        // No facts = the fetch failed: unknown, which rule 2 reads as a competitor.
+        .map((o) => ({
+          orcid: o,
+          shared: args.facts.has(o) ? (shared.get(key(p.cwid, o)) ?? 0) : null,
+        })),
       otherHolders: (byOrcid.get(p.orcid) ?? [])
         .filter((c) => c !== p.cwid)
         .map((c) => ({ cwid: c, shared: shared.get(key(c, p.orcid)) ?? 0 })),
@@ -425,8 +442,10 @@ export function assembleEvidence(args: {
 }
 
 /** The `email_verified` rows the auto-confirm may write: the scholar has no iD
- *  on file, the pair is not dismissed, the scholar has exactly one such row, and
- *  no other scholar holds or is email-verified for the iD. Pure. */
+ *  on file (`held`: `scholar.orcid` or an undismissed `rpm_admin` iD), the pair
+ *  is not dismissed, the scholar has exactly one such row, and no other scholar
+ *  holds or is email-verified for the iD. The last two are stricter than the
+ *  spec on purpose (see its Deviations). Pure. */
 export function planAutoConfirm(
   rows: Array<Pick<EvidenceRow, "cwid" | "orcid" | "band">>,
   held: Map<string, string | null>,
@@ -556,16 +575,27 @@ async function main(): Promise<number> {
   );
 
   // 1. Population: distinct non-dismissed candidate pairs of active scholars.
+  //    "On file" is `scholar.orcid` or an undismissed `rpm_admin` iD (`heldFor`).
   const seen = new Set<string>();
   const pairs: Array<{ cwid: string; orcid: string }> = [];
-  for (const c of await db.write.orcidCandidate.findMany({ select: { cwid: true, orcid: true } })) {
+  const admins = new Map<string, string[]>();
+  for (const c of await db.write.orcidCandidate.findMany({
+    select: { cwid: true, orcid: true, source: true },
+  })) {
     const k = `${c.cwid}|${c.orcid}`;
-    if (seen.has(k) || dismissed.has(k) || !byCwid.has(c.cwid)) continue;
+    if (dismissed.has(k) || !byCwid.has(c.cwid)) continue;
+    if (c.source === "rpm_admin" && !(admins.get(c.cwid) ?? []).includes(c.orcid))
+      admins.set(c.cwid, [...(admins.get(c.cwid) ?? []), c.orcid]);
+    if (seen.has(k)) continue;
     seen.add(k);
     pairs.push({ cwid: c.cwid, orcid: c.orcid });
   }
   const onFile = new Set(
-    pairs.filter((p) => byCwid.get(p.cwid)!.orcid === p.orcid).map((p) => `${p.cwid}|${p.orcid}`),
+    pairs
+      .filter(
+        (p) => heldFor(p.orcid, byCwid.get(p.cwid)!.orcid, admins.get(p.cwid) ?? []) === p.orcid,
+      )
+      .map((p) => `${p.cwid}|${p.orcid}`),
   );
   let ids = [...new Set(pairs.map((p) => p.orcid))];
   if (maxRecords > 0 && ids.length > maxRecords) {
@@ -625,7 +655,11 @@ async function main(): Promise<number> {
   );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 
-  const plan = planAutoConfirm(rows, new Map(active.map((s) => [s.cwid, s.orcid])), dismissed);
+  const plan = planAutoConfirm(
+    rows,
+    new Map(active.map((s) => [s.cwid, s.orcid ?? admins.get(s.cwid)?.[0] ?? null])),
+    dismissed,
+  );
   if (dryRun) {
     await autoConfirmStep(db.write, plan, { enabled: isEmailAutoconfirmEnabled(), dryRun });
     console.log("--dry-run: nothing written.");

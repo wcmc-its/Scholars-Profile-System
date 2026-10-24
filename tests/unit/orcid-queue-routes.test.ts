@@ -21,7 +21,9 @@ type SampleRow = Pair & { id: string; band: string; startedAt: Date; decision: s
 
 const h = vi.hoisted(() => {
   const state = {
-    evidence: [] as Array<{ cwid: string; orcid: string; band: string }>,
+    evidence: [] as Array<{ cwid: string; orcid: string; band: string; computedAt?: Date }>,
+    /** `orcid_candidate` rows with source `rpm_admin`. */
+    admins: [] as Array<{ cwid: string; orcid: string }>,
     scholars: new Map<string, { orcid: string | null; orcidConfirmMethod: string | null }>(),
     dismissals: new Set<string>(),
     samples: [] as Array<{
@@ -49,6 +51,17 @@ const h = vi.hoisted(() => {
           .filter((r) => r.band === where.band)
           .map(({ cwid, orcid }) => ({ cwid, orcid })),
       ),
+      findFirst: vi.fn(async ({ where }: { where: { band: string; computedAt: { gt: Date } } }) => {
+        const e = h.state.evidence.find(
+          (r) => r.band === where.band && r.computedAt && r.computedAt > where.computedAt.gt,
+        );
+        return e ? { cwid: e.cwid } : null;
+      }),
+    },
+    orcidCandidate: {
+      findMany: vi.fn(async ({ where }: { where: { cwid: { in: string[] } } }) =>
+        h.state.admins.filter((a) => where.cwid.in.includes(a.cwid)),
+      ),
     },
     scholar: {
       findUnique: vi.fn(async ({ where }: { where: { cwid: string } }) => {
@@ -73,8 +86,15 @@ const h = vi.hoisted(() => {
           ? where.cwid_orcid
           : null,
       ),
-      findMany: vi.fn(async () =>
-        [...h.state.dismissals].map((d) => ({ cwid: d.split("|")[0], orcid: d.split("|")[1] })),
+      findMany: vi.fn(async (args?: { where?: { cwid?: string | { in: string[] } } }) =>
+        [...h.state.dismissals]
+          .map((d) => ({ cwid: d.split("|")[0]!, orcid: d.split("|")[1]! }))
+          .filter((d) => {
+            const c = args?.where?.cwid;
+            return (
+              c === undefined || (typeof c === "string" ? d.cwid === c : c.in.includes(d.cwid))
+            );
+          }),
       ),
       deleteMany: vi.fn(async () => ({ count: 0 })),
       upsert: vi.fn(async ({ create }: { create: Pair }) => {
@@ -190,6 +210,7 @@ beforeEach(() => {
   h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong" }];
   h.state.scholars = new Map([["jd0001", { orcid: null, orcidConfirmMethod: null }]]);
   h.state.dismissals = new Set();
+  h.state.admins = [];
   h.state.samples = [];
   h.scholarUpdateMany.mockImplementation(
     async ({
@@ -317,6 +338,49 @@ describe("decide", () => {
     expect(audits()[0]!.afterValues).toMatchObject({ undo_email_autoconfirm: true });
   });
 
+  it("an rpm_admin iD is on file: another candidate is a 409 conflict, replace dismisses the rpm_admin iD", async () => {
+    h.state.admins = [{ cwid: "jd0001", orcid: OTHER }];
+    const refused = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "confirm" }));
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toBe("on_file_differs");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    const replaced = await decide(
+      req({ cwid: "jd0001", orcid: ORCID, decision: "confirm", replace: true }),
+    );
+    expect(replaced.status).toBe(200);
+    expect(h.state.scholars.get("jd0001")!.orcid).toBe(ORCID);
+    expect(h.state.dismissals.has(k("jd0001", OTHER))).toBe(true);
+    expect(audits()[0]!.afterValues).toMatchObject({ dismissed: [OTHER] });
+  });
+
+  it("an rpm_admin iD is on file: confirming it is 409 already_on_file, dismissing it is 409 on_file", async () => {
+    h.state.admins = [{ cwid: "jd0001", orcid: ORCID }];
+    const confirm = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "confirm" }));
+    expect((await confirm.json()).error).toBe("already_on_file");
+    const dismiss = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "dismiss" }));
+    expect(dismiss.status).toBe(409);
+    expect((await dismiss.json()).error).toBe("on_file");
+    expect(h.state.dismissals.size).toBe(0);
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("a dismissed rpm_admin iD is not on file: the candidate confirms", async () => {
+    h.state.admins = [{ cwid: "jd0001", orcid: OTHER }];
+    h.state.dismissals.add(k("jd0001", OTHER));
+    expect((await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "confirm" }))).status).toBe(
+      200,
+    );
+  });
+
+  it("confirm never overrides a dismissal (the scholar's Remove, or Not this person): 409, nothing written", async () => {
+    h.state.dismissals.add(k("jd0001", ORCID));
+    const res = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "confirm" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("dismissed");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    expect(h.state.dismissals.has(k("jd0001", ORCID))).toBe(true);
+  });
+
   it("dismiss on an iD the scholar confirmed themselves is 409 (that is Remove on /edit)", async () => {
     h.state.scholars.set("jd0001", { orcid: ORCID, orcidConfirmMethod: "self" });
     const res = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "dismiss" }));
@@ -369,6 +433,34 @@ describe("sample lifecycle", () => {
       req({ cwid: row.cwid, orcid: row.orcid, decision: "dismiss", sampleId: s.id }),
     );
     expect(again.status).toBe(409);
+  });
+
+  it("a sampled pair that went on file elsewhere: confirm stamps the row and writes nothing else, so the sample can pass", async () => {
+    seedBand(1);
+    const s = (await (await sample(req({ band: "strong" }))).json()).sample;
+    const row = h.state.samples[0]!;
+    h.state.scholars.set(row.cwid, { orcid: row.orcid, orcidConfirmMethod: "self" });
+    const res = await decide(
+      req({ cwid: row.cwid, orcid: row.orcid, decision: "confirm", sampleId: s.id }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ alreadyOnFile: true });
+    expect(row.decision).toBe("confirmed");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+    expect(sampleStatus(h.state.samples)).toBe("passed");
+    // Without a sampleId the same confirm is still a plain 409.
+    expect(
+      (await decide(req({ cwid: row.cwid, orcid: row.orcid, decision: "confirm" }))).status,
+    ).toBe(409);
+  });
+
+  it("restart abandons an open sample: a fresh one supersedes it", async () => {
+    seedBand(3);
+    const first = (await (await sample(req({ band: "strong" }))).json()).sample;
+    const again = await (await sample(req({ band: "strong", restart: true }))).json();
+    expect(again.created).toBe(true);
+    expect(again.sample.id).not.toBe(first.id);
   });
 
   it("a locked sample is not open: the next call starts a fresh one", async () => {
@@ -466,6 +558,46 @@ describe("bulk confirm", () => {
       targetEntityType: "orcid_queue_sample",
       targetEntityId: "s1",
     });
+  });
+
+  it("a passed sample is stale once a later ETL run re-scored the band", async () => {
+    passed("s1", 2000);
+    h.state.evidence[0]!.computedAt = new Date(5000);
+    const res = await bulk(req({ band: "strong", sampleId: "s1" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("stale_sample");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("skips a scholar whose only on-file iD is an rpm_admin one", async () => {
+    passed();
+    h.state.admins = [{ cwid: "a00001", orcid: OTHER }];
+    const res = await bulk(req({ band: "strong", sampleId: "s1" }));
+    expect(await res.json()).toMatchObject({ confirmed: 2 });
+    expect(h.state.scholars.get("a00001")!.orcid).toBeNull();
+  });
+
+  it("batches run with a raised transaction timeout; a failed later batch still writes a partial bulk audit row", async () => {
+    passed();
+    const { db } = await import("@/lib/db");
+    const $tx = db.write.$transaction as unknown as ReturnType<typeof vi.fn>;
+    const real = $tx.getMockImplementation()!;
+    let n = 0;
+    $tx.mockImplementation(async (fn: unknown, opts: unknown) => {
+      n++;
+      if (n === 1) expect(opts).toMatchObject({ timeout: 30000 });
+      if (n === 2) throw new Error("Transaction already closed: timeout");
+      return real(fn as never, opts as never);
+    });
+    // Three rows, BATCH 50: one batch, then the final audit fails → partial audit.
+    const res = await bulk(req({ band: "strong", sampleId: "s1" }));
+    $tx.mockImplementation(real);
+    expect(res.status).toBe(500);
+    expect(audits().at(-1)).toMatchObject({
+      action: "orcid_bulk_confirm",
+      afterValues: { band: "strong", confirmed: 3, partial: true },
+    });
+    expect(h.runAfterResponse).toHaveBeenCalled();
   });
 
   it("re-reads the band on the writer: a row re-scored into another band is skipped", async () => {

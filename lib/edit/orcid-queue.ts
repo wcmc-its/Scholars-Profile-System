@@ -61,6 +61,21 @@ export function isOrcidSampleBand(v: unknown): v is OrcidSampleBand {
   return typeof v === "string" && (ORCID_SAMPLE_BANDS as readonly string[]).includes(v);
 }
 
+/** The iD on file for a scholar as the rest of the app reads it
+ *  (`/api/edit/orcid`, the coverage fold): `scholar.orcid`, else an undismissed
+ *  `rpm_admin` candidate iD. WCM usually leaves `scholar.orcid` NULL and the
+ *  /edit card shows the RPM mirror row. `orcid` is the pair being placed, so a
+ *  scholar with two `rpm_admin` iDs reads the pair's own as on file. Pure. */
+export function heldFor(
+  orcid: string,
+  scholarOrcid: string | null,
+  adminIds: readonly string[],
+): string | null {
+  if (scholarOrcid !== null) return scholarOrcid;
+  if (adminIds.includes(orcid)) return orcid;
+  return adminIds[0] ?? null;
+}
+
 /** Where a candidate pair stands against what is on file. Pure. */
 export type PairState = "queue" | "on_file" | "dismissed" | "conflict";
 export function pairState(orcid: string, held: string | null, dismissed: boolean): PairState {
@@ -87,6 +102,9 @@ export type OrcidQueueSampleState = {
   decided: number;
   dismissed: number;
   status: SampleStatus;
+  /** A passed sample whose band was re-scored by a later ETL run: it no longer
+   *  authorizes bulk confirm, and a new sample is needed. */
+  stale?: boolean;
 };
 
 export type OrcidQueueWork = {

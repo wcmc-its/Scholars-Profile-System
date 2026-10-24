@@ -88,6 +88,17 @@ Confirm = same writes as `POST /api/edit/orcid` confirm (`scholar.orcid`, `orcid
 
 Gate the page, routes and subnav link on flag `ORCID_LIBRARIAN_QUEUE` (`on` in staging, off in prod in `cdk/lib/app-stack.ts`; flag-parity allowlist).
 
+## Deviations (deliberate, from review)
+
+The build is stricter than the text above in these places:
+
+- **On file includes `rpm_admin`.** Everywhere this spec says "`scholar.orcid`" for what is on file (population, Conflicts, the bulk re-check, the auto-confirm's "`scholar.orcid` is null"), the build reads `scholar.orcid`, else an undismissed `rpm_admin` candidate iD. That is how `/api/edit/orcid` and the coverage fold read it; WCM usually leaves `scholar.orcid` NULL. Replacing an `rpm_admin` iD from Conflicts dismisses it, and dismissing one here is a 409 (that is Remove on /edit).
+- **Email auto-confirm** also requires exactly one `email_verified` row for the scholar and for the iD, and that no other scholar holds the iD: two verified matches are a question for a librarian, not the ETL.
+- **Bulk confirm and sampling** leave out a scholar with two qualifying rows in the band (only one iD can be theirs). Those rows stay in the tab for one-at-a-time decisions, and the bulk response counts them as skipped.
+- **A competitor that cannot be ruled out counts.** When another candidate iD of the same scholar could not be fetched this run, the pair is marked competitor, so a degraded run never lifts it into a confirmable band.
+- **Confirm never overrides a dismissal** (409 `dismissed`): unlike the scholar's own `/api/edit/orcid` confirm, a librarian does not undo the scholar's Remove or an earlier Not this person.
+- **Samples.** A sampled confirm whose iD went on file by another route stamps the row confirmed and writes nothing else. "Start a new sample" abandons an open sample. A passed sample stops authorizing bulk once a later ETL run re-scores the band (any evidence `computed_at` after the sample started); review a new one.
+
 ## Tests
 
 Unit tests (vitest, `--maxWorkers=4`) for: band function and name cases; evidence assembly from a fixture record; competitor rules; email auto-confirm (flag off = no write, never overwrites, dismissal respected); each route's authz (non-superuser 403, impersonation), sample lifecycle (pass, lock on dismissal, stale sample refused), bulk re-check skipping rows that changed; existing `/api/edit/orcid` sets method `self` / `proxy`.
