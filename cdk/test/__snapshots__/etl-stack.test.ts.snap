@@ -1845,7 +1845,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -2509,7 +2509,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -3121,7 +3121,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -3664,7 +3664,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -4642,7 +4642,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",

@@ -937,10 +937,11 @@ export class EtlStack extends Stack {
       // ORCID librarian queue — etl:orcid-evidence (OrcidEvidenceWeekly) confirms an
       // iD whose public record lists the scholar's email as VERIFIED (method
       // email_verified, never over an iD on file) only when this is exactly "on";
-      // otherwise it logs the would-confirm count and cwids. Off in every env
-      // until a librarian has reviewed a run's would-confirm list. Applied via
-      // cdk deploy --exclusively Sps-Etl-<env>.
-      ORCID_EMAIL_AUTOCONFIRM: "off",
+      // otherwise it logs the would-confirm count and cwids. Prod on: the staging
+      // would-confirm list (124) was reviewed 2026-10-24. Staging stays off: its
+      // OrcidPush is dry-run, so a staging confirm never reaches Identity.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_EMAIL_AUTOCONFIRM: env === "prod" ? "on" : "off",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
