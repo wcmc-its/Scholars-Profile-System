@@ -794,7 +794,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_LIBRARIAN_QUEUE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "HONORS_CURATOR_ENABLED",
