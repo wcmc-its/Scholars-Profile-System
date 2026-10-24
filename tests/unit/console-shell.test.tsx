@@ -77,6 +77,7 @@ const NO_TABS: ConsoleTabState = {
   roleVocabulary: false,
   titles: false,
   grantAttribution: false,
+  orcidQueue: false,
 };
 
 function tabs(overrides: Partial<ConsoleTabState>): ConsoleTabState {

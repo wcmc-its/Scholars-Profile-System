@@ -1,0 +1,100 @@
+/**
+ * `/edit/orcid-queue` — the ORCID librarian confirmation queue
+ * (docs/orcid-librarian-queue-spec.md). People rarely confirm their own iD, so
+ * librarians confirm candidate iDs on the evidence etl/orcid-evidence gathers
+ * from each public ORCID record: a verified institutional email, an
+ * institution in the record's affiliations, papers shared with the scholar's
+ * publications, name agreement, and competing scholars or iDs.
+ *
+ * Band tabs (Email verified, Strong, Shared papers, Moderate, Weak) plus
+ * Conflicts, where the scholar already holds a different iD. `?tab=` picks
+ * one (default Strong); the server loads that tab's rows and every tab's
+ * count. Strong and Shared papers carry the sample gate: a passed sample of 50
+ * unlocks "Confirm remaining N".
+ *
+ * Order of checks, every GET: session, then the flag (`ORCID_LIBRARIAN_QUEUE`
+ * off ⇒ 404 for everyone), then `requireSuperuserGet` (librarians are
+ * superusers; no new role). A View-as session reads the queue with every
+ * control off: the routes refuse impersonated decisions. `force-dynamic` +
+ * `noindex` like every `/edit` page.
+ */
+import { notFound, redirect } from "next/navigation";
+
+import { ConsoleShell } from "@/components/edit/console-shell";
+import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { OrcidQueue } from "@/components/edit/orcid-queue";
+import { getEffectiveEditSession, impersonationActive } from "@/lib/auth/effective-identity";
+import { nowSeconds } from "@/lib/auth/session";
+import { getSession } from "@/lib/auth/session-server";
+import { db } from "@/lib/db";
+import { requireSuperuserGet } from "@/lib/edit/authz";
+import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { isOrcidLibrarianQueueEnabled } from "@/lib/edit/orcid-queue";
+import { loadOrcidQueue } from "@/lib/edit/orcid-queue.server";
+import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
+
+export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: "ORCID queue — Scholars Console",
+  robots: { index: false, follow: false },
+};
+
+const BASE_PATH = "/edit/orcid-queue";
+
+export default async function OrcidQueuePage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ tab?: string }>;
+}) {
+  const session = await getEffectiveEditSession();
+  if (!session) {
+    redirect(`/api/auth/saml/login?return=${BASE_PATH}`);
+  }
+  if (!isOrcidLibrarianQueueEnabled()) {
+    notFound();
+  }
+  // Superuser re-check on every GET. Emits the `edit_authz_denied` line.
+  if (requireSuperuserGet({ session, path: BASE_PATH, targetId: "orcid-queue" }) !== null) {
+    return (
+      <ConsoleShell
+        active="orcid-queue"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
+        <ForbiddenEditPage session={session} />
+      </ConsoleShell>
+    );
+  }
+
+  const { tab } = (await searchParams) ?? {};
+  const [data, rawSession, pendingSlugRequests, pendingHonors] = await Promise.all([
+    loadOrcidQueue(db.read, tab),
+    getSession(),
+    isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
+    isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
+  ]);
+
+  return (
+    <ConsoleShell
+      active="orcid-queue"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+    >
+      <div className="mb-[22px] flex flex-col gap-1.5">
+        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">ORCID queue</h1>
+        <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
+          ORCID iDs that may belong to a scholar, with the evidence from each public ORCID record. A
+          confirmed iD goes on file and reaches WCM Identity overnight.
+        </p>
+      </div>
+      <OrcidQueue
+        data={data}
+        basePath={BASE_PATH}
+        readOnly={rawSession ? impersonationActive(rawSession, nowSeconds()) : false}
+      />
+    </ConsoleShell>
+  );
+}

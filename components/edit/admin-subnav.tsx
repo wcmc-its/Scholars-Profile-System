@@ -51,6 +51,7 @@ export type AdminSubnavActive =
   | "activity"
   | "usage"
   | "orcid-coverage"
+  | "orcid-queue"
   | "etl-status"
   | "reports"
   | "cores"
@@ -114,6 +115,9 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   activity: "insights",
   usage: "insights",
   "orcid-coverage": "insights",
+  /** Candidate ORCID iDs a librarian confirms — pending work, so a queue, though
+   *  the ungrouped strip lists it beside ORCID coverage. */
+  "orcid-queue": "queues",
   "etl-status": "insights",
   // Its own single-member group (Reports IA redesign, 2026-08-14) — a
   // dedicated top-level tab, not an Insights peer. Reverses the 2026-08-12
@@ -155,6 +159,7 @@ export function AdminSubnav({
   unitsTab = false,
   usageTab = false,
   orcidCoverageTab = false,
+  orcidQueueTab = false,
   coiTab = false,
   activityTab = false,
   etlStatusTab = false,
@@ -236,6 +241,9 @@ export function AdminSubnav({
   /** Show the "ORCID coverage" tab (`/edit/orcid-coverage`) — same audience
    *  and gate as `usageTab` (`canViewUsage`). Default `false`. */
   orcidCoverageTab?: boolean;
+  /** Show the "ORCID queue" tab (`/edit/orcid-queue`): superuser librarians with
+   *  `ORCID_LIBRARIAN_QUEUE` on (`TAB_PREDICATES.orcidQueue`). Default `false`. */
+  orcidQueueTab?: boolean;
   /** Show COI / Activity / ETL status to a viewer who is NOT a superuser: an
    *  observer or content editor (COI), or an ad hoc dashboard grantee
    *  (`lib/edit/dashboard-access.ts`). Mirrors the matching
@@ -422,6 +430,13 @@ export function AdminSubnav({
         id: "orcid-coverage",
         href: "/edit/orcid-coverage",
         label: "ORCID coverage",
+      },
+      // The ORCID librarian confirmation queue, beside the coverage it closes.
+      {
+        show: orcidQueueTab,
+        id: "orcid-queue",
+        href: "/edit/orcid-queue",
+        label: "ORCID queue",
       },
       // Read-only ETL health board. Superuser, or an ad hoc grantee
       // (`etlStatusTab`); no separate flag.

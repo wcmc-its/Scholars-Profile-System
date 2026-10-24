@@ -71,6 +71,8 @@ async function main() {
     ["RPM-orcid-candidates", "etl/orcid-candidates/index.ts"],
     // Weekly in the deployed Step Function; here it runs with the rest of the chain.
     ["ORCID-registry", "etl/orcid-registry/index.ts"],
+    // Evidence for the ORCID librarian queue; reads the registry's fresh candidates.
+    ["ORCID-evidence", "etl/orcid-evidence/index.ts"],
     ["ASMS", "etl/asms/index.ts"],
     ["InfoEd", "etl/infoed/index.ts"],
     ["Jenzabar", "etl/jenzabar/index.ts"],

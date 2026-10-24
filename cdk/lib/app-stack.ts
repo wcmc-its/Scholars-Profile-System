@@ -1843,6 +1843,14 @@ export class AppStack extends Stack {
         // the queue: staging first, prod after the staging queue is reviewed.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         GRANT_ATTRIBUTION_QUEUE: envConfig.envName === "staging" ? "on" : "off",
+        // ORCID librarian queue -- /edit/orcid-queue and /api/edit/orcid-queue/*
+        // (superuser librarians confirm candidate iDs on etl/orcid-evidence's
+        // bands). isOrcidLibrarianQueueEnabled() reads === "on"
+        // (lib/edit/orcid-queue.ts); off => the page AND the three routes 404 and
+        // the ORCID queue tab is hidden. Staging first; prod after the staging
+        // queue is reviewed. Takes effect ONLY on a manual
+        // `cdk deploy --exclusively Sps-App-<env>`.
+        ORCID_LIBRARIAN_QUEUE: envConfig.envName === "staging" ? "on" : "off",
         // #1762 — the `honors_curator` role. The approver is the RESEARCH DEAN's
         // office (a different org unit from the Dean's office), which self-serves
         // from day one, so this is not a fast-follow: without it the queue is

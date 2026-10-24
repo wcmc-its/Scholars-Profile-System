@@ -1,6 +1,7 @@
 /**
  * POST /api/edit/orcid — the Identifiers & Profiles write. Pins the one SPS
- * transaction (`scholar.orcid` + `orcid_confirmed_at`, the `orcid_dismissal`
+ * transaction (`scholar.orcid` + `orcid_confirmed_at` + the confirm method /
+ * confirmer — `self` or `proxy` by the REAL actor — the `orcid_dismissal`
  * pair, the audit row), that nothing is written to ReciterDB, the checksum gate,
  * and the `authorizeOverviewWrite` boundary. Mirrors the appointment-visibility
  * route test's mock seams.
@@ -180,6 +181,26 @@ describe("POST /api/edit/orcid", () => {
     expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
   });
 
+  it("a self confirm stamps method self and the scholar as confirmer", async () => {
+    const res = await POST(post({ cwid: "self01", orcid: ID }));
+    expect(res.status).toBe(200);
+    expect(mockTxScholarUpdate.mock.calls[0][0].data).toMatchObject({
+      orcid: ID,
+      orcidConfirmMethod: "self",
+      orcidConfirmedBy: "self01",
+    });
+  });
+
+  it("a superuser setting someone else's iD is a proxy confirm by the real actor", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(post({ cwid: "self01", orcid: ID }));
+    expect(res.status).toBe(200);
+    expect(mockTxScholarUpdate.mock.calls[0][0].data).toMatchObject({
+      orcidConfirmMethod: "proxy",
+      orcidConfirmedBy: "adm001",
+    });
+  });
+
   it("orcid: null REMOVES: scholar.orcid AND orcid_confirmed_at nulled, the rpm_admin mirror row dropped, the removed iD dismissed, one audit row", async () => {
     // The removed iD is on the rpm_admin mirror row, NOT scholar.orcid (NULL for WCM).
     mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
@@ -188,7 +209,7 @@ describe("POST /api/edit/orcid", () => {
     expect((await res.json()).orcid).toBeNull();
     expect(mockTxScholarUpdate).toHaveBeenCalledWith({
       where: { cwid: "self01" },
-      data: { orcid: null, orcidConfirmedAt: null },
+      data: { orcid: null, orcidConfirmedAt: null, orcidConfirmMethod: null, orcidConfirmedBy: null },
     });
     expect(mockTxCandidateDeleteMany).toHaveBeenCalledWith({ where: { cwid: "self01", source: "rpm_admin" } });
     // The dismissal is what stops the nightly mirror / Identity import bringing it back.
@@ -288,7 +309,7 @@ describe("POST /api/edit/orcid", () => {
     expect(res.status).toBe(200);
     expect(mockTxScholarUpdate).toHaveBeenCalledWith({
       where: { cwid: "self01" },
-      data: { orcid: null, orcidConfirmedAt: null },
+      data: { orcid: null, orcidConfirmedAt: null, orcidConfirmMethod: null, orcidConfirmedBy: null },
     });
     expect(mockTxDismissalUpsert).not.toHaveBeenCalled();
     expect(mockTxDismissalDeleteMany).not.toHaveBeenCalled();

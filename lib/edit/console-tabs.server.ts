@@ -52,6 +52,7 @@ import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isOrgUnitRoleConsoleTabVisible } from "@/lib/edit/org-unit-role-flags";
 import { canReviewTitles } from "@/lib/edit/titles-queue";
 import { isGrantAttributionQueueTabVisible } from "@/lib/edit/grant-attribution-queue";
+import { isOrcidQueueTabVisible } from "@/lib/edit/orcid-queue";
 
 // ---------------------------------------------------------------------------
 // Tab ids — one per `AdminSubnavActive` entry in `admin-subnav.tsx`, minus
@@ -80,6 +81,7 @@ export const CONSOLE_TAB_IDS = [
   "roleVocabulary",
   "titles",
   "grantAttribution",
+  "orcidQueue",
 ] as const;
 
 export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
@@ -218,6 +220,10 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // are the same function (flag + superuser/steward deciders + observer and
   // content-editor readers).
   grantAttribution: (s) => isGrantAttributionQueueTabVisible(s),
+
+  // The ORCID librarian queue. Librarians are superusers (no new role); the
+  // page gate and this tab are the same function (flag + isSuperuser).
+  orcidQueue: (s) => isOrcidQueueTabVisible(s),
 };
 
 // ---------------------------------------------------------------------------

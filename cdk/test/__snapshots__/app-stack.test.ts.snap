@@ -793,6 +793,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ORCID_LIBRARIAN_QUEUE",
+                "Value": "off",
+              },
+              {
                 "Name": "HONORS_CURATOR_ENABLED",
                 "Value": "on",
               },
@@ -5769,6 +5773,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "GRANT_ATTRIBUTION_QUEUE",
+                "Value": "on",
+              },
+              {
+                "Name": "ORCID_LIBRARIAN_QUEUE",
                 "Value": "on",
               },
               {

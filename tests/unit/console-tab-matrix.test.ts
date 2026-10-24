@@ -35,6 +35,7 @@ const ALL_FLAGS_ON: Record<string, string> = {
   GRANT_MATCHA: "on",
   ORG_UNIT_ROLE_CONSOLE: "on",
   GRANT_ATTRIBUTION_QUEUE: "on",
+  ORCID_LIBRARIAN_QUEUE: "on",
 };
 
 afterEach(() => {
@@ -125,6 +126,7 @@ describe("feature flags", () => {
     ["MATCHA", ["matcha", "grantMatcha"]],
     ["GRANT_MATCHA", ["grantMatcha"]],
     ["GRANT_ATTRIBUTION_QUEUE", ["grantAttribution"]],
+    ["ORCID_LIBRARIAN_QUEUE", ["orcidQueue"]],
   ];
 
   it.each(flagToTabs)("flag %s off hides only %s", (flagKey, tabs) => {

@@ -452,6 +452,7 @@ export default async function EditSelfPage({
             pendingClips={pendingClips}
             usageTab={tabs.usage}
             orcidCoverageTab={tabs.orcidCoverage}
+            orcidQueueTab={tabs.orcidQueue}
             coiTab={tabs.coi}
             activityTab={tabs.activity}
             etlStatusTab={tabs.etlStatus}

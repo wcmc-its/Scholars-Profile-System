@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- description writes target, now that the route writes
   -- `OrgUnitRoleAssignment` rows directly. Appended LAST to preserve existing
   -- ENUM ordinals.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role','honor_list','frt_mentee') NOT NULL,
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role','honor_list','frt_mentee','orcid_queue_sample') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- entry; same `target_entity_type`/`target_entity_id` shape as the other
   -- two `role_vocabulary_*` actions) -- appended LAST after
   -- `role_vocabulary_update`.
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update','honor_list_run','core_queue_add','disease_auto_publish_set','frt_mentee_dismiss','frt_mentee_restore','frt_mentee_assign_cwid','grant_rec_feedback','grant_attribution_confirm','grant_attribution_reject','grant_attribution_undo','grant_attribution_requeue') NOT NULL,
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update','honor_list_run','core_queue_add','disease_auto_publish_set','frt_mentee_dismiss','frt_mentee_restore','frt_mentee_assign_cwid','grant_rec_feedback','grant_attribution_confirm','grant_attribution_reject','grant_attribution_undo','grant_attribution_requeue','orcid_librarian_confirm','orcid_librarian_dismiss','orcid_bulk_confirm','orcid_email_autoconfirm') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -411,9 +411,21 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         review queue; target_entity_type='grant', target_
 --                         entity_id the grant externalId, before/after carry
 --                         { band, review_status, created }). Appended LAST.
+--   ORCID librarian queue (docs/orcid-librarian-queue-spec.md, /edit/orcid-queue,
+--                         etl/orcid-evidence): + orcid_librarian_confirm,
+--                         orcid_librarian_dismiss  (a superuser librarian
+--                         confirmed a candidate iD or marked it "Not this
+--                         person"; target_entity_type='scholar', target_entity_id
+--                         the cwid), + orcid_bulk_confirm  (one "Confirm
+--                         remaining N" after a passed review sample;
+--                         target_entity_type='orcid_queue_sample', target_
+--                         entity_id the sample id), + orcid_email_autoconfirm
+--                         (the ETL confirmed an iD on a verified email match;
+--                         actor 'ETL', target_entity_type='scholar'). Appended
+--                         LAST to preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update','honor_list_run','core_queue_add','disease_auto_publish_set','frt_mentee_dismiss','frt_mentee_restore','frt_mentee_assign_cwid','grant_rec_feedback','grant_attribution_confirm','grant_attribution_reject','grant_attribution_undo','grant_attribution_requeue')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete','core_client_add','core_client_remove','mentee_suggestion_dismiss','mentee_suggestion_restore','report_access_grant','report_access_revoke','orcid_set','slug_redirect_remove','functional_role_grant','functional_role_scope_set','functional_role_revoke','functional_role_update','honor_list_run','core_queue_add','disease_auto_publish_set','frt_mentee_dismiss','frt_mentee_restore','frt_mentee_assign_cwid','grant_rec_feedback','grant_attribution_confirm','grant_attribution_reject','grant_attribution_undo','grant_attribution_requeue','orcid_librarian_confirm','orcid_librarian_dismiss','orcid_bulk_confirm','orcid_email_autoconfirm')
     NOT NULL;
 
 --   SELF_EDIT_MENTEE_SUGGESTIONS (#2634): + mentee_suggestion_dismiss ·
@@ -502,9 +514,13 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --   Honors Run now: + honor_list  (a public honor list the honors scraper
 --                    reads; target_entity_id is the list id). Appended LAST to
 --                    preserve existing ENUM ordinals.
+--   ORCID librarian queue: + orcid_queue_sample  (a review sample on
+--                    /edit/orcid-queue; target_entity_id is the sample id; only
+--                    orcid_bulk_confirm uses it). Appended LAST to preserve
+--                    existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role','honor_list','frt_mentee')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program','mentee_suggestion','report_access','institution','functional_role','honor_list','frt_mentee','orcid_queue_sample')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for

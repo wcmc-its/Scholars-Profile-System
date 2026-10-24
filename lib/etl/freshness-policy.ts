@@ -165,6 +165,9 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "RPM-orcid-candidates": { cadence: "nightly" },
   // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_crossref / orcid_name); weekly step.
   "ORCID-registry": { cadence: "weekly" },
+  // ORCID candidate evidence (etl/orcid-evidence) → orcid_candidate_evidence, the
+  // librarian queue's bands, plus the flag-gated email auto-confirm; weekly, after the registry.
+  "ORCID-evidence": { cadence: "weekly" },
   // scholar.orcid → WCM Identity via the ReCiter API (etl/orcid-push), the nightly
   // OrcidPush step right BEFORE Identity in BOTH envs (push-then-pull, so the pull
   // never reads our own last push as a conflict; the reciter-api secret is seeded

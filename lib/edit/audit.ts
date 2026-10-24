@@ -329,7 +329,27 @@ export type AuditAction =
    *  (shown or hidden) back to the review queue. `targetEntityType='grant'`,
    *  `targetEntityId` the grant externalId; before/after carry `{ band,
    *  review_status, created }`. ENUM extended in scripts/sql/audit-log.sql. */
-  | "grant_attribution_requeue";
+  | "grant_attribution_requeue"
+  /** ORCID librarian queue (`/edit/orcid-queue`, `POST /api/edit/orcid-queue/decide`
+   *  and `.../bulk-confirm`): a superuser librarian confirmed a candidate iD
+   *  (`scholar.orcid`, method `librarian`) or marked it "Not this person" (an
+   *  `orcid_dismissal` row; on an email auto-confirmed iD this is the Undo and
+   *  also clears `scholar.orcid`). `targetEntityType='scholar'`, `targetEntityId`
+   *  the cwid; before/after carry `{ orcid, method, band, sample_id }`. ENUM
+   *  extended in scripts/sql/audit-log.sql. */
+  | "orcid_librarian_confirm"
+  | "orcid_librarian_dismiss"
+  /** One "Confirm remaining N" on a band whose review sample passed; each
+   *  scholar it confirmed also gets an `orcid_librarian_confirm` row.
+   *  `targetEntityType='orcid_queue_sample'`, `targetEntityId` the sample id;
+   *  after carries `{ band, confirmed, skipped }`. ENUM extended in
+   *  scripts/sql/audit-log.sql. */
+  | "orcid_bulk_confirm"
+  /** etl/orcid-evidence confirmed an iD whose record lists the scholar's
+   *  email as VERIFIED (`ORCID_EMAIL_AUTOCONFIRM`). Actor `"ETL"`,
+   *  `targetEntityType='scholar'`, `targetEntityId` the cwid; before/after
+   *  carry `{ orcid }`. ENUM extended in scripts/sql/audit-log.sql. */
+  | "orcid_email_autoconfirm";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -430,7 +450,12 @@ export type AuditEntityType =
   /** a Faculty Review Tool mentee row (`frt_mentee`); `targetEntityId` is its
    *  id. Requires the `scholars_audit` target_entity_type ENUM be extended,
    *  see `scripts/sql/audit-log.sql`. */
-  | "frt_mentee";
+  | "frt_mentee"
+  /** an ORCID librarian queue review sample (`orcid_queue_sample`);
+   *  `targetEntityId` is the sample id. Only `orcid_bulk_confirm` uses it.
+   *  Requires the `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "orcid_queue_sample";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

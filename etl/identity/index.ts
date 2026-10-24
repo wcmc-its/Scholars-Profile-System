@@ -38,8 +38,8 @@
  *   4. Conflict rule: when Identity holds a non-null iD that DIFFERS from one
  *      the person confirmed in SPS, Identity WINS — it is the authority (a
  *      change made in Publication Manager lands there) — so the row takes
- *      Identity's value AND `orcidConfirmedAt` is cleared (the confirmation
- *      was of a different iD). Counted as `conflict` in the summary line;
+ *      Identity's value AND `orcidConfirmedAt` is cleared, with the method
+ *      and confirmer beside it (the confirmation was of a different iD). Counted as `conflict` in the summary line;
  *      the values themselves are never logged. This only means something
  *      because the nightly runs `etl/orcid-push` BEFORE this step: SPS's own
  *      confirmation is already in Identity by the time it is read here, so a
@@ -227,7 +227,7 @@ async function main() {
         // other iD. Counted separately so the summary shows it happened; no values logged.
         await db.write.scholar.update({
           where: { cwid: target },
-          data: { orcid: d.orcid, orcidConfirmedAt: null },
+          data: { orcid: d.orcid, orcidConfirmedAt: null, orcidConfirmMethod: null, orcidConfirmedBy: null },
         });
         conflict += 1;
         continue;
