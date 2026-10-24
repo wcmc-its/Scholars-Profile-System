@@ -539,7 +539,7 @@ export class SpsObservabilityStack extends Stack {
       functionName: `sps-edge-origin-probe-${env}`,
       entry: path.join(__dirname, "../lambda/edge-origin-probe/index.ts"),
       handler: "handler",
-      runtime: lambda.Runtime.NODEJS_22_X,
+      runtime: lambda.Runtime.NODEJS_24_X,
       memorySize: 128,
       // Three sequential network probes at an 8s ceiling each, plus a cold
       // Secrets Manager fetch. 30s leaves headroom without letting a wedged
@@ -1322,7 +1322,7 @@ export class SpsObservabilityStack extends Stack {
       deadLetterQueue: relayDlq,
       entry: path.join(__dirname, "../lambda/oncall-relay/index.ts"),
       handler: "handler",
-      runtime: lambda.Runtime.NODEJS_22_X,
+      runtime: lambda.Runtime.NODEJS_24_X,
       memorySize: 256,
       timeout: Duration.seconds(10),
       logGroup: relayLogGroup,

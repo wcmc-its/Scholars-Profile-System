@@ -753,7 +753,7 @@ describe("SpsObservabilityStack", () => {
       template.resourceCountIs("AWS::Lambda::Function", 2);
       template.hasResourceProperties("AWS::Lambda::Function", {
         FunctionName: "sps-oncall-relay-prod",
-        Runtime: "nodejs22.x",
+        Runtime: "nodejs24.x",
         MemorySize: 256,
         Timeout: 10,
         Handler: "index.handler",
@@ -766,7 +766,7 @@ describe("SpsObservabilityStack", () => {
       });
       template.hasResourceProperties("AWS::Lambda::Function", {
         FunctionName: "sps-edge-origin-probe-prod",
-        Runtime: "nodejs22.x",
+        Runtime: "nodejs24.x",
         Handler: "index.handler",
         Environment: {
           Variables: {
@@ -1374,7 +1374,7 @@ describe("SpsObservabilityStack", () => {
       template.resourceCountIs("AWS::Lambda::Function", 2);
       template.hasResourceProperties("AWS::Lambda::Function", {
         FunctionName: "sps-oncall-relay-staging",
-        Runtime: "nodejs22.x",
+        Runtime: "nodejs24.x",
         MemorySize: 256,
         Timeout: 10,
       });

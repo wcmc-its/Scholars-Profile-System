@@ -405,7 +405,7 @@ export class DataStack extends Stack {
           "../lambda/db-bootstrap-seed/package-lock.json",
         ),
         handler: "onEvent",
-        runtime: lambda.Runtime.NODEJS_22_X,
+        runtime: lambda.Runtime.NODEJS_24_X,
         memorySize: 256,
         timeout: Duration.minutes(2),
         vpc,

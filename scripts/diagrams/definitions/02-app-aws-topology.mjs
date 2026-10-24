@@ -21,7 +21,7 @@ const nodes = {
 
   // ── Inside the shared VPC ──
   albp:  { x: 605, y: 250, w: 220, h: 70, kind: "net", title: "Public ALB · sps-public", sub: ["HTTPS :443 · X-Origin-Verify", "else default 403"], badge: "AppStack" },
-  ecs:   { x: 560, y: 370, w: 310, h: 80, kind: "app", title: "ECS Fargate · sps-app", sub: ["Next.js (Node 22) + OTel sidecar"], badge: "AppStack" },
+  ecs:   { x: 560, y: 370, w: 310, h: 80, kind: "app", title: "ECS Fargate · sps-app", sub: ["Next.js (Node 24) + OTel sidecar"], badge: "AppStack" },
   ialb:  { x: 920, y: 370, w: 200, h: 56, kind: "net", title: "Internal ALB", sub: ["POST /api/revalidate"], badge: "AppStack" },
   aur:   { x: 470, y: 510, w: 200, h: 72, kind: "data", title: "Aurora MySQL", sub: ["Serverless v2 · writer+reader", "scholars + scholars_audit"], badge: "DataStack" },
   os:    { x: 690, y: 510, w: 180, h: 72, kind: "data", title: "OpenSearch 2.19", sub: ["5 aliases: people · pubs", "funding · opportunities · trials"], badge: "DataStack" },
