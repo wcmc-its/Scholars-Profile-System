@@ -1829,7 +1829,12 @@ describe("EtlStack", () => {
     it("state-machine roles can RunTask any revision of their family (cdk.json flags)", () => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { context } = require("../cdk.json") as { context: Record<string, unknown> };
-      const { template: real } = buildEtlStack("prod", {}, context);
+      // allowLatestAppImage: prod synth without a digest is an error annotation,
+      // which aws-cdk-lib >=2.27x throws on at Template.fromStack.
+      const { template: real } = buildEtlStack("prod", {}, {
+        ...context,
+        allowLatestAppImage: "true",
+      });
       const runTaskResources = Object.values(real.findResources("AWS::IAM::Policy")).flatMap(
         (p) =>
           (
