@@ -189,6 +189,7 @@ model Scholar {
   reporterCandidates   ReporterProfileCandidate[]
   grantReviews         GrantAttributionReview[]
   grantScores          GrantAttributionScore[]
+  wcmNamesake          WcmNamesake?
   clinicalTrials       PersonClinicalTrial[]
   datasetDeposits      PersonDatasetDeposit[]
   overviewGenerations  OverviewGeneration[]
@@ -1221,6 +1222,20 @@ model GrantAttributionRun {
 
   @@index([ranAt])
   @@map("grant_attribution_run")
+}
+
+/// #3071 — how many other WCM directory people, current or former, share a
+/// name-only scholar's first and last name and could hold an NIH award. Written
+/// nightly by etl:ed (the LDAP task); read by the weekly grants scorer, which
+/// stops counting "held at WCM" as strong when it is above 0. A count only:
+/// never who they are.
+model WcmNamesake {
+  cwid      String   @id @db.VarChar(32)
+  scholar   Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  count     Int      @map("namesake_count")
+  checkedAt DateTime @map("checked_at")
+
+  @@map("wcm_namesake")
 }
 
 /// #3071 cue 2 — (cwid, pmid) pairs a scholar rejected in ReCiter ("not me"),

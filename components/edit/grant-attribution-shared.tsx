@@ -216,10 +216,14 @@ export function HowWeCheck() {
       </p>
       <ul className="m-0 pl-[18px] text-[13px] leading-relaxed text-[#3a3532]">
         <li>Papers in the scholar&rsquo;s confirmed publications that cite the award</li>
-        <li>Whether the award&rsquo;s NIH profile is already proven to be theirs</li>
+        <li>
+          Whether the scholar&rsquo;s accepted papers already link them to the award&rsquo;s NIH
+          profile
+        </li>
         <li>Co-investigators who co-author with the scholar</li>
         <li>Where and when the scholar trained and worked</li>
-        <li>WCM records of who holds the award</li>
+        <li>WCM records of who holds the award, and whether anyone else at WCM shares the name</li>
+        <li>How many NIH investigators share the name</li>
       </ul>
       <p className="m-0 text-[13px] leading-normal text-[#3a3532]">
         Clear evidence shows or hides the award on its own. Anything in between waits in the queue
