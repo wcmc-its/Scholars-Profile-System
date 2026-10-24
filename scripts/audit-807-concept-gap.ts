@@ -74,18 +74,17 @@ async function main() {
   // (Path A) OR terms{reciterParentTopicId: anchors} (Path B), msm:1.
   const should: Record<string, unknown>[] = [{ match_phrase: { meshTerms: { query: res.name } } }];
   if (anchors.length > 0) should.push({ terms: { reciterParentTopicId: anchors } });
-  const pubResp = await client.search({
-    index: PUBLICATIONS_INDEX,
-    body: {
-      size: 0,
-      track_total_hits: true,
-      query: { bool: { should, minimum_should_match: 1 } },
-      aggs: {
-        authors: { terms: { field: "wcmAuthorCwids", size: AUTHOR_AGG_CAP } },
-        distinct: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
-      },
+  // Loosely typed: opensearch-js 3.9's AggregationContainer union rejects inline aggs.
+  const pubBody: Record<string, unknown> = {
+    size: 0,
+    track_total_hits: true,
+    query: { bool: { should, minimum_should_match: 1 } },
+    aggs: {
+      authors: { terms: { field: "wcmAuthorCwids", size: AUTHOR_AGG_CAP } },
+      distinct: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
     },
-  });
+  };
+  const pubResp = await client.search({ index: PUBLICATIONS_INDEX, body: pubBody });
   const pub = pubResp.body as unknown as PubAgg;
   const pubsMatched = pub.hits.total.value;
   const authorCwids = pub.aggregations.authors.buckets.map((b) => b.key);

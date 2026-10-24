@@ -16,7 +16,8 @@
 
 const NIH_API = "https://api.reporter.nih.gov/v2/projects/search";
 const NIH_PUBLICATIONS_API = "https://api.reporter.nih.gov/v2/publications/search";
-const PAGE_LIMIT = 500;
+/** RePORTER rows per request; `searchProjectsByPiName` reads one page only. */
+export const PAGE_LIMIT = 500;
 /** core_project_nums per publications/search request. Keeps the criteria array
  *  bounded; a candidate's cores are unioned across batches by the caller. */
 const CORE_NUMS_BATCH = 50;

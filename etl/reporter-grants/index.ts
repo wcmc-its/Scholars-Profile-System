@@ -45,6 +45,7 @@ import { reflectGrantSuppressions } from "@/lib/edit/search-suppression";
 import {
   fetchGrantProjectsByProfileIds,
   fetchPublicationsByCoreProjectNums,
+  PAGE_LIMIT as PI_NAME_PAGE_LIMIT,
   searchProjectsByPiName,
   sleepBetweenRequests,
 } from "../nih-profile/fetcher";
@@ -58,7 +59,13 @@ import {
   type AwardState,
 } from "./attribution-plan";
 import { buildAwardEvidence, buildScholarFacts, profileProof } from "./evidence";
-import { evidenceKey, scoreAttribution, type AttributionScore, type CueId } from "./score";
+import {
+  evidenceKey,
+  nameProfileCountFrom,
+  scoreAttribution,
+  type AttributionScore,
+  type CueId,
+} from "./score";
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
@@ -436,6 +443,9 @@ interface AttributionContext {
   /** False until etl:reciter has mirrored ReCiter rejections at least once:
    *  cue 2 is then unavailable, not "no rejections". */
   rejectedAvailable: boolean;
+  /** WCM directory namesakes per name-only scholar (etl:ed). null ⇒ the table
+   *  is empty, so "held at WCM" counts as it did before the guard. */
+  wcmNamesakesByCwid: Map<string, number> | null;
 }
 
 /** What `scoreScholarAwards` returns per award: the scorer's verdict plus the
@@ -588,10 +598,39 @@ async function scoreScholarAwards(
     built.map((b) => ({ ourProfileIds: b.ourProfileIds, publicationLinked: b.evidence.publicationLinked })),
     facts.matchedProfileIds,
   );
+  // Rule 4: how many NIH PI profiles share the name. Name-only profiles only.
+  // A failed search leaves the scholar unjudged, like the publications fetch:
+  // dropping the cue could move an award across a band and mint a hide.
+  let nameProfileCount: number | null = null;
+  const fullName = ctx.namesByCwid.get(cwid)?.fullName;
+  if (policy === "wcm-or-publication" && fullName) {
+    const { firstName, lastName } = parseFirstLast(fullName);
+    if (firstName) {
+      try {
+        const projects = await searchProjectsByPiName({ firstName, lastName });
+        nameProfileCount = nameProfileCountFrom(
+          groupCandidatesByProfileId(fullName, projects).length,
+          projects.length,
+          PI_NAME_PAGE_LIMIT,
+        );
+      } catch (err) {
+        console.warn(`  [${cwid}] name rarity search failed: ${(err as Error).message}`);
+        return "fetch-error";
+      } finally {
+        await sleepBetweenRequests();
+      }
+    }
+  }
+  const wcmNamesakes = ctx.wcmNamesakesByCwid ? (ctx.wcmNamesakesByCwid.get(cwid) ?? null) : null;
   const out = new Map<string, ScoredAward>();
   candidates.forEach((c, i) => {
     const { evidence, revocable, ourProfileIds } = built[i]!;
-    const score = scoreAttribution({ ...evidence, profileProven: proof[i]! });
+    const score = scoreAttribution({
+      ...evidence,
+      profileProven: proof[i]!,
+      nameProfileCount,
+      wcmNamesakes,
+    });
     const ours = c.group.pis.find((pi) => ourProfileIds.includes(pi.profile_id));
     out.set(c.row.externalId, {
       score,
@@ -737,6 +776,10 @@ async function main() {
         rejectedRows,
       });
       for (const w of gate.warnings) console.warn(`#3071 attribution: ${w}`);
+      const namesakeRows = await db.write.wcmNamesake.findMany({ select: { cwid: true, count: true } });
+      if (namesakeRows.length === 0) {
+        console.warn("#3071 attribution: no WCM namesake counts yet (etl:ed); held-at-WCM unguarded");
+      }
       attribution = {
         profileIdsByCwid: profilesByCwid,
         matchedProfileIdsByCwid: matchedProfilesByCwid,
@@ -744,13 +787,15 @@ async function main() {
         namesByCwid,
         educationByCwid,
         rejectedAvailable,
+        wcmNamesakesByCwid:
+          namesakeRows.length > 0 ? new Map(namesakeRows.map((r) => [r.cwid, r.count])) : null,
       };
       allowRevoke = gate.allowRevoke;
     }
   }
   const tally = {
     band: { show: 0, hide: 0, queue: 0 },
-    rule: { decisive: 0, conflict: 0, sum: 0 },
+    rule: { conflict: 0, sum: 0 },
     cue: {} as Partial<Record<CueId, number>>,
     minted: { "wcm-or-publication": 0, "publication-only": 0, queue: 0 },
     revoked: 0,
@@ -1170,8 +1215,7 @@ async function main() {
       .join(", ");
     console.log(
       `#3071 attribution: scored show=${tally.band.show} hide=${tally.band.hide} ` +
-        `queue=${tally.band.queue} (decisive=${tally.rule.decisive}, ` +
-        `conflict=${tally.rule.conflict}); newly hidden ${unverifiedTotal} ` +
+        `queue=${tally.band.queue} (conflict=${tally.rule.conflict}); newly hidden ${unverifiedTotal} ` +
         `(${tally.minted["wcm-or-publication"]} name-only, ${tally.minted["publication-only"]} ` +
         `grant-join, ${tally.minted.queue} queued); revoked ${tally.revoked}` +
         `${allowRevoke ? "" : " (revoking off this run)"}; reviews created ` +

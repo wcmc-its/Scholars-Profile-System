@@ -194,6 +194,7 @@ export const GRANT_ATTRIBUTION_BULK_MAX = 50;
 export const CUE_LABELS: Readonly<Record<string, string>> = {
   pub_linked: "Linked publication",
   wcm_org: "Held at WCM",
+  wcm_org_shared_name: "Held at WCM, name shared",
   infoed_other_wcm_pi_named: "Another WCM investigator's award",
   infoed_other_wcm_pi: "Another WCM PI in InfoEd",
   rejected_pmids: "Papers rejected in ReCiter",
@@ -204,7 +205,9 @@ export const CUE_LABELS: Readonly<Record<string, string>> = {
   copi_coauthor: "Co-PI is a co-author",
   topic_match: "Topics match",
   topic_mismatch: "Topics differ",
-  profile_proven: "NIH profile proven",
+  profile_proven: "NIH profile linked by accepted papers",
+  name_rare: "Rare name",
+  name_common: "Common name",
 };
 
 export function cueLabel(id: string): string {
@@ -228,25 +231,41 @@ export const ATTRIBUTION_LEVELS = [
 
 export type AttributionLevel = (typeof ATTRIBUTION_LEVELS)[number]["key"];
 
-/** A cue that settles an award against the scholar on its own: the scorer's
- *  decisive cue, or a strong negative (|weight| ≥ STRONG in score.ts). */
+/** A strong negative (|weight| ≥ STRONG in score.ts). The named InfoEd cue
+ *  counts too: reviews stored before 2026-10-24 carry it at weight 0. */
 export function isVetoCue(c: Pick<GrantAttributionCue, "id" | "weight">): boolean {
   return c.id === "infoed_other_wcm_pi_named" || c.weight <= -4;
 }
 
-/** The cues are only a co-PI co-author and a topic match: weak by design. */
+/** Cues that only adjust other evidence (score.ts rules 3 and 4), never
+ *  evidence on their own. */
+const MODIFIER_CUES: ReadonlySet<string> = new Set([
+  "topic_match",
+  "topic_mismatch",
+  "name_rare",
+  "name_common",
+]);
+
+/** The cues are only a co-PI co-author plus modifiers: weak by design. */
 export function isCoauthorshipOnly(cues: ReadonlyArray<Pick<GrantAttributionCue, "id">>): boolean {
-  return cues.length > 0 && cues.every((c) => c.id === "copi_coauthor" || c.id === "topic_match");
+  return (
+    cues.some((c) => c.id === "copi_coauthor") &&
+    cues.every((c) => c.id === "copi_coauthor" || MODIFIER_CUES.has(c.id))
+  );
 }
 
 export function attributionLevel(cues: ReadonlyArray<Pick<GrantAttributionCue, "id" | "weight">>): {
   level: AttributionLevel;
   veto: string | null;
 } {
+  // Ruled out only when nothing strong points the other way; otherwise the
+  // scorer queued it as a conflict.
   const veto = cues.find(isVetoCue);
-  if (veto) return { level: "out", veto: veto.id };
-  const pos = cues.filter((c) => c.weight > 0);
-  const neg = cues.some((c) => c.weight < 0);
+  if (veto && !cues.some((c) => c.weight >= 4)) return { level: "out", veto: veto.id };
+  if (veto) return { level: "conflict", veto: null };
+  // Name rarity only adjusts other evidence, so it never counts as a cue here.
+  const pos = cues.filter((c) => c.weight > 0 && c.id !== "name_rare");
+  const neg = cues.some((c) => c.weight < 0 && c.id !== "name_common");
   if (pos.length > 0 && neg) return { level: "conflict", veto: null };
   if (pos.some((c) => c.id === "pub_linked") || pos.length >= 2)
     return { level: "high", veto: null };
@@ -316,26 +335,38 @@ export function reporterNameParts(
 }
 
 /** Report 14's evidence rows: each cue in plain words and which way it
- *  points. The named InfoEd cue counts with its sibling. */
+ *  points. */
 export const EVIDENCE_ROWS: ReadonlyArray<{
   ids: readonly string[];
   label: string;
   toward: boolean;
 }> = [
   { ids: ["pub_linked"], label: "A paper of theirs cites the award", toward: true },
-  { ids: ["profile_proven"], label: "NIH profile proven theirs", toward: true },
+  { ids: ["profile_proven"], label: "NIH profile linked by their accepted papers", toward: true },
   { ids: ["copi_coauthor"], label: "A co-PI co-authors with them", toward: true },
   { ids: ["wcm_org"], label: "Held at WCM", toward: true },
+  {
+    ids: ["wcm_org_shared_name"],
+    label: "Held at WCM, but another WCM person shares the name",
+    toward: true,
+  },
   { ids: ["prior_institution"], label: "They trained there", toward: true },
   { ids: ["topic_match"], label: "Topics match their papers", toward: true },
+  { ids: ["name_rare"], label: "Rare name: the only NIH PI profile with it", toward: true },
   { ids: ["middle_initial_conflict"], label: "Middle initial differs", toward: false },
   { ids: ["timeline_impossible"], label: "Impossible timeline", toward: false },
   { ids: ["rejected_pmids"], label: "Papers rejected in ReCiter", toward: false },
   {
-    ids: ["infoed_other_wcm_pi", "infoed_other_wcm_pi_named"],
-    label: "Another WCM investigator’s award",
+    ids: ["infoed_other_wcm_pi_named"],
+    label: "InfoEd names another WCM PI, and the NIH profile matches their name",
     toward: false,
   },
+  { ids: ["infoed_other_wcm_pi"], label: "Another WCM investigator in InfoEd", toward: false },
   { ids: ["timeline_unlikely"], label: "Unlikely timeline", toward: false },
   { ids: ["topic_mismatch"], label: "Topics differ", toward: false },
+  {
+    ids: ["name_common"],
+    label: "Common name: 10 or more NIH PI profiles share it",
+    toward: false,
+  },
 ];

@@ -25,6 +25,7 @@ import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import { NON_ACADEMIC_DEPT_NAMES } from "../../lib/non-academic-units";
 import { resolveScholarTitles } from "./title-resolution";
+import { refreshWcmNamesakes } from "./namesakes";
 import { syncVolunteerMentors } from "./volunteers";
 import {
   loadUnitOverridesForETL,
@@ -2326,6 +2327,21 @@ async function main() {
     console.log(
       `[ED] pruned ${orphanDepts.count} empty depts, ${orphanDivs.count} empty divisions`,
     );
+
+    // #3071 — directory namesakes for the grant attribution scorer. Non-fatal:
+    // the scorer reads a missing count as "not looked up".
+    try {
+      const namesakeClient = await openLdap();
+      try {
+        await refreshWcmNamesakes(namesakeClient);
+      } finally {
+        await namesakeClient.unbind().catch(() => {});
+      }
+    } catch (err) {
+      console.warn(
+        `[ED] #3071 WCM namesakes skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     await db.write.etlRun.update({
       where: { id: run.id },

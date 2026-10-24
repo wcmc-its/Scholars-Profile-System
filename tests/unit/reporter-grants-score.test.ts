@@ -6,6 +6,8 @@ import {
   PROFILE_PROVEN_MIN_LINKED,
   SHOW_AT,
   WEIGHTS,
+  NAME_COMMON_MIN,
+  nameProfileCountFrom,
   authorKey,
   coauthorCounts,
   doctoralYearRange,
@@ -85,13 +87,20 @@ describe("band thresholds and the #3088/#3092 baseline", () => {
 });
 
 describe("cue 1: the core is in InfoEd under another WCM investigator", () => {
-  it("is decisive when our NIH profile's name matches theirs, even over WCM org", () => {
+  it("is a strong negative when our NIH profile's name matches theirs: hides with nothing else", () => {
+    const s = scoreAttribution(ev({ infoedOther: { piLevel: true, profileNameMatchesOther: true } }));
+    expect(s.band).toBe("hide");
+    expect(s.rule).toBe("sum");
+    expect(s.score).toBe(PRIOR + WEIGHTS.infoed_other_wcm_pi_named);
+    expect(s.reasons[0]!.id).toBe("infoed_other_wcm_pi_named");
+  });
+
+  it("is not an override: a strong tie the other way (WCM org) queues it", () => {
     const s = scoreAttribution(
       ev({ wcmOrgHistory: true, infoedOther: { piLevel: true, profileNameMatchesOther: true } }),
     );
-    expect(s.band).toBe("hide");
-    expect(s.rule).toBe("decisive");
-    expect(s.reasons[0]!.id).toBe("infoed_other_wcm_pi_named");
+    expect(s.band).toBe("queue");
+    expect(s.rule).toBe("conflict");
   });
 
   it("queues instead when a linked confirmed publication contradicts it", () => {
@@ -240,10 +249,16 @@ describe("cue 4: middle initial", () => {
     expect([...scholarInitials(["Ana de la Cruz"]).middle]).toEqual([]);
   });
 
-  it("is a weak negative: alone it cannot move a shown award out of show", () => {
+  it("is a strong negative: hides an award nothing else ties to the scholar", () => {
+    const s = scoreAttribution(ev({ middleInitialConflict: true }));
+    expect(s.band).toBe("hide");
+    expect(s.score).toBe(PRIOR + WEIGHTS.middle_initial_conflict);
+  });
+
+  it("queues, not hides, an award a confirmed paper cites (a data error on one side)", () => {
     const s = scoreAttribution(ev({ publicationLinked: true, middleInitialConflict: true }));
-    expect(s.band).toBe("show");
-    expect(s.score).toBe(PRIOR + WEIGHTS.pub_linked + WEIGHTS.middle_initial_conflict);
+    expect(s.band).toBe("queue");
+    expect(s.rule).toBe("conflict");
   });
 });
 
@@ -324,14 +339,14 @@ describe("cue 7: topic is a tie-break", () => {
     expect(scoreAttribution(base).band).toBe("queue");
     expect(scoreAttribution({ ...base, topic: { share: 0.6, descriptors: 8, papers: 30 } }).band).toBe("show");
     expect(scoreAttribution({ ...base, topic: { share: 0.05, descriptors: 8, papers: 30 } }).band).toBe("queue");
-    // prior institution + middle-initial conflict = -1 (queue); a mismatch tips it to hide.
-    const weak = ev({ priorInstitution: "Elsewhere University", middleInitialConflict: true });
+    // prior institution + co-PI + unlikely timeline = -1 (queue); a mismatch tips it to hide.
+    const weak = ev({ priorInstitution: "Elsewhere University", coPiSharedPapers: 3, activityCode: "K99", startYear: 1997 });
     expect(scoreAttribution(weak).band).toBe("queue");
     expect(scoreAttribution({ ...weak, topic: { share: 0, descriptors: 8, papers: 30 } }).band).toBe("hide");
   });
 
   it("needs enough data on both sides before calling a mismatch", () => {
-    const weak = ev({ priorInstitution: "Elsewhere University", middleInitialConflict: true });
+    const weak = ev({ priorInstitution: "Elsewhere University", coPiSharedPapers: 3, activityCode: "K99", startYear: 1997 });
     expect(scoreAttribution({ ...weak, topic: { share: 0, descriptors: 3, papers: 30 } }).band).toBe("queue");
     expect(scoreAttribution({ ...weak, topic: { share: 0, descriptors: 8, papers: 4 } }).band).toBe("queue");
   });
@@ -466,11 +481,12 @@ describe("cue 8: a proven NIH profile vouches for its awards", () => {
     expect(s.rule).toBe("conflict");
   });
 
-  it("never overrides the decisive other-WCM-investigator hide", () => {
+  it("queues when InfoEd names another WCM PI whose name the profile matches", () => {
     const s = scoreAttribution(
       ev({ profileProven: { kind: "matched" }, infoedOther: { piLevel: true, profileNameMatchesOther: true } }),
     );
-    expect(s.band).toBe("hide");
+    expect(s.band).toBe("queue");
+    expect(s.rule).toBe("conflict");
   });
 });
 
@@ -503,5 +519,58 @@ describe("profileProof", () => {
     expect(proof[1]).toEqual({ kind: "siblings", linked: 2 });
     expect(profileProof(awards.slice(0, 2), new Set())).toEqual([null, null]);
     expect(PROFILE_PROVEN_MIN_LINKED).toBe(2);
+  });
+});
+
+describe("rule 4: name rarity", () => {
+  it("adds a rare name only next to other evidence", () => {
+    expect(ids(ev({ nameProfileCount: 1 }))).toEqual([]);
+    expect(scoreAttribution(ev({ nameProfileCount: 1 })).score).toBe(PRIOR);
+    const s = scoreAttribution(ev({ coPiSharedPapers: 3, nameProfileCount: 1 }));
+    expect(s.reasons.map((r) => r.id)).toEqual(["copi_coauthor", "name_rare"]);
+    expect(s.score).toBe(PRIOR + WEIGHTS.copi_coauthor + WEIGHTS.name_rare);
+  });
+
+  it("takes one off for a common name, and nothing in between", () => {
+    const common = scoreAttribution(ev({ coPiSharedPapers: 3, nameProfileCount: NAME_COMMON_MIN }));
+    expect(common.score).toBe(PRIOR + WEIGHTS.copi_coauthor + WEIGHTS.name_common);
+    expect(ids(ev({ coPiSharedPapers: 3, nameProfileCount: NAME_COMMON_MIN - 1 }))).toEqual(["copi_coauthor"]);
+    expect(ids(ev({ coPiSharedPapers: 3, nameProfileCount: 2 }))).toEqual(["copi_coauthor"]);
+  });
+
+  it("is unknown at 0 or null, and ignored for grant-join profiles", () => {
+    expect(ids(ev({ coPiSharedPapers: 3, nameProfileCount: 0 }))).toEqual(["copi_coauthor"]);
+    expect(ids(ev({ coPiSharedPapers: 3, nameProfileCount: null }))).toEqual(["copi_coauthor"]);
+    expect(
+      ids(ev({ policy: "publication-only", coPiSharedPapers: 3, nameProfileCount: 1 })),
+    ).toEqual(["copi_coauthor"]);
+  });
+
+  it("reads a full RePORTER page as a lower bound: common stays common, never rare", () => {
+    expect(nameProfileCountFrom(1, 120, 500)).toBe(1);
+    expect(nameProfileCountFrom(1, 500, 500)).toBeNull();
+    expect(nameProfileCountFrom(4, 500, 500)).toBeNull();
+    expect(nameProfileCountFrom(NAME_COMMON_MIN, 500, 500)).toBe(NAME_COMMON_MIN);
+  });
+
+  it("stays out of the evidence key, so a moving count never reopens a review", () => {
+    const a = scoreAttribution(ev({ coPiSharedPapers: 3, priorInstitution: "X", nameProfileCount: 1 }));
+    const b = scoreAttribution(ev({ coPiSharedPapers: 3, priorInstitution: "X", nameProfileCount: 2 }));
+    expect(evidenceKey(a)).toBe(evidenceKey(b));
+  });
+});
+
+describe("held at WCM, with a WCM namesake", () => {
+  it("drops to moderate and queues when someone else at WCM shares the name", () => {
+    const s = scoreAttribution(ev({ wcmOrgHistory: true, wcmNamesakes: 1 }));
+    expect(s.reasons.map((r) => r.id)).toEqual(["wcm_org_shared_name"]);
+    expect(s.score).toBe(PRIOR + WEIGHTS.wcm_org_shared_name);
+    expect(s.band).toBe("queue");
+  });
+
+  it("is the strong tie as before with no namesake, or when the count is unknown", () => {
+    expect(ids(ev({ wcmOrgHistory: true, wcmNamesakes: 0 }))).toEqual(["wcm_org"]);
+    expect(ids(ev({ wcmOrgHistory: true, wcmNamesakes: null }))).toEqual(["wcm_org"]);
+    expect(scoreAttribution(ev({ wcmOrgHistory: true })).band).toBe("show");
   });
 });

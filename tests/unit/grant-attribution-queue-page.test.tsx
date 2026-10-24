@@ -233,21 +233,34 @@ const detail = () => within(screen.getByTestId("grant-attribution-detail"));
 
 describe("helpers", () => {
   it("levels: a strong negative rules out, both sides conflict, a link or two cues is high", () => {
-    expect(attributionLevel([{ id: "timeline_impossible", weight: -5 }, { id: "pub_linked", weight: 4 }])).toEqual({
+    expect(attributionLevel([{ id: "timeline_impossible", weight: -5 }, { id: "prior_institution", weight: 2 }])).toEqual({
       level: "out",
       veto: "timeline_impossible",
     });
+    // A strong tie the other way makes it a conflict, not a ruling.
+    expect(attributionLevel([{ id: "timeline_impossible", weight: -5 }, { id: "pub_linked", weight: 5 }])).toEqual({
+      level: "conflict",
+      veto: null,
+    });
+    // Reviews stored before 2026-10-24 carry the named InfoEd cue at weight 0.
+    expect(attributionLevel([{ id: "infoed_other_wcm_pi_named", weight: 0 }]).level).toBe("out");
     expect(attributionLevel([{ id: "prior_institution", weight: 2 }, { id: "middle_initial_conflict", weight: -1 }]).level).toBe("conflict");
     expect(attributionLevel([{ id: "pub_linked", weight: 4 }]).level).toBe("high");
     expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }, { id: "topic_match", weight: 1 }]).level).toBe("high");
     expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }]).level).toBe("likely");
     expect(attributionLevel([]).level).toBe("unclear");
+    // Name rarity never counts as a cue of its own.
+    expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }, { id: "name_rare", weight: 1 }]).level).toBe("likely");
+    expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }, { id: "name_common", weight: -1 }]).level).toBe("likely");
   });
 
   it("co-authorship-only is co-PI and topic cues and nothing else", () => {
     expect(isCoauthorshipOnly([{ id: "copi_coauthor" }, { id: "topic_match" }])).toBe(true);
     expect(isCoauthorshipOnly([{ id: "copi_coauthor" }, { id: "wcm_org" }])).toBe(false);
     expect(isCoauthorshipOnly([])).toBe(false);
+    // Name rarity is a modifier: it neither makes nor breaks co-authorship-only.
+    expect(isCoauthorshipOnly([{ id: "copi_coauthor" }, { id: "name_rare" }])).toBe(true);
+    expect(isCoauthorshipOnly([{ id: "name_rare" }])).toBe(false);
   });
 
   it("title-cases RePORTER names and finds the scholar by surname", () => {
