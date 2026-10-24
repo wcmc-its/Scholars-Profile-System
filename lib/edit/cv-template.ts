@@ -12,7 +12,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
-import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
+import { DOMParser, XMLSerializer, type Node as XmlNode } from "@xmldom/xmldom";
 
 // @xmldom returns its own DOM nodes; type them structurally to avoid coupling to
 // lib.dom. Only the members we touch are declared.
@@ -65,7 +65,7 @@ export async function loadTemplate(): Promise<LoadedTemplate> {
 }
 
 export async function serialize(t: LoadedTemplate): Promise<Buffer> {
-  const xml = new XMLSerializer().serializeToString(t.doc as unknown as Node);
+  const xml = new XMLSerializer().serializeToString(t.doc as unknown as XmlNode);
   t.zip.file("word/document.xml", xml);
   return t.zip.generateAsync({ type: "nodebuffer" });
 }
