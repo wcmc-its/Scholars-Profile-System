@@ -1847,10 +1847,10 @@ export class AppStack extends Stack {
         // (superuser librarians confirm candidate iDs on etl/orcid-evidence's
         // bands). isOrcidLibrarianQueueEnabled() reads === "on"
         // (lib/edit/orcid-queue.ts); off => the page AND the three routes 404 and
-        // the ORCID queue tab is hidden. Staging first; prod after the staging
-        // queue is reviewed. Takes effect ONLY on a manual
+        // the ORCID queue tab is hidden. On in both envs: the staging queue was
+        // reviewed 2026-10-24. Takes effect ONLY on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
-        ORCID_LIBRARIAN_QUEUE: envConfig.envName === "staging" ? "on" : "off",
+        ORCID_LIBRARIAN_QUEUE: "on",
         // #1762 — the `honors_curator` role. The approver is the RESEARCH DEAN's
         // office (a different org unit from the Dean's office), which self-serves
         // from day one, so this is not a fast-follow: without it the queue is
