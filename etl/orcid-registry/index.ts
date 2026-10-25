@@ -70,6 +70,7 @@ import {
   expandedSearchAll,
   fetchWorks,
   initOrcidAuth,
+  OrcidDeprecatedError,
   OrcidHttpError,
   type ExpandedResult,
   type ExternalId,
@@ -550,8 +551,11 @@ async function main(): Promise<number> {
       if (err instanceof OrcidHttpError && (err.status === 401 || err.status === 403)) {
         throw new Error(`ORCID refused /works (HTTP ${err.status}) — aborting before the write`, { cause: err });
       }
-      worksFailed++;
-      if (worksFailed <= 3) console.warn(`works fetch failed for ${orcid}: ${(err as Error).message}`);
+      // A deprecated (merged) record has no works of its own; not an outage signal.
+      if (!(err instanceof OrcidDeprecatedError)) {
+        worksFailed++;
+        if (worksFailed <= 3) console.warn(`works fetch failed for ${orcid}: ${(err as Error).message}`);
+      }
     }
     const names = candidateNames(recordById.get(orcid)!);
     const evidence = new Map<string, WorksEvidence>();
