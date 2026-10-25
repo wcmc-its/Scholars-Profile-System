@@ -59,6 +59,11 @@ describe("isNonPublicationWork", () => {
     "Supporting information",
     "Additional file 1",
     "MOESM1 of a paper",
+    "Movie S2",
+    "Video 1: the procedure",
+    "Appendix A",
+    "Appendix S1: search strategy",
+    "Supplementary tables",
   ])("drops an `other` or untyped work titled %s", (title) => {
     expect(isNonPublicationWork(w(title, "other"))).toBe(true);
     expect(isNonPublicationWork(w(title, null))).toBe(true);
@@ -67,6 +72,24 @@ describe("isNonPublicationWork", () => {
   it("keeps an `other` work with a paper's title", () => {
     expect(isNonPublicationWork(w("Tables and chairs in the clinic", "other"))).toBe(false);
     expect(isNonPublicationWork(w("Outcomes after transplant", "other"))).toBe(false);
+  });
+
+  it.each([
+    "Video-assisted thoracoscopic lobectomy outcomes",
+    "Appendix cancer: a review",
+    "Appendix a review of cases",
+    "Figures of merit in imaging",
+    "Movie theater injuries",
+    "Table manners in pediatric wards",
+    "Supplementation with vitamin D in older adults",
+    "Supplemental oxygen after surgery",
+  ])("keeps an `other` or untyped paper titled %s", (title) => {
+    expect(isNonPublicationWork(w(title, "other"))).toBe(false);
+    expect(isNonPublicationWork(w(title, null))).toBe(false);
+  });
+
+  it("never drops a work that carries a PMID for its title", () => {
+    expect(isNonPublicationWork(w("Figure 3", "other", null, ["pmid:12345"]))).toBe(false);
   });
 
   it("drops a Figshare or Zenodo DOI unless typed journal-article", () => {

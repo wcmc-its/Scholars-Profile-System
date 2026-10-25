@@ -9,8 +9,8 @@
  * appear as works):
  *   - work types that are not publications: `image`, `data-set`, `software`,
  *     `lecture-speech`, `conference-poster`, `conference-abstract`, `website`;
- *   - an `other` (or untyped) work whose title reads as a figure or supplement
- *     ("Figure 3", "Table S1", "Supplementary material …");
+ *   - an `other` (or untyped) work with no PMID whose title reads as a figure or
+ *     supplement ("Figure 3", "Table S1", "Supplementary material …");
  *   - a Figshare (`10.6084`) or Zenodo (`10.5281`) DOI, unless the work is typed
  *     `journal-article`.
  * Collapsed: preprint versions. Works that share a title (ignoring case,
@@ -58,9 +58,21 @@ export const PREPRINT_DOI_PREFIXES = [
   "10.26434/",
 ] as const;
 
-/** A title that names a figure, table or supplement rather than a paper. */
-const FIGURE_TITLE =
-  /^\s*(fig(ure)?s?\.?|table|supplement(al|ary)?|suppl\.?|supporting information|additional file|appendix|movie|video|data sheet|moesm\d*)\b/i;
+/** Titles that name a figure, table or supplement rather than a paper: the
+ *  item word must be followed by its number ("Figure 3", "Table S1") or by a
+ *  material noun ("Supplementary material …"), so a paper titled "Video-assisted
+ *  …" or "Appendix cancer: …" is kept. */
+const FIGURE_TITLES: readonly RegExp[] = [
+  /^\s*(fig(ure)?s?\.?|table|movie|video|data sheet)\s*S?\d/i,
+  /^\s*(supplement(al|ary)?|suppl\.?)\s+(materials?|data|information|info|files?|tables?|figures?|methods|appendix|appendices|videos?|movies?|text|notes?)\b/i,
+  /^\s*supporting information\b/i,
+  /^\s*additional file\s*\d/i,
+  /^\s*moesm\d*\b/i,
+  // "Appendix 2", "Appendix S1", "Appendix A" (an uppercase letter alone, so
+  // "Appendix cancer" and "Appendix a review" stay); case-sensitive on the letter.
+  /^\s*[Aa](ppendix|PPENDIX)\s*(S?\d|[A-Z](?=$|[.:;,)]))/,
+];
+const isFigureTitle = (title: string) => FIGURE_TITLES.some((re) => re.test(title));
 
 /** Shorter normalized titles never group: too generic to call two works one. */
 const MIN_TITLE_KEY = 20;
@@ -82,7 +94,10 @@ const lowerDoi = (w: FilterableWork) => w.doi?.trim().toLowerCase() || null;
 export function isNonPublicationWork(w: FilterableWork): boolean {
   const type = lowerType(w);
   if (type && NON_PUBLICATION_TYPES.has(type)) return true;
-  if ((type === null || type === "other") && w.title && FIGURE_TITLE.test(w.title)) return true;
+  // A work carrying a PMID is a paper, whatever its title says.
+  const hasPmid = [...w.ids].some((k) => k.startsWith("pmid:"));
+  if ((type === null || type === "other") && !hasPmid && w.title && isFigureTitle(w.title))
+    return true;
   const doi = lowerDoi(w);
   if (doi && type !== "journal-article" && REPOSITORY_DOI_PREFIXES.some((p) => doi.startsWith(p)))
     return true;

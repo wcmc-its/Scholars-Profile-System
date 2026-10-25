@@ -20,7 +20,7 @@ import {
 describe("institutionsMatch", () => {
   it.each([
     ["Albany Medical College", "Albany Medical College of Union University"],
-    ["University of Rochester", "Rochester University"],
+    ["University of Pittsburgh", "Pittsburgh University"],
     ["University of Rochester", "University of Rochester Medical Center"],
     ["The Johns Hopkins University", "Johns Hopkins University"],
     ["Université de Montréal", "Universite de Montreal"],
@@ -33,6 +33,12 @@ describe("institutionsMatch", () => {
     ["New York University", "New York University School of Medicine"],
     ["UCSF", "University of California, San Francisco"],
     ["Mount Sinai Hospital", "Mt. Sinai Hospital"],
+    ["Children's Hospital of Philadelphia", "Childrens Hospital of Philadelphia"],
+    ["State University of New York", "State University of New York"],
+    [
+      "SUNY Downstate Medical Center, State University of New York",
+      "SUNY Downstate Medical Center",
+    ],
   ])("%s ↔ %s", (a, b) => {
     expect(institutionsMatch(a, b)).toBe(true);
     expect(institutionsMatch(b, a)).toBe(true);
@@ -49,6 +55,33 @@ describe("institutionsMatch", () => {
     ["Harvard University", "Harvard Medical School"],
     ["Columbia University", "Columbia College Chicago"],
     ["Albany Medical College", "Albany College of Pharmacy"],
+    // "University of X" / "X University" that are different places.
+    ["University of Washington", "Washington University"],
+    ["University of Washington", "Washington University School of Medicine"],
+    ["University of Washington", "Washington University in St. Louis"],
+    ["Miami University", "University of Miami"],
+    ["Ohio University", "University of Ohio"],
+    ["Indiana University", "University of Indiana"],
+    ["Saint Louis University", "University of Saint Louis"],
+    ["University of Rochester", "Rochester University"],
+    // A swapped form is compared whole, never as a prefix.
+    ["University of Pittsburgh", "Pittsburgh University Medical Center"],
+    // USC is Southern California or South Carolina.
+    ["USC", "University of Southern California"],
+    // Weak descriptors are not distinctive on their own.
+    ["Children's Hospital", "Children's Hospital of Philadelphia"],
+    ["Children's Hospital", "Childrens Hospital Medical Center"],
+    ["Children's Hospital", "Children's Hospital"],
+    ["State University", "State University of New York"],
+    ["Memorial Hospital", "Memorial Hospital of Rhode Island"],
+    ["City Hospital", "City Hospital of Boston"],
+    ["Cancer Institute", "Cancer Institute of New Jersey"],
+    ["Royal College", "Royal College of Surgeons in Ireland"],
+    // A multi-campus system's name never matches as a part on its own.
+    [
+      "SUNY Downstate Medical Center, State University of New York",
+      "University at Buffalo, State University of New York",
+    ],
   ])("%s ≠ %s", (a, b) => {
     expect(institutionsMatch(a, b)).toBe(false);
     expect(institutionsMatch(b, a)).toBe(false);
