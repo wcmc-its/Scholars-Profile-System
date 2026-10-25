@@ -88,6 +88,7 @@ import {
 import {
   fetchRecord,
   initOrcidAuth,
+  OrcidDeprecatedError,
   OrcidHttpError,
   type RecordResponse,
 } from "@/etl/orcid-registry/orcid-api";
@@ -669,6 +670,39 @@ export function buildHistory(args: {
   return out;
 }
 
+/** Replace each pair whose iD ORCID reports as deprecated with the same scholar
+ *  paired to the primary iD, unless that pair is dismissed or already present. A
+ *  deprecated iD with no named primary is dropped. The deprecated iD itself never
+ *  reaches the evidence table: confirming it would put a dead iD on file. Pure. */
+export function substituteDeprecated(
+  pairs: ReadonlyArray<{ cwid: string; orcid: string }>,
+  deprecated: ReadonlyMap<string, string | null>,
+  dismissed: ReadonlySet<string>,
+): { pairs: Array<{ cwid: string; orcid: string }>; replaced: number; dropped: number } {
+  const out: Array<{ cwid: string; orcid: string }> = [];
+  const have = new Set<string>();
+  let replaced = 0;
+  let dropped = 0;
+  const push = (cwid: string, orcid: string) => {
+    const k = `${cwid}|${orcid}`;
+    if (have.has(k)) return;
+    have.add(k);
+    out.push({ cwid, orcid });
+  };
+  for (const p of pairs) if (!deprecated.has(p.orcid)) push(p.cwid, p.orcid);
+  for (const p of pairs) {
+    if (!deprecated.has(p.orcid)) continue;
+    const primary = deprecated.get(p.orcid) ?? null;
+    if (!primary || deprecated.has(primary) || dismissed.has(`${p.cwid}|${primary}`)) {
+      dropped++;
+      continue;
+    }
+    replaced++;
+    push(p.cwid, primary);
+  }
+  return { pairs: out, replaced, dropped };
+}
+
 /** The `email_verified` rows the auto-confirm may write: the scholar has no iD
  *  on file (`held`: `scholar.orcid` or an undismissed `rpm_admin` iD), the pair
  *  is not dismissed, the scholar has exactly one such row, and no other scholar
@@ -838,13 +872,6 @@ async function main(): Promise<number> {
     seen.add(k);
     pairs.push({ cwid: c.cwid, orcid: c.orcid });
   }
-  const onFile = new Set(
-    pairs
-      .filter(
-        (p) => heldFor(p.orcid, byCwid.get(p.cwid)!.orcid, admins.get(p.cwid) ?? []) === p.orcid,
-      )
-      .map((p) => `${p.cwid}|${p.orcid}`),
-  );
   let ids = [...new Set(pairs.map((p) => p.orcid))];
   if (maxRecords > 0 && ids.length > maxRecords) {
     console.log(
@@ -852,29 +879,58 @@ async function main(): Promise<number> {
     );
     ids = ids.slice(0, maxRecords);
   }
-  console.log(
-    `${pairs.length} candidate pairs (${onFile.size} already on file), ${ids.length} distinct iDs`,
-  );
+  console.log(`${pairs.length} candidate pairs, ${ids.length} distinct iDs`);
   if (ids.length === 0)
     throw new Error("0 candidate iDs — orcid_candidate is empty; refusing to mirror");
 
   // 2. One /record per iD.
   const facts = new Map<string, ReturnType<typeof recordFacts>>();
+  const deprecated = new Map<string, string | null>();
   let failed = 0;
-  for (const orcid of ids) {
-    try {
-      facts.set(orcid, recordFacts(orcid, await fetchRecord(orcid)));
-    } catch (err) {
-      // Auth/blocking: every further call fails the same way — stop before the write.
-      if (err instanceof OrcidHttpError && (err.status === 401 || err.status === 403)) {
-        throw new Error(`ORCID refused /record (HTTP ${err.status}) — aborting before the write`, {
-          cause: err,
-        });
+  const fetchAll = async (list: string[]) => {
+    for (const orcid of list) {
+      if (facts.has(orcid) || deprecated.has(orcid)) continue;
+      try {
+        facts.set(orcid, recordFacts(orcid, await fetchRecord(orcid)));
+      } catch (err) {
+        // A merged record: not a failure, and never scored as itself.
+        if (err instanceof OrcidDeprecatedError) {
+          deprecated.set(orcid, err.primary);
+          continue;
+        }
+        // Auth/blocking: every further call fails the same way — stop before the write.
+        if (err instanceof OrcidHttpError && (err.status === 401 || err.status === 403)) {
+          throw new Error(
+            `ORCID refused /record (HTTP ${err.status}) — aborting before the write`,
+            {
+              cause: err,
+            },
+          );
+        }
+        failed++;
+        if (failed <= 3)
+          console.warn(`record fetch failed for ${orcid}: ${(err as Error).message}`);
       }
-      failed++;
-      if (failed <= 3) console.warn(`record fetch failed for ${orcid}: ${(err as Error).message}`);
     }
+  };
+  await fetchAll(ids);
+  if (deprecated.size > 0) {
+    const sub = substituteDeprecated(pairs, deprecated, dismissed);
+    pairs.splice(0, pairs.length, ...sub.pairs);
+    // Primaries this run has not fetched yet (they were not candidates themselves).
+    await fetchAll([...new Set(pairs.map((p) => p.orcid))]);
+    console.log(
+      `${deprecated.size} deprecated iDs: ${sub.replaced} pairs moved to the primary iD, ${sub.dropped} dropped (${[...deprecated].map(([d, p]) => `${d}->${p ?? "none"}`).join(", ")})`,
+    );
   }
+  const onFile = new Set(
+    pairs
+      .filter(
+        (p) => heldFor(p.orcid, byCwid.get(p.cwid)!.orcid, admins.get(p.cwid) ?? []) === p.orcid,
+      )
+      .map((p) => `${p.cwid}|${p.orcid}`),
+  );
+  console.log(`${onFile.size} pairs already on file`);
   const maxFailed = Math.max(RECORD_FAIL_FLOOR, Math.ceil(RECORD_FAIL_SHARE * ids.length));
   if (failed > maxFailed) {
     throw new Error(

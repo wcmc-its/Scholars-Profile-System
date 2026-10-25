@@ -265,7 +265,7 @@ describe("AnalyticsStack", () => {
         template.resourceCountIs("AWS::Lambda::Function", 1);
         template.hasResourceProperties("AWS::Lambda::Function", {
           FunctionName: `sps-cf-usage-rollup-${env}`,
-          Runtime: "nodejs22.x",
+          Runtime: "nodejs24.x",
           Handler: "index.handler",
           MemorySize: 256,
           Timeout: 600,
