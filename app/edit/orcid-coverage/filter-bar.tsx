@@ -22,8 +22,10 @@ import { cn } from "@/lib/utils";
 
 type Sel = { nih: NihFilter; types: string[]; units: string[] };
 
-type FacetDef = {
-  key: "nih" | "type" | "dept" | "center" | "inst";
+/** One dropdown's definition. Exported with `FacetPopover` for the ORCID
+ *  queue's filter bar (`components/edit/orcid-queue-filter-bar.tsx`). */
+export type FacetDef = {
+  key: string;
   label: string;
   options: DataQualityFacetOption[];
   single?: boolean;
@@ -188,18 +190,20 @@ export function CoverageFilterBar({
   );
 }
 
-function FacetPopover({
+export function FacetPopover({
   def,
   selected,
   onToggle,
   onClear,
   valueLabel,
+  testIdPrefix = "orcid-coverage-filter",
 }: {
   def: FacetDef;
   selected: string[];
   onToggle: (value: string) => void;
   onClear: () => void;
   valueLabel: (value: string) => string;
+  testIdPrefix?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
@@ -227,7 +231,7 @@ function FacetPopover({
           "bg-apollo-surface text-foreground inline-flex h-[34px] items-center gap-1.5 rounded-lg border pr-2.5 pl-3 text-[13.5px] whitespace-nowrap",
           active ? "border-apollo-slate" : "border-apollo-border-strong",
         )}
-        data-testid={`orcid-coverage-filter-${def.key}`}
+        data-testid={`${testIdPrefix}-${def.key}`}
       >
         <span className={active ? "text-muted-foreground" : undefined}>
           {value ? `${def.label}:` : def.label}
@@ -283,7 +287,9 @@ function FacetPopover({
                   )}
                   aria-hidden
                 >
-                  {checked && def.single ? <span className="size-1.5 rounded-full bg-white" /> : null}
+                  {checked && def.single ? (
+                    <span className="size-1.5 rounded-full bg-white" />
+                  ) : null}
                   {checked && !def.single ? (
                     <Check className="size-[11px] text-white" strokeWidth={3.5} />
                   ) : null}

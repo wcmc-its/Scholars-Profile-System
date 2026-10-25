@@ -539,6 +539,8 @@ export class EtlStack extends Stack {
     //
     //   etl:dynamodb     (nightly) dynamodb:Scan  table/reciterai
     //   etl:identity     (nightly) dynamodb:Scan  table/Identity
+    //   etl:orcid-evidence (weekly) dynamodb:Scan table/Identity (identity.institutions,
+    //                    ORCID queue v2 history_match; same grant and table name)
     //   etl:spotlight    (weekly)  s3:GetObject   wcmc-reciterai-artifacts/spotlight/*
     //   etl:scholar-tool (nightly) s3:GetObject   wcmc-reciterai-artifacts/tools/*
     //   etl:hierarchy    (annual)  s3:GetObject   wcmc-reciterai-hierarchy/*
@@ -1992,7 +1994,9 @@ export class EtlStack extends Stack {
       // bands /edit/orcid-queue reads, then the email auto-confirm (behind
       // ORCID_EMAIL_AUTOCONFIRM, off). Right after OrcidRegistryWeekly so it scores the
       // fresh candidates; one public /record per iD over NAT egress with no credential,
-      // so external: false like the registry. `continue`: the queue is a librarian tool.
+      // so external: false like the registry. v2 also Scans the Identity table for each
+      // scholar's prior institutions through the shared task role (the etl:identity
+      // grant), no secret. `continue`: the queue is a librarian tool.
       { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: false, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public

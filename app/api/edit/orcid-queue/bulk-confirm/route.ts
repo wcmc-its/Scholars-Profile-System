@@ -1,6 +1,12 @@
 /**
  * `POST /api/edit/orcid-queue/bulk-confirm` — "Confirm remaining N" on the
- * ORCID queue's Strong or Shared papers tab. Body `{ band, sampleId }`.
+ * ORCID queue's Strong or Shared papers tab. Body `{ band, sampleId, filter? }`.
+ *
+ * v2: `filter` is the page's `{ types, units, sources }`. The sample must have
+ * been drawn under the SAME filter (409 `filter_mismatch` otherwise), and only
+ * the band's rows inside it are confirmed. The one-row-per-scholar and
+ * best-band rules read each scholar's full candidate set, never the filtered
+ * one (`loadQualifying`).
  *
  * Refused (409) unless `sampleId` is the band's LATEST sample and it is passed
  * (every row decided, none "Not this person"): a stale sample, an open one and
@@ -29,7 +35,12 @@ import { db } from "@/lib/db";
 import { runAfterResponse } from "@/lib/edit/after-response";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
-import { isOrcidLibrarianQueueEnabled, isOrcidSampleBand } from "@/lib/edit/orcid-queue";
+import {
+  isOrcidLibrarianQueueEnabled,
+  isOrcidSampleBand,
+  orcidQueueFilterKey,
+  sanitizeOrcidQueueFilter,
+} from "@/lib/edit/orcid-queue";
 import {
   confirmPair,
   isSampleStale,
@@ -69,6 +80,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof sampleId !== "string" || sampleId.length === 0 || sampleId.length > 64) {
     return editError(400, "invalid_body", "sampleId");
   }
+  const filter = sanitizeOrcidQueueFilter(body.filter);
+  if (!filter) return editError(400, "invalid_body", "filter");
 
   const ts = new Date();
   let confirmed: string[] = [];
@@ -76,13 +89,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const latest = await loadLatestSample(db.write, band);
     if (!latest || latest.id !== sampleId) return editError(409, "stale_sample");
+    if (latest.filterKey !== orcidQueueFilterKey(filter)) return editError(409, "filter_mismatch");
     if (latest.status === "locked") return editError(409, "sample_locked");
     if (latest.status !== "passed") return editError(409, "sample_not_passed");
     if (await isSampleStale(db.write, band, new Date(latest.startedAt)))
       return editError(409, "stale_sample");
 
     const inSample = new Set(latest.pairs.map((p) => `${p.cwid}|${p.orcid}`));
-    const { qualifying, total } = await loadQualifying(db.write, band);
+    const { qualifying, total } = await loadQualifying(db.write, band, filter);
     const todo = qualifying.filter((q) => !inSample.has(`${q.cwid}|${q.orcid}`));
     for (let i = 0; i < todo.length; i += BATCH) {
       const batch = todo.slice(i, i + BATCH);
@@ -121,7 +135,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     skipped = total - latest.pairs.length - confirmed.length;
     if (skipped < 0) skipped = 0;
 
-    await writeBulkAudit({ band, confirmed: confirmed.length, skipped });
+    await writeBulkAudit({
+      band,
+      confirmed: confirmed.length,
+      skipped,
+      ...(latest.filterKey ? { filter: latest.filterKey } : {}),
+    });
   } catch (err) {
     logEditFailure(PATH, err);
     // Earlier batches committed: audit what did land, and reflect those profiles.

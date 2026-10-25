@@ -2,7 +2,8 @@
  * `POST /api/edit/orcid-queue/decide` — one librarian decision on the ORCID
  * queue (`/edit/orcid-queue`, docs/orcid-librarian-queue-spec.md).
  *
- * Body `{ cwid, orcid, decision: "confirm" | "dismiss", sampleId?, replace? }`.
+ * Body `{ cwid, orcid, decision: "confirm" | "dismiss", sampleId?, replace?,
+ * dismissOthers? }`.
  *  - confirm: the pair must be in `orcid_candidate_evidence`. Same write as
  *    `POST /api/edit/orcid` (`scholar.orcid`, `orcid_confirmed_at`, the pair's
  *    dismissal deleted) plus `orcid_confirm_method = "librarian"` and
@@ -19,6 +20,11 @@
  *    sample can still finish. Returns `alreadyOnFile: true` then.
  *  - confirm on a dismissed pair is a 409 `dismissed`: a librarian never
  *    overrides the scholar's own Remove or an earlier Not this person.
+ *  - `dismissOthers` (v2, confirm only): the scholar's OTHER candidate iDs to
+ *    mark Not this person in the same transaction ("Confirm, and mark the
+ *    others not this person" on a card). Each must be one of the scholar's
+ *    candidates in the evidence table (404 `other_not_in_queue` rolls the whole
+ *    decision back) and gets its own dismissal and audit row.
  * One transaction with its audit row (`orcid_librarian_confirm` /
  * `orcid_librarian_dismiss`); the profile is re-reflected after commit.
  *
@@ -35,6 +41,7 @@ import { normalizeOrcid } from "@/lib/edit/orcid";
 import { isOrcidLibrarianQueueEnabled } from "@/lib/edit/orcid-queue";
 import {
   confirmPair,
+  dismissOthers,
   dismissPair,
   OrcidQueueRefused,
   stampSampleRow,
@@ -45,6 +52,8 @@ import { reflectOverviewEdit } from "@/lib/edit/revalidation";
 export const dynamic = "force-dynamic";
 
 const PATH = "/api/edit/orcid-queue/decide";
+/** A scholar's candidate iDs are a handful; more is a malformed body. */
+const MAX_OTHERS = 20;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidLibrarianQueueEnabled()) return new NextResponse(null, { status: 404 });
@@ -78,11 +87,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   ) {
     return editError(400, "invalid_body", "sampleId");
   }
+  let others: string[] = [];
+  if (body.dismissOthers !== undefined) {
+    const raw = body.dismissOthers;
+    if (decision !== "confirm" || !Array.isArray(raw) || raw.length > MAX_OTHERS)
+      return editError(400, "invalid_body", "dismissOthers");
+    const ids = raw.map((o) => (typeof o === "string" ? normalizeOrcid(o) : null));
+    if (ids.some((o) => o === null)) return editError(400, "invalid_orcid", "dismissOthers");
+    others = [...new Set(ids as string[])].filter((o) => o !== orcid);
+  }
 
   const ts = new Date();
   const meta = { actor: realCwid, impersonatedCwid, requestId, ts, sampleId: sampleId ?? null };
   let undid = false;
   let alreadyOnFile = false;
+  let dismissed: string[] = [];
   try {
     await db.write.$transaction(async (tx) => {
       if (decision === "confirm") {
@@ -94,6 +113,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           if (!onFile || typeof sampleId !== "string") throw err;
           alreadyOnFile = true;
         }
+        if (others.length > 0) dismissed = await dismissOthers(tx, cwid, orcid, others, meta);
       } else undid = (await dismissPair(tx, { cwid, orcid }, meta)).undid;
       if (typeof sampleId === "string") {
         await stampSampleRow(
@@ -121,5 +141,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  return editOk({ decision, undid, ...(alreadyOnFile ? { alreadyOnFile: true } : {}) });
+  return editOk({
+    decision,
+    undid,
+    ...(alreadyOnFile ? { alreadyOnFile: true } : {}),
+    ...(dismissed.length > 0 ? { dismissed } : {}),
+  });
 }

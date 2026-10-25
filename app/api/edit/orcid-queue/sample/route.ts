@@ -1,6 +1,9 @@
 /**
  * `POST /api/edit/orcid-queue/sample` — "Review a sample of 50" on the ORCID
- * queue's Strong or Shared papers tab. Body `{ band, restart? }`.
+ * queue's Strong or Shared papers tab. Body `{ band, restart?, filter? }`.
+ * `filter` (v2) is the page's `{ types, units, sources }`: the sample is drawn
+ * from the rows inside it and stores its key, so it authorizes bulk confirm
+ * for that same filter only.
  *
  * Returns the band's open sample (undecided rows, no dismissal), or starts one:
  * up to 50 random rows of the band that qualify now (no iD on file, not
@@ -19,7 +22,11 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
-import { isOrcidLibrarianQueueEnabled, isOrcidSampleBand } from "@/lib/edit/orcid-queue";
+import {
+  isOrcidLibrarianQueueEnabled,
+  isOrcidSampleBand,
+  sanitizeOrcidQueueFilter,
+} from "@/lib/edit/orcid-queue";
 import { openOrStartSample } from "@/lib/edit/orcid-queue.server";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 
@@ -47,10 +54,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidSampleBand(body.band)) return editError(400, "invalid_body", "band");
   const band = body.band;
   const restart = body.restart === true;
+  const filter = sanitizeOrcidQueueFilter(body.filter);
+  if (!filter) return editError(400, "invalid_body", "filter");
 
   try {
     const { sample, created } = await db.write.$transaction((tx) =>
-      openOrStartSample(tx, band, realCwid, new Date(), { restart }),
+      openOrStartSample(tx, band, realCwid, new Date(), { restart, filter }),
     );
     return editOk({ sample, created });
   } catch (err) {

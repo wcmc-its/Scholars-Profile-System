@@ -12,6 +12,12 @@
  * count. Strong and Shared papers carry the sample gate: a passed sample of 50
  * unlocks "Confirm remaining N".
  *
+ * v2: one card per scholar with every candidate iD; tab counts are scholars.
+ * `type` / `unit` / `source` (the filter bar) narrow the list, the counts, the
+ * sample and bulk confirm. The filter-bar facets load beside the queue; when
+ * they fail the queue still renders (the URL's filter still applies) and the
+ * bar offers the source filter only.
+ *
  * Order of checks, every GET: session, then the flag (`ORCID_LIBRARIAN_QUEUE`
  * off ⇒ 404 for everyone), then `requireSuperuserGet` (librarians are
  * superusers; no new role). A View-as session reads the queue with every
@@ -21,6 +27,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
+import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { OrcidQueue } from "@/components/edit/orcid-queue";
 import { getEffectiveEditSession, impersonationActive } from "@/lib/auth/effective-identity";
@@ -29,7 +36,7 @@ import { getSession } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { isOrcidLibrarianQueueEnabled } from "@/lib/edit/orcid-queue";
+import { isOrcidLibrarianQueueEnabled, parseOrcidQueueFilter } from "@/lib/edit/orcid-queue";
 import { loadOrcidQueue } from "@/lib/edit/orcid-queue.server";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -45,7 +52,7 @@ const BASE_PATH = "/edit/orcid-queue";
 export default async function OrcidQueuePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getEffectiveEditSession();
   if (!session) {
@@ -68,12 +75,25 @@ export default async function OrcidQueuePage({
     );
   }
 
-  const { tab } = (await searchParams) ?? {};
-  const [data, rawSession, pendingSlugRequests, pendingHonors] = await Promise.all([
-    loadOrcidQueue(db.read, tab),
+  const params = (await searchParams) ?? {};
+  const tab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
+  const filter = parseOrcidQueueFilter(params);
+  const [data, rawSession, pendingSlugRequests, pendingHonors, facets] = await Promise.all([
+    loadOrcidQueue(db.read, tab, filter),
     getSession(),
     isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
+    // Independent of the queue: a facet failure only narrows the filter bar.
+    loadDataQualityFacets(db.read).catch((err: unknown) => {
+      console.error(
+        JSON.stringify({
+          event: "orcid_queue_facets_failed",
+          path: BASE_PATH,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return null;
+    }),
   ]);
 
   return (
@@ -86,12 +106,13 @@ export default async function OrcidQueuePage({
       <div className="mb-[22px] flex flex-col gap-1.5">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">ORCID queue</h1>
         <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
-          ORCID iDs that may belong to a scholar, with the evidence from each public ORCID record. A
-          confirmed iD goes on file and reaches WCM Identity overnight.
+          ORCID iDs that may belong to a scholar, one card per scholar, with the evidence from each
+          public ORCID record. A confirmed iD goes on file and reaches WCM Identity overnight.
         </p>
       </div>
       <OrcidQueue
         data={data}
+        facets={facets}
         basePath={BASE_PATH}
         readOnly={rawSession ? impersonationActive(rawSession, nowSeconds()) : false}
       />

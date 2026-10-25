@@ -98,6 +98,9 @@ export type OrcidQueueSampleState = {
   id: string;
   band: OrcidSampleBand;
   startedAt: string;
+  /** `orcidQueueFilterKey` of the filter the sample was drawn under; it
+   *  authorizes bulk confirm for that filter only. */
+  filterKey: string;
   total: number;
   decided: number;
   dismissed: number;
@@ -113,41 +116,274 @@ export type OrcidQueueWork = {
   doi: string | null;
   pmid: string | null;
   source: string | null;
+  /** The ORCID work's own link (v2; absent on rows a v1 run wrote). */
+  url?: string | null;
 };
 
+/** `orcid_candidate.source` values, in the order the filter lists them. */
+export const ORCID_CANDIDATE_SOURCES = [
+  "rpm_inferred",
+  "rpm_admin",
+  "orcid_email",
+  "orcid_works",
+  "orcid_crossref",
+  "orcid_name",
+] as const;
+export type OrcidCandidateSource = (typeof ORCID_CANDIDATE_SOURCES)[number];
+
+export const ORCID_SOURCE_LABEL: Record<OrcidCandidateSource, string> = {
+  rpm_inferred: "Publication Manager inference",
+  rpm_admin: "Publication Manager admin",
+  orcid_email: "ORCID email",
+  orcid_works: "ORCID shared works",
+  orcid_crossref: "Crossref deposit",
+  orcid_name: "ORCID name only",
+};
+
+export function isOrcidCandidateSource(v: unknown): v is OrcidCandidateSource {
+  return typeof v === "string" && (ORCID_CANDIDATE_SOURCES as readonly string[]).includes(v);
+}
+
+/** Which surname rule made the names agree (etl/orcid-evidence `surnameRule`):
+ *  the same surname; the same once accents are folded; a shared token of a
+ *  compound surname; the same once spaces and hyphens are removed. */
+export type OrcidSurnameRule = "same" | "folded" | "compound_token" | "joined";
+
+export const ORCID_SURNAME_RULE_LABEL: Record<OrcidSurnameRule, string> = {
+  same: "same surname",
+  folded: "same surname once accents are folded",
+  compound_token: "a compound surname shares a part",
+  joined: "same surname once spaces and hyphens are removed",
+};
+
+/** One institution fact: an ORCID affiliation and what it matched on our side
+ *  (`wcm` = the inst_match rule; the rest are the scholar's own history). */
+export type OrcidInstitutionPair = {
+  orcid: {
+    name: string;
+    kind: "employment" | "education";
+    start: number | null;
+    end: number | null;
+  };
+  ours: { name: string; source: "wcm" | "education" | "appointment" | "identity" };
+};
+
+export type OrcidSharedPaper = {
+  pmid: string;
+  doi: string | null;
+  title: string | null;
+  year: number | null;
+  journal: string | null;
+};
+
+/** `orcid_candidate_evidence.evidence_detail`: the facts behind each chip,
+ *  written by etl/orcid-evidence so the page never re-fetches ORCID. */
+export type OrcidEvidenceDetail = {
+  names: {
+    orcid: { credit: string | null; given: string | null; family: string | null; other: string[] };
+    givenAgrees: boolean;
+    surnameRule: OrcidSurnameRule | null;
+  };
+  /** inst_match (`wcm`) and history_match pairs. */
+  institutions: OrcidInstitutionPair[];
+  /** A cornell.edu address on the record (an inst_match fact on its own). */
+  institutionEmail: string | null;
+  /** The scholar's email the record lists as verified. */
+  email: string | null;
+  /** The shared papers (capped; `shared` is the full count). */
+  shared: OrcidSharedPaper[];
+  competitors: {
+    cwids: Array<{ cwid: string; shared: number; reason: "same_surname" | "same_id" }>;
+    orcids: Array<{ orcid: string; shared: number | null }>;
+  };
+  /** `orcid_candidate.source` values for the pair at scoring time. */
+  sources: string[];
+  /** Works the non-publication filter dropped or collapsed. */
+  worksDropped: number;
+};
+
+/** A work's link: PubMed when it has a PMID, else doi.org, else its own URL
+ *  (http/https only). Null when it has none. Pure. */
+export function workHref(w: {
+  pmid?: string | null;
+  doi?: string | null;
+  url?: string | null;
+}): string | null {
+  if (w.pmid && /^\d+$/.test(w.pmid.trim()))
+    return `https://pubmed.ncbi.nlm.nih.gov/${w.pmid.trim()}/`;
+  if (w.doi?.trim()) return `https://doi.org/${w.doi.trim()}`;
+  if (w.url && /^https?:\/\//i.test(w.url.trim())) return w.url.trim();
+  return null;
+}
+
+/** The queue's filter (v2 item 6/7): person type (`role_category`), unit
+ *  (`dept:` / `div:` / `inst:` values, the `lib/edit/person-filter.ts`
+ *  vocabulary) and candidate source. Empty = no filter on that facet. */
+export type OrcidQueueFilter = {
+  types: string[];
+  units: string[];
+  sources: OrcidCandidateSource[];
+};
+
+export const EMPTY_ORCID_QUEUE_FILTER: OrcidQueueFilter = { types: [], units: [], sources: [] };
+
+/** Unit kinds the queue offers (no centers). */
+const QUEUE_UNIT = /^(dept|div|inst):[^\s]{1,64}$/;
+const MAX_FILTER_VALUES = 50;
+
+const cleanList = (v: unknown, ok: (s: string) => boolean): string[] | null => {
+  if (v === undefined || v === null) return [];
+  const xs = Array.isArray(v) ? v : [v];
+  if (xs.length > MAX_FILTER_VALUES) return null;
+  const out: string[] = [];
+  for (const x of xs) {
+    if (typeof x !== "string") return null;
+    const t = x.trim();
+    if (!t) continue;
+    if (t.length > 72 || !ok(t)) return null;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out.sort();
+};
+
+/** A filter from a request body or URL values; null when malformed (the
+ *  routes 400). Values sorted and de-duplicated, so two spellings of one
+ *  selection compare equal. Pure. */
+export function sanitizeOrcidQueueFilter(raw: unknown): OrcidQueueFilter | null {
+  if (raw === undefined || raw === null) return { types: [], units: [], sources: [] };
+  if (typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const types = cleanList(r.types, () => true);
+  const units = cleanList(r.units, (u) => QUEUE_UNIT.test(u));
+  const sources = cleanList(r.sources, isOrcidCandidateSource);
+  if (!types || !units || !sources) return null;
+  return { types, units, sources: sources as OrcidCandidateSource[] };
+}
+
+/** The canonical key a sample stores (`orcid_queue_sample.filter_key`): ""
+ *  for no filter, so every v1 sample reads as unfiltered. Pure. */
+export function orcidQueueFilterKey(f: OrcidQueueFilter): string {
+  const q = new URLSearchParams();
+  for (const t of [...f.types].sort()) q.append("type", t);
+  for (const u of [...f.units].sort()) q.append("unit", u);
+  for (const s of [...f.sources].sort()) q.append("source", s);
+  return q.toString();
+}
+
+export function isEmptyOrcidQueueFilter(f: OrcidQueueFilter): boolean {
+  return f.types.length === 0 && f.units.length === 0 && f.sources.length === 0;
+}
+
+/** `?tab=…&type=…&unit=…&source=…` for the page's links. Pure. */
+export function orcidQueueHref(basePath: string, tab: string, f: OrcidQueueFilter): string {
+  const key = orcidQueueFilterKey(f);
+  return `${basePath}?tab=${encodeURIComponent(tab)}${key ? `&${key}` : ""}`;
+}
+
+/** One candidate iD on a scholar's card. */
 export type OrcidQueueRow = {
   cwid: string;
   orcid: string;
-  slug: string | null;
-  name: string;
-  title: string | null;
-  department: string | null;
   band: OrcidQueueBand;
+  /** queue = nothing on file; conflict = a DIFFERENT iD is on file (Replace);
+   *  auto_confirmed = the iD the ETL email-confirmed (Undo); on_file = a
+   *  sampled pair that went on file since (shown decided). */
+  state: "queue" | "conflict" | "auto_confirmed" | "on_file";
   instMatch: boolean;
+  historyMatch: boolean;
   emailVerified: boolean;
   nameAgrees: boolean;
   shared: number;
   competitor: boolean;
-  competitors: Array<{ cwid: string; name: string }>;
-  competitorOrcids: string[];
+  competitors: Array<{ cwid: string; name: string; shared: number | null; reason: string | null }>;
+  competitorOrcids: Array<{ orcid: string; shared: number | null }>;
   worksTotal: number;
   newWorks: number;
   newWorksSample: OrcidQueueWork[];
-  /** Conflicts tab: the iD on file. Email verified tab: the auto-confirmed iD. */
+  /** `orcid_candidate.source` values for the pair, read live. */
+  sources: OrcidCandidateSource[];
+  /** The ETL's facts behind the chips; null on a row a v1 run wrote. */
+  detail: OrcidEvidenceDetail | null;
+  /** Conflicts / email verified: the iD on file. */
   onFileOrcid: string | null;
-  /** Email verified tab: already confirmed by the ETL (shows Undo). */
+  /** Email verified: already confirmed by the ETL (shows Undo). */
   autoConfirmed: boolean;
   /** This row's decision in the band's current sample; undefined = not sampled. */
   sampleDecision?: "confirmed" | "dismissed" | null;
 };
 
-/** What the page hands the client: one tab's rows and every tab's count. */
+/** One scholar and every candidate iD for them, best first (v2 item 5). */
+export type OrcidQueueCard = {
+  cwid: string;
+  slug: string | null;
+  name: string;
+  /** The names the ETL compared (fullName, preferredName), distinct. */
+  scholarNames: string[];
+  title: string | null;
+  department: string | null;
+  /** The tab the card sits in: its best candidate's band, or conflicts /
+   *  email verified (`cardTabOf`). */
+  tab: OrcidQueueTab;
+  candidates: OrcidQueueRow[];
+};
+
+/** What the page hands the client: one tab's cards and every tab's count
+ *  (scholars, not pairs), under one filter. */
 export type OrcidQueueData = {
   tab: OrcidQueueTab;
-  rows: OrcidQueueRow[];
+  cards: OrcidQueueCard[];
   counts: Record<OrcidQueueTab, number>;
+  filter: OrcidQueueFilter;
   /** The band's latest sample (Strong / Shared papers only). */
   sample: OrcidQueueSampleState | null;
   /** Rows a passed sample's "Confirm remaining N" would confirm now. */
   remaining: number | null;
 };
+
+/** Band strength: 0 = strongest. Pure. */
+export function bandRank(band: string): number {
+  const i = (ORCID_QUEUE_BANDS as readonly string[]).indexOf(band);
+  return i < 0 ? ORCID_QUEUE_BANDS.length : i;
+}
+
+/** The tab a scholar's card sits in: email verified when the ETL confirmed one
+ *  of their iDs, Conflicts when another iD is on file, else the best band among
+ *  their open candidates. Pure. */
+export function cardTabOf(
+  candidates: ReadonlyArray<Pick<OrcidQueueRow, "band" | "state">>,
+): OrcidQueueTab {
+  if (candidates.some((c) => c.state === "auto_confirmed")) return "email_verified";
+  if (candidates.some((c) => c.state === "conflict")) return "conflicts";
+  const best = [...candidates].sort((a, b) => bandRank(a.band) - bandRank(b.band))[0];
+  return best ? best.band : "weak";
+}
+
+/** Best candidate first: band, then shared papers, then name agreement. Pure. */
+export function compareCandidates(
+  a: Pick<OrcidQueueRow, "band" | "shared" | "nameAgrees" | "orcid">,
+  b: Pick<OrcidQueueRow, "band" | "shared" | "nameAgrees" | "orcid">,
+): number {
+  return (
+    bandRank(a.band) - bandRank(b.band) ||
+    b.shared - a.shared ||
+    Number(b.nameAgrees) - Number(a.nameAgrees) ||
+    a.orcid.localeCompare(b.orcid)
+  );
+}
+
+/** The filter from page search params, lenient: unknown values are dropped,
+ *  not refused (a mangled link narrows less, never errors). Pure. */
+export function parseOrcidQueueFilter(
+  raw: Record<string, string | string[] | undefined>,
+): OrcidQueueFilter {
+  const list = (k: string) => {
+    const v = raw[k];
+    return (Array.isArray(v) ? v : v === undefined ? [] : [v]).map((x) => x.trim()).filter(Boolean);
+  };
+  const uniq = <T extends string>(xs: T[]) => [...new Set(xs)].sort() as T[];
+  return {
+    types: uniq(list("type").filter((t) => t.length <= 72)).slice(0, MAX_FILTER_VALUES),
+    units: uniq(list("unit").filter((u) => QUEUE_UNIT.test(u))).slice(0, MAX_FILTER_VALUES),
+    sources: uniq(list("source").filter(isOrcidCandidateSource)),
+  };
+}
