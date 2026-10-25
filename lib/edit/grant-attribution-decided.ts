@@ -141,7 +141,8 @@ export function nameParts(
           )
           .join("-"),
       );
-  if (order === "last-first") {
+  // RePORTER sometimes prints "First Last" with no comma.
+  if (order === "last-first" && raw.includes(",")) {
     const [last = "", rest = ""] = raw.split(",").map((x) => x.trim());
     const r = tidy(rest.replace(/\./g, ""));
     return { last: tidy(last).join(" "), first: r[0] ?? "", middle: r.slice(1).join(" ") };
@@ -185,6 +186,7 @@ export function checkedNothingFound(cueIds: ReadonlySet<string>): string[] {
   if (!cueIds.has("timeline_impossible") && !cueIds.has("timeline_unlikely"))
     out.push("The award fits the scholar's career stage");
   if (!cueIds.has("middle_initial_conflict")) out.push("No middle-initial conflict");
+  if (!cueIds.has("pi_name_mismatch")) out.push("The NIH profile's PI has the scholar's surname");
   return out;
 }
 

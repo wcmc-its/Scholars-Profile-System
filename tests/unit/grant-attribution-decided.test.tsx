@@ -110,6 +110,12 @@ describe("names and wording", () => {
       first: "Lee",
       middle: "D",
     });
+    // RePORTER sometimes prints "First Last" with no comma.
+    expect(nameParts("Pat Other", "last-first")).toEqual({
+      last: "Other",
+      first: "Pat",
+      middle: "",
+    });
     expect(nameParts("Lee A. Sample, PhD", "first-last")).toEqual({
       last: "Sample",
       first: "Lee",

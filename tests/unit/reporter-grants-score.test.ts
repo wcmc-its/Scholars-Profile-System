@@ -8,6 +8,7 @@ import {
   WEIGHTS,
   NAME_COMMON_MIN,
   nameProfileCountFrom,
+  piSurnameMatches,
   authorKey,
   coauthorCounts,
   doctoralYearRange,
@@ -572,5 +573,36 @@ describe("held at WCM, with a WCM namesake", () => {
     expect(ids(ev({ wcmOrgHistory: true, wcmNamesakes: 0 }))).toEqual(["wcm_org"]);
     expect(ids(ev({ wcmOrgHistory: true, wcmNamesakes: null }))).toEqual(["wcm_org"]);
     expect(scoreAttribution(ev({ wcmOrgHistory: true })).band).toBe("show");
+  });
+});
+
+describe("the NIH profile's PI carries the scholar's surname", () => {
+  it("compares RePORTER's surname, in either order, against every name on record", () => {
+    expect(piSurnameMatches("SAMPLE, LEE D", ["Lee A. Sample, PhD"])).toBe(true);
+    expect(piSurnameMatches("Lee Sample", ["Lee A. Sample"])).toBe(true);
+    expect(piSurnameMatches("Lee Sample Jr", ["Lee A. Sample"])).toBe(true);
+    expect(piSurnameMatches("EXAMPLE-SAMPLE, LEE", ["Lee Sample"])).toBe(true);
+    expect(piSurnameMatches("Pat Other", ["Lee A. Sample", "Lee Sample"])).toBe(false);
+    expect(piSurnameMatches("OTHER, LEE", ["Lee Sample"])).toBe(false);
+    expect(piSurnameMatches(null, ["Lee Sample"])).toBeNull();
+    expect(piSurnameMatches("Pat Other", [null, undefined])).toBeNull();
+  });
+
+  it("is strong evidence against: hides with nothing else, queues against a citing paper", () => {
+    const alone = scoreAttribution(ev({ piSurnameMatches: false }));
+    expect(alone.band).toBe("hide");
+    expect(alone.score).toBe(PRIOR + WEIGHTS.pi_name_mismatch);
+    const cited = scoreAttribution(ev({ publicationLinked: true, piSurnameMatches: false }));
+    expect(cited.band).toBe("queue");
+    expect(cited.rule).toBe("conflict");
+  });
+
+  it("stops a profile that isn't the scholar's from vouching for its awards", () => {
+    const s = scoreAttribution(
+      ev({ profileProven: { kind: "siblings", linked: 2 }, piSurnameMatches: false }),
+    );
+    expect(s.reasons.map((r) => r.id)).toEqual(["pi_name_mismatch"]);
+    expect(s.band).toBe("hide");
+    expect(ids(ev({ profileProven: { kind: "matched" }, piSurnameMatches: true }))).toEqual(["profile_proven"]);
   });
 });

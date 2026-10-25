@@ -57,7 +57,8 @@ export type CueId =
   | "topic_mismatch"
   | "profile_proven"
   | "name_rare"
-  | "name_common";
+  | "name_common"
+  | "pi_name_mismatch";
 
 export interface CueHit {
   id: CueId;
@@ -151,6 +152,12 @@ export const WEIGHTS = {
   /** Name-only profiles: NAME_COMMON_MIN or more NIH PI profiles share the
    *  name. Same gate as name_rare. */
   name_common: -1,
+  /** RePORTER's PI on the NIH profile we hold for the scholar has a surname
+   *  that appears nowhere in the scholar's names: the profile is most likely
+   *  someone else's (a grant-join that paired the wrong PI). Strong, not an
+   *  override, because people change surnames: with a strong tie the other way
+   *  it queues (rule 2). Staging 2026-10-25: 102 awards, 11 scholars, 60 shown. */
+  pi_name_mismatch: -5,
 } as const satisfies Record<CueId, number>;
 
 /** NIH PI profiles sharing the scholar's name at or above which it is common
@@ -249,6 +256,10 @@ export interface AttributionEvidence {
    *  academic staff; current or former). null ⇒ not looked up. Absent in older
    *  callers. */
   wcmNamesakes?: number | null;
+  /** Whether RePORTER's PI on our NIH profile carries the scholar's surname
+   *  (`piSurnameMatches`). null ⇒ no PI name to compare. Absent in older
+   *  callers. */
+  piSurnameMatches?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +440,39 @@ export function scholarInitials(names: ReadonlyArray<string | null | undefined>)
     }
   }
   return { first, middle };
+}
+
+/** Letters-only lower-case words of a name, hyphenated parts split. */
+function nameWords(name: string): string[] {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .split(/[\s,.\-']+/)
+    .map((w) => w.replace(/[^a-z]/g, ""))
+    .filter((w) => w.length >= 2);
+}
+
+/**
+ * Whether RePORTER's PI name carries the scholar's surname. RePORTER prints
+ * "LAST, FIRST M" (surname before the comma) or "First … Last" (any word after
+ * the first).
+ * Matches when any surname word appears anywhere in the scholar's names on
+ * record, so compound and hyphenated surnames and a surname used as a middle
+ * name still match. null ⇒ nothing to compare. Pure.
+ */
+export function piSurnameMatches(
+  piName: string | null | undefined,
+  scholarNames: ReadonlyArray<string | null | undefined>,
+): boolean | null {
+  const raw = (piName ?? "").trim();
+  if (!raw) return null;
+  // "First Last": every word after the first, so a trailing "Jr" or a
+  // compound surname still finds its match.
+  const surname = raw.includes(",") ? nameWords(raw.split(",")[0]!) : nameWords(raw).slice(1);
+  const ours = new Set(scholarNames.flatMap((n) => (n ? nameWords(n.split(",")[0]!) : [])));
+  if (surname.length === 0 || ours.size === 0) return null;
+  return surname.some((w) => ours.has(w));
 }
 
 /**
@@ -677,9 +721,14 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
   if (e.priorInstitution) {
     add("prior_institution", `Held at an institution the scholar trained at (${e.priorInstitution})`);
   }
-  if (e.profileProven?.kind === "matched") {
+  const piMismatch = e.piSurnameMatches === false;
+  if (piMismatch) {
+    add("pi_name_mismatch", "The NIH profile's PI has a different surname from the scholar");
+  }
+  // A profile that is not the scholar's vouches for nothing.
+  if (!piMismatch && e.profileProven?.kind === "matched") {
     add("profile_proven", "The award is on the scholar's NIH profile that was matched by their publications");
-  } else if (e.profileProven?.kind === "siblings") {
+  } else if (!piMismatch && e.profileProven?.kind === "siblings") {
     add(
       "profile_proven",
       `${e.profileProven.linked} other awards on the same NIH profile are cited by the scholar's papers`,

@@ -62,6 +62,7 @@ import { buildAwardEvidence, buildScholarFacts, profileProof } from "./evidence"
 import {
   evidenceKey,
   nameProfileCountFrom,
+  piSurnameMatches,
   scoreAttribution,
   type AttributionScore,
   type CueId,
@@ -623,21 +624,24 @@ async function scoreScholarAwards(
   }
   const wcmNamesakes = ctx.wcmNamesakesByCwid ? (ctx.wcmNamesakesByCwid.get(cwid) ?? null) : null;
   const out = new Map<string, ScoredAward>();
+  const scholarNames = [ctx.namesByCwid.get(cwid)?.fullName, ctx.namesByCwid.get(cwid)?.preferredName];
   candidates.forEach((c, i) => {
     const { evidence, revocable, ourProfileIds } = built[i]!;
+    const ours = c.group.pis.find((pi) => ourProfileIds.includes(pi.profile_id));
+    const reporterName = ours ? reporterPiName(ours) || null : null;
     const score = scoreAttribution({
       ...evidence,
       profileProven: proof[i]!,
       nameProfileCount,
       wcmNamesakes,
+      piSurnameMatches: piSurnameMatches(reporterName, scholarNames),
     });
-    const ours = c.group.pis.find((pi) => ourProfileIds.includes(pi.profile_id));
     out.set(c.row.externalId, {
       score,
       key: evidenceKey(score),
       award: awardFacts(c),
       revocable,
-      reporterName: ours ? reporterPiName(ours) || null : null,
+      reporterName,
     });
   });
   return out;
