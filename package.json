@@ -201,6 +201,7 @@
     "sax": "^1.6.1",
     "stemmer": "^2.0.1",
     "tailwind-merge": "^2.6.0",
+    "unpdf": "1.8.1",
     "vis-data": "^8.0.5",
     "vis-network": "^10.1.2",
     "zod": "^4.6.7"
