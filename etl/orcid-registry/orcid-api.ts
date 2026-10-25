@@ -42,12 +42,10 @@ export type WorkSummary = {
 };
 export type WorksResponse = {
   "last-modified-date": { value: number } | null;
-  group:
-    | Array<{
-        "external-ids": ExternalIds;
-        "work-summary": WorkSummary[] | null;
-      }>
-    | null;
+  group: Array<{
+    "external-ids": ExternalIds;
+    "work-summary": WorkSummary[] | null;
+  }> | null;
 };
 
 /** An employment / education summary's organization. */
@@ -96,6 +94,36 @@ export class OrcidHttpError extends Error {
     super(`ORCID HTTP ${status} for ${url}`);
     this.name = "OrcidHttpError";
   }
+}
+
+/** A deprecated (merged) record. ORCID answers 3xx and names the primary iD in
+ *  the body ("This account is deprecated. Please refer to account: …"). Before
+ *  this, `fetch` followed the redirect and the deprecated iD was scored with its
+ *  primary record's emails, affiliations and works. `primary` is null when the
+ *  response names no other iD. */
+export class OrcidDeprecatedError extends OrcidHttpError {
+  constructor(
+    status: number,
+    url: string,
+    public readonly deprecated: string | null,
+    public readonly primary: string | null,
+  ) {
+    super(status, url);
+    this.name = "OrcidDeprecatedError";
+  }
+}
+
+const ORCID_ID = /\d{4}-\d{4}-\d{4}-\d{3}[\dX]/g;
+
+/** The first iD in the redirect's Location or body that is not the requested one. Pure. */
+export function primaryFromRedirect(
+  url: string,
+  location: string | null,
+  body: string,
+): { deprecated: string | null; primary: string | null } {
+  const deprecated = url.match(ORCID_ID)?.[0] ?? null;
+  const ids = [...(location ?? "").matchAll(ORCID_ID), ...body.matchAll(ORCID_ID)].map((m) => m[0]);
+  return { deprecated, primary: ids.find((i) => i !== deprecated) ?? null };
 }
 
 let token: string | null = null;
@@ -149,8 +177,14 @@ async function orcidGet(url: string): Promise<unknown> {
     let resp: Response;
     try {
       resp = await fetch(url, {
-        headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         signal: AbortSignal.timeout(30_000),
+        // A deprecated record redirects to its primary; following it silently
+        // would credit the primary's data to the deprecated iD.
+        redirect: "manual",
       });
     } catch (err) {
       lastErr = err; // network / DNS / timeout
@@ -158,6 +192,11 @@ async function orcidGet(url: string): Promise<unknown> {
       continue;
     }
     if (resp.ok) return resp.json();
+    if (resp.status >= 300 && resp.status < 400) {
+      const body = await resp.text().catch(() => "");
+      const { deprecated, primary } = primaryFromRedirect(url, resp.headers.get("location"), body);
+      throw new OrcidDeprecatedError(resp.status, url, deprecated, primary);
+    }
     lastErr = new OrcidHttpError(resp.status, url);
     if (!RETRYABLE.has(resp.status)) throw lastErr;
     await sleep(Math.max(retryAfterMs(resp) ?? 0, 1000 * 2 ** attempt));

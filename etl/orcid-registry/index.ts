@@ -65,11 +65,17 @@ import { db } from "../../lib/db";
 import { withEtlRun } from "@/lib/etl-run";
 import { lastNameKey } from "@/lib/last-name-key";
 import { nameTokens, namesMatch } from "@/etl/nih-profile/resolver";
-import { crossrefAuthors, CrossrefHttpError, DOIS_PER_REQUEST, type CrossrefAuthor } from "./crossref-api";
+import {
+  crossrefAuthors,
+  CrossrefHttpError,
+  DOIS_PER_REQUEST,
+  type CrossrefAuthor,
+} from "./crossref-api";
 import {
   expandedSearchAll,
   fetchWorks,
   initOrcidAuth,
+  OrcidDeprecatedError,
   OrcidHttpError,
   type ExpandedResult,
   type ExternalId,
@@ -86,7 +92,12 @@ const WORKS_FAIL_FLOOR = 2;
 /** Most recent DOIs looked up per scholar: publisher iD deposits are dense after
  *  ~2016 and sparse before, so older papers cost requests for little. */
 const CROSSREF_DOIS_PER_SCHOLAR = 20;
-export const ORCID_SOURCES = ["orcid_email", "orcid_works", "orcid_crossref", "orcid_name"] as const;
+export const ORCID_SOURCES = [
+  "orcid_email",
+  "orcid_works",
+  "orcid_crossref",
+  "orcid_name",
+] as const;
 export type OrcidSource = (typeof ORCID_SOURCES)[number];
 
 export type SourceRow = {
@@ -148,7 +159,9 @@ type ScholarRow = {
 };
 
 /** lower(trim(email)) → cwid, only for emails held by exactly one scholar. Pure. */
-export function emailToCwid(scholars: Array<Pick<ScholarRow, "cwid" | "email">>): Map<string, string> {
+export function emailToCwid(
+  scholars: Array<Pick<ScholarRow, "cwid" | "email">>,
+): Map<string, string> {
   const owners = new Map<string, Set<string>>();
   for (const s of scholars) {
     const e = s.email?.trim().toLowerCase();
@@ -238,7 +251,8 @@ export function matchNames(
   for (const r of records) {
     for (const name of candidateNames(r)) {
       for (const s of index.get(lastNameKey(name)) ?? []) {
-        if (!namesMatch(name, fold(s.fullName)) && !namesMatch(name, fold(s.preferredName))) continue;
+        if (!namesMatch(name, fold(s.fullName)) && !namesMatch(name, fold(s.preferredName)))
+          continue;
         if (!out.has(r["orcid-id"])) out.set(r["orcid-id"], new Set());
         out.get(r["orcid-id"])!.add(s.cwid);
       }
@@ -264,7 +278,8 @@ export function givenNameKeys(name: string): Set<string> {
  *  inherits a departed owner's iD; the works tier requires this on top. Pure. */
 export function givenNamesAgree(recordNames: string[], scholar: NamedScholar): boolean {
   const mine = new Set<string>();
-  for (const n of [scholar.fullName, scholar.preferredName]) for (const k of givenNameKeys(n)) mine.add(k);
+  for (const n of [scholar.fullName, scholar.preferredName])
+    for (const k of givenNameKeys(n)) mine.add(k);
   if (mine.size === 0) return false;
   return recordNames.some((n) => [...givenNameKeys(n)].some((k) => mine.has(k)));
 }
@@ -315,7 +330,10 @@ export function indexScholarWorks(
 /** PMIDs of the scholar's papers that share a PMID or DOI with the record's `/works`.
  *  A paper present under both its ids is one PMID, so it counts once — before this a
  *  2-paper overlap could reach MIN_SHARED_WORKS as 4 keys. Pure. */
-export function sharedPapers(workIds: Set<string>, mine: Map<string, string> | undefined): Set<string> {
+export function sharedPapers(
+  workIds: Set<string>,
+  mine: Map<string, string> | undefined,
+): Set<string> {
   const shared = new Set<string>();
   if (mine) for (const [key, pmid] of mine) if (workIds.has(key)) shared.add(pmid);
   return shared;
@@ -429,7 +447,8 @@ export function mergeForScholars(
     }
     const k = `${r.cwid}|${r.orcid}`;
     const cur = byKey.get(k);
-    if (!cur || ORCID_SOURCES.indexOf(r.source) < ORCID_SOURCES.indexOf(cur.source)) byKey.set(k, r);
+    if (!cur || ORCID_SOURCES.indexOf(r.source) < ORCID_SOURCES.indexOf(cur.source))
+      byKey.set(k, r);
   }
   return { keep: [...byKey.values()], noScholar };
 }
@@ -473,7 +492,10 @@ async function loadRecentDois(cwids: string[]): Promise<Map<string, string[]>> {
   return new Map(
     [...out].map(([cwid, ps]) => [
       cwid,
-      ps.sort((a, b) => b.year - a.year).slice(0, CROSSREF_DOIS_PER_SCHOLAR).map((p) => p.doi),
+      ps
+        .sort((a, b) => b.year - a.year)
+        .slice(0, CROSSREF_DOIS_PER_SCHOLAR)
+        .map((p) => p.doi),
     ]),
   );
 }
@@ -482,7 +504,9 @@ const maxRecords = Number(process.env.ORCID_REGISTRY_MAX_RECORDS);
 // A truncated union is a local smoke only: on the write path the delete pass would
 // remove every registry row the sample did not cover, so the knob forces a dry run.
 const dryRun =
-  process.argv.includes("--dry-run") || process.env.ORCID_REGISTRY_DRY_RUN === "1" || maxRecords > 0;
+  process.argv.includes("--dry-run") ||
+  process.env.ORCID_REGISTRY_DRY_RUN === "1" ||
+  maxRecords > 0;
 
 async function main(): Promise<number> {
   await initOrcidAuth();
@@ -505,7 +529,9 @@ async function main(): Promise<number> {
   }
   console.log(`Registry union: ${records.length} records`);
   if (records.length === 0) {
-    throw new Error("0 records from the ORCID registry — an outage, not \"nobody\"; refusing to mirror");
+    throw new Error(
+      '0 records from the ORCID registry — an outage, not "nobody"; refusing to mirror',
+    );
   }
 
   const scholars: ScholarRow[] = await db.write.scholar.findMany({
@@ -523,8 +549,15 @@ async function main(): Promise<number> {
 
   // 2. Email match; iDs that resolve to exactly one scholar are settled and skip the
   //    name step. Ambiguous ones (emails of two scholars) fall through to it.
-  const { rows: emailRows, matched: settled, ambiguous } = matchEmails(records, emailToCwid(scholars));
-  if (ambiguous) console.log(`${ambiguous} records list emails of more than one scholar → left to the name step`);
+  const {
+    rows: emailRows,
+    matched: settled,
+    ambiguous,
+  } = matchEmails(records, emailToCwid(scholars));
+  if (ambiguous)
+    console.log(
+      `${ambiguous} records list emails of more than one scholar → left to the name step`,
+    );
 
   // 3. Name match on the rest.
   const nameMatched = matchNames(
@@ -534,7 +567,9 @@ async function main(): Promise<number> {
   const unmatched = records.length - settled.size - nameMatched.size;
 
   // 4. Works confirmation, one /works call per name-matched iD.
-  const scholarIds = await loadScholarWorkIds([...new Set([...nameMatched.values()].flatMap((s) => [...s]))]);
+  const scholarIds = await loadScholarWorkIds([
+    ...new Set([...nameMatched.values()].flatMap((s) => [...s])),
+  ]);
   const recordById = new Map(records.map((r) => [r["orcid-id"], r]));
   const rows: SourceRow[] = [...emailRows];
   let worksFailed = 0;
@@ -544,14 +579,22 @@ async function main(): Promise<number> {
     try {
       const works = await fetchWorks(orcid);
       ids = extractWorkIds(works);
-      updatedAt = works["last-modified-date"]?.value ? new Date(works["last-modified-date"].value) : null;
+      updatedAt = works["last-modified-date"]?.value
+        ? new Date(works["last-modified-date"].value)
+        : null;
     } catch (err) {
       // Auth/blocking: every further call fails the same way — stop before the write.
       if (err instanceof OrcidHttpError && (err.status === 401 || err.status === 403)) {
-        throw new Error(`ORCID refused /works (HTTP ${err.status}) — aborting before the write`, { cause: err });
+        throw new Error(`ORCID refused /works (HTTP ${err.status}) — aborting before the write`, {
+          cause: err,
+        });
       }
-      worksFailed++;
-      if (worksFailed <= 3) console.warn(`works fetch failed for ${orcid}: ${(err as Error).message}`);
+      // A deprecated (merged) record has no works of its own; not an outage signal.
+      if (!(err instanceof OrcidDeprecatedError)) {
+        worksFailed++;
+        if (worksFailed <= 3)
+          console.warn(`works fetch failed for ${orcid}: ${(err as Error).message}`);
+      }
     }
     const names = candidateNames(recordById.get(orcid)!);
     const evidence = new Map<string, WorksEvidence>();
@@ -580,7 +623,10 @@ async function main(): Promise<number> {
       `${worksFailed} of ${nameMatched.size} /works fetches failed after retries (> ${maxWorksFailed}) — an ORCID outage, refusing to mirror`,
     );
   }
-  if (worksFailed) console.warn(`${worksFailed} /works fetches failed after retries → treated as orcid_name with 0 shared`);
+  if (worksFailed)
+    console.warn(
+      `${worksFailed} /works fetches failed after retries → treated as orcid_name with 0 shared`,
+    );
 
   // 4b. Crossref: publisher-deposited iDs on the scholar's own papers, for active
   //     scholars with no iD on file that the registry pool did not settle.
@@ -598,13 +644,19 @@ async function main(): Promise<number> {
       for (const [doi, authors] of await crossrefAuthors(batch)) authorsByDoi.set(doi, authors);
     } catch (err) {
       if (err instanceof CrossrefHttpError && (err.status === 401 || err.status === 403)) {
-        throw new Error(`Crossref refused the lookup (HTTP ${err.status}) — aborting before the write`, { cause: err });
+        throw new Error(
+          `Crossref refused the lookup (HTTP ${err.status}) — aborting before the write`,
+          { cause: err },
+        );
       }
       crossrefFailed++;
       if (crossrefFailed <= 3) console.warn(`Crossref batch failed: ${(err as Error).message}`);
     }
   }
-  const maxCrossrefFailed = Math.max(WORKS_FAIL_FLOOR, Math.ceil(WORKS_FAIL_SHARE * doiBatches.length));
+  const maxCrossrefFailed = Math.max(
+    WORKS_FAIL_FLOOR,
+    Math.ceil(WORKS_FAIL_SHARE * doiBatches.length),
+  );
   if (crossrefFailed > maxCrossrefFailed) {
     // Same reasoning as /works: the delete pass would drop every orcid_crossref row
     // those batches would have re-confirmed.
@@ -615,7 +667,9 @@ async function main(): Promise<number> {
   // Targets exclude settled scholars, so an iD the registry already gave someone by
   // email/works is a different person's here: never hand it out twice.
   const settledIds = new Set(rows.filter((r) => r.source !== "orcid_name").map((r) => r.orcid));
-  const crossrefRows = decideCrossref(papers, authorsByDoi, byCwid).filter((r) => !settledIds.has(r.orcid));
+  const crossrefRows = decideCrossref(papers, authorsByDoi, byCwid).filter(
+    (r) => !settledIds.has(r.orcid),
+  );
   console.log(
     `Crossref: ${targets.length} target scholars, ${papers.size} with DOIs, ${dois.length} DOIs in ${doiBatches.length} batches (${crossrefFailed} failed), ${authorsByDoi.size} found → ${crossrefRows.length} orcid_crossref`,
   );
@@ -683,7 +737,9 @@ async function main(): Promise<number> {
   const { count: removed } = await db.write.orcidCandidate.deleteMany({
     where: { source: { in: [...ORCID_SOURCES] }, syncedAt: { lt: now } },
   });
-  console.log(`orcid_candidate (registry) mirrored: ${keep.length} rows, ${removed} stale rows removed.`);
+  console.log(
+    `orcid_candidate (registry) mirrored: ${keep.length} rows, ${removed} stale rows removed.`,
+  );
   return keep.length;
 }
 
