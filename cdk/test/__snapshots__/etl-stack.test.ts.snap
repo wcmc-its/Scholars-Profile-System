@@ -1886,6 +1886,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -2550,6 +2554,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -3162,6 +3170,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -3703,6 +3715,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
                 "Value": "on",
+              },
+              {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -4681,6 +4697,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
                 "Value": "on",
+              },
+              {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -13474,6 +13494,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -14138,6 +14162,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -14750,6 +14778,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ORCID_HISTORY_BAND",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -15290,6 +15322,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
+                "Value": "off",
+              },
+              {
+                "Name": "ORCID_HISTORY_BAND",
                 "Value": "off",
               },
               {
@@ -16268,6 +16304,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
+                "Value": "off",
+              },
+              {
+                "Name": "ORCID_HISTORY_BAND",
                 "Value": "off",
               },
               {

@@ -30,7 +30,11 @@
  *                        same iD is a candidate for another scholar who shares ≥3.
  *   - `band`           — `bandOf`, first match wins: email_verified, strong,
  *                        shared_only, moderate, weak. The institutional condition
- *                        is `inst_match OR history_match` (v2, decision C).
+ *                        is `inst_match OR history_match` (v2, decision C) only
+ *                        when `ORCID_HISTORY_BAND` is exactly "on"; otherwise
+ *                        `inst_match` alone, and the run logs how many rows the
+ *                        history term would move (spec Phasing step 2: persist
+ *                        history_match, compare band counts, then switch).
  *
  * Works (v2 item 3): every record's works go through `filterPublicationWorks`
  * (`work-filter.ts`) first — figures, data sets, posters and the like are
@@ -59,7 +63,7 @@
  * Usage: `npm run etl:orcid-evidence [-- --dry-run]` (weekly; base task family —
  * HTTPS to ORCID + Aurora, plus the Identity table Scan on the shared task role).
  * Env: `ORCID_CLIENT_ID` / `ORCID_CLIENT_SECRET` (optional, anonymous otherwise),
- * `ORCID_EMAIL_AUTOCONFIRM`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
+ * `ORCID_EMAIL_AUTOCONFIRM`, `ORCID_HISTORY_BAND`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
  * Scan, as etl/identity; a failed Scan logs and the run goes on without that
  * source — a missing source can only lower a band, never raise one),
  * `ORCID_EVIDENCE_DRY_RUN=1`, `ORCID_EVIDENCE_MAX_RECORDS=<n>` (local smoke:
@@ -527,6 +531,9 @@ export function assembleEvidence(args: {
   history?: Map<string, HistoryInstitution[]>;
   /** v2: `cwid|orcid` → its `orcid_candidate` sources. */
   sources?: Map<string, string[]>;
+  /** v2: let `history_match` count toward the band (`ORCID_HISTORY_BAND`).
+   *  Absent = false: history_match is persisted but the band is inst_match's. */
+  historyBand?: boolean;
 }): EvidenceRow[] {
   const key = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
   const shared = new Map<string, number>();
@@ -590,7 +597,7 @@ export function assembleEvidence(args: {
     rows.push({
       cwid: p.cwid,
       orcid: p.orcid,
-      band: bandOf(e),
+      band: bandOf({ ...e, historyMatch: args.historyBand === true && e.historyMatch }),
       ...e,
       competitorCwids: comp.cwids,
       competitorOrcids: comp.orcids,
@@ -690,6 +697,23 @@ export function planAutoConfirm(
         !heldIds.has(r.orcid),
     )
     .map((r) => ({ cwid: r.cwid, orcid: r.orcid }));
+}
+
+/** `ORCID_HISTORY_BAND`: exactly "on" lets history_match count toward the band. */
+export function isHistoryBandEnabled(): boolean {
+  return process.env.ORCID_HISTORY_BAND === "on";
+}
+
+/** Rows whose band the history term would change, by band after → count.
+ *  For the before/after comparison the spec asks for ahead of the switch. Pure. */
+export function historyBandShift(rows: readonly EvidenceRow[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const off = bandOf({ ...r, historyMatch: false });
+    const on = bandOf({ ...r, historyMatch: r.historyMatch });
+    if (off !== on) out[`${off}->${on}`] = (out[`${off}->${on}`] ?? 0) + 1;
+  }
+  return out;
 }
 
 /** `ORCID_EMAIL_AUTOCONFIRM`: exactly "on" writes. */
@@ -910,6 +934,7 @@ async function main(): Promise<number> {
     active,
     history,
     sources,
+    historyBand: isHistoryBandEnabled(),
   });
 
   // 5. Shared papers' title, year, journal and DOI from our publications.
@@ -934,6 +959,9 @@ async function main(): Promise<number> {
   );
   console.log(
     `${rows.length} evidence rows ${JSON.stringify(byBand)}; ${rows.filter((r) => r.historyMatch).length} with history_match (${rows.filter((r) => r.historyMatch && !r.instMatch).length} without inst_match); ${failed} record-fetch failures`,
+  );
+  console.log(
+    `history band term ${isHistoryBandEnabled() ? "ON" : "off (ORCID_HISTORY_BAND)"}; band moves it makes: ${JSON.stringify(historyBandShift(rows))}`,
   );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 

@@ -944,6 +944,13 @@ export class EtlStack extends Stack {
       // OrcidPush is dry-run, so a staging confirm never reaches Identity.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ORCID_EMAIL_AUTOCONFIRM: env === "prod" ? "on" : "off",
+      // ORCID queue v2 (decision C) — etl:orcid-evidence lets history_match (the
+      // scholar's own prior institutions) satisfy the institutional condition for
+      // Strong only when this is exactly "on". Off: history_match and
+      // evidence_detail are still written and the run logs the band moves the term
+      // would make; the spec's Phasing step 2 compares those counts before the
+      // switch. Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_HISTORY_BAND: "off",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is

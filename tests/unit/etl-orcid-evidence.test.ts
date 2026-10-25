@@ -14,6 +14,8 @@ import {
   autoConfirmStep,
   bandOf,
   buildHistory,
+  historyBandShift,
+  isHistoryBandEnabled,
   instMatchFacts,
   surnameRule,
   withSharedPaperDetail,
@@ -720,6 +722,7 @@ describe("v2: history_match, the band rule, and the evidence detail", () => {
         identity: new Map([["jd0001", ["Albany Medical College of Union University"]]]),
       }),
       sources: new Map([[`jd0001|${ORCID}`, ["rpm_inferred", "orcid_works"]]]),
+      historyBand: true,
     });
     expect(rows[0]).toMatchObject({
       band: "strong",
@@ -756,6 +759,46 @@ describe("v2: history_match, the band rule, and the evidence detail", () => {
       active: [JANE],
     });
     expect(without[0]).toMatchObject({ band: "shared_only", historyMatch: false });
+  });
+
+  it("ORCID_HISTORY_BAND off: history_match is written but does not move the band", () => {
+    const f = recordFacts(ORCID, albanyRecord());
+    const rows = assembleEvidence({
+      pairs: [{ cwid: "jd0001", orcid: ORCID }],
+      onFile: new Set(),
+      facts: new Map([[ORCID, f]]),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+      history: buildHistory({
+        education: [],
+        appointments: [],
+        identity: new Map([["jd0001", ["Albany Medical College of Union University"]]]),
+      }),
+    });
+    expect(rows[0]).toMatchObject({ band: "shared_only", historyMatch: true, instMatch: false });
+    expect(rows[0]!.evidenceDetail.institutions).toHaveLength(1);
+    expect(historyBandShift(rows)).toEqual({ "shared_only->strong": 1 });
+  });
+
+  it('isHistoryBandEnabled is exactly "on"', () => {
+    const prev = process.env.ORCID_HISTORY_BAND;
+    try {
+      for (const [v, want] of [
+        ["on", true],
+        ["ON", false],
+        ["1", false],
+        ["off", false],
+      ] as const) {
+        process.env.ORCID_HISTORY_BAND = v;
+        expect(isHistoryBandEnabled()).toBe(want);
+      }
+      delete process.env.ORCID_HISTORY_BAND;
+      expect(isHistoryBandEnabled()).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.ORCID_HISTORY_BAND;
+      else process.env.ORCID_HISTORY_BAND = prev;
+    }
   });
 
   it("withSharedPaperDetail fills title, year, journal and DOI from our publications", () => {
