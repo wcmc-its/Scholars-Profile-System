@@ -27,7 +27,7 @@ import {
 // partition nor DELETE, so a re-run without the purge would double-count. That
 // purge is why this handler needs @aws-sdk/client-s3 in addition to
 // @aws-sdk/client-athena; both are externalized in the CDK bundling config
-// because they ship in the NODEJS_22_X runtime.
+// because they ship in the NODEJS_24_X runtime.
 //
 // `new Date()` here runs at Lambda EXECUTION time -- the CDK synth-time Date
 // ban (deterministic templates) does not apply inside the deployable.

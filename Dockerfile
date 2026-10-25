@@ -7,7 +7,7 @@
 # bundle and runs as the unprivileged `node` user. ADR-008, Phase 0.
 
 # ---- Base -------------------------------------------------------------------
-FROM node:22-bookworm-slim AS base
+FROM node:24-bookworm-slim AS base
 WORKDIR /app
 
 # ---- Dependencies -----------------------------------------------------------

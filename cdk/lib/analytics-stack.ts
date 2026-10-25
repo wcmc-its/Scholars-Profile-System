@@ -597,7 +597,7 @@ export class AnalyticsStack extends Stack {
     // ------------------------------------------------------------------
     // Rollup Lambda. Mirrors observability-stack.ts OncallRelayFunction: an
     // explicit log group (NO logRetention prop -- that pulls in a CFN custom
-    // resource Lambda+Role that would inflate the resource counts), NODEJS_22_X,
+    // resource Lambda+Role that would inflate the resource counts), NODEJS_24_X,
     // externalize every @aws-sdk/* client (they ship in the runtime),
     // sourceMap off, target node22. Athena polling is mostly idle wait so the
     // timeout is generous; memory stays modest.
@@ -611,7 +611,7 @@ export class AnalyticsStack extends Stack {
       functionName: `sps-cf-usage-rollup-${env}`,
       entry: path.join(__dirname, "../lambda/cf-usage-rollup/index.ts"),
       handler: "handler",
-      runtime: lambda.Runtime.NODEJS_22_X,
+      runtime: lambda.Runtime.NODEJS_24_X,
       memorySize: 256,
       timeout: Duration.minutes(10),
       logGroup: rollupLogGroup,
@@ -628,7 +628,7 @@ export class AnalyticsStack extends Stack {
           this.analyticsBucket.s3UrlForObject(athenaResultsPrefix),
       },
       bundling: {
-        // Both clients ship in the NODEJS_22_X runtime; bundling them inflates
+        // Both clients ship in the NODEJS_24_X runtime; bundling them inflates
         // cold start. Their typecheck/resolve from cdk root depends on the
         // workspace hoist (lambda/cf-usage-rollup is a workspace -- see
         // cdk/package.json).
