@@ -14,7 +14,7 @@
  * logs the value) so a keyless `--dry-run` is impossible to confuse with a
  * misconfigured live run.
  */
-import { generateText, stepCountIs, type ToolSet } from "ai";
+import { generateText, isStepCount, type ToolSet } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 
@@ -160,17 +160,22 @@ export async function callProvider(
     model: spec.model,
     prompt,
     temperature,
-    ...(tools ? { tools, stopWhen: stepCountIs(maxSteps) } : {}),
+    ...(tools ? { tools, stopWhen: isStepCount(maxSteps) } : {}),
   });
 
+  // AI SDK 7: top-level `sources` now accumulate across every step and the
+  // top-level `providerMetadata` is deprecated. Read both from `finalStep` to
+  // keep the AI SDK 6 meaning (final step only). `usage` is now the total
+  // across all steps, which is the right figure for a per-answer cost.
+  const { finalStep } = result;
   const gateway = (
-    result.providerMetadata as Record<string, { generationId?: unknown }> | undefined
+    finalStep.providerMetadata as Record<string, { generationId?: unknown }> | undefined
   )?.gateway;
   const generationId = typeof gateway?.generationId === "string" ? gateway.generationId : null;
 
   return {
     prose: result.text,
-    citedUrls: await resolveCitedUrls(citedUrlsFromSources(result.sources)),
+    citedUrls: await resolveCitedUrls(citedUrlsFromSources(finalStep.sources)),
     usage: result.usage
       ? {
           inputTokens: result.usage.inputTokens,
