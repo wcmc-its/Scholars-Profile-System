@@ -22,6 +22,18 @@ const h = vi.hoisted(() => ({
   rawSession: vi.fn(),
   impersonating: vi.fn(() => false),
   load: vi.fn(),
+  decided: vi.fn(async (_c: unknown, params: unknown, _runs?: unknown, _opts?: unknown) => ({
+    params,
+    counts: {
+      confirmed: { all: 321, curator: 1, auto: 320 },
+      rejected: { all: 7, curator: 2, auto: 5 },
+      unproven: { all: 4, curator: 0, auto: 4 },
+    },
+    changed: 0,
+    matched: 0,
+    rows: [],
+    groups: null,
+  })),
   shell: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("__NOT_FOUND__");
@@ -32,7 +44,11 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
-vi.mock("next/navigation", () => ({ notFound: h.notFound, redirect: h.redirect }));
+vi.mock("next/navigation", () => ({
+  notFound: h.notFound,
+  redirect: h.redirect,
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: h.session,
   impersonationActive: h.impersonating,
@@ -44,6 +60,9 @@ vi.mock("@/lib/edit/grant-attribution-queue.server", () => ({
   countGrantAttribution: vi.fn(async (_c: unknown, status: string) => (status === "confirmed" ? 321 : 7)),
   loadAutoConfirmed: vi.fn(async () => ({ items: [], total: 0 })),
   loadGrantAttributionRuns: vi.fn(async () => []),
+}));
+vi.mock("@/lib/edit/grant-attribution-decided.server", () => ({
+  loadDecidedPage: h.decided,
 }));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: (props: { children: unknown }) => {
@@ -77,9 +96,7 @@ import {
   decidingReason,
   canViewGrantAttributionQueue,
   isGrantAttributionQueueReadOnly,
-  type GrantAttributionAutoItem,
   type GrantAttributionItem,
-  type GrantAttributionRunTotals,
 } from "@/lib/edit/grant-attribution-queue";
 
 const SUPER = { cwid: "zzs0001", isSuperuser: true };
@@ -164,28 +181,39 @@ describe("predicates", () => {
 describe("page gate", () => {
   it("redirects with no session", async () => {
     h.session.mockResolvedValue(null);
-    await expect(GrantAttributionQueuePage()).rejects.toThrow("__REDIRECT__");
+    await expect(GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("__REDIRECT__");
   });
 
   it("404s for everyone when the flag is off", async () => {
     vi.stubEnv("GRANT_ATTRIBUTION_QUEUE", "off");
     h.session.mockResolvedValue(SUPER);
-    await expect(GrantAttributionQueuePage()).rejects.toThrow("__NOT_FOUND__");
+    await expect(GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("__NOT_FOUND__");
     expect(h.load).not.toHaveBeenCalled();
   });
 
   it("shows a non-reader the forbidden page and loads nothing", async () => {
     h.session.mockResolvedValue(SCHOLAR);
-    await GrantAttributionQueuePage();
+    await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) });
     expect(h.load).not.toHaveBeenCalled();
   });
 
-  it("loads all three buckets for a reader and hands the shell the pending count", async () => {
+  it("loads the pending list and the decided counts for a reader, and hands the shell the pending count", async () => {
     h.session.mockResolvedValue(OBSERVER);
     h.load.mockImplementation(async (_c: unknown, status: string) => (status === "pending" ? [ITEM] : []));
-    const el = (await GrantAttributionQueuePage()) as { props: Record<string, unknown> };
-    expect(h.load.mock.calls.map((c) => c[1]).sort()).toEqual(["confirmed", "pending", "rejected"]);
+    const el = (await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as { props: Record<string, unknown> };
+    expect(h.load.mock.calls.map((c) => c[1])).toEqual(["pending"]);
+    // On To review the decided pass only counts: no rows hydrated.
+    expect(h.decided.mock.calls[0]![3]).toEqual({ hydrate: false });
     expect(el.props.pendingGrantAttribution).toBe(1);
+  });
+
+  it("loads one hydrated page of a decided tab from the URL", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    h.load.mockResolvedValue([]);
+    await GrantAttributionQueuePage({ searchParams: Promise.resolve({ tab: "rejected", by: "auto", page: "2" }) });
+    const [, params, , opts] = h.decided.mock.calls[0]!;
+    expect(params).toMatchObject({ tab: "rejected", by: "auto", page: 2 });
+    expect(opts).toEqual({ hydrate: true });
   });
 
   it("passes read-only to observers and content editors (synthetic steward), and under View as", async () => {
@@ -195,17 +223,14 @@ describe("page gate", () => {
     };
     for (const s of [OBSERVER, EDITOR]) {
       h.session.mockResolvedValue(s);
-      expect(queueProps((await GrantAttributionQueuePage()) as never).readOnly).toBe(true);
+      expect(queueProps((await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as never).readOnly).toBe(true);
     }
     h.session.mockResolvedValue(STEWARD);
-    expect(queueProps((await GrantAttributionQueuePage()) as never).readOnly).toBe(false);
+    expect(queueProps((await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as never).readOnly).toBe(false);
     h.session.mockResolvedValue(SUPER);
     h.impersonating.mockReturnValue(true);
-    const props = queueProps((await GrantAttributionQueuePage()) as never);
+    const props = queueProps((await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as never);
     expect(props.readOnly).toBe(true);
-    // The decided pills carry the full counts, not the capped list lengths.
-    expect(props.confirmedTotal).toBe(321);
-    expect(props.rejectedTotal).toBe(7);
   });
 });
 
@@ -228,7 +253,7 @@ const COAUTHOR: GrantAttributionItem = {
 };
 
 const queue = (readOnly = false, pending = [ITEM]) =>
-  render(<GrantAttributionQueue pending={pending} confirmed={[]} rejected={[]} readOnly={readOnly} />);
+  render(<GrantAttributionQueue pending={pending} readOnly={readOnly} />);
 const detail = () => within(screen.getByTestId("grant-attribution-detail"));
 
 describe("helpers", () => {
@@ -325,7 +350,8 @@ describe("the review", () => {
     queue(true);
     expect(screen.queryByText("Confirm")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
-    expect(screen.getByText(/Read-only/)).toBeTruthy();
+    // The page, not the queue, says it is read-only.
+    expect(screen.queryByText(/Read-only/)).toBeNull();
   });
 
   it("Not this person asks for a reason and has no reasonless submit", () => {
@@ -371,87 +397,4 @@ describe("the review", () => {
   });
 });
 
-const RUNS: GrantAttributionRunTotals[] = [
-  { ranAt: "2026-10-23T14:00:00.000Z", scholars: 900, show: 2288, hide: 495, queue: 44, recovered: 401, cues: {} },
-  { ranAt: "2026-10-22T14:00:00.000Z", scholars: 900, show: 1887, hide: 838, queue: 102, recovered: 0, cues: {} },
-];
-const AUTO: GrantAttributionAutoItem = {
-  id: "reporter:zza0002:R01XX000002",
-  cwid: "zza0002",
-  slug: "lee-sample",
-  scholarName: "Lee Sample, PhD",
-  scholarNames: ["Lee A. Sample"],
-  department: "Medicine",
-  award: { ...ITEM.award, title: "An auto-confirmed study", awardNumber: "R01XX000002" },
-  reporterName: "SAMPLE, LEE D",
-  was: "hidden",
-  decidedAt: "2026-10-23T14:00:00.000Z",
-  reason: "2 other awards on the same NIH profile are cited by the scholar's papers",
-};
 
-describe("showing the check's work", () => {
-  const withAuto = (readOnly = false) =>
-    render(
-      <GrantAttributionQueue
-        pending={[ITEM]}
-        confirmed={[]}
-        rejected={[]}
-        confirmedTotal={0}
-        rejectedTotal={0}
-        auto={[AUTO]}
-        autoTotal={401}
-        runs={RUNS}
-        readOnly={readOnly}
-      />,
-    );
-
-  it("summarizes the latest run above the tabs", () => {
-    withAuto();
-    const strip = within(screen.getByTestId("grant-attribution-strip"));
-    expect(strip.getByText(/2,827 NIH awards matched by name, across 900 scholars/)).toBeTruthy();
-    expect(strip.getByText("2,288")).toBeTruthy();
-    expect(strip.getByText(/401 recovered from hidden/)).toBeTruthy();
-    expect(strip.getByText("495")).toBeTruthy();
-    expect(strip.getByText("102 queued the run before")).toBeTruthy();
-    fireEvent.click(strip.getByText("How we check"));
-    expect(screen.getByRole("dialog", { name: "How we check" })).toBeTruthy();
-  });
-
-  it("shows no strip before any run is recorded", () => {
-    render(<GrantAttributionQueue pending={[]} confirmed={[]} rejected={[]} readOnly={false} />);
-    expect(screen.queryByTestId("grant-attribution-strip")).toBeNull();
-  });
-
-  it("opens Confirmed on the auto-confirmed rows, with the RePORTER name and its difference marked", () => {
-    withAuto();
-    fireEvent.click(screen.getByTestId("grant-attribution-strip-confirmed"));
-    expect(screen.getByTestId("grant-attribution-tab-confirmed").textContent).toContain("401");
-    expect(screen.getByTestId("grant-attribution-decided-auto").getAttribute("aria-checked")).toBe("true");
-    const row = within(screen.getByTestId(`grant-attribution-item-${AUTO.id}`));
-    expect(row.getByTestId("grant-attribution-auto-chip")).toBeTruthy();
-    expect(row.getByText("was hidden")).toBeTruthy();
-    expect(row.getByText(/2 other awards on the same NIH profile/)).toBeTruthy();
-    expect(row.getByTestId("reporter-name-line").querySelector("mark")?.textContent).toBe("D");
-  });
-
-  it("sends an auto-confirmed award back to review through the requeue route", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    withAuto();
-    fireEvent.click(screen.getByTestId("grant-attribution-tab-confirmed"));
-    await act(async () => {
-      fireEvent.click(screen.getByText("Move back to review"));
-    });
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("/api/edit/grant-attribution/requeue");
-    expect(JSON.parse(init.body as string)).toEqual({ id: AUTO.id });
-    expect(screen.getByText("Back in To review after a refresh")).toBeTruthy();
-    vi.unstubAllGlobals();
-  });
-
-  it("offers no requeue to a read-only viewer", () => {
-    withAuto(true);
-    fireEvent.click(screen.getByTestId("grant-attribution-tab-confirmed"));
-    expect(screen.queryByText("Move back to review")).toBeNull();
-  });
-});

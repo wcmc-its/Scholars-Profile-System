@@ -313,3 +313,96 @@ describe("bulk is all-or-nothing", () => {
     expect(h.reflectVisibilityChange).not.toHaveBeenCalled();
   });
 });
+
+describe("deciding by grant from the decided tabs", () => {
+  const SCORE = {
+    grantExternalId: ENTITY,
+    cwid: "t000001",
+    score: 3,
+    band: "show",
+    cues: [],
+    evidenceKey: "show|pub_linked",
+    award: {},
+    scoredAt: new Date("2026-10-25T00:00:00Z"),
+  };
+  const tx = h.tx as unknown as {
+    grantAttributionScore: { findUnique: ReturnType<typeof vi.fn> };
+    grantAttributionReview: { create: ReturnType<typeof vi.fn> };
+    suppression: { findFirst: ReturnType<typeof vi.fn> };
+  };
+  beforeEach(() => {
+    tx.grantAttributionScore = { findUnique: vi.fn().mockResolvedValue({ ...SCORE }) };
+    tx.grantAttributionReview.create = vi.fn().mockResolvedValue({ ...PENDING, band: "show", score: 3 });
+    tx.suppression.findFirst = vi.fn().mockResolvedValue(null);
+  });
+  const actions = () => h.appendAuditRow.mock.calls.map((c) => (c[1] as { action: string }).action);
+
+  it("opens a review from the score for an award the check settled, then rejects it", async () => {
+    h.tx.grantAttributionReview.findUnique.mockResolvedValueOnce(null);
+    h.tx.suppression.findMany.mockResolvedValue([]);
+    const res = await POST(
+      request({ grant: ENTITY, decision: "reject", reason: "A different person with the same name" }, STEWARD),
+    );
+    expect(res.status).toBe(200);
+    // Opened like a requeue: hidden by the check's marker, and marked as this curator's.
+    expect(h.tx.suppression.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ entityId: ENTITY, createdBy: "system-unverified" }),
+    });
+    expect(tx.grantAttributionReview.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        grantExternalId: ENTITY,
+        status: "pending",
+        decidedByCwid: "c000001",
+        reopenedAt: expect.any(Date),
+      }),
+    });
+    expect(h.tx.suppression.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ entityId: ENTITY, createdBy: "c000001" }),
+    });
+    expect(actions()).toEqual(["grant_attribution_reject"]);
+    // The audit says what the award was before: no review at all.
+    expect(
+      (h.appendAuditRow.mock.calls[0]![1] as { beforeValues: Record<string, unknown> }).beforeValues,
+    ).toMatchObject({ status: null, opened_from_score: true });
+  });
+
+  it("flips a curator's decision: undoes it, then decides the other way, in one call", async () => {
+    h.tx.grantAttributionReview.findUnique.mockResolvedValueOnce({
+      ...PENDING,
+      status: "confirmed",
+      decidedAt: new Date("2026-10-20T00:00:00Z"),
+      decisionEffects: { revoked: ["sup-sys"], created: [] },
+    });
+    const res = await POST(
+      request({ grant: ENTITY, decision: "reject", reason: "Outside the scholar's career" }, STEWARD),
+    );
+    expect(res.status).toBe(200);
+    expect(actions()).toEqual(["grant_attribution_undo", "grant_attribution_reject"]);
+  });
+
+  it("refuses the decision the award already has", async () => {
+    h.tx.grantAttributionReview.findUnique.mockResolvedValueOnce({
+      ...PENDING,
+      status: "confirmed",
+      decidedAt: new Date("2026-10-20T00:00:00Z"),
+      decisionEffects: { revoked: [], created: [] },
+    });
+    const res = await POST(request({ grant: ENTITY, decision: "confirm" }, STEWARD));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "already_decided" });
+  });
+
+  it("refuses an award hidden for age, and one the check never scored", async () => {
+    h.tx.grantAttributionReview.findUnique.mockResolvedValueOnce(null);
+    tx.suppression.findFirst.mockResolvedValueOnce({ id: "sup-age" });
+    expect((await POST(request({ grant: ENTITY, decision: "confirm" }, STEWARD))).status).toBe(409);
+    h.tx.grantAttributionReview.findUnique.mockResolvedValueOnce(null);
+    tx.grantAttributionScore.findUnique.mockResolvedValueOnce(null);
+    expect((await POST(request({ grant: ENTITY, decision: "confirm" }, STEWARD))).status).toBe(404);
+  });
+
+  it("refuses undo by grant and a body naming both a grant and an id", async () => {
+    expect((await POST(request({ grant: ENTITY, decision: "undo" }, STEWARD))).status).toBe(400);
+    expect((await POST(request({ grant: ENTITY, id: "rev-1", decision: "confirm" }, STEWARD))).status).toBe(400);
+  });
+});

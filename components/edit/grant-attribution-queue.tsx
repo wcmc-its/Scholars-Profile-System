@@ -12,7 +12,8 @@
  * the ETL never touches, and always takes a reason; Skip moves the card to the
  * end of this session's list and writes nothing. Bulk decisions go through the
  * shared `SelectionBar`, up to GRANT_ATTRIBUTION_BULK_MAX in one all-or-nothing
- * call. The Confirmed and Not this person tabs are tables.
+ * call. The decided tabs (Confirmed, Not this person, Unproven) are
+ * `grant-attribution-decided.tsx`; the page renders the tab bar.
  *
  * A decided card stays in the list, dimmed (no refresh: the replica may not
  * have the write yet). Mockup: Projects/Scholars-Profile-System/mockups/Grant
@@ -25,11 +26,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Kbd, ReasonSelect, shortName } from "@/components/edit/honors-review";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
-import {
-  GrantAttributionStrip,
-  ReporterNameLine,
-  postRequeue,
-} from "@/components/edit/grant-attribution-shared";
 import { DecisionStatusBar } from "@/components/edit/news-review-shared";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { SelectionBar, SelectionBarSpacer } from "@/components/edit/selection-bar";
@@ -47,18 +43,14 @@ import {
   reporterNameForDisplay,
   reporterProjectUrl,
   type AttributionLevel,
-  type GrantAttributionAutoItem,
   type GrantAttributionItem,
-  type GrantAttributionRunTotals,
 } from "@/lib/edit/grant-attribution-queue";
 import { profilePath } from "@/lib/profile-url";
 import { cn } from "@/lib/utils";
 
-type Tab = "pending" | "confirmed" | "rejected";
 type Outcome = { kind: "confirmed" | "rejected" | "reopened"; reason?: string };
 type EvidenceFilter = "all" | "co" | "red" | "timeline";
 type Sort = "oldest" | "high" | "low" | "scholar" | "start";
-type DecidedBy = "all" | "curator" | "auto";
 
 const LEVEL_RANK: Record<AttributionLevel, number> = Object.fromEntries(
   ATTRIBUTION_LEVELS.map((l, i) => [l.key, i]),
@@ -199,32 +191,12 @@ function scaleNoteOf(c: Card): string {
 
 export function GrantAttributionQueue({
   pending,
-  confirmed,
-  rejected,
-  confirmedTotal,
-  rejectedTotal,
-  auto = [],
-  autoTotal,
-  runs = [],
   readOnly,
 }: {
   pending: GrantAttributionItem[];
-  confirmed: GrantAttributionItem[];
-  rejected: GrantAttributionItem[];
-  /** Every decided item, for the pills: the lists themselves are capped. */
-  confirmedTotal?: number;
-  rejectedTotal?: number;
-  /** Awards the weekly check showed again on its own (capped; total below). */
-  auto?: GrantAttributionAutoItem[];
-  autoTotal?: number;
-  /** The latest scoring runs, newest first, for the summary strip. */
-  runs?: GrantAttributionRunTotals[];
   readOnly: boolean;
 }) {
   const cards = useMemo(() => prepare(pending), [pending]);
-  const [tab, setTab] = useState<Tab>("pending");
-  const [decidedBy, setDecidedBy] = useState<DecidedBy>("all");
-  const [requeuing, setRequeuing] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [evidence, setEvidence] = useState<EvidenceFilter>("all");
   const [levelFilter, setLevelFilter] = useState<AttributionLevel | "all">("all");
@@ -350,23 +322,6 @@ export function GrantAttributionQueue({
     [cards, undoing],
   );
 
-  const requeue = useCallback(
-    async (id: string) => {
-      if (!canDecide || requeuing) return;
-      setRequeuing(id);
-      setError(null);
-      const r = await postRequeue(id);
-      setRequeuing(null);
-      if (!r.ok) {
-        setError(r.message);
-        return;
-      }
-      setOutcomes((o) => ({ ...o, [id]: { kind: "reopened" } }));
-      setToast({ text: "Sent back to review. It's hidden until a curator confirms it.", ids: null });
-    },
-    [canDecide, requeuing],
-  );
-
   const skip = useCallback(
     (id: string) => {
       if (outcomes[id]) return;
@@ -410,7 +365,6 @@ export function GrantAttributionQueue({
   const overCap = selIds.length > GRANT_ATTRIBUTION_BULK_MAX;
 
   useEffect(() => {
-    if (tab !== "pending") return;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
       const k = e.key.toLowerCase();
@@ -465,77 +419,15 @@ export function GrantAttributionQueue({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tab, asking, focus, outcomes, canDecide, history, selIds, overCap, bulkReason, decide, undo, moveFocus, toggle, startReject, skip]);
+  }, [asking, focus, outcomes, canDecide, history, selIds, overCap, bulkReason, decide, undo, moveFocus, toggle, startReject, skip]);
 
-  const counts: Record<Tab, number> = {
-    pending: cards.length - Object.keys(outcomes).filter((id) => cards.some((c) => c.id === id)).length,
-    confirmed: (confirmedTotal ?? confirmed.length) + (autoTotal ?? auto.length),
-    rejected: rejectedTotal ?? rejected.length,
-  };
   const countOf = (f: (c: Card) => boolean) => cards.filter(f).length;
   const coOnlyOpen = open.filter((c) => c.coOnly);
   const allSel = open.length > 0 && open.every((c) => selected.has(c.id));
-  const showBar = canDecide && tab === "pending" && selIds.length > 0;
-  // With no auto rows the filter is hidden, so it must not strand the tab on "auto".
-  const decidedByShown: DecidedBy = (autoTotal ?? auto.length) > 0 ? decidedBy : "all";
+  const showBar = canDecide && selIds.length > 0;
 
   return (
     <div className="flex flex-col gap-[18px]" data-slot="grant-attribution-queue">
-      <GrantAttributionStrip
-        runs={runs}
-        pending={counts.pending}
-        onConfirmed={() => {
-          setTab("confirmed");
-          setDecidedBy("auto");
-          setSelected(new Set());
-          setAsking(null);
-        }}
-      />
-      <div className="border-apollo-border-strong flex flex-wrap items-end gap-x-7 border-b" role="tablist">
-        {(
-          [
-            ["pending", "To review"],
-            ["confirmed", "Confirmed"],
-            ["rejected", "Not this person"],
-          ] as const
-        ).map(([t, label]) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => {
-              setTab(t);
-              setSelected(new Set());
-              setAsking(null);
-            }}
-            className={cn(
-              "-mb-px flex items-center gap-2 border-b-2 px-0.5 pt-2.5 pb-3 text-[15px] whitespace-nowrap",
-              tab === t
-                ? "border-apollo-maroon text-foreground font-medium"
-                : "text-muted-foreground hover:text-foreground border-transparent",
-            )}
-            data-testid={`grant-attribution-tab-${t}`}
-          >
-            {label}
-            <span
-              className={cn(
-                "rounded-full px-[7px] py-px text-xs font-semibold tabular-nums",
-                t === "pending" ? "bg-apollo-amber-tint text-apollo-amber" : "bg-apollo-surface-2 text-foreground",
-              )}
-            >
-              {counts[t].toLocaleString("en-US")}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {readOnly ? (
-        <p className="border-apollo-border-strong bg-apollo-surface-2 m-0 rounded-lg border px-3 py-[9px] text-[13.5px] text-[#3a3532]">
-          Read-only. Your role can see this queue but not decide it.
-        </p>
-      ) : null}
-
       {error ? (
         <div
           role="alert"
@@ -549,8 +441,7 @@ export function GrantAttributionQueue({
         </div>
       ) : null}
 
-      {tab === "pending" ? (
-        <div className="flex flex-col gap-3.5">
+      <div className="flex flex-col gap-3.5">
           <div className="flex flex-wrap items-center gap-2.5">
             <input
               type="search"
@@ -717,22 +608,6 @@ export function GrantAttributionQueue({
           )}
           <SelectionBarSpacer count={showBar ? selIds.length : 0} />
         </div>
-      ) : (
-        <DecidedTable
-          kind={tab}
-          rows={decidedRows(tab, tab === "confirmed" ? confirmed : rejected, tab === "confirmed" ? auto : [], decidedByShown)}
-          counts={{
-            curator: confirmedTotal ?? confirmed.length,
-            auto: autoTotal ?? auto.length,
-          }}
-          decidedBy={decidedByShown}
-          onDecidedBy={setDecidedBy}
-          outcomes={outcomes}
-          canDecide={canDecide}
-          busy={undoing || requeuing !== null}
-          onBack={(row) => void (row.auto ? requeue(row.id) : undo([row.id]))}
-        />
-      )}
 
       {toast ? (
         <DecisionStatusBar
@@ -1197,214 +1072,5 @@ function Detail({
         </div>
       ) : null}
     </section>
-  );
-}
-
-/** One row of a decided tab: a curator decision or an auto-confirmed award. */
-type DecidedRow = {
-  id: string;
-  cwid: string;
-  scholarName: string;
-  scholarNames: string[];
-  reporterName: string | null;
-  award: GrantAttributionItem["award"];
-  auto: boolean;
-  /** Auto rows: what the award was before the check showed it. */
-  was: string | null;
-  decidedByName: string | null;
-  decidedAt: string | null;
-  reason: string | null;
-};
-
-function decidedRows(
-  kind: "confirmed" | "rejected",
-  items: GrantAttributionItem[],
-  auto: GrantAttributionAutoItem[],
-  by: DecidedBy,
-): DecidedRow[] {
-  const curator: DecidedRow[] = items.map((it) => ({
-    id: it.id,
-    cwid: it.cwid,
-    scholarName: it.scholarName,
-    scholarNames: it.scholarNames,
-    reporterName: it.reporterName,
-    award: it.award,
-    auto: false,
-    was: null,
-    decidedByName: it.decidedByName,
-    decidedAt: it.decidedAt,
-    reason: kind === "rejected" ? it.rejectionReason : null,
-  }));
-  if (kind === "rejected") return curator;
-  const system: DecidedRow[] = auto.map((a) => ({
-    id: a.id,
-    cwid: a.cwid,
-    scholarName: a.scholarName,
-    scholarNames: a.scholarNames,
-    reporterName: a.reporterName,
-    award: a.award,
-    auto: true,
-    was: a.was === "queued" ? "was in the queue" : "was hidden",
-    decidedByName: null,
-    decidedAt: a.decidedAt,
-    reason: a.reason,
-  }));
-  const rows = by === "curator" ? curator : by === "auto" ? system : [...curator, ...system];
-  return rows.sort((x, y) => (y.decidedAt ?? "").localeCompare(x.decidedAt ?? ""));
-}
-
-function DecidedTable({
-  kind,
-  rows,
-  counts,
-  decidedBy,
-  onDecidedBy,
-  outcomes,
-  canDecide,
-  busy,
-  onBack,
-}: {
-  kind: "confirmed" | "rejected";
-  rows: DecidedRow[];
-  counts: { curator: number; auto: number };
-  decidedBy: DecidedBy;
-  onDecidedBy: (by: DecidedBy) => void;
-  outcomes: Record<string, Outcome>;
-  canDecide: boolean;
-  busy: boolean;
-  onBack: (row: DecidedRow) => void;
-}) {
-  const cols = "grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_140px_100px_minmax(0,1fr)_170px]";
-  const showAuto = kind === "confirmed" && counts.auto > 0;
-  return (
-    <div className="flex flex-col gap-3">
-      {showAuto ? (
-        <div
-          role="radiogroup"
-          aria-label="Decided by"
-          className="border-apollo-border-strong bg-apollo-surface inline-flex self-start overflow-hidden rounded-lg border"
-        >
-          {(
-            [
-              ["all", "All", counts.curator + counts.auto],
-              ["curator", "By a curator", counts.curator],
-              ["auto", "Auto-confirmed", counts.auto],
-            ] as const
-          ).map(([k, label, n], i) => (
-            <button
-              key={k}
-              type="button"
-              role="radio"
-              aria-checked={decidedBy === k}
-              onClick={() => onDecidedBy(k)}
-              className={cn(
-                "h-[34px] px-3 text-[13px]",
-                i > 0 && "border-apollo-border-strong border-l",
-                decidedBy === k ? "bg-apollo-surface-2 text-foreground font-medium" : "text-[#3a3532]",
-              )}
-              data-testid={`grant-attribution-decided-${k}`}
-            >
-              {label} <span className="tabular-nums">{n.toLocaleString("en-US")}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <p className="text-muted-foreground m-0 max-w-[760px] text-[13.5px]">
-        {kind === "rejected"
-          ? "Awards a curator hid as belonging to someone else. The weekly import never overrides these."
-          : decidedBy === "auto"
-            ? "Awards the weekly check had hidden or queued, then showed again once new evidence tied them to the scholar. Move one back to review if the check got it wrong."
-            : "Awards a curator confirmed, and awards the weekly check showed again on its own. They show on the scholar’s profile."}
-      </p>
-      {rows.length === 0 ? (
-        <div
-          className="bg-apollo-surface border-apollo-border-strong text-muted-foreground rounded-[var(--apollo-radius-card)] border p-8 text-center text-[14px]"
-          data-testid="grant-attribution-empty"
-        >
-          Nothing here yet.
-        </div>
-      ) : (
-        <div className="bg-apollo-surface border-apollo-border-strong overflow-hidden rounded-[var(--apollo-radius-card)] border">
-          <div className="overflow-x-auto">
-            <div className="min-w-[900px]">
-              <div
-                className={cn(
-                  "bg-apollo-surface-2 border-apollo-border-strong grid gap-4 border-b px-5 py-3",
-                  cols,
-                  EYEBROW,
-                )}
-              >
-                <span>Scholar</span>
-                <span>Award</span>
-                <span>Decided by</span>
-                <span>Date</span>
-                <span>Reason</span>
-                <span />
-              </div>
-              {rows.map((it) => {
-                const a = it.award;
-                const reopened = outcomes[it.id]?.kind === "reopened";
-                return (
-                  <div
-                    key={it.id}
-                    className={cn("border-apollo-border grid items-start gap-4 border-b px-5 py-[11px] text-[13.5px]", cols)}
-                    data-testid={`grant-attribution-item-${it.id}`}
-                  >
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="font-medium">
-                        <ScholarHoverCard cwid={it.cwid}>
-                          <span>{it.scholarName}</span>
-                        </ScholarHoverCard>
-                      </span>
-                      <ReporterNameLine reporterName={it.reporterName} scholarNames={it.scholarNames} />
-                    </span>
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span>{a.title ?? "Untitled award"}</span>
-                      <span className="text-muted-foreground font-mono text-xs">
-                        {[a.activityCode, a.awardNumber, years(a.startYear, a.endYear)].filter(Boolean).join(" · ")}
-                      </span>
-                    </span>
-                    <span className="flex flex-col gap-0.5 text-[#3a3532]">
-                      {it.auto ? (
-                        <>
-                          <span
-                            className="border-apollo-slate-tint-border bg-apollo-slate-tint text-foreground inline-flex items-center gap-1.5 self-start rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap"
-                            data-testid="grant-attribution-auto-chip"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M20 6 9 17l-5-5" />
-                            </svg>
-                            Auto-confirmed
-                          </span>
-                          <span className="text-muted-foreground text-[12.5px]">{it.was}</span>
-                        </>
-                      ) : (
-                        (it.decidedByName ?? "")
-                      )}
-                    </span>
-                    <span className="text-muted-foreground">{it.decidedAt ? it.decidedAt.slice(0, 10) : ""}</span>
-                    <span className="text-[#3a3532]">{it.reason ?? "—"}</span>
-                    <span className="flex justify-end">
-                      {reopened ? (
-                        <span className="text-muted-foreground text-[13px]">Back in To review after a refresh</span>
-                      ) : canDecide ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => onBack(it)}
-                          className="text-apollo-slate rounded-md px-2 py-1 text-[13px] whitespace-nowrap"
-                        >
-                          Move back to review
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

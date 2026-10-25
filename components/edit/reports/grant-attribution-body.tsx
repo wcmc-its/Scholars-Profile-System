@@ -191,7 +191,7 @@ export async function renderGrantAttributionReport({
                 </tbody>
               </table>
             </div>
-            <details className="text-[13px]">
+            <details id="method" className="scroll-mt-4 text-[13px]">
               <summary className="text-apollo-slate cursor-pointer">How we check</summary>
               <div className="mt-2 flex flex-col gap-2">
                 <HowWeCheck />
