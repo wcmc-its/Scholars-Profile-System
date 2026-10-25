@@ -32,22 +32,26 @@ export type ExternalId = {
 };
 type ExternalIds = { "external-id": ExternalId[] | null } | null;
 type Value<T> = { value: T } | null;
-/** One source's copy of a work. `title` / `publication-date` / `source` are read
- *  only by etl/orcid-evidence (the new-works sample); the registry reads ids. */
+/** One source's copy of a work. `title` / `publication-date` / `source` / `type` /
+ *  `url` / `journal-title` are read only by etl/orcid-evidence (the new-works
+ *  sample and the non-publication filter); the registry reads ids. */
 export type WorkSummary = {
   "external-ids": ExternalIds;
   title?: { title: Value<string> | null } | null;
   "publication-date"?: { year: Value<string> | null } | null;
   source?: { "source-name": Value<string> | null } | null;
+  /** ORCID work type, e.g. `journal-article`, `preprint`, `data-set`, `other`. */
+  type?: string | null;
+  /** The work's own link, as the depositing source gave it. */
+  url?: Value<string>;
+  "journal-title"?: Value<string>;
 };
 export type WorksResponse = {
   "last-modified-date": { value: number } | null;
-  group:
-    | Array<{
-        "external-ids": ExternalIds;
-        "work-summary": WorkSummary[] | null;
-      }>
-    | null;
+  group: Array<{
+    "external-ids": ExternalIds;
+    "work-summary": WorkSummary[] | null;
+  }> | null;
 };
 
 /** An employment / education summary's organization. */
@@ -58,9 +62,20 @@ export type AffiliationOrg = {
     "disambiguation-source": string | null;
   } | null;
 };
+/** An ORCID fuzzy date; only the year is read. */
+export type OrcidDate = { year: Value<string> | null } | null;
 type AffiliationGroups = {
   "affiliation-group": Array<{
-    summaries: Array<Record<string, { organization: AffiliationOrg | null } | null>> | null;
+    summaries: Array<
+      Record<
+        string,
+        {
+          organization: AffiliationOrg | null;
+          "start-date"?: OrcidDate;
+          "end-date"?: OrcidDate;
+        } | null
+      >
+    > | null;
   }> | null;
 } | null;
 
@@ -149,7 +164,10 @@ async function orcidGet(url: string): Promise<unknown> {
     let resp: Response;
     try {
       resp = await fetch(url, {
-        headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         signal: AbortSignal.timeout(30_000),
       });
     } catch (err) {

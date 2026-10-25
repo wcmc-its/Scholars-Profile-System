@@ -61,8 +61,13 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { db } from "../../lib/db";
 
-const TABLE = process.env.SCHOLARS_IDENTITY_TABLE ?? "Identity";
-const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
+/** The WCM Identity table and region. etl/orcid-evidence scans the same table
+ *  (each record's `identity.institutions`), with the same config. */
+export const IDENTITY_TABLE = process.env.SCHOLARS_IDENTITY_TABLE ?? "Identity";
+export const IDENTITY_REGION =
+  process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
+const TABLE = IDENTITY_TABLE;
+const REGION = IDENTITY_REGION;
 
 /** ORCID iD canonical form: 16 digits in 4-char groups, optional 'X' on the
  *  final check digit. Matches the bare-id form we store (no protocol/host). */
@@ -227,7 +232,12 @@ async function main() {
         // other iD. Counted separately so the summary shows it happened; no values logged.
         await db.write.scholar.update({
           where: { cwid: target },
-          data: { orcid: d.orcid, orcidConfirmedAt: null, orcidConfirmMethod: null, orcidConfirmedBy: null },
+          data: {
+            orcid: d.orcid,
+            orcidConfirmedAt: null,
+            orcidConfirmMethod: null,
+            orcidConfirmedBy: null,
+          },
         });
         conflict += 1;
         continue;
