@@ -679,7 +679,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "ce2cd18a9da8beb80db9685db763ad0e90a8ec1771663b981e6af9a10bcc4388.zip",
+          "S3Key": "6c8b3763a4daa4e16d39cb2d0277ea3cad9dc49c6215c9a0d293de769f5f0372.zip",
         },
         "Environment": {
           "Variables": {

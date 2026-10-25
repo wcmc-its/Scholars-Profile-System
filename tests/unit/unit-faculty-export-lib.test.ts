@@ -45,7 +45,7 @@ function client(over?: {
     divisionMembership: {
       findMany: over?.membershipFindMany ?? vi.fn().mockResolvedValue([]),
     },
-  };
+  } as unknown as FacultyExportClient;
 }
 
 describe("buildFacultyCsv", () => {

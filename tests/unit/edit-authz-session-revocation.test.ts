@@ -18,7 +18,7 @@
  * `auth-superuser.test.ts`; this file's job is the boundary behaviour at
  * the route handler.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, type MockInstance } from "vitest";
 import { NextRequest } from "next/server";
 
 const {
@@ -113,7 +113,7 @@ function post(): NextRequest {
   });
 }
 
-let warnSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: MockInstance<typeof console.warn>;
 
 beforeEach(() => {
   vi.clearAllMocks();

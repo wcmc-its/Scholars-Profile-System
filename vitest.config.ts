@@ -6,9 +6,8 @@ export default defineConfig({
   plugins: [react()],
   test: {
     pool: "forks",
-    poolOptions: {
-      forks: { maxForks: 4, minForks: 1 },
-    },
+    // vitest 4+ replaced poolOptions.forks.maxForks with top-level maxWorkers.
+    maxWorkers: 4,
     environment: "jsdom",
     globals: true,
     // Raised from the 5000ms default so a waitFor that consumes its widened
