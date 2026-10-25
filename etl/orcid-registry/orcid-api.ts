@@ -42,10 +42,12 @@ export type WorkSummary = {
 };
 export type WorksResponse = {
   "last-modified-date": { value: number } | null;
-  group: Array<{
-    "external-ids": ExternalIds;
-    "work-summary": WorkSummary[] | null;
-  }> | null;
+  group:
+    | Array<{
+        "external-ids": ExternalIds;
+        "work-summary": WorkSummary[] | null;
+      }>
+    | null;
 };
 
 /** An employment / education summary's organization. */
@@ -177,10 +179,7 @@ async function orcidGet(url: string): Promise<unknown> {
     let resp: Response;
     try {
       resp = await fetch(url, {
-        headers: {
-          Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         signal: AbortSignal.timeout(30_000),
         // A deprecated record redirects to its primary; following it silently
         // would credit the primary's data to the deprecated iD.
