@@ -14,6 +14,12 @@
  *   undo     Reverse exactly what one decision did (`decisionEffects`), and
  *            move the review back to pending.
  *
+ * `{ grant, decision: "confirm" | "reject" }` decides by grant externalId from
+ * the decided tabs. An award the weekly check settled on its own (no review,
+ * or a withdrawn one) gets a pending review from its score row first; a
+ * curator's opposite decision is undone first. Either way it is one
+ * transaction, then the ordinary confirm or reject.
+ *
  * Gated on the flag first (404), then `canDecideGrantAttribution` (superuser or
  * comms_steward, who `authorizeRevoke` already lets lift any suppression, so
  * the queue adds no power). A superuser acting under View as is refused: the
@@ -54,17 +60,28 @@ const PATH = "/api/edit/grant-attribution/decision";
 /** The ETL's createdBy markers (etl/reporter-grants/index.ts). */
 const SYSTEM_UNVERIFIED = "system-unverified";
 const SYSTEM_RECENCY = "system-recency";
+/** The hide a by-grant decision mints on a shown award, as the requeue route does. */
+const OPENED_REASON =
+  "RePORTER grant opened for a curator's decision in the grant attribution queue. " +
+  "Hidden until a curator confirms it.";
 
 type Decision = "confirm" | "reject" | "undo";
 /** `reopenedBy`: the review was pending as reopened-from-decision (a requeue,
  *  or the ETL reopening a decision) when decided, by this cwid. Undo puts the
  *  marker back, so the next run still leaves it to a curator. */
 type Effects = { revoked: string[]; created: string[]; reopenedBy?: string | null };
+type Review = NonNullable<Awaited<ReturnType<typeof db.write.grantAttributionReview.findUnique>>>;
 
 class Refused extends Error {
   constructor(
     readonly status: 404 | 409,
-    readonly code: "not_found" | "not_pending" | "not_undoable" | "hidden_by_age" | "state_changed",
+    readonly code:
+      | "not_found"
+      | "not_pending"
+      | "not_undoable"
+      | "hidden_by_age"
+      | "state_changed"
+      | "already_decided",
   ) {
     super(code);
   }
@@ -95,7 +112,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!decision) return editError(400, "invalid_body", "decision");
 
   let ids: string[];
-  if (body.ids !== undefined) {
+  let byGrant: string | null = null;
+  if (body.grant !== undefined) {
+    const g = body.grant;
+    if (
+      body.id !== undefined ||
+      body.ids !== undefined ||
+      decision === "undo" ||
+      typeof g !== "string" ||
+      g.length === 0 ||
+      g.length > 64
+    ) {
+      return editError(400, "invalid_body", "grant");
+    }
+    byGrant = g;
+    ids = [];
+  } else if (body.ids !== undefined) {
     const raw = body.ids;
     if (
       body.id !== undefined ||
@@ -120,72 +152,181 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return editError(400, "invalid_body", "reason");
     }
     const trimmed = body.reason.trim();
-    if (trimmed.length > GRANT_REJECTION_REASON_MAX) return editError(400, "invalid_body", "reason");
+    if (trimmed.length > GRANT_REJECTION_REASON_MAX)
+      return editError(400, "invalid_body", "reason");
     reason = trimmed.length > 0 ? trimmed : null;
   }
   // "Not this person" always says why: the Not this person tab lists it.
   if (decision === "reject" && reason === null) return editError(400, "invalid_body", "reason");
 
   const ts = new Date();
-  let result: { entities: string[]; suppressions: Array<{ suppressionId: string; entityId: string }> };
+  let result: {
+    entities: string[];
+    suppressions: Array<{ suppressionId: string; entityId: string }>;
+  };
   try {
     result = await db.write.$transaction(async (tx) => {
       const entities: string[] = [];
       const suppressions: Array<{ suppressionId: string; entityId: string }> = [];
 
-      for (const id of ids) {
-        const row = await tx.grantAttributionReview.findUnique({ where: { id } });
-        if (!row) throw new Refused(404, "not_found");
+      /** Undo one decided review: put back what it changed, then pending. */
+      const undoRow = async (row: Review) => {
         const entityId = row.grantExternalId;
-        const snapshot = { review_id: row.id, status: row.status, score: row.score, band: row.band };
+        const snapshot = {
+          review_id: row.id,
+          status: row.status,
+          score: row.score,
+          band: row.band,
+        };
+        const effects = parseEffects(row.decisionEffects);
+        const undoable =
+          (row.status === "confirmed" || row.status === "rejected") &&
+          row.decidedAt !== null &&
+          effects !== null;
+        if (!undoable || !effects) throw new Refused(409, "not_undoable");
+        for (const sid of effects.revoked) {
+          const r = await tx.suppression.updateMany({
+            where: { id: sid, entityId, revokedAt: { not: null } },
+            data: { revokedAt: null, revokedBy: null, searchReflectedAt: null },
+          });
+          if (r.count !== 1) throw new Refused(409, "state_changed");
+          suppressions.push({ suppressionId: sid, entityId });
+        }
+        for (const sid of effects.created) {
+          const r = await tx.suppression.updateMany({
+            where: { id: sid, entityId, revokedAt: null },
+            data: { revokedAt: ts, revokedBy: realCwid, searchReflectedAt: null },
+          });
+          if (r.count !== 1) throw new Refused(409, "state_changed");
+          suppressions.push({ suppressionId: sid, entityId });
+        }
+        const claimed = await tx.grantAttributionReview.updateMany({
+          where: { id: row.id, status: row.status, decidedAt: row.decidedAt },
+          data: {
+            status: "pending",
+            decidedByCwid: effects.reopenedBy ?? null,
+            decidedAt: effects.reopenedBy ? ts : null,
+            rejectionReason: null,
+            decisionEffects: Prisma.DbNull,
+          },
+        });
+        if (claimed.count !== 1) throw new Refused(409, "not_undoable");
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "grant",
+          targetEntityId: entityId,
+          action: "grant_attribution_undo",
+          fieldsChanged: ["status"],
+          beforeValues: { ...snapshot, effects },
+          afterValues: { review_id: row.id, status: "pending" },
+          ts,
+          requestId,
+        });
+        entities.push(entityId);
+        const reopened: Review = {
+          ...row,
+          status: "pending",
+          decidedByCwid: effects.reopenedBy ?? null,
+          decidedAt: effects.reopenedBy ? ts : null,
+          rejectionReason: null,
+          decisionEffects: null,
+        };
+        return reopened;
+      };
+
+      /** What a by-grant decision found before it opened a review, for the audit. */
+      let openedFrom: Record<string, unknown> | null = null;
+
+      /** The pending review a by-grant decision acts on. Opening one from the
+       *  score works like the requeue route: the award is hidden and the
+       *  review marked reopened-from-decision, so an undo leaves it with a
+       *  curator and the next run never withdraws it or lifts the hide. */
+      const pendingForGrant = async (grantId: string): Promise<Review> => {
+        const review = await tx.grantAttributionReview.findUnique({
+          where: { grantExternalId: grantId },
+        });
+        if (review?.status === "pending") return review;
+        if (review && (review.status === "confirmed" || review.status === "rejected")) {
+          const same = (review.status === "confirmed") === (decision === "confirm");
+          if (same) throw new Refused(409, "already_decided");
+          return undoRow(review);
+        }
+        // Settled by the weekly check: open a review from its latest score.
+        const score = await tx.grantAttributionScore.findUnique({
+          where: { grantExternalId: grantId },
+        });
+        if (!score) throw new Refused(404, "not_found");
+        const aged = await tx.suppression.findFirst({
+          where: { entityType: "grant", entityId: grantId, createdBy: SYSTEM_RECENCY },
+          select: { id: true },
+        });
+        if (aged) throw new Refused(409, "hidden_by_age");
+        const hides = await tx.suppression.findMany({
+          where: { entityType: "grant", entityId: grantId, revokedAt: null, createdBy: SYSTEM_UNVERIFIED },
+          select: { id: true },
+        });
+        if (hides.length === 0) {
+          const sup = await tx.suppression.create({
+            data: { entityType: "grant", entityId: grantId, reason: OPENED_REASON, createdBy: SYSTEM_UNVERIFIED },
+          });
+          suppressions.push({ suppressionId: sup.id, entityId: grantId });
+        }
+        openedFrom = {
+          review_status: review?.status ?? null,
+          opened_from_score: true,
+          prior_score: review?.score ?? null,
+          prior_band: review?.band ?? null,
+        };
+        const fields = {
+          score: score.score,
+          band: score.band,
+          cues: score.cues as Prisma.InputJsonValue,
+          evidenceKey: score.evidenceKey,
+          award: score.award as Prisma.InputJsonValue,
+          status: "pending",
+          decidedByCwid: realCwid,
+          decidedAt: ts,
+          reopenedAt: ts,
+          rejectionReason: null,
+          decisionEffects: Prisma.DbNull,
+          scoredAt: score.scoredAt,
+          lastSeenAt: ts,
+        };
+        if (review) {
+          const claimed = await tx.grantAttributionReview.updateMany({
+            where: { id: review.id, status: "withdrawn" },
+            data: fields,
+          });
+          if (claimed.count !== 1) throw new Refused(409, "state_changed");
+          return (await tx.grantAttributionReview.findUnique({ where: { id: review.id } }))!;
+        }
+        return tx.grantAttributionReview.create({
+          data: { cwid: score.cwid, grantExternalId: grantId, ...fields },
+        });
+      };
+
+      const targets: Array<{ review: Review | null; id: string }> = byGrant
+        ? [{ review: await pendingForGrant(byGrant), id: "" }]
+        : ids.map((id) => ({ review: null, id }));
+      // Set inside pendingForGrant; TS cannot see the closure write.
+      const opened = openedFrom as Record<string, unknown> | null;
+      for (const target of targets) {
+        const row =
+          target.review ??
+          (await tx.grantAttributionReview.findUnique({ where: { id: target.id } }));
+        if (!row) throw new Refused(404, "not_found");
+        const id = row.id;
+        const entityId = row.grantExternalId;
+        const snapshot = {
+          review_id: row.id,
+          status: row.status,
+          score: row.score,
+          band: row.band,
+        };
 
         if (decision === "undo") {
-          const effects = parseEffects(row.decisionEffects);
-          const undoable =
-            (row.status === "confirmed" || row.status === "rejected") &&
-            row.decidedAt !== null &&
-            effects !== null;
-          if (!undoable || !effects) throw new Refused(409, "not_undoable");
-          for (const sid of effects.revoked) {
-            const r = await tx.suppression.updateMany({
-              where: { id: sid, entityId, revokedAt: { not: null } },
-              data: { revokedAt: null, revokedBy: null, searchReflectedAt: null },
-            });
-            if (r.count !== 1) throw new Refused(409, "state_changed");
-            suppressions.push({ suppressionId: sid, entityId });
-          }
-          for (const sid of effects.created) {
-            const r = await tx.suppression.updateMany({
-              where: { id: sid, entityId, revokedAt: null },
-              data: { revokedAt: ts, revokedBy: realCwid, searchReflectedAt: null },
-            });
-            if (r.count !== 1) throw new Refused(409, "state_changed");
-            suppressions.push({ suppressionId: sid, entityId });
-          }
-          const claimed = await tx.grantAttributionReview.updateMany({
-            where: { id, status: row.status, decidedAt: row.decidedAt },
-            data: {
-              status: "pending",
-              decidedByCwid: effects.reopenedBy ?? null,
-              decidedAt: effects.reopenedBy ? ts : null,
-              rejectionReason: null,
-              decisionEffects: Prisma.DbNull,
-            },
-          });
-          if (claimed.count !== 1) throw new Refused(409, "not_undoable");
-          await appendAuditRow(tx, {
-            actorCwid: realCwid,
-            impersonatedCwid,
-            targetEntityType: "grant",
-            targetEntityId: entityId,
-            action: "grant_attribution_undo",
-            fieldsChanged: ["status"],
-            beforeValues: { ...snapshot, effects },
-            afterValues: { review_id: row.id, status: "pending" },
-            ts,
-            requestId,
-          });
-          entities.push(entityId);
+          await undoRow(row);
           continue;
         }
 
@@ -250,7 +391,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           targetEntityId: entityId,
           action: decision === "confirm" ? "grant_attribution_confirm" : "grant_attribution_reject",
           fieldsChanged: decision === "reject" && reason ? ["status", "rejectionReason"] : ["status"],
-          beforeValues: snapshot,
+          beforeValues: opened ? { ...snapshot, ...opened, status: opened.review_status } : snapshot,
           afterValues: { review_id: row.id, status, reason, effects },
           ts,
           requestId,
@@ -260,7 +401,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return { entities, suppressions };
     });
   } catch (err) {
-    if (err instanceof Refused) return editError(err.status, err.code, ids.length > 1 ? "ids" : "id");
+    if (err instanceof Refused)
+      return editError(err.status, err.code, byGrant ? "grant" : ids.length > 1 ? "ids" : "id");
+    // A concurrent by-grant create of the same review trips the unique key.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return editError(409, "state_changed", byGrant ? "grant" : "id");
+    }
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
@@ -284,7 +430,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   return editOk({
     decision,
-    decided: result.entities.length,
+    decided: byGrant ? 1 : result.entities.length,
     status: decision === "undo" ? "pending" : decision === "confirm" ? "confirmed" : "rejected",
   });
 }
