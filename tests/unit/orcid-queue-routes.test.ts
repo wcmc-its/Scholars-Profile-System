@@ -28,6 +28,10 @@ const h = vi.hoisted(() => {
     sources: [] as Array<{ cwid: string; orcid: string; source: string }>,
     /** role_category per cwid (default "faculty"). */
     roles: new Map<string, string>(),
+    /** dept_code / div_code / primary_org_code per cwid. */
+    units: new Map<string, Record<string, string>>(),
+    /** Manual division code → its hand-added roster. */
+    rosters: new Map<string, string[]>(),
     scholars: new Map<string, { orcid: string | null; orcidConfirmMethod: string | null }>(),
     dismissals: new Set<string>(),
     samples: [] as Array<{
@@ -76,22 +80,50 @@ const h = vi.hoisted(() => {
       ),
     },
     division: {
-      findMany: vi.fn(async () => [] as Array<{ code: string }>),
+      findMany: vi.fn(async ({ where }: { where: { code: { in: string[] } } }) =>
+        where.code.in.filter((c) => h.state.rosters.has(c)).map((code) => ({ code })),
+      ),
     },
-    divisionMembership: { findMany: vi.fn(async () => []) },
+    divisionMembership: {
+      findMany: vi.fn(async ({ where }: { where: { divisionCode: { in: string[] } } }) =>
+        where.divisionCode.in.flatMap((d) =>
+          (h.state.rosters.get(d) ?? []).map((cwid) => ({ cwid })),
+        ),
+      ),
+    },
     scholar: {
       findUnique: vi.fn(async ({ where }: { where: { cwid: string } }) => {
         const s = h.state.scholars.get(where.cwid);
         return s ? { ...s } : null;
       }),
       findMany: vi.fn(
-        async ({ where }: { where: { cwid: { in: string[] }; roleCategory?: { in: string[] } } }) =>
+        async ({
+          where,
+        }: {
+          where: {
+            cwid: { in: string[] };
+            roleCategory?: { in: string[] };
+            AND?: Array<{ OR?: Array<Record<string, { in: string[] }>> }>;
+          };
+        }) =>
           where.cwid.in
             .filter((c) => h.state.scholars.has(c))
             .filter(
               (c) =>
                 !where.roleCategory ||
                 where.roleCategory.in.includes(h.state.roles.get(c) ?? "faculty"),
+            )
+            // personFilterWhere's unit clause: { OR: [{ deptCode: { in } }, { cwid: { in } }, …] }.
+            .filter((c) =>
+              (where.AND ?? []).every(
+                (w) =>
+                  !w.OR ||
+                  w.OR.some((o) =>
+                    Object.entries(o).some(([field, v]) =>
+                      v.in.includes(field === "cwid" ? c : (h.state.units.get(c)?.[field] ?? "")),
+                    ),
+                  ),
+              ),
             )
             .map((c) => ({
               cwid: c,
@@ -237,6 +269,8 @@ beforeEach(() => {
   h.state.admins = [];
   h.state.sources = [];
   h.state.roles = new Map();
+  h.state.units = new Map();
+  h.state.rosters = new Map();
   h.state.samples = [];
   h.scholarUpdateMany.mockImplementation(
     async ({
@@ -787,6 +821,75 @@ describe("v2: filters on the sample and bulk confirm", () => {
       action: "orcid_bulk_confirm",
       afterValues: { filter: "type=postdoc" },
     });
+  });
+
+  it("a unit filter (department, division with its manual roster, institution) narrows the sample", async () => {
+    seed();
+    h.state.units = new Map<string, Record<string, string>>([
+      ["fac0001", { deptCode: "MED", divCode: "CARD", primaryOrgCode: "WCM" }],
+      ["fac0002", { deptCode: "SURG", primaryOrgCode: "WCM" }],
+      ["pd00001", { deptCode: "MED", primaryOrgCode: "HSS" }],
+      ["mix0001", { deptCode: "PEDS", primaryOrgCode: "WCM" }],
+    ]);
+    const dept = await (
+      await sample(req({ band: "strong", filter: { units: ["dept:MED"] } }))
+    ).json();
+    expect(dept.sample).toMatchObject({ filterKey: "unit=dept%3AMED", total: 2 });
+    expect(h.state.samples.map((s) => s.cwid).sort()).toEqual(["fac0001", "pd00001"]);
+    expect(tx.scholar.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ AND: [{ OR: [{ deptCode: { in: ["MED"] } }] }] }),
+      }),
+    );
+
+    h.state.samples = [];
+    h.state.rosters = new Map([["CARD", ["mix0001"]]]);
+    await sample(req({ band: "strong", filter: { units: ["div:CARD"] } }));
+    expect(h.state.samples.map((s) => s.cwid).sort()).toEqual(["fac0001", "mix0001"]);
+
+    h.state.samples = [];
+    await sample(req({ band: "strong", filter: { units: ["inst:HSS"] } }));
+    expect(h.state.samples.map((s) => s.cwid)).toEqual(["pd00001"]);
+  });
+
+  it("bulk under a unit filter confirms only that unit's rows", async () => {
+    seed();
+    h.state.units = new Map([
+      ["fac0001", { deptCode: "MED" }],
+      ["fac0002", { deptCode: "SURG" }],
+      ["pd00001", { deptCode: "MED" }],
+      ["mix0001", { deptCode: "PEDS" }],
+    ]);
+    h.state.samples.push({
+      id: "s1",
+      band: "strong",
+      startedAt: new Date(2000),
+      filterKey: "unit=dept%3AMED",
+      cwid: "fac0001",
+      orcid: ORCID,
+      decision: "confirmed",
+    });
+    h.state.scholars.set("fac0001", { orcid: ORCID, orcidConfirmMethod: "librarian" });
+    const res = await bulk(
+      req({ band: "strong", sampleId: "s1", filter: { units: ["dept:MED"] } }),
+    );
+    expect(await res.json()).toMatchObject({ confirmed: 1 });
+    expect(h.state.scholars.get("pd00001")!.orcid).toBe(ORCID);
+    expect(h.state.scholars.get("fac0002")!.orcid).toBeNull();
+    expect(h.state.scholars.get("mix0001")!.orcid).toBeNull();
+  });
+
+  it("400 on a filter whose key would not fit filter_key, before any write", async () => {
+    const units = Array.from(
+      { length: 50 },
+      (_, i) => `dept:${String(i).padStart(2, "0")}${"X".repeat(60)}`,
+    );
+    expect((await sample(req({ band: "strong", filter: { units } }))).status).toBe(400);
+    expect((await bulk(req({ band: "strong", sampleId: "s1", filter: { units } }))).status).toBe(
+      400,
+    );
+    expect(tx.orcidQueueSample.createMany).not.toHaveBeenCalled();
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
   });
 
   it("400 on a malformed filter, before any write", async () => {

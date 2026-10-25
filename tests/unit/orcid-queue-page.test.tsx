@@ -288,6 +288,8 @@ describe("loader", () => {
       sampleFilterKey?: string;
       admins?: Array<{ cwid: string; orcid: string }>;
       rescored?: boolean;
+      /** Manual division code → its hand-added roster. */
+      rosters?: Record<string, string[]>;
     } = {},
   ) => {
     const evidence = [
@@ -306,6 +308,25 @@ describe("loader", () => {
       f00001: null,
     };
     const roles: Record<string, string> = { d00001: "postdoc" };
+    const units: Record<
+      string,
+      { deptCode: string; divCode: string | null; primaryOrgCode: string }
+    > = {
+      a00001: { deptCode: "MED", divCode: "CARD", primaryOrgCode: "WCM" },
+      c00001: { deptCode: "MED", divCode: null, primaryOrgCode: "WCM" },
+      d00001: { deptCode: "SURG", divCode: null, primaryOrgCode: "WCM" },
+      f00001: { deptCode: "PEDS", divCode: null, primaryOrgCode: "HSS" },
+    };
+    // personFilterWhere's unit clause: { OR: [{ deptCode: { in } } | { cwid: { in } } | …] }.
+    const inUnit = (c: string, w?: { OR?: Array<Record<string, { in: string[] }>> }) =>
+      !w?.OR ||
+      w.OR.some((o) =>
+        Object.entries(o).some(([field, v]) =>
+          field === "cwid"
+            ? v.in.includes(c)
+            : v.in.includes((units[c] as Record<string, string | null> | undefined)?.[field] ?? ""),
+        ),
+      );
     return {
       orcidCandidateEvidence: {
         findMany: vi.fn(
@@ -344,8 +365,18 @@ describe("loader", () => {
           { cwid: "d00001", orcid: OTHER, source: "rpm_inferred" },
         ]),
       },
-      division: { findMany: vi.fn(async () => []) },
-      divisionMembership: { findMany: vi.fn(async () => []) },
+      division: {
+        findMany: vi.fn(async (args: { where: { code: { in: string[] } } }) =>
+          args.where.code.in.filter((c) => opts.rosters?.[c]).map((code) => ({ code })),
+        ),
+      },
+      divisionMembership: {
+        findMany: vi.fn(async (args: { where: { divisionCode: { in: string[] } } }) =>
+          args.where.divisionCode.in.flatMap((d) =>
+            (opts.rosters?.[d] ?? []).map((cwid) => ({ cwid })),
+          ),
+        ),
+      },
       scholar: {
         findMany: vi.fn(
           async (args: {
@@ -353,6 +384,7 @@ describe("loader", () => {
               orcidConfirmMethod?: string;
               cwid?: { in: string[] };
               roleCategory?: { in: string[] };
+              AND?: Array<{ OR?: Array<Record<string, { in: string[] }>> }>;
             };
           }) =>
             args.where.orcidConfirmMethod
@@ -363,6 +395,7 @@ describe("loader", () => {
                       !args.where.roleCategory ||
                       args.where.roleCategory.in.includes(roles[c] ?? "faculty"),
                   )
+                  .filter((c) => (args.where.AND ?? []).every((w) => inUnit(c, w)))
                   .map((c) => ({
                     cwid: c,
                     orcid: held[c] ?? null,
@@ -440,6 +473,64 @@ describe("loader", () => {
     expect(bySource.cards[0]!.candidates).toHaveLength(2);
   });
 
+  it("the filter narrows the cards and the counts: department, division (with its manual roster), institution", async () => {
+    const byDept = client();
+    const dept = await realLoad(byDept, "strong", { types: [], units: ["dept:MED"], sources: [] });
+    expect(dept.cards.map((c) => c.cwid)).toEqual(["a00001"]);
+    expect(dept.counts).toMatchObject({ strong: 1, conflicts: 1, moderate: 0 });
+    // The person query carries the unit OR clause.
+    const calls = (byDept as unknown as { scholar: { findMany: { mock: { calls: unknown[][] } } } })
+      .scholar.findMany.mock.calls;
+    expect(calls.map((c) => c[0])).toContainEqual(
+      expect.objectContaining({
+        where: expect.objectContaining({ AND: [{ OR: [{ deptCode: { in: ["MED"] } }] }] }),
+      }),
+    );
+
+    // A manual division: its column members and its hand-added roster.
+    const div = await realLoad(client({ rosters: { CARD: ["d00001"] } }), "strong", {
+      types: [],
+      units: ["div:CARD"],
+      sources: [],
+    });
+    expect(div.cards.map((c) => c.cwid)).toEqual(["d00001", "a00001"]);
+
+    const inst = await realLoad(client(), "moderate", {
+      types: [],
+      units: ["inst:HSS"],
+      sources: [],
+    });
+    expect(inst.cards.map((c) => c.cwid)).toEqual(["f00001"]);
+    expect(inst.counts).toMatchObject({ strong: 0, moderate: 1, conflicts: 0 });
+  });
+
+  it("an open sample's pair still undecided but now in another tab stays decidable on the sample's tab", async () => {
+    // f00001's only iD is Moderate now: its card sits in Moderate, but the Strong
+    // sample drew it. On Strong it shows with its real state and band, stamping the
+    // sample. c00001's sampled iD went on file since: shown in place, decided.
+    const q = await realLoad(
+      client({
+        sample: [
+          { cwid: "f00001", orcid: OTHER, decision: null },
+          { cwid: "c00001", orcid: OTHER, decision: "confirmed" },
+        ],
+      }),
+      "strong",
+    );
+    expect(q.sample).toMatchObject({ status: "open", total: 2 });
+    expect(q.cards.find((c) => c.cwid === "f00001")!.candidates).toEqual([
+      expect.objectContaining({
+        orcid: OTHER,
+        state: "queue",
+        band: "moderate",
+        sampleDecision: null,
+      }),
+    ]);
+    expect(q.cards.find((c) => c.cwid === "c00001")!.candidates).toEqual([
+      expect.objectContaining({ orcid: OTHER, state: "on_file", sampleDecision: "confirmed" }),
+    ]);
+  });
+
   it("a passed sample the ETL re-scored since is stale: no Confirm remaining", async () => {
     const sample = [{ cwid: "d00001", orcid: OTHER, decision: "confirmed" }];
     const fresh = await realLoad(client({ sample }), "strong");
@@ -501,6 +592,20 @@ describe("filter and link helpers", () => {
     expect(sanitizeOrcidQueueFilter([])).toBeNull();
   });
 
+  it("a filter whose key would not fit filter_key (1024) is refused by the routes, trimmed by the page", () => {
+    const units = Array.from(
+      { length: 50 },
+      (_, i) => `dept:${String(i).padStart(2, "0")}${"X".repeat(60)}`,
+    );
+    expect(sanitizeOrcidQueueFilter({ units })).toBeNull();
+    expect(sanitizeOrcidQueueFilter({ units: units.slice(0, 5) })?.units).toHaveLength(5);
+    const parsed = parseOrcidQueueFilter({ unit: units, type: "faculty" });
+    expect(orcidQueueFilterKey(parsed).length).toBeLessThanOrEqual(1024);
+    expect(parsed.types).toEqual(["faculty"]);
+    expect(parsed.units.length).toBeGreaterThan(0);
+    expect(sanitizeOrcidQueueFilter(parsed)).toEqual(parsed);
+  });
+
   it("the filter key is canonical and empty for no filter", () => {
     expect(orcidQueueFilterKey(EMPTY_ORCID_QUEUE_FILTER)).toBe("");
     expect(orcidQueueFilterKey({ types: ["b", "a"], units: [], sources: ["orcid_works"] })).toBe(
@@ -516,11 +621,14 @@ describe("filter and link helpers", () => {
     });
   });
 
-  it("workHref: PubMed, else doi.org, else the work's own http(s) URL", () => {
+  it("workHref: PubMed, else doi.org, else the work's own https URL", () => {
     expect(workHref({ pmid: "123", doi: "10.1/a" })).toBe("https://pubmed.ncbi.nlm.nih.gov/123/");
     expect(workHref({ pmid: null, doi: "10.1/a" })).toBe("https://doi.org/10.1/a");
     expect(workHref({ url: "https://example.org/w" })).toBe("https://example.org/w");
     expect(workHref({ url: "javascript:alert(1)" })).toBeNull();
+    expect(workHref({ url: "http://example.org/w" })).toBeNull();
+    expect(workHref({ url: "data:text/html,<b>x</b>" })).toBeNull();
+    expect(workHref({ url: "https://" })).toBeNull();
     expect(workHref({})).toBeNull();
   });
 });

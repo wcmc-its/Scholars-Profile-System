@@ -14,7 +14,7 @@ import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 
-import { FacetPopover, type FacetDef } from "@/app/edit/orcid-coverage/filter-bar";
+import { FacetPopover, type FacetDef } from "@/components/edit/facet-popover";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
 import {
   EMPTY_ORCID_QUEUE_FILTER,

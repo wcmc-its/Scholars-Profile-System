@@ -691,9 +691,22 @@ export async function loadOrcidQueue(
       if (state.status === "open" && mine) {
         for (const p of pairs) {
           sampled.set(pairKey(p.cwid, p.orcid), p.decision as "confirmed" | "dismissed" | null);
-          // A sampled pair decided since left the band's list; show it in place, decided.
           const ps = inTab.get(p.cwid) ?? [];
-          if (!ps.some((x) => x.orcid === p.orcid)) {
+          const all = byCwid.get(p.cwid) ?? [];
+          const stillOpen = all.some(
+            (x) => x.orcid === p.orcid && (x.state === "queue" || x.state === "conflict"),
+          );
+          if (ps.some((x) => x.orcid === p.orcid)) {
+            // Already on this tab's card.
+          } else if (stillOpen) {
+            // Still undecided, but the card now sits in another tab (a later ETL
+            // run moved the band, or a stronger iD appeared): bring the scholar's
+            // real pairs here, so the sampled one stays decidable and stamps the
+            // sample, and the card shows every iD the scholar has.
+            for (const x of all) if (!ps.some((y) => y.orcid === x.orcid)) ps.push({ ...x });
+          } else {
+            // Decided since (on file or dismissed): it left the band's list; show
+            // it in place, decided.
             ps.push({
               orcid: p.orcid,
               band: tab,

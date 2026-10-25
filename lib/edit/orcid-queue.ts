@@ -203,7 +203,8 @@ export type OrcidEvidenceDetail = {
 };
 
 /** A work's link: PubMed when it has a PMID, else doi.org, else its own URL
- *  (http/https only). Null when it has none. Pure. */
+ *  (https only: it comes from someone else's ORCID record). Null when it has
+ *  none. Pure. */
 export function workHref(w: {
   pmid?: string | null;
   doi?: string | null;
@@ -212,7 +213,14 @@ export function workHref(w: {
   if (w.pmid && /^\d+$/.test(w.pmid.trim()))
     return `https://pubmed.ncbi.nlm.nih.gov/${w.pmid.trim()}/`;
   if (w.doi?.trim()) return `https://doi.org/${w.doi.trim()}`;
-  if (w.url && /^https?:\/\//i.test(w.url.trim())) return w.url.trim();
+  const url = w.url?.trim();
+  if (url && /^https:\/\//i.test(url)) {
+    try {
+      if (new URL(url).protocol === "https:") return url;
+    } catch {
+      // Not a URL: no link.
+    }
+  }
   return null;
 }
 
@@ -230,6 +238,9 @@ export const EMPTY_ORCID_QUEUE_FILTER: OrcidQueueFilter = { types: [], units: []
 /** Unit kinds the queue offers (no centers). */
 const QUEUE_UNIT = /^(dept|div|inst):[^\s]{1,64}$/;
 const MAX_FILTER_VALUES = 50;
+/** `orcid_queue_sample.filter_key` is VARCHAR(1024): a filter whose canonical
+ *  key is longer is refused (routes) or trimmed (page), never truncated. */
+export const MAX_FILTER_KEY_LENGTH = 1024;
 
 const cleanList = (v: unknown, ok: (s: string) => boolean): string[] | null => {
   if (v === undefined || v === null) return [];
@@ -257,7 +268,8 @@ export function sanitizeOrcidQueueFilter(raw: unknown): OrcidQueueFilter | null 
   const units = cleanList(r.units, (u) => QUEUE_UNIT.test(u));
   const sources = cleanList(r.sources, isOrcidCandidateSource);
   if (!types || !units || !sources) return null;
-  return { types, units, sources: sources as OrcidCandidateSource[] };
+  const f = { types, units, sources: sources as OrcidCandidateSource[] };
+  return orcidQueueFilterKey(f).length > MAX_FILTER_KEY_LENGTH ? null : f;
 }
 
 /** The canonical key a sample stores (`orcid_queue_sample.filter_key`): ""
@@ -381,9 +393,16 @@ export function parseOrcidQueueFilter(
     return (Array.isArray(v) ? v : v === undefined ? [] : [v]).map((x) => x.trim()).filter(Boolean);
   };
   const uniq = <T extends string>(xs: T[]) => [...new Set(xs)].sort() as T[];
-  return {
+  const f: OrcidQueueFilter = {
     types: uniq(list("type").filter((t) => t.length <= 72)).slice(0, MAX_FILTER_VALUES),
     units: uniq(list("unit").filter((u) => QUEUE_UNIT.test(u))).slice(0, MAX_FILTER_VALUES),
     sources: uniq(list("source").filter(isOrcidCandidateSource)),
   };
+  // Too long to store as a sample's key: drop the last values until it fits.
+  while (orcidQueueFilterKey(f).length > MAX_FILTER_KEY_LENGTH) {
+    if (f.units.length > 0) f.units.pop();
+    else if (f.types.length > 0) f.types.pop();
+    else f.sources.pop();
+  }
+  return f;
 }
