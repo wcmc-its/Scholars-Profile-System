@@ -7,7 +7,7 @@
  *
  * Log shape: { event: "profile_view", cwid, slug, ts: ISO8601 }
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 // Mock next/navigation before importing the page module.
 vi.mock("next/navigation", () => ({
@@ -112,7 +112,7 @@ vi.mock("@/lib/auth/session-server", () => ({
 }));
 
 describe("ANALYTICS-01 — profile_view structured log", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleSpy: MockInstance<typeof console.log>;
 
   beforeEach(() => {
     consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});

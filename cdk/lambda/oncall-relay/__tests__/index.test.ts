@@ -1,16 +1,16 @@
 import type { SNSEvent } from "aws-lambda";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 // Mock the AWS SDK before importing the handler so the module-scope client
 // created lazily in getClient() resolves to our mock.
 const sendMock = vi.fn();
 vi.mock("@aws-sdk/client-secrets-manager", () => ({
-  SecretsManagerClient: vi.fn().mockImplementation(() => ({
-    send: sendMock,
-  })),
-  GetSecretValueCommand: vi
-    .fn()
-    .mockImplementation((input: { SecretId: string }) => ({ input })),
+  SecretsManagerClient: vi.fn().mockImplementation(function () {
+    return { send: sendMock };
+  }),
+  GetSecretValueCommand: vi.fn().mockImplementation(function (input: { SecretId: string }) {
+    return { input };
+  }),
 }));
 
 import { handler, __resetForTests } from "../index.js";
@@ -87,7 +87,7 @@ function cardFromFetch(call: unknown[]): {
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
-let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+let consoleLogSpy: MockInstance<typeof console.log>;
 
 beforeEach(() => {
   __resetForTests();

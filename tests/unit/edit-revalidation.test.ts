@@ -45,8 +45,12 @@ vi.mock("@/lib/edit/after-response", () => ({
 }));
 // Mock the CloudFront SDK so the enqueue/mark path runs without real AWS.
 vi.mock("@aws-sdk/client-cloudfront", () => ({
-  CloudFrontClient: vi.fn().mockImplementation(() => ({ send: mockCfSend })),
-  CreateInvalidationCommand: vi.fn().mockImplementation((input) => ({ input })),
+  CloudFrontClient: vi.fn().mockImplementation(function () {
+    return { send: mockCfSend };
+  }),
+  CreateInvalidationCommand: vi.fn().mockImplementation(function (input) {
+    return { input };
+  }),
 }));
 
 import {

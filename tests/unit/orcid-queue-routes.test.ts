@@ -10,7 +10,7 @@
  * bulk confirm refuses a stale, open or locked sample and skips rows that
  * changed since they were read.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 const ORCID = "0000-0002-1825-0097";
 const ORCID_2 = "0000-0002-1825-009X";
@@ -580,7 +580,7 @@ describe("bulk confirm", () => {
   it("batches run with a raised transaction timeout; a failed later batch still writes a partial bulk audit row", async () => {
     passed();
     const { db } = await import("@/lib/db");
-    const $tx = db.write.$transaction as unknown as ReturnType<typeof vi.fn>;
+    const $tx = db.write.$transaction as unknown as Mock<(...args: never[]) => unknown>;
     const real = $tx.getMockImplementation()!;
     let n = 0;
     $tx.mockImplementation(async (fn: unknown, opts: unknown) => {
