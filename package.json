@@ -159,8 +159,8 @@
     "@node-saml/node-saml": "^5.1.0",
     "@opensearch-project/opensearch": "^3.9.0",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
-    "@opentelemetry/instrumentation-http": "^0.218.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
+    "@opentelemetry/instrumentation-http": "^0.300.0",
     "@opentelemetry/propagator-aws-xray": "^2.2.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@prisma/adapter-mariadb": "^7.10.1",
@@ -226,6 +226,6 @@
     "tsx": "^4.23.15",
     "tw-animate-css": "^1.2.5",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.2"
+    "vitest": "^5.0.5"
   }
 }
