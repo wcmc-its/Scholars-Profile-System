@@ -11,12 +11,22 @@
  * cookie (`lib/auth/session.ts`).
  */
 import { createHash } from "node:crypto";
+import { DOMParser } from "@xmldom/xmldom";
 import { SAML, SamlStatusError, ValidateInResponseTo } from "@node-saml/node-saml";
 import type { Profile, SamlConfig } from "@node-saml/node-saml";
 import { getSamlEnv, type SamlEnv } from "@/lib/auth/config";
 import type { AssertionIdentity } from "@/lib/auth/saml-assertion-store";
 
 let cached: { saml: SAML; env: SamlEnv } | null = null;
+
+/**
+ * Longest we accept an assertion after its IdP `IssueInstant` (plus clock
+ * skew). The POST binding auto-submits within seconds; 5 minutes leaves room
+ * for a slow browser without accepting a captured assertion much later.
+ */
+export const MAX_ASSERTION_AGE_MS = 5 * 60 * 1000;
+
+const BEARER_METHOD = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
 /** Build (once) and return the configured SAML SP plus the env it came from. */
 function ensureSaml(): { saml: SAML; env: SamlEnv } {
@@ -37,6 +47,10 @@ function ensureSaml(): { saml: SAML; env: SamlEnv } {
     wantAssertionsSigned: true,
     wantAuthnResponseSigned: env.wantAuthnResponseSigned,
     acceptedClockSkewMs: env.clockSkewMs,
+    // Caps the Conditions window at IssueInstant + this. Also enforced, with
+    // the Recipient/Destination binding, in `checkResponseBinding`, because
+    // node-saml skips time checks when an assertion has no Conditions.
+    maxAssertionAgeMs: MAX_ASSERTION_AGE_MS,
     // InResponseTo is not validated against a stored request id (B01 plan OQ6).
     // node-saml's request-id check is backed by an in-process cache, which does
     // not hold across the 1–2 Fargate tasks staging/prod run: an AuthnRequest
@@ -75,7 +89,8 @@ export type SamlValidationResult =
 /**
  * Validate a base64 `SAMLResponse` from the ACS POST. node-saml verifies the
  * signature, the NotBefore / NotOnOrAfter window, and the audience; this
- * wrapper adds CWID extraction and maps every failure to a stable `reason`
+ * wrapper adds the ACS binding and age check (`checkResponseBinding`), CWID
+ * extraction, and maps every failure to a stable `reason`
  * string. It never throws and never leaks assertion internals to the caller.
  */
 export async function validateSamlResponse(
@@ -95,6 +110,16 @@ export async function validateSamlResponse(
     };
   }
   if (!profile) return { ok: false, reason: "no_profile" };
+  // Bind the response to THIS environment's ACS and bound its age. node-saml
+  // 5.x checks neither Recipient nor Destination, and staging and prod share
+  // one SP entity ID, so the audience check cannot tell them apart.
+  const bindingError = checkResponseBinding(profile, {
+    acsUrl: env.spAcsUrl,
+    now: new Date(),
+    clockSkewMs: env.clockSkewMs,
+    maxAssertionAgeMs: MAX_ASSERTION_AGE_MS,
+  });
+  if (bindingError) return { ok: false, reason: bindingError };
   // Primary: the WCM-direct `CWID` attribute (or NameID when unconfigured).
   // Fallback: the eppn local-part for federated (NYP / WCM-Q) logins, which
   // arrive without a `CWID` attribute — gated by the trusted-scope allowlist.
@@ -250,6 +275,77 @@ export function extractAssertionIdentity(
       : new Date(opts.now.getTime() + fallbackMs);
 
   return { id, expiresAt };
+}
+
+/** Every element of an xml2js array node (or the single value), as a list. */
+function allElements(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  return value === undefined || value === null ? [] : [value];
+}
+
+/** The root `Destination` attribute of the raw SAML Response XML, if any. */
+function responseDestination(profile: Profile): string | undefined {
+  const xml =
+    typeof profile.getSamlResponseXml === "function"
+      ? profile.getSamlResponseXml()
+      : undefined;
+  if (!xml) return undefined;
+  try {
+    const doc = new DOMParser().parseFromString(xml, "text/xml");
+    const value = doc.documentElement?.getAttribute("Destination");
+    return value ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reject a signature-valid assertion that was not issued for this environment
+ * or is too old (2026-10-23 security audit, finding 12). Returns a fixed
+ * reason string (safe to log: no assertion content, no PII), or null to pass.
+ *
+ *   - Response `Destination`, when present, must equal `acsUrl` exactly.
+ *   - At least one bearer `SubjectConfirmationData/@Recipient` must equal
+ *     `acsUrl` exactly. A missing Recipient is rejected: the SAML Web Browser
+ *     SSO profile (saml-profiles-2.0 section 4.1.4.2) requires it on the
+ *     bearer confirmation. The Recipient is inside the signed assertion, so it
+ *     is the check that stops a response issued for one environment's ACS
+ *     from being replayed to the other's.
+ *   - Assertion `IssueInstant` must be present, not later than now plus
+ *     `clockSkewMs`, and no older than `maxAssertionAgeMs + clockSkewMs`.
+ */
+export function checkResponseBinding(
+  profile: Profile,
+  opts: { acsUrl: string; now: Date; clockSkewMs: number; maxAssertionAgeMs: number },
+): string | null {
+  const destination = responseDestination(profile);
+  if (destination !== undefined && destination !== opts.acsUrl) {
+    return "destination_mismatch";
+  }
+
+  const parsed =
+    typeof profile.getAssertion === "function" ? profile.getAssertion() : undefined;
+  const assertionNode = firstElement(asRecord(parsed)?.["Assertion"]);
+  const subjectNode = firstElement(asRecord(assertionNode)?.["Subject"]);
+  const recipients: string[] = [];
+  for (const confirmation of allElements(asRecord(subjectNode)?.["SubjectConfirmation"])) {
+    if (xmlAttr(confirmation, "Method") !== BEARER_METHOD) continue;
+    for (const data of allElements(asRecord(confirmation)?.["SubjectConfirmationData"])) {
+      const recipient = xmlAttr(data, "Recipient");
+      if (recipient) recipients.push(recipient);
+    }
+  }
+  if (recipients.length === 0) return "recipient_missing";
+  if (!recipients.includes(opts.acsUrl)) return "recipient_mismatch";
+
+  const issuedAt = timestampMs(xmlAttr(assertionNode, "IssueInstant"));
+  if (issuedAt === null) return "issue_instant_missing";
+  const nowMs = opts.now.getTime();
+  if (issuedAt > nowMs + opts.clockSkewMs) return "assertion_not_yet_valid";
+  if (nowMs > issuedAt + opts.maxAssertionAgeMs + opts.clockSkewMs) {
+    return "assertion_too_old";
+  }
+  return null;
 }
 
 /** SP metadata XML — hand the `/api/auth/saml/metadata` URL to WCM identity. */
