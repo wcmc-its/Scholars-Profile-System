@@ -366,6 +366,39 @@ describe("PATCH /api/edit/center/[code]/nci-2a/[awardId]", () => {
     expect(res.status).toBe(403);
   });
 
+  it("saves a reviewer note alone — trimmed, no source change, audited with before/after", async () => {
+    mockAwardFindUnique.mockResolvedValue({ ...EXISTING, reviewerNote: null });
+    const res = await PATCH(patch({ reviewerNote: "  Half basic biology  " }), { params: params() });
+    expect(res.status).toBe(200);
+    const data = mockTxAwardUpdate.mock.calls[0][0].data;
+    expect(data).toEqual({ reviewerNote: "Half basic biology" });
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("a blank or null note clears it", async () => {
+    mockAwardFindUnique.mockResolvedValue({ ...EXISTING, reviewerNote: "old" });
+    await PATCH(patch({ reviewerNote: "   " }), { params: params() });
+    expect(mockTxAwardUpdate.mock.calls[0][0].data).toEqual({ reviewerNote: null });
+    await PATCH(patch({ reviewerNote: null }), { params: params() });
+    expect(mockTxAwardUpdate.mock.calls[1][0].data).toEqual({ reviewerNote: null });
+  });
+
+  it("400s a non-string or over-long note", async () => {
+    expect((await PATCH(patch({ reviewerNote: 5 }), { params: params() })).status).toBe(400);
+    expect((await PATCH(patch({ reviewerNote: "x".repeat(2001) }), { params: params() })).status).toBe(400);
+    expect(mockTxAwardUpdate).not.toHaveBeenCalled();
+  });
+
+  it("saves a percent and a note together", async () => {
+    const res = await PATCH(patch({ cancerRelevantPercent: 60, reviewerNote: "Aim 2 only" }), { params: params() });
+    expect(res.status).toBe(200);
+    expect(mockTxAwardUpdate.mock.calls[0][0].data).toMatchObject({
+      cancerRelevantPercent: 60,
+      cancerRelevantPercentSource: "human",
+      reviewerNote: "Aim 2 only",
+    });
+  });
+
   it("overrides the percent only — sets source:human, leaves allocations untouched", async () => {
     const res = await PATCH(patch({ cancerRelevantPercent: 80 }), { params: params() });
     expect(res.status).toBe(200);
