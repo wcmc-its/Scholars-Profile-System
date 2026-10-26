@@ -541,6 +541,17 @@ describe("orcidVerdict", () => {
     ).toEqual({ tier: "strong", orcid: "iD-a", accepted: 1 });
   });
 
+  it("an infoed_biosketch row is strong on its own; two biosketch iDs → weak", () => {
+    expect(orcidVerdict([cand("x", "infoed_biosketch", 0, 0, "iD-a")])).toEqual({
+      tier: "strong",
+      orcid: "iD-a",
+      accepted: 0,
+    });
+    expect(
+      orcidVerdict([cand("x", "infoed_biosketch", 0, 0, "iD-a"), cand("x", "infoed_biosketch", 0, 0, "iD-b")]).tier,
+    ).toBe("weak");
+  });
+
   it("an rpm_admin row → asserted with the admin iD, whatever else is there", () => {
     expect(
       orcidVerdict([cand("x", "rpm_inferred", 9, 0, "iD-b"), cand("x", "rpm_admin", 0, 0, "iD-a")]),

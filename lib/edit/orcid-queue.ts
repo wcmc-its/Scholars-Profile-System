@@ -128,6 +128,7 @@ export const ORCID_CANDIDATE_SOURCES = [
   "orcid_works",
   "orcid_crossref",
   "orcid_name",
+  "infoed_biosketch",
 ] as const;
 export type OrcidCandidateSource = (typeof ORCID_CANDIDATE_SOURCES)[number];
 
@@ -138,6 +139,7 @@ export const ORCID_SOURCE_LABEL: Record<OrcidCandidateSource, string> = {
   orcid_works: "ORCID shared works",
   orcid_crossref: "Crossref deposit",
   orcid_name: "ORCID name only",
+  infoed_biosketch: "NIH biosketch",
 };
 
 export function isOrcidCandidateSource(v: unknown): v is OrcidCandidateSource {

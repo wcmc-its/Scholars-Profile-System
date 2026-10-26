@@ -249,6 +249,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Adds the clinical trials each scholar leads as principal investigator.",
     origin: "external", // sibling ReCiterDB
   },
+  "InfoEd-Biosketch": {
+    label: "NIH Biosketches",
+    description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",
+    origin: "external", // InfoEd proposal attachments
+  },
   DataSharing: {
     label: "Dataset Deposits",
     description: "Adds a scholar's shared research datasets to their profile's Datasets section.",

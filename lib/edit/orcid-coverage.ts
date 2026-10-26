@@ -27,6 +27,7 @@
  *    `articles_rejected` is 0 on
  *    every registry row. STRONG = exactly one distinct strong-eligible ORCID
  *    across the person's rows, where strong-eligible is: any `orcid_email` row;
+ *    any `infoed_biosketch` row (the iD on the person's NIH biosketch in InfoEd);
  *    an `orcid_works` or `orcid_crossref` row with ≥ STRONG_MIN_ACCEPTED papers; the SOLE
  *    `rpm_inferred` row when it has ≥ STRONG_MIN_ACCEPTED accepted articles and
  *    no rejected one; or an ORCID that an `rpm_*` row with NO rejected article
@@ -254,6 +255,10 @@ export function orcidVerdict(
   );
   const strongEligible = (r: CandidateRow) =>
     r.source === "orcid_email" ||
+    // The iD on the person's own NIH biosketch (SciENcv fills it from their linked
+    // ORCID account), tied to them by the SF424 profile email — etl/infoed-biosketch
+    // writes only email-attributed rows.
+    r.source === "infoed_biosketch" ||
     ((r.source === "orcid_works" || r.source === "orcid_crossref") && r.articlesAccepted >= minAccepted) ||
     (r === soleInferred && r.articlesRejected === 0 && r.articlesAccepted >= minAccepted) ||
     // Two independent sources agreeing on one iD outweighs either one's accepted counts.

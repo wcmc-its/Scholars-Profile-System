@@ -57,6 +57,8 @@ export function orcidEvidenceLine(e: OrcidEvidence, subject: string | null): str
         : `${e.accepted} works on the ORCID record match ${whose} publications`;
     case "orcid_crossref":
       return `Publishers recorded this iD on ${e.accepted} of ${whose} papers`;
+    case "infoed_biosketch":
+      return `Listed on ${whose} NIH biosketch in a WCM grant application`;
     case "orcid_name":
       return `The ORCID registry record matches ${whose} name`;
     default:

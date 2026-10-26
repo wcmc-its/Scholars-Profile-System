@@ -1275,6 +1275,7 @@ export class EtlStack extends Stack {
       "etl:orcid-candidates",
       "etl:asms",
       "etl:infoed",
+      "etl:infoed-biosketch",
       "etl:coi",
       "etl:frt",
       "etl:jenzabar",
@@ -1997,6 +1998,12 @@ export class EtlStack extends Stack {
       // because the registry moves slowly; `continue` because the only consumer is
       // the advisory /edit/orcid-coverage dashboard, never the public profile.
       { id: "OrcidRegistryWeekly", npmScript: "etl:orcid-registry", external: false, tier: "continue" },
+      // NIH biosketches from InfoEd proposal PDFs (etl/infoed-biosketch) -> infoed_biosketch,
+      // plus their email-attributed ORCID iDs -> orcid_candidate (source infoed_biosketch).
+      // InfoEd credentials, so the sources family (SOURCES_SCRIPTS). Before
+      // OrcidEvidenceWeekly so the new candidates are scored the same run. `continue`:
+      // feeds /edit and the ORCID queue only, never the public profile.
+      { id: "InfoedBiosketchWeekly", npmScript: "etl:infoed-biosketch", external: true, tier: "continue" },
       // ORCID candidate evidence (etl/orcid-evidence) -> orcid_candidate_evidence, the
       // bands /edit/orcid-queue reads, then the email auto-confirm (behind
       // ORCID_EMAIL_AUTOCONFIRM, off). Right after OrcidRegistryWeekly so it scores the
