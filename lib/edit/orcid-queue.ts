@@ -14,6 +14,8 @@
  * as, so `orcid_confirmed_by` is always the real librarian).
  */
 
+import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
+
 /** `ORCID_LIBRARIAN_QUEUE`: exactly "on" shows the page, the tab and the routes. */
 export function isOrcidLibrarianQueueEnabled(): boolean {
   return process.env.ORCID_LIBRARIAN_QUEUE === "on";
@@ -265,7 +267,9 @@ export function workHref(w: {
 }): string | null {
   if (w.pmid && /^\d+$/.test(w.pmid.trim()))
     return `https://pubmed.ncbi.nlm.nih.gov/${w.pmid.trim()}/`;
-  if (w.doi?.trim()) return `https://doi.org/${w.doi.trim()}`;
+  // Each path segment encoded (old SICI DOIs carry `<`, `>`, `;`, `#`), the `/` kept.
+  if (w.doi?.trim())
+    return `https://doi.org/${w.doi.trim().split("/").map(encodeURIComponent).join("/")}`;
   const url = w.url?.trim();
   if (url && /^https:\/\//i.test(url)) {
     try {
@@ -275,6 +279,43 @@ export function workHref(w: {
     }
   }
   return null;
+}
+
+/** An https origin (+ optional path) with no trailing slash, or null. Pure. */
+function httpsBase(raw: string | null | undefined): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) return null;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/** v2.1: Publication Manager's base URL for the queue's links, from
+ *  `PUBLICATION_MANAGER_URL` (wired per env in cdk/lib/app-stack.ts), else the
+ *  front door the rest of SPS links to (`request-a-change.ts`). https only:
+ *  anything else falls back to the default. Server-side (reads env). */
+export function publicationManagerBaseUrl(): string {
+  return httpsBase(process.env.PUBLICATION_MANAGER_URL) ?? httpsBase(PUBLICATION_MANAGER_URL)!;
+}
+
+/** A scholar's Publication Manager curate page, or with `doi` its Add tab
+ *  with that DOI filled in (`/curate/<uid>?add=external&doi=<doi>`, PM #1047).
+ *  Null unless `base` is https. The uid and the DOI are URL-encoded. Pure. */
+export function pmCurateHref(
+  base: string | null | undefined,
+  cwid: string,
+  opts: { doi?: string | null } = {},
+): string | null {
+  const b = httpsBase(base);
+  const uid = cwid.trim();
+  if (!b || !uid) return null;
+  const href = `${b}/curate/${encodeURIComponent(uid)}`;
+  const doi = opts.doi?.trim();
+  return doi ? `${href}?add=external&doi=${encodeURIComponent(doi)}` : href;
 }
 
 /** The queue's filter (v2 item 6/7): person type (`role_category`), unit

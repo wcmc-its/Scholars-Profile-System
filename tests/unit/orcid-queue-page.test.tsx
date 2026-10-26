@@ -13,6 +13,9 @@
  *     its best band's tab; counts are scholars), the filter (person facets +
  *     source) on list and counts, chips that open to their facts, names side
  *     by side, every work linked, Confirm sending the others to dismiss.
+ *   - v2.1: each new work's ReCiter status chip and its Publication Manager
+ *     link (review for pending / rejected, add for a DOI not in PubMed), the
+ *     status split in the preview header, and the https-only PM base URL.
  *
  * Fixture people and iDs are invented.
  */
@@ -78,6 +81,8 @@ import {
   orcidQueueHref,
   pairState,
   parseOrcidQueueFilter,
+  pmCurateHref,
+  publicationManagerBaseUrl,
   sanitizeOrcidQueueFilter,
   workHref,
   type OrcidEvidenceDetail,
@@ -129,7 +134,53 @@ const DETAIL: OrcidEvidenceDetail = {
   competitors: { cwids: [], orcids: [] },
   sources: ["orcid_works", "rpm_inferred"],
   worksDropped: 1,
+  workStatus: {
+    counts: { pending: 1, rejected: 1, not_in_pubmed: 1 },
+    unknown: 0,
+    reciterRead: true,
+    acceptedInReciter: 2,
+    resolvedByDoi: 4,
+    resolvedByTitle: 1,
+  },
 };
+const STATUS_SAMPLE = [
+  {
+    title: "A pending paper",
+    year: 2025,
+    doi: "10.9/p",
+    pmid: "901",
+    source: "Crossref",
+    url: null,
+    status: "pending" as const,
+  },
+  {
+    title: "A rejected paper",
+    year: 2024,
+    doi: null,
+    pmid: "902",
+    source: null,
+    url: null,
+    status: "rejected" as const,
+  },
+  {
+    title: "A paper PubMed lacks",
+    year: 2023,
+    doi: "10.9/a b<c>",
+    pmid: null,
+    source: null,
+    url: null,
+    status: "not_in_pubmed" as const,
+  },
+  {
+    title: "A paper never retrieved",
+    year: 2022,
+    doi: null,
+    pmid: "903",
+    source: null,
+    url: null,
+    status: "not_retrieved" as const,
+  },
+];
 const ROW: OrcidQueueRow = {
   cwid: "jd0001",
   orcid: ORCID,
@@ -350,7 +401,10 @@ describe("loader", () => {
                     competitorOrcids: [],
                     worksTotal: 5,
                     newWorks: 1,
-                    newWorksSample: [],
+                    newWorksSample:
+                      e.cwid === "a00001"
+                        ? [...STATUS_SAMPLE, { title: "Old row", year: 2020, status: "bogus" }]
+                        : [],
                     evidenceDetail: e.cwid === "a00001" ? DETAIL : null,
                   }))
               : evidence.map((e) => ({ ...e, nameAgrees: true })),
@@ -431,6 +485,14 @@ describe("loader", () => {
       sources: ["orcid_works", "rpm_inferred"],
       detail: DETAIL,
     });
+    // v2.1: each work's status survives the read; an unknown value is dropped.
+    expect(a.candidates[0]!.newWorksSample.map((w) => w.status)).toEqual([
+      "pending",
+      "rejected",
+      "not_in_pubmed",
+      "not_retrieved",
+      undefined,
+    ]);
     expect(q.counts).toMatchObject({
       strong: 2,
       moderate: 1,
@@ -630,10 +692,110 @@ describe("filter and link helpers", () => {
     expect(workHref({ url: "data:text/html,<b>x</b>" })).toBeNull();
     expect(workHref({ url: "https://" })).toBeNull();
     expect(workHref({})).toBeNull();
+    // v2.1: the DOI is URL-encoded per path segment.
+    expect(workHref({ doi: "10.1002/(SICI)1097<1::AID>3.0.CO;2-#" })).toBe(
+      "https://doi.org/10.1002/(SICI)1097%3C1%3A%3AAID%3E3.0.CO%3B2-%23",
+    );
+  });
+
+  it("pmCurateHref: https base only, uid and DOI URL-encoded", () => {
+    const base = "https://pm.example.org";
+    expect(pmCurateHref(base, "jd0001")).toBe("https://pm.example.org/curate/jd0001");
+    expect(pmCurateHref(`${base}/`, "jd0001", { doi: "10.9/a b&c=d" })).toBe(
+      "https://pm.example.org/curate/jd0001?add=external&doi=10.9%2Fa%20b%26c%3Dd",
+    );
+    expect(pmCurateHref(base, "a/b")).toBe("https://pm.example.org/curate/a%2Fb");
+    expect(pmCurateHref("http://pm.example.org", "jd0001")).toBeNull();
+    expect(pmCurateHref("javascript:alert(1)", "jd0001")).toBeNull();
+    expect(pmCurateHref("https://u:p@pm.example.org", "jd0001")).toBeNull();
+    expect(pmCurateHref(null, "jd0001")).toBeNull();
+    expect(pmCurateHref(base, " ")).toBeNull();
+  });
+
+  it("publicationManagerBaseUrl: the env's https URL, else the SPS-wide default", () => {
+    vi.stubEnv("PUBLICATION_MANAGER_URL", "https://pm-staging.example.org/");
+    expect(publicationManagerBaseUrl()).toBe("https://pm-staging.example.org");
+    vi.stubEnv("PUBLICATION_MANAGER_URL", "http://insecure.example.org");
+    expect(publicationManagerBaseUrl()).toBe("https://reciter.weill.cornell.edu");
+    vi.stubEnv("PUBLICATION_MANAGER_URL", "");
+    expect(publicationManagerBaseUrl()).toBe("https://reciter.weill.cornell.edu");
   });
 });
 
 describe("client", () => {
+  it("v2.1: each new work shows its ReCiter status and the Publication Manager link that acts on it", () => {
+    render(
+      <OrcidQueue
+        data={data({
+          cards: [CARD({}, [{ ...ROW, newWorks: 3, newWorksSample: STATUS_SAMPLE }])],
+          counts: { ...EMPTY_COUNTS, strong: 1 },
+        })}
+        basePath="/edit/orcid-queue"
+        readOnly={false}
+        pmBaseUrl="https://pm.example.org"
+      />,
+    );
+    const works = screen.getAllByTestId("orcid-queue-work");
+    const statusOf = (i: number) =>
+      works[i]!.querySelector('[data-testid="orcid-queue-work-status"]')?.textContent;
+    const pmOf = (i: number) =>
+      works[i]!.querySelector('[data-testid="orcid-queue-work-pm"]') as HTMLAnchorElement | null;
+    expect(statusOf(0)).toBe("Pending in ReCiter");
+    expect(pmOf(0)?.textContent).toBe("Review in Publication Manager");
+    expect(pmOf(0)?.getAttribute("href")).toBe("https://pm.example.org/curate/jd0001");
+    expect(statusOf(1)).toBe("Rejected in ReCiter: re-review");
+    expect(pmOf(1)?.getAttribute("href")).toBe("https://pm.example.org/curate/jd0001");
+    expect(statusOf(2)).toBe("Not in PubMed");
+    expect(pmOf(2)?.textContent).toBe("Add in Publication Manager");
+    expect(pmOf(2)?.getAttribute("href")).toBe(
+      "https://pm.example.org/curate/jd0001?add=external&doi=10.9%2Fa%20b%3Cc%3E",
+    );
+    expect(statusOf(3)).toBe("Not retrieved by ReCiter");
+    expect(pmOf(3)).toBeNull();
+    // PubMed for any PMID.
+    expect(screen.getByText("A rejected paper").getAttribute("href")).toBe(
+      "https://pubmed.ncbi.nlm.nih.gov/902/",
+    );
+    expect(screen.getByTestId("orcid-queue-work-status-summary").textContent).toBe(
+      "ReCiter: 1 pending · 1 rejected · 1 not in PubMed. 2 accepted in ReCiter counted as shared",
+    );
+  });
+
+  it("v2.1: no Publication Manager links without an https base; unknown statuses say so", () => {
+    render(
+      <OrcidQueue
+        data={data({
+          cards: [
+            CARD({}, [
+              {
+                ...ROW,
+                newWorksSample: STATUS_SAMPLE.map((w) => ({ ...w, status: null })),
+                detail: {
+                  ...DETAIL,
+                  workStatus: {
+                    ...DETAIL.workStatus!,
+                    counts: {},
+                    unknown: 3,
+                    reciterRead: false,
+                    acceptedInReciter: 0,
+                  },
+                },
+              },
+            ]),
+          ],
+        })}
+        basePath="/edit/orcid-queue"
+        readOnly={false}
+        pmBaseUrl="http://pm.example.org"
+      />,
+    );
+    expect(screen.queryAllByTestId("orcid-queue-work-pm")).toHaveLength(0);
+    expect(screen.queryAllByTestId("orcid-queue-work-status")).toHaveLength(0);
+    expect(screen.getByTestId("orcid-queue-work-status-summary").textContent).toBe(
+      "ReCiter: 3 status unknown. ReCiter could not be read on the last run",
+    );
+  });
+
   it("renders the evidence, the new-works sample and the two decisions", () => {
     render(
       <OrcidQueue

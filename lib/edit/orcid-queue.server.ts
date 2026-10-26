@@ -37,6 +37,7 @@ import {
   heldFor,
   isOrcidCandidateSource,
   isOrcidQueueTab,
+  isReciterWorkStatus,
   ORCID_QUEUE_BANDS,
   ORCID_QUEUE_SAMPLE_SIZE,
   ORCID_QUEUE_TABS,
@@ -54,6 +55,7 @@ import {
   type OrcidQueueTab,
   type OrcidQueueWork,
   type OrcidSampleBand,
+  type OrcidWorkStatusDetail,
 } from "./orcid-queue";
 
 type Client = Pick<
@@ -161,6 +163,8 @@ function asWorks(v: unknown): OrcidQueueWork[] {
       pmid: typeof w.pmid === "string" ? w.pmid : null,
       source: typeof w.source === "string" ? w.source : null,
       url: typeof w.url === "string" ? w.url : null,
+      // v2.1: absent on rows an earlier run wrote; null = ReCiter not read.
+      ...(w.status === null || isReciterWorkStatus(w.status) ? { status: w.status } : {}),
     }));
 }
 
@@ -616,6 +620,26 @@ function asDetail(v: unknown): OrcidEvidenceDetail | null {
     },
     sources: Array.isArray(d.sources) ? d.sources : [],
     worksDropped: typeof d.worksDropped === "number" ? d.worksDropped : 0,
+    ...(asWorkStatus(d.workStatus) ? { workStatus: asWorkStatus(d.workStatus)! } : {}),
+  };
+}
+
+/** `evidence_detail.workStatus` (v2.1), or null on an earlier run's row. */
+function asWorkStatus(v: unknown): OrcidWorkStatusDetail | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const w = v as Record<string, unknown>;
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : 0);
+  const counts: OrcidWorkStatusDetail["counts"] = {};
+  if (w.counts && typeof w.counts === "object")
+    for (const [k, c] of Object.entries(w.counts as Record<string, unknown>))
+      if (isReciterWorkStatus(k) && n(c) > 0) counts[k] = n(c);
+  return {
+    counts,
+    unknown: n(w.unknown),
+    reciterRead: w.reciterRead === true,
+    acceptedInReciter: n(w.acceptedInReciter),
+    resolvedByDoi: n(w.resolvedByDoi),
+    resolvedByTitle: n(w.resolvedByTitle),
   };
 }
 
