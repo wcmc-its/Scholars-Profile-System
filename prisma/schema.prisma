@@ -191,6 +191,8 @@ model Scholar {
   grantScores          GrantAttributionScore[]
   wcmNamesake          WcmNamesake?
   infoedBiosketches    InfoedBiosketch[]
+  myncbiBibliography   MyncbiBibliography?
+  myncbiCitations      MyncbiCitation[]
   clinicalTrials       PersonClinicalTrial[]
   datasetDeposits      PersonDatasetDeposit[]
   overviewGenerations  OverviewGeneration[]
@@ -1265,6 +1267,35 @@ model InfoedBiosketch {
   @@id([cwid, docVersionId])
   @@index([orcid])
   @@map("infoed_biosketch")
+}
+
+/// A scholar's public MyNCBI bibliography, fetched from the URL on their own NIH
+/// biosketch (etl/myncbi). One row per scholar; `status` "ok" | "empty" | "error".
+model MyncbiBibliography {
+  cwid          String   @id @db.VarChar(32)
+  scholar       Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  url           String   @db.VarChar(512)
+  status        String   @db.VarChar(8)
+  error         String?  @db.VarChar(255)
+  citationCount Int      @map("citation_count")
+  fetchedAt     DateTime @map("fetched_at")
+
+  @@map("myncbi_bibliography")
+}
+
+/// One citation on a scholar's MyNCBI bibliography. `pmid` null for non-PubMed items.
+model MyncbiCitation {
+  cwid       String  @db.VarChar(32)
+  scholar    Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  citationId String  @map("citation_id") @db.VarChar(32)
+  pmid       String? @db.VarChar(32)
+  title      String  @db.VarChar(1000)
+  source     String? @db.VarChar(255)
+  year       Int?
+
+  @@id([cwid, citationId])
+  @@index([pmid])
+  @@map("myncbi_citation")
 }
 
 model WcmNamesake {
