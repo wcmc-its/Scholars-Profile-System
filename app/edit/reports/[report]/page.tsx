@@ -257,6 +257,15 @@ export default async function EditReportPage({
       audience: ADMIN_AUDIENCE,
     });
     render = () => def.render({ n, session, searchParams: sp, basePath });
+  } else if (def.gate === "superuser") {
+    if (!session.isSuperuser) notFound();
+    back = "/edit/reports";
+    loadAccess = async () => ({
+      mode: "unit",
+      audience: "Superusers",
+      rule: "Only superusers can run this report.",
+    });
+    render = () => def.render({ n, session, searchParams: sp, basePath });
   } else {
     // Row-based gate: an empty scope set reads as an unbuilt route, the same
     // 404 `/edit/data-sharing` gives a non-viewer.
