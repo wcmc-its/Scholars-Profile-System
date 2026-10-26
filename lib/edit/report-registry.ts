@@ -86,6 +86,7 @@ import { renderCoreGrantsReport } from "@/components/edit/reports/core-grants-bo
 import { renderCoreOutputReport } from "@/components/edit/reports/core-output-over-time-body";
 import { renderCoreUsersReport } from "@/components/edit/reports/core-users-body";
 import { renderGrantAttributionReport } from "@/components/edit/reports/grant-attribution-body";
+import { renderNihBiosketchesReport } from "@/components/edit/reports/nih-biosketches-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -145,6 +146,10 @@ export type AdminReportProps = {
   basePath: string;
 };
 
+/** What a superuser-gated body (report 15) is handed: the gate is
+ *  `session.isSuperuser` alone (not comms stewards), nothing to scope. */
+export type SuperuserReportProps = AdminReportProps;
+
 /** What a body returns. `subtitle` becomes `ReportHeader`'s children (the
  *  page's dynamic `<p>` between the h1 and the "About this report"
  *  disclosure — reports 3–7 have one, 1–2 none); `main` renders after the
@@ -174,6 +179,12 @@ export type ReportDef =
        *  gets `notFound()`, like the person gate. */
       gate: "admin";
       render: (props: AdminReportProps) => Promise<ReportRender>;
+    }
+  | {
+      n: ReportKey;
+      /** `session.isSuperuser`; anyone else gets `notFound()`. No grants. */
+      gate: "superuser";
+      render: (props: SuperuserReportProps) => Promise<ReportRender>;
     };
 
 /** Every report, by `report_meta.report_key`. Reports 1–6 are unit-gated;
@@ -214,6 +225,8 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     accessKey: GRANT_ATTRIBUTION_REPORT,
     render: renderGrantAttributionReport,
   },
+  // NIH biosketches harvested from InfoEd (etl/infoed-biosketch). Superusers only.
+  "15": { n: "15", gate: "superuser", render: renderNihBiosketchesReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page
