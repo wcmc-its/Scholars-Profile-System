@@ -640,6 +640,7 @@ function asWorkStatus(v: unknown): OrcidWorkStatusDetail | null {
     acceptedInReciter: n(w.acceptedInReciter),
     resolvedByDoi: n(w.resolvedByDoi),
     resolvedByTitle: n(w.resolvedByTitle),
+    pubmedUnknown: n(w.pubmedUnknown),
   };
 }
 

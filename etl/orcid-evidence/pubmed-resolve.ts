@@ -16,11 +16,17 @@
  * 429 or 5xx; a per-request timeout.
  *
  * NEVER throws. A failed batch leaves its DOIs unresolved and is counted; after
- * MAX_CONSECUTIVE_FAILURES failed batches in a row the resolver stops calling
- * NCBI for the rest of the run (an outage must not stall the weekly run with
- * hundreds of retried batches). The caller logs the counts and writes its
- * evidence regardless: an unresolved DOI only means the work shows as
- * "not in PubMed".
+ * MAX_CONSECUTIVE_FAILURES failed batches in a row on one host (the converter
+ * on pmc.ncbi.nlm.nih.gov, or E-utilities) the resolver stops calling that host
+ * for the rest of the run (an outage must not stall the weekly run with
+ * hundreds of retried batches); a converter outage still lets `[aid]` run. The
+ * caller logs the counts and writes its evidence regardless.
+ *
+ * `resolve` tells "not in PubMed" from "not looked up": a DOI maps to its PMID,
+ * to null when a working `[aid]` search answered and found none, and is absent
+ * when no lookup answered it (a failed batch, giving up, or a DOI the search
+ * cannot express). Only the converter not knowing a DOI says nothing: it knows
+ * PMC articles only.
  *
  * Cached per resolver instance (one per run), so a DOI is looked up once.
  * The mapping is pure and exported; the fetcher is injectable for tests.
@@ -58,7 +64,7 @@ export type ResolveStats = {
   byAid: number;
   unresolved: number;
   failedBatches: number;
-  /** True when the resolver stopped calling NCBI after repeated failures. */
+  /** True when the resolver stopped calling an NCBI host after repeated failures. */
   gaveUp: boolean;
 };
 
@@ -137,8 +143,8 @@ const chunk = <T>(xs: readonly T[], n: number): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
 /**
- * A per-run DOI → PMID resolver. `resolve` returns the PMIDs it found (cached
- * across calls) and never throws; `stats` holds the counts for the run's log.
+ * A per-run DOI → PMID resolver. `resolve` returns each answered DOI's PMID or
+ * null (cached across calls) and never throws; `stats` holds the counts for the run's log.
  */
 export function createPmidResolver(opts: ResolverOptions = {}) {
   const fetchFn = opts.fetchFn ?? fetch;
@@ -156,7 +162,12 @@ export function createPmidResolver(opts: ResolverOptions = {}) {
     failedBatches: 0,
     gaveUp: false,
   };
-  let consecutive = 0;
+  /** Failures in a row and giving up, per host: one host's outage must not
+   *  stop the other's lookups. */
+  const hosts = {
+    idconv: { consecutive: 0, gaveUp: false },
+    eutils: { consecutive: 0, gaveUp: false },
+  };
   let calls = 0;
 
   /** One GET as JSON, with the shared retry rule; null = this batch failed. */
@@ -184,16 +195,18 @@ export function createPmidResolver(opts: ResolverOptions = {}) {
     }
   }
 
-  /** Runs one batch; false when it failed (and counts toward giving up). */
-  async function batch(run: () => Promise<boolean>): Promise<void> {
-    if (stats.gaveUp) return;
+  /** Runs one batch against a host; false when it failed (and counts toward
+   *  giving up on that host). */
+  async function batch(host: keyof typeof hosts, run: () => Promise<boolean>): Promise<void> {
+    const h = hosts[host];
+    if (h.gaveUp) return;
     const ok = await run();
     if (ok) {
-      consecutive = 0;
+      h.consecutive = 0;
       return;
     }
     stats.failedBatches++;
-    if (++consecutive >= MAX_CONSECUTIVE_FAILURES) stats.gaveUp = true;
+    if (++h.consecutive >= MAX_CONSECUTIVE_FAILURES) h.gaveUp = stats.gaveUp = true;
   }
 
   const params = (p: Record<string, string>) => {
@@ -202,16 +215,20 @@ export function createPmidResolver(opts: ResolverOptions = {}) {
     return q.toString();
   };
 
-  async function resolve(raw: Iterable<string>): Promise<Map<string, string>> {
+  /** Normalized DOI → PMID, or null = looked up and not in PubMed; a DOI no
+   *  lookup answered is absent. */
+  async function resolve(raw: Iterable<string>): Promise<Map<string, string | null>> {
     const wanted = [...new Set([...raw].map(normalizeDoi).filter((d): d is string => !!d))].filter(
       (d) => !cache.has(d),
     );
     stats.requested += wanted.length;
     const found = new Map<string, string>();
+    /** DOIs a working [aid] search was asked about. */
+    const answered = new Set<string>();
 
     // 1. PMC ID converter.
     for (const part of chunk(wanted, IDCONV_BATCH)) {
-      await batch(async () => {
+      await batch("idconv", async () => {
         const json = await getJson(
           `${IDCONV}?${params({ ids: part.join(","), idtype: "doi", format: "json" })}`,
         );
@@ -227,9 +244,10 @@ export function createPmidResolver(opts: ResolverOptions = {}) {
     // 2. PubMed [aid] for the rest, mapped back through ESummary.
     const rest = wanted.filter((d) => !found.has(d));
     for (const part of chunk(rest, AID_BATCH)) {
-      await batch(async () => {
+      await batch("eutils", async () => {
         const term = aidTerm(part);
         if (!term) return true;
+        const asked = part.filter((d) => !d.includes('"'));
         const search = await getJson(
           `${ESEARCH}?${params({ db: "pubmed", term, retmode: "json", retmax: String(part.length * 3) })}`,
         );
@@ -237,7 +255,10 @@ export function createPmidResolver(opts: ResolverOptions = {}) {
           ?.idlist;
         if (search === null || !Array.isArray(ids)) return false;
         const pmids = ids.map(pmidOf).filter((p): p is string => !!p);
-        if (pmids.length === 0) return true;
+        if (pmids.length === 0) {
+          for (const d of asked) answered.add(d);
+          return true;
+        }
         const summary = await getJson(
           `${ESUMMARY}?${params({ db: "pubmed", id: pmids.join(","), retmode: "json" })}`,
         );
@@ -246,23 +267,22 @@ export function createPmidResolver(opts: ResolverOptions = {}) {
           found.set(doi, pmid);
           stats.byAid++;
         }
+        for (const d of asked) answered.add(d);
         return true;
       });
     }
 
     // Cache only what a working lookup answered: a DOI a failed batch skipped
-    // is not cached as "not found" (it is still unresolved for this run).
+    // is not cached as "not found" (it stays unknown for this run).
     for (const d of wanted) {
       if (found.has(d)) cache.set(d, found.get(d)!);
-      else stats.unresolved++;
+      else {
+        stats.unresolved++;
+        if (answered.has(d)) cache.set(d, null);
+      }
     }
-    if (!stats.gaveUp && stats.failedBatches === 0)
-      for (const d of wanted) if (!found.has(d)) cache.set(d, null);
-    const out = new Map<string, string>();
-    for (const d of [...raw].map(normalizeDoi)) {
-      const hit = d ? cache.get(d) : null;
-      if (d && hit) out.set(d, hit);
-    }
+    const out = new Map<string, string | null>();
+    for (const d of [...raw].map(normalizeDoi)) if (d && cache.has(d)) out.set(d, cache.get(d)!);
     return out;
   }
 

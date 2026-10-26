@@ -93,9 +93,11 @@ const SUPPLEMENT_TITLES: readonly RegExp[] = [
 ];
 const isSupplementTitle = (title: string) => SUPPLEMENT_TITLES.some((re) => re.test(title));
 
-/** AACR supplement DOIs: `10.1158/<ISSN>.<6+ digits>`, optionally `.vN`. An AACR
+/** AACR supplement DOIs: `10.1158/<ISSN>.<6+ digits>`, optionally `.vN`, and
+ *  the Figshare collection form `10.1158/<ISSN>.c.<6+ digits>` (titled "Data
+ *  from <article title>", which no title rule can tell from a paper). An AACR
  *  article DOI has letters after the ISSN (`10.1158/0008-5472.CAN-20-1234`). */
-export const AACR_SUPPLEMENT_DOI = /^10\.1158\/\d{4}-\d{3}[\dx]\.\d{6,}(\.v\d+)?$/i;
+export const AACR_SUPPLEMENT_DOI = /^10\.1158\/\d{4}-\d{3}[\dx]\.(c\.)?\d{6,}(\.v\d+)?$/i;
 
 /** Shorter normalized titles never group: too generic to call two works one. */
 const MIN_TITLE_KEY = 20;

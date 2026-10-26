@@ -46,7 +46,8 @@
  *
  * v2.1: PMIDs and ReCiter status. Every work with a DOI but no PMID goes through
  * the DOI → PMID lookup (`pubmed-resolve.ts`: the PMC ID converter, then PubMed
- * `[aid]`; an NCBI outage leaves them unresolved and the run goes on), and a
+ * `[aid]`; a DOI no lookup answered, as in an NCBI outage, gets status unknown,
+ * not `not_in_pubmed`, and the run goes on), and a
  * work with neither id is matched by exact normalized title + year ±1 against
  * the scholar's own publications. Then ReCiter's assertions for the scholar
  * (reciterdb `person_article.userAssertion`, read for the record's PMIDs only):
@@ -190,6 +191,9 @@ type WorkFact = Omit<NewWork, "status"> & {
   type: string | null;
   /** v2.1: how the PMID was found when the record had none. */
   resolvedBy?: "doi" | "title";
+  /** v2.1: a DOI-only work none of whose DOIs the PubMed lookup answered (an
+   *  NCBI outage, a failed batch): its status is unknown, not `not_in_pubmed`. */
+  pubmedUnknown?: true;
 };
 
 /** What one `/record` says, normalized once per iD. */
@@ -465,12 +469,13 @@ export function reciterAssertionOf(raw: unknown): ReciterAssertion {
 
 /** A new work's ReCiter status for the scholar. `assertions` is the scholar's
  *  PMID → assertion map; null/undefined = ReCiter was not read, so a PMID's
- *  status is unknown (null). Pure. */
+ *  status is unknown (null). A DOI-only work the PubMed lookup never answered
+ *  (`pubmedUnknown`) is unknown too. Pure. */
 export function reciterStatusOf(
-  w: Pick<WorkFact, "pmid" | "doi">,
+  w: Pick<WorkFact, "pmid" | "doi" | "pubmedUnknown">,
   assertions: ReadonlyMap<string, ReciterAssertion> | null | undefined,
 ): ReciterWorkStatus | null {
-  if (!w.pmid) return w.doi ? "not_in_pubmed" : "no_ids";
+  if (!w.pmid) return w.doi ? (w.pubmedUnknown ? null : "not_in_pubmed") : "no_ids";
   if (!assertions) return null;
   const a = assertions.get(w.pmid);
   if (a === "ACCEPTED") return "accepted";
@@ -504,14 +509,14 @@ export function newWorksOf(
   const sample = [...fresh]
     .sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
     .slice(0, NEW_WORKS_SAMPLE)
-    .map(({ title, year, doi, pmid, source, url }) => ({
+    .map(({ title, year, doi, pmid, source, url, pubmedUnknown }) => ({
       title,
       year,
       doi,
       pmid,
       source,
       url,
-      status: reciterStatusOf({ pmid, doi }, assertions),
+      status: reciterStatusOf({ pmid, doi, pubmedUnknown }, assertions),
     }));
   return { total: facts.works.length, count: fresh.length, sample, counts, unknown };
 }
@@ -532,21 +537,26 @@ export function doisToResolve(facts: Iterable<Pick<RecordFacts, "works">>): stri
 }
 
 /** The record with each DOI-only work given the PMID its DOI resolved to
- *  (`resolved`: normalized DOI → PMID), in the work's ids, `pmid` and the
- *  record's `workIds`. A work whose DOIs resolve to two PMIDs stays unresolved. Pure. */
+ *  (`resolved`: normalized DOI → PMID, or null = looked up and not in PubMed;
+ *  a DOI the lookup never answered is absent), in the work's ids, `pmid` and
+ *  the record's `workIds`. A work whose DOIs resolve to two PMIDs stays
+ *  unresolved; one none of whose DOIs was answered is marked `pubmedUnknown`.
+ *  Pure. */
 export function withResolvedPmids<F extends Pick<RecordFacts, "works" | "workIds">>(
   f: F,
-  resolved: ReadonlyMap<string, string>,
+  resolved: ReadonlyMap<string, string | null>,
 ): F {
   let changed = false;
   const works = f.works.map((w) => {
     if ([...w.ids].some((k) => k.startsWith("pmid:"))) return w;
-    const hits = new Set(
-      [...w.ids]
-        .filter((k) => k.startsWith("doi:"))
-        .map((k) => resolved.get(normalizeDoi(k.slice(4)) ?? ""))
-        .filter((p): p is string => !!p),
-    );
+    const dois = [...w.ids]
+      .filter((k) => k.startsWith("doi:"))
+      .map((k) => normalizeDoi(k.slice(4)) ?? "");
+    if (dois.length > 0 && !dois.some((d) => resolved.has(d))) {
+      changed = true;
+      return { ...w, pubmedUnknown: true as const };
+    }
+    const hits = new Set(dois.map((d) => resolved.get(d)).filter((p): p is string => !!p));
     if (hits.size !== 1) return w;
     const pmid = [...hits][0]!;
     changed = true;
@@ -558,9 +568,18 @@ export function withResolvedPmids<F extends Pick<RecordFacts, "works" | "workIds
   return { ...f, works, workIds };
 }
 
+/** Normalized titles that name a kind of item, not a paper: a scholar's one
+ *  "Letter to the editor" is no evidence that a homonym's is the same work. */
+const GENERIC_TITLES: readonly RegExp[] = [
+  /^(letters?|correspondence) (to|from) (the )?editors?$/,
+  /^((authors?|author s|editors?|editor s) )?((re|in) )?(reply|replies|response|responses|answer|rebuttal|comments?|notes?)( (to|on|by|from|regarding))?( (the|a|an))?( (authors?|author s|editors?|editor s))?( (letters?|comments?|commentary|editorial|correspondence))?( (to|on|by|from))?( (the|a|an))?( (editors?|authors?|editorial|letter|comment|commentary))?$/,
+  /^(invited |editorial )?(editorial|commentary|comment|editorial comment|perspective)$/,
+  /^(erratum|errata|correction|corrigendum|retraction|retraction notice|expression of concern|notice of retraction)$/,
+];
+
 /** A title as the v2.1 title match compares it: HTML tags removed, accents
- *  folded, lowercased, punctuation to spaces. Null under 20 characters (too
- *  generic to match on). Pure. */
+ *  folded, lowercased, punctuation to spaces. Null under 20 characters or for
+ *  a generic correspondence title (`GENERIC_TITLES`): too generic to match on. Pure. */
 export function titleMatchKey(title: string | null | undefined): string | null {
   if (!title) return null;
   const k = fold(title.replace(/<[^>]*>/g, " "))
@@ -568,7 +587,7 @@ export function titleMatchKey(title: string | null | undefined): string | null {
     .replace(/&[a-z]+;|&#\d+;/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-  return k.length >= 20 ? k : null;
+  return k.length >= 20 && !GENERIC_TITLES.some((re) => re.test(k)) ? k : null;
 }
 
 export type ScholarTitle = { pmid: string; title: string | null; year: number | null };
@@ -853,6 +872,7 @@ export function assembleEvidence(args: {
           acceptedInReciter,
           resolvedByDoi: f.works.filter((w) => w.resolvedBy === "doi").length,
           resolvedByTitle: f.works.filter((w) => w.resolvedBy === "title").length,
+          pubmedUnknown: f.works.filter((w) => w.pubmedUnknown).length,
         },
       },
       recordModifiedAt: f.modifiedAt,
@@ -1053,11 +1073,13 @@ const chunk = <T>(xs: T[], n: number): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
 /** The run's DOI → PMID lookup over every DOI-only work. Never throws: an NCBI
- *  outage logs its counts and returns what resolved (possibly nothing). */
-async function resolveWorkPmids(facts: Map<string, RecordFacts>): Promise<Map<string, string>> {
+ *  outage logs its counts and returns what was answered (possibly nothing). */
+async function resolveWorkPmids(
+  facts: Map<string, RecordFacts>,
+): Promise<Map<string, string | null>> {
   const dois = doisToResolve(facts.values());
   const resolver = createPmidResolver({ apiKey: process.env.NCBI_API_KEY });
-  let resolved = new Map<string, string>();
+  let resolved = new Map<string, string | null>();
   try {
     resolved = await resolver.resolve(dois);
   } catch (err) {
@@ -1066,7 +1088,7 @@ async function resolveWorkPmids(facts: Map<string, RecordFacts>): Promise<Map<st
   }
   const st = resolver.stats;
   console.log(
-    `DOI → PMID: ${dois.length} DOI-only DOIs, ${resolved.size} resolved (${st.byIdconv} PMC ID converter, ${st.byAid} PubMed [aid]), ${st.unresolved} unresolved, ${st.failedBatches} failed batches${st.gaveUp ? " (NCBI unreachable: stopped early, the rest stay unresolved)" : ""}`,
+    `DOI → PMID: ${dois.length} DOI-only DOIs, ${[...resolved.values()].filter(Boolean).length} resolved (${st.byIdconv} PMC ID converter, ${st.byAid} PubMed [aid]), ${st.unresolved} unresolved (${dois.length - resolved.size} never answered: status unknown), ${st.failedBatches} failed batches${st.gaveUp ? " (NCBI unreachable: stopped early, the rest stay unknown)" : ""}`,
   );
   return resolved;
 }
@@ -1235,7 +1257,8 @@ async function main(): Promise<number> {
   }
 
   // 2b. DOI → PMID for works with a DOI and no PMID (v2.1 item 2). Never throws:
-  //     an NCBI outage leaves them unresolved ("not in PubMed") and the run goes on.
+  //     a DOI the lookup never answered (an NCBI outage) gets status unknown,
+  //     not "not in PubMed", and the run goes on.
   const resolution = await resolveWorkPmids(facts);
   for (const [orcid, f] of facts) facts.set(orcid, withResolvedPmids(f, resolution));
 
@@ -1325,6 +1348,7 @@ async function main(): Promise<number> {
     statusTotals.accepted_in_reciter =
       (statusTotals.accepted_in_reciter ?? 0) + ws.acceptedInReciter;
     statusTotals.title_matched = (statusTotals.title_matched ?? 0) + ws.resolvedByTitle;
+    statusTotals.pubmed_unknown = (statusTotals.pubmed_unknown ?? 0) + (ws.pubmedUnknown ?? 0);
   }
   console.log(`new works by ReCiter status (all rows): ${JSON.stringify(statusTotals)}`);
 

@@ -778,6 +778,7 @@ describe("client", () => {
                     unknown: 3,
                     reciterRead: false,
                     acceptedInReciter: 0,
+                    pubmedUnknown: 2,
                   },
                 },
               },
@@ -792,7 +793,7 @@ describe("client", () => {
     expect(screen.queryAllByTestId("orcid-queue-work-pm")).toHaveLength(0);
     expect(screen.queryAllByTestId("orcid-queue-work-status")).toHaveLength(0);
     expect(screen.getByTestId("orcid-queue-work-status-summary").textContent).toBe(
-      "ReCiter: 3 status unknown. ReCiter could not be read on the last run",
+      "ReCiter: 3 status unknown. ReCiter could not be read on the last run. PubMed lookup unavailable on the last run for 2 DOI-only works",
     );
   });
 

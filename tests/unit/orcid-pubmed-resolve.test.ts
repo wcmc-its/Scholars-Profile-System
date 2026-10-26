@@ -144,6 +144,7 @@ describe("createPmidResolver", () => {
     const r = createPmidResolver({ fetchFn: fn, ...fast });
     const got = await r.resolve(["10.1/PMC", "https://doi.org/10.1/pubmed", "10.1/nowhere"]);
     expect([...got].sort()).toEqual([
+      ["10.1/nowhere", null],
       ["10.1/pmc", "111"],
       ["10.1/pubmed", "222"],
     ]);
@@ -180,7 +181,10 @@ describe("createPmidResolver", () => {
     const before = calls.length;
     const again = await r.resolve(["10.1/A", "10.1/b"]);
     expect(calls.length).toBe(before);
-    expect([...again]).toEqual([["10.1/a", "1"]]);
+    expect([...again]).toEqual([
+      ["10.1/a", "1"],
+      ["10.1/b", null],
+    ]);
   });
 
   it("sends the api key when configured, and never without one", async () => {
@@ -203,15 +207,16 @@ describe("createPmidResolver", () => {
     expect(r.stats.failedBatches).toBe(0);
   });
 
-  it("an outage never throws: DOIs stay unresolved, and it stops calling after 3 failed batches", async () => {
+  it("an outage never throws: DOIs stay unresolved, and it stops calling each host after 3 failed batches", async () => {
     const dois = Array.from({ length: 1000 }, (_, i) => `10.9/${i}`);
     const { fn, calls } = fakeNcbi({ fail: () => new Error("ECONNRESET") });
     const r = createPmidResolver({ fetchFn: fn, ...fast });
     const got = await r.resolve(dois);
     expect(got.size).toBe(0);
-    expect(r.stats).toMatchObject({ unresolved: 1000, failedBatches: 3, gaveUp: true });
-    // 3 batches × (1 try + 3 retries); nothing after giving up.
-    expect(calls).toHaveLength(12);
+    expect(r.stats).toMatchObject({ unresolved: 1000, failedBatches: 6, gaveUp: true });
+    // Per host (converter, then E-utilities): 3 batches × (1 try + 3 retries);
+    // nothing after giving up.
+    expect(calls).toHaveLength(24);
   });
 
   it("a failed batch is not cached as not-found", async () => {
@@ -224,5 +229,37 @@ describe("createPmidResolver", () => {
     expect((await r.resolve(["10.1/a"])).size).toBe(0);
     down = false;
     expect([...(await r.resolve(["10.1/a"]))]).toEqual([["10.1/a", "5"]]);
+  });
+
+  it("a DOI no lookup answered is absent (unknown), not null (not in PubMed)", async () => {
+    // The converter answers; every [aid] search fails: the converter not
+    // knowing a DOI says nothing about PubMed.
+    const { fn } = fakeNcbi({
+      pmc: { "10.1/a": "5" },
+      fail: (u) => (u.pathname.endsWith("esearch.fcgi") ? new Error("ECONNRESET") : null),
+    });
+    const got = await createPmidResolver({ fetchFn: fn, ...fast }).resolve(["10.1/a", "10.1/b"]);
+    expect([...got]).toEqual([["10.1/a", "5"]]);
+    expect(got.has("10.1/b")).toBe(false);
+  });
+
+  it("a converter outage still lets PubMed [aid] run: giving up is per host", async () => {
+    const dois = Array.from({ length: 600 }, (_, i) => `10.9/${i}`);
+    const { fn, calls } = fakeNcbi({
+      pubmed: { "10.9/1": "11", "10.9/599": "99" },
+      fail: (u) => (u.pathname.includes("idconv") ? json({}, 503) : null),
+    });
+    const r = createPmidResolver({ fetchFn: fn, ...fast });
+    const got = await r.resolve(dois);
+    expect(got.get("10.9/1")).toBe("11");
+    expect(got.get("10.9/599")).toBe("99");
+    expect(got.get("10.9/2")).toBeNull();
+    expect(got.size).toBe(600);
+    expect(r.stats).toMatchObject({ byIdconv: 0, byAid: 2, failedBatches: 3, gaveUp: true });
+    // 3 converter batches × 4 tries, then every [aid] batch.
+    expect(calls.filter((u) => u.pathname.includes("idconv"))).toHaveLength(12);
+    expect(calls.filter((u) => u.pathname.endsWith("esearch.fcgi"))).toHaveLength(
+      Math.ceil(600 / AID_BATCH),
+    );
   });
 });

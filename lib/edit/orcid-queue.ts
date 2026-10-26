@@ -245,7 +245,8 @@ export type OrcidWorkStatusDetail = {
   /** New works (not in the scholar's publications) per status; `accepted`
    *  is never here (accepted works are shared, see `acceptedInReciter`). */
   counts: Partial<Record<ReciterWorkStatus, number>>;
-  /** New works with a PMID whose status is unknown: ReCiter was not read. */
+  /** New works whose status is unknown: a PMID when ReCiter was not read, or a
+   *  DOI the PubMed lookup never answered (`pubmedUnknown`). */
   unknown: number;
   /** False when the run could not read ReCiter's assertions. */
   reciterRead: boolean;
@@ -255,6 +256,10 @@ export type OrcidWorkStatusDetail = {
   /** Record works whose PMID came from the DOI lookup, or from a title match. */
   resolvedByDoi: number;
   resolvedByTitle: number;
+  /** Record works with a DOI and no PMID the PubMed lookup never answered (an
+   *  NCBI outage): neither resolved nor shown as not in PubMed. Absent on rows
+   *  written before it existed. */
+  pubmedUnknown?: number;
 };
 
 /** A work's link: PubMed when it has a PMID, else doi.org, else its own URL

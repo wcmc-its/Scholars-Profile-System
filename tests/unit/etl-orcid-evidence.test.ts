@@ -9,6 +9,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createPmidResolver, type FetchFn } from "@/etl/orcid-evidence/pubmed-resolve";
+
 import {
   assembleEvidence,
   autoConfirmStep,
@@ -912,6 +914,8 @@ describe("v2.1: PMIDs from DOIs and titles, and ReCiter status", () => {
     expect(reciterStatusOf({ pmid: null, doi: null }, a)).toBe("no_ids");
     expect(reciterStatusOf({ pmid: "4", doi: null }, null)).toBeNull();
     expect(reciterStatusOf({ pmid: null, doi: "10.1/x" }, null)).toBe("not_in_pubmed");
+    // The PubMed lookup never answered its DOI: unknown, not "not in PubMed".
+    expect(reciterStatusOf({ pmid: null, doi: "10.1/x", pubmedUnknown: true }, a)).toBeNull();
   });
 
   it("doisToResolve: the DOIs of works with no PMID, normalized and distinct", () => {
@@ -926,7 +930,12 @@ describe("v2.1: PMIDs from DOIs and titles, and ReCiter status", () => {
     const two = g.works.find((w) => w.title === "Paper two")!;
     expect(two).toMatchObject({ pmid: "102", resolvedBy: "doi" });
     expect(g.workIds.has("pmid:102")).toBe(true);
-    expect(withResolvedPmids(f, new Map())).toBe(f);
+    // Every DOI answered "not in PubMed": nothing changes.
+    expect(withResolvedPmids(f, new Map(doisToResolve([f]).map((d) => [d, null])))).toBe(f);
+    // No DOI answered (an outage): the DOI-only works are marked unknown.
+    expect(
+      withResolvedPmids(f, new Map()).works.find((w) => w.title === "Paper two"),
+    ).toMatchObject({ pmid: null, pubmedUnknown: true });
     // A work whose DOIs resolve to two PMIDs stays unresolved.
     const twin = {
       ...f,
@@ -948,6 +957,25 @@ describe("v2.1: PMIDs from DOIs and titles, and ReCiter status", () => {
       titleMatchKey("GENE EXPRESSION IN HUMAN LIVER CELLS"),
     );
     expect(titleMatchKey("Reply")).toBeNull();
+  });
+
+  it.each([
+    "Letter to the Editor",
+    "Letters to the editor",
+    "Reply to the Letter to the Editor",
+    "Response to letter to the editor",
+    "In reply to the editor",
+    "Authors' reply to the letter to the editor",
+    "Response to the comment on the editorial",
+  ])("titleMatchKey: generic correspondence title %s never matches", (title) => {
+    expect(titleMatchKey(title)).toBeNull();
+    const pubs = [{ pmid: "500", title, year: 2021 }];
+    expect(matchByTitle({ title, year: 2021, ids: new Set<string>() }, pubs)).toBeNull();
+  });
+
+  it("titleMatchKey keeps a specific title that opens with a correspondence word", () => {
+    expect(titleMatchKey("Response to immunotherapy in metastatic melanoma")).not.toBeNull();
+    expect(titleMatchKey("Letter to the editor regarding statin use in sepsis")).not.toBeNull();
   });
 
   it("matchByTitle: exact normalized title, year ±1, no ids, one paper only", () => {
@@ -1001,6 +1029,7 @@ describe("v2.1: PMIDs from DOIs and titles, and ReCiter status", () => {
       acceptedInReciter: 1,
       resolvedByDoi: 0,
       resolvedByTitle: 1,
+      pubmedUnknown: 0,
     });
   });
 
@@ -1023,6 +1052,24 @@ describe("v2.1: PMIDs from DOIs and titles, and ReCiter status", () => {
     expect(row!.shared).toBe(4);
     expect(row!.newWorks).toBe(4);
     expect(row!.evidenceDetail.workStatus!.resolvedByDoi).toBe(1);
+    expect(row!.evidenceDetail.workStatus!.counts.not_in_pubmed).toBeUndefined();
+  });
+
+  it("an NCBI outage (fetch rejects): the DOI-only work is unknown, not 'not in PubMed'", async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new Error("ECONNRESET");
+    }) as unknown as FetchFn;
+    const resolver = createPmidResolver({ fetchFn, delayMs: 0, retryBaseMs: 0 });
+    const facts = recordFacts(ORCID, statusRecord());
+    const f = withResolvedPmids(facts, await resolver.resolve(doisToResolve([facts])));
+    const [row] = assemble({ facts: new Map([[ORCID, f]]), reciter: RECITER, titles: TITLES });
+    const doiOnly = row!.newWorksSample.find((w) => w.title === "A DOI-only paper")!;
+    expect(doiOnly.status).toBeNull();
+    expect(row!.evidenceDetail.workStatus).toMatchObject({
+      counts: { pending: 1, rejected: 1, not_retrieved: 1, no_ids: 1 },
+      unknown: 1,
+      pubmedUnknown: 1,
+    });
     expect(row!.evidenceDetail.workStatus!.counts.not_in_pubmed).toBeUndefined();
   });
 });

@@ -149,6 +149,23 @@ describe("v2.1: supplements, whatever the ORCID type", () => {
     }
   });
 
+  it("drops an AACR Figshare collection DOI (10.1158/<issn>.c.<digits>) titled 'Data from …'", () => {
+    const d = "10.1158/0008-5472.c.6506030";
+    expect(AACR_SUPPLEMENT_DOI.test(d)).toBe(true);
+    expect(AACR_SUPPLEMENT_DOI.test("10.1158/1078-0432.c.6531234.v1")).toBe(true);
+    expect(
+      isNonPublicationWork(w("Data from Deleting Trim33 in mouse tumors", "journal-article", d)),
+    ).toBe(true);
+  });
+
+  it("keeps a 'Data from the …' paper with a non-AACR DOI", () => {
+    expect(
+      isNonPublicationWork(
+        w("Data from the Nurses' Health Study on diet", "journal-article", "10.1093/aje/kwx123"),
+      ),
+    ).toBe(false);
+  });
+
   it("keeps an AACR article DOI", () => {
     for (const d of [
       "10.1158/0008-5472.CAN-20-1234",

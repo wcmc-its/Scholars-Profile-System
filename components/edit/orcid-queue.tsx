@@ -644,6 +644,9 @@ function WorkStatusSummary({ row: r }: { row: OrcidQueueRow }) {
       ? [`${fmt(ws.acceptedInReciter)} accepted in ReCiter counted as shared`]
       : []),
     ...(!ws.reciterRead ? ["ReCiter could not be read on the last run"] : []),
+    ...((ws.pubmedUnknown ?? 0) > 0
+      ? [`PubMed lookup unavailable on the last run for ${fmt(ws.pubmedUnknown!)} DOI-only works`]
+      : []),
   ];
   return (
     <div className="text-muted-foreground mt-0.5" data-testid="orcid-queue-work-status-summary">
