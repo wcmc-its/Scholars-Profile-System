@@ -2768,6 +2768,11 @@ model CancerCenterFundingAward {
   cancerRelevantPromptHash    String?  @map("cancer_relevant_prompt_hash") @db.VarChar(12)
   cancerRelevantInputHash     String?  @map("cancer_relevant_input_hash") @db.VarChar(64)
   cancerRelevantInferredAt    DateTime? @map("cancer_relevant_inferred_at")
+  /// A reviewer's free-text note on the award (e.g. why it is under 100%
+  /// cancer-relevant), set on `/edit/reports` beside the percent and carried
+  /// into the CSV. Human-only: the import never writes it, except to carry a
+  /// prior cycle's note forward with the reviewer percent. NULL = no note.
+  reviewerNote                String?   @map("reviewer_note") @db.Text
   /// DT2A rule #4 (CCSG Data Guide p.7): "Only grant and contracts from NCI,
   /// NIH, or organizations listed in [the closed allowlist] are considered
   /// peer-reviewed." Fully deterministic — no Bedrock call, no `source`

@@ -23,6 +23,10 @@
  * shows each saved value itself (`applyNci2aWrite`) until the server row has
  * it — a stale row must never bring back an Accept bound to the old AI value.
  *
+ * Notes: a free-text reviewer note per row (`reviewerNote`, same PATCH),
+ * saved when the field loses focus; Esc undoes. MCC uses it to say why an
+ * award is under 100% cancer-relevant; it is the CSV's Notes column.
+ *
  * Program is read-only here: the PI's center membership, edited in the
  * center roster. Nothing here reaches `@/lib/db`.
  */
@@ -38,6 +42,7 @@ import {
   applyNci2aWrite,
   bulkAcceptTargets,
   money,
+  NCI2A_NOTE_MAX,
   nci2aCsv,
   nci2aStatus,
   nci2aWriteLanded,
@@ -106,6 +111,7 @@ export function Nci2aDownloadButton({
 }
 
 type Save = (awardId: string, value: number) => Promise<boolean>;
+type SaveNote = (awardId: string, note: string | null) => Promise<boolean>;
 
 const value0 = (a: Nci2aAward) =>
   a.cancerRelevantPercent == null ? "" : String(a.cancerRelevantPercent);
@@ -199,6 +205,61 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
         <StatusPill award={award} />
       </div>
     </div>
+  );
+}
+
+function NoteCell({ award, save }: { award: Nci2aAward; save: SaveNote }) {
+  const [draft, setDraft] = React.useState<string | undefined>(undefined);
+  // The note this cell saved, shown until the (possibly lagging) replica has it.
+  const [saved, setSaved] = React.useState<string | null | undefined>(undefined);
+  const [busy, setBusy] = React.useState(false);
+  const cancelled = React.useRef(false);
+  const server = award.reviewerNote ?? null;
+  if (saved !== undefined && saved === server) setSaved(undefined);
+  const current = saved !== undefined ? saved : server;
+
+  async function commit() {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
+    if (draft === undefined) return;
+    const next = draft.trim() || null;
+    if (next === current) {
+      setDraft(undefined);
+      return;
+    }
+    setBusy(true);
+    const ok = await save(award.id, next);
+    setBusy(false);
+    if (ok) setSaved(next);
+    setDraft(undefined);
+  }
+
+  const under100 = award.cancerRelevantPercent != null && award.cancerRelevantPercent < 100;
+  return (
+    <textarea
+      rows={2}
+      maxLength={NCI2A_NOTE_MAX}
+      value={draft ?? current ?? ""}
+      disabled={busy}
+      placeholder={under100 ? "Why under 100%?" : "Add a note"}
+      aria-label={`Notes, ${award.projectNumber}`}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          cancelled.current = true;
+          setDraft(undefined);
+          e.currentTarget.blur();
+        }
+      }}
+      className={cn(
+        "bg-apollo-surface block w-full resize-y rounded-md border px-2 py-1 text-[13px] leading-snug",
+        draft !== undefined ? "border-apollo-slate" : "border-apollo-border-strong",
+      )}
+      data-testid="nci-2a-note"
+    />
   );
 }
 
@@ -362,6 +423,29 @@ export function Nci2aTable({
     return true;
   };
 
+  const saveNote: SaveNote = async (awardId, note) => {
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/edit/center/${encodeURIComponent(centerCode)}/nci-2a/${encodeURIComponent(awardId)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reviewerNote: note }),
+        },
+      );
+      if (!res.ok) {
+        setError(`Save failed (${res.status}). The note was not changed.`);
+        return false;
+      }
+    } catch {
+      setError("Save failed. The note was not changed.");
+      return false;
+    }
+    React.startTransition(() => router.refresh());
+    return true;
+  };
+
   const sortHeader = (k: Nci2aSortKey, label: string) => (
     <Link
       href={sortHrefs[k]}
@@ -427,7 +511,7 @@ export function Nci2aTable({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] border-collapse text-sm tabular-nums">
+          <table className="w-full min-w-[1280px] border-collapse text-sm tabular-nums">
             <thead>
               <tr className="bg-apollo-surface-2 text-left">
                 <th className={cn(TH, "w-[170px] pl-5")} aria-sort={ariaSort("pi")}>
@@ -442,6 +526,7 @@ export function Nci2aTable({
                 <th className={cn(TH, "w-[190px]")} aria-sort={ariaSort("pct")}>
                   {sortHeader("pct", "Cancer-relevant %")}
                 </th>
+                <th className={cn(TH, "w-[200px]")}>Notes</th>
                 <th className={cn(TH, "w-[100px] text-right")} aria-sort={ariaSort("rel")}>
                   {sortHeader("rel", "Relevant DC")}
                 </th>
@@ -504,6 +589,9 @@ export function Nci2aTable({
                   </td>
                   <td className="px-3 py-2.5">
                     <PercentCell award={a} save={save} />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <NoteCell award={a} save={saveNote} />
                   </td>
                   <td className="p-3 text-right font-semibold">
                     {money(a.cancerRelevantAnnualProjectDc)}

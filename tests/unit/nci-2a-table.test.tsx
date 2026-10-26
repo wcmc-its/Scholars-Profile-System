@@ -52,6 +52,7 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     cancerRelevantPercentAi: pct,
     cancerRelevantModel: null,
     cancerRelevantRationale: "because",
+    reviewerNote: null,
     cancerRelevantAnnualProjectDc: pct == null ? null : pct * 1000,
     isPeerReviewed: true,
     grantCwid: `zzz${over.id}`,
@@ -390,6 +391,29 @@ describe("report 2 table", () => {
     expect((f.mock.calls[0] as unknown[])[1]).toEqual(
       expect.objectContaining({ body: JSON.stringify({ cancerRelevantPercent: 37.5 }) }),
     );
+  });
+
+  it("a note saves on blur as reviewerNote, survives a lagged refresh, and Esc undoes", async () => {
+    const f = stubFetch();
+    const r = renderTable([AI]);
+    const note = r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement;
+    expect(note.placeholder).toBe("Why under 100%?");
+    fireEvent.change(note, { target: { value: " Aim 2 only " } });
+    fireEvent.blur(note);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect(f.mock.calls[0]).toEqual([
+      `/api/edit/center/${CENTER}/nci-2a/1`,
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ reviewerNote: "Aim 2 only" }) }),
+    ]);
+    r.rerender(tableEl([AI])); // replica still says no note
+    expect((r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement).value).toBe("Aim 2 only");
+    const again = r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement;
+    fireEvent.change(again, { target: { value: "scrap" } });
+    fireEvent.keyDown(again, { key: "Escape" });
+    fireEvent.blur(again);
+    await act(async () => {});
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(again.value).toBe("Aim 2 only");
   });
 
   it("Esc undoes the draft and saves nothing", async () => {

@@ -47,6 +47,8 @@ export type Nci2aAward = {
   /** Bedrock model id, or `rule:nci` / `rule:lynch`; null = not recorded. */
   cancerRelevantModel: string | null;
   cancerRelevantRationale: string | null;
+  /** A reviewer's free-text note (e.g. why it is under 100%); null = none. */
+  reviewerNote: string | null;
   cancerRelevantAnnualProjectDc: number | null;
   isPeerReviewed: boolean;
   grantCwid: string | null;
@@ -389,6 +391,9 @@ export function applyNci2aWrite(a: Nci2aAward, pct: number): Nci2aAward {
 export const nci2aWriteLanded = (a: Nci2aAward, pct: number) =>
   a.cancerRelevantPercentSource === "human" && a.cancerRelevantPercent === pct;
 
+/** Longest reviewer note the PATCH route takes. */
+export const NCI2A_NOTE_MAX = 2000;
+
 // ── Bulk Accept ──────────────────────────────────────────────────────────
 
 /** Most awards one `POST .../nci-2a/accept` takes (one transaction). */
@@ -435,8 +440,12 @@ export function statusPillLabel(
 function csvCell(v: string | number | null): string {
   if (v == null) return "";
   const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
+
+/** Free text a spreadsheet would run as a formula (`=`, `+`, `-`, `@`) gets a
+ *  leading apostrophe, so Excel shows it as text. */
+const csvText = (s: string | null) => (s && /^[=+\-@]/.test(s) ? `'${s}` : s);
 
 export const NCI2A_CSV_HEADER = [
   "PI",
@@ -453,6 +462,7 @@ export const NCI2A_CSV_HEADER = [
   "Program Code",
   "Program Percent",
   "Annual Program Direct Costs",
+  "Notes",
 ] as const;
 
 /** `-filtered` in the name whenever the file isn't the whole cycle. */
@@ -490,6 +500,7 @@ export function nci2aCsv(awards: ReadonlyArray<Nci2aAward>): string {
           al?.programCode ?? "",
           al?.programPercent ?? "",
           al?.annualProgramDirectCosts ?? "",
+          first ? (csvText(a.reviewerNote) ?? "") : "",
         ]
           .map(csvCell)
           .join(","),

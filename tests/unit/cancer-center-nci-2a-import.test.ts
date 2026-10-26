@@ -57,6 +57,7 @@ import {
   loadImportRows,
   planRow,
   applyPlan,
+  carriedHumanNote,
   carriedHumanPercent,
   CENTER_CODE,
   type ImportOptions,
@@ -403,7 +404,7 @@ type CapturedUpdate = { data: Record<string, unknown> };
 function makeDb(
   existing: Record<
     string,
-    { id: string; cancerRelevantPercent?: number | null; cancerRelevantPercentSource: string; allocations: { source: string }[] }
+    { id: string; cancerRelevantPercent?: number | null; cancerRelevantPercentSource: string; reviewerNote?: string | null; allocations: { source: string }[] }
   >,
 ) {
   const created: unknown[] = [];
@@ -657,6 +658,7 @@ describe("carry-forward of a reviewer's percent", () => {
     institutionNumber: over.institutionNumber ?? ROW.institutionNumber,
     projectNumber: over.projectNumber ?? ROW.projectNumber,
     cancerRelevantPercent: over.pct === undefined ? 50 : over.pct,
+    reviewerNote: "Aim 2 only",
   });
 
   it("carries the same award's human percent, latest cycle first", () => {
@@ -692,6 +694,20 @@ describe("carry-forward of a reviewer's percent", () => {
     const { db, updated } = makeDb({ "12345": { id: "a1", cancerRelevantPercent: 90, cancerRelevantPercentSource: "llm", allocations: [] } });
     await applyPlan(db, { ...PLAN, cancerRelevantPercent: null }, RUN, emptyCounts(), 25);
     expect(updated[0].data).toMatchObject({ cancerRelevantPercent: 25, cancerRelevantPercentSource: "human" });
+  });
+
+  it("carries the prior row's note with its percent, never over a note already on the row", async () => {
+    expect(carriedHumanNote(ROW, [prior()])).toBe("Aim 2 only");
+    expect(carriedHumanNote(ROW, [prior({ reportingCycle: ROW.reportingCycle })])).toBeNull();
+    const fresh = makeDb({});
+    await applyPlan(fresh.db, PLAN, RUN, emptyCounts(), 50, "Aim 2 only");
+    expect((fresh.created[0] as { data: Record<string, unknown> }).data.reviewerNote).toBe("Aim 2 only");
+    const noted = makeDb({ "12345": { id: "a1", cancerRelevantPercent: 90, cancerRelevantPercentSource: "llm", reviewerNote: "mine", allocations: [] } });
+    await applyPlan(noted.db, PLAN, RUN, emptyCounts(), 50, "Aim 2 only");
+    expect(noted.updated[0].data).not.toHaveProperty("reviewerNote");
+    const bare = makeDb({ "12345": { id: "a1", cancerRelevantPercent: 90, cancerRelevantPercentSource: "llm", allocations: [] } });
+    await applyPlan(bare.db, PLAN, RUN, emptyCounts(), 50, "Aim 2 only");
+    expect(bare.updated[0].data.reviewerNote).toBe("Aim 2 only");
   });
 
   it("never touches a row already reviewed in this cycle", async () => {
