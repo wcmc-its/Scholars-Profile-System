@@ -92,6 +92,9 @@ export class InboundMailStack extends Stack {
       enforceSSL: true,
       // The ETL re-reads a 30-day window; the upsert keeps what it matched.
       lifecycleRules: [{ expiration: Duration.days(90) }],
+      // Object Created events go to EventBridge, where each env's EtlStack
+      // starts scholars-funding-digest-<env> as soon as a digest lands.
+      eventBridgeEnabled: true,
       removalPolicy: RemovalPolicy.RETAIN,
     });
 

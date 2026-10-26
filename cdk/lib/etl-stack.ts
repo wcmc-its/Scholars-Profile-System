@@ -193,6 +193,8 @@ export class EtlStack extends Stack {
   public readonly cdnReconcileStateMachine: sfn.StateMachine;
   /** Honors-list scraper, `scholars-honors-<env>`: weekly + the console's Run now. */
   public readonly honorsStateMachine: sfn.StateMachine;
+  /** Funding digest import, started when a digest email lands in the inbound mail bucket. */
+  public readonly fundingDigestStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
@@ -3402,6 +3404,106 @@ export class EtlStack extends Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     honorsStatusAlarm.addAlarmAction(alarmAction);
+
+    // ------------------------------------------------------------------
+    // Funding digest on arrival. SES writes each funding@ message to the
+    // inbound mail bucket under funding/ (inbound-mail-stack.ts, which sends
+    // the bucket's Object Created events to EventBridge). This rule starts the
+    // same `etl:funding-digest` step as soon as one lands, instead of leaving a
+    // Monday digest for the next Sunday weekly run. FundingDigestWeekly stays in
+    // the weekly chain as a backstop; the step skips any link already in the
+    // corpus or the queue, so a second read of the same email submits nothing.
+    // Staging's run is a dry run (only prod submits; see the step's header).
+    // ------------------------------------------------------------------
+    const fundingDigestUnit = taskUnitFor("etl:funding-digest");
+    const fundingDigestTask = new tasks.EcsRunTask(this, "TaskFundingDigestOnArrival", {
+      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+      cluster: ecsCluster,
+      taskDefinition: fundingDigestUnit.taskDefinition,
+      launchTarget: new tasks.EcsFargateLaunchTarget({
+        platformVersion: ecs.FargatePlatformVersion.LATEST,
+      }),
+      assignPublicIp: false,
+      subnets: etlTaskSubnets,
+      securityGroups: [etlSecurityGroup],
+      containerOverrides: [
+        {
+          containerDefinition: fundingDigestUnit.container,
+          command: ["npm", "run", "etl:funding-digest"],
+        },
+      ],
+      // A run reads a few emails and checks ~200 links; minutes, not tens.
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(30)),
+    });
+    fundingDigestTask.addCatch(
+      new tasks.SnsPublish(this, "NotifyFundingDigestOnArrival", {
+        topic: this.failureTopic,
+        subject: `SPS funding digest import ${env} -- run failed`,
+        message: sfn.TaskInput.fromObject({
+          env,
+          step: "FundingDigestOnArrival",
+          stateMachine: sfn.JsonPath.stateMachineName,
+          execution: sfn.JsonPath.executionName,
+          error: sfn.JsonPath.stringAt("$.error"),
+        }),
+      }).next(
+        new sfn.Fail(this, "FailFundingDigestOnArrival", { cause: "funding digest import failed" }),
+      ),
+      { errors: ["States.ALL"], resultPath: "$.error" },
+    );
+
+    const fundingDigestSmLogGroup = new logs.LogGroup(this, "FundingDigestSmLogGroup", {
+      logGroupName: `/aws/states/funding-digest-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.fundingDigestStateMachine = new sfn.StateMachine(this, "FundingDigestStateMachine", {
+      stateMachineName: `scholars-funding-digest-${env}`,
+      stateMachineType: sfn.StateMachineType.STANDARD,
+      definitionBody: sfn.DefinitionBody.fromChainable(fundingDigestTask),
+      // Over the 30 min task timeout so the task's own timeout (which the Catch
+      // sees and pages on) always fires first; a machine TIMED_OUT runs no Catch.
+      timeout: Duration.minutes(45),
+      logs: {
+        destination: fundingDigestSmLogGroup,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
+      },
+      tracingEnabled: true,
+    });
+
+    const fundingDigestRule = new events.Rule(this, "FundingDigestArrivalRule", {
+      ruleName: `sps-funding-digest-${env}`,
+      description: `SPS funding digest import -- on each email SES writes under ${FUNDING_PREFIX} (${env}).`,
+      eventPattern: {
+        source: ["aws.s3"],
+        detailType: ["Object Created"],
+        detail: {
+          bucket: { name: [inboundMailBucketName(this.account)] },
+          object: { key: [{ prefix: FUNDING_PREFIX }] },
+        },
+      },
+    });
+    fundingDigestRule.addTarget(
+      new eventsTargets.SfnStateMachine(this.fundingDigestStateMachine, {
+        input: events.RuleTargetInput.fromObject({}),
+        retryAttempts: 2,
+      }),
+    );
+
+    const fundingDigestStatusAlarm = new cloudwatch.Alarm(this, "FundingDigestStatusAlarm", {
+      alarmName: `sps-funding-digest-status-${env}`,
+      alarmDescription: `SPS funding digest import (${env}) -- a run started by a digest email did not finish successfully. That digest's links were not submitted; the Sunday weekly run retries them. Next: open the Step Functions execution for scholars-funding-digest-${env} and read the task log (event funding_digest_complete or the error).`,
+      metric: unsuccessfulMetric(
+        { StateMachineArn: this.fundingDigestStateMachine.stateMachineArn },
+        Duration.days(1),
+      ),
+      evaluationPeriods: 1,
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    fundingDigestStatusAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
     // Grants bulk-export schedule -- nightly all-scholars `export:grants-bulk`
