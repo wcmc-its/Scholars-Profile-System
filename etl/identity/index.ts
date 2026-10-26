@@ -40,7 +40,9 @@
  *      change made in Publication Manager lands there) — so the row takes
  *      Identity's value AND `orcidConfirmedAt` is cleared, with the method
  *      and confirmer beside it (the confirmation was of a different iD). Counted as `conflict` in the summary line;
- *      the values themselves are never logged. This only means something
+ *      the values themselves are never logged. Exception: an iD the person
+ *      proved by signing in to ORCID (method `authenticated`, #3115) is never
+ *      overridden — counted as `kept`; orcid-push corrects Identity instead. This only means something
  *      because the nightly runs `etl/orcid-push` BEFORE this step: SPS's own
  *      confirmation is already in Identity by the time it is read here, so a
  *      difference is someone else's write, not our previous night's push.
@@ -109,6 +111,8 @@ export function orcidFromIdentityItem(row: IdentityRow): string {
 export type ScholarOrcidState = {
   orcid: string | null;
   orcidConfirmedAt: Date | null;
+  /** `authenticated` = the person signed in to ORCID (#3115); Identity never overrides it. */
+  orcidConfirmMethod?: string | null;
 };
 
 /** The per-row outcome, so the rule is testable without a client. `update` is the plain
@@ -122,6 +126,7 @@ export type IdentityDecision =
   | { kind: "no_scholar" }
   | { kind: "dismissed" }
   | { kind: "unchanged" }
+  | { kind: "authenticated" }
   | { kind: "update"; cwid: string; orcid: string }
   | { kind: "conflict"; cwid: string; orcid: string };
 
@@ -148,6 +153,8 @@ export function decideIdentityRow(
   if (!current) return { kind: "no_scholar" };
   if (dismissed.has(dismissalKey(cwid, orcid))) return { kind: "dismissed" };
   if (current.orcid === orcid) return { kind: "unchanged" };
+  // An iD the person proved by ORCID sign-in outranks Identity; orcid-push corrects Identity.
+  if (current.orcidConfirmMethod === "authenticated") return { kind: "authenticated" };
   if (current.orcidConfirmedAt !== null) return { kind: "conflict", cwid, orcid };
   return { kind: "update", cwid, orcid };
 }
@@ -183,14 +190,19 @@ async function main() {
     // would no-op (and so we can report unmatched Identity records).
     const ourScholars = await db.write.scholar.findMany({
       where: { deletedAt: null },
-      select: { cwid: true, orcid: true, orcidConfirmedAt: true },
+      select: { cwid: true, orcid: true, orcidConfirmedAt: true, orcidConfirmMethod: true },
     });
     // Keyed LOWERCASE to match `cwidFromIdentityItem` (the collation is case-insensitive,
     // the JS Map is not). The `where` below still uses the row's own cwid.
     const cwidToCurrent = new Map<string, ScholarOrcidState & { cwid: string }>(
       ourScholars.map((s) => [
         s.cwid.toLowerCase(),
-        { cwid: s.cwid, orcid: s.orcid, orcidConfirmedAt: s.orcidConfirmedAt },
+        {
+          cwid: s.cwid,
+          orcid: s.orcid,
+          orcidConfirmedAt: s.orcidConfirmedAt,
+          orcidConfirmMethod: s.orcidConfirmMethod,
+        },
       ]),
     );
 
@@ -206,6 +218,7 @@ async function main() {
     let noScholar = 0;
     let conflict = 0;
     let dismissedCount = 0;
+    let keptAuthenticated = 0;
 
     for (const row of rows) {
       const d = decideIdentityRow(row, cwidToCurrent, dismissed);
@@ -224,6 +237,10 @@ async function main() {
       }
       if (d.kind === "unchanged") {
         unchanged += 1;
+        continue;
+      }
+      if (d.kind === "authenticated") {
+        keptAuthenticated += 1;
         continue;
       }
       const target = cwidToCurrent.get(d.cwid)!.cwid;
@@ -251,7 +268,7 @@ async function main() {
 
     const took = ((Date.now() - start) / 1000).toFixed(1);
     console.log(
-      `Identity ETL complete in ${took}s: ${updated} updated, ${unchanged} unchanged, ${conflict} conflict (Identity won over an SPS confirmation), ${dismissedCount} dismissed (Not-me pair, not re-imported), ${invalidFormat} invalid, ${noScholar} no-scholar-row.`,
+      `Identity ETL complete in ${took}s: ${updated} updated, ${unchanged} unchanged, ${conflict} conflict (Identity won over an SPS confirmation), ${dismissedCount} dismissed (Not-me pair, not re-imported), ${keptAuthenticated} kept (ORCID-authenticated), ${invalidFormat} invalid, ${noScholar} no-scholar-row.`,
     );
 
     await db.write.etlRun.update({

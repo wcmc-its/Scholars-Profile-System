@@ -27,6 +27,7 @@
  *    the `rpm_admin` row the nightly mirror re-creates from the dead-but-still-
  *    populated `admin_orcid`. The local `rpm_admin` row is also deleted here so
  *    the card flips now, not after the 07:00 UTC re-mirror.
+ *  Either way an `orcid_authentication` row (#3115) for any other iD is deleted.
  *  Plus the B03 audit row, same transaction.
  *
  * Gated by `SELF_EDIT_ORCID_SUGGESTION` (404 when off) — one kill switch for the
@@ -145,6 +146,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       } else {
         await tx.orcidDismissal.deleteMany({ where: { cwid: scholar.cwid, orcid } });
       }
+      // An ORCID sign-in (#3115) vouches only for the iD it returned; Remove or a
+      // change to a different iD drops it, token included.
+      await tx.orcidAuthentication.deleteMany({
+        where: { cwid: scholar.cwid, ...(orcid === null ? {} : { orcid: { not: orcid } }) },
+      });
       for (const d of toDismiss) {
         await tx.orcidDismissal.upsert({
           where: { cwid_orcid: { cwid: scholar.cwid, orcid: d } },

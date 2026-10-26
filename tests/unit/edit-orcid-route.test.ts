@@ -24,6 +24,7 @@ const {
   mockTxDismissalUpsert,
   mockTxDismissalDeleteMany,
   mockTxExecuteRaw,
+  mockTxAuthDeleteMany,
   mockReflectOverviewEdit,
   mockWithReciterConnection,
 } = vi.hoisted(() => ({
@@ -41,6 +42,7 @@ const {
   mockTxDismissalUpsert: vi.fn(),
   mockTxDismissalDeleteMany: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
+  mockTxAuthDeleteMany: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
   mockWithReciterConnection: vi.fn(),
 }));
@@ -85,6 +87,7 @@ const fakeTx = {
   scholar: { update: mockTxScholarUpdate, findUnique: mockTxScholarFindUnique },
   orcidCandidate: { deleteMany: mockTxCandidateDeleteMany, findMany: mockTxCandidateFindMany },
   orcidDismissal: { upsert: mockTxDismissalUpsert, deleteMany: mockTxDismissalDeleteMany },
+  orcidAuthentication: { deleteMany: mockTxAuthDeleteMany },
   $executeRaw: mockTxExecuteRaw,
 };
 const ID = "0000-0002-1825-0097";
@@ -115,6 +118,7 @@ beforeEach(() => {
   mockTxDismissalUpsert.mockResolvedValue({});
   mockTxDismissalDeleteMany.mockResolvedValue({ count: 0 });
   mockTxExecuteRaw.mockResolvedValue(1);
+  mockTxAuthDeleteMany.mockResolvedValue({ count: 0 });
   mockReflectOverviewEdit.mockResolvedValue(undefined);
 });
 
@@ -353,5 +357,14 @@ describe("POST /api/edit/orcid", () => {
     const res = await POST(post({ cwid: "nobody", orcid: ID }));
     expect(res.status).toBe(404);
     expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("drops an ORCID sign-in (#3115) for any other iD on set, and all of it on Remove", async () => {
+    await POST(post({ cwid: "self01", orcid: ID }));
+    expect(mockTxAuthDeleteMany).toHaveBeenLastCalledWith({
+      where: { cwid: "self01", orcid: { not: ID } },
+    });
+    await POST(post({ cwid: "self01", orcid: null }));
+    expect(mockTxAuthDeleteMany).toHaveBeenLastCalledWith({ where: { cwid: "self01" } });
   });
 });

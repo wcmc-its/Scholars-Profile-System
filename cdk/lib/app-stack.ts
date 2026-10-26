@@ -1746,6 +1746,14 @@ export class AppStack extends Stack {
         // refresh it waited on landed 2026-09-21). Kept as a flag: it is the single
         // kill switch for the ORCID tab, its write and the suggestion.
         SELF_EDIT_ORCID_SUGGESTION: "on",
+        // ORCID_CONNECT (#3115) — "Connect your ORCID iD" (ORCID sign-in,
+        // `/authenticate` only) on the scholar's own Identifiers & Profiles card,
+        // and `GET /api/edit/orcid/connect` + `/callback`. OFF both envs: the
+        // client credentials (scholars/<env>/orcid-api) are not wired yet, and
+        // prod needs ORCID's demo review first. Staging runs against the sandbox.
+        ORCID_CONNECT: "off",
+        ORCID_CONNECT_BASE:
+          envConfig.envName === "prod" ? "https://orcid.org" : "https://sandbox.orcid.org",
         // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
         // (LinkedIn, X, Bluesky, Google Scholar, ResearchGate): the External
         // Profiles card on the Identifiers & Profiles tab, the `profileLinks`

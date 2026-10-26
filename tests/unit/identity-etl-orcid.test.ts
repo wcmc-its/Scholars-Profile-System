@@ -81,6 +81,21 @@ describe("identity ETL — per-row decision against SPS", () => {
     expect(d2).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
   });
 
+  it("an ORCID-authenticated iD (#3115) is never overridden by a different Identity value", () => {
+    const OTHER = "0000-0000-0000-001X";
+    const authed = { orcid: OTHER, orcidConfirmedAt: new Date(), orcidConfirmMethod: "authenticated" };
+    expect(
+      decideIdentityRow({ uid: "abc1234", identity: { orcid: ID } }, scholars({ abc1234: authed })),
+    ).toEqual({ kind: "authenticated" });
+    // A plain confirmation still loses to Identity.
+    expect(
+      decideIdentityRow(
+        { uid: "abc1234", identity: { orcid: ID } },
+        scholars({ abc1234: { ...authed, orcidConfirmMethod: "self" } }),
+      ),
+    ).toEqual({ kind: "conflict", cwid: "abc1234", orcid: ID });
+  });
+
   it("no scholar row / malformed iD / missing fields are counted, never written", () => {
     expect(
       decideIdentityRow({ uid: "zzz9999", identity: { orcid: ID } }, scholars({ abc1234: state(null) })),

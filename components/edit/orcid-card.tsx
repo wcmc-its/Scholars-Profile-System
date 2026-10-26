@@ -24,6 +24,12 @@
  * `router.refresh()` reconciles the page. Off-campus friendly:
  * this replaces the "Confirm in ReCiter" hand-off, which only worked on the
  * campus network.
+ *
+ * `ORCID_CONNECT` on (#3115), scholar's own view only: "Connect your ORCID iD"
+ * (a link to `/api/edit/orcid/connect`, ORCID's sign-in) replaces typing an iD,
+ * per ORCID's rule that iDs are never typed in. An iD proved that way shows the
+ * "Authenticated" pill. The callback lands back here with `?orcid=connected|
+ * denied|failed`, read once on mount for the status line.
  */
 "use client";
 
@@ -50,7 +56,32 @@ export type OrcidCardProps = {
   onFile: string | null;
   onFileEvidence?: OrcidEvidence[];
   suggested: { orcid: string; accepted: number; evidence?: OrcidEvidence[] } | null;
+  /** `onFile` was proved by an ORCID sign-in (#3115). */
+  authenticated?: boolean;
+  /** Offer "Connect your ORCID iD" — `ORCID_CONNECT` on and the scholar's own view. */
+  connectEnabled?: boolean;
 };
+
+const CONNECT_OUTCOME: Record<string, { text: string; error: boolean }> = {
+  connected: { text: "Your ORCID iD is connected.", error: false },
+  denied: { text: "You didn't grant access on ORCID, so nothing changed.", error: false },
+  failed: { text: "Couldn't connect your ORCID iD. Try again.", error: true },
+};
+
+/** ORCID's iD mark (brand asset), 16px. */
+function OrcidIdIcon() {
+  return (
+    <svg viewBox="0 0 256 256" className="size-4 shrink-0" aria-hidden>
+      <path fill="#A6CE39" d="M256 128c0 70.7-57.3 128-128 128S0 198.7 0 128 57.3 0 128 0s128 57.3 128 128z" />
+      <path fill="#fff" d="M86.3 186.2H70.9V79.1h15.4v107.1z" />
+      <path
+        fill="#fff"
+        d="M108.9 79.1h41.6c39.6 0 57 28.3 57 53.6 0 27.5-21.5 53.6-56.8 53.6h-41.8V79.1zm15.4 93.3h24.5c34.9 0 42.9-26.5 42.9-39.7 0-21.5-13.7-39.7-43.7-39.7h-23.7v79.4z"
+      />
+      <path fill="#fff" d="M88.7 56.8c0 5.5-4.5 10.1-10.1 10.1s-10.1-4.6-10.1-10.1 4.5-10.1 10.1-10.1 10.1 4.6 10.1 10.1z" />
+    </svg>
+  );
+}
 
 function errorMessage(code: string): string {
   switch (code) {
@@ -64,7 +95,7 @@ function errorMessage(code: string): string {
   }
 }
 
-type Status = "suggested" | "on-file" | "confirmed";
+type Status = "suggested" | "on-file" | "confirmed" | "authenticated";
 
 const PILL: Record<Status, { label: string; icon: typeof Check; className: string }> = {
   suggested: {
@@ -82,6 +113,11 @@ const PILL: Record<Status, { label: string; icon: typeof Check; className: strin
     icon: Check,
     className: "bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground",
   },
+  authenticated: {
+    label: "Authenticated",
+    icon: Check,
+    className: "bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground",
+  },
 };
 
 export function OrcidCard({
@@ -91,6 +127,8 @@ export function OrcidCard({
   onFile,
   onFileEvidence = [],
   suggested,
+  authenticated = false,
+  connectEnabled = false,
 }: OrcidCardProps) {
   const router = useRouter();
   const subject = mode === "superuser" ? firstName(scholarName) : null;
@@ -104,6 +142,11 @@ export function OrcidCard({
   // The competing suggestion hides once a write dismissing it lands; the route
   // records the dismissal, so it stays gone on the next load too.
   const [dismissed, setDismissed] = React.useState(false);
+  const [outcome, setOutcome] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    const o = new URLSearchParams(window.location.search).get("orcid");
+    if (o && o in CONNECT_OUTCOME) setOutcome(o);
+  }, []);
 
   const save = async (
     orcid: string | null,
@@ -165,7 +208,8 @@ export function OrcidCard({
   // disagrees with what is on file.
   const offer = suggested && !dismissed ? suggested : null;
   const competing = offer && offer.orcid !== current ? offer : null;
-  const status: Status = saved !== undefined ? "confirmed" : "on-file";
+  const status: Status =
+    saved !== undefined ? "confirmed" : authenticated ? "authenticated" : "on-file";
 
   /** The boxed iD row: the linked iD, its evidence lines, a status pill. */
   const idRow = (
@@ -248,6 +292,26 @@ export function OrcidCard({
     </form>
   );
 
+  const connect = (
+    <div className="flex flex-col gap-2" data-testid="orcid-connect-block">
+      {/* A full navigation, not <Link>: a prefetch would start the OAuth flow. */}
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+      <a
+        href="/api/edit/orcid/connect"
+        className="border-apollo-border-strong hover:bg-apollo-surface-2 inline-flex w-fit items-center gap-2 rounded-md border bg-white px-3 py-1.5 text-sm font-semibold text-foreground"
+        data-testid="orcid-connect"
+      >
+        <OrcidIdIcon />
+        {current ? "Connect a different ORCID iD" : "Connect your ORCID iD"}
+      </a>
+      <p className="text-muted-foreground text-xs">
+        You’ll sign in at ORCID to prove the iD is yours. Weill Cornell records your iD and
+        the name on it to match your publications and fill NIH biosketches. We never change
+        your ORCID record.
+      </p>
+    </div>
+  );
+
   return (
     <EditPanel
       heading="ORCID iD"
@@ -261,7 +325,11 @@ export function OrcidCard({
           currentEvidence,
           status,
           "orcid-on-file",
-          status === "confirmed" ? "Confirmed by you" : undefined,
+          status === "confirmed"
+            ? "Confirmed by you"
+            : status === "authenticated"
+              ? "You signed in to ORCID to confirm this iD"
+              : undefined,
         )}
       {current &&
         competing &&
@@ -310,15 +378,17 @@ export function OrcidCard({
         )}
         {current && !editing && !competing && (
           <>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setEditing(true)}
-              data-testid="orcid-change"
-            >
-              Change
-            </Button>
+            {!connectEnabled && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing(true)}
+                data-testid="orcid-change"
+              >
+                Change
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
@@ -343,20 +413,33 @@ export function OrcidCard({
             >
               Confirm this iD
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setEditing(true)}
-              disabled={busy}
-              data-testid="orcid-enter-other"
-            >
-              Enter a different iD
-            </Button>
+            {!connectEnabled && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing(true)}
+                disabled={busy}
+                data-testid="orcid-enter-other"
+              >
+                Enter a different iD
+              </Button>
+            )}
           </>
         )}
-        {(editing || (!current && !offer)) && form}
+        {/* ORCID's rule: with sign-in available, the scholar never types an iD. */}
+        {!connectEnabled && (editing || (!current && !offer)) && form}
       </div>
+      {connectEnabled && !(authenticated && saved === undefined) && connect}
+      {outcome && (
+        <p
+          role={CONNECT_OUTCOME[outcome].error ? "alert" : "status"}
+          className={`text-sm ${CONNECT_OUTCOME[outcome].error ? "text-destructive" : "text-muted-foreground"}`}
+          data-testid="orcid-connect-outcome"
+        >
+          {CONNECT_OUTCOME[outcome].text}
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-destructive text-sm" data-testid="orcid-error">
           {error}

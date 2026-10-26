@@ -35,6 +35,7 @@ import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
 import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
+import { isOrcidConnectEnabled } from "@/lib/edit/orcid-connect";
 import { isProfileLinksEnabled } from "@/lib/edit/profile-links";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
@@ -468,6 +469,7 @@ export default async function EditSelfPage({
       reciterPendingEnabled={reciterPendingEnabled}
       orcidTabEnabled={isOrcidSuggestionEnabled()}
       profileLinksEnabled={isProfileLinksEnabled()}
+      orcidConnectEnabled={isOrcidConnectEnabled()}
       grantRecsEnabled={grantRecsEnabled}
       grantRecsFeedbackEnabled={grantRecsFeedbackEnabled}
       biosketchEnabled={biosketchEnabled}
