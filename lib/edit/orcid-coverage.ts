@@ -28,6 +28,8 @@
  *    every registry row. STRONG = exactly one distinct strong-eligible ORCID
  *    across the person's rows, where strong-eligible is: any `orcid_email` row;
  *    any `infoed_biosketch` row (the iD on the person's NIH biosketch in InfoEd);
+ *    an `infoed_biosketch_name` row (the same, but the biosketch was matched to the
+ *    person by name) only when another non-name-only source names the same iD;
  *    an `orcid_works` or `orcid_crossref` row with ≥ STRONG_MIN_ACCEPTED papers; the SOLE
  *    `rpm_inferred` row when it has ≥ STRONG_MIN_ACCEPTED accepted articles and
  *    no rejected one; or an ORCID that an `rpm_*` row with NO rejected article
@@ -259,6 +261,17 @@ export function orcidVerdict(
     // ORCID account), tied to them by the SF424 profile email — etl/infoed-biosketch
     // writes only email-attributed rows.
     r.source === "infoed_biosketch" ||
+    // Matched to the person by name only, so a namesake's biosketch is possible: strong
+    // only when another source names the same iD — not another name-only match, and not
+    // an RPM row that also sat on articles the person rejected.
+    (r.source === "infoed_biosketch_name" &&
+      rows.some(
+        (o) =>
+          o.orcid === r.orcid &&
+          o.source !== "infoed_biosketch_name" &&
+          o.source !== "orcid_name" &&
+          !(isRpmSource(o.source) && o.articlesRejected > 0),
+      )) ||
     ((r.source === "orcid_works" || r.source === "orcid_crossref") && r.articlesAccepted >= minAccepted) ||
     (r === soleInferred && r.articlesRejected === 0 && r.articlesAccepted >= minAccepted) ||
     // Two independent sources agreeing on one iD outweighs either one's accepted counts.

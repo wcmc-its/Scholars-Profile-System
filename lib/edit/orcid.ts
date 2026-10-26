@@ -59,6 +59,8 @@ export function orcidEvidenceLine(e: OrcidEvidence, subject: string | null): str
       return `Publishers recorded this iD on ${e.accepted} of ${whose} papers`;
     case "infoed_biosketch":
       return `Listed on ${whose} NIH biosketch in a WCM grant application`;
+    case "infoed_biosketch_name":
+      return `Listed on an NIH biosketch matched to ${who} by name in a WCM grant application`;
     case "orcid_name":
       return `The ORCID registry record matches ${whose} name`;
     default:
