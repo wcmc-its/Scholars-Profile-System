@@ -12,7 +12,13 @@
  *   - an `other` (or untyped) work with no PMID whose title reads as a figure or
  *     supplement ("Figure 3", "Table S1", "Supplementary material …");
  *   - a Figshare (`10.6084`) or Zenodo (`10.5281`) DOI, unless the work is typed
- *     `journal-article`.
+ *     `journal-article`;
+ *   - (v2.1) a supplement, WHATEVER its ORCID type: a title that starts
+ *     "Supplementary / Supplemental <material noun> …", or reads
+ *     "(Figure|Fig.|Table|Data|Movie|Video|File|Appendix) S?<n>[a-z]? (from|for|of) …"
+ *     at its start; and any AACR supplement DOI
+ *     (`10.1158/<issn>.<6+ digits>[.vN]`), which Crossref types journal-article.
+ *     The title rules still spare a work that carries a PMID.
  * Collapsed: preprint versions. Works that share a title (ignoring case,
  * punctuation, diacritics and a trailing `v1` / `v2`) or a DOI up to its
  * version suffix form one group when the group holds a preprint (type
@@ -74,6 +80,23 @@ const FIGURE_TITLES: readonly RegExp[] = [
 ];
 const isFigureTitle = (title: string) => FIGURE_TITLES.some((re) => re.test(title));
 
+/** v2.1: supplement titles dropped whatever the work's type (AACR deposits its
+ *  supplements as journal-articles: "Supplementary Table S1 from …", "Figure S3
+ *  from …"). "Supplementary / Supplemental" must be followed by a material noun,
+ *  so "Supplemental oxygen …" and "Supplemental Nutrition Assistance Program …"
+ *  stay; an item word must open the title and carry its number and a from / for
+ *  / of clause, so "… of the Appendix" stays. */
+const SUPPLEMENT_TITLES: readonly RegExp[] = [
+  /^\s*supplement(ary|al)\s+(online\s+)?(materials?|data|information|info|files?|tables?|figures?|figs?\.?|methods|appendix|appendices|videos?|movies?|text|notes?|references|results|document|digital content)\b/i,
+  /^\s*(figure|fig\.?|table|data|movie|video|file|appendix)\s*S?\d+[a-z]?\s+(from|for|of)\s/i,
+  /^\s*supplement(ary|al)\s+(figures|tables)\s+S\d+\s*[-\u2013]\s*S\d+\s+from\s/i,
+];
+const isSupplementTitle = (title: string) => SUPPLEMENT_TITLES.some((re) => re.test(title));
+
+/** AACR supplement DOIs: `10.1158/<ISSN>.<6+ digits>`, optionally `.vN`. An AACR
+ *  article DOI has letters after the ISSN (`10.1158/0008-5472.CAN-20-1234`). */
+export const AACR_SUPPLEMENT_DOI = /^10\.1158\/\d{4}-\d{3}[\dx]\.\d{6,}(\.v\d+)?$/i;
+
 /** Shorter normalized titles never group: too generic to call two works one. */
 const MIN_TITLE_KEY = 20;
 
@@ -98,7 +121,9 @@ export function isNonPublicationWork(w: FilterableWork): boolean {
   const hasPmid = [...w.ids].some((k) => k.startsWith("pmid:"));
   if ((type === null || type === "other") && !hasPmid && w.title && isFigureTitle(w.title))
     return true;
+  if (!hasPmid && w.title && isSupplementTitle(w.title)) return true;
   const doi = lowerDoi(w);
+  if (doi && AACR_SUPPLEMENT_DOI.test(doi)) return true;
   if (doi && type !== "journal-article" && REPOSITORY_DOI_PREFIXES.some((p) => doi.startsWith(p)))
     return true;
   return false;
