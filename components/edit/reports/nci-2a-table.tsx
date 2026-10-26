@@ -23,9 +23,10 @@
  * shows each saved value itself (`applyNci2aWrite`) until the server row has
  * it — a stale row must never bring back an Accept bound to the old AI value.
  *
- * Notes: a free-text reviewer note per row (`reviewerNote`, same PATCH),
- * saved when the field loses focus; Esc undoes. MCC uses it to say why an
- * award is under 100% cancer-relevant; it is the CSV's Notes column.
+ * Notes: a free-text reviewer note per row (`reviewerNote`, same PATCH). A
+ * link under the status pill opens an editor row under the award; leaving the
+ * field saves, Esc undoes. MCC uses it to say why an award is under 100%
+ * cancer-relevant; it is the CSV's Notes column.
  *
  * Program is read-only here: the PI's center membership, edited in the
  * center roster. Nothing here reaches `@/lib/db`.
@@ -33,11 +34,12 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Download } from "lucide-react";
+import { Download, Pencil } from "lucide-react";
 
 import { useShowMore } from "@/components/edit/reports/report-show-more";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   applyNci2aWrite,
   bulkAcceptTargets,
@@ -116,7 +118,16 @@ type SaveNote = (awardId: string, note: string | null) => Promise<boolean>;
 const value0 = (a: Nci2aAward) =>
   a.cancerRelevantPercent == null ? "" : String(a.cancerRelevantPercent);
 
-function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
+function PercentCell({
+  award,
+  save,
+  children,
+}: {
+  award: Nci2aAward;
+  save: Save;
+  /** Under the status pill: the note link. */
+  children?: React.ReactNode;
+}) {
   const status = nci2aStatus(award);
   const [draft, setDraft] = React.useState<string | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
@@ -204,13 +215,20 @@ function PercentCell({ award, save }: { award: Nci2aAward; save: Save }) {
       <div className="mt-1.5">
         <StatusPill award={award} />
       </div>
+      {children}
     </div>
   );
 }
 
-function NoteCell({ award, save }: { award: Nci2aAward; save: SaveNote }) {
+/**
+ * The row's note, per the "NCI Table Notes" mockup (1a): a link under the
+ * status pill ("Add note", or the note itself, clamped) opens an editor row
+ * under the award. Leaving the field saves; Done closes; Esc undoes and closes.
+ */
+function useNote(award: Nci2aAward, save: SaveNote) {
+  const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<string | undefined>(undefined);
-  // The note this cell saved, shown until the (possibly lagging) replica has it.
+  // The note this row saved, shown until the (possibly lagging) replica has it.
   const [saved, setSaved] = React.useState<string | null | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
   const cancelled = React.useRef(false);
@@ -236,30 +254,58 @@ function NoteCell({ award, save }: { award: Nci2aAward; save: SaveNote }) {
     setDraft(undefined);
   }
 
+  function cancel() {
+    cancelled.current = true;
+    setDraft(undefined);
+    setOpen(false);
+  }
+
+  return { open, setOpen, draft, setDraft, busy, current, commit, cancel };
+}
+
+type NoteState = ReturnType<typeof useNote>;
+
+function NoteLink({ award, note }: { award: Nci2aAward; note: NoteState }) {
+  if (note.open) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => note.setOpen(true)}
+      className="text-apollo-slate mt-1.5 flex cursor-pointer items-start gap-[5px] text-left text-xs hover:underline"
+      aria-label={note.current ? `Edit note, ${award.projectNumber}` : `Add note, ${award.projectNumber}`}
+      data-testid="nci-2a-note-link"
+    >
+      <Pencil className="mt-px size-[13px] shrink-0" aria-hidden />
+      <span className="line-clamp-2 max-w-[180px] leading-[1.4]">{note.current ?? "Add note"}</span>
+    </button>
+  );
+}
+
+function NoteEditor({ award, note }: { award: Nci2aAward; note: NoteState }) {
   const under100 = award.cancerRelevantPercent != null && award.cancerRelevantPercent < 100;
   return (
-    <textarea
-      rows={2}
-      maxLength={NCI2A_NOTE_MAX}
-      value={draft ?? current ?? ""}
-      disabled={busy}
-      placeholder={under100 ? "Why under 100%?" : "Add a note"}
-      aria-label={`Notes, ${award.projectNumber}`}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => void commit()}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          cancelled.current = true;
-          setDraft(undefined);
-          e.currentTarget.blur();
-        }
-      }}
-      className={cn(
-        "bg-apollo-surface block w-full resize-y rounded-md border px-2 py-1 text-[13px] leading-snug",
-        draft !== undefined ? "border-apollo-slate" : "border-apollo-border-strong",
-      )}
-      data-testid="nci-2a-note"
-    />
+    <div className="bg-apollo-surface-2 flex items-start gap-3 rounded-lg p-3">
+      <Textarea
+        rows={2}
+        autoFocus
+        maxLength={NCI2A_NOTE_MAX}
+        value={note.draft ?? note.current ?? ""}
+        disabled={note.busy}
+        placeholder={under100 ? "Why under 100%?" : "Add a note"}
+        aria-label={`Note, ${award.projectNumber}`}
+        onChange={(e) => note.setDraft(e.target.value)}
+        onBlur={() => void note.commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") note.cancel();
+        }}
+        className="min-h-0 flex-1 bg-white"
+        data-testid="nci-2a-note"
+      />
+      {/* The field's blur (which saves) fires before this click. */}
+      <Button variant="outline" size="sm" disabled={note.busy} onClick={() => note.setOpen(false)}>
+        Done
+      </Button>
+    </div>
   );
 }
 
@@ -295,6 +341,90 @@ function ProgramCell({ award, rosterHref }: { award: Nci2aAward; rosterHref: str
         </li>
       )}
     </ul>
+  );
+}
+
+function Nci2aRow({
+  award: a,
+  save,
+  saveNote,
+  rosterHref,
+}: {
+  award: Nci2aAward;
+  save: Save;
+  saveNote: SaveNote;
+  rosterHref: string;
+}) {
+  const note = useNote(a, saveNote);
+  return (
+    <>
+      <tr
+        className={cn("border-apollo-border align-top", !note.open && "border-b")}
+        data-testid="nci-2a-row"
+      >
+        <td className="py-3 pr-3 pl-5">
+          <div className="leading-snug font-semibold">
+            {a.grantCwid ? (
+              <ScholarHoverCard cwid={a.grantCwid}>
+                <span>{a.pi}</span>
+              </ScholarHoverCard>
+            ) : (
+              a.pi
+            )}
+          </div>
+          {a.grantCwid && (
+            <div className="text-muted-foreground mt-0.5 font-mono text-xs">
+              {a.grantCwid}
+            </div>
+          )}
+        </td>
+        <td className="p-3 leading-snug">{a.specificFundingSource}</td>
+        <td className="p-3">
+          {a.applId != null ? (
+            <a
+              href={nihReporterProjectUrl(a.applId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="View on NIH RePORTER"
+              className="font-mono text-[13px] font-semibold underline-offset-2 hover:underline"
+            >
+              {a.projectNumber}
+            </a>
+          ) : (
+            <div className="font-mono text-[13px] font-semibold">{a.projectNumber}</div>
+          )}
+          <div
+            className="mt-0.5 text-[13px] leading-snug"
+            title={a.projectTitle}
+          >
+            {a.projectTitle}
+          </div>
+        </td>
+        <td className="p-3 text-right">{money(a.annualProjectDirectCosts)}</td>
+        <td className={cn("p-3", !a.isPeerReviewed && "text-muted-foreground")}>
+          {a.isPeerReviewed ? "Yes" : "No"}
+        </td>
+        <td className="px-3 py-2.5">
+          <PercentCell award={a} save={save}>
+            <NoteLink award={a} note={note} />
+          </PercentCell>
+        </td>
+        <td className="p-3 text-right font-semibold">
+          {money(a.cancerRelevantAnnualProjectDc)}
+        </td>
+        <td className="py-3 pr-5 pl-3">
+          <ProgramCell award={a} rosterHref={rosterHref} />
+        </td>
+      </tr>
+      {note.open && (
+        <tr className="border-apollo-border border-b" data-testid="nci-2a-note-row">
+          <td />
+          <td colSpan={7} className="pr-5 pb-4">
+            <NoteEditor award={a} note={note} />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -511,7 +641,7 @@ export function Nci2aTable({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1280px] border-collapse text-sm tabular-nums">
+          <table className="w-full min-w-[1080px] border-collapse text-sm tabular-nums">
             <thead>
               <tr className="bg-apollo-surface-2 text-left">
                 <th className={cn(TH, "w-[170px] pl-5")} aria-sort={ariaSort("pi")}>
@@ -526,7 +656,6 @@ export function Nci2aTable({
                 <th className={cn(TH, "w-[190px]")} aria-sort={ariaSort("pct")}>
                   {sortHeader("pct", "Cancer-relevant %")}
                 </th>
-                <th className={cn(TH, "w-[200px]")}>Notes</th>
                 <th className={cn(TH, "w-[100px] text-right")} aria-sort={ariaSort("rel")}>
                   {sortHeader("rel", "Relevant DC")}
                 </th>
@@ -540,66 +669,13 @@ export function Nci2aTable({
             </thead>
             <tbody>
               {visible.map((a) => (
-                <tr
+                <Nci2aRow
                   key={a.id}
-                  className="border-apollo-border border-b align-top"
-                  data-testid="nci-2a-row"
-                >
-                  <td className="py-3 pr-3 pl-5">
-                    <div className="leading-snug font-semibold">
-                      {a.grantCwid ? (
-                        <ScholarHoverCard cwid={a.grantCwid}>
-                          <span>{a.pi}</span>
-                        </ScholarHoverCard>
-                      ) : (
-                        a.pi
-                      )}
-                    </div>
-                    {a.grantCwid && (
-                      <div className="text-muted-foreground mt-0.5 font-mono text-xs">
-                        {a.grantCwid}
-                      </div>
-                    )}
-                  </td>
-                  <td className="p-3 leading-snug">{a.specificFundingSource}</td>
-                  <td className="p-3">
-                    {a.applId != null ? (
-                      <a
-                        href={nihReporterProjectUrl(a.applId)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="View on NIH RePORTER"
-                        className="font-mono text-[13px] font-semibold underline-offset-2 hover:underline"
-                      >
-                        {a.projectNumber}
-                      </a>
-                    ) : (
-                      <div className="font-mono text-[13px] font-semibold">{a.projectNumber}</div>
-                    )}
-                    <div
-                      className="mt-0.5 text-[13px] leading-snug"
-                      title={a.projectTitle}
-                    >
-                      {a.projectTitle}
-                    </div>
-                  </td>
-                  <td className="p-3 text-right">{money(a.annualProjectDirectCosts)}</td>
-                  <td className={cn("p-3", !a.isPeerReviewed && "text-muted-foreground")}>
-                    {a.isPeerReviewed ? "Yes" : "No"}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <PercentCell award={a} save={save} />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <NoteCell award={a} save={saveNote} />
-                  </td>
-                  <td className="p-3 text-right font-semibold">
-                    {money(a.cancerRelevantAnnualProjectDc)}
-                  </td>
-                  <td className="py-3 pr-5 pl-3">
-                    <ProgramCell award={a} rosterHref={rosterHref} />
-                  </td>
-                </tr>
+                  award={a}
+                  save={save}
+                  saveNote={saveNote}
+                  rosterHref={rosterHref}
+                />
               ))}
             </tbody>
           </table>
