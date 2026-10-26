@@ -918,6 +918,12 @@ describe("client", () => {
     );
   });
 
+  it("publications open on the first non-empty list", async () => {
+    mount([CARD({}, [{ ...ROW, newWorks: 0, newWorksSample: [] }])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-pubs-both").getAttribute("aria-selected")).toBe("true");
+  });
+
   it("names side by side and the signals with their facts", async () => {
     mount([CARD()]);
     await screen.findByTestId("orcid-queue-card-jd0001");

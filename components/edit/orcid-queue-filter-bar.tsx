@@ -212,7 +212,7 @@ export function OrcidQueueFilterBar({
 
   return (
     <div
-      className="bg-apollo-page border-apollo-border sticky top-14 z-20 -mx-6 flex flex-col gap-2.5 border-y px-6 py-3"
+      className="border-apollo-border -mx-6 flex flex-col gap-2.5 border-y px-6 py-3"
       data-testid="orcid-queue-filters"
     >
       <div className="flex flex-wrap items-center gap-2">
