@@ -11,6 +11,11 @@
  * them (institution pairs, the verified email, the shared papers, competitors,
  * how the iD was discovered), and the record's works not in the scholar's
  * publications, each linked (PubMed, else doi.org, else the work's own URL).
+ * v2.1: the preview header splits the new works by ReCiter status, and each
+ * work shows its status chip and the Publication Manager link that acts on it:
+ * "Review in Publication Manager" (the scholar's curate page) for pending and
+ * rejected (rejected flagged for re-review), "Add in Publication Manager" (the
+ * curate page's Add tab with the DOI filled in) for a DOI not in PubMed.
  * Confirm and Not this person act per iD; on a card with other candidates,
  * Confirm also marks the others Not this person in the same action unless the
  * card's box is cleared. Email verified also lists the iDs the ETL already
@@ -49,6 +54,9 @@ import {
   ORCID_SURNAME_RULE_LABEL,
   orcidQueueFilterKey,
   orcidQueueHref,
+  pmCurateHref,
+  RECITER_WORK_STATUS_LABEL,
+  RECITER_WORK_STATUSES,
   sampleStatus,
   workHref,
   type OrcidInstitutionPair,
@@ -57,6 +65,8 @@ import {
   type OrcidQueueRow,
   type OrcidQueueSampleState,
   type OrcidQueueTab,
+  type OrcidQueueWork,
+  type ReciterWorkStatus,
 } from "@/lib/edit/orcid-queue";
 import { profilePath } from "@/lib/profile-url";
 import { cn } from "@/lib/utils";
@@ -122,6 +132,7 @@ export function OrcidQueue({
   basePath,
   readOnly,
   facets = null,
+  pmBaseUrl = null,
 }: {
   data: OrcidQueueData;
   basePath: string;
@@ -129,6 +140,9 @@ export function OrcidQueue({
   readOnly: boolean;
   /** The filter bar's person facets; null = unavailable (source filter only). */
   facets?: DataQualityFacets | null;
+  /** v2.1: Publication Manager's https base URL (`publicationManagerBaseUrl`);
+   *  null = no Publication Manager links. */
+  pmBaseUrl?: string | null;
 }) {
   const router = useRouter();
   const { tab, cards, counts, filter } = data;
@@ -346,6 +360,7 @@ export function OrcidQueue({
               sampleDecisions={sampleDecisions}
               canDecide={canDecide}
               busyKey={busy}
+              pmBaseUrl={pmBaseUrl}
               onDecide={(row, decision, opts) => void decide(row, decision, opts)}
             />
           ))}
@@ -492,6 +507,7 @@ function ScholarCard({
   sampleDecisions,
   canDecide,
   busyKey,
+  pmBaseUrl,
   onDecide,
 }: {
   card: OrcidQueueCard;
@@ -500,6 +516,7 @@ function ScholarCard({
   sampleDecisions: Record<string, "confirmed" | "dismissed">;
   canDecide: boolean;
   busyKey: string | null;
+  pmBaseUrl: string | null;
   onDecide: (
     row: OrcidQueueRow,
     decision: "confirm" | "dismiss",
@@ -550,6 +567,7 @@ function ScholarCard({
             sampleDecision={sampleDecisions[pairKey(r)] ?? r.sampleDecision}
             canDecide={canDecide}
             busy={busyKey === pairKey(r)}
+            pmBaseUrl={pmBaseUrl}
             onConfirm={() =>
               onDecide(r, "confirm", {
                 replace: r.state === "conflict",
@@ -572,6 +590,68 @@ function ScholarCard({
         </label>
       ) : null}
     </article>
+  );
+}
+
+const STATUS_TONE: Record<ReciterWorkStatus, string> = {
+  accepted: CHIP_ON,
+  pending: CHIP_ON,
+  rejected: CHIP_WARN,
+  not_retrieved: CHIP_OFF,
+  not_in_pubmed: CHIP_OFF,
+  no_ids: CHIP_OFF,
+};
+
+/** The Publication Manager action for a new work (v2.1): review a pending or
+ *  rejected paper on the scholar's curate page; add a DOI PubMed lacks on its
+ *  Add tab. Null otherwise, or without an https PM base. */
+function pmActionOf(
+  w: OrcidQueueWork,
+  cwid: string,
+  base: string | null,
+): { href: string; label: string } | null {
+  if (w.status === "pending" || w.status === "rejected") {
+    const href = pmCurateHref(base, cwid);
+    return href ? { href, label: "Review in Publication Manager" } : null;
+  }
+  if (w.status === "not_in_pubmed" && w.doi) {
+    const href = pmCurateHref(base, cwid, { doi: w.doi });
+    return href ? { href, label: "Add in Publication Manager" } : null;
+  }
+  return null;
+}
+
+const STATUS_SHORT: Record<ReciterWorkStatus, string> = {
+  accepted: "accepted",
+  pending: "pending",
+  rejected: "rejected",
+  not_retrieved: "not retrieved",
+  not_in_pubmed: "not in PubMed",
+  no_ids: "with no identifiers",
+};
+
+/** The new works by ReCiter status (v2.1), from the ETL's counts. */
+function WorkStatusSummary({ row: r }: { row: OrcidQueueRow }) {
+  const ws = r.detail?.workStatus;
+  if (!ws || r.newWorks === 0) return null;
+  const parts = RECITER_WORK_STATUSES.flatMap((st) =>
+    ws.counts[st] ? [`${fmt(ws.counts[st]!)} ${STATUS_SHORT[st]}`] : [],
+  );
+  if (ws.unknown > 0) parts.push(`${fmt(ws.unknown)} status unknown`);
+  const sentences = [
+    ...(parts.length > 0 ? [`ReCiter: ${parts.join(" · ")}`] : []),
+    ...(ws.acceptedInReciter > 0
+      ? [`${fmt(ws.acceptedInReciter)} accepted in ReCiter counted as shared`]
+      : []),
+    ...(!ws.reciterRead ? ["ReCiter could not be read on the last run"] : []),
+    ...((ws.pubmedUnknown ?? 0) > 0
+      ? [`PubMed lookup unavailable on the last run for ${fmt(ws.pubmedUnknown!)} DOI-only works`]
+      : []),
+  ];
+  return (
+    <div className="text-muted-foreground mt-0.5" data-testid="orcid-queue-work-status-summary">
+      {sentences.join(". ")}
+    </div>
   );
 }
 
@@ -605,6 +685,7 @@ function Candidate({
   sampleDecision,
   canDecide,
   busy,
+  pmBaseUrl,
   onConfirm,
   onDismiss,
 }: {
@@ -616,6 +697,7 @@ function Candidate({
   sampleDecision: "confirmed" | "dismissed" | null | undefined;
   canDecide: boolean;
   busy: boolean;
+  pmBaseUrl: string | null;
   onConfirm: () => void;
   onDismiss: () => void;
 }) {
@@ -756,24 +838,53 @@ function Candidate({
           scholar&rsquo;s publications
           {r.newWorksSample.length > 0 ? ":" : "."}
         </span>
+        <WorkStatusSummary row={r} />
         {r.newWorksSample.length > 0 ? (
-          <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0">
+          <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0">
             {r.newWorksSample.map((w, i) => {
               const href = workHref(w);
+              const pm = pmActionOf(w, r.cwid, pmBaseUrl);
               return (
-                <li key={i} className="truncate">
-                  {href ? (
-                    <a href={href} target="_blank" rel="noreferrer" className={LINK}>
-                      {w.title ?? "Untitled work"}
-                    </a>
-                  ) : (
-                    (w.title ?? "Untitled work")
-                  )}
-                  <span className="text-muted-foreground">
-                    {[w.year, w.source].filter(Boolean).length > 0
-                      ? ` · ${[w.year, w.source].filter(Boolean).join(" · ")}`
-                      : ""}
+                <li
+                  key={i}
+                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5"
+                  data-testid="orcid-queue-work"
+                >
+                  <span className="min-w-0 truncate">
+                    {href ? (
+                      <a href={href} target="_blank" rel="noreferrer" className={LINK}>
+                        {w.title ?? "Untitled work"}
+                      </a>
+                    ) : (
+                      (w.title ?? "Untitled work")
+                    )}
+                    <span className="text-muted-foreground">
+                      {[w.year, w.source].filter(Boolean).length > 0
+                        ? ` · ${[w.year, w.source].filter(Boolean).join(" · ")}`
+                        : ""}
+                    </span>
                   </span>
+                  {w.status ? (
+                    <span
+                      className={cn(CHIP, STATUS_TONE[w.status])}
+                      data-testid="orcid-queue-work-status"
+                    >
+                      {w.status === "rejected"
+                        ? "Rejected in ReCiter: re-review"
+                        : RECITER_WORK_STATUS_LABEL[w.status]}
+                    </span>
+                  ) : null}
+                  {pm ? (
+                    <a
+                      href={pm.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={cn(LINK, "text-[12.5px]")}
+                      data-testid="orcid-queue-work-pm"
+                    >
+                      {pm.label}
+                    </a>
+                  ) : null}
                 </li>
               );
             })}

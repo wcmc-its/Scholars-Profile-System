@@ -1275,6 +1275,9 @@ export class EtlStack extends Stack {
       "etl:reciter",
       "etl:reciter:coi-statements",
       "etl:orcid-candidates",
+      // ORCID queue v2.1: reads reciterdb person_article (each candidate work's
+      // ReCiter assertion for the scholar), so the sources family since then.
+      "etl:orcid-evidence",
       "etl:asms",
       "etl:infoed",
       "etl:infoed-biosketch",
@@ -2009,11 +2012,14 @@ export class EtlStack extends Stack {
       // ORCID candidate evidence (etl/orcid-evidence) -> orcid_candidate_evidence, the
       // bands /edit/orcid-queue reads, then the email auto-confirm (behind
       // ORCID_EMAIL_AUTOCONFIRM, off). Right after OrcidRegistryWeekly so it scores the
-      // fresh candidates; one public /record per iD over NAT egress with no credential,
-      // so external: false like the registry. v2 also Scans the Identity table for each
-      // scholar's prior institutions through the shared task role (the etl:identity
-      // grant), no secret. `continue`: the queue is a librarian tool.
-      { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: false, tier: "continue" },
+      // fresh candidates; one public /record per iD over NAT egress with no credential.
+      // v2 also Scans the Identity table for each scholar's prior institutions through
+      // the shared task role (the etl:identity grant), no secret. v2.1 resolves DOIs to
+      // PMIDs on the public NCBI E-utilities (NAT egress, optional NCBI_API_KEY) and
+      // reads each candidate work's ReCiter assertion from reciterdb person_article, so
+      // it runs on the sources family (SOURCES_SCRIPTS) and is external: true. `continue`:
+      // the queue is a librarian tool.
+      { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: true, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public
       // directory (no secret); reporter-grants + clinical-trials read ReciterDB

@@ -18,6 +18,9 @@
  * they fail the queue still renders (the URL's filter still applies) and the
  * bar offers the source filter only.
  *
+ * v2.1: each new work's Publication Manager link uses `PUBLICATION_MANAGER_URL`
+ * (cdk/lib/app-stack.ts, per env; https only, else the SPS-wide default).
+ *
  * Order of checks, every GET: session, then the flag (`ORCID_LIBRARIAN_QUEUE`
  * off ⇒ 404 for everyone), then `requireSuperuserGet` (librarians are
  * superusers; no new role). A View-as session reads the queue with every
@@ -36,7 +39,11 @@ import { getSession } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { isOrcidLibrarianQueueEnabled, parseOrcidQueueFilter } from "@/lib/edit/orcid-queue";
+import {
+  isOrcidLibrarianQueueEnabled,
+  parseOrcidQueueFilter,
+  publicationManagerBaseUrl,
+} from "@/lib/edit/orcid-queue";
 import { loadOrcidQueue } from "@/lib/edit/orcid-queue.server";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -115,6 +122,7 @@ export default async function OrcidQueuePage({
         facets={facets}
         basePath={BASE_PATH}
         readOnly={rawSession ? impersonationActive(rawSession, nowSeconds()) : false}
+        pmBaseUrl={publicationManagerBaseUrl()}
       />
     </ConsoleShell>
   );

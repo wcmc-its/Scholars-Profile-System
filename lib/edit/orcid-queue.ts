@@ -14,6 +14,8 @@
  * as, so `orcid_confirmed_by` is always the real librarian).
  */
 
+import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
+
 /** `ORCID_LIBRARIAN_QUEUE`: exactly "on" shows the page, the tab and the routes. */
 export function isOrcidLibrarianQueueEnabled(): boolean {
   return process.env.ORCID_LIBRARIAN_QUEUE === "on";
@@ -110,6 +112,35 @@ export type OrcidQueueSampleState = {
   stale?: boolean;
 };
 
+/** v2.1: where a record's work stands in ReCiter for the scholar.
+ *  `accepted` works are the scholar's and never reach the new-works preview
+ *  (they count as shared); `pending` / `rejected` = ReCiter holds it for the
+ *  scholar with that assertion; `not_retrieved` = a PMID ReCiter never
+ *  retrieved for them; `not_in_pubmed` = a DOI that did not resolve to a PMID;
+ *  `no_ids` = neither id (and no title match). */
+export const RECITER_WORK_STATUSES = [
+  "accepted",
+  "pending",
+  "rejected",
+  "not_retrieved",
+  "not_in_pubmed",
+  "no_ids",
+] as const;
+export type ReciterWorkStatus = (typeof RECITER_WORK_STATUSES)[number];
+
+export const RECITER_WORK_STATUS_LABEL: Record<ReciterWorkStatus, string> = {
+  accepted: "Accepted in ReCiter",
+  pending: "Pending in ReCiter",
+  rejected: "Rejected in ReCiter",
+  not_retrieved: "Not retrieved by ReCiter",
+  not_in_pubmed: "Not in PubMed",
+  no_ids: "No identifiers",
+};
+
+export function isReciterWorkStatus(v: unknown): v is ReciterWorkStatus {
+  return typeof v === "string" && (RECITER_WORK_STATUSES as readonly string[]).includes(v);
+}
+
 export type OrcidQueueWork = {
   title: string | null;
   year: number | null;
@@ -118,6 +149,9 @@ export type OrcidQueueWork = {
   source: string | null;
   /** The ORCID work's own link (v2; absent on rows a v1 run wrote). */
   url?: string | null;
+  /** v2.1: the work's ReCiter status; null when ReCiter could not be read
+   *  this run, absent on rows an earlier run wrote. */
+  status?: ReciterWorkStatus | null;
 };
 
 /** `orcid_candidate.source` values, in the order the filter lists them. */
@@ -202,6 +236,30 @@ export type OrcidEvidenceDetail = {
   sources: string[];
   /** Works the non-publication filter dropped or collapsed. */
   worksDropped: number;
+  /** v2.1: the new works by ReCiter status, and how the PMIDs were found.
+   *  Absent on rows an earlier run wrote. */
+  workStatus?: OrcidWorkStatusDetail;
+};
+
+export type OrcidWorkStatusDetail = {
+  /** New works (not in the scholar's publications) per status; `accepted`
+   *  is never here (accepted works are shared, see `acceptedInReciter`). */
+  counts: Partial<Record<ReciterWorkStatus, number>>;
+  /** New works whose status is unknown: a PMID when ReCiter was not read, or a
+   *  DOI the PubMed lookup never answered (`pubmedUnknown`). */
+  unknown: number;
+  /** False when the run could not read ReCiter's assertions. */
+  reciterRead: boolean;
+  /** Record works ReCiter accepted for the scholar that our publications lack:
+   *  counted as shared, not as new. */
+  acceptedInReciter: number;
+  /** Record works whose PMID came from the DOI lookup, or from a title match. */
+  resolvedByDoi: number;
+  resolvedByTitle: number;
+  /** Record works with a DOI and no PMID the PubMed lookup never answered (an
+   *  NCBI outage): neither resolved nor shown as not in PubMed. Absent on rows
+   *  written before it existed. */
+  pubmedUnknown?: number;
 };
 
 /** A work's link: PubMed when it has a PMID, else doi.org, else its own URL
@@ -214,7 +272,9 @@ export function workHref(w: {
 }): string | null {
   if (w.pmid && /^\d+$/.test(w.pmid.trim()))
     return `https://pubmed.ncbi.nlm.nih.gov/${w.pmid.trim()}/`;
-  if (w.doi?.trim()) return `https://doi.org/${w.doi.trim()}`;
+  // Each path segment encoded (old SICI DOIs carry `<`, `>`, `;`, `#`), the `/` kept.
+  if (w.doi?.trim())
+    return `https://doi.org/${w.doi.trim().split("/").map(encodeURIComponent).join("/")}`;
   const url = w.url?.trim();
   if (url && /^https:\/\//i.test(url)) {
     try {
@@ -224,6 +284,43 @@ export function workHref(w: {
     }
   }
   return null;
+}
+
+/** An https origin (+ optional path) with no trailing slash, or null. Pure. */
+function httpsBase(raw: string | null | undefined): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) return null;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/** v2.1: Publication Manager's base URL for the queue's links, from
+ *  `PUBLICATION_MANAGER_URL` (wired per env in cdk/lib/app-stack.ts), else the
+ *  front door the rest of SPS links to (`request-a-change.ts`). https only:
+ *  anything else falls back to the default. Server-side (reads env). */
+export function publicationManagerBaseUrl(): string {
+  return httpsBase(process.env.PUBLICATION_MANAGER_URL) ?? httpsBase(PUBLICATION_MANAGER_URL)!;
+}
+
+/** A scholar's Publication Manager curate page, or with `doi` its Add tab
+ *  with that DOI filled in (`/curate/<uid>?add=external&doi=<doi>`, PM #1047).
+ *  Null unless `base` is https. The uid and the DOI are URL-encoded. Pure. */
+export function pmCurateHref(
+  base: string | null | undefined,
+  cwid: string,
+  opts: { doi?: string | null } = {},
+): string | null {
+  const b = httpsBase(base);
+  const uid = cwid.trim();
+  if (!b || !uid) return null;
+  const href = `${b}/curate/${encodeURIComponent(uid)}`;
+  const doi = opts.doi?.trim();
+  return doi ? `${href}?add=external&doi=${encodeURIComponent(doi)}` : href;
 }
 
 /** The queue's filter (v2 item 6/7): person type (`role_category`), unit

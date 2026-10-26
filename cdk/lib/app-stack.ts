@@ -1851,6 +1851,15 @@ export class AppStack extends Stack {
         // reviewed 2026-10-24. Takes effect ONLY on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         ORCID_LIBRARIAN_QUEUE: "on",
+        // ORCID queue v2.1 -- the Publication Manager base the queue's "Review in
+        // Publication Manager" (/curate/<uid>) and "Add in Publication Manager"
+        // (/curate/<uid>?add=external&doi=<doi>, PM #1047) links use.
+        // publicationManagerBaseUrl() (lib/edit/orcid-queue.ts) accepts https only
+        // and otherwise falls back to the SPS-wide PUBLICATION_MANAGER_URL constant.
+        // Same value in both envs, production Publication Manager: staging's scholars and
+        // candidates are prod's people, and the dev PM is not guaranteed to carry
+        // #1047. Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        PUBLICATION_MANAGER_URL: "https://reciter.weill.cornell.edu",
         // #1762 — the `honors_curator` role. The approver is the RESEARCH DEAN's
         // office (a different org unit from the Dean's office), which self-serves
         // from day one, so this is not a fast-follow: without it the queue is
