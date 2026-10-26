@@ -1,9 +1,10 @@
 /**
- * ORCID librarian queue — the loader the page reads and the writes the three
- * routes share (`app/api/edit/orcid-queue/*`). Server-only: the client
- * component imports the pure sibling `orcid-queue.ts`. Every function takes
- * the Prisma client (or the transaction client) as a parameter and none checks
- * authorization: the page and routes gate first.
+ * ORCID librarian queue — the loaders the page and the scholar route read,
+ * and the writes the decide route makes (`app/api/edit/orcid-queue/*`).
+ * Server-only: the client component imports the pure sibling
+ * `orcid-queue.ts`. Every function takes the Prisma client (or the
+ * transaction client) as a parameter and none checks authorization: the page
+ * and routes gate first.
  *
  * A confirm is the same write `POST /api/edit/orcid` makes (`scholar.orcid`,
  * `orcid_confirmed_at`, the pair's dismissal deleted) plus method `librarian`
@@ -12,56 +13,42 @@
  * which clears `scholar.orcid` (the Remove write). Each runs inside the
  * caller's transaction with its audit row.
  *
- * v2 (docs/orcid-librarian-queue-spec.md, "v2"): the page is one card per
- * scholar with every candidate iD, best first, and the card sits in its best
- * candidate's tab (`cardTabOf`); tab counts are scholars. One filter (person
- * type, department / division, institution, candidate source) narrows the
- * list, the counts, the sample draw and bulk confirm alike, and a sample
- * stores the filter it was drawn under (`filter_key`). The uniqueness rules
- * (one qualifying row per scholar, best band) always read the scholar's FULL
- * candidate set, never the filtered one, so a filter can never hide a second
- * iD from bulk confirm.
+ * v3 (Roadmap/orcid-queue-v3-redesign-plan.md, PR A): the page lists every
+ * scholar in the queue as a summary (`loadOrcidQueue`, under the person and
+ * source filter), and the selected scholar's card loads on its own
+ * (`loadOrcidQueueCard`). The sample gate and bulk confirm are gone.
  */
-import { randomUUID } from "node:crypto";
-
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { loadSelectedDivisionRosterCwids, personFilterWhere } from "@/lib/edit/person-filter";
 import { formatPublishedName } from "@/lib/postnominal";
 
 import {
-  bandRank,
-  cardTabOf,
   compareCandidates,
   EMPTY_ORCID_QUEUE_FILTER,
   heldFor,
   isOrcidCandidateSource,
-  isOrcidQueueTab,
   isReciterWorkStatus,
   ORCID_QUEUE_BANDS,
-  ORCID_QUEUE_SAMPLE_SIZE,
-  ORCID_QUEUE_TABS,
-  orcidQueueFilterKey,
   pairState,
-  sampleStatus,
   type OrcidCandidateSource,
   type OrcidEvidenceDetail,
+  type OrcidOnFile,
+  type OrcidOnFileHow,
   type OrcidQueueBand,
   type OrcidQueueCard,
   type OrcidQueueData,
   type OrcidQueueFilter,
   type OrcidQueueRow,
-  type OrcidQueueSampleState,
-  type OrcidQueueTab,
+  type OrcidQueueSummary,
   type OrcidQueueWork,
-  type OrcidSampleBand,
   type OrcidWorkStatusDetail,
 } from "./orcid-queue";
 
 type Client = Pick<
   PrismaClient,
   | "orcidCandidateEvidence"
-  | "orcidQueueSample"
+  | "publicationAuthor"
   | "orcidDismissal"
   | "scholar"
   | "orcidCandidate"
@@ -70,9 +57,6 @@ type Client = Pick<
 >;
 type Tx = Prisma.TransactionClient;
 type ReadClient = Client | Tx;
-
-/** Rows shown per tab. The tab pills count them all. */
-const TAB_LIMIT = 200;
 
 /** A refused write: the route maps it to `editError(status, code)`. */
 export class OrcidQueueRefused extends Error {
@@ -86,8 +70,6 @@ export class OrcidQueueRefused extends Error {
       | "on_file"
       | "dismissed"
       | "state_changed"
-      | "sample_row_not_found"
-      | "sample_row_decided"
       | "other_not_in_queue",
   ) {
     super(code);
@@ -138,20 +120,6 @@ async function readOnFile(tx: Tx, cwid: string) {
   return { held, admins, dismissed };
 }
 
-/** True when a later ETL run re-scored the band after the sample was drawn: the
- *  sample measured a population that is gone, so it no longer authorizes bulk. */
-export async function isSampleStale(
-  client: Pick<PrismaClient, "orcidCandidateEvidence"> | Tx,
-  band: OrcidSampleBand,
-  startedAt: Date,
-): Promise<boolean> {
-  const newer = await client.orcidCandidateEvidence.findFirst({
-    where: { band, computedAt: { gt: startedAt } },
-    select: { cwid: true },
-  });
-  return newer !== null;
-}
-
 function asWorks(v: unknown): OrcidQueueWork[] {
   if (!Array.isArray(v)) return [];
   return v
@@ -171,46 +139,15 @@ function asWorks(v: unknown): OrcidQueueWork[] {
 const asStrings = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
-/** The newest sample of a band and its state, or null. */
-export async function loadLatestSample(
-  client: Pick<PrismaClient, "orcidQueueSample"> | Tx,
-  band: OrcidSampleBand,
-): Promise<
-  | (OrcidQueueSampleState & {
-      pairs: Array<{ cwid: string; orcid: string; decision: string | null }>;
-    })
-  | null
-> {
-  const head = await client.orcidQueueSample.findFirst({
-    where: { band },
-    orderBy: { startedAt: "desc" },
-    select: { id: true, startedAt: true, filterKey: true },
-  });
-  if (!head) return null;
-  const rows = await client.orcidQueueSample.findMany({
-    where: { id: head.id },
-    select: { cwid: true, orcid: true, decision: true },
-  });
-  return {
-    id: head.id,
-    band,
-    startedAt: head.startedAt.toISOString(),
-    filterKey: head.filterKey ?? "",
-    total: rows.length,
-    decided: rows.filter((r) => r.decision !== null).length,
-    dismissed: rows.filter((r) => r.decision === "dismissed").length,
-    status: sampleStatus(rows),
-    pairs: rows,
-  };
-}
-
 /** An open pair: a candidate of an active scholar, not dismissed, not on file. */
 type OpenPair = {
   cwid: string;
   orcid: string;
   band: OrcidQueueBand;
   shared: number;
+  worksTotal: number;
   nameAgrees: boolean;
+  competitor: boolean;
   state: "queue" | "conflict";
   onFile: string | null;
 };
@@ -219,7 +156,6 @@ type OpenPair = {
  *  pairs (unfiltered), each pair's live sources, and which scholars the
  *  person filter keeps (null = no person filter). */
 type QueueState = {
-  all: Array<{ cwid: string; orcid: string; band: string }>;
   open: OpenPair[];
   sources: Map<string, OrcidCandidateSource[]>;
   people: Set<string> | null;
@@ -249,12 +185,23 @@ async function matchPeople(
   return new Set(rows.map((r) => r.cwid));
 }
 
+/** `only`: one scholar's pairs (the card route), else every evidence row. */
 async function loadQueueState(
   client: ReadClient,
   filter: OrcidQueueFilter = EMPTY_ORCID_QUEUE_FILTER,
+  only?: string,
 ): Promise<QueueState> {
   const all = await client.orcidCandidateEvidence.findMany({
-    select: { cwid: true, orcid: true, band: true, shared: true, nameAgrees: true },
+    ...(only ? { where: { cwid: only } } : {}),
+    select: {
+      cwid: true,
+      orcid: true,
+      band: true,
+      shared: true,
+      worksTotal: true,
+      nameAgrees: true,
+      competitor: true,
+    },
   });
   const cwids = [...new Set(all.map((r) => r.cwid))];
   const [scholars, dismissals, candidates, people] = await Promise.all([
@@ -306,12 +253,14 @@ async function loadQueueState(
       orcid: r.orcid,
       band: r.band as OrcidQueueBand,
       shared: r.shared,
+      worksTotal: r.worksTotal,
       nameAgrees: r.nameAgrees,
+      competitor: r.competitor,
       state,
       onFile: state === "conflict" ? onFile : null,
     });
   }
-  return { all, open, sources, people, filter };
+  return { open, sources, people, filter };
 }
 
 /** The pair passes the filter: its scholar the person facets, and (when
@@ -323,125 +272,22 @@ function pairInFilter(st: QueueState, cwid: string, orcid: string): boolean {
   return mine.some((x) => st.filter.sources.includes(x));
 }
 
-/** The band's rows that qualify for a sample or a bulk confirm: nothing on
- *  file, not dismissed (`loadQueueState`), the pair inside the filter, and,
- *  over the scholar's FULL candidate set (never the filtered one), exactly one
- *  open row in the band and no open row in a stronger band, so the card sits in
- *  this band's tab. The one-row rule is v1's (spec Deviations); the best-band
- *  rule is v2's, so a sampled pair is always on its band's tab. `total` counts
- *  the band's evidence rows inside the filter, as v1 counted the whole band. */
-function qualifyingFrom(
-  st: QueueState,
-  band: OrcidQueueBand,
-): { qualifying: Array<{ cwid: string; orcid: string }>; total: number } {
-  const byCwid = new Map<string, OpenPair[]>();
-  for (const p of st.open)
-    if (p.state === "queue") byCwid.set(p.cwid, [...(byCwid.get(p.cwid) ?? []), p]);
-  const qualifying: Array<{ cwid: string; orcid: string }> = [];
-  for (const [cwid, ps] of byCwid) {
-    const inBand = ps.filter((p) => p.band === band);
-    if (inBand.length !== 1) continue;
-    if (ps.some((p) => bandRank(p.band) < bandRank(band))) continue;
-    if (!pairInFilter(st, cwid, inBand[0]!.orcid)) continue;
-    qualifying.push({ cwid, orcid: inBand[0]!.orcid });
-  }
-  const total = st.all.filter((r) => r.band === band && pairInFilter(st, r.cwid, r.orcid)).length;
-  return { qualifying, total };
-}
-
-/** `qualifyingFrom` read now, on the client given (the writer, in a route). */
-export async function loadQualifying(
-  client: ReadClient,
-  band: OrcidQueueBand,
-  filter: OrcidQueueFilter = EMPTY_ORCID_QUEUE_FILTER,
-): Promise<{ qualifying: Array<{ cwid: string; orcid: string }>; total: number }> {
-  return qualifyingFrom(await loadQueueState(client, filter), band);
-}
-
-/** Fisher–Yates, first `n`. */
-function pick<T>(xs: T[], n: number): T[] {
-  const a = [...xs];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j]!, a[i]!];
-  }
-  return a.slice(0, n);
-}
-
-/** Returns the band's open sample, or starts one: up to ORCID_QUEUE_SAMPLE_SIZE
- *  random rows that qualify now under `filter`, stored with the filter's key.
- *  A passed or locked sample is not open, so a call after one starts a fresh
- *  sample (which supersedes it for bulk). An open sample drawn under a
- *  DIFFERENT filter is not returned either: one sample per band at a time, so
- *  drawing one for this filter abandons it.
- *  `restart` abandons an open sample the same way: a sampled pair can leave the
- *  queue before it is decided (the scholar confirms it, or the ETL drops it), so
- *  an open sample must never be the band's last word. The fresh sample still
- *  has to pass in full, so this opens no way around the gate. */
-export async function openOrStartSample(
-  tx: Tx,
-  band: OrcidSampleBand,
-  actor: string,
-  now: Date,
-  opts: { restart?: boolean; filter?: OrcidQueueFilter } = {},
-): Promise<{ sample: OrcidQueueSampleState; created: boolean }> {
-  const filter = opts.filter ?? EMPTY_ORCID_QUEUE_FILTER;
-  const filterKey = orcidQueueFilterKey(filter);
-  const latest = await loadLatestSample(tx, band);
-  if (latest && latest.status === "open" && !opts.restart && latest.filterKey === filterKey) {
-    const { id, band: b, startedAt, total, decided, dismissed, status } = latest;
-    return {
-      sample: { id, band: b, startedAt, filterKey, total, decided, dismissed, status },
-      created: false,
-    };
-  }
-  const { qualifying } = await loadQualifying(tx, band, filter);
-  const chosen = pick(qualifying, ORCID_QUEUE_SAMPLE_SIZE);
-  const id = randomUUID();
-  if (chosen.length > 0) {
-    await tx.orcidQueueSample.createMany({
-      data: chosen.map((c) => ({
-        id,
-        band,
-        startedBy: actor,
-        startedAt: now,
-        filterKey,
-        cwid: c.cwid,
-        orcid: c.orcid,
-      })),
-    });
-  }
-  return {
-    sample: {
-      id,
-      band,
-      startedAt: now.toISOString(),
-      filterKey,
-      total: chosen.length,
-      decided: 0,
-      dismissed: 0,
-      status: "open",
-    },
-    created: true,
-  };
-}
-
 type WriteMeta = {
   actor: string;
   impersonatedCwid: string | null;
   requestId: string | null;
   ts: Date;
-  sampleId?: string | null;
-  bulk?: boolean;
   /** A dismissal made with a confirm of this iD (`dismissOthers`). */
   alongside?: string;
+  /** v3: a dismissal made by "None of these". */
+  noneOfThese?: boolean;
 };
 
 /** Confirm one pair (method `librarian`). The pair must be in the evidence
  *  table and not dismissed (a librarian never overrides the scholar's own
  *  Remove or an earlier Not this person). "On file" is `scholar.orcid` or an
  *  undismissed `rpm_admin` iD, as on /edit. An iD already on file is refused; a
- *  DIFFERENT iD on file (the Conflicts tab) is replaced only with `replace`, and
+ *  DIFFERENT iD on file (a possible error) is replaced only with `replace`, and
  *  every replaced iD is dismissed. Optimistic: the update re-checks what was read. */
 export async function confirmPair(
   tx: Tx,
@@ -493,8 +339,6 @@ export async function confirmPair(
       method: "librarian",
       band: evidence.band,
       ...(replaced.length > 0 ? { dismissed: replaced } : {}),
-      ...(meta.sampleId ? { sample_id: meta.sampleId } : {}),
-      ...(meta.bulk ? { bulk: true } : {}),
     },
     ts: meta.ts,
     requestId: meta.requestId,
@@ -550,7 +394,7 @@ export async function dismissPair(
       band: evidence?.band ?? null,
       ...(undid ? { undo_email_autoconfirm: true } : {}),
       ...(meta.alongside ? { with_confirm_of: meta.alongside } : {}),
-      ...(meta.sampleId && !meta.alongside ? { sample_id: meta.sampleId } : {}),
+      ...(meta.noneOfThese ? { none_of_these: true } : {}),
     },
     ts: meta.ts,
     requestId: meta.requestId,
@@ -559,48 +403,33 @@ export async function dismissPair(
 }
 
 /** v2 item 5: "Not this person" on the scholar's OTHER candidate iDs, in the
- *  same transaction as the confirm that precedes it. Each must be a candidate
+ *  same transaction as the decision on `decided` that precedes it: a confirm,
+ *  or (v3, `meta.noneOfThese`) the first iD of "None of these". Each must be a candidate
  *  in the evidence table for this scholar (404 `other_not_in_queue`
  *  otherwise, which rolls the whole decision back); each gets its own
  *  dismissal and `orcid_librarian_dismiss` audit row (`dismissPair`). */
 export async function dismissOthers(
   tx: Tx,
   cwid: string,
-  confirmed: string,
+  decided: string,
   others: readonly string[],
   meta: WriteMeta,
 ): Promise<string[]> {
   const done: string[] = [];
-  for (const orcid of [...new Set(others)].filter((o) => o !== confirmed)) {
+  for (const orcid of [...new Set(others)].filter((o) => o !== decided)) {
     const evidence = await tx.orcidCandidateEvidence.findUnique({
       where: { cwid_orcid: { cwid, orcid } },
       select: { band: true },
     });
     if (!evidence) throw new OrcidQueueRefused(404, "other_not_in_queue");
-    await dismissPair(tx, { cwid, orcid }, { ...meta, alongside: confirmed });
+    await dismissPair(
+      tx,
+      { cwid, orcid },
+      meta.noneOfThese ? meta : { ...meta, alongside: decided },
+    );
     done.push(orcid);
   }
   return done;
-}
-
-/** Stamps a sample row with a decision; it must exist and be undecided. */
-export async function stampSampleRow(
-  tx: Tx,
-  row: { sampleId: string; cwid: string; orcid: string },
-  decision: "confirmed" | "dismissed",
-  actor: string,
-  ts: Date,
-): Promise<void> {
-  const found = await tx.orcidQueueSample.findUnique({
-    where: { id_cwid_orcid: { id: row.sampleId, cwid: row.cwid, orcid: row.orcid } },
-    select: { decision: true },
-  });
-  if (!found) throw new OrcidQueueRefused(404, "sample_row_not_found");
-  const { count } = await tx.orcidQueueSample.updateMany({
-    where: { id: row.sampleId, cwid: row.cwid, orcid: row.orcid, decision: null },
-    data: { decision, decidedBy: actor, decidedAt: ts },
-  });
-  if (count !== 1) throw new OrcidQueueRefused(409, "sample_row_decided");
 }
 
 /** The ETL's `evidence_detail`, or null (a v1 row, or a shape we do not know). */
@@ -644,168 +473,205 @@ function asWorkStatus(v: unknown): OrcidWorkStatusDetail | null {
   };
 }
 
-type CardPair = {
-  orcid: string;
-  band: OrcidQueueBand;
-  shared: number;
-  nameAgrees: boolean;
-  state: OrcidQueueRow["state"];
-  onFile: string | null;
+type ScholarRow = {
+  cwid: string;
+  slug: string;
+  preferredName: string;
+  fullName: string;
+  postnominal: string | null;
+  roleCategory: string | null;
+  primaryTitle: string | null;
+  primaryDepartment: string | null;
 };
 
-/**
- * One tab of the queue: one card per scholar (every candidate iD, best first),
- * the band's sample first, under `filter`; plus every tab's count of scholars.
- */
-export async function loadOrcidQueue(
-  client: Client,
-  rawTab: unknown,
-  filter: OrcidQueueFilter = EMPTY_ORCID_QUEUE_FILTER,
-): Promise<OrcidQueueData> {
-  const tab: OrcidQueueTab = isOrcidQueueTab(rawTab) ? rawTab : "strong";
-  const [st, autoConfirmed] = await Promise.all([
-    loadQueueState(client, filter),
-    client.scholar.findMany({
-      where: { orcidConfirmMethod: "email_verified", orcid: { not: null }, deletedAt: null },
-      select: { cwid: true, orcid: true },
-    }),
-  ]);
-  const auto = autoConfirmed.filter((a) => !st.people || st.people.has(a.cwid));
+const SCHOLAR_SELECT = {
+  cwid: true,
+  slug: true,
+  preferredName: true,
+  fullName: true,
+  postnominal: true,
+  roleCategory: true,
+  primaryTitle: true,
+  primaryDepartment: true,
+} as const;
 
-  // Every scholar's pairs, unfiltered: the tab a card sits in reads them all.
+const publishedName = (s: ScholarRow | undefined, cwid: string) =>
+  formatPublishedName(
+    s?.preferredName ?? s?.fullName ?? cwid,
+    s?.postnominal ?? null,
+    s?.roleCategory ?? null,
+  );
+
+/** A scholar's pairs as the card and the list see them: their open pairs plus
+ *  the iD the ETL email-confirmed (state `auto_confirmed`), best first. */
+type CardPair = Pick<
+  OpenPair,
+  "orcid" | "band" | "shared" | "worksTotal" | "nameAgrees" | "competitor" | "onFile"
+> & { state: OrcidQueueRow["state"] };
+
+function pairsByScholar(
+  st: QueueState,
+  auto: Array<{ cwid: string; orcid: string | null }>,
+): Map<string, CardPair[]> {
   const byCwid = new Map<string, CardPair[]>();
   const add = (cwid: string, p: CardPair) => byCwid.set(cwid, [...(byCwid.get(cwid) ?? []), p]);
-  for (const p of st.open) add(p.cwid, { ...p });
-  for (const a of auto)
+  for (const p of st.open) add(p.cwid, p);
+  for (const a of auto) {
+    if (!a.orcid) continue;
     add(a.cwid, {
-      orcid: a.orcid!,
+      orcid: a.orcid,
       band: "email_verified",
       shared: 0,
+      worksTotal: 0,
       nameAgrees: false,
+      competitor: false,
       state: "auto_confirmed",
       onFile: a.orcid,
     });
-
-  const counts = Object.fromEntries(ORCID_QUEUE_TABS.map((t) => [t, 0])) as Record<
-    OrcidQueueTab,
-    number
-  >;
-  const inTab = new Map<string, CardPair[]>();
-  for (const [cwid, ps] of byCwid) {
-    if (!ps.some((p) => pairInFilter(st, cwid, p.orcid))) continue;
-    const t = cardTabOf(ps);
-    counts[t]++;
-    if (t === tab) inTab.set(cwid, ps);
   }
+  for (const ps of byCwid.values()) ps.sort(compareCandidates);
+  return byCwid;
+}
 
-  let sample: OrcidQueueSampleState | null = null;
-  let remaining: number | null = null;
-  const sampled = new Map<string, "confirmed" | "dismissed" | null>();
-  const filterKey = orcidQueueFilterKey(filter);
-  if (tab === "strong" || tab === "shared_only") {
-    const latest = await loadLatestSample(client, tab);
-    if (latest) {
-      const { pairs, ...state } = latest;
-      sample =
-        state.status === "passed" && (await isSampleStale(client, tab, new Date(state.startedAt)))
-          ? { ...state, stale: true }
-          : state;
-      // A sample drawn under another filter shows its state only; its rows
-      // and its bulk confirm belong to that filter.
-      const mine = state.filterKey === filterKey;
-      if (state.status === "open" && mine) {
-        for (const p of pairs) {
-          sampled.set(pairKey(p.cwid, p.orcid), p.decision as "confirmed" | "dismissed" | null);
-          const ps = inTab.get(p.cwid) ?? [];
-          const all = byCwid.get(p.cwid) ?? [];
-          const stillOpen = all.some(
-            (x) => x.orcid === p.orcid && (x.state === "queue" || x.state === "conflict"),
-          );
-          if (ps.some((x) => x.orcid === p.orcid)) {
-            // Already on this tab's card.
-          } else if (stillOpen) {
-            // Still undecided, but the card now sits in another tab (a later ETL
-            // run moved the band, or a stronger iD appeared): bring the scholar's
-            // real pairs here, so the sampled one stays decidable and stamps the
-            // sample, and the card shows every iD the scholar has.
-            for (const x of all) if (!ps.some((y) => y.orcid === x.orcid)) ps.push({ ...x });
-          } else {
-            // Decided since (on file or dismissed): it left the band's list; show
-            // it in place, decided.
-            ps.push({
-              orcid: p.orcid,
-              band: tab,
-              shared: 0,
-              nameAgrees: false,
-              state: "on_file",
-              onFile: null,
-            });
-          }
-          inTab.set(p.cwid, ps);
-        }
-      }
-      if (state.status === "passed" && !sample.stale && mine) {
-        const done = new Set(pairs.map((p) => pairKey(p.cwid, p.orcid)));
-        remaining = qualifyingFrom(st, tab).qualifying.filter(
-          (q) => !done.has(pairKey(q.cwid, q.orcid)),
-        ).length;
-      }
-    }
-  }
+/** Scholars whose iD the ETL confirmed from a verified email. */
+const loadAutoConfirmed = (client: ReadClient, cwid?: string) =>
+  client.scholar.findMany({
+    where: {
+      ...(cwid ? { cwid } : {}),
+      orcidConfirmMethod: "email_verified",
+      orcid: { not: null },
+      deletedAt: null,
+    },
+    select: { cwid: true, orcid: true },
+  });
 
-  // Cards: the sample first, then by best candidate.
-  const isSampledCard = (cwid: string, ps: CardPair[]) =>
-    ps.some((p) => sampled.has(pairKey(cwid, p.orcid)));
-  const best = (ps: CardPair[]) => [...ps].sort(compareCandidates)[0]!;
-  const ordered = [...inTab].sort(
-    ([ca, a], [cb, b]) =>
-      Number(isSampledCard(cb, b)) - Number(isSampledCard(ca, a)) ||
-      compareCandidates(best(a), best(b)),
+/**
+ * v3: every scholar in the queue under `filter`, as list summaries. A scholar
+ * is in when any of their pairs passes the filter; their summary still carries
+ * every pair, so the score and "Clearest winner" read the full set.
+ */
+export async function loadOrcidQueue(
+  client: Client,
+  filter: OrcidQueueFilter = EMPTY_ORCID_QUEUE_FILTER,
+): Promise<OrcidQueueData> {
+  const [st, autoConfirmed] = await Promise.all([
+    loadQueueState(client, filter),
+    loadAutoConfirmed(client),
+  ]);
+  const byCwid = pairsByScholar(
+    st,
+    autoConfirmed.filter((a) => !st.people || st.people.has(a.cwid)),
   );
-  const sampledCards = ordered.filter(([c, ps]) => isSampledCard(c, ps)).length;
-  const shown = ordered.slice(0, Math.max(TAB_LIMIT, sampledCards));
-
-  const wanted = shown.flatMap(([cwid, ps]) => ps.map((p) => ({ cwid, orcid: p.orcid })));
-  const details =
-    wanted.length === 0
-      ? []
-      : await client.orcidCandidateEvidence.findMany({ where: { OR: wanted } });
-  const detailBy = new Map(details.map((d) => [pairKey(d.cwid, d.orcid), d]));
-  const people = new Set(shown.map(([c]) => c));
-  for (const d of details) for (const c of asStrings(d.competitorCwids)) people.add(c);
+  const shown = [...byCwid].filter(([cwid, ps]) => ps.some((p) => pairInFilter(st, cwid, p.orcid)));
   const scholars = new Map(
+    shown.length === 0
+      ? []
+      : (
+          await client.scholar.findMany({
+            where: { cwid: { in: shown.map(([c]) => c) } },
+            select: SCHOLAR_SELECT,
+          })
+        ).map((s) => [s.cwid, s]),
+  );
+  const summaries: OrcidQueueSummary[] = shown.map(([cwid, ps]) => {
+    const s = scholars.get(cwid);
+    return {
+      cwid,
+      name: publishedName(s, cwid),
+      surname: (s?.fullName ?? cwid).trim().split(/\s+/).pop()!.toLowerCase(),
+      department: s?.primaryDepartment ?? null,
+      candidates: ps.map(({ orcid, band, shared, worksTotal, nameAgrees, competitor }) => ({
+        orcid,
+        band,
+        shared,
+        worksTotal,
+        nameAgrees,
+        competitor,
+      })),
+      conflict: ps.some((p) => p.state === "conflict"),
+      autoConfirmed: ps.some((p) => p.state === "auto_confirmed"),
+    };
+  });
+  return { summaries, filter };
+}
+
+const ON_FILE_HOWS: readonly string[] = [
+  "self",
+  "proxy",
+  "librarian",
+  "email_verified",
+  "authenticated",
+];
+
+/**
+ * v3: one scholar's card (every candidate iD, best first, with the ETL's
+ * evidence, the iD on file and where it came from, and their publication
+ * count), or null when the scholar has no open pair and no email-confirmed iD.
+ */
+export async function loadOrcidQueueCard(
+  client: Client,
+  cwid: string,
+): Promise<OrcidQueueCard | null> {
+  const [st, autoConfirmed] = await Promise.all([
+    loadQueueState(client, EMPTY_ORCID_QUEUE_FILTER, cwid),
+    loadAutoConfirmed(client, cwid),
+  ]);
+  const ps = pairsByScholar(st, autoConfirmed).get(cwid);
+  if (!ps || ps.length === 0) return null;
+
+  const [details, me, reciterTotal] = await Promise.all([
+    client.orcidCandidateEvidence.findMany({ where: { cwid } }),
+    client.scholar.findUnique({
+      where: { cwid },
+      select: {
+        ...SCHOLAR_SELECT,
+        orcid: true,
+        orcidConfirmMethod: true,
+        orcidConfirmedAt: true,
+        orcidConfirmedBy: true,
+      },
+    }),
+    client.publicationAuthor.count({ where: { cwid, isConfirmed: true } }),
+  ]);
+  const detailBy = new Map(details.map((d) => [d.orcid, d]));
+  const onFileOrcid = ps.find((p) => p.onFile)?.onFile ?? me?.orcid ?? null;
+  const people = new Set<string>();
+  for (const d of details) for (const c of asStrings(d.competitorCwids)) people.add(c);
+  if (me?.orcidConfirmedBy && me.orcidConfirmedBy !== "ETL") people.add(me.orcidConfirmedBy);
+  const named = new Map(
     people.size === 0
       ? []
       : (
           await client.scholar.findMany({
             where: { cwid: { in: [...people] } },
-            select: {
-              cwid: true,
-              slug: true,
-              preferredName: true,
-              fullName: true,
-              postnominal: true,
-              roleCategory: true,
-              primaryTitle: true,
-              primaryDepartment: true,
-            },
+            select: SCHOLAR_SELECT,
           })
         ).map((s) => [s.cwid, s]),
   );
-  const nameOf = (cwid: string) => {
-    const s = scholars.get(cwid);
-    return formatPublishedName(
-      s?.preferredName ?? s?.fullName ?? cwid,
-      s?.postnominal ?? null,
-      s?.roleCategory ?? null,
-    );
-  };
 
-  const rowOf = (cwid: string, p: CardPair): OrcidQueueRow => {
-    const d = detailBy.get(pairKey(cwid, p.orcid));
+  let onFile: OrcidOnFile | null = null;
+  if (onFileOrcid) {
+    const fromScholar = me?.orcid === onFileOrcid;
+    const method = fromScholar ? me?.orcidConfirmMethod : null;
+    const how: OrcidOnFileHow = !fromScholar
+      ? "rpm_admin"
+      : method && ON_FILE_HOWS.includes(method)
+        ? (method as OrcidOnFileHow)
+        : "identity";
+    const by = fromScholar ? (me?.orcidConfirmedBy ?? null) : null;
+    onFile = {
+      orcid: onFileOrcid,
+      how,
+      at: fromScholar ? (me?.orcidConfirmedAt?.toISOString() ?? null) : null,
+      by,
+      byName: by && by !== "ETL" ? publishedName(named.get(by), by) : null,
+    };
+  }
+
+  const candidates: OrcidQueueRow[] = ps.map((p) => {
+    const d = detailBy.get(p.orcid);
     const detail = asDetail(d?.evidenceDetail);
-    const band = (d?.band ?? p.band) as OrcidQueueBand;
-    const key = pairKey(cwid, p.orcid);
+    const band = d?.band ?? p.band;
     const competitorShared = new Map(
       (detail?.competitors.cwids ?? []).map((c) => [c.cwid, c] as const),
     );
@@ -815,7 +681,9 @@ export async function loadOrcidQueue(
     return {
       cwid,
       orcid: p.orcid,
-      band: (ORCID_QUEUE_BANDS as readonly string[]).includes(band) ? band : "weak",
+      band: (ORCID_QUEUE_BANDS as readonly string[]).includes(band)
+        ? (band as OrcidQueueBand)
+        : "weak",
       state: p.state,
       instMatch: d?.instMatch ?? false,
       historyMatch: d?.historyMatch ?? false,
@@ -825,7 +693,7 @@ export async function loadOrcidQueue(
       competitor: d?.competitor ?? false,
       competitors: asStrings(d?.competitorCwids).map((c) => ({
         cwid: c,
-        name: nameOf(c),
+        name: publishedName(named.get(c), c),
         shared: competitorShared.get(c)?.shared ?? null,
         reason: competitorShared.get(c)?.reason ?? null,
       })),
@@ -836,34 +704,22 @@ export async function loadOrcidQueue(
       worksTotal: d?.worksTotal ?? 0,
       newWorks: d?.newWorks ?? 0,
       newWorksSample: asWorks(d?.newWorksSample),
-      sources: st.sources.get(key) ?? [],
+      sources: st.sources.get(pairKey(cwid, p.orcid)) ?? [],
       detail,
-      onFileOrcid: p.state === "conflict" || p.state === "auto_confirmed" ? p.onFile : null,
+      onFileOrcid: p.state === "queue" ? null : p.onFile,
       autoConfirmed: p.state === "auto_confirmed",
-      ...(sampled.has(key) ? { sampleDecision: sampled.get(key) ?? null } : {}),
-    };
-  };
-
-  const cards: OrcidQueueCard[] = shown.map(([cwid, ps]) => {
-    const s = scholars.get(cwid);
-    const candidates = ps
-      .map((p) => rowOf(cwid, p))
-      .sort(
-        (a, b) =>
-          Number(b.state === "auto_confirmed") - Number(a.state === "auto_confirmed") ||
-          compareCandidates(a, b),
-      );
-    return {
-      cwid,
-      slug: s?.slug ?? null,
-      name: nameOf(cwid),
-      scholarNames: [...new Set([s?.fullName, s?.preferredName].filter((n): n is string => !!n))],
-      title: s?.primaryTitle ?? null,
-      department: s?.primaryDepartment ?? null,
-      tab,
-      candidates,
     };
   });
 
-  return { tab, cards, counts, filter, sample, remaining };
+  return {
+    cwid,
+    slug: me?.slug ?? null,
+    name: publishedName(me ?? undefined, cwid),
+    scholarNames: [...new Set([me?.fullName, me?.preferredName].filter((n): n is string => !!n))],
+    title: me?.primaryTitle ?? null,
+    department: me?.primaryDepartment ?? null,
+    onFile,
+    reciterTotal,
+    candidates,
+  };
 }

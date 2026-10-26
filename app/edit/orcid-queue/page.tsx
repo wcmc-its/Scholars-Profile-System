@@ -6,17 +6,16 @@
  * institution in the record's affiliations, papers shared with the scholar's
  * publications, name agreement, and competing scholars or iDs.
  *
- * Band tabs (Email verified, Strong, Shared papers, Moderate, Weak) plus
- * Conflicts, where the scholar already holds a different iD. `?tab=` picks
- * one (default Strong); the server loads that tab's rows and every tab's
- * count. Strong and Shared papers carry the sample gate: a passed sample of 50
- * unlocks "Confirm remaining N".
+ * v3 (Roadmap/orcid-queue-v3-redesign-plan.md, PR A): master–detail. The
+ * server loads every scholar in the queue as a list summary; the client
+ * scores, searches, filters and sorts them, and fetches the selected
+ * scholar's card from `GET /api/edit/orcid-queue/scholar`. The band tabs, the
+ * sample gate and bulk confirm are gone.
  *
- * v2: one card per scholar with every candidate iD; tab counts are scholars.
- * `type` / `unit` / `source` (the filter bar) narrow the list, the counts, the
- * sample and bulk confirm. The filter-bar facets load beside the queue; when
- * they fail the queue still renders (the URL's filter still applies) and the
- * bar offers the source filter only.
+ * `type` / `unit` / `source` (the server half of the filter bar) narrow the
+ * list. The filter-bar facets load beside the queue; when they fail the queue
+ * still renders (the URL's filter still applies) and the bar offers the source
+ * filter only.
  *
  * v2.1: each new work's Publication Manager link uses `PUBLICATION_MANAGER_URL`
  * (cdk/lib/app-stack.ts, per env; https only, else the SPS-wide default).
@@ -83,10 +82,9 @@ export default async function OrcidQueuePage({
   }
 
   const params = (await searchParams) ?? {};
-  const tab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
   const filter = parseOrcidQueueFilter(params);
   const [data, rawSession, pendingSlugRequests, pendingHonors, facets] = await Promise.all([
-    loadOrcidQueue(db.read, tab, filter),
+    loadOrcidQueue(db.read, filter),
     getSession(),
     isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
@@ -113,8 +111,8 @@ export default async function OrcidQueuePage({
       <div className="mb-[22px] flex flex-col gap-1.5">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">ORCID queue</h1>
         <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
-          ORCID iDs that may belong to a scholar, one card per scholar, with the evidence from each
-          public ORCID record. A confirmed iD goes on file and reaches WCM Identity overnight.
+          ORCID iDs that may belong to a scholar, with the evidence from each public ORCID record. A
+          confirmed iD goes on file and reaches WCM Identity overnight.
         </p>
       </div>
       <OrcidQueue
