@@ -797,8 +797,9 @@ function Detail({
             {initials(c.scholarName)}
           </span>
           <div className="flex min-w-[200px] flex-1 flex-col gap-0.5">
+            {/* self-start: a stretched full-width trigger left no room on the right, so the card flipped over the list */}
             <ScholarHoverCard cwid={c.cwid}>
-              <span className="text-[17px] font-semibold">{c.scholarName}</span>
+              <span className="self-start text-[17px] font-semibold">{c.scholarName}</span>
             </ScholarHoverCard>
             <span className="text-muted-foreground text-[13px]">
               {[c.title, c.department].filter(Boolean).join(" · ")} {/* pub-html-ok: the scholar's job title */}
