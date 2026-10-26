@@ -14,6 +14,14 @@ import {
   autoConfirmStep,
   bandOf,
   buildHistory,
+  doisToResolve,
+  matchByTitle,
+  reciterAssertionOf,
+  reciterStatusOf,
+  titleMatchKey,
+  withReciterAccepted,
+  withResolvedPmids,
+  type ReciterAssertion,
   historyBandShift,
   isHistoryBandEnabled,
   instMatchFacts,
@@ -267,8 +275,11 @@ describe("recordFacts + the per-pair evidence", () => {
           pmid: null,
           source: "Example Repository",
           url: null,
+          status: "not_in_pubmed",
         },
       ],
+      counts: { not_in_pubmed: 1 },
+      unknown: 0,
     });
   });
 
@@ -830,5 +841,188 @@ describe("v2: history_match, the band rule, and the evidence detail", () => {
       year: null,
       journal: null,
     });
+  });
+});
+
+describe("v2.1: PMIDs from DOIs and titles, and ReCiter status", () => {
+  /** Jane's record: one paper we hold, ReCiter-only papers in each state, a
+   *  DOI-only work, a work with no id, and one whose only match is its title. */
+  function statusRecord(): RecordResponse {
+    const r = record();
+    r["activities-summary"]!.works = {
+      "last-modified-date": null,
+      group: [
+        work("Paper one", "2020", [doi("10.1/A"), pmid("101")]),
+        work("Accepted in ReCiter only", "2023", [pmid("201")]),
+        work("Pending in ReCiter", "2023", [pmid("202")]),
+        work("Rejected in ReCiter", "2022", [pmid("203")]),
+        work("Never retrieved by ReCiter", "2021", [pmid("204")]),
+        work("A DOI-only paper", "2024", [doi("10.1/Q")]),
+        work("A work with no identifiers", "2019", []),
+        work("Gene Expression in Human Liver Cells", "2020", []),
+      ],
+    };
+    return r;
+  }
+  const TITLES = new Map([
+    [
+      "jd0001",
+      [{ pmid: "102", title: "Gene <i>expression</i> in human líver cells.", year: 2021 }],
+    ],
+  ]);
+  const RECITER = new Map([
+    [
+      "jd0001",
+      new Map<string, ReciterAssertion>([
+        ["101", "ACCEPTED"],
+        ["201", "ACCEPTED"],
+        ["202", "PENDING"],
+        ["203", "REJECTED"],
+      ]),
+    ],
+  ]);
+  const assemble = (over: Partial<Parameters<typeof assembleEvidence>[0]> = {}) =>
+    assembleEvidence({
+      pairs: [{ cwid: "jd0001", orcid: ORCID }],
+      onFile: new Set(),
+      facts: new Map([[ORCID, recordFacts(ORCID, statusRecord())]]),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+      ...over,
+    });
+
+  it("reciterAssertionOf: ACCEPTED, REJECTED, anything else on a row is pending", () => {
+    expect(reciterAssertionOf("ACCEPTED")).toBe("ACCEPTED");
+    expect(reciterAssertionOf(" rejected ")).toBe("REJECTED");
+    for (const v of [null, "NULL", "PENDING", ""]) expect(reciterAssertionOf(v)).toBe("PENDING");
+  });
+
+  it("reciterStatusOf: PMID states, DOI only, no ids, and unknown when ReCiter was not read", () => {
+    const a = new Map<string, ReciterAssertion>([
+      ["1", "ACCEPTED"],
+      ["2", "PENDING"],
+      ["3", "REJECTED"],
+    ]);
+    expect(reciterStatusOf({ pmid: "1", doi: null }, a)).toBe("accepted");
+    expect(reciterStatusOf({ pmid: "2", doi: null }, a)).toBe("pending");
+    expect(reciterStatusOf({ pmid: "3", doi: null }, a)).toBe("rejected");
+    expect(reciterStatusOf({ pmid: "4", doi: "10.1/x" }, a)).toBe("not_retrieved");
+    expect(reciterStatusOf({ pmid: null, doi: "10.1/x" }, a)).toBe("not_in_pubmed");
+    expect(reciterStatusOf({ pmid: null, doi: null }, a)).toBe("no_ids");
+    expect(reciterStatusOf({ pmid: "4", doi: null }, null)).toBeNull();
+    expect(reciterStatusOf({ pmid: null, doi: "10.1/x" }, null)).toBe("not_in_pubmed");
+  });
+
+  it("doisToResolve: the DOIs of works with no PMID, normalized and distinct", () => {
+    const f = recordFacts(ORCID, statusRecord());
+    expect(doisToResolve([f, f])).toEqual(["10.1/q"]);
+  });
+
+  it("withResolvedPmids gives a DOI-only work its PMID, so it can count as shared", () => {
+    const f = recordFacts(ORCID, record());
+    // "Paper two" (10.1/B, no PMID on the record) resolves to Jane's 102.
+    const g = withResolvedPmids(f, new Map([["10.1/b", "102"]]));
+    const two = g.works.find((w) => w.title === "Paper two")!;
+    expect(two).toMatchObject({ pmid: "102", resolvedBy: "doi" });
+    expect(g.workIds.has("pmid:102")).toBe(true);
+    expect(withResolvedPmids(f, new Map())).toBe(f);
+    // A work whose DOIs resolve to two PMIDs stays unresolved.
+    const twin = {
+      ...f,
+      works: [{ ...two, pmid: null, ids: new Set(["doi:10.1/b", "doi:10.1/c"]) }],
+    };
+    expect(
+      withResolvedPmids(
+        twin,
+        new Map([
+          ["10.1/b", "1"],
+          ["10.1/c", "2"],
+        ]),
+      ).works[0]!.pmid,
+    ).toBeNull();
+  });
+
+  it("titleMatchKey strips tags, accents, case and punctuation; short titles never match", () => {
+    expect(titleMatchKey("Gene <i>expression</i> in human líver cells.")).toBe(
+      titleMatchKey("GENE EXPRESSION IN HUMAN LIVER CELLS"),
+    );
+    expect(titleMatchKey("Reply")).toBeNull();
+  });
+
+  it("matchByTitle: exact normalized title, year ±1, no ids, one paper only", () => {
+    const pubs = TITLES.get("jd0001")!;
+    const w = (title: string, year: number | null, ids: string[] = []) => ({
+      title,
+      year,
+      ids: new Set(ids),
+    });
+    expect(matchByTitle(w("Gene Expression in Human Liver Cells", 2020), pubs)).toBe("102");
+    expect(matchByTitle(w("Gene Expression in Human Liver Cells", 2022), pubs)).toBe("102");
+    expect(matchByTitle(w("Gene Expression in Human Liver Cells", 2019), pubs)).toBeNull();
+    expect(matchByTitle(w("Gene Expression in Human Liver Cells", null), pubs)).toBeNull();
+    expect(matchByTitle(w("Gene Expression in Human Liver Cells II", 2021), pubs)).toBeNull();
+    expect(
+      matchByTitle(w("Gene Expression in Human Liver Cells", 2021, ["doi:10.1/x"]), pubs),
+    ).toBeNull();
+    const dup = [
+      ...pubs,
+      { pmid: "999", title: "Gene expression in human liver cells", year: 2021 },
+    ];
+    expect(matchByTitle(w("Gene Expression in Human Liver Cells", 2021), dup)).toBeNull();
+  });
+
+  it("withReciterAccepted adds ACCEPTED PMIDs our publications lack, and only those", () => {
+    const base = indexScholarWorks(JANE_PAPERS);
+    const { works, added } = withReciterAccepted(base, RECITER);
+    expect(works.get("jd0001")!.get("pmid:201")).toBe("201");
+    expect(works.get("jd0001")!.has("pmid:202")).toBe(false);
+    expect([...added.get("jd0001")!]).toEqual(["201"]);
+    expect(base.get("jd0001")!.has("pmid:201")).toBe(false); // input untouched
+  });
+
+  it("assembles statuses: accepted counts as shared, the rest split by status in the sample and counts", () => {
+    const [row] = assemble({ titles: TITLES, reciter: RECITER });
+    // Shared: 101 (held), 102 (title match), 201 (ReCiter accepted only).
+    expect(row!.shared).toBe(3);
+    expect(row!.worksTotal).toBe(8);
+    expect(row!.newWorks).toBe(5);
+    expect(row!.newWorksSample.map((w) => [w.title, w.status])).toEqual([
+      ["A DOI-only paper", "not_in_pubmed"],
+      ["Pending in ReCiter", "pending"],
+      ["Rejected in ReCiter", "rejected"],
+      ["Never retrieved by ReCiter", "not_retrieved"],
+      ["A work with no identifiers", "no_ids"],
+    ]);
+    expect(row!.evidenceDetail.workStatus).toEqual({
+      counts: { pending: 1, rejected: 1, not_retrieved: 1, not_in_pubmed: 1, no_ids: 1 },
+      unknown: 0,
+      reciterRead: true,
+      acceptedInReciter: 1,
+      resolvedByDoi: 0,
+      resolvedByTitle: 1,
+    });
+  });
+
+  it("ReCiter unreadable: no accepted lift, PMID works unknown, the row still written", () => {
+    const [row] = assemble({ titles: TITLES });
+    expect(row!.shared).toBe(2); // 101 + the title match
+    expect(row!.newWorks).toBe(6);
+    expect(row!.newWorksSample.find((w) => w.title === "Pending in ReCiter")!.status).toBeNull();
+    expect(row!.evidenceDetail.workStatus).toMatchObject({
+      counts: { not_in_pubmed: 1, no_ids: 1 },
+      unknown: 4,
+      reciterRead: false,
+      acceptedInReciter: 0,
+    });
+  });
+
+  it("a DOI resolved to the scholar's PMID moves the work from new to shared", () => {
+    const f = withResolvedPmids(recordFacts(ORCID, statusRecord()), new Map([["10.1/q", "103"]]));
+    const [row] = assemble({ facts: new Map([[ORCID, f]]), reciter: RECITER, titles: TITLES });
+    expect(row!.shared).toBe(4);
+    expect(row!.newWorks).toBe(4);
+    expect(row!.evidenceDetail.workStatus!.resolvedByDoi).toBe(1);
+    expect(row!.evidenceDetail.workStatus!.counts.not_in_pubmed).toBeUndefined();
   });
 });

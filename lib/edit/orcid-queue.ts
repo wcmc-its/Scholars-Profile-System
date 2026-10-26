@@ -110,6 +110,35 @@ export type OrcidQueueSampleState = {
   stale?: boolean;
 };
 
+/** v2.1: where a record's work stands in ReCiter for the scholar.
+ *  `accepted` works are the scholar's and never reach the new-works preview
+ *  (they count as shared); `pending` / `rejected` = ReCiter holds it for the
+ *  scholar with that assertion; `not_retrieved` = a PMID ReCiter never
+ *  retrieved for them; `not_in_pubmed` = a DOI that did not resolve to a PMID;
+ *  `no_ids` = neither id (and no title match). */
+export const RECITER_WORK_STATUSES = [
+  "accepted",
+  "pending",
+  "rejected",
+  "not_retrieved",
+  "not_in_pubmed",
+  "no_ids",
+] as const;
+export type ReciterWorkStatus = (typeof RECITER_WORK_STATUSES)[number];
+
+export const RECITER_WORK_STATUS_LABEL: Record<ReciterWorkStatus, string> = {
+  accepted: "Accepted in ReCiter",
+  pending: "Pending in ReCiter",
+  rejected: "Rejected in ReCiter",
+  not_retrieved: "Not retrieved by ReCiter",
+  not_in_pubmed: "Not in PubMed",
+  no_ids: "No identifiers",
+};
+
+export function isReciterWorkStatus(v: unknown): v is ReciterWorkStatus {
+  return typeof v === "string" && (RECITER_WORK_STATUSES as readonly string[]).includes(v);
+}
+
 export type OrcidQueueWork = {
   title: string | null;
   year: number | null;
@@ -118,6 +147,9 @@ export type OrcidQueueWork = {
   source: string | null;
   /** The ORCID work's own link (v2; absent on rows a v1 run wrote). */
   url?: string | null;
+  /** v2.1: the work's ReCiter status; null when ReCiter could not be read
+   *  this run, absent on rows an earlier run wrote. */
+  status?: ReciterWorkStatus | null;
 };
 
 /** `orcid_candidate.source` values, in the order the filter lists them. */
@@ -202,6 +234,25 @@ export type OrcidEvidenceDetail = {
   sources: string[];
   /** Works the non-publication filter dropped or collapsed. */
   worksDropped: number;
+  /** v2.1: the new works by ReCiter status, and how the PMIDs were found.
+   *  Absent on rows an earlier run wrote. */
+  workStatus?: OrcidWorkStatusDetail;
+};
+
+export type OrcidWorkStatusDetail = {
+  /** New works (not in the scholar's publications) per status; `accepted`
+   *  is never here (accepted works are shared, see `acceptedInReciter`). */
+  counts: Partial<Record<ReciterWorkStatus, number>>;
+  /** New works with a PMID whose status is unknown: ReCiter was not read. */
+  unknown: number;
+  /** False when the run could not read ReCiter's assertions. */
+  reciterRead: boolean;
+  /** Record works ReCiter accepted for the scholar that our publications lack:
+   *  counted as shared, not as new. */
+  acceptedInReciter: number;
+  /** Record works whose PMID came from the DOI lookup, or from a title match. */
+  resolvedByDoi: number;
+  resolvedByTitle: number;
 };
 
 /** A work's link: PubMed when it has a PMID, else doi.org, else its own URL
