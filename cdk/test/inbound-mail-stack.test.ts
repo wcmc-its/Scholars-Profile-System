@@ -21,6 +21,12 @@ describe("InboundMailStack", () => {
     expect(names.sort()).toEqual(["clips", "cviche-cv", "funding"]);
   });
 
+  it("sends the bucket's events to EventBridge, so a funding digest starts its import on arrival", () => {
+    synth().template.hasResourceProperties("Custom::S3BucketNotifications", {
+      NotificationConfiguration: { EventBridgeConfiguration: {} },
+    });
+  });
+
   it("routes cv@ to the bucket named by the SSM parameter, under its prefix, scanned", () => {
     const { template } = synth();
     const params = template.findParameters("*", {
