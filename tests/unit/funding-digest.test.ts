@@ -5,7 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { sesAuthVerdict } from "@/etl/news/clips";
 import {
+  bucketAuthPasses,
   digestNote,
   newSubmissions,
   parseDigestLines,
@@ -136,4 +138,20 @@ it("digestNote carries section, sponsor, deadline and nomination limit within 50
     "Research Dean funding digest 2026-08-17 · Federal Limited Submission Opportunities · Deadline: September 15, 2026 · Nomination limit: 3 per Department",
   );
   expect(digestNote({ ...first, title: "x", sponsor: "y".repeat(900) }, "2026-08-17").length).toBe(500);
+});
+
+describe("bucketAuthPasses", () => {
+  it("accepts SES's real (lowercase) verdict when DMARC passes", () => {
+    const verdict = sesAuthVerdict(
+      "amazonses.com; spf=pass smtp.mailfrom=example.org; dkim=pass header.i=@example.org; dmarc=pass header.from=example.org;",
+    );
+    expect(verdict).toBe("spf=pass dkim=pass dmarc=pass");
+    expect(bucketAuthPasses(verdict)).toBe(true);
+  });
+
+  it("rejects SPF or DKIM passing without DMARC (they need not align with the From domain)", () => {
+    expect(bucketAuthPasses("spf=pass dkim=pass dmarc=fail")).toBe(false);
+    expect(bucketAuthPasses("spf=pass dkim=none dmarc=none")).toBe(false);
+    expect(bucketAuthPasses(sesAuthVerdict(undefined))).toBe(false);
+  });
 });

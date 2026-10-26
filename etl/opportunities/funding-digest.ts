@@ -56,6 +56,16 @@ const MAX_ITEMS_PER_EMAIL = 150;
 /** The panel caps a note at 500 chars; so does the digest. */
 const NOTE_MAX = 500;
 
+/**
+ * Bucket mail must pass DMARC at SES. SPF or DKIM alone authenticates some
+ * domain, not necessarily the From domain WCM_FROM_RE checks; DMARC ties the
+ * two together. `verdict` is sesAuthVerdict()'s string, which is lowercase
+ * ("spf=pass dkim=pass dmarc=pass"), so the match ignores case.
+ */
+export function bucketAuthPasses(verdict: string): boolean {
+  return /\bdmarc=pass\b/i.test(verdict);
+}
+
 export type DigestItem = {
   url: string;
   /** normalizeOpportunityUrl's key — https only, tracking params stripped. */
@@ -235,13 +245,13 @@ async function main(): Promise<number> {
         (!fromBucket ||
           (!REPLY_RE.test(e.subject) &&
             WCM_FROM_RE.test(outer.from) &&
-            /\b(spf|dkim)=PASS\b/.test(outer.authVerdict) &&
+            bucketAuthPasses(outer.authVerdict) &&
             outer.virusVerdict !== "FAIL" &&
             outer.spamVerdict !== "FAIL"));
       if (!trusted) {
         // Unlike clips, submissions go to ReciterAI's fetcher with no human in
-        // between, so bucket mail must also pass SPF or DKIM (the From header is
-        // forgeable). Logged, so a real digest the list server fails auth on is
+        // between, so bucket mail must also pass DMARC (the From header is
+        // forgeable; see bucketAuthPasses). Logged, so a real digest the list server fails auth on is
         // visible rather than silently lost.
         if (fromBucket && SUBJECT_RE.test(e.subject)) {
           console.warn(`[FundingDigest] skipped "${e.subject}" from ${outer.from} (${outer.authVerdict})`);
