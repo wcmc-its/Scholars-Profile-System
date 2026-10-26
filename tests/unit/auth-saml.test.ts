@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { extractCwid, extractCwidFromEppn, extractAssertionIdentity } from "@/lib/auth/saml";
+import {
+  checkResponseBinding,
+  extractCwid,
+  extractCwidFromEppn,
+  extractAssertionIdentity,
+  MAX_ASSERTION_AGE_MS,
+} from "@/lib/auth/saml";
 import { parseScopes } from "@/lib/auth/config";
 import type { Profile } from "@node-saml/node-saml";
 
@@ -184,6 +190,122 @@ describe("extractAssertionIdentity", () => {
       fallbackWindowMs: 60_000,
     });
     expect(expiresAt.toISOString()).toBe("2026-07-03T12:01:00.000Z");
+  });
+});
+
+describe("checkResponseBinding", () => {
+  const ACS = "https://scholars.example.org/api/auth/saml/callback";
+  const OTHER_ACS = "https://scholars-staging.example.org/api/auth/saml/callback";
+  const NOW = new Date("2026-10-23T12:00:00.000Z");
+  const OPTS = {
+    acsUrl: ACS,
+    now: NOW,
+    clockSkewMs: 5000,
+    maxAssertionAgeMs: MAX_ASSERTION_AGE_MS,
+  };
+  const BEARER = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+
+  /** Profile shaped like node-saml's output: xml2js assertion + raw response XML. */
+  function boundProfile(opts: {
+    recipient?: string | null;
+    method?: string;
+    destination?: string | null;
+    issueInstant?: string | null;
+  }): Profile {
+    const recipient = opts.recipient === undefined ? ACS : opts.recipient;
+    const destination = opts.destination === undefined ? ACS : opts.destination;
+    const issueInstant =
+      opts.issueInstant === undefined ? "2026-10-23T11:59:30Z" : opts.issueInstant;
+    const p = profile({}) as Profile & {
+      getAssertion?: () => Record<string, unknown>;
+      getSamlResponseXml?: () => string;
+    };
+    p.getAssertion = () => ({
+      Assertion: {
+        $: { ID: "_a", Version: "2.0", ...(issueInstant ? { IssueInstant: issueInstant } : {}) },
+        Subject: [
+          {
+            SubjectConfirmation: [
+              {
+                $: { Method: opts.method ?? BEARER },
+                SubjectConfirmationData: [
+                  {
+                    $: {
+                      NotOnOrAfter: "2026-10-23T12:04:30Z",
+                      ...(recipient ? { Recipient: recipient } : {}),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const destAttr = destination ? ` Destination="${destination}"` : "";
+    p.getSamlResponseXml = () =>
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_r" Version="2.0"${destAttr}></samlp:Response>`;
+    return p;
+  }
+
+  it("accepts a Recipient and Destination equal to this environment's ACS", () => {
+    expect(checkResponseBinding(boundProfile({}), OPTS)).toBeNull();
+  });
+
+  it("rejects an assertion whose Recipient is the other environment's ACS", () => {
+    const p = boundProfile({ recipient: OTHER_ACS, destination: null });
+    expect(checkResponseBinding(p, OPTS)).toBe("recipient_mismatch");
+  });
+
+  it("rejects a Response whose Destination is the other environment's ACS", () => {
+    const p = boundProfile({ destination: OTHER_ACS });
+    expect(checkResponseBinding(p, OPTS)).toBe("destination_mismatch");
+  });
+
+  it("requires an exact match (no trailing-slash or case tolerance)", () => {
+    expect(checkResponseBinding(boundProfile({ recipient: `${ACS}/` }), OPTS)).toBe(
+      "recipient_mismatch",
+    );
+    expect(
+      checkResponseBinding(boundProfile({ recipient: ACS.toUpperCase() }), OPTS),
+    ).toBe("recipient_mismatch");
+  });
+
+  it("allows an absent Destination when the Recipient matches", () => {
+    expect(checkResponseBinding(boundProfile({ destination: null }), OPTS)).toBeNull();
+  });
+
+  it("rejects an assertion with no Recipient", () => {
+    expect(checkResponseBinding(boundProfile({ recipient: null }), OPTS)).toBe(
+      "recipient_missing",
+    );
+  });
+
+  it("ignores a Recipient on a non-bearer confirmation", () => {
+    const p = boundProfile({ method: "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key" });
+    expect(checkResponseBinding(p, OPTS)).toBe("recipient_missing");
+  });
+
+  it("rejects a stale assertion past the max age plus skew", () => {
+    // Issued 5m06s before NOW: past 5m + 5s skew.
+    const p = boundProfile({ issueInstant: "2026-10-23T11:54:54Z" });
+    expect(checkResponseBinding(p, OPTS)).toBe("assertion_too_old");
+  });
+
+  it("accepts an assertion just inside the max age plus skew", () => {
+    const p = boundProfile({ issueInstant: "2026-10-23T11:54:56Z" });
+    expect(checkResponseBinding(p, OPTS)).toBeNull();
+  });
+
+  it("rejects an assertion issued in the future beyond the skew", () => {
+    const p = boundProfile({ issueInstant: "2026-10-23T12:00:10Z" });
+    expect(checkResponseBinding(p, OPTS)).toBe("assertion_not_yet_valid");
+  });
+
+  it("rejects an assertion with no IssueInstant", () => {
+    expect(checkResponseBinding(boundProfile({ issueInstant: null }), OPTS)).toBe(
+      "issue_instant_missing",
+    );
   });
 });
 
