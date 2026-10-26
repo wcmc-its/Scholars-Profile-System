@@ -295,6 +295,9 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // withEtlRun("DataSharing", main) call). Continue-tier, so freshness is the only
   // detector of a silently-dead schedule.
   DataSharing: { cadence: "weekly" },
+  // Deployed weekly step (cdk/lib/etl-stack.ts InfoedBiosketchWeekly, tier:"continue")
+  // that writes source "InfoEd-Biosketch" (etl/infoed-biosketch/index.ts withEtlRun).
+  "InfoEd-Biosketch": { cadence: "weekly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.

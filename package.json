@@ -67,6 +67,7 @@
     "etl:asms": "tsx etl/asms/index.ts",
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",
     "etl:infoed": "tsx etl/infoed/index.ts",
+    "etl:infoed-biosketch": "tsx etl/infoed-biosketch/index.ts",
     "report:grant-date-gaps": "tsx scripts/report-grant-date-gaps.ts",
     "etl:jenzabar:probe": "tsx etl/jenzabar/probe.ts",
     "etl:jenzabar:probe-gs-faculty": "tsx etl/jenzabar/probe-gs-faculty.ts",
