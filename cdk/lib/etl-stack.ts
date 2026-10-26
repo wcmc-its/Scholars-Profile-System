@@ -539,6 +539,8 @@ export class EtlStack extends Stack {
     //
     //   etl:dynamodb     (nightly) dynamodb:Scan  table/reciterai
     //   etl:identity     (nightly) dynamodb:Scan  table/Identity
+    //   etl:orcid-evidence (weekly) dynamodb:Scan table/Identity (identity.institutions,
+    //                    ORCID queue v2 history_match; same grant and table name)
     //   etl:spotlight    (weekly)  s3:GetObject   wcmc-reciterai-artifacts/spotlight/*
     //   etl:scholar-tool (nightly) s3:GetObject   wcmc-reciterai-artifacts/tools/*
     //   etl:hierarchy    (annual)  s3:GetObject   wcmc-reciterai-hierarchy/*
@@ -942,6 +944,13 @@ export class EtlStack extends Stack {
       // OrcidPush is dry-run, so a staging confirm never reaches Identity.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ORCID_EMAIL_AUTOCONFIRM: env === "prod" ? "on" : "off",
+      // ORCID queue v2 (decision C) — etl:orcid-evidence lets history_match (the
+      // scholar's own prior institutions) satisfy the institutional condition for
+      // Strong only when this is exactly "on". Off: history_match and
+      // evidence_detail are still written and the run logs the band moves the term
+      // would make; the spec's Phasing step 2 compares those counts before the
+      // switch. Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_HISTORY_BAND: "off",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
@@ -1992,7 +2001,9 @@ export class EtlStack extends Stack {
       // bands /edit/orcid-queue reads, then the email auto-confirm (behind
       // ORCID_EMAIL_AUTOCONFIRM, off). Right after OrcidRegistryWeekly so it scores the
       // fresh candidates; one public /record per iD over NAT egress with no credential,
-      // so external: false like the registry. `continue`: the queue is a librarian tool.
+      // so external: false like the registry. v2 also Scans the Identity table for each
+      // scholar's prior institutions through the shared task role (the etl:identity
+      // grant), no secret. `continue`: the queue is a librarian tool.
       { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: false, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public

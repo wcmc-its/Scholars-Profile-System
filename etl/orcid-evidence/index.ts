@@ -14,6 +14,11 @@
  *   - `inst_match`     — an employment or education organization names
  *                        "Cornell" (which covers the WCM `orgPhrase`), or carries
  *                        the WCM ROR id, or any public email is on cornell.edu.
+ *   - `history_match`  — (v2) an employment or education organization matches an
+ *                        institution in the scholar's own history: ASMS degrees
+ *                        (`education`), external positions (`profile_appointment`,
+ *                        category EXTERNAL), ReCiter Identity `institutions`
+ *                        (DynamoDB, one Scan per run). `institution-match.ts`.
  *   - `name_agrees`    — `givenNamesAgree` (the registry's full-given-name
  *                        guard) AND `surnamesAgree` (see below).
  *   - `shared`         — distinct scholar papers the record's works also carry,
@@ -24,7 +29,20 @@
  *                        another candidate iD of this scholar shares ≥3; or the
  *                        same iD is a candidate for another scholar who shares ≥3.
  *   - `band`           — `bandOf`, first match wins: email_verified, strong,
- *                        shared_only, moderate, weak.
+ *                        shared_only, moderate, weak. The institutional condition
+ *                        is `inst_match OR history_match` (v2, decision C) only
+ *                        when `ORCID_HISTORY_BAND` is exactly "on"; otherwise
+ *                        `inst_match` alone, and the run logs how many rows the
+ *                        history term would move (spec Phasing step 2: persist
+ *                        history_match, compare band counts, then switch).
+ *
+ * Works (v2 item 3): every record's works go through `filterPublicationWorks`
+ * (`work-filter.ts`) first — figures, data sets, posters and the like are
+ * dropped and preprint versions collapsed — so `works_total`, `new_works`, the
+ * sample and `shared` all count publications only. Each row also carries
+ * `evidence_detail` (v2 item 2): the matched institution pairs, the verified
+ * email, the shared papers (title, year, journal from our publications), the
+ * competitor detail, both names and the surname rule, and the pair's sources.
  *
  * Then the email auto-confirm: each `email_verified` row whose scholar has no
  * iD on file gets `scholar.orcid` + `orcid_confirmed_at` + method
@@ -43,8 +61,11 @@
  * WCM only: nothing here reads a cwid's shape.
  *
  * Usage: `npm run etl:orcid-evidence [-- --dry-run]` (weekly; base task family —
- * HTTPS to ORCID + Aurora only). Env: `ORCID_CLIENT_ID` / `ORCID_CLIENT_SECRET`
- * (optional, anonymous otherwise), `ORCID_EMAIL_AUTOCONFIRM`,
+ * HTTPS to ORCID + Aurora, plus the Identity table Scan on the shared task role).
+ * Env: `ORCID_CLIENT_ID` / `ORCID_CLIENT_SECRET` (optional, anonymous otherwise),
+ * `ORCID_EMAIL_AUTOCONFIRM`, `ORCID_HISTORY_BAND`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
+ * Scan, as etl/identity; a failed Scan logs and the run goes on without that
+ * source — a missing source can only lower a band, never raise one),
  * `ORCID_EVIDENCE_DRY_RUN=1`, `ORCID_EVIDENCE_MAX_RECORDS=<n>` (local smoke:
  * truncates the iD list and FORCES a dry run — the delete pass would otherwise
  * remove every row the sample did not cover).
@@ -71,12 +92,28 @@ import {
   OrcidHttpError,
   type RecordResponse,
 } from "@/etl/orcid-registry/orcid-api";
-import { heldFor } from "@/lib/edit/orcid-queue";
+import {
+  heldFor,
+  type OrcidEvidenceDetail,
+  type OrcidInstitutionPair,
+  type OrcidSharedPaper,
+  type OrcidSurnameRule,
+} from "@/lib/edit/orcid-queue";
 import { lastNameKey } from "@/lib/last-name-key";
+
+import { loadIdentityInstitutions } from "./identity-institutions";
+import {
+  historyMatches,
+  type HistoryInstitution,
+  type OrcidAffiliation,
+} from "./institution-match";
+import { filterPublicationWorks } from "./work-filter";
 
 const BATCH = 500;
 export const MIN_SHARED = 3;
 const NEW_WORKS_SAMPLE = 5;
+/** Shared papers kept in `evidence_detail` (the `shared` column has the full count). */
+export const SHARED_DETAIL_CAP = 100;
 /** Same outage rule as the registry's `/works` step. */
 const RECORD_FAIL_SHARE = 0.02;
 const RECORD_FAIL_FLOOR = 2;
@@ -93,18 +130,23 @@ export type Band = (typeof BANDS)[number];
 export type BandInput = {
   emailVerified: boolean;
   instMatch: boolean;
+  /** v2: an ORCID affiliation matches the scholar's own history. Absent = false. */
+  historyMatch?: boolean;
   shared: number;
   competitor: boolean;
   nameAgrees: boolean;
 };
 
-/** The queue band, first match wins. Pure. */
+/** The queue band, first match wins. The institutional condition is
+ *  `instMatch OR historyMatch` (v2, decided 2026-10-25), in Strong and in
+ *  Moderate's two-of-three alike. Pure. */
 export function bandOf(e: BandInput): Band {
   const papers = e.shared >= MIN_SHARED;
+  const inst = e.instMatch || e.historyMatch === true;
   if (e.emailVerified && !e.competitor) return "email_verified";
-  if (e.instMatch && papers && !e.competitor && e.nameAgrees) return "strong";
+  if (inst && papers && !e.competitor && e.nameAgrees) return "strong";
   if (papers && !e.competitor && e.nameAgrees) return "shared_only";
-  if ([e.instMatch, papers, !e.competitor].filter(Boolean).length >= 2) return "moderate";
+  if ([inst, papers, !e.competitor].filter(Boolean).length >= 2) return "moderate";
   return "weak";
 }
 
@@ -114,9 +156,12 @@ export type NewWork = {
   doi: string | null;
   pmid: string | null;
   source: string | null;
+  /** The ORCID work's own link (the depositing source's `url`), for the preview's
+   *  link when the work has neither PMID nor DOI. */
+  url: string | null;
 };
 
-type WorkFact = NewWork & { ids: Set<string> };
+type WorkFact = NewWork & { ids: Set<string>; type: string | null };
 
 /** What one `/record` says, normalized once per iD. */
 export type RecordFacts = {
@@ -124,12 +169,17 @@ export type RecordFacts = {
   names: string[];
   given: string | null;
   family: string | null;
+  /** v2: the record's own spelling, for the names-side-by-side display. */
+  credit?: string | null;
+  otherNames?: string[];
   emails: Array<{ email: string; verified: boolean }>;
-  orgs: Array<{ name: string | null; ror: string | null }>;
-  /** Every work's doi:/pmid: keys (`extractWorkIds`). */
+  orgs: OrcidAffiliation[];
+  /** Every PUBLICATION's doi:/pmid: keys (`extractWorkIds`, after the filter). */
   workIds: Set<string>;
-  /** One per work group. */
+  /** One per work group, publications only (`filterPublicationWorks`). */
   works: WorkFact[];
+  /** Works the filter dropped or collapsed. */
+  worksDropped?: number;
   modifiedAt: Date | null;
 };
 
@@ -156,7 +206,14 @@ export function recordFacts(orcid: string, rec: RecordResponse): RecordFacts {
     .map((e) => ({ email: e.email!.trim().toLowerCase(), verified: e.verified === true }));
   const acts = rec["activities-summary"];
   const orgs: RecordFacts["orgs"] = [];
-  for (const block of [acts?.employments, acts?.educations]) {
+  const yearOf = (d: { year: { value: string } | null } | null | undefined) => {
+    const y = Number(text(d?.year));
+    return Number.isInteger(y) && y > 0 ? y : null;
+  };
+  for (const [kind, block] of [
+    ["employment", acts?.employments],
+    ["education", acts?.educations],
+  ] as const) {
     for (const g of block?.["affiliation-group"] ?? []) {
       for (const summary of g.summaries ?? []) {
         // Each summary is `{ "employment-summary": {...} }` or `{ "education-summary": {...} }`.
@@ -170,19 +227,25 @@ export function recordFacts(orcid: string, rec: RecordResponse): RecordFacts {
               d?.["disambiguation-source"]?.toUpperCase() === "ROR"
                 ? (d["disambiguated-organization-identifier"] ?? null)
                 : null,
+            kind,
+            start: yearOf(s["start-date"]),
+            end: yearOf(s["end-date"]),
           });
         }
       }
     }
   }
   const worksResp = acts?.works ?? { "last-modified-date": null, group: null };
-  const works: WorkFact[] = (worksResp.group ?? []).map((g) => {
+  const all: WorkFact[] = (worksResp.group ?? []).map((g) => {
     const ids = extractWorkIds({ "last-modified-date": null, group: [g] });
-    const first =
-      (g["work-summary"] ?? []).find((w) => text(w.title?.title)) ?? g["work-summary"]?.[0];
+    const summaries = g["work-summary"] ?? [];
+    const first = summaries.find((w) => text(w.title?.title)) ?? summaries[0];
     const year = Number(text(first?.["publication-date"]?.year));
     const doi = [...ids].find((k) => k.startsWith("doi:"))?.slice(4) ?? null;
     const pmid = [...ids].find((k) => k.startsWith("pmid:"))?.slice(5) ?? null;
+    // A group's copies can disagree on type; a journal-article copy wins, so a
+    // paper one source typed `other` is not mistaken for a figure.
+    const types = summaries.map((w) => w.type?.trim().toLowerCase()).filter(Boolean) as string[];
     return {
       ids,
       title: text(first?.title?.title),
@@ -190,20 +253,41 @@ export function recordFacts(orcid: string, rec: RecordResponse): RecordFacts {
       doi,
       pmid,
       source: text(first?.source?.["source-name"]),
+      url: summaries.map((w) => text(w.url)).find(Boolean) ?? null,
+      type: types.includes("journal-article") ? "journal-article" : (types[0] ?? null),
     };
   });
+  const { kept: works } = filterPublicationWorks(all);
+  const workIds = new Set<string>();
+  for (const w of works) for (const k of w.ids) workIds.add(k);
   const modified =
     rec.history?.["last-modified-date"]?.value ?? acts?.["last-modified-date"]?.value ?? null;
   return {
     names,
     given,
     family,
+    credit: text(name?.["credit-name"]),
+    otherNames: (rec.person?.["other-names"]?.["other-name"] ?? [])
+      .map((o) => o.content?.trim() ?? "")
+      .filter(Boolean),
     emails,
     orgs,
-    workIds: extractWorkIds(worksResp),
+    workIds,
     works,
+    worksDropped: all.length - works.length,
     modifiedAt: modified ? new Date(modified) : null,
   };
+}
+
+/** The scholar's email when a VERIFIED public email on the record equals it,
+ *  else null. Pure. */
+export function verifiedEmailOf(
+  facts: Pick<RecordFacts, "emails">,
+  scholarEmail: string | null,
+): string | null {
+  const mine = scholarEmail?.trim().toLowerCase();
+  if (!mine) return null;
+  return facts.emails.some((e) => e.verified && e.email === mine) ? mine : null;
 }
 
 /** A VERIFIED public email on the record equals the scholar's email. Pure. */
@@ -211,29 +295,56 @@ export function isEmailVerified(
   facts: Pick<RecordFacts, "emails">,
   scholarEmail: string | null,
 ): boolean {
-  const mine = scholarEmail?.trim().toLowerCase();
-  if (!mine) return false;
-  return facts.emails.some((e) => e.verified && e.email === mine);
+  return verifiedEmailOf(facts, scholarEmail) !== null;
+}
+
+type OrgFact = Pick<OrcidAffiliation, "name" | "ror"> & Partial<OrcidAffiliation>;
+
+/** What made `inst_match`: each org that names Cornell or carries the WCM ROR
+ *  id (paired with what it matched), and the first cornell.edu email. Pure. */
+export function instMatchFacts(facts: { emails: RecordFacts["emails"]; orgs: OrgFact[] }): {
+  pairs: OrcidInstitutionPair[];
+  email: string | null;
+} {
+  const phrases = [CORNELL_ORG_PHRASE, ...INSTITUTIONS.map((i) => i.orgPhrase)].map((p) =>
+    p.toLowerCase(),
+  );
+  const wcmPhrases = INSTITUTIONS.map((i) => i.orgPhrase.toLowerCase());
+  const rors = new Set(INSTITUTIONS.map((i) => i.ror.toLowerCase()));
+  const domains = [CORNELL_EMAIL_DOMAIN, ...INSTITUTIONS.map((i) => i.emailDomain)];
+  const pairs: OrcidInstitutionPair[] = [];
+  for (const o of facts.orgs) {
+    const name = o.name?.toLowerCase() ?? "";
+    const byRor = !!o.ror && rors.has(o.ror.trim().toLowerCase());
+    if (!byRor && !phrases.some((p) => name.includes(p))) continue;
+    pairs.push({
+      orcid: {
+        name: o.name?.trim() || o.ror || "",
+        kind: o.kind ?? "employment",
+        start: o.start ?? null,
+        end: o.end ?? null,
+      },
+      ours: {
+        name:
+          byRor || wcmPhrases.some((p) => name.includes(p))
+            ? `Weill Cornell Medicine${byRor ? " (ROR)" : ""}`
+            : "Cornell University",
+        source: "wcm",
+      },
+    });
+  }
+  const email =
+    facts.emails.find((e) =>
+      domains.some((d) => e.email.endsWith(`@${d}`) || e.email.endsWith(`.${d}`)),
+    )?.email ?? null;
+  return { pairs, email };
 }
 
 /** An employment/education org names Cornell or carries the WCM ROR id, or a
  *  public email is on cornell.edu (verified or not). Pure. */
-export function isInstMatch(facts: Pick<RecordFacts, "emails" | "orgs">): boolean {
-  const phrases = [CORNELL_ORG_PHRASE, ...INSTITUTIONS.map((i) => i.orgPhrase)].map((p) =>
-    p.toLowerCase(),
-  );
-  const rors = new Set(INSTITUTIONS.map((i) => i.ror.toLowerCase()));
-  const domains = [CORNELL_EMAIL_DOMAIN, ...INSTITUTIONS.map((i) => i.emailDomain)];
-  return (
-    facts.orgs.some(
-      (o) =>
-        (o.name && phrases.some((p) => o.name!.toLowerCase().includes(p))) ||
-        (o.ror && rors.has(o.ror.trim().toLowerCase())),
-    ) ||
-    facts.emails.some((e) =>
-      domains.some((d) => e.email.endsWith(`@${d}`) || e.email.endsWith(`.${d}`)),
-    )
-  );
+export function isInstMatch(facts: { emails: RecordFacts["emails"]; orgs: OrgFact[] }): boolean {
+  const f = instMatchFacts(facts);
+  return f.pairs.length > 0 || f.email !== null;
 }
 
 /** A name's surname tokens: everything after the first (given) token, folded,
@@ -270,15 +381,39 @@ const gluedTails = (tokens: string[]) =>
  *  surname is everything after the first token of fullName or preferredName —
  *  there is no surname column. Pure. */
 export function surnamesAgree(recordFamily: string | null, scholar: NamedScholar): boolean {
-  if (!recordFamily) return false;
+  return surnameRule(recordFamily, scholar) !== null;
+}
+
+/** WHICH surname rule agreed, for the evidence detail (v2 item 4), or null:
+ *  `same` (the whole surname, as spelled), `folded` (the whole surname once
+ *  accents are folded: Jaffré/Jaffre), `compound_token` (a ≥3-letter part of a
+ *  compound surname: Sanchez / Sanchez Garcia-Vao), `joined` (equal once spaces
+ *  and hyphens are removed: Al Hariri / Alhariri). Same agreement as
+ *  `surnamesAgree`, which reads this. Pure. */
+export function surnameRule(
+  recordFamily: string | null,
+  scholar: NamedScholar,
+): OrcidSurnameRule | null {
+  if (!recordFamily) return null;
   const theirs = surnameTokens(recordFamily, { skipGiven: false });
   const theirTails = new Set(gluedTails([...nameTokens(fold(recordFamily))]));
+  const words = (v: string) => v.toLowerCase().split(/\s+/).filter(Boolean);
+  const endsWith = (xs: string[], ys: string[]) =>
+    ys.length > 0 &&
+    ys.length <= xs.length &&
+    ys.every((y, k) => xs[xs.length - ys.length + k] === y);
   for (const n of [scholar.fullName, scholar.preferredName]) {
     const mine = surnameTokens(n, { skipGiven: true });
-    if (theirs.some((t) => t.length >= 3 && mine.includes(t))) return true;
-    if (gluedTails([...nameTokens(fold(n))].slice(1)).some((t) => theirTails.has(t))) return true;
+    if (theirs.some((t) => t.length >= 3 && mine.includes(t))) {
+      // The whole record surname is the end of the scholar's name: as spelled, or folded.
+      if (endsWith(words(n).slice(1), words(recordFamily))) return "same";
+      if (endsWith(words(fold(n)).slice(1), words(fold(recordFamily)))) return "folded";
+      return "compound_token";
+    }
+    if (gluedTails([...nameTokens(fold(n))].slice(1)).some((t) => theirTails.has(t)))
+      return "joined";
   }
-  return false;
+  return null;
 }
 
 /** Given name (`givenNamesAgree`) AND surname (`surnamesAgree`). Pure. */
@@ -299,7 +434,7 @@ export function newWorksOf(
   const sample = [...fresh]
     .sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
     .slice(0, NEW_WORKS_SAMPLE)
-    .map(({ title, year, doi, pmid, source }) => ({ title, year, doi, pmid, source }));
+    .map(({ title, year, doi, pmid, source, url }) => ({ title, year, doi, pmid, source, url }));
   return { total: facts.works.length, count: fresh.length, sample };
 }
 
@@ -317,25 +452,40 @@ export function findCompetitors(args: {
   sameSurname: Array<{ cwid: string; works: Map<string, string> | undefined }>;
   otherIds: Array<{ orcid: string; shared: number | null }>;
   otherHolders: Array<{ cwid: string; shared: number }>;
-}): { competitor: boolean; cwids: string[]; orcids: string[] } {
+}): {
+  competitor: boolean;
+  cwids: string[];
+  orcids: string[];
+  /** v2: who and why, for the evidence detail. `shared` is K: the record's
+   *  papers the other scholar holds (rule 1: that this scholar lacks), or the
+   *  other iD's shared count (null = its fetch failed). */
+  detail: OrcidEvidenceDetail["competitors"];
+} {
   const minePmids = new Set(args.mine?.values() ?? []);
-  const cwids = new Set<string>();
+  const cwids = new Map<string, { shared: number; reason: "same_surname" | "same_id" }>();
   for (const s of args.sameSurname) {
     if (s.cwid === args.cwid) continue;
     const theirs = [...sharedPapers(args.workIds, s.works)].filter((p) => !minePmids.has(p));
-    if (theirs.length >= MIN_SHARED) cwids.add(s.cwid);
+    if (theirs.length >= MIN_SHARED)
+      cwids.set(s.cwid, { shared: theirs.length, reason: "same_surname" });
   }
   for (const h of args.otherHolders)
-    if (h.cwid !== args.cwid && h.shared >= MIN_SHARED) cwids.add(h.cwid);
-  const orcids = [
-    ...new Set(
-      args.otherIds.filter((o) => o.shared === null || o.shared >= MIN_SHARED).map((o) => o.orcid),
-    ),
-  ];
+    if (h.cwid !== args.cwid && h.shared >= MIN_SHARED && !cwids.has(h.cwid))
+      cwids.set(h.cwid, { shared: h.shared, reason: "same_id" });
+  const orcids = new Map<string, number | null>();
+  for (const o of args.otherIds)
+    if ((o.shared === null || o.shared >= MIN_SHARED) && !orcids.has(o.orcid))
+      orcids.set(o.orcid, o.shared);
+  const cwidList = [...cwids.keys()].sort();
+  const orcidList = [...orcids.keys()].sort();
   return {
-    competitor: cwids.size > 0 || orcids.length > 0,
-    cwids: [...cwids].sort(),
-    orcids: orcids.sort(),
+    competitor: cwids.size > 0 || orcids.size > 0,
+    cwids: cwidList,
+    orcids: orcidList,
+    detail: {
+      cwids: cwidList.map((c) => ({ cwid: c, ...cwids.get(c)! })),
+      orcids: orcidList.map((o) => ({ orcid: o, shared: orcids.get(o)! })),
+    },
   };
 }
 
@@ -344,6 +494,7 @@ export type EvidenceRow = {
   orcid: string;
   band: Band;
   instMatch: boolean;
+  historyMatch: boolean;
   emailVerified: boolean;
   nameAgrees: boolean;
   shared: number;
@@ -353,6 +504,9 @@ export type EvidenceRow = {
   worksTotal: number;
   newWorks: number;
   newWorksSample: NewWork[];
+  /** The facts behind the chips. `shared` holds bare PMIDs until
+   *  `withSharedPaperDetail` fills in title, year and journal. */
+  evidenceDetail: OrcidEvidenceDetail;
   recordModifiedAt: Date | null;
 };
 
@@ -373,6 +527,14 @@ export function assembleEvidence(args: {
   works: ScholarWorkIndex;
   /** Active scholars, for the same-surname rule. */
   active: EvidenceScholar[];
+  /** v2: cwid → the scholar's own institution history (education, external
+   *  appointments, ReCiter Identity). Absent = none known. */
+  history?: Map<string, HistoryInstitution[]>;
+  /** v2: `cwid|orcid` → its `orcid_candidate` sources. */
+  sources?: Map<string, string[]>;
+  /** v2: let `history_match` count toward the band (`ORCID_HISTORY_BAND`).
+   *  Absent = false: history_match is persisted but the band is inst_match's. */
+  historyBand?: boolean;
 }): EvidenceRow[] {
   const key = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
   const shared = new Map<string, number>();
@@ -418,28 +580,94 @@ export function assembleEvidence(args: {
         .filter((c) => c !== p.cwid)
         .map((c) => ({ cwid: c, shared: shared.get(key(c, p.orcid)) ?? 0 })),
     });
+    const email = verifiedEmailOf(f, s.email);
+    const inst = instMatchFacts(f);
+    const history = historyMatches(f.orgs, args.history?.get(p.cwid.toLowerCase()) ?? []);
+    const rule = surnameRule(recordFamilyName(f), s);
+    const givenAgrees = givenNamesAgree(f.names, s);
     const e = {
-      emailVerified: isEmailVerified(f, s.email),
-      instMatch: isInstMatch(f),
+      emailVerified: email !== null,
+      instMatch: inst.pairs.length > 0 || inst.email !== null,
+      historyMatch: history.length > 0,
       shared: shared.get(key(p.cwid, p.orcid)) ?? 0,
       competitor: comp.competitor,
-      nameAgrees: nameAgrees(f, s),
+      nameAgrees: givenAgrees && rule !== null,
     };
     const nw = newWorksOf(f, mine);
+    const sharedPmids = [...sharedPapers(f.workIds, mine)].sort((a, b) => Number(b) - Number(a));
     rows.push({
       cwid: p.cwid,
       orcid: p.orcid,
-      band: bandOf(e),
+      band: bandOf({ ...e, historyMatch: args.historyBand === true && e.historyMatch }),
       ...e,
       competitorCwids: comp.cwids,
       competitorOrcids: comp.orcids,
       worksTotal: nw.total,
       newWorks: nw.count,
       newWorksSample: nw.sample,
+      evidenceDetail: {
+        names: {
+          orcid: {
+            credit: f.credit ?? null,
+            given: f.given,
+            family: f.family,
+            other: f.otherNames ?? [],
+          },
+          givenAgrees,
+          surnameRule: rule,
+        },
+        institutions: [...inst.pairs, ...history],
+        institutionEmail: inst.email,
+        email,
+        shared: sharedPmids
+          .slice(0, SHARED_DETAIL_CAP)
+          .map((pmid) => ({ pmid, doi: null, title: null, year: null, journal: null })),
+        competitors: comp.detail,
+        sources: [...(args.sources?.get(key(p.cwid, p.orcid)) ?? [])].sort(),
+        worksDropped: f.worksDropped ?? 0,
+      },
       recordModifiedAt: f.modifiedAt,
     });
   }
   return rows;
+}
+
+/** Fills each row's shared papers with title, year, journal and DOI from our
+ *  publications (`papers`: pmid → its row). A PMID with no row keeps its id. Pure. */
+export function withSharedPaperDetail(
+  rows: EvidenceRow[],
+  papers: Map<string, Omit<OrcidSharedPaper, "pmid">>,
+): EvidenceRow[] {
+  return rows.map((r) => ({
+    ...r,
+    evidenceDetail: {
+      ...r.evidenceDetail,
+      shared: r.evidenceDetail.shared.map((p) => ({ ...p, ...(papers.get(p.pmid) ?? {}) })),
+    },
+  }));
+}
+
+/** The scholars' own institution history from our tables plus ReCiter Identity,
+ *  keyed by LOWERCASE cwid (Identity's uid is lowercase). Pure. */
+export function buildHistory(args: {
+  education: Array<{ cwid: string; institution: string }>;
+  appointments: Array<{ cwid: string; organization: string }>;
+  identity: Map<string, string[]>;
+}): Map<string, HistoryInstitution[]> {
+  const out = new Map<string, HistoryInstitution[]>();
+  const add = (cwid: string, h: HistoryInstitution) => {
+    const k = cwid.toLowerCase();
+    const xs = out.get(k) ?? [];
+    if (!xs.some((x) => x.name === h.name && x.source === h.source)) xs.push(h);
+    out.set(k, xs);
+  };
+  for (const e of args.education)
+    if (e.institution?.trim()) add(e.cwid, { name: e.institution.trim(), source: "education" });
+  for (const a of args.appointments)
+    if (a.organization?.trim()) add(a.cwid, { name: a.organization.trim(), source: "appointment" });
+  for (const [cwid, names] of args.identity)
+    for (const n of names) add(cwid, { name: n, source: "identity" });
+  return out;
 }
 
 /** Replace each pair whose iD ORCID reports as deprecated with the same scholar
@@ -503,6 +731,23 @@ export function planAutoConfirm(
         !heldIds.has(r.orcid),
     )
     .map((r) => ({ cwid: r.cwid, orcid: r.orcid }));
+}
+
+/** `ORCID_HISTORY_BAND`: exactly "on" lets history_match count toward the band. */
+export function isHistoryBandEnabled(): boolean {
+  return process.env.ORCID_HISTORY_BAND === "on";
+}
+
+/** Rows whose band the history term would change, by band after → count.
+ *  For the before/after comparison the spec asks for ahead of the switch. Pure. */
+export function historyBandShift(rows: readonly EvidenceRow[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const off = bandOf({ ...r, historyMatch: false });
+    const on = bandOf({ ...r, historyMatch: r.historyMatch });
+    if (off !== on) out[`${off}->${on}`] = (out[`${off}->${on}`] ?? 0) + 1;
+  }
+  return out;
 }
 
 /** `ORCID_EMAIL_AUTOCONFIRM`: exactly "on" writes. */
@@ -613,11 +858,14 @@ async function main(): Promise<number> {
   const seen = new Set<string>();
   const pairs: Array<{ cwid: string; orcid: string }> = [];
   const admins = new Map<string, string[]>();
+  const sources = new Map<string, string[]>();
   for (const c of await db.write.orcidCandidate.findMany({
     select: { cwid: true, orcid: true, source: true },
   })) {
     const k = `${c.cwid}|${c.orcid}`;
     if (dismissed.has(k) || !byCwid.has(c.cwid)) continue;
+    if (!(sources.get(k) ?? []).includes(c.source))
+      sources.set(k, [...(sources.get(k) ?? []), c.source]);
     if (c.source === "rpm_admin" && !(admins.get(c.cwid) ?? []).includes(c.orcid))
       admins.set(c.cwid, [...(admins.get(c.cwid) ?? []), c.orcid]);
     if (seen.has(k)) continue;
@@ -701,13 +949,75 @@ async function main(): Promise<number> {
   }
   const works = await loadScholarWorkIds([...needed]);
 
-  const rows = assembleEvidence({ pairs, onFile, facts, scholars: byCwid, works, active });
+  // 4. The scholars' own institution history (history_match), for the pairs' scholars.
+  const pairCwids = [...new Set(pairs.map((p) => p.cwid))];
+  const education: Array<{ cwid: string; institution: string }> = [];
+  const appointments: Array<{ cwid: string; organization: string }> = [];
+  for (const part of chunk(pairCwids, BATCH)) {
+    education.push(
+      ...(await db.write.education.findMany({
+        where: { cwid: { in: part } },
+        select: { cwid: true, institution: true },
+      })),
+    );
+    appointments.push(
+      ...(await db.write.profileAppointment.findMany({
+        where: { cwid: { in: part }, category: "EXTERNAL" },
+        select: { cwid: true, organization: true },
+      })),
+    );
+  }
+  let identity = new Map<string, string[]>();
+  try {
+    identity = await loadIdentityInstitutions(new Set(pairCwids));
+  } catch (err) {
+    // Conservative on failure: without this source a pair can only score lower.
+    console.warn(
+      `ReCiter Identity institutions unavailable (${(err as Error).message}); history_match uses education + appointments only`,
+    );
+  }
+  const history = buildHistory({ education, appointments, identity });
+  console.log(
+    `history: ${education.length} degrees, ${appointments.length} external appointments, ${identity.size} Identity records with institutions`,
+  );
+
+  const scored = assembleEvidence({
+    pairs,
+    onFile,
+    facts,
+    scholars: byCwid,
+    works,
+    active,
+    history,
+    sources,
+    historyBand: isHistoryBandEnabled(),
+  });
+
+  // 5. Shared papers' title, year, journal and DOI from our publications.
+  const sharedPmids = [
+    ...new Set(scored.flatMap((r) => r.evidenceDetail.shared.map((p) => p.pmid))),
+  ];
+  const papers = new Map<
+    string,
+    { doi: string | null; title: string | null; year: number | null; journal: string | null }
+  >();
+  for (const part of chunk(sharedPmids, BATCH)) {
+    for (const p of await db.write.publication.findMany({
+      where: { pmid: { in: part } },
+      select: { pmid: true, doi: true, title: true, year: true, journal: true },
+    }))
+      papers.set(p.pmid, { doi: p.doi, title: p.title, year: p.year, journal: p.journal });
+  }
+  const rows = withSharedPaperDetail(scored, papers);
   const byBand = rows.reduce<Record<string, number>>(
     (m, r) => ((m[r.band] = (m[r.band] ?? 0) + 1), m),
     {},
   );
   console.log(
-    `${rows.length} evidence rows ${JSON.stringify(byBand)}; ${failed} record-fetch failures`,
+    `${rows.length} evidence rows ${JSON.stringify(byBand)}; ${rows.filter((r) => r.historyMatch).length} with history_match (${rows.filter((r) => r.historyMatch && !r.instMatch).length} without inst_match); ${failed} record-fetch failures`,
+  );
+  console.log(
+    `history band term ${isHistoryBandEnabled() ? "ON" : "off (ORCID_HISTORY_BAND)"}; band moves it makes: ${JSON.stringify(historyBandShift(rows))}`,
   );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 
@@ -722,7 +1032,7 @@ async function main(): Promise<number> {
     return rows.length;
   }
 
-  // 4. Mirror: upsert everything, then delete what this run did not compute.
+  // 6. Mirror: upsert everything, then delete what this run did not compute.
   const now = new Date();
   for (const batch of chunk(rows, BATCH)) {
     await db.write.$transaction(
@@ -743,7 +1053,7 @@ async function main(): Promise<number> {
     `orcid_candidate_evidence mirrored: ${rows.length} rows, ${removed} stale rows removed.`,
   );
 
-  // 5. Email auto-confirm, after the evidence write.
+  // 7. Email auto-confirm, after the evidence write.
   await autoConfirmStep(db.write, plan, { enabled: isEmailAutoconfirmEnabled(), dryRun, now });
   return rows.length;
 }

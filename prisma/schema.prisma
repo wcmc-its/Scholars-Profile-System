@@ -1017,6 +1017,10 @@ model OrcidCandidateEvidence {
   /// email_verified | strong | shared_only | moderate | weak (`bandOf`).
   band             String    @db.VarChar(16)
   instMatch        Boolean   @map("inst_match")
+  /// v2: an ORCID affiliation matches the scholar's own history (education,
+  /// external appointments, ReCiter Identity institutions). With inst_match,
+  /// the institutional condition for Strong.
+  historyMatch     Boolean   @default(false) @map("history_match")
   emailVerified    Boolean   @map("email_verified")
   nameAgrees       Boolean   @map("name_agrees")
   /// Distinct scholar papers the record's works also carry (PMID or DOI).
@@ -1031,6 +1035,10 @@ model OrcidCandidateEvidence {
   newWorks         Int       @map("new_works")
   /// ≤5 of { title, year, doi, pmid, source }.
   newWorksSample   Json      @map("new_works_sample")
+  /// v2: the facts behind each evidence chip (`OrcidEvidenceDetail` in
+  /// lib/edit/orcid-queue.ts): institution pairs, the verified email, shared
+  /// papers, competitor detail, candidate sources. NULL on rows a v1 run wrote.
+  evidenceDetail   Json?     @map("evidence_detail")
   recordModifiedAt DateTime? @map("record_modified_at")
   computedAt       DateTime  @map("computed_at")
 
@@ -1049,6 +1057,9 @@ model OrcidQueueSample {
   band      String    @db.VarChar(16)
   startedBy String    @map("started_by") @db.VarChar(32)
   startedAt DateTime  @map("started_at")
+  /// v2: the queue filter the sample was drawn under (`orcidQueueFilterKey`;
+  /// "" = none). A passed sample authorizes bulk confirm for this filter only.
+  filterKey String    @default("") @map("filter_key") @db.VarChar(1024)
   cwid      String    @db.VarChar(32)
   scholar   Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   orcid     String    @db.VarChar(19)

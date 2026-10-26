@@ -13,6 +13,12 @@ import {
   assembleEvidence,
   autoConfirmStep,
   bandOf,
+  buildHistory,
+  historyBandShift,
+  isHistoryBandEnabled,
+  instMatchFacts,
+  surnameRule,
+  withSharedPaperDetail,
   findCompetitors,
   isEmailVerified,
   isInstMatch,
@@ -209,7 +215,15 @@ describe("recordFacts + the per-pair evidence", () => {
   it("reads names, emails, orgs, works and the modified date", () => {
     expect(f.names).toEqual(["Jane Doe"]);
     expect(f.emails).toEqual([{ email: "jd0001@example.med.cornell.edu", verified: true }]);
-    expect(f.orgs).toEqual([{ name: "Example Medical College", ror: "https://ror.org/02r109517" }]);
+    expect(f.orgs).toEqual([
+      {
+        name: "Example Medical College",
+        ror: "https://ror.org/02r109517",
+        kind: "employment",
+        start: null,
+        end: null,
+      },
+    ]);
     expect(f.works).toHaveLength(4);
     expect(f.modifiedAt?.toISOString()).toBe("2026-10-01T00:00:00.000Z");
   });
@@ -246,7 +260,14 @@ describe("recordFacts + the per-pair evidence", () => {
       total: 4,
       count: 1,
       sample: [
-        { title: "Elsewhere", year: 2024, doi: "10.1/z", pmid: null, source: "Example Repository" },
+        {
+          title: "Elsewhere",
+          year: 2024,
+          doi: "10.1/z",
+          pmid: null,
+          source: "Example Repository",
+          url: null,
+        },
       ],
     });
   });
@@ -315,7 +336,12 @@ describe("findCompetitors", () => {
       otherIds: [],
       otherHolders: [],
     });
-    expect(r).toEqual({ competitor: true, cwids: ["b"], orcids: [] });
+    expect(r).toEqual({
+      competitor: true,
+      cwids: ["b"],
+      orcids: [],
+      detail: { cwids: [{ cwid: "b", shared: 3, reason: "same_surname" }], orcids: [] },
+    });
   });
 
   it("rule 1 ignores joint papers: a co-author sharing only this scholar's papers is no competitor", () => {
@@ -347,7 +373,12 @@ describe("findCompetitors", () => {
       ],
       otherHolders: [],
     });
-    expect(r).toEqual({ competitor: true, cwids: [], orcids: [ORCID_2] });
+    expect(r).toEqual({
+      competitor: true,
+      cwids: [],
+      orcids: [ORCID_2],
+      detail: { cwids: [], orcids: [{ orcid: ORCID_2, shared: 3 }] },
+    });
   });
 
   it("rule 3: the same iD is a candidate for another scholar with ≥3 shared", () => {
@@ -362,7 +393,12 @@ describe("findCompetitors", () => {
         { cwid: "d", shared: 1 },
       ],
     });
-    expect(r).toEqual({ competitor: true, cwids: ["c"], orcids: [] });
+    expect(r).toEqual({
+      competitor: true,
+      cwids: ["c"],
+      orcids: [],
+      detail: { cwids: [{ cwid: "c", shared: 4, reason: "same_id" }], orcids: [] },
+    });
   });
 
   it("rule 2 reads an unscored iD (its /record fetch failed) as a competitor", () => {
@@ -565,5 +601,234 @@ describe("email auto-confirm", () => {
     ).toEqual([]);
     expect(h.updateMany).not.toHaveBeenCalled();
     expect(h.executeRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("v2: history_match, the band rule, and the evidence detail", () => {
+  it("bandOf: a history match is the institutional condition for Strong (and Moderate)", () => {
+    expect(bandOf({ ...base, historyMatch: true, shared: 3, nameAgrees: true })).toBe("strong");
+    expect(bandOf({ ...base, historyMatch: true })).toBe("moderate");
+    expect(
+      bandOf({ ...base, historyMatch: true, shared: 3, nameAgrees: true, competitor: true }),
+    ).toBe("moderate");
+    expect(bandOf({ ...base, shared: 3, nameAgrees: true })).toBe("shared_only");
+  });
+
+  it("surnameRule names which rule agreed", () => {
+    const scholar = (fullName: string) => ({ cwid: "x", fullName, preferredName: fullName });
+    expect(surnameRule("Doe", scholar("Jane Doe"))).toBe("same");
+    expect(surnameRule("Jaffré", scholar("Marie Jaffre"))).toBe("folded");
+    expect(surnameRule("Navarro-Millán", scholar("Ana Navarro-Millan"))).toBe("folded");
+    expect(surnameRule("Prieto", scholar("Ana Prieto Fernandez"))).toBe("compound_token");
+    expect(surnameRule("Sanchez Garcia-Vao", scholar("Maria Sanchez"))).toBe("compound_token");
+    expect(surnameRule("Al Hariri", scholar("Omar Alhariri"))).toBe("joined");
+    expect(surnameRule("Smith", scholar("Jane Doe"))).toBeNull();
+  });
+
+  it("instMatchFacts pairs each matching org with what it matched, plus a Cornell email", () => {
+    const f = instMatchFacts({
+      orgs: [
+        {
+          name: "Example Medical College",
+          ror: "https://ror.org/02r109517",
+          kind: "employment",
+          start: 2010,
+          end: null,
+        },
+        { name: "Cornell University", ror: null, kind: "education", start: 1990, end: 1994 },
+        { name: "Elsewhere University", ror: null, kind: "education", start: null, end: null },
+      ],
+      emails: [{ email: "x@cornell.edu", verified: false }],
+    });
+    expect(f.pairs.map((p) => [p.orcid.name, p.orcid.kind, p.ours.name])).toEqual([
+      ["Example Medical College", "employment", "Weill Cornell Medicine (ROR)"],
+      ["Cornell University", "education", "Cornell University"],
+    ]);
+    expect(f.email).toBe("x@cornell.edu");
+  });
+
+  it("buildHistory: education, external appointments and Identity, keyed by lowercase cwid", () => {
+    const h = buildHistory({
+      education: [{ cwid: "JD0001", institution: "Albany Medical College" }],
+      appointments: [{ cwid: "jd0001", organization: " University of Rochester " }],
+      identity: new Map([["jd0001", ["Albany Medical College of Union University"]]]),
+    });
+    expect(h.get("jd0001")).toEqual([
+      { name: "Albany Medical College", source: "education" },
+      { name: "University of Rochester", source: "appointment" },
+      { name: "Albany Medical College of Union University", source: "identity" },
+    ]);
+  });
+
+  /** A record with no WCM tie: an Albany employment, five works (three Jane's),
+   *  a figure and an image that must not count, and a preprint of paper one. */
+  function albanyRecord(): RecordResponse {
+    const r = record({ emails: { email: [] } });
+    r["activities-summary"]!.employments = {
+      "affiliation-group": [
+        {
+          summaries: [
+            {
+              "employment-summary": {
+                organization: {
+                  name: "Albany Medical College",
+                  "disambiguated-organization": null,
+                },
+                "start-date": { year: { value: "1996" } },
+                "end-date": { year: { value: "2001" } },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const typed = (w: ReturnType<typeof work>, type: string) => ({
+      ...w,
+      "work-summary": w["work-summary"].map((x) => ({ ...x, type })),
+    });
+    r["activities-summary"]!.works = {
+      "last-modified-date": null,
+      group: [
+        typed(work("Paper one", "2020", [doi("10.1/A"), pmid("101")]), "journal-article"),
+        typed(work("Paper two", "2021", [doi("10.1/B")]), "journal-article"),
+        typed(work("Paper three", "2022", [pmid("103")]), "journal-article"),
+        typed(work("Figure 2", "2022", [doi("10.6084/m9.figshare.1")]), "other"),
+        typed(work("A microscopy image", "2022", [doi("10.9/IMG")]), "image"),
+      ],
+    };
+    return r;
+  }
+
+  it("non-publications never count: works_total, new works and shared see publications only", () => {
+    const f = recordFacts(ORCID, albanyRecord());
+    expect(f.works.map((w) => w.title)).toEqual(["Paper one", "Paper two", "Paper three"]);
+    expect(f.worksDropped).toBe(2);
+    expect(f.workIds.has("doi:10.6084/m9.figshare.1")).toBe(false);
+    expect(f.orgs[0]).toMatchObject({ kind: "employment", start: 1996, end: 2001 });
+  });
+
+  it("a history match lifts a pair to Strong, and the detail names the pair, sources and names", () => {
+    const f = recordFacts(ORCID, albanyRecord());
+    const rows = assembleEvidence({
+      pairs: [{ cwid: "jd0001", orcid: ORCID }],
+      onFile: new Set(),
+      facts: new Map([[ORCID, f]]),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+      history: buildHistory({
+        education: [],
+        appointments: [],
+        identity: new Map([["jd0001", ["Albany Medical College of Union University"]]]),
+      }),
+      sources: new Map([[`jd0001|${ORCID}`, ["rpm_inferred", "orcid_works"]]]),
+      historyBand: true,
+    });
+    expect(rows[0]).toMatchObject({
+      band: "strong",
+      instMatch: false,
+      historyMatch: true,
+      shared: 3,
+      worksTotal: 3,
+      newWorks: 0,
+    });
+    const d = rows[0]!.evidenceDetail;
+    expect(d.institutions).toEqual([
+      {
+        orcid: { name: "Albany Medical College", kind: "employment", start: 1996, end: 2001 },
+        ours: { name: "Albany Medical College of Union University", source: "identity" },
+      },
+    ]);
+    expect(d.names).toEqual({
+      orcid: { credit: null, given: "Jane", family: "Doe", other: [] },
+      givenAgrees: true,
+      surnameRule: "same",
+    });
+    expect(d.sources).toEqual(["orcid_works", "rpm_inferred"]);
+    expect(d.email).toBeNull();
+    expect(d.worksDropped).toBe(2);
+    expect(d.shared.map((p) => p.pmid)).toEqual(["103", "102", "101"]);
+
+    // Without the history the same pair is Shared papers only.
+    const without = assembleEvidence({
+      pairs: [{ cwid: "jd0001", orcid: ORCID }],
+      onFile: new Set(),
+      facts: new Map([[ORCID, f]]),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+    });
+    expect(without[0]).toMatchObject({ band: "shared_only", historyMatch: false });
+  });
+
+  it("ORCID_HISTORY_BAND off: history_match is written but does not move the band", () => {
+    const f = recordFacts(ORCID, albanyRecord());
+    const rows = assembleEvidence({
+      pairs: [{ cwid: "jd0001", orcid: ORCID }],
+      onFile: new Set(),
+      facts: new Map([[ORCID, f]]),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+      history: buildHistory({
+        education: [],
+        appointments: [],
+        identity: new Map([["jd0001", ["Albany Medical College of Union University"]]]),
+      }),
+    });
+    expect(rows[0]).toMatchObject({ band: "shared_only", historyMatch: true, instMatch: false });
+    expect(rows[0]!.evidenceDetail.institutions).toHaveLength(1);
+    expect(historyBandShift(rows)).toEqual({ "shared_only->strong": 1 });
+  });
+
+  it('isHistoryBandEnabled is exactly "on"', () => {
+    const prev = process.env.ORCID_HISTORY_BAND;
+    try {
+      for (const [v, want] of [
+        ["on", true],
+        ["ON", false],
+        ["1", false],
+        ["off", false],
+      ] as const) {
+        process.env.ORCID_HISTORY_BAND = v;
+        expect(isHistoryBandEnabled()).toBe(want);
+      }
+      delete process.env.ORCID_HISTORY_BAND;
+      expect(isHistoryBandEnabled()).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.ORCID_HISTORY_BAND;
+      else process.env.ORCID_HISTORY_BAND = prev;
+    }
+  });
+
+  it("withSharedPaperDetail fills title, year, journal and DOI from our publications", () => {
+    const f = recordFacts(ORCID, record());
+    const rows = assembleEvidence({
+      pairs: [{ cwid: "jd0001", orcid: ORCID }],
+      onFile: new Set(),
+      facts: new Map([[ORCID, f]]),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+    });
+    expect(rows[0]!.evidenceDetail.email).toBe("jd0001@example.med.cornell.edu");
+    const filled = withSharedPaperDetail(
+      rows,
+      new Map([["101", { doi: "10.1/a", title: "Paper one", year: 2020, journal: "J Example" }]]),
+    );
+    expect(filled[0]!.evidenceDetail.shared).toContainEqual({
+      pmid: "101",
+      doi: "10.1/a",
+      title: "Paper one",
+      year: 2020,
+      journal: "J Example",
+    });
+    expect(filled[0]!.evidenceDetail.shared).toContainEqual({
+      pmid: "103",
+      doi: null,
+      title: null,
+      year: null,
+      journal: null,
+    });
   });
 });
