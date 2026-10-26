@@ -2004,6 +2004,12 @@ export class EtlStack extends Stack {
       // OrcidEvidenceWeekly so the new candidates are scored the same run. `continue`:
       // feeds /edit and the ORCID queue only, never the public profile.
       { id: "InfoedBiosketchWeekly", npmScript: "etl:infoed-biosketch", external: true, tier: "continue" },
+      // Public MyNCBI bibliographies (etl/myncbi) for the URLs on scholars' own biosketches
+      // -> myncbi_bibliography / myncbi_citation, for the bibliography-discrepancy report.
+      // Right after InfoedBiosketchWeekly so a new URL is fetched the same run. Public
+      // pages over NAT egress, no secret, so the base family (external: false). Each
+      // scholar at most every 30 days, one request every 2s. `continue`: report data only.
+      { id: "MyncbiWeekly", npmScript: "etl:myncbi", external: false, tier: "continue" },
       // ORCID candidate evidence (etl/orcid-evidence) -> orcid_candidate_evidence, the
       // bands /edit/orcid-queue reads, then the email auto-confirm (behind
       // ORCID_EMAIL_AUTOCONFIRM, off). Right after OrcidRegistryWeekly so it scores the

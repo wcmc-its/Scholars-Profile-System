@@ -249,6 +249,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Adds the clinical trials each scholar leads as principal investigator.",
     origin: "external", // sibling ReCiterDB
   },
+  MyNCBI: {
+    label: "NIH Bibliographies",
+    description: "Reads the public MyNCBI bibliography linked on a scholar's own NIH biosketch.",
+    origin: "external", // ncbi.nlm.nih.gov
+  },
   "InfoEd-Biosketch": {
     label: "NIH Biosketches",
     description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",
