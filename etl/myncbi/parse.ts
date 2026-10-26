@@ -20,11 +20,12 @@ export type MyncbiCitation = {
 const strip = (s: string) =>
   s
     .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
+    // Last, so "&amp;lt;" stays the literal "&lt;" instead of becoming "<".
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 

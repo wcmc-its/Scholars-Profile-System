@@ -28,6 +28,11 @@ describe("parseMyncbiPage", () => {
     ]);
   });
 
+  it("decodes &amp; last, so an escaped entity stays literal", () => {
+    const html = `<div class="citation-wrap"><input type="checkbox" value="5" class="citation-check"><div class="ncbi-docsum">A &amp;lt;b&amp;gt; tag &amp; more</div></div>`;
+    expect(parseMyncbiPage(html).citations[0].title).toBe("A &lt;b&gt; tag & more");
+  });
+
   it("an empty or foreign page → no citations, page 1", () => {
     expect(parseMyncbiPage("<html><body>Not found</body></html>")).toEqual({ citations: [], lastPage: 1, total: null });
   });
