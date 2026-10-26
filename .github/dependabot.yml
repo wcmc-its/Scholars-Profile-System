@@ -69,3 +69,14 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps-cdk)"
+
+  # Dockerfile base image (node:<major>-bookworm-slim@sha256:...). The digest is
+  # pinned for reproducible builds; this bumps it weekly so base-image security
+  # patches still arrive, as a reviewable PR.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(docker)"

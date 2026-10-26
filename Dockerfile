@@ -7,7 +7,10 @@
 # bundle and runs as the unprivileged `node` user. ADR-008, Phase 0.
 
 # ---- Base -------------------------------------------------------------------
-FROM node:24-bookworm-slim AS base
+# Pinned by digest (the multi-arch index, not a per-arch manifest) so a rebuild
+# of the same commit gets the same base layers. The tag is kept for
+# readability; Dependabot's docker ecosystem bumps the digest with a PR.
+FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS base
 WORKDIR /app
 
 # ---- Dependencies -----------------------------------------------------------
@@ -52,16 +55,16 @@ RUN npx prisma generate && npm run build
 # `npx prisma migrate deploy`, but Next standalone tracing drops the Prisma CLI
 # and its full dependency closure -- the CLI is never imported by server code,
 # and its config loader (@prisma/config) eagerly requires effect, c12,
-# deepmerge-ts, empathic, etc. Resolve that closure cleanly in an isolated
-# install (npm does the transitive resolution) rather than hand-copying deps
-# out of the trimmed standalone node_modules. Versions track package.json so it
-# never drifts from the app's Prisma.
+# deepmerge-ts, empathic, etc. (plus dotenv, which prisma.config.ts imports).
+# Copy that closure out of the `deps` stage's lockfile install: the script walks
+# package-lock.json from `prisma` and `dotenv` and copies each package at its
+# locked path, so the CLI is byte-for-byte the locked version -- no unlocked
+# `npm install` in the image build.
 FROM base AS prismacli
-WORKDIR /pris
-COPY package.json ./
-RUN npm install --no-save --omit=dev --no-audit --no-fund \
-      "prisma@$(node -p "require('./package.json').dependencies.prisma")" \
-      "dotenv@$(node -p "require('./package.json').devDependencies.dotenv")"
+COPY --from=deps /app/node_modules /app/node_modules
+COPY package-lock.json /app/package-lock.json
+COPY scripts/docker/prisma-cli-closure.mjs /tmp/prisma-cli-closure.mjs
+RUN node /tmp/prisma-cli-closure.mjs /app /pris/node_modules prisma dotenv
 
 # ---- ETL image --------------------------------------------------------------
 # Batch image for the `sps-etl-*` Fargate task family (Step Functions
@@ -122,9 +125,10 @@ COPY --from=build --chown=node:node /app/.next/static ./.next/static
 # `npx prisma migrate deploy`). Next standalone tracing omits the schema, the
 # migration SQL, the config file, and the CLI closure -- none are server-code
 # imports -- so add them here. The CLI closure comes from the `prismacli` stage
-# (full transitive resolution incl. the Linux schema-engine binary) overlaid
+# (the locked transitive closure incl. the Linux schema-engine binary) overlaid
 # onto the standalone node_modules; the app's own deps are untouched since
-# `prisma` pulls neither @prisma/client nor the mariadb adapter. The schema
+# `prisma` pulls neither @prisma/client nor the mariadb adapter, and any shared
+# package lands at the same locked version and path it has in the full tree. The schema
 # declares no migrate-time driver adapter, so the native schema engine connects
 # directly from DATABASE_URL -- no JS driver needed.
 COPY --from=build --chown=node:node /app/prisma ./prisma
@@ -132,8 +136,9 @@ COPY --from=build --chown=node:node /app/prisma.config.ts ./prisma.config.ts
 COPY --from=prismacli --chown=node:node /pris/node_modules ./node_modules
 # .bin/prisma must be a real symlink: Docker COPY dereferences it into a plain
 # file under .bin/, breaking the CLI's __dirname-relative load of
-# prisma_schema_build_bg.wasm. Recreate it pointing into prisma/build/.
-RUN ln -sf ../prisma/build/index.js node_modules/.bin/prisma
+# prisma_schema_build_bg.wasm. Recreate it pointing into prisma/build/. The
+# closure copy carries no .bin/ of its own, so create the directory first.
+RUN mkdir -p node_modules/.bin && ln -sf ../prisma/build/index.js node_modules/.bin/prisma
 
 # #1846 — the ISR cacheHandler namespaces its S3 keys per deploy using
 # NEXT_DEPLOYMENT_ID at RUNTIME. The build stage's ENV (line ~33) does not cross
