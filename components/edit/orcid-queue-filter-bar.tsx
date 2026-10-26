@@ -134,7 +134,7 @@ export function OrcidQueueFilterBar({
       options: ORCID_CANDIDATE_SOURCES.map((s) => ({
         value: s,
         label: ORCID_SOURCE_LABEL[s],
-        count: -1,
+        count: count((x) => x.candidates.some((c) => c.sources.includes(s))),
       })),
       scope: "Scholars with an iD found this way.",
     },

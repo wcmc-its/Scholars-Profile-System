@@ -587,6 +587,7 @@ export async function loadOrcidQueue(
         worksTotal,
         nameAgrees,
         competitor,
+        sources: st.sources.get(pairKey(cwid, orcid)) ?? [],
       })),
       conflict: ps.some((p) => p.state === "conflict"),
       autoConfirmed: ps.some((p) => p.state === "auto_confirmed"),

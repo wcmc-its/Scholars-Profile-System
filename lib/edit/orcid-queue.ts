@@ -400,6 +400,8 @@ export type OrcidQueueSummaryCandidate = {
   worksTotal: number;
   nameAgrees: boolean;
   competitor: boolean;
+  /** `orcid_candidate.source` values for the pair (the How discovered counts). */
+  sources: OrcidCandidateSource[];
 };
 
 /** v3: one row of the scholar list. `candidates` best first; email

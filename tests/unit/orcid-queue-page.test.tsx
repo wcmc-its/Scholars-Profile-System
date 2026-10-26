@@ -229,14 +229,17 @@ const summaryOf = (
   name: c.name,
   surname: c.name.split(",")[0]!.split(" ").pop()!.toLowerCase(),
   department: c.department,
-  candidates: c.candidates.map(({ orcid, band, shared, worksTotal, nameAgrees, competitor }) => ({
-    orcid,
-    band,
-    shared,
-    worksTotal,
-    nameAgrees,
-    competitor,
-  })),
+  candidates: c.candidates.map(
+    ({ orcid, band, shared, worksTotal, nameAgrees, competitor, sources }) => ({
+      orcid,
+      band,
+      shared,
+      worksTotal,
+      nameAgrees,
+      competitor,
+      sources,
+    }),
+  ),
   conflict: c.candidates.some((r) => r.state === "conflict"),
   autoConfirmed: c.candidates.some((r) => r.autoConfirmed),
   ...over,
@@ -544,9 +547,9 @@ describe("loaders", () => {
       conflict: false,
       autoConfirmed: false,
     });
-    expect(by("a00001").candidates.map((r) => [r.orcid, r.band])).toEqual([
-      [ORCID, "strong"],
-      [OTHER_2, "weak"],
+    expect(by("a00001").candidates.map((r) => [r.orcid, r.band, r.sources])).toEqual([
+      [ORCID, "strong", ["orcid_works", "rpm_inferred"]],
+      [OTHER_2, "weak", []],
     ]);
     expect(by("c00001")).toMatchObject({ conflict: true });
     expect(by("e00001")).toMatchObject({ autoConfirmed: true });
@@ -658,6 +661,7 @@ describe("v3 pure rules", () => {
         worksTotal,
         nameAgrees: true,
         competitor: false,
+        sources: [],
       })),
       ...over,
     }) as OrcidQueueSummary;
@@ -839,6 +843,17 @@ describe("client", () => {
     fireEvent.click(screen.getByTestId("orcid-queue-filter-errors"));
     expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 scholar");
     expect(screen.getByTestId("orcid-queue-item-cf0003")).toBeTruthy();
+  });
+
+  it("How discovered counts scholars with an iD found each way", async () => {
+    mount([JOHN, CARD({}, [ROW, SECOND])]);
+    fireEvent.click(screen.getByTestId("orcid-queue-filter-source"));
+    const opt = (label: string) =>
+      screen.getByRole("checkbox", { name: new RegExp(`^${label}`) }).textContent;
+    // ROW's sources are orcid_works + rpm_inferred (both scholars); SECOND's orcid_name (Jane only).
+    expect(opt("ORCID shared works")).toMatch(/2$/);
+    expect(opt("ORCID name only")).toMatch(/1$/);
+    expect(opt("Crossref deposit")).toMatch(/0$/);
   });
 
   it("v2.1: each new work shows its ReCiter status and the Publication Manager link that acts on it", async () => {
