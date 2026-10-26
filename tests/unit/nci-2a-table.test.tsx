@@ -393,9 +393,14 @@ describe("report 2 table", () => {
     );
   });
 
-  it("a note saves on blur as reviewerNote, survives a lagged refresh, and Esc undoes", async () => {
+  it("the note link opens an editor row; blur saves reviewerNote, the link shows it through a lagged refresh", async () => {
     const f = stubFetch();
     const r = renderTable([AI]);
+    expect(r.q.queryByTestId("nci-2a-note")).toBeNull();
+    const link = r.q.getByTestId("nci-2a-note-link");
+    expect(link.textContent).toBe("Add note");
+    fireEvent.click(link);
+    expect(r.q.getByTestId("nci-2a-note-row")).toBeTruthy();
     const note = r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement;
     expect(note.placeholder).toBe("Why under 100%?");
     fireEvent.change(note, { target: { value: " Aim 2 only " } });
@@ -405,15 +410,25 @@ describe("report 2 table", () => {
       `/api/edit/center/${CENTER}/nci-2a/1`,
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ reviewerNote: "Aim 2 only" }) }),
     ]);
+    fireEvent.click(r.q.getByRole("button", { name: "Done" }));
+    expect(r.q.queryByTestId("nci-2a-note-row")).toBeNull();
     r.rerender(tableEl([AI])); // replica still says no note
-    expect((r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement).value).toBe("Aim 2 only");
-    const again = r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement;
-    fireEvent.change(again, { target: { value: "scrap" } });
-    fireEvent.keyDown(again, { key: "Escape" });
-    fireEvent.blur(again);
+    expect(r.q.getByTestId("nci-2a-note-link").textContent).toBe("Aim 2 only");
+  });
+
+  it("Esc in the note editor undoes, closes and saves nothing", async () => {
+    const f = stubFetch();
+    const r = renderTable([{ ...AI, reviewerNote: "kept" }]);
+    fireEvent.click(r.q.getByTestId("nci-2a-note-link"));
+    const note = r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement;
+    expect(note.value).toBe("kept");
+    fireEvent.change(note, { target: { value: "scrap" } });
+    fireEvent.keyDown(note, { key: "Escape" });
+    fireEvent.blur(note);
     await act(async () => {});
-    expect(f).toHaveBeenCalledTimes(1);
-    expect(again.value).toBe("Aim 2 only");
+    expect(f).not.toHaveBeenCalled();
+    expect(r.q.queryByTestId("nci-2a-note-row")).toBeNull();
+    expect(r.q.getByTestId("nci-2a-note-link").textContent).toBe("kept");
   });
 
   it("Esc undoes the draft and saves nothing", async () => {
