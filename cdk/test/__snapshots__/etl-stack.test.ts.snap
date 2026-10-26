@@ -1887,7 +1887,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -2555,7 +2555,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -3171,7 +3171,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -3718,7 +3718,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -4700,7 +4700,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -5442,6 +5442,493 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "FundingDigestArrivalRule17C6C729": {
+      "Properties": {
+        "Description": "SPS funding digest import -- on each email SES writes under funding/ (prod).",
+        "EventPattern": {
+          "detail": {
+            "bucket": {
+              "name": [
+                "sps-inbound-mail-123456789012",
+              ],
+            },
+            "object": {
+              "key": [
+                {
+                  "prefix": "funding/",
+                },
+              ],
+            },
+          },
+          "detail-type": [
+            "Object Created",
+          ],
+          "source": [
+            "aws.s3",
+          ],
+        },
+        "Name": "sps-funding-digest-prod",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "FundingDigestStateMachineD94758DB",
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 2,
+            },
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "FundingDigestStateMachineEventsRoleC026E91B",
+                "Arn",
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "FundingDigestSmLogGroupDBE20FA0": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/states/funding-digest-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "FundingDigestStateMachineD94758DB": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "FundingDigestStateMachineRoleDefaultPolicyD6CEC74B",
+        "FundingDigestStateMachineRoleE420063B",
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{"StartAt":"TaskFundingDigestOnArrival","States":{"TaskFundingDigestOnArrival":{"End":true,"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyFundingDigestOnArrival"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:funding-digest"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyFundingDigestOnArrival":{"Next":"FailFundingDigestOnArrival","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"FundingDigestOnArrival","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS funding digest import prod -- run failed"}},"FailFundingDigestOnArrival":{"Type":"Fail","Cause":"funding digest import failed"}},"TimeoutSeconds":2700}",
+            ],
+          ],
+        },
+        "LoggingConfiguration": {
+          "Destinations": [
+            {
+              "CloudWatchLogsLogGroup": {
+                "LogGroupArn": {
+                  "Fn::GetAtt": [
+                    "FundingDigestSmLogGroupDBE20FA0",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+          ],
+          "IncludeExecutionData": false,
+          "Level": "ERROR",
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "FundingDigestStateMachineRoleE420063B",
+            "Arn",
+          ],
+        },
+        "StateMachineName": "scholars-funding-digest-prod",
+        "StateMachineType": "STANDARD",
+        "TracingConfiguration": {
+          "Enabled": true,
+        },
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "FundingDigestStateMachineEventsRoleC026E91B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "FundingDigestStateMachineEventsRoleDefaultPolicy1DCA167E": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "FundingDigestStateMachineD94758DB",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "FundingDigestStateMachineEventsRoleDefaultPolicy1DCA167E",
+        "Roles": [
+          {
+            "Ref": "FundingDigestStateMachineEventsRoleC026E91B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "FundingDigestStateMachineRoleDefaultPolicyD6CEC74B": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskExecutionRoleC745E2CD",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogDelivery",
+                "logs:GetLogDelivery",
+                "logs:UpdateLogDelivery",
+                "logs:DeleteLogDelivery",
+                "logs:ListLogDeliveries",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "FundingDigestStateMachineRoleDefaultPolicyD6CEC74B",
+        "Roles": [
+          {
+            "Ref": "FundingDigestStateMachineRoleE420063B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "FundingDigestStateMachineRoleE420063B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":states:us-east-1:123456789012:stateMachine:*",
+                      ],
+                    ],
+                  },
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "FundingDigestStatusAlarm68D6047A": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS funding digest import (prod) -- a run started by a digest email did not finish successfully. That digest's links were not submitted; the Sunday weekly run retries them. Next: open the Step Functions execution for scholars-funding-digest-prod and read the task log (event funding_digest_complete or the error).",
+        "AlarmName": "sps-funding-digest-status-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "EvaluationPeriods": 1,
+        "Metrics": [
+          {
+            "Expression": "failed + timedOut + aborted",
+            "Id": "expr_1",
+            "ReturnData": true,
+          },
+          {
+            "Id": "failed",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "FundingDigestStateMachineD94758DB",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsFailed",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "timedOut",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "FundingDigestStateMachineD94758DB",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsTimedOut",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "aborted",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "FundingDigestStateMachineD94758DB",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsAborted",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
     },
     "GrantsExportBucketD74F895B": {
       "DeletionPolicy": "Retain",
@@ -9698,7 +10185,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-evidence"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyMyncbiWeekly":{"Next":"TaskOrcidEvidenceWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-evidence"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyMyncbiWeekly":{"Next":"TaskOrcidEvidenceWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -13527,7 +14014,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -14195,7 +14682,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -14811,7 +15298,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -15358,7 +15845,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -16340,7 +16827,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_HISTORY_BAND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -17087,6 +17574,493 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "FundingDigestArrivalRule17C6C729": {
+      "Properties": {
+        "Description": "SPS funding digest import -- on each email SES writes under funding/ (staging).",
+        "EventPattern": {
+          "detail": {
+            "bucket": {
+              "name": [
+                "sps-inbound-mail-123456789012",
+              ],
+            },
+            "object": {
+              "key": [
+                {
+                  "prefix": "funding/",
+                },
+              ],
+            },
+          },
+          "detail-type": [
+            "Object Created",
+          ],
+          "source": [
+            "aws.s3",
+          ],
+        },
+        "Name": "sps-funding-digest-staging",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "FundingDigestStateMachineD94758DB",
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 2,
+            },
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "FundingDigestStateMachineEventsRoleC026E91B",
+                "Arn",
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "FundingDigestSmLogGroupDBE20FA0": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/states/funding-digest-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "FundingDigestStateMachineD94758DB": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "FundingDigestStateMachineRoleDefaultPolicyD6CEC74B",
+        "FundingDigestStateMachineRoleE420063B",
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{"StartAt":"TaskFundingDigestOnArrival","States":{"TaskFundingDigestOnArrival":{"End":true,"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyFundingDigestOnArrival"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:funding-digest"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyFundingDigestOnArrival":{"Next":"FailFundingDigestOnArrival","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"FundingDigestOnArrival","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS funding digest import staging -- run failed"}},"FailFundingDigestOnArrival":{"Type":"Fail","Cause":"funding digest import failed"}},"TimeoutSeconds":2700}",
+            ],
+          ],
+        },
+        "LoggingConfiguration": {
+          "Destinations": [
+            {
+              "CloudWatchLogsLogGroup": {
+                "LogGroupArn": {
+                  "Fn::GetAtt": [
+                    "FundingDigestSmLogGroupDBE20FA0",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+          ],
+          "IncludeExecutionData": false,
+          "Level": "ERROR",
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "FundingDigestStateMachineRoleE420063B",
+            "Arn",
+          ],
+        },
+        "StateMachineName": "scholars-funding-digest-staging",
+        "StateMachineType": "STANDARD",
+        "TracingConfiguration": {
+          "Enabled": true,
+        },
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "FundingDigestStateMachineEventsRoleC026E91B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "FundingDigestStateMachineEventsRoleDefaultPolicy1DCA167E": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "FundingDigestStateMachineD94758DB",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "FundingDigestStateMachineEventsRoleDefaultPolicy1DCA167E",
+        "Roles": [
+          {
+            "Ref": "FundingDigestStateMachineEventsRoleC026E91B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "FundingDigestStateMachineRoleDefaultPolicyD6CEC74B": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskExecutionRoleC745E2CD",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogDelivery",
+                "logs:GetLogDelivery",
+                "logs:UpdateLogDelivery",
+                "logs:DeleteLogDelivery",
+                "logs:ListLogDeliveries",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "FundingDigestStateMachineRoleDefaultPolicyD6CEC74B",
+        "Roles": [
+          {
+            "Ref": "FundingDigestStateMachineRoleE420063B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "FundingDigestStateMachineRoleE420063B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":states:us-east-1:123456789012:stateMachine:*",
+                      ],
+                    ],
+                  },
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "FundingDigestStatusAlarm68D6047A": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS funding digest import (staging) -- a run started by a digest email did not finish successfully. That digest's links were not submitted; the Sunday weekly run retries them. Next: open the Step Functions execution for scholars-funding-digest-staging and read the task log (event funding_digest_complete or the error).",
+        "AlarmName": "sps-funding-digest-status-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "EvaluationPeriods": 1,
+        "Metrics": [
+          {
+            "Expression": "failed + timedOut + aborted",
+            "Id": "expr_1",
+            "ReturnData": true,
+          },
+          {
+            "Id": "failed",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "FundingDigestStateMachineD94758DB",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsFailed",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "timedOut",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "FundingDigestStateMachineD94758DB",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsTimedOut",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "aborted",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "FundingDigestStateMachineD94758DB",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsAborted",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
     },
     "GrantsExportBucketD74F895B": {
       "DeletionPolicy": "Retain",
@@ -21343,7 +22317,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-evidence"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyMyncbiWeekly":{"Next":"TaskOrcidEvidenceWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-evidence"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyMyncbiWeekly":{"Next":"TaskOrcidEvidenceWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },

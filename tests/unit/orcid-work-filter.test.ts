@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AACR_SUPPLEMENT_DOI,
   filterPublicationWorks,
   isNonPublicationWork,
   isPreprint,
@@ -98,6 +99,90 @@ describe("isNonPublicationWork", () => {
     expect(isNonPublicationWork(w("Model weights", "journal-article", "10.5281/zenodo.42"))).toBe(
       false,
     );
+  });
+});
+
+describe("v2.1: supplements, whatever the ORCID type", () => {
+  it.each([
+    "Supplementary Table S1 from Radiodensities of Breast Tissue in Screening",
+    "Figure S3 from Deleting Trim33 Alters Myeloid Differentiation",
+    "Supplementary Data from Tumor Evolution in Patients",
+    "Supplemental Figure 2 from A Phase I Trial",
+    "Supplementary Figures S1-S7 from Clonal Hematopoiesis",
+    "Supplementary Tables S1\u2013S4 from Clonal Hematopoiesis",
+    "Supplementary Methods from Single-Cell Atlas",
+    "Table S2 for Germline Variants in Prostate Cancer",
+    "Fig. 4 of the Lung Tumor Model",
+    "Data S1 from Mouse Models of Leukemia",
+    "Movie S1 from Live Imaging of Metastasis",
+    "Video 2 from Endoscopic Resection",
+    "File S1 from Cohort Characteristics",
+    "Appendix S2 from A Randomized Trial",
+    "Figure 1a from Spatial Transcriptomics",
+  ])("drops %s even when typed journal-article", (title) => {
+    expect(isNonPublicationWork(w(title, "journal-article"))).toBe(true);
+    expect(isNonPublicationWork(w(title, null))).toBe(true);
+  });
+
+  it.each([
+    "A Randomized Pilot Trial of Micronutrient Supplementation in Pregnancy",
+    "Incidental Detection on CT of Neoplasms of the Appendix",
+    "Supplemental oxygen after surgery",
+    "Supplemental Nutrition Assistance Program participation for older adults",
+    "Supplementation with vitamin D in older adults",
+    "Data sharing for clinical trials",
+    "Table manners in pediatric wards",
+    "Figures of merit in imaging",
+  ])("keeps the paper %s", (title) => {
+    expect(isNonPublicationWork(w(title, "journal-article"))).toBe(false);
+    expect(isNonPublicationWork(w(title, null))).toBe(false);
+  });
+
+  it("drops an AACR supplement DOI (10.1158/<issn>.<6+ digits>[.vN]) whatever its type or title", () => {
+    for (const d of [
+      "10.1158/0008-5472.22412345",
+      "10.1158/1078-0432.22487654.v1",
+      "10.1158/2159-829X.123456",
+    ]) {
+      expect(AACR_SUPPLEMENT_DOI.test(d)).toBe(true);
+      expect(isNonPublicationWork(w("Untitled deposit", "journal-article", d))).toBe(true);
+    }
+  });
+
+  it("drops an AACR Figshare collection DOI (10.1158/<issn>.c.<digits>) titled 'Data from …'", () => {
+    const d = "10.1158/0008-5472.c.6506030";
+    expect(AACR_SUPPLEMENT_DOI.test(d)).toBe(true);
+    expect(AACR_SUPPLEMENT_DOI.test("10.1158/1078-0432.c.6531234.v1")).toBe(true);
+    expect(
+      isNonPublicationWork(w("Data from Deleting Trim33 in mouse tumors", "journal-article", d)),
+    ).toBe(true);
+  });
+
+  it("keeps a 'Data from the …' paper with a non-AACR DOI", () => {
+    expect(
+      isNonPublicationWork(
+        w("Data from the Nurses' Health Study on diet", "journal-article", "10.1093/aje/kwx123"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps an AACR article DOI", () => {
+    for (const d of [
+      "10.1158/0008-5472.CAN-20-1234",
+      "10.1158/1078-0432.CCR-19-0001",
+      "10.1158/0008-5472.12345",
+    ]) {
+      expect(AACR_SUPPLEMENT_DOI.test(d)).toBe(false);
+      expect(isNonPublicationWork(w("A real paper about tumors", "journal-article", d))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("a supplement title on a work that carries a PMID is kept (the PMID says paper)", () => {
+    expect(
+      isNonPublicationWork(w("Supplementary Table S1 from X", "journal-article", null, ["pmid:9"])),
+    ).toBe(false);
   });
 });
 

@@ -118,8 +118,8 @@ describe("PUT /api/edit/report-meta/[n] — gating", () => {
     expect(h.mockUpsert).not.toHaveBeenCalled();
   });
 
-  it("404 unknown_report for a superuser on a key outside the catalog (retired 10, unbuilt 15)", async () => {
-    const res = await put("15", VALID);
+  it("404 unknown_report for a superuser on a key outside the catalog (retired 10, unbuilt 16)", async () => {
+    const res = await put("16", VALID);
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ ok: false, error: "unknown_report" });
     expect(h.mockUpsert).not.toHaveBeenCalled();

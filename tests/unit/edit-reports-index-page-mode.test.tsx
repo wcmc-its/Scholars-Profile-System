@@ -107,7 +107,11 @@ async function indexProps(searchParams: Record<string, string> = {}) {
   const result = await EditReportsIndexPage({ searchParams: Promise.resolve(searchParams) });
   const index = findByType(result, mockReportsIndex);
   expect(index).not.toBeNull();
-  return index!.props as {
+  // This file is about unit groups. A superuser also gets the Institution-wide
+  // pseudo-unit (report 15), which edit-reports-index-page-gap5 covers.
+  const raw = index!.props as { units: Array<{ kind: string }> };
+  const props = { ...raw, units: raw.units.filter((u) => u.kind !== "institution") };
+  return props as unknown as {
     units: Array<{
       code: string;
       kind: string;

@@ -130,8 +130,8 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   "ORCID-evidence": {
     label: "ORCID candidate evidence",
     description:
-      "The evidence on each candidate ORCID iD (a verified email, the institution, shared papers, name agreement, competing scholars) read from its public ORCID record. Feeds the ORCID librarian queue.",
-    origin: "external", // pub.orcid.org public API
+      "The evidence on each candidate ORCID iD (a verified email, the institution, shared papers, name agreement, competing scholars) read from its public ORCID record, with each work's PubMed ID (NCBI) and ReCiter status. Feeds the ORCID librarian queue.",
+    origin: "external", // pub.orcid.org public API, NCBI E-utilities, ReciterDB
   },
   "ORCID-push": {
     label: "ORCID iDs pushed to Identity",
