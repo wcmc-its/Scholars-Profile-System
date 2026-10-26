@@ -552,6 +552,19 @@ describe("orcidVerdict", () => {
     ).toBe("weak");
   });
 
+  it("infoed_biosketch_name: weak alone or beside another name-only iD; strong when an independent source agrees", () => {
+    expect(orcidVerdict([cand("x", "infoed_biosketch_name", 0, 0, "iD-a")]).tier).toBe("weak");
+    expect(
+      orcidVerdict([cand("x", "infoed_biosketch_name", 0, 0, "iD-a"), cand("x", "orcid_name", 0, 0, "iD-a")]).tier,
+    ).toBe("weak");
+    expect(
+      orcidVerdict([cand("x", "infoed_biosketch_name", 0, 0, "iD-a"), cand("x", "rpm_inferred", 1, 2, "iD-a")]).tier,
+    ).toBe("weak");
+    expect(
+      orcidVerdict([cand("x", "infoed_biosketch_name", 0, 0, "iD-a"), cand("x", "rpm_inferred", 1, 0, "iD-a")]),
+    ).toEqual({ tier: "strong", orcid: "iD-a", accepted: 1 });
+  });
+
   it("an rpm_admin row → asserted with the admin iD, whatever else is there", () => {
     expect(
       orcidVerdict([cand("x", "rpm_inferred", 9, 0, "iD-b"), cand("x", "rpm_admin", 0, 0, "iD-a")]),

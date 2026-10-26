@@ -1,6 +1,6 @@
 /**
  * InfoEd NIH biosketches → `infoed_biosketch`, and their ORCID iDs → `orcid_candidate`
- * (source `infoed_biosketch`).
+ * (source `infoed_biosketch`, or `infoed_biosketch_name` when matched by name only).
  *
  * InfoEd keeps every proposal attachment's bytes in `ProjDocVer.DocContent`. NIH
  * application packages there (`*_Egrant.pdf`, the eRA `nih_grant_image.pdf`, the
@@ -34,6 +34,7 @@ const WINDOW_DAYS = 14;
 const BACKFILL_PER_PERSON = 2;
 const MAX_DOC_BYTES = 60_000_000;
 const ORCID_SOURCE = "infoed_biosketch";
+const ORCID_NAME_SOURCE = "infoed_biosketch_name";
 
 // File names that carry NIH biosketches (2026-10-25 yield sample). `*application*` /
 // `*submitted*` PDFs yielded none and are left out.
@@ -93,27 +94,38 @@ async function docBytes(id: string): Promise<Uint8Array> {
   return new Uint8Array(r.recordset[0].DocContent);
 }
 
-/** Mirror the email-attributed biosketch iDs into `orcid_candidate`, own source only. */
+/** Mirror the biosketch iDs into `orcid_candidate`, own sources only: email-attributed
+ *  rows as `infoed_biosketch` (strong), name-attributed as `infoed_biosketch_name`
+ *  (weak unless another source names the same iD — lib/edit/orcid-coverage.ts). */
 async function mirrorOrcidCandidates(): Promise<number> {
   const rows = await db.write.infoedBiosketch.groupBy({
-    by: ["cwid", "orcid"],
-    where: { attributedBy: "email", orcid: { not: null } },
+    by: ["cwid", "orcid", "attributedBy"],
+    where: { orcid: { not: null } },
     _max: { uploadedAt: true },
   });
   const now = new Date();
   for (const r of rows) {
+    const source = r.attributedBy === "email" ? ORCID_SOURCE : ORCID_NAME_SOURCE;
     await db.write.orcidCandidate.upsert({
-      where: { cwid_orcid_source: { cwid: r.cwid, orcid: r.orcid!, source: ORCID_SOURCE } },
-      create: { cwid: r.cwid, orcid: r.orcid!, source: ORCID_SOURCE, sourceUpdatedAt: r._max.uploadedAt, syncedAt: now },
+      where: { cwid_orcid_source: { cwid: r.cwid, orcid: r.orcid!, source } },
+      create: { cwid: r.cwid, orcid: r.orcid!, source, sourceUpdatedAt: r._max.uploadedAt, syncedAt: now },
       update: { sourceUpdatedAt: r._max.uploadedAt, syncedAt: now },
     });
   }
   // Derived from our own table, so empty means nothing harvested yet, not an outage —
   // but never let an empty read wipe what is there.
   const removed = rows.length
-    ? (await db.write.orcidCandidate.deleteMany({ where: { source: ORCID_SOURCE, syncedAt: { lt: now } } })).count
+    ? (
+        await db.write.orcidCandidate.deleteMany({
+          where: { source: { in: [ORCID_SOURCE, ORCID_NAME_SOURCE] }, syncedAt: { lt: now } },
+        })
+      ).count
     : 0;
-  console.log(`orcid_candidate (${ORCID_SOURCE}): ${rows.length} rows, ${removed} stale removed`);
+  const bySource = rows.reduce<Record<string, number>>((m, r) => {
+    const k = r.attributedBy === "email" ? ORCID_SOURCE : ORCID_NAME_SOURCE;
+    return (m[k] = (m[k] ?? 0) + 1), m;
+  }, {});
+  console.log(`orcid_candidate: ${JSON.stringify(bySource)}, ${removed} stale removed`);
   return rows.length;
 }
 
