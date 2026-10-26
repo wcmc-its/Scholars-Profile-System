@@ -949,8 +949,10 @@ export class EtlStack extends Stack {
       // Strong only when this is exactly "on". Off: history_match and
       // evidence_detail are still written and the run logs the band moves the term
       // would make; the spec's Phasing step 2 compares those counts before the
-      // switch. Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      ORCID_HISTORY_BAND: "off",
+      // switch. On in both envs since 2026-10-26: the staging run's moves were
+      // 322 shared_only->strong and 331 weak->moderate, reviewed and approved.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_HISTORY_BAND: "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
