@@ -208,6 +208,7 @@ export const CUE_LABELS: Readonly<Record<string, string>> = {
   profile_proven: "NIH profile linked by accepted papers",
   name_rare: "Rare name",
   name_common: "Common name",
+  pi_name_mismatch: "PI has a different surname",
 };
 
 export function cueLabel(id: string): string {
@@ -367,6 +368,11 @@ export const EVIDENCE_ROWS: ReadonlyArray<{
   {
     ids: ["name_common"],
     label: "Common name: 10 or more NIH PI profiles share it",
+    toward: false,
+  },
+  {
+    ids: ["pi_name_mismatch"],
+    label: "The NIH profile's PI has a different surname",
     toward: false,
   },
 ];
