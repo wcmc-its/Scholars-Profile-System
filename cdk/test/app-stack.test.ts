@@ -32,6 +32,42 @@ function buildAppStack(
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 
 describe("AppStack", () => {
+  // #1943 item 2 -- internal ALB :80 ingress narrowing.
+  describe("#1943 -- internal ALB consumer prefix list", () => {
+    const internalSg = (template: Template) =>
+      Object.values(template.findResources("AWS::EC2::SecurityGroup")).find((r) =>
+        String(r.Properties?.GroupDescription).startsWith("SPS internal ALB"),
+      );
+
+    it("off (default, both envs): the internal ALB SG keeps CDK's 0.0.0.0/0 :80 ingress and no prefix-list rule", () => {
+      for (const env of ["staging", "prod"] as const) {
+        const { template } = buildAppStack(env);
+        expect(JSON.stringify(internalSg(template)?.Properties?.SecurityGroupIngress)).toContain(
+          "0.0.0.0/0",
+        );
+        expect(JSON.stringify(template.toJSON())).not.toContain(
+          "internal-alb-consumer-prefix-list-id",
+        );
+      }
+    });
+
+    it("on: no 0.0.0.0/0 on the internal ALB SG; :80 admitted only from the SSM-referenced prefix list", () => {
+      const { template } = buildAppStack("prod", { internalAlbConsumerPrefixList: true });
+      expect(JSON.stringify(internalSg(template)?.Properties?.SecurityGroupIngress ?? [])).not.toContain(
+        "0.0.0.0/0",
+      );
+      const rules = Object.values(template.findResources("AWS::EC2::SecurityGroupIngress")).filter(
+        (r) => r.Properties?.SourcePrefixListId !== undefined,
+      );
+      expect(rules).toHaveLength(1);
+      expect(rules[0].Properties).toMatchObject({ IpProtocol: "tcp", FromPort: 80, ToPort: 80 });
+      expect(JSON.stringify(rules[0].Properties.GroupId)).toContain("InternalAlbSecurityGroup");
+      expect(JSON.stringify(template.toJSON().Parameters)).toContain(
+        "/sps/prod/app/internal-alb-consumer-prefix-list-id",
+      );
+    });
+  });
+
   // Cutover de-coupling (§8.4): OPENSEARCH_NODE moves off the Data→App
   // cross-stack export onto the opensearch secret's `node` key, so the
   // OpenSearch-domain replace at cutover isn't blocked by the export-lock.
