@@ -174,3 +174,26 @@ Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, section "v2.1", fro
 - **Both envs link to production Publication Manager**: staging's scholars are prod's people, and the dev PM is not guaranteed to carry #1047.
 - **Pending and rejected come from reciterdb, not DynamoDB GoldStandard**: `person_article` already holds every candidate ReCiter retrieved for the person with its assertion, which is also what separates `pending` from `not_retrieved`; GoldStandard holds only accepted and rejected PMIDs.
 - **Bands can move**: a resolved PMID, a title match or a ReCiter acceptance raises `shared` like any shared paper. Compare band counts on the first v2.1 run.
+
+## v3 PR A (2026-10-26): master–detail redesign
+
+Plan: `Roadmap/orcid-queue-v3-redesign-plan.md` (Projects). Mockup: `Projects/Scholars-Profile-System/mockups/ORCID Queue Redesign/` v5. UI only; no schema change.
+
+### Queue page
+
+- The band tabs are gone. The page loads every scholar in the queue as a summary (`loadOrcidQueue`); the selected scholar's card comes from `GET /api/edit/orcid-queue/scholar?cwid=` (`loadOrcidQueueCard`), gated like the page.
+- Each scholar carries a 5-step "Match evidence" meter from their best iD (`bandLevel`: Weak 1 … Email verified 5). A competitor blocks steps 3–5, drawn amber.
+- Search (name, CWID, iD with or without dashes), Confidence, Decision (default Unassigned) and Possible errors (a different iD on file) run in the browser. Person type, department, institution and how discovered stay server-side (`?type=&unit=&source=`).
+- Sorts: Strongest match (`candidateScore`), Clearest winner (`scholarGap`), Department then name, Name, CWID.
+- One table per scholar, a column per signal. An opened row shows the competitor rule that fired (`competitorRules`: 1 same-surname scholar, 2 another plausible iD, 3 iD shared with another scholar), names, signals, and publications ORCID vs. ReCiter (`reciterTotal` = confirmed `publication_author` rows).
+- The card shows the iD on file and where it came from (`OrcidOnFile.how`).
+
+### Routes
+
+- `decide` drops `sampleId`. "None of these" is a dismiss with the rest in `dismissOthers` and `noneOfThese: true`; each audit row carries `none_of_these: true`.
+- `sample` and `bulk-confirm` are removed. The `orcid_queue_sample` table stays; nothing writes it.
+
+### Deviations (deliberate)
+
+- No "Only in ReCiter" list, only its count: the ETL keeps a capped sample of shared papers, so the exact set isn't known. PR B.
+- No Undo of a librarian decision, no "Same person, duplicate iD", no one-iD-two-scholars compare, no "Decided by", and no queue-age sorts. Each needs the `orcid_decision` table (PR B).

@@ -1,31 +1,33 @@
 /**
- * The ORCID librarian queue page gate, its loader, and the client.
+ * The ORCID librarian queue page gate, its loaders, the scholar route, and the
+ * client.
  *
  *   - Page: no session → SSO redirect; flag off → 404 for everyone; a
  *     non-superuser → ForbiddenEditPage; a superuser gets the queue. The tab
  *     predicate is the page gate (flag + isSuperuser).
- *   - Loader: a dismissed or on-file pair is never a row; a scholar holding a
- *     DIFFERENT iD goes to Conflicts; Email verified also lists the ETL's
- *     confirmed iDs; an open sample's rows come first.
- *   - Client: chips, the new-works sample, Confirm / Not this person; the
- *     sample panel's three states.
- *   - v2: one card per scholar (every candidate iD, best first; the card in
- *     its best band's tab; counts are scholars), the filter (person facets +
- *     source) on list and counts, chips that open to their facts, names side
- *     by side, every work linked, Confirm sending the others to dismiss.
+ *   - Loaders (v3): every scholar in the queue is one summary, candidates best
+ *     first; a dismissed or on-file pair is never a candidate; a scholar
+ *     holding a DIFFERENT iD is a conflict; the ETL's email-confirmed iDs are
+ *     in; the person / source filter narrows the list. The card carries the iD
+ *     on file and where it came from, and the publication count.
+ *   - Pure rules (v3): meter level, score, gap, competitor rules, search, sort.
+ *   - Client (v3): the scholar list with Unassigned by default, search and
+ *     Possible errors; the card fetched for the selected scholar; the
+ *     candidate table; the evidence; the decision bar, "Also mark the others",
+ *     None of these, Undo; a decided scholar stays until you move on.
  *   - v2.1: each new work's ReCiter status chip and its Publication Manager
- *     link (review for pending / rejected, add for a DOI not in PubMed), the
- *     status split in the preview header, and the https-only PM base URL.
+ *     link, the status split, and the https-only PM base URL.
  *
  * Fixture people and iDs are invented.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 const h = vi.hoisted(() => ({
   session: vi.fn(),
   rawSession: vi.fn(),
   load: vi.fn(),
+  loadCard: vi.fn(),
   shell: vi.fn(),
   refresh: vi.fn(),
   replace: vi.fn(),
@@ -53,6 +55,7 @@ vi.mock("@/lib/api/data-quality", () => ({ loadDataQualityFacets: h.facets }));
 vi.mock("@/lib/edit/orcid-queue.server", async (orig) => ({
   ...(await orig<typeof import("@/lib/edit/orcid-queue.server")>()),
   loadOrcidQueue: h.load,
+  loadOrcidQueueCard: h.loadCard,
 }));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: (props: { children: unknown }) => {
@@ -72,23 +75,29 @@ vi.mock("@/lib/edit/slug-request", () => ({
 
 import OrcidQueuePage from "@/app/edit/orcid-queue/page";
 import { OrcidQueue } from "@/components/edit/orcid-queue";
+import { GET as scholarRoute } from "@/app/api/edit/orcid-queue/scholar/route";
 import { TAB_PREDICATES } from "@/lib/edit/console-tabs.server";
 import {
-  cardTabOf,
+  bandLevel,
+  candidateScore,
+  compareSummaries,
+  competitorRules,
   EMPTY_ORCID_QUEUE_FILTER,
   isOrcidQueueTabVisible,
+  matchesQueueSearch,
   orcidQueueFilterKey,
   orcidQueueHref,
   pairState,
   parseOrcidQueueFilter,
   pmCurateHref,
   publicationManagerBaseUrl,
-  sanitizeOrcidQueueFilter,
+  scholarGap,
   workHref,
   type OrcidEvidenceDetail,
   type OrcidQueueCard,
   type OrcidQueueData,
   type OrcidQueueRow,
+  type OrcidQueueSummary,
 } from "@/lib/edit/orcid-queue";
 
 const ORCID = "0000-0002-1825-0097";
@@ -96,23 +105,6 @@ const OTHER = "0000-0000-0000-001X";
 const SUPER = { cwid: "lib0001", isSuperuser: true };
 const STEWARD = { cwid: "cs00001", isSuperuser: false, isCommsSteward: true };
 
-const EMPTY_COUNTS = {
-  email_verified: 0,
-  strong: 0,
-  shared_only: 0,
-  moderate: 0,
-  weak: 0,
-  conflicts: 0,
-};
-const data = (over: Partial<OrcidQueueData> = {}): OrcidQueueData => ({
-  tab: "strong",
-  cards: [],
-  counts: EMPTY_COUNTS,
-  filter: EMPTY_ORCID_QUEUE_FILTER,
-  sample: null,
-  remaining: null,
-  ...over,
-});
 const DETAIL: OrcidEvidenceDetail = {
   names: {
     orcid: { credit: "J. Doe", given: "Jane", family: "Doe", other: ["Jane Q. Doe"] },
@@ -223,14 +215,73 @@ const CARD = (
   scholarNames: ["Jane Q Doe", "Jane Doe"],
   title: "Professor of Medicine",
   department: "Medicine",
-  tab: "strong",
+  onFile: null,
+  reciterTotal: 20,
   candidates: rows,
   ...over,
 });
 
+const summaryOf = (
+  c: OrcidQueueCard,
+  over: Partial<OrcidQueueSummary> = {},
+): OrcidQueueSummary => ({
+  cwid: c.cwid,
+  name: c.name,
+  surname: c.name.split(",")[0]!.split(" ").pop()!.toLowerCase(),
+  department: c.department,
+  candidates: c.candidates.map(({ orcid, band, shared, worksTotal, nameAgrees, competitor }) => ({
+    orcid,
+    band,
+    shared,
+    worksTotal,
+    nameAgrees,
+    competitor,
+  })),
+  conflict: c.candidates.some((r) => r.state === "conflict"),
+  autoConfirmed: c.candidates.some((r) => r.autoConfirmed),
+  ...over,
+});
+
+const data = (summaries: OrcidQueueSummary[] = []): OrcidQueueData => ({
+  summaries,
+  filter: EMPTY_ORCID_QUEUE_FILTER,
+});
+
+type FetchCall = [string, RequestInit | undefined];
+
+/** Renders the queue over `cards`: GET serves the card, POST succeeds. */
+function mount(
+  cards: OrcidQueueCard[],
+  opts: { readOnly?: boolean; pmBaseUrl?: string | null; summaries?: OrcidQueueSummary[] } = {},
+) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    const cwid = new URL(url, "http://x").searchParams.get("cwid");
+    const c = cards.find((x) => x.cwid === cwid);
+    return c
+      ? new Response(JSON.stringify(c), { status: 200 })
+      : new Response(null, { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <OrcidQueue
+      data={data(opts.summaries ?? cards.map((c) => summaryOf(c)))}
+      basePath="/edit/orcid-queue"
+      readOnly={opts.readOnly ?? false}
+      pmBaseUrl={opts.pmBaseUrl ?? null}
+    />,
+  );
+  const posts = () =>
+    (fetchMock.mock.calls as unknown as FetchCall[])
+      .filter(([, i]) => i?.method === "POST")
+      .map(([, i]) => JSON.parse(i!.body as string) as Record<string, unknown>);
+  return { fetchMock, posts };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.stubEnv("ORCID_LIBRARIAN_QUEUE", "on");
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -264,7 +315,7 @@ describe("page gate", () => {
     expect(h.load).not.toHaveBeenCalled();
   });
 
-  it("a superuser gets the queue for the requested tab", async () => {
+  it("a superuser gets the queue under the URL's filter (a stray ?tab= is ignored)", async () => {
     h.session.mockResolvedValue(SUPER);
     render(
       await OrcidQueuePage({
@@ -276,11 +327,14 @@ describe("page gate", () => {
         }),
       }),
     );
-    expect(h.load).toHaveBeenCalledWith({}, "conflicts", {
-      types: ["faculty"],
-      units: ["div:CARD"],
-      sources: ["orcid_works"],
-    });
+    expect(h.load).toHaveBeenCalledWith(
+      {},
+      {
+        types: ["faculty"],
+        units: ["div:CARD"],
+        sources: ["orcid_works"],
+      },
+    );
     expect(h.shell).toHaveBeenCalledWith(expect.objectContaining({ active: "orcid-queue" }));
   });
 
@@ -300,7 +354,35 @@ describe("page gate", () => {
   });
 });
 
-describe("loader", () => {
+describe("scholar route", () => {
+  const get = (q = "?cwid=jd0001") =>
+    scholarRoute({ nextUrl: new URL(`http://x/api/edit/orcid-queue/scholar${q}`) } as never);
+
+  it("flag off 404, no session 401, a non-superuser 403, before any read", async () => {
+    vi.stubEnv("ORCID_LIBRARIAN_QUEUE", "off");
+    expect((await get()).status).toBe(404);
+    vi.stubEnv("ORCID_LIBRARIAN_QUEUE", "on");
+    h.session.mockResolvedValue(null);
+    expect((await get()).status).toBe(401);
+    h.session.mockResolvedValue(STEWARD);
+    expect((await get()).status).toBe(403);
+    expect(h.loadCard).not.toHaveBeenCalled();
+  });
+
+  it("400 without a cwid; 404 when the scholar left the queue; else the card", async () => {
+    h.session.mockResolvedValue(SUPER);
+    expect((await get("")).status).toBe(400);
+    h.loadCard.mockResolvedValue(null);
+    expect((await get()).status).toBe(404);
+    h.loadCard.mockResolvedValue(CARD());
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ cwid: "jd0001", reciterTotal: 20 });
+    expect(h.loadCard).toHaveBeenLastCalledWith({}, "jd0001");
+  });
+});
+
+describe("loaders", () => {
   it("pairState: on file, dismissed, conflict, queue", () => {
     expect(pairState(ORCID, ORCID, false)).toBe("on_file");
     expect(pairState(ORCID, null, true)).toBe("dismissed");
@@ -308,37 +390,16 @@ describe("loader", () => {
     expect(pairState(ORCID, null, false)).toBe("queue");
   });
 
-  it("cardTabOf: email verified, then conflicts, then the best band", () => {
-    expect(
-      cardTabOf([
-        { band: "weak", state: "queue" },
-        { band: "strong", state: "queue" },
-      ]),
-    ).toBe("strong");
-    expect(cardTabOf([{ band: "strong", state: "conflict" }])).toBe("conflicts");
-    expect(
-      cardTabOf([
-        { band: "email_verified", state: "auto_confirmed" },
-        { band: "strong", state: "conflict" },
-      ]),
-    ).toBe("email_verified");
-  });
-
-  // The page test mocks the loader; these cases run the real one.
-  const realLoad: typeof import("@/lib/edit/orcid-queue.server").loadOrcidQueue = async (c, t, f) =>
-    (
-      await vi.importActual<typeof import("@/lib/edit/orcid-queue.server")>(
-        "@/lib/edit/orcid-queue.server",
-      )
-    ).loadOrcidQueue(c, t, f);
+  // The page test mocks the loaders; these cases run the real ones.
+  const actual = () =>
+    vi.importActual<typeof import("@/lib/edit/orcid-queue.server")>(
+      "@/lib/edit/orcid-queue.server",
+    );
 
   const OTHER_2 = "0000-0001-5109-3700";
   const client = (
     opts: {
-      sample?: Array<{ cwid: string; orcid: string; decision: string | null }>;
-      sampleFilterKey?: string;
       admins?: Array<{ cwid: string; orcid: string }>;
-      rescored?: boolean;
       /** Manual division code → its hand-added roster. */
       rosters?: Record<string, string[]>;
     } = {},
@@ -351,12 +412,30 @@ describe("loader", () => {
       { cwid: "d00001", orcid: OTHER, band: "strong", shared: 9 },
       { cwid: "f00001", orcid: OTHER, band: "moderate", shared: 1 },
     ];
+    const full = (e: (typeof evidence)[number]) => ({
+      ...e,
+      instMatch: true,
+      historyMatch: false,
+      emailVerified: false,
+      nameAgrees: true,
+      competitor: false,
+      competitorCwids: [],
+      competitorOrcids: [],
+      worksTotal: 5,
+      newWorks: 1,
+      newWorksSample:
+        e.cwid === "a00001"
+          ? [...STATUS_SAMPLE, { title: "Old row", year: 2020, status: "bogus" }]
+          : [],
+      evidenceDetail: e.cwid === "a00001" ? DETAIL : null,
+    });
     const held: Record<string, string | null> = {
       a00001: null,
       b00001: null,
       c00001: OTHER,
       d00001: null,
       f00001: null,
+      e00001: ORCID,
     };
     const roles: Record<string, string> = { d00001: "postdoc" };
     const units: Record<
@@ -378,38 +457,27 @@ describe("loader", () => {
             : v.in.includes((units[c] as Record<string, string | null> | undefined)?.[field] ?? ""),
         ),
       );
+    const person = (c: string) => ({
+      cwid: c,
+      orcid: held[c] ?? null,
+      status: "active",
+      deletedAt: null,
+      slug: c,
+      preferredName: `Pref ${c}`,
+      fullName: `Full Name ${c}`,
+      postnominal: null,
+      roleCategory: roles[c] ?? "faculty",
+      primaryTitle: "Professor",
+      primaryDepartment: "Medicine",
+      orcidConfirmMethod: c === "e00001" ? "email_verified" : null,
+      orcidConfirmedAt: c === "e00001" ? new Date("2026-10-20T12:00:00Z") : null,
+      orcidConfirmedBy: c === "e00001" ? "ETL" : null,
+    });
     return {
       orcidCandidateEvidence: {
-        findMany: vi.fn(
-          async (args: {
-            select?: unknown;
-            where?: { OR?: Array<{ cwid: string; orcid: string }> };
-          }) =>
-            args.where?.OR
-              ? evidence
-                  .filter((e) =>
-                    args.where!.OR!.some((o) => o.cwid === e.cwid && o.orcid === e.orcid),
-                  )
-                  .map((e) => ({
-                    ...e,
-                    instMatch: true,
-                    historyMatch: false,
-                    emailVerified: false,
-                    nameAgrees: true,
-                    competitor: false,
-                    competitorCwids: [],
-                    competitorOrcids: [],
-                    worksTotal: 5,
-                    newWorks: 1,
-                    newWorksSample:
-                      e.cwid === "a00001"
-                        ? [...STATUS_SAMPLE, { title: "Old row", year: 2020, status: "bogus" }]
-                        : [],
-                    evidenceDetail: e.cwid === "a00001" ? DETAIL : null,
-                  }))
-              : evidence.map((e) => ({ ...e, nameAgrees: true })),
+        findMany: vi.fn(async (args: { where?: { cwid?: string } } = {}) =>
+          evidence.filter((e) => !args.where?.cwid || e.cwid === args.where.cwid).map(full),
         ),
-        findFirst: vi.fn(async () => (opts.rescored ? { cwid: "a00001" } : null)),
       },
       orcidCandidate: {
         findMany: vi.fn(async () => [
@@ -431,251 +499,238 @@ describe("loader", () => {
           ),
         ),
       },
+      publicationAuthor: { count: vi.fn(async () => 42) },
       scholar: {
+        findUnique: vi.fn(async (args: { where: { cwid: string } }) =>
+          args.where.cwid in held ? person(args.where.cwid) : null,
+        ),
         findMany: vi.fn(
           async (args: {
             where: {
               orcidConfirmMethod?: string;
-              cwid?: { in: string[] };
+              cwid?: string | { in: string[] };
               roleCategory?: { in: string[] };
               AND?: Array<{ OR?: Array<Record<string, { in: string[] }>> }>;
             };
-          }) =>
-            args.where.orcidConfirmMethod
-              ? [{ cwid: "e00001", orcid: ORCID }]
-              : (args.where.cwid?.in ?? [])
-                  .filter(
-                    (c) =>
-                      !args.where.roleCategory ||
-                      args.where.roleCategory.in.includes(roles[c] ?? "faculty"),
-                  )
-                  .filter((c) => (args.where.AND ?? []).every((w) => inUnit(c, w)))
-                  .map((c) => ({
-                    cwid: c,
-                    orcid: held[c] ?? null,
-                    status: "active",
-                    deletedAt: null,
-                    slug: c,
-                    preferredName: c,
-                    fullName: c,
-                  })),
+          }) => {
+            const w = args.where;
+            if (w.orcidConfirmMethod)
+              return typeof w.cwid === "string" && w.cwid !== "e00001"
+                ? []
+                : [{ cwid: "e00001", orcid: ORCID }];
+            const cwids = typeof w.cwid === "string" ? [w.cwid] : (w.cwid?.in ?? []);
+            return cwids
+              .filter((c) => !w.roleCategory || w.roleCategory.in.includes(roles[c] ?? "faculty"))
+              .filter((c) => (w.AND ?? []).every((x) => inUnit(c, x)))
+              .map(person);
+          },
         ),
       },
-      orcidDismissal: { findMany: vi.fn(async () => [{ cwid: "b00001", orcid: ORCID }]) },
-      orcidQueueSample: {
-        findFirst: vi.fn(async () =>
-          opts.sample
-            ? { id: "s1", startedAt: new Date(0), filterKey: opts.sampleFilterKey ?? "" }
-            : null,
-        ),
-        findMany: vi.fn(async () => opts.sample ?? []),
+      orcidDismissal: {
+        findMany: vi.fn(async () => [{ cwid: "b00001", orcid: ORCID }]),
       },
     } as never;
   };
 
-  it("one card per scholar, every candidate best first; dismissed pairs drop; counts are scholars", async () => {
-    const q = await realLoad(client(), "strong");
-    expect(q.cards.map((c) => c.cwid)).toEqual(["d00001", "a00001"]); // most shared first
-    const a = q.cards.find((c) => c.cwid === "a00001")!;
-    expect(a.candidates.map((r) => [r.orcid, r.band])).toEqual([
+  const cwidsOf = (q: OrcidQueueData) => q.summaries.map((s) => s.cwid).sort();
+
+  it("one summary per scholar, candidates best first; a dismissed pair drops; conflicts and the ETL's iDs are flagged", async () => {
+    const q = await (await actual()).loadOrcidQueue(client());
+    expect(cwidsOf(q)).toEqual(["a00001", "c00001", "d00001", "e00001", "f00001"]);
+    const by = (c: string) => q.summaries.find((s) => s.cwid === c)!;
+    expect(by("a00001")).toMatchObject({
+      name: "Pref a00001",
+      surname: "a00001",
+      conflict: false,
+      autoConfirmed: false,
+    });
+    expect(by("a00001").candidates.map((r) => [r.orcid, r.band])).toEqual([
       [ORCID, "strong"],
       [OTHER_2, "weak"],
     ]);
-    expect(a.candidates[0]).toMatchObject({
+    expect(by("c00001")).toMatchObject({ conflict: true });
+    expect(by("e00001")).toMatchObject({ autoConfirmed: true });
+    expect(by("e00001").candidates[0]).toMatchObject({ band: "email_verified" });
+  });
+
+  it("an rpm_admin iD is on file: that scholar's other candidate is a conflict", async () => {
+    const q = await (
+      await actual()
+    ).loadOrcidQueue(client({ admins: [{ cwid: "a00001", orcid: OTHER }] }));
+    expect(q.summaries.find((s) => s.cwid === "a00001")).toMatchObject({ conflict: true });
+  });
+
+  it("the filter narrows the list: person type, how discovered (a kept scholar keeps every candidate)", async () => {
+    const { loadOrcidQueue } = await actual();
+    const byType = await loadOrcidQueue(client(), { types: ["postdoc"], units: [], sources: [] });
+    expect(cwidsOf(byType)).toEqual(["d00001"]);
+    const bySource = await loadOrcidQueue(client(), {
+      types: [],
+      units: [],
+      sources: ["orcid_works"],
+    });
+    expect(cwidsOf(bySource)).toEqual(["a00001"]);
+    expect(bySource.summaries[0]!.candidates).toHaveLength(2);
+  });
+
+  it("the filter narrows the list: department, division (with its manual roster), institution", async () => {
+    const { loadOrcidQueue } = await actual();
+    expect(
+      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["dept:MED"], sources: [] })),
+    ).toEqual(["a00001", "c00001"]);
+    expect(
+      cwidsOf(
+        await loadOrcidQueue(client({ rosters: { CARD: ["d00001"] } }), {
+          types: [],
+          units: ["div:CARD"],
+          sources: [],
+        }),
+      ),
+    ).toEqual(["a00001", "d00001"]);
+    expect(
+      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["inst:HSS"], sources: [] })),
+    ).toEqual(["f00001"]);
+  });
+
+  it("the card: every candidate with its evidence, sources and work statuses; the publication count", async () => {
+    const card = (await (await actual()).loadOrcidQueueCard(client(), "a00001"))!;
+    expect(card).toMatchObject({
+      cwid: "a00001",
+      name: "Pref a00001",
+      scholarNames: ["Full Name a00001", "Pref a00001"],
+      onFile: null,
+      reciterTotal: 42,
+    });
+    expect(card.candidates.map((r) => r.orcid)).toEqual([ORCID, OTHER_2]);
+    expect(card.candidates[0]).toMatchObject({
       sources: ["orcid_works", "rpm_inferred"],
       detail: DETAIL,
+      state: "queue",
     });
     // v2.1: each work's status survives the read; an unknown value is dropped.
-    expect(a.candidates[0]!.newWorksSample.map((w) => w.status)).toEqual([
+    expect(card.candidates[0]!.newWorksSample.map((w) => w.status)).toEqual([
       "pending",
       "rejected",
       "not_in_pubmed",
       "not_retrieved",
       undefined,
     ]);
-    expect(q.counts).toMatchObject({
-      strong: 2,
-      moderate: 1,
-      weak: 0,
-      conflicts: 1,
-      email_verified: 1,
+  });
+
+  it("the card: the iD on file and where it came from (WCM Identity; the ETL's email confirm)", async () => {
+    const { loadOrcidQueueCard } = await actual();
+    const c = (await loadOrcidQueueCard(client(), "c00001"))!;
+    expect(c.onFile).toEqual({ orcid: OTHER, how: "identity", at: null, by: null, byName: null });
+    expect(c.candidates[0]).toMatchObject({ state: "conflict", onFileOrcid: OTHER });
+    const e = (await loadOrcidQueueCard(client(), "e00001"))!;
+    expect(e.onFile).toMatchObject({
+      orcid: ORCID,
+      how: "email_verified",
+      by: "ETL",
+      byName: null,
     });
-    const c = await realLoad(client(), "conflicts");
-    expect(c.cards).toEqual([
-      expect.objectContaining({
-        cwid: "c00001",
-        candidates: [expect.objectContaining({ state: "conflict", onFileOrcid: OTHER })],
-      }),
+    expect(e.candidates).toEqual([
+      expect.objectContaining({ autoConfirmed: true, state: "auto_confirmed" }),
     ]);
   });
 
-  it("an rpm_admin iD is on file: that scholar's card goes to Conflicts", async () => {
-    const admins = [{ cwid: "a00001", orcid: OTHER }];
-    const q = await realLoad(client({ admins }), "strong");
-    expect(q.cards.map((r) => r.cwid)).toEqual(["d00001"]);
-    const c = await realLoad(client({ admins }), "conflicts");
-    expect(c.cards.map((r) => r.cwid).sort()).toEqual(["a00001", "c00001"]);
+  it("the card is null for a scholar with nothing in the queue", async () => {
+    expect(await (await actual()).loadOrcidQueueCard(client(), "b00001")).toBeNull();
+  });
+});
+
+describe("v3 pure rules", () => {
+  const sum = (
+    bands: Array<[OrcidQueueRow["band"], number, number]>,
+    over: Partial<OrcidQueueSummary> = {},
+  ) =>
+    ({
+      cwid: "x",
+      name: "X",
+      surname: "x",
+      department: null,
+      conflict: false,
+      autoConfirmed: false,
+      candidates: bands.map(([band, shared, worksTotal], i) => ({
+        orcid: `0000-0000-0000-000${i}`,
+        band,
+        shared,
+        worksTotal,
+        nameAgrees: true,
+        competitor: false,
+      })),
+      ...over,
+    }) as OrcidQueueSummary;
+
+  it("meter level, score and gap", () => {
+    expect(bandLevel("weak")).toBe(1);
+    expect(bandLevel("email_verified")).toBe(5);
+    expect(candidateScore({ band: "moderate", shared: 5, worksTotal: 10 })).toBe(2.5);
+    expect(candidateScore({ band: "moderate", shared: 0, worksTotal: 0 })).toBe(2);
+    expect(scholarGap(sum([["strong", 0, 0]]))).toBe(9);
+    expect(
+      scholarGap(
+        sum([
+          ["strong", 0, 0],
+          ["weak", 0, 0],
+        ]),
+      ),
+    ).toBe(3);
   });
 
-  it("the filter narrows the cards and the counts: person type, and how discovered", async () => {
-    const byType = await realLoad(client(), "strong", {
-      types: ["postdoc"],
-      units: [],
-      sources: [],
-    });
-    expect(byType.cards.map((c) => c.cwid)).toEqual(["d00001"]);
-    expect(byType.counts).toMatchObject({ strong: 1, conflicts: 0, moderate: 0 });
-    const bySource = await realLoad(client(), "strong", {
-      types: [],
-      units: [],
-      sources: ["orcid_works"],
-    });
-    expect(bySource.cards.map((c) => c.cwid)).toEqual(["a00001"]);
-    // A card the filter keeps still lists every candidate.
-    expect(bySource.cards[0]!.candidates).toHaveLength(2);
-  });
-
-  it("the filter narrows the cards and the counts: department, division (with its manual roster), institution", async () => {
-    const byDept = client();
-    const dept = await realLoad(byDept, "strong", { types: [], units: ["dept:MED"], sources: [] });
-    expect(dept.cards.map((c) => c.cwid)).toEqual(["a00001"]);
-    expect(dept.counts).toMatchObject({ strong: 1, conflicts: 1, moderate: 0 });
-    // The person query carries the unit OR clause.
-    const calls = (byDept as unknown as { scholar: { findMany: { mock: { calls: unknown[][] } } } })
-      .scholar.findMany.mock.calls;
-    expect(calls.map((c) => c[0])).toContainEqual(
-      expect.objectContaining({
-        where: expect.objectContaining({ AND: [{ OR: [{ deptCode: { in: ["MED"] } }] }] }),
-      }),
-    );
-
-    // A manual division: its column members and its hand-added roster.
-    const div = await realLoad(client({ rosters: { CARD: ["d00001"] } }), "strong", {
-      types: [],
-      units: ["div:CARD"],
-      sources: [],
-    });
-    expect(div.cards.map((c) => c.cwid)).toEqual(["d00001", "a00001"]);
-
-    const inst = await realLoad(client(), "moderate", {
-      types: [],
-      units: ["inst:HSS"],
-      sources: [],
-    });
-    expect(inst.cards.map((c) => c.cwid)).toEqual(["f00001"]);
-    expect(inst.counts).toMatchObject({ strong: 0, moderate: 1, conflicts: 0 });
-  });
-
-  it("an open sample's pair still undecided but now in another tab stays decidable on the sample's tab", async () => {
-    // f00001's only iD is Moderate now: its card sits in Moderate, but the Strong
-    // sample drew it. On Strong it shows with its real state and band, stamping the
-    // sample. c00001's sampled iD went on file since: shown in place, decided.
-    const q = await realLoad(
-      client({
-        sample: [
-          { cwid: "f00001", orcid: OTHER, decision: null },
-          { cwid: "c00001", orcid: OTHER, decision: "confirmed" },
+  it("competitor rules from the row's detail", () => {
+    const base = { competitor: true, competitors: [], competitorOrcids: [] };
+    expect(competitorRules({ ...base, competitor: false })).toEqual([]);
+    expect(
+      competitorRules({
+        ...base,
+        competitors: [
+          { cwid: "a", name: "A", shared: 3, reason: "same_surname" },
+          { cwid: "b", name: "B", shared: 4, reason: "same_id" },
         ],
+        competitorOrcids: [{ orcid: OTHER, shared: null }],
       }),
-      "strong",
+    ).toEqual([1, 2, 3]);
+  });
+
+  it("search: name, CWID, or an iD with or without dashes", () => {
+    const s = sum([["weak", 0, 0]], { name: "Jane Doe, MD", cwid: "jd0001" });
+    expect(matchesQueueSearch(s, "")).toBe(true);
+    expect(matchesQueueSearch(s, "doe")).toBe(true);
+    expect(matchesQueueSearch(s, "JD0001")).toBe(true);
+    expect(matchesQueueSearch(s, "0000-0000-0000-0000")).toBe(true);
+    expect(matchesQueueSearch(s, "0000000000000000")).toBe(true);
+    expect(matchesQueueSearch(s, "zzz")).toBe(false);
+  });
+
+  it("sorts: strongest, clearest winner, department then name, name, cwid", () => {
+    const a = sum(
+      [
+        ["strong", 1, 10],
+        ["strong", 1, 10],
+      ],
+      { cwid: "c3", surname: "b", name: "B", department: "Z" },
     );
-    expect(q.sample).toMatchObject({ status: "open", total: 2 });
-    expect(q.cards.find((c) => c.cwid === "f00001")!.candidates).toEqual([
-      expect.objectContaining({
-        orcid: OTHER,
-        state: "queue",
-        band: "moderate",
-        sampleDecision: null,
-      }),
-    ]);
-    expect(q.cards.find((c) => c.cwid === "c00001")!.candidates).toEqual([
-      expect.objectContaining({ orcid: OTHER, state: "on_file", sampleDecision: "confirmed" }),
-    ]);
-  });
-
-  it("a passed sample the ETL re-scored since is stale: no Confirm remaining", async () => {
-    const sample = [{ cwid: "d00001", orcid: OTHER, decision: "confirmed" }];
-    const fresh = await realLoad(client({ sample }), "strong");
-    expect(fresh.sample).toMatchObject({ status: "passed" });
-    expect(fresh.sample?.stale).toBeUndefined();
-    // a00001's second iD is in a weaker band, so it still qualifies (v1 rule: two in the band).
-    expect(fresh.remaining).toBe(1);
-    const stale = await realLoad(client({ sample, rescored: true }), "strong");
-    expect(stale.sample).toMatchObject({ status: "passed", stale: true });
-    expect(stale.remaining).toBeNull();
-  });
-
-  it("a passed sample drawn under another filter offers no Confirm remaining here", async () => {
-    const sample = [{ cwid: "d00001", orcid: OTHER, decision: "confirmed" }];
-    const q = await realLoad(client({ sample, sampleFilterKey: "type=postdoc" }), "strong");
-    expect(q.sample).toMatchObject({ status: "passed", filterKey: "type=postdoc" });
-    expect(q.remaining).toBeNull();
-    const same = await realLoad(client({ sample, sampleFilterKey: "type=postdoc" }), "strong", {
-      types: ["postdoc"],
-      units: [],
-      sources: [],
-    });
-    expect(same.remaining).toBe(0);
-  });
-
-  it("Email verified lists the ETL's confirmed iDs, as auto-confirmed", async () => {
-    const q = await realLoad(client(), "email_verified");
-    expect(q.cards).toEqual([
-      expect.objectContaining({
-        cwid: "e00001",
-        candidates: [expect.objectContaining({ autoConfirmed: true, state: "auto_confirmed" })],
-      }),
-    ]);
-  });
-
-  it("an open sample's cards come first, with their decisions", async () => {
-    const q = await realLoad(
-      client({ sample: [{ cwid: "a00001", orcid: ORCID, decision: null }] }),
-      "strong",
-    );
-    expect(q.sample).toMatchObject({ id: "s1", status: "open", total: 1 });
-    expect(q.cards[0]!.cwid).toBe("a00001");
-    expect(q.cards[0]!.candidates[0]).toMatchObject({ orcid: ORCID, sampleDecision: null });
+    const b = sum([["moderate", 9, 10]], { cwid: "c1", surname: "c", name: "C", department: "A" });
+    const c = sum([["weak", 0, 1]], { cwid: "c2", surname: "a", name: "A", department: null });
+    const order = (k: Parameters<typeof compareSummaries>[0]) =>
+      [a, b, c].sort(compareSummaries(k)).map((s) => s.cwid);
+    expect(order("strong")).toEqual(["c3", "c1", "c2"]);
+    expect(order("gap")).toEqual(["c1", "c2", "c3"]);
+    expect(order("dept")).toEqual(["c1", "c3", "c2"]);
+    expect(order("name")).toEqual(["c2", "c3", "c1"]);
+    expect(order("cwid")).toEqual(["c1", "c2", "c3"]);
   });
 });
 
 describe("filter and link helpers", () => {
-  it("sanitizeOrcidQueueFilter sorts, de-duplicates, and refuses what it does not know", () => {
-    expect(
-      sanitizeOrcidQueueFilter({
-        types: ["b", "a", "a"],
-        units: ["inst:X", "dept:Y"],
-        sources: ["orcid_name"],
-      }),
-    ).toEqual({ types: ["a", "b"], units: ["dept:Y", "inst:X"], sources: ["orcid_name"] });
-    expect(sanitizeOrcidQueueFilter(undefined)).toEqual(EMPTY_ORCID_QUEUE_FILTER);
-    expect(sanitizeOrcidQueueFilter({ units: ["center:X"] })).toBeNull();
-    expect(sanitizeOrcidQueueFilter({ sources: ["nope"] })).toBeNull();
-    expect(sanitizeOrcidQueueFilter([])).toBeNull();
-  });
-
-  it("a filter whose key would not fit filter_key (1024) is refused by the routes, trimmed by the page", () => {
-    const units = Array.from(
-      { length: 50 },
-      (_, i) => `dept:${String(i).padStart(2, "0")}${"X".repeat(60)}`,
-    );
-    expect(sanitizeOrcidQueueFilter({ units })).toBeNull();
-    expect(sanitizeOrcidQueueFilter({ units: units.slice(0, 5) })?.units).toHaveLength(5);
-    const parsed = parseOrcidQueueFilter({ unit: units, type: "faculty" });
-    expect(orcidQueueFilterKey(parsed).length).toBeLessThanOrEqual(1024);
-    expect(parsed.types).toEqual(["faculty"]);
-    expect(parsed.units.length).toBeGreaterThan(0);
-    expect(sanitizeOrcidQueueFilter(parsed)).toEqual(parsed);
-  });
-
-  it("the filter key is canonical and empty for no filter", () => {
+  it("the filter key is canonical and empty for no filter; the href carries no tab", () => {
     expect(orcidQueueFilterKey(EMPTY_ORCID_QUEUE_FILTER)).toBe("");
     expect(orcidQueueFilterKey({ types: ["b", "a"], units: [], sources: ["orcid_works"] })).toBe(
       "type=a&type=b&source=orcid_works",
     );
-    expect(orcidQueueHref("/q", "strong", { types: ["a"], units: [], sources: [] })).toBe(
-      "/q?tab=strong&type=a",
-    );
+    expect(orcidQueueHref("/q", { types: ["a"], units: [], sources: [] })).toBe("/q?type=a");
+    expect(orcidQueueHref("/q", EMPTY_ORCID_QUEUE_FILTER)).toBe("/q");
     expect(parseOrcidQueueFilter({ type: "a", unit: "nope", source: "orcid_email" })).toEqual({
       types: ["a"],
       units: [],
@@ -723,18 +778,74 @@ describe("filter and link helpers", () => {
 });
 
 describe("client", () => {
-  it("v2.1: each new work shows its ReCiter status and the Publication Manager link that acts on it", () => {
-    render(
-      <OrcidQueue
-        data={data({
-          cards: [CARD({}, [{ ...ROW, newWorks: 3, newWorksSample: STATUS_SAMPLE }])],
-          counts: { ...EMPTY_COUNTS, strong: 1 },
-        })}
-        basePath="/edit/orcid-queue"
-        readOnly={false}
-        pmBaseUrl="https://pm.example.org"
-      />,
+  const SECOND: OrcidQueueRow = {
+    ...ROW,
+    orcid: OTHER,
+    band: "weak",
+    shared: 0,
+    nameAgrees: false,
+    detail: null,
+    sources: ["orcid_name"],
+  };
+  const JOHN = CARD(
+    { cwid: "js0002", slug: "john-smith", name: "John Smith, PhD", department: "Surgery" },
+    [{ ...ROW, cwid: "js0002", band: "moderate", orcid: "0000-0001-5109-3700" }],
+  );
+
+  it("lists every scholar strongest first and loads the first one's card", async () => {
+    mount([JOHN, CARD()]);
+    const items = within(screen.getByTestId("orcid-queue-list")).getAllByRole("option");
+    expect(items.map((i) => i.textContent)).toEqual([
+      expect.stringContaining("Jane Doe, MD"),
+      expect.stringContaining("John Smith, PhD"),
+    ]);
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("2 scholars");
+    const card = await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(within(card).getByText("View profile ↗").getAttribute("href")).toBe("/jane-doe");
+    expect(within(card).getByTestId("orcid-queue-evidence").textContent).toContain(
+      "From its one iD: 2 sources agree; 7 of the 12 works on the ORCID record are also in ReCiter; name agrees.",
     );
+    expect(screen.getByTestId("orcid-queue-record-link").getAttribute("href")).toBe(
+      `https://orcid.org/${ORCID}`,
+    );
+  });
+
+  it("J / K move through the list; clicking a scholar loads theirs", async () => {
+    mount([JOHN, CARD()]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    act(() => {
+      fireEvent.keyDown(window, { key: "j" });
+    });
+    expect(await screen.findByTestId("orcid-queue-card-js0002")).toBeTruthy();
+    act(() => {
+      fireEvent.keyDown(window, { key: "k" });
+    });
+    expect(await screen.findByTestId("orcid-queue-card-jd0001")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("orcid-queue-item-js0002"));
+    expect(await screen.findByTestId("orcid-queue-card-js0002")).toBeTruthy();
+  });
+
+  it("search by an iD without dashes, and Possible errors, narrow the list", async () => {
+    const conflict = CARD({ cwid: "cf0003", name: "Carl Field" }, [
+      { ...ROW, cwid: "cf0003", orcid: OTHER, state: "conflict", onFileOrcid: ORCID },
+    ]);
+    mount([JOHN, CARD(), conflict]);
+    fireEvent.change(screen.getByTestId("orcid-queue-search"), {
+      target: { value: "0000000151093700" },
+    });
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 scholar");
+    fireEvent.change(screen.getByTestId("orcid-queue-search"), { target: { value: "" } });
+    expect(screen.getByTestId("orcid-queue-filter-errors").textContent).toBe("Possible errors · 1");
+    fireEvent.click(screen.getByTestId("orcid-queue-filter-errors"));
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 scholar");
+    expect(screen.getByTestId("orcid-queue-item-cf0003")).toBeTruthy();
+  });
+
+  it("v2.1: each new work shows its ReCiter status and the Publication Manager link that acts on it", async () => {
+    mount([CARD({}, [{ ...ROW, newWorks: 3, newWorksSample: STATUS_SAMPLE }])], {
+      pmBaseUrl: "https://pm.example.org",
+    });
+    await screen.findByTestId("orcid-queue-card-jd0001");
     const works = screen.getAllByTestId("orcid-queue-work");
     const statusOf = (i: number) =>
       works[i]!.querySelector('[data-testid="orcid-queue-work-status"]')?.textContent;
@@ -744,7 +855,6 @@ describe("client", () => {
     expect(pmOf(0)?.textContent).toBe("Review in Publication Manager");
     expect(pmOf(0)?.getAttribute("href")).toBe("https://pm.example.org/curate/jd0001");
     expect(statusOf(1)).toBe("Rejected in ReCiter: re-review");
-    expect(pmOf(1)?.getAttribute("href")).toBe("https://pm.example.org/curate/jd0001");
     expect(statusOf(2)).toBe("Not in PubMed");
     expect(pmOf(2)?.textContent).toBe("Add in Publication Manager");
     expect(pmOf(2)?.getAttribute("href")).toBe(
@@ -752,44 +862,41 @@ describe("client", () => {
     );
     expect(statusOf(3)).toBe("Not retrieved by ReCiter");
     expect(pmOf(3)).toBeNull();
-    // PubMed for any PMID.
-    expect(screen.getByText("A rejected paper").getAttribute("href")).toBe(
-      "https://pubmed.ncbi.nlm.nih.gov/902/",
-    );
     expect(screen.getByTestId("orcid-queue-work-status-summary").textContent).toBe(
       "ReCiter: 1 pending · 1 rejected · 1 not in PubMed. 2 accepted in ReCiter counted as shared",
     );
+    // A work row opens to its identifiers and its link.
+    fireEvent.click(within(works[1]!).getByRole("button", { name: /A rejected paper/ }));
+    expect(within(works[1]!).getByText("902")).toBeTruthy();
+    expect(within(works[1]!).getByText("Open the work ↗").getAttribute("href")).toBe(
+      "https://pubmed.ncbi.nlm.nih.gov/902/",
+    );
   });
 
-  it("v2.1: no Publication Manager links without an https base; unknown statuses say so", () => {
-    render(
-      <OrcidQueue
-        data={data({
-          cards: [
-            CARD({}, [
-              {
-                ...ROW,
-                newWorksSample: STATUS_SAMPLE.map((w) => ({ ...w, status: null })),
-                detail: {
-                  ...DETAIL,
-                  workStatus: {
-                    ...DETAIL.workStatus!,
-                    counts: {},
-                    unknown: 3,
-                    reciterRead: false,
-                    acceptedInReciter: 0,
-                    pubmedUnknown: 2,
-                  },
-                },
+  it("v2.1: no Publication Manager links without an https base; unknown statuses say so", async () => {
+    mount(
+      [
+        CARD({}, [
+          {
+            ...ROW,
+            newWorksSample: STATUS_SAMPLE.map((w) => ({ ...w, status: null })),
+            detail: {
+              ...DETAIL,
+              workStatus: {
+                ...DETAIL.workStatus!,
+                counts: {},
+                unknown: 3,
+                reciterRead: false,
+                acceptedInReciter: 0,
+                pubmedUnknown: 2,
               },
-            ]),
-          ],
-        })}
-        basePath="/edit/orcid-queue"
-        readOnly={false}
-        pmBaseUrl="http://pm.example.org"
-      />,
+            },
+          },
+        ]),
+      ],
+      { pmBaseUrl: "http://pm.example.org" },
     );
+    await screen.findByTestId("orcid-queue-card-jd0001");
     expect(screen.queryAllByTestId("orcid-queue-work-pm")).toHaveLength(0);
     expect(screen.queryAllByTestId("orcid-queue-work-status")).toHaveLength(0);
     expect(screen.getByTestId("orcid-queue-work-status-summary").textContent).toBe(
@@ -797,231 +904,184 @@ describe("client", () => {
     );
   });
 
-  it("renders the evidence, the new-works sample and the two decisions", () => {
-    render(
-      <OrcidQueue
-        data={data({ cards: [CARD()], counts: { ...EMPTY_COUNTS, strong: 1 } })}
-        basePath="/edit/orcid-queue"
-        readOnly={false}
-      />,
-    );
-    expect(screen.getByText("Jane Doe, MD").closest("a")?.getAttribute("href")).toBe("/jane-doe");
-    expect(screen.getByText(ORCID).getAttribute("href")).toBe(`https://orcid.org/${ORCID}`);
-    expect(screen.getByText("Past institution on record")).toBeTruthy();
-    expect(screen.getByText("Shared 7")).toBeTruthy();
-    expect(screen.getByText("2 sources agree")).toBeTruthy();
-    expect(screen.getByText("A synthetic study").getAttribute("href")).toBe(
-      "https://pubmed.ncbi.nlm.nih.gov/999/",
-    );
-    expect(screen.getByText("A DOI-only study").getAttribute("href")).toBe(
-      "https://doi.org/10.9/x",
-    );
-    expect(screen.getByText("A link-only work").getAttribute("href")).toBe("https://example.org/w");
-    expect(screen.getByTestId("orcid-queue-confirm")).toBeTruthy();
-    expect(screen.getByTestId("orcid-queue-dismiss")).toBeTruthy();
-    expect(screen.getByTestId("orcid-queue-start-sample").textContent).toBe(
-      "Review a sample of 50",
+  it("publications: In both lists the shared papers; Only in ReCiter counts the rest", async () => {
+    mount([CARD()]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    fireEvent.click(screen.getByTestId("orcid-queue-pubs-both"));
+    const pubs = screen.getByTestId("orcid-queue-pubs");
+    expect(within(pubs).getByText("A shared paper")).toBeTruthy();
+    expect(within(pubs).getByText("PMID 102")).toBeTruthy();
+    expect(within(pubs).getByText("Showing 2 of 7.")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("orcid-queue-pubs-rec"));
+    expect(pubs.textContent).toContain(
+      "13 of the scholar's 20 ReCiter publications aren't on this ORCID record",
     );
   });
 
-  it("read-only under View as: no controls", () => {
-    render(<OrcidQueue data={data({ cards: [CARD()] })} basePath="/edit/orcid-queue" readOnly />);
-    expect(screen.queryByTestId("orcid-queue-confirm")).toBeNull();
-    expect(screen.queryByTestId("orcid-queue-start-sample")).toBeNull();
-  });
-
-  it("a passed sample offers Confirm remaining N; a locked one says why and offers another sample", () => {
-    const passed = {
-      id: "s1",
-      band: "strong" as const,
-      startedAt: "",
-      filterKey: "",
-      total: 50,
-      decided: 50,
-      dismissed: 0,
-      status: "passed" as const,
-    };
-    const { unmount } = render(
-      <OrcidQueue
-        data={data({ sample: passed, remaining: 120 })}
-        basePath="/edit/orcid-queue"
-        readOnly={false}
-      />,
-    );
-    expect(screen.getByTestId("orcid-queue-bulk-confirm").textContent).toBe(
-      "Confirm remaining 120",
-    );
-    unmount();
-    render(
-      <OrcidQueue
-        data={data({ sample: { ...passed, dismissed: 1, status: "locked" } })}
-        basePath="/edit/orcid-queue"
-        readOnly={false}
-      />,
-    );
-    expect(screen.getByTestId("orcid-queue-sample-locked")).toBeTruthy();
-    expect(screen.queryByTestId("orcid-queue-bulk-confirm")).toBeNull();
-    expect(screen.getByTestId("orcid-queue-start-sample").textContent).toBe(
-      "Review another sample",
-    );
-  });
-
-  it("an open sample offers Start a new sample; a passed but re-scored one offers no bulk confirm", () => {
-    const base = {
-      id: "s1",
-      band: "strong" as const,
-      startedAt: "",
-      filterKey: "",
-      total: 50,
-      decided: 3,
-      dismissed: 0,
-      status: "open" as const,
-    };
-    const { unmount } = render(
-      <OrcidQueue data={data({ sample: base })} basePath="/edit/orcid-queue" readOnly={false} />,
-    );
-    expect(screen.getByTestId("orcid-queue-sample-open")).toBeTruthy();
-    expect(screen.getByTestId("orcid-queue-start-sample").textContent).toBe("Start a new sample");
-    unmount();
-    render(
-      <OrcidQueue
-        data={data({
-          sample: { ...base, decided: 50, status: "passed", stale: true },
-          remaining: null,
-        })}
-        basePath="/edit/orcid-queue"
-        readOnly={false}
-      />,
-    );
-    expect(screen.getByTestId("orcid-queue-sample-stale")).toBeTruthy();
-    expect(screen.queryByTestId("orcid-queue-bulk-confirm")).toBeNull();
-    expect(screen.getByTestId("orcid-queue-start-sample").textContent).toBe(
-      "Review another sample",
-    );
-  });
-
-  it("Email verified's confirmed rows show Undo instead of Confirm", () => {
-    render(
-      <OrcidQueue
-        data={data({
-          tab: "email_verified",
-          cards: [
-            CARD({ tab: "email_verified" }, [
-              {
-                ...ROW,
-                band: "email_verified",
-                state: "auto_confirmed",
-                autoConfirmed: true,
-                onFileOrcid: ORCID,
-              },
-            ]),
-          ],
-        })}
-        basePath="/edit/orcid-queue"
-        readOnly={false}
-      />,
-    );
-    expect(screen.getByText("Undo")).toBeTruthy();
-    expect(screen.queryByTestId("orcid-queue-confirm")).toBeNull();
-  });
-
-  it("names side by side: the scholar's and the ORCID record's, with the rule that matched", () => {
-    render(<OrcidQueue data={data({ cards: [CARD()] })} basePath="/q" readOnly={false} />);
+  it("names side by side and the signals with their facts", async () => {
+    mount([CARD()]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
     const names = screen.getByTestId("orcid-queue-names").textContent ?? "";
     expect(names).toContain("Jane Q Doe / Jane Doe");
     expect(names).toContain("J. Doe");
-    expect(names).toContain("also known as Jane Doe; Jane Q. Doe");
+    expect(names).toContain("Also known as Jane Doe; Jane Q. Doe");
     expect(names).toContain("Agree: same surname, full given name");
+    expect(names).toContain(
+      "Example Medical College 1996–2001 ↔ ReCiter Identity: Example Medical College of Example University",
+    );
+    expect(names).toContain("No verified email");
+    expect(names).toContain("Found by: 2 sources agree");
   });
 
-  it("chips open in place to their facts: institution pairs, shared papers (linked), sources", () => {
-    render(<OrcidQueue data={data({ cards: [CARD()] })} basePath="/q" readOnly={false} />);
-    fireEvent.click(screen.getByTestId("orcid-queue-chip-institution"));
-    expect(screen.getByTestId("orcid-queue-detail-institution").textContent).toContain(
-      "ORCID: Example Medical College, employment 1996–2001 ↔ ReCiter Identity: Example Medical College of Example University",
-    );
-    fireEvent.click(screen.getByTestId("orcid-queue-chip-shared"));
-    expect(screen.getByText("A shared paper").closest("a")?.getAttribute("href")).toBe(
-      "https://pubmed.ncbi.nlm.nih.gov/101/",
-    );
-    expect(screen.getByText("PMID 102").getAttribute("href")).toBe(
-      "https://pubmed.ncbi.nlm.nih.gov/102/",
-    );
-    expect(screen.getByText("Showing 2 of 7.")).toBeTruthy();
-    expect(screen.getByText("J Example")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("orcid-queue-chip-sources"));
-    expect(screen.getByTestId("orcid-queue-detail-sources").textContent).toContain(
-      "ORCID shared works and Publication Manager inference: 2 sources agree",
-    );
-  });
-
-  it("a card with two candidates: Confirm on one sends the other to dismiss, unless the box is cleared", async () => {
-    const second: OrcidQueueRow = { ...ROW, orcid: OTHER, band: "weak", shared: 0, detail: null };
-    const fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const { unmount } = render(
-      <OrcidQueue
-        data={data({ cards: [CARD({}, [ROW, second])] })}
-        basePath="/q"
-        readOnly={false}
-      />,
-    );
-    expect(screen.getByText("2 candidate iDs, best first")).toBeTruthy();
-    fireEvent.click(screen.getAllByTestId("orcid-queue-confirm")[0]!);
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  it("a competitor opens to the rule that fired and who; Open this iD jumps to that row", async () => {
+    const best: OrcidQueueRow = {
+      ...ROW,
+      competitor: true,
+      competitorOrcids: [{ orcid: OTHER, shared: 4 }],
+      competitors: [{ cwid: "zz0009", name: "Zed Doe", shared: 5, reason: "same_surname" }],
+    };
+    mount([CARD({}, [best, SECOND])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    const callout = screen.getByTestId("orcid-queue-competitor");
+    expect(callout.textContent).toContain("Rule 1 · Same-surname scholar");
+    expect(callout.textContent).toContain("Zed Doe zz0009");
+    expect(callout.textContent).toContain("Rule 2 · Another plausible iD");
+    expect(callout.textContent).toContain("Candidate 2 · Weak · 0 of 12 shared");
+    fireEvent.click(within(callout).getByText("Open this iD"));
     expect(
-      JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string),
-    ).toMatchObject({
+      screen
+        .getByTestId(`orcid-queue-row-jd0001-${OTHER}`)
+        .querySelector("[aria-expanded]")!
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("Confirm also marks the others, unless the box is cleared; the scholar stays, decided", async () => {
+    const { posts } = mount([CARD({}, [ROW, SECOND]), JOHN]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByText("2 candidate iDs, best first")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toMatchObject({
       cwid: "jd0001",
       orcid: ORCID,
       decision: "confirm",
       dismissOthers: [OTHER],
     });
-    unmount();
-    fetchMock.mockClear();
-    render(
-      <OrcidQueue
-        data={data({ cards: [CARD({}, [ROW, second])] })}
-        basePath="/q"
-        readOnly={false}
-      />,
+    // Decided, but still listed until you move on.
+    expect(await screen.findByTestId("orcid-queue-decision")).toBeTruthy();
+    expect(screen.getByTestId("orcid-queue-item-jd0001")).toBeTruthy();
+    expect(screen.getByTestId("orcid-queue-resolved").textContent).toBe(
+      `Confirmed ${ORCID}. Reaches WCM Identity overnight.`,
     );
-    fireEvent.click(screen.getByTestId("orcid-queue-also-dismiss"));
-    fireEvent.click(screen.getAllByTestId("orcid-queue-confirm")[0]!);
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(
-      JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string),
-    ).not.toHaveProperty("dismissOthers");
-    vi.unstubAllGlobals();
+    fireEvent.click(screen.getByText("Next scholar"));
+    expect(await screen.findByTestId("orcid-queue-card-js0002")).toBeTruthy();
+    expect(screen.queryByTestId("orcid-queue-item-jd0001")).toBeNull();
   });
 
-  it("the sample panel says when the latest sample belongs to another filter", () => {
-    render(
-      <OrcidQueue
-        data={data({
-          filter: { types: ["faculty"], units: [], sources: [] },
-          sample: {
-            id: "s1",
-            band: "strong",
-            startedAt: "",
-            filterKey: "",
-            total: 50,
-            decided: 50,
-            dismissed: 0,
-            status: "passed",
-          },
-          remaining: null,
-        })}
-        basePath="/q"
-        readOnly={false}
-      />,
+  it("with the box cleared, Confirm sends no dismissOthers", async () => {
+    const { posts } = mount([CARD({}, [ROW, SECOND])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    fireEvent.click(screen.getByTestId("orcid-queue-also-dismiss"));
+    fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).not.toHaveProperty("dismissOthers");
+  });
+
+  it("Not this person opens the next open iD", async () => {
+    const { posts } = mount([CARD({}, [ROW, SECOND])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    fireEvent.click(screen.getByTestId("orcid-queue-dismiss"));
+    await vi.waitFor(() =>
+      expect(
+        screen
+          .getByTestId(`orcid-queue-row-jd0001-${OTHER}`)
+          .querySelector("[aria-expanded]")!
+          .getAttribute("aria-expanded"),
+      ).toBe("true"),
     );
-    expect(screen.getByTestId("orcid-queue-sample-other-filter")).toBeTruthy();
-    expect(screen.queryByTestId("orcid-queue-bulk-confirm")).toBeNull();
-    expect(screen.getByTestId("orcid-queue-tab-weak").getAttribute("href")).toBe(
-      "/q?tab=weak&type=faculty",
+    expect(posts()[0]).toMatchObject({ orcid: ORCID, decision: "dismiss" });
+    expect(screen.getByTestId(`orcid-queue-row-jd0001-${ORCID}`).textContent).toContain(
+      "Not this person",
     );
+  });
+
+  it("None of these marks every open iD in one request", async () => {
+    const { posts } = mount([CARD({}, [ROW, SECOND])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    fireEvent.click(screen.getByTestId("orcid-queue-none"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toEqual({
+      cwid: "jd0001",
+      orcid: ORCID,
+      decision: "dismiss",
+      dismissOthers: [OTHER],
+      noneOfThese: true,
+    });
+    expect((await screen.findByTestId("orcid-queue-decision")).textContent).toContain(
+      "None of the candidates",
+    );
+  });
+
+  it("a different iD on file: the provenance shows, and Confirm is Replace", async () => {
+    const card = CARD(
+      {
+        onFile: {
+          orcid: OTHER,
+          how: "librarian",
+          at: "2026-03-12T15:00:00Z",
+          by: "dw0002",
+          byName: "Dana Whit",
+        },
+      },
+      [{ ...ROW, state: "conflict", onFileOrcid: OTHER }],
+    );
+    const { posts } = mount([card]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-on-file").textContent).toContain(
+      "Confirmed by a librarian (Dana Whit dw0002) on Mar 12, 2026",
+    );
+    expect(screen.getByTestId("orcid-queue-confirm").textContent).toBe("Replace with this iD");
+    fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toMatchObject({ decision: "confirm", replace: true });
+  });
+
+  it("Unassigned is the default: an email auto-confirmed scholar shows once the Decision pill is removed, with Undo", async () => {
+    const auto = CARD(
+      { onFile: { orcid: ORCID, how: "email_verified", at: null, by: "ETL", byName: null } },
+      [
+        {
+          ...ROW,
+          band: "email_verified",
+          state: "auto_confirmed",
+          autoConfirmed: true,
+          onFileOrcid: ORCID,
+        },
+      ],
+    );
+    const { posts } = mount([auto]);
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("0 scholars");
+    fireEvent.click(screen.getByLabelText("Remove Decision: Unassigned"));
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-decision").textContent).toContain(
+      "Automatically, from a verified email",
+    );
+    expect(screen.queryByTestId("orcid-queue-confirm")).toBeNull();
+    fireEvent.click(screen.getByTestId("orcid-queue-undo"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toMatchObject({ decision: "dismiss", orcid: ORCID });
+  });
+
+  it("read-only under View as: no controls", async () => {
+    mount([CARD({}, [ROW, SECOND])], { readOnly: true });
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.queryByTestId("orcid-queue-confirm")).toBeNull();
+    expect(screen.queryByTestId("orcid-queue-none")).toBeNull();
+  });
+
+  it("a scholar who left the queue since the page loaded says so", async () => {
+    mount([], { summaries: [summaryOf(CARD())] });
+    expect(await screen.findByTestId("orcid-queue-gone")).toBeTruthy();
   });
 });
