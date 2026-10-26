@@ -54,6 +54,7 @@ import {
   SYSTEM_RESCORED,
   attributionGate,
   isReopenedFromDecision,
+  orphanedPendingReviews,
   planAward,
   type AwardPlan,
   type AwardState,
@@ -1268,6 +1269,25 @@ async function main() {
     deleted += res.count;
   }
   console.log(`Reconcile: deleted ${deleted} stale RePORTER grant rows.`);
+
+  // #3071 — withdraw the attribution cards of awards this run no longer holds.
+  const orphaned = orphanedPendingReviews(
+    await db.write.grantAttributionReview.findMany({
+      where: { status: "pending" },
+      select: { grantExternalId: true, cwid: true },
+    }),
+    keptIds,
+    erroredCwids,
+  );
+  let withdrawnOrphans = 0;
+  for (const batch of chunks(orphaned, DELETE_BATCH)) {
+    const res = await db.write.grantAttributionReview.updateMany({
+      where: { grantExternalId: { in: batch }, status: "pending" },
+      data: { status: "withdrawn", decidedByCwid: SYSTEM_RESCORED, decidedAt: new Date() },
+    });
+    withdrawnOrphans += res.count;
+  }
+  console.log(`Reconcile: withdrew ${withdrawnOrphans} pending reviews of awards no longer returned.`);
   console.log("\nRePORTER Grants ETL complete.\n");
 }
 
