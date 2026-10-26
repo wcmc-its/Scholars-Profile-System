@@ -1067,8 +1067,13 @@ async function main() {
               : { band: "show", lastSeenAt: now };
             const prior = reviews.get(row.externalId);
             if (plan.review === "create" && scored) {
-              await tx.grantAttributionReview.create({
-                data: {
+              // Upsert, not create: `reviews` is read once at start, so an
+              // overlapping run (e.g. a manual one during the weekly) may have
+              // queued this award since. Its row stands (#3157).
+              await tx.grantAttributionReview.upsert({
+                where: { grantExternalId: row.externalId },
+                update: {},
+                create: {
                   cwid,
                   grantExternalId: row.externalId,
                   score: scored.score.score,
