@@ -6,7 +6,9 @@
  * /myncbi for crawlers; this fetches known pages for known people at low volume:
  * each scholar at most once per REFRESH_DAYS, one request every REQUEST_GAP_MS.
  *
- * Per scholar, the newest biosketch's URL wins. A fetch that returns no citations
+ * Per scholar, the newest legacy-format biosketch's URL wins (the parser takes no
+ * link from a Common Form sketch; the filter also covers rows stored before that).
+ * A scholar with no URL left has their list dropped. A fetch that returns no citations
  * never replaces a list we already hold (the page or the account went away, or
  * NCBI is degraded — not "they have no papers").
  *
@@ -45,12 +47,23 @@ async function fetchBibliography(url: string): Promise<MyncbiCitation[]> {
 async function main(): Promise<number> {
   // Newest biosketch URL per scholar.
   const rows = await db.read.infoedBiosketch.findMany({
-    where: { myncbiUrl: { not: null } },
+    where: { myncbiUrl: { not: null }, format: "legacy" },
     orderBy: { uploadedAt: "desc" },
     select: { cwid: true, myncbiUrl: true },
   });
   const urlOf = new Map<string, string>();
   for (const r of rows) if (!urlOf.has(r.cwid)) urlOf.set(r.cwid, r.myncbiUrl!);
+
+  const orphaned = (await db.read.myncbiBibliography.findMany({ select: { cwid: true } }))
+    .map((b) => b.cwid)
+    .filter((cwid) => !urlOf.has(cwid));
+  if (orphaned.length) {
+    await db.write.$transaction([
+      db.write.myncbiCitation.deleteMany({ where: { cwid: { in: orphaned } } }),
+      db.write.myncbiBibliography.deleteMany({ where: { cwid: { in: orphaned } } }),
+    ]);
+    console.log(`dropped ${orphaned.length} lists with no biosketch URL left`);
+  }
 
   const cutoff = new Date(Date.now() - REFRESH_DAYS * 86_400_000);
   const fresh = new Map(

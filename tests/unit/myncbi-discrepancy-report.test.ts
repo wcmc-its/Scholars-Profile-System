@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compareBibliography,
+  isSuspectList,
   parseMyncbiDiscrepancyParams,
   type CitationItem,
 } from "@/lib/edit/myncbi-discrepancy-report";
@@ -28,6 +29,16 @@ describe("compareBibliography", () => {
   });
 });
 
+describe("isSuspectList", () => {
+  it("flags a list mostly absent from a profile that has papers; never a short list or an empty profile", () => {
+    expect(isSuspectList(298, 0, 58)).toBe(true);
+    expect(isSuspectList(100, 19, 40)).toBe(true);
+    expect(isSuspectList(100, 20, 40)).toBe(false);
+    expect(isSuspectList(4, 0, 40)).toBe(false);
+    expect(isSuspectList(100, 0, 0)).toBe(false);
+  });
+});
+
 describe("parseMyncbiDiscrepancyParams", () => {
   it("defaults to missing, trims, and rejects an unknown show", () => {
     expect(parseMyncbiDiscrepancyParams({ q: "  ada ", show: "bogus", type: "full_time_faculty" })).toMatchObject({
@@ -36,5 +47,6 @@ describe("parseMyncbiDiscrepancyParams", () => {
       types: ["full_time_faculty"],
     });
     expect(parseMyncbiDiscrepancyParams({ show: "all" }).show).toBe("all");
+    expect(parseMyncbiDiscrepancyParams({ show: "suspect" }).show).toBe("suspect");
   });
 });

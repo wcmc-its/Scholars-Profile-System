@@ -27,7 +27,9 @@ describe("parseBiosketches", () => {
       "NIH BIOGRAPHICAL SKETCH COMMON FORM Name: Lovelace, Ada Persistent Identifier (PID) of the Senior/Key Person: " +
       "https://orcid.org/0000-0002-1825-0097 Position Title: Professor PROFESSIONAL PREPARATION ... " +
       `NIH BIOGRAPHICAL SKETCH SUPPLEMENT Personal Statement I study engines. ${words(60)} ` +
-      `Honors 2020 Some Prize ${words(50)} Contributions to Science 1. Analytical engines. ${words(60)} Research Support`;
+      `Honors 2020 Some Prize ${words(50)} Contributions to Science 1. Analytical engines. ${words(60)} Research Support ` +
+      // Another person's document later in the package — its link is not Ada's.
+      "Complete list: https://www.ncbi.nlm.nih.gov/myncbi/charles.babbage.1/bibliography/public/";
     const [b, ...rest] = parseBiosketches(text, personnel);
     expect(rest).toHaveLength(0);
     expect(b).toMatchObject({ cwid: "abc1001", format: "common", attributedBy: "email", orcid: "0000-0002-1825-0097", myncbiUrl: null });
