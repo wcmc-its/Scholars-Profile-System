@@ -29,6 +29,7 @@ import { ConsoleNavSheet, type ConsoleNavSection } from "@/components/edit/conso
 import { BAR_TAB_ACTIVE, BAR_TAB_INACTIVE } from "@/components/edit/console-tab-classes";
 import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { isFundableWorkEnabled } from "@/lib/fundable-work";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
@@ -57,6 +58,7 @@ export type AdminSubnavActive =
   | "cores"
   | "matcha"
   | "grant-matcha"
+  | "fundable-work"
   /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
    *  profile actions live in the right-end account menu. */
   | "self";
@@ -128,6 +130,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   /** Paste an input, get a ranked result. */
   matcha: "tools",
   "grant-matcha": "tools",
+  "fundable-work": "tools",
   /** The viewer's own `/edit` — no group is active, so tier 2 does not render. */
   self: null,
 };
@@ -488,6 +491,14 @@ export function AdminSubnav({
         id: "grant-matcha",
         href: "/edit/grant-matcha",
         label: "Grant Matcha",
+      },
+      // Fundable work — scored WCM abstracts and preprints for CTL. Matcha's
+      // audience, its own flag (FUNDABLE_WORK).
+      {
+        show: (superuserSurfaces || viewerCanUseMatcha) && isFundableWorkEnabled(),
+        id: "fundable-work",
+        href: "/edit/fundable-work",
+        label: "Fundable work",
       },
     ] satisfies TabSpec[]
   ).filter((t) => t.show);

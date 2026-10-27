@@ -48,6 +48,7 @@ import { registryDashboards } from "@/lib/auth/functional-role-authz";
 import { hasAnyReportAccess } from "@/lib/edit/report-access";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { isFundableWorkEnabled } from "@/lib/fundable-work";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isOrgUnitRoleConsoleTabVisible } from "@/lib/edit/org-unit-role-flags";
 import { canReviewTitles } from "@/lib/edit/titles-queue";
@@ -78,6 +79,7 @@ export const CONSOLE_TAB_IDS = [
   "cores",
   "matcha",
   "grantMatcha",
+  "fundableWork",
   "roleVocabulary",
   "titles",
   "grantAttribution",
@@ -205,6 +207,9 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // (`app/edit/grant-matcha/page.tsx`). Same audience as `matcha`.
   grantMatcha: (s) =>
     (s.isSuperuser || s.isDeveloper === true || s.isObserver === true) && isMatchaEnabled() && isGrantMatchaEnabled(),
+  // `/edit/fundable-work` — Matcha's audience, its own flag.
+  fundableWork: (s) =>
+    (s.isSuperuser || s.isDeveloper === true || s.isObserver === true) && isFundableWorkEnabled(),
 
   // #2542 Phase 3 — the `OrgUnitRole` vocabulary editor. Delegates entirely to
   // the bundled `isXTabVisible` (flag + role together), per the convention

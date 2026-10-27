@@ -1722,6 +1722,10 @@ export class AppStack extends Stack {
         // columns), so flag-off leaves any already-suppressed rows suppressed in reads — the
         // flag gates the WRITE surface, not the read filters.
         MATCHA_ADMIN: env === "staging" ? "on" : "off",
+        // FUNDABLE_WORK — /edit/fundable-work: WCM conference abstracts + preprints scored for
+        // private-funding potential (etl/fundable-work, weekly). Read via isFundableWorkEnabled();
+        // the page notFound()s while off. ON in staging; OFF in prod until CTL has reviewed scores.
+        FUNDABLE_WORK: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
