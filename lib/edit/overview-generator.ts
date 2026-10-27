@@ -21,7 +21,11 @@
 import { generateText } from "ai";
 
 import { BEDROCK_CACHE_POINT, bedrockClient } from "@/lib/llm/client";
-import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
+import {
+  DEFAULT_GENERATE_MODEL,
+  bedrockCallOptions,
+  modelAcceptsTemperature,
+} from "@/lib/llm/models";
 import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import type { BiosketchProductRef } from "@/lib/edit/biosketch-references";
@@ -752,6 +756,7 @@ export async function generateOverviewDraft(
       ...(steering === null ? [] : [{ role: "user" as const, content: steering }]),
     ],
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
+    ...bedrockCallOptions(modelId, { effort: "high" }),
   });
 
   // #742 post-generation faithfulness pass — explicit opt-in only (validation
@@ -1290,6 +1295,7 @@ export async function verifyDraftGrounding(
       { role: "user", content: draft },
     ],
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
+    ...bedrockCallOptions(modelId, { effort: "high" }),
   });
   return parseUngrounded(result.text);
 }
@@ -1318,6 +1324,7 @@ export async function reviseDraftForGrounding(
     system: opts?.system ?? OVERVIEW_REVISE_SYSTEM_PROMPT,
     prompt: userTurn,
     ...(modelAcceptsTemperature(modelId) ? { temperature: opts?.temperature ?? 0.2 } : {}),
+    ...bedrockCallOptions(modelId, { effort: "high" }),
   });
   return result.text.trim();
 }

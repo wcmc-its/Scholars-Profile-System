@@ -18,6 +18,8 @@ import { generateText, isStepCount, type ToolSet } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 
+import { modelAcceptsTemperature } from "@/lib/llm/models";
+
 import { citedUrlsFromSources, isGroundingRedirect, type CitedUrl } from "./llm-rank";
 
 /** One citation-RAG surface: a pinned model + how it is told to search. */
@@ -82,7 +84,7 @@ export const CITATION_PROVIDERS: ProviderSpec[] = [
  */
 export const PARAMETRIC_PROVIDERS: ProviderSpec[] = [
   { key: "openai", model: "openai/gpt-5.1", modelDate: null, costPerCallUsd: 0.01 },
-  { key: "anthropic", model: "anthropic/claude-sonnet-4.5", modelDate: null, costPerCallUsd: 0.012 },
+  { key: "anthropic", model: "anthropic/claude-sonnet-5.5", modelDate: null, costPerCallUsd: 0.008 },
   { key: "google", model: "google/gemini-2.5-flash", modelDate: null, costPerCallUsd: 0.004 },
 ];
 
@@ -159,7 +161,9 @@ export async function callProvider(
   const result = await generateText({
     model: spec.model,
     prompt,
-    temperature,
+    // Claude 5.x (and Opus 4.7+) 400 on an explicit temperature; the run manifest still
+    // records the requested value, but it only reaches models that accept one.
+    ...(modelAcceptsTemperature(spec.model) ? { temperature } : {}),
     ...(tools ? { tools, stopWhen: isStepCount(maxSteps) } : {}),
   });
 

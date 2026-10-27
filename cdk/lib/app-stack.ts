@@ -918,14 +918,17 @@ export class AppStack extends Stack {
     // the single action bedrock:InvokeModel (the generator uses generateText,
     // not streaming, so no InvokeModelWithResponseStream).
     //
-    // Scoped to the Claude Opus 4.8 and Sonnet 4.x families, NOT a bare `*`:
+    // Scoped to Claude Opus 5.5 + 4.8, Sonnet 5.5 and the Sonnet 4.x family,
+    // NOT a bare `*`:
     //   - the us. cross-region INFERENCE PROFILE the model id resolves to
     //     (account-scoped), and
     //   - the underlying FOUNDATION MODELs (AWS-owned, empty account field)
     //     the profile routes to.
-    // Opus 4.8 is now the DEFAULT generate model and is granted here. Sonnet
-    // stays granted because the verify/revise critic pass and the
-    // OVERVIEW_GENERATE_MODEL rollback lever still run on Sonnet.
+    // Opus 5.5 is the DEFAULT generate model and Sonnet 5.5 the DEFAULT
+    // extract model (lib/llm/models.ts). Opus 4.8 and Sonnet 4.x stay granted
+    // so the OVERVIEW_GENERATE_MODEL / BIOSKETCH_GENERATE_MODEL /
+    // MATCHA_EXTRACT_MODEL / CANCER_FUNDING_MODEL env vars can roll back to
+    // the previous generation without an IAM change.
     // Region is `*` because a us. inference-profile call fans out across the
     // US regions (us-east-1/-2, us-west-2); the family wildcards let an
     // intra-family bump (e.g. Sonnet 4.5 -> 4.6) via OVERVIEW_GENERATE_MODEL
@@ -941,6 +944,10 @@ export class AppStack extends Stack {
           effect: iam.Effect.ALLOW,
           actions: ["bedrock:InvokeModel"],
           resources: [
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-opus-5-5*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*",
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-5-5*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-opus-4-8*`,
             "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*",
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,

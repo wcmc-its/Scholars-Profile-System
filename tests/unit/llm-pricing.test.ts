@@ -19,6 +19,15 @@ describe("estimateDraftCostUsd — display-only superuser cost estimate", () => 
     );
   });
 
+  it("prices the 5.5 generation separately from the 4.x ids", () => {
+    // Opus 5.5: 5000/1e6 * 4 + 300/1e6 * 20 = 0.02 + 0.006 = 0.026
+    expect(estimateDraftCostUsd("us.anthropic.claude-opus-5-5")).toBeCloseTo(0.026, 4);
+    // Sonnet 5.5: 5000/1e6 * 2 + 300/1e6 * 10 = 0.01 + 0.003 = 0.013
+    expect(estimateDraftCostUsd("us.anthropic.claude-sonnet-5-5")).toBeCloseTo(0.013, 4);
+    // Haiku 5.5: 5000/1e6 * 0.1 + 300/1e6 * 0.5 = 0.0005 + 0.00015 = 0.00065
+    expect(estimateDraftCostUsd("us.anthropic.claude-haiku-5-5")).toBeCloseTo(0.00065, 6);
+  });
+
   it("returns null for an unrecognized model id", () => {
     expect(estimateDraftCostUsd("openai/gpt")).toBeNull();
   });

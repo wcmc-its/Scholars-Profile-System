@@ -19,7 +19,11 @@
 import { generateText } from "ai";
 
 import { BEDROCK_CACHE_POINT, bedrockClient } from "@/lib/llm/client";
-import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
+import {
+  DEFAULT_GENERATE_MODEL,
+  bedrockCallOptions,
+  modelAcceptsTemperature,
+} from "@/lib/llm/models";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import {
   groundOverviewDraft,
@@ -71,8 +75,8 @@ import {
   type BiosketchContributionSources,
 } from "@/lib/edit/biosketch-sources";
 
-/** Low-but-not-zero temperature for non-Opus models — grounded prose, minimal confabulation.
- *  Opus 4.x rejects an explicit temperature (gated by `modelAcceptsTemperature`). */
+/** Low-but-not-zero temperature for models that accept one — grounded prose, minimal confabulation.
+ *  Opus 4.7+ and every 5.x model reject an explicit temperature (gated by `modelAcceptsTemperature`). */
 const BIOSKETCH_DEFAULT_TEMPERATURE = 0.4;
 
 // ---------------------------------------------------------------------------
@@ -936,6 +940,7 @@ export async function generateBiosketch(
       ...(steering === null ? [] : [{ role: "user" as const, content: steering }]),
     ],
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
+    ...bedrockCallOptions(modelId, { effort: "high" }),
   });
 
   let entries = parseBiosketchEntries(result.text, mode, { extractTitle });
@@ -976,6 +981,7 @@ export async function generateBiosketch(
           system: { role: "system", content: systemPrompt, providerOptions: BEDROCK_CACHE_POINT },
           messages: [{ role: "user", content: buildTightenPrompt(entry.body, cap) }],
           ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
+          ...bedrockCallOptions(modelId, { effort: "high" }),
         });
         const text = t.text.trim();
         if (text.length > 0 && text.length < body.length) body = text;
@@ -1060,6 +1066,7 @@ export async function generateBiosketch(
             system: PRODUCT_MAPPING_SYSTEM_PROMPT,
             prompt: buildProductMappingPrompt(entryBodies, uniqueToMap),
             ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
+            ...bedrockCallOptions(modelId, { effort: "high" }),
           });
           products = applyProductMapping(selected, mapping.text, entries.length);
         }
@@ -1084,6 +1091,7 @@ export async function generateBiosketch(
         system: SOURCE_ATTRIBUTION_SYSTEM_PROMPT,
         prompt: buildSourceAttributionPrompt(entryBodies, pubs),
         ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
+        ...bedrockCallOptions(modelId, { effort: "high" }),
       });
       const parsed = parseSourceAttribution(attribution.text, allowed, entries.length);
       sources = parsed.length > 0 ? parsed : null;

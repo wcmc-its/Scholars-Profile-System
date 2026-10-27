@@ -47,7 +47,11 @@ import { generateObject } from "ai";
 import { z } from "zod";
 
 import { bedrockClient } from "@/lib/llm/client";
-import { DEFAULT_EXTRACT_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
+import {
+  DEFAULT_EXTRACT_MODEL,
+  bedrockCallOptions,
+  modelAcceptsTemperature,
+} from "@/lib/llm/models";
 
 export type CancerFundingInferenceInput = {
   projectTitle: string;
@@ -83,9 +87,10 @@ export type CancerFundingInference = {
  *  generator's 0.4 (this has no room for stylistic variation to begin with). */
 const FUNDING_TEMPERATURE = 0;
 
-/** A short number plus a short rationale, comfortably inside a small
- *  budget — this is a classification call, not a draft. */
-const FUNDING_MAX_TOKENS = 500;
+/** A short number plus a short rationale — a classification call, not a draft.
+ *  Raised 500→2048 for Sonnet 5.5, which thinks by default and counts the
+ *  thinking against this cap (run at effort `low`, see the call). */
+const FUNDING_MAX_TOKENS = 2048;
 
 /** Short interactive-scale ceiling so one slow row can't stall a batch import
  *  indefinitely; the caller runs many of these and a hang on row N must not
@@ -178,6 +183,7 @@ export async function inferCancerFundingJudgments(
       maxOutputTokens: FUNDING_MAX_TOKENS,
       abortSignal: AbortSignal.timeout(FUNDING_TIMEOUT_MS),
       ...(modelAcceptsTemperature(modelId) ? { temperature: FUNDING_TEMPERATURE } : {}),
+      ...bedrockCallOptions(modelId, { effort: "low" }),
     });
     const clean = sanitize(object);
     if (!clean) return null;

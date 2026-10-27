@@ -5,8 +5,13 @@
  * overview drafts). Never used for routing.
  */
 
-/** Per-MILLION-token Bedrock list prices (USD), keyed by model-family fragment. */
+/** Per-MILLION-token Bedrock list prices (USD), keyed by model-id fragment. FIRST match
+ *  wins, so a version-specific row must sit above its family's catch-all: the 5.5
+ *  generation is priced differently from the 4.x ids a rollback env var can still run. */
 const MODEL_PRICE_PER_MTOK: { test: RegExp; input: number; output: number }[] = [
+  { test: /claude-opus-5-5/i, input: 4, output: 20 },
+  { test: /claude-sonnet-5-5/i, input: 2, output: 10 },
+  { test: /claude-haiku-5-5/i, input: 0.1, output: 0.5 },
   { test: /claude-opus/i, input: 5, output: 25 },
   { test: /claude-sonnet/i, input: 3, output: 15 },
   { test: /claude-haiku/i, input: 1, output: 5 },

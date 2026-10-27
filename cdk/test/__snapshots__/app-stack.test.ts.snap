@@ -4500,6 +4500,10 @@ service:
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
               "Resource": [
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-4-*",
@@ -9598,6 +9602,10 @@ service:
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
               "Resource": [
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-4-*",
