@@ -9,6 +9,7 @@ import { isWcmOrg } from "@/etl/reporter-grants/transform";
 import { formatPublishedName } from "@/lib/postnominal";
 
 import {
+  asRejectedPapers,
   decidingReason,
   type GrantAttributionAutoItem,
   type GrantAttributionAward,
@@ -63,7 +64,8 @@ function asCues(v: unknown): StoredCue[] {
     .map((c) => {
       const p = c.coPi;
       const ok = !!p && typeof p.name === "string" && Array.isArray(p.pmids) && p.pmids.every((x) => typeof x === "string");
-      return { id: c.id, weight: c.weight, reason: c.reason, ...(ok ? { coPi: p } : {}) };
+      const rejected = asRejectedPapers(c.rejected);
+      return { id: c.id, weight: c.weight, reason: c.reason, ...(ok ? { coPi: p } : {}), ...(rejected ? { rejected } : {}) };
     });
 }
 

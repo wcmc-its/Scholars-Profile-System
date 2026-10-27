@@ -513,6 +513,32 @@ describe("DecidedAwards", () => {
     expect(ev.getByText("No confirmed paper of the scholar cites this award")).toBeTruthy();
   });
 
+  it("lists the rejected papers under their cue in the ledger", () => {
+    const withRejected: DecidedRow = {
+      ...ROW,
+      cues: [
+        ...ROW.cues,
+        {
+          id: "rejected_pmids",
+          weight: -4,
+          reason: "2 of the 16 papers RePORTER links to this award were rejected in ReCiter as not the scholar's",
+          rejected: [
+            { pmid: "333", title: "A rejected synthetic paper" },
+            { pmid: "444", title: null },
+          ],
+        },
+      ],
+    };
+    render(<DecidedAwards page={page({ rows: [withRejected] })} readOnly={false} />);
+    fireEvent.click(row().getByTestId(`grant-attribution-evidence-${ROW.grantId}`));
+    const ev = within(screen.getAllByTestId("grant-attribution-evidence")[0]!);
+    const list = within(ev.getByTestId("grant-attribution-rejected-papers"));
+    expect(list.getByText("A rejected synthetic paper").closest("a")?.getAttribute("href")).toBe(
+      "https://pubmed.ncbi.nlm.nih.gov/333/",
+    );
+    expect(list.getByText("PMID 444").closest("a")?.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/444/");
+  });
+
   it("marks an auto-confirmed award not this person by grant, with a reason", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

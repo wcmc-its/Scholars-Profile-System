@@ -60,6 +60,7 @@ import {
   type AwardState,
 } from "./attribution-plan";
 import { buildAwardEvidence, buildScholarFacts, profileProof } from "./evidence";
+import { fillRejectedTitles } from "./rejected-titles";
 import {
   evidenceKey,
   nameProfileCountFrom,
@@ -647,6 +648,7 @@ async function scoreScholarAwards(
       reporterName,
     });
   });
+  await fillRejectedTitles([...out.values()].map((s) => s.score.reasons));
   return out;
 }
 

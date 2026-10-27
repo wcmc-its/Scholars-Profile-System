@@ -146,6 +146,15 @@ describe("cue 2: papers linked to the award were rejected in ReCiter", () => {
     expect(ids(ev({ rejected: null }))).toEqual([]);
     expect(ids(ev({ rejected: { overlap: 0, linkedTotal: 3 } }))).toEqual([]);
   });
+
+  it("carries the rejected PMIDs, untitled, for the queue to list", () => {
+    const hit = scoreAttribution(ev({ rejected: { overlap: 2, linkedTotal: 12, pmids: ["111", "222"] } })).reasons[0]!;
+    expect(hit.rejected).toEqual([
+      { pmid: "111", title: null },
+      { pmid: "222", title: null },
+    ]);
+    expect(scoreAttribution(ev({ rejected: { overlap: 1, linkedTotal: 12 } })).reasons[0]!.rejected).toBeUndefined();
+  });
 });
 
 describe("cue 3: timeline", () => {

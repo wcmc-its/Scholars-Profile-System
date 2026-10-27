@@ -23,6 +23,7 @@ import {
   type DecidedTab,
 } from "./grant-attribution-decided";
 import {
+  asRejectedPapers,
   decidingReason,
   type GrantAttributionAward,
   type GrantAttributionCue,
@@ -66,7 +67,14 @@ function asCues(v: unknown): StoredCue[] {
         typeof p.name === "string" &&
         Array.isArray(p.pmids) &&
         p.pmids.every((x) => typeof x === "string");
-      return { id: c.id, weight: c.weight, reason: c.reason, ...(ok ? { coPi: p } : {}) };
+      const rejected = asRejectedPapers(c.rejected);
+      return {
+        id: c.id,
+        weight: c.weight,
+        reason: c.reason,
+        ...(ok ? { coPi: p } : {}),
+        ...(rejected ? { rejected } : {}),
+      };
     });
 }
 

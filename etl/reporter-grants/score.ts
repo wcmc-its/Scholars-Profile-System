@@ -72,6 +72,9 @@ export interface CueHit {
   /** Cue 6 only: the co-PI and the scholar's PMIDs they co-authored, so the
    *  queue can name them and list the papers. */
   coPi?: { name: string; pmids: string[]; total: number };
+  /** Cue 2 only: the rejected papers RePORTER links to the award (capped), with
+   *  PubMed's title when the ETL could fetch it, so the queue can list them. */
+  rejected?: Array<{ pmid: string; title: string | null }>;
 }
 
 export interface AttributionScore {
@@ -232,7 +235,7 @@ export interface AttributionEvidence {
   /** Cue 2. null ⇒ the scholar's ReCiter rejections are unavailable.
    *  `linkedTotal` null ⇒ the core is over RePORTER's offset cap, so its true
    *  link count is unknown and it counts as a large set. */
-  rejected: { overlap: number; linkedTotal: number | null } | null;
+  rejected: { overlap: number; linkedTotal: number | null; pmids?: string[] } | null;
   /** Cue 3. The scholar's earliest and latest doctoral degree years, or null
    *  when none is on file. */
   doctoralYears: { earliest: number; latest: number } | null;
@@ -751,6 +754,8 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
           : `${overlap} of the ${linkedTotal} papers RePORTER links to this award were rejected ` +
               `in ReCiter as not the scholar's`,
       );
+      const pmids = e.rejected.pmids ?? [];
+      if (pmids.length > 0) hits[hits.length - 1]!.rejected = pmids.map((pmid) => ({ pmid, title: null }));
     }
   }
 
