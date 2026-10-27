@@ -72,8 +72,11 @@ export function nameTokens(name: string): Set<string> {
 /** A PI's full_name matches a candidate's fullName when their last token
  *  matches and at least one other token matches (covers `J A Smith` vs
  *  `John A Smith` vs `John Adam Smith` without false-firing on
- *  `Jane Smith` vs `John Smith`). Initials count: a one-letter token
- *  matches the first letter of any other-side token. */
+ *  `Jane Smith` vs `John Smith`). A full given name matches in any position,
+ *  so `R Brad Jones` matches `Brad Jones`. A one-letter initial matches only
+ *  first-name-to-first-name: `J Smith` matches `John Smith`, but the middle
+ *  initial in `Augustine M Choi` does not make it `Mary E Choi` (#3071). The
+ *  trade-off: `J M Smith` no longer matches `Michael Smith`. */
 export function namesMatch(a: string, b: string): boolean {
   const at = Array.from(nameTokens(a));
   const bt = Array.from(nameTokens(b));
@@ -83,18 +86,14 @@ export function namesMatch(a: string, b: string): boolean {
   const aLast = at[at.length - 1]!;
   const bLast = bt[bt.length - 1]!;
   if (aLast !== bLast) return false;
-  // Beyond the last name, require ≥1 additional token match. Initials
-  // count: a single-character token matches the first character of any
-  // multi-character token on the other side.
+  // Beyond the last name, require ≥1 additional token match: a full given
+  // name anywhere, or an initial against the other side's first name only.
   const aRest = at.slice(0, -1);
   const bRest = bt.slice(0, -1);
-  for (const x of aRest) {
-    for (const y of bRest) {
-      if (x === y) return true;
-      if (x.length === 1 && y.startsWith(x)) return true;
-      if (y.length === 1 && x.startsWith(y)) return true;
-    }
-  }
+  for (const x of aRest) for (const y of bRest) if (x.length > 1 && x === y) return true;
+  const [aFirst, bFirst] = [aRest[0], bRest[0]];
+  if (!aFirst || !bFirst) return false;
+  if (aFirst.length === 1 || bFirst.length === 1) return aFirst[0] === bFirst[0];
   return false;
 }
 
