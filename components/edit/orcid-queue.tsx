@@ -193,10 +193,14 @@ export function OrcidQueue({
   );
   const current = list.find((s) => s.cwid === sel) ?? list[0] ?? null;
 
+  const detailRef = useRef<HTMLElement>(null);
   const select = useCallback((cwid: string) => {
     setSel(cwid);
     setSticky(null);
     setError(null);
+    // A scholar picked from further down the page starts at their header.
+    if ((detailRef.current?.getBoundingClientRect().top ?? 0) < 0)
+      detailRef.current?.scrollIntoView({ block: "start" });
   }, []);
 
   // J / K move through the list.
@@ -345,7 +349,7 @@ export function OrcidQueue({
         </div>
       ) : null}
 
-      <div className="grid items-start gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
         <ScholarList
           list={list}
           current={current}
@@ -354,7 +358,11 @@ export function OrcidQueue({
           onSort={setSort}
           onSelect={select}
         />
-        <section className={cn(CARD, "min-w-0")} data-testid="orcid-queue-detail">
+        <section
+          ref={detailRef}
+          className={cn(CARD, "min-w-0 scroll-mt-[72px]")}
+          data-testid="orcid-queue-detail"
+        >
           {!current ? (
             <p
               className="text-muted-foreground m-0 p-8 text-center text-[14px]"
@@ -458,7 +466,7 @@ function ScholarList({
   const [sortOpen, setSortOpen] = useState(false);
   return (
     <aside
-      className={cn(CARD, "bg-apollo-surface-2 overflow-hidden lg:sticky lg:top-[132px]")}
+      className={cn(CARD, "bg-apollo-surface-2 overflow-hidden lg:sticky lg:top-[72px]")}
       data-testid="orcid-queue-list"
     >
       <div className="border-apollo-border flex flex-col gap-1.5 border-b px-4 pt-3.5 pb-2.5">
@@ -526,7 +534,7 @@ function ScholarList({
         </Popover>
       </div>
       <div
-        className="max-h-[calc(100vh-240px)] overflow-y-auto"
+        className="max-h-[calc(100vh-170px)] overflow-y-auto"
         role="listbox"
         aria-label="Scholars"
       >
@@ -820,7 +828,7 @@ function ScholarDetail({
       </div>
 
       <div className="border-apollo-border overflow-x-auto border-t">
-        <div className="min-w-[860px]">
+        <div className="min-w-[870px]">
           <div
             className={cn(
               GRID,
@@ -893,8 +901,9 @@ function ScholarDetail({
   );
 }
 
+// Fits the detail panel at a ~1380px window (list 300px): 870px of columns and gaps.
 const GRID =
-  "grid grid-cols-[36px_minmax(170px,1fr)_110px_minmax(180px,1.3fr)_150px_170px_minmax(170px,1.1fr)] items-start gap-x-4 px-4";
+  "grid grid-cols-[28px_minmax(156px,1fr)_84px_minmax(140px,1.2fr)_124px_132px_minmax(130px,1fr)] items-start gap-x-3 px-4";
 
 function DecisionBlock({
   card,
@@ -1000,7 +1009,7 @@ function CandidateRow({
           aria-hidden
         />
         <span className="flex flex-col gap-0.5">
-          <span className={cn(MONO, "text-[14px]", outcome === "dismissed" && "line-through")}>
+          <span className={cn(MONO, "text-[13px]", outcome === "dismissed" && "line-through")}>
             {r.orcid}
           </span>
           {isBest && pending ? (
@@ -1459,9 +1468,10 @@ function Publications({
   row: OrcidQueueRow;
   pmBaseUrl: string | null;
 }) {
-  const [tab, setTab] = useState<PubTab>("orcid");
   const onlyOrcid = r.newWorks;
   const both = r.shared;
+  // Opens on the first non-empty list.
+  const [tab, setTab] = useState<PubTab>(onlyOrcid > 0 ? "orcid" : both > 0 ? "both" : "rec");
   // ponytail: counts, not lists, for "Only in ReCiter": the ETL keeps a capped
   // sample of shared papers, so the exact set of the scholar's papers missing
   // from the record isn't known here. List it when PR B stores the overlap.

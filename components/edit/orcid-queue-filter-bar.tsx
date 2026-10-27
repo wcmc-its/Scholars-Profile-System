@@ -134,7 +134,7 @@ export function OrcidQueueFilterBar({
       options: ORCID_CANDIDATE_SOURCES.map((s) => ({
         value: s,
         label: ORCID_SOURCE_LABEL[s],
-        count: -1,
+        count: count((x) => x.candidates.some((c) => c.sources.includes(s))),
       })),
       scope: "Scholars with an iD found this way.",
     },
@@ -212,7 +212,7 @@ export function OrcidQueueFilterBar({
 
   return (
     <div
-      className="bg-apollo-page border-apollo-border sticky top-14 z-20 -mx-6 flex flex-col gap-2.5 border-y px-6 py-3"
+      className="border-apollo-border -mx-6 flex flex-col gap-2.5 border-y px-6 py-3"
       data-testid="orcid-queue-filters"
     >
       <div className="flex flex-wrap items-center gap-2">
