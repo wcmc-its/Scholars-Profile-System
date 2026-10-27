@@ -71,7 +71,7 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     source: "ed_group",
     groupCn: ED("development"),
     alsoGrantedBy: "External Affairs · Development",
-    can: ["Prospect-research tools"],
+    can: ["Matcha and Grant Matcha", "Every user's Matcha history"],
     cannot: ["Edit profiles"],
   },
   {

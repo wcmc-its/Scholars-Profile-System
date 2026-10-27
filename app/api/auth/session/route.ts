@@ -15,6 +15,7 @@ import {
 } from "@/lib/edit/impersonation-display";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { db } from "@/lib/db";
+import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
 
 /**
  * GET /api/auth/session — the header's client-side auth probe (#356 Phase 5,
@@ -73,6 +74,15 @@ type ImpersonatingBlock = {
   startedAt: number;
 };
 
+/** ED display name for a profile-less cwid (no Scholar / steward_directory row). One LDAPS
+ *  search, only on that fallback path; fail-soft to null so the caller shows the cwid. */
+async function directoryName(cwid: string): Promise<string | null> {
+  const [person] = await fetchDirectoryPeopleByCwid([cwid]).catch(() => []);
+  if (!person) return null;
+  const full = [person.firstName, person.lastName].filter(Boolean).join(" ");
+  return full || person.name || null;
+}
+
 export async function GET(): Promise<NextResponse> {
   const session = await getSession().catch(() => null);
   const noStore = { "cache-control": "no-store" };
@@ -117,7 +127,7 @@ export async function GET(): Promise<NextResponse> {
         await db.read.stewardDirectory
           .findUnique({ where: { cwid: session.cwid }, select: { displayName: true } })
           .catch(() => null)
-      )?.displayName ?? null;
+      )?.displayName ?? (await directoryName(session.cwid));
 
   // Every role verdict, against the REAL cwid, resolved CONCURRENTLY. Each is a
   // fresh LDAPS connect + bind + search + compare (~230 ms, `lib/auth/ldap-group.ts`)
@@ -271,13 +281,13 @@ export async function GET(): Promise<NextResponse> {
         // data_sharing_viewer / development / content_editor / observer, `lib/auth/global-roles.ts`) — the
         // same stranding hazard the steward/unit-admin branches above exist to
         // prevent. These roles have no name-resolution bridge of their own (no
-        // steward_directory-equivalent), so the name degrades to the bare CWID —
-        // still functional, never missing.
+        // steward_directory-equivalent), so the name comes from ED, degrading to
+        // the bare CWID if the directory is unreachable — never missing.
         const globalRole = await resolveGlobalRole(targetCwid).catch(() => null);
         if (globalRole) {
           impersonating = {
             targetCwid,
-            targetName: targetCwid,
+            targetName: (await directoryName(targetCwid)) ?? targetCwid,
             role: globalRole,
             unitKind: null,
             unit: null,

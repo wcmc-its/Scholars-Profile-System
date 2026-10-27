@@ -40,9 +40,10 @@
  *     their only door was "Org units". (The roster's own COI-review column is
  *     superuser-only, so it earns no separate link here — see
  *     `lib/edit/data-quality.ts`.)
- *   - **Developer** (not a superuser) → "Grant Matcha" (`/edit/grant-matcha`),
- *     the role's one console page (`GLOBAL_ROLE_HOME.development`). Without it a
- *     developer with no other role had an empty dropdown and no door in.
+ *   - **Developer** (not a superuser) → "Matcha" (`/edit/matcha`), the role's
+ *     front door (`GLOBAL_ROLE_HOME.development`). Its console nav fans out to
+ *     Grant Matcha, so one row is enough. Without it a developer with no other
+ *     role had an empty dropdown and no door in.
  *
  * A viewer holding several non-superuser roles gets several links. The list is
  * profile-independent: a steward or unit admin with no `Scholar` row still gets
@@ -52,7 +53,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units" | "profiles" | "grant-matcha";
+  id: "manage-profiles" | "methods" | "units" | "profiles" | "matcha";
   label: string;
   href: string;
 };
@@ -86,7 +87,7 @@ export type ConsoleLinkVerdicts = {
  * handoff, Workstream B; the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag that gated
  * the relabel was retired in #1440). A superuser reaches the GrantRecs matcher
  * tools through the in-console `AdminSubnav`; a non-superuser developer gets a
- * direct "Grant Matcha" row, since that page is their console.
+ * direct "Matcha" row, since that is their console.
  */
 export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   const links: ConsoleLink[] = [];
@@ -120,7 +121,7 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   }
 
   if (v.isDeveloper && !v.isSuperuser) {
-    links.push({ id: "grant-matcha", label: "Grant Matcha", href: "/edit/grant-matcha" });
+    links.push({ id: "matcha", label: "Matcha", href: "/edit/matcha" });
   }
 
   return links;

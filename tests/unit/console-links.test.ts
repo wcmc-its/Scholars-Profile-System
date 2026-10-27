@@ -92,15 +92,15 @@ describe("buildConsoleLinks", () => {
   });
 
   // 2026-10-27: a developer with no other role saw an empty dropdown.
-  it("developer (not a superuser) → 'Grant Matcha', alongside any other role's rows", () => {
+  it("developer (not a superuser) → 'Matcha', alongside any other role's rows", () => {
     expect(
       buildConsoleLinks({ isSuperuser: false, isCommsSteward: false, managesUnits: false, isDeveloper: true }),
-    ).toEqual([{ id: "grant-matcha", label: "Grant Matcha", href: "/edit/grant-matcha" }]);
+    ).toEqual([{ id: "matcha", label: "Matcha", href: "/edit/matcha" }]);
     expect(
       buildConsoleLinks({ isSuperuser: false, isCommsSteward: true, managesUnits: false, isDeveloper: true }).map(
         (l) => l.id,
       ),
-    ).toEqual(["manage-profiles", "grant-matcha"]);
+    ).toEqual(["manage-profiles", "matcha"]);
   });
 
   it("superuser who is also a developer → still only 'Admin console'", () => {

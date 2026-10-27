@@ -1711,9 +1711,8 @@ export class AppStack extends Stack {
         // small regardless: the page gate is isMatchaEnabled() && isGrantMatchaEnabled() &&
         // (superuser||developer), with a Tools nav tab for exactly that audience.
         // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
-        // ⚠ Since the find-researchers sunset (Phase 3c), /edit/grant-matcha is the development
-        // role's ONLY console page and their GLOBAL_ROLE_HOME landing. Flipping this (or MATCHA)
-        // off no longer degrades to an older surface — it 404s that role's entire console entry.
+        // ⚠ The development role's console is /edit/matcha (their GLOBAL_ROLE_HOME landing) plus
+        // this page. Flipping MATCHA off 404s that role's entire console entry.
         GRANT_MATCHA: "on",
         // MATCHA_ADMIN — the Grant Matcha corpus-admin surface (matcha-admin plan Phase 1b):
         // /api/edit/opportunity-admin suppress/restore on `opportunity` rows + the Browse-tab

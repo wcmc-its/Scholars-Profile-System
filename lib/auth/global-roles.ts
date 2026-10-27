@@ -52,7 +52,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
  *  docblock names its single surface) + the page-name label for a link to it
  *  (deliberately NOT `GLOBAL_ROLE_LABEL` above — that's the ROLE's name, e.g.
  *  "Development", which reads as a place called Development, not a
- *  description of what's there; this is the PAGE's name, "Grant Matcha").
+ *  description of what's there; this is the PAGE's name, "Matcha").
  *  Reused by `/edit`'s profile-less fallthrough (`app/edit/page.tsx`, href
  *  only) and `ForbiddenEditPage` (`components/edit/forbidden-edit-page.tsx`,
  *  href + label) so a global-role holder with no Scholar row lands on their
@@ -61,7 +61,8 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
 export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string }> = {
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
-  development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
+  // Matcha is the front door; its console nav reaches Grant Matcha too.
+  development: { href: "/edit/matcha", label: "Matcha" },
   content_editor: { href: "/edit/profiles", label: "Profiles" },
   observer: { href: "/edit/profiles", label: "Profiles" },
 };
