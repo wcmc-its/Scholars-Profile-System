@@ -721,6 +721,10 @@ export class EtlStack extends Stack {
           resources: [
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
             "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
+            // Sonnet 5.5 for the weekly fundable-work scorer (etl/fundable-work). Pinned to
+            // 5-5, not a sonnet-5 glob, so a later family bump stays a reviewed change.
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-5-5*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
           ],
         }),
       ],
@@ -2101,6 +2105,10 @@ export class EtlStack extends Stack {
       // drain scores them. Prod submits; staging is a logged dry run (the queue
       // table is shared). external:false (S3 + DynamoDB), continue-tier.
       { id: "FundingDigestWeekly", npmScript: "etl:funding-digest", external: false, tier: "continue" },
+      // Fundable work (etl/fundable-work) — OpenAlex WCM conference abstracts + preprints,
+      // Sonnet 5.5-scored for private-funding potential -> fundable_work. Public API + Bedrock,
+      // external:false; continue-tier (a miss only delays new scores a week).
+      { id: "FundableWorkWeekly", npmScript: "etl:fundable-work", external: false, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.

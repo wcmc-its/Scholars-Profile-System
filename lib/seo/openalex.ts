@@ -106,7 +106,7 @@ function withMailto(url: string, mailto: string | undefined): string {
   return url + (url.includes("?") ? "&" : "?") + `mailto=${encodeURIComponent(mailto)}`;
 }
 
-async function getJson<T>(url: string, mailto: string | undefined): Promise<T> {
+export async function getJson<T>(url: string, mailto: string | undefined): Promise<T> {
   const res = await fetch(withMailto(url, mailto), { headers: { Accept: "application/json" } });
   if (!res.ok) {
     throw new Error(`OpenAlex HTTP ${res.status} ${res.statusText} for ${url}`);
@@ -114,7 +114,7 @@ async function getJson<T>(url: string, mailto: string | undefined): Promise<T> {
   return (await res.json()) as T;
 }
 
-function mailtoFromEnv(env: Record<string, string | undefined> = process.env): string | undefined {
+export function mailtoFromEnv(env: Record<string, string | undefined> = process.env): string | undefined {
   return env.OPENALEX_MAILTO?.trim() || undefined;
 }
 

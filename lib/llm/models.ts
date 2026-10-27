@@ -24,10 +24,10 @@ export const DEFAULT_GENERATE_MODEL = "us.anthropic.claude-opus-4-8";
 export const DEFAULT_EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
 /**
- * Opus 4.7 / 4.8 and Fable REJECT an explicit `temperature` on Bedrock (HTTP
- * 400). Gate the param so those models run; every other model (incl. Sonnet)
+ * Opus 4.7 / 4.8, every 5.x model and Fable REJECT an explicit `temperature`
+ * on Bedrock (HTTP 400). Gate the param so those models run; every other model (incl. Sonnet)
  * keeps its tuned temperature. `thinking` stays unset regardless.
  */
 export function modelAcceptsTemperature(modelId: string): boolean {
-  return !/claude-(opus-4-[78]|fable)/.test(modelId);
+  return !/claude-(opus-4-[78]|(opus|sonnet|haiku)-5|fable)/.test(modelId);
 }
