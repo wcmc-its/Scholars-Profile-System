@@ -165,6 +165,7 @@ export async function GET(): Promise<NextResponse> {
       isSuperuser: true,
       isCommsSteward: false,
       managesUnits: false,
+      isDeveloper: false,
     });
   } else {
     // An observer or content editor gets the steward's console entry (their
@@ -175,6 +176,7 @@ export async function GET(): Promise<NextResponse> {
       isSuperuser: false,
       isCommsSteward: commsSteward,
       managesUnits,
+      isDeveloper: developer,
     });
   }
 
