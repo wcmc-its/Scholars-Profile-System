@@ -71,6 +71,35 @@ describe("namesMatch", () => {
     expect(namesMatch("Maria T Diaz-Meco", "Maria Diaz-Meco")).toBe(true);
     expect(namesMatch("Maria Meco", "Maria Diaz-Meco")).toBe(false);
   });
+
+  // #3071: a middle initial matched the other person's first name, so a
+  // spouse's NIH profile passed as the scholar's.
+  it("does not let a middle initial stand for the other side's first name", () => {
+    expect(namesMatch("Arthur M Doe", "Mary E Doe")).toBe(false);
+    expect(namesMatch("Mary E Doe", "Arthur M Doe")).toBe(false);
+  });
+
+  it("matches a full given name in any position (going by a middle name)", () => {
+    expect(namesMatch("R Brad Doe", "Brad Doe")).toBe(true);
+    expect(namesMatch("Ana Lucia Doe", "Lucia Doe")).toBe(true);
+    expect(namesMatch("Lucia Doe", "Ana Lucia Doe")).toBe(true);
+  });
+
+  it("matches an initial against the first name, either side", () => {
+    expect(namesMatch("J Doe", "John Doe")).toBe(true);
+    expect(namesMatch("John Q Doe", "J Doe")).toBe(true);
+    expect(namesMatch("J Q Doe", "J R Doe")).toBe(true);
+  });
+
+  it("matches a short form that starts the other first name (3+ letters)", () => {
+    expect(namesMatch("Ben S Doe", "Benjamin S Doe")).toBe(true);
+    expect(namesMatch("Sarah Doe", "Sara Doe")).toBe(true);
+    expect(namesMatch("Su Doe", "Susan Doe")).toBe(false);
+  });
+
+  it("trade-off: an initial no longer reaches a middle-name goer", () => {
+    expect(namesMatch("J M Doe", "Michael Doe")).toBe(false);
+  });
 });
 
 describe("resolveProjectGrantJoin", () => {
