@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: vi.fn() }
 
 import { DecidedAwards } from "@/components/edit/grant-attribution-decided";
 import {
+  DECIDED_PAGE_SIZE,
   checkedNothingFound,
   decidedHref,
   decidedTabOf,
@@ -92,10 +93,16 @@ describe("URL state", () => {
       sort: "recent",
       q: "lee",
       page: 3,
+      all: false,
     });
     expect(decidedHref(p)).toBe(
       "?tab=confirmed&by=auto&changed=1&group=1&sort=recent&q=lee&page=3",
     );
+    // Show all replaces the page number and survives a filter change.
+    const all = parseDecidedParams({ by: "auto", all: "1", page: "3" }, "confirmed");
+    expect(all.all).toBe(true);
+    expect(decidedHref(all)).toBe("?tab=confirmed&by=auto&all=1");
+    expect(decidedHref(all, { by: "curator", page: 1 })).toBe("?tab=confirmed&by=curator&all=1");
     expect(decidedHref(parseDecidedParams({}, "rejected"))).toBe("?tab=rejected");
     // "Changed this run" only exists on Confirmed; Unproven defaults to most recent.
     expect(parseDecidedParams({ changed: "1" }, "rejected").changed).toBe(false);
@@ -212,6 +219,19 @@ const RUNS = [
     cues: {},
   },
 ];
+
+describe("loadDecidedPage paging", () => {
+  it("pages at DECIDED_PAGE_SIZE, and Show all returns every match", async () => {
+    const scores = Array.from({ length: DECIDED_PAGE_SIZE + 5 }, (_, i) =>
+      score(`P${i}`, "zza0001", "show", 5, [{ id: "pub_linked", weight: 5, reason: "cited" }]),
+    );
+    const paged = await loadDecidedPage(client({ scores }), parseDecidedParams({}, "confirmed"), RUNS);
+    expect(paged.matched).toBe(DECIDED_PAGE_SIZE + 5);
+    expect(paged.rows).toHaveLength(DECIDED_PAGE_SIZE);
+    const all = await loadDecidedPage(client({ scores }), parseDecidedParams({ all: "1" }, "confirmed"), RUNS);
+    expect(all.rows).toHaveLength(DECIDED_PAGE_SIZE + 5);
+  });
+});
 
 describe("loadDecidedPage", () => {
   const data = {
@@ -539,6 +559,30 @@ describe("DecidedAwards", () => {
     render(<DecidedAwards page={page()} readOnly />);
     expect(row().queryByRole("button", { name: "Not this person" })).toBeNull();
     expect(row().getByTestId(`grant-attribution-evidence-${ROW.grantId}`)).toBeTruthy();
+  });
+
+  it("offers Show all past one page, and a way back to paging", () => {
+    render(<DecidedAwards page={page({ matched: DECIDED_PAGE_SIZE + 1 })} readOnly={false} />);
+    fireEvent.click(screen.getByTestId("grant-attribution-show-all"));
+    expect(push).toHaveBeenLastCalledWith("?tab=confirmed&all=1", { scroll: false });
+  });
+
+  it("hides the pager when showing all", () => {
+    render(
+      <DecidedAwards
+        page={page({ matched: DECIDED_PAGE_SIZE + 1, params: { ...parseDecidedParams({ all: "1" }, "confirmed") } })}
+        readOnly={false}
+      />,
+    );
+    expect(screen.getByText(`1–${DECIDED_PAGE_SIZE + 1} of ${DECIDED_PAGE_SIZE + 1}`)).toBeTruthy();
+    expect(screen.getByText("Next").closest("span")!.className).toContain("hidden");
+    fireEvent.click(screen.getByTestId("grant-attribution-show-paged"));
+    expect(push).toHaveBeenLastCalledWith("?tab=confirmed", { scroll: false });
+  });
+
+  it("no Show all when everything fits on one page", () => {
+    render(<DecidedAwards page={page()} readOnly={false} />);
+    expect(screen.queryByTestId("grant-attribution-show-all")).toBeNull();
   });
 
   it("puts filters in the URL", () => {
