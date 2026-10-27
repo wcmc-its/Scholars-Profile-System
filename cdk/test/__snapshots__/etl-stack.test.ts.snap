@@ -1879,7 +1879,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
@@ -2547,7 +2547,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
@@ -3163,7 +3163,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
@@ -3710,7 +3710,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",
@@ -4692,7 +4692,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_GRANTS_CORROBORATION_HIDE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_EMAIL_AUTOCONFIRM",

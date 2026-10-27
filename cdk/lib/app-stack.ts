@@ -1840,9 +1840,9 @@ export class AppStack extends Stack {
         // reads === "on" (lib/edit/grant-attribution-queue.ts); off => the page
         // AND the decision endpoint 404, and the Grants tab is hidden. Tracks
         // REPORTER_GRANTS_CORROBORATION_HIDE (cdk/lib/etl-stack.ts), which fills
-        // the queue: staging first, prod after the staging queue is reviewed.
+        // the queue: staging first, prod flipped 2026-10-27.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        GRANT_ATTRIBUTION_QUEUE: envConfig.envName === "staging" ? "on" : "off",
+        GRANT_ATTRIBUTION_QUEUE: "on",
         // ORCID librarian queue -- /edit/orcid-queue and /api/edit/orcid-queue/*
         // (superuser librarians confirm candidate iDs on etl/orcid-evidence's
         // bands). isOrcidLibrarianQueueEnabled() reads === "on"
