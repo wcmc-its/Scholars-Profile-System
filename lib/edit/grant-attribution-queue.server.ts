@@ -97,6 +97,69 @@ export async function loadGrantAttributionQueue(
     );
   }
 
+  return toItems(
+    client,
+    rows.filter((r) => live === null || live.has(r.grantExternalId)),
+    false,
+  );
+}
+
+/** The fields of a review (or, for an Unproven award, of its score row) a card needs. */
+type ItemRow = {
+  id: string;
+  cwid: string;
+  grantExternalId: string;
+  score: number;
+  band: string;
+  cues: unknown;
+  award: unknown;
+  status: string;
+  firstSeenAt: Date;
+  reopenedAt: Date | null;
+  decidedAt: Date | null;
+  decidedByCwid: string | null;
+  rejectionReason: string | null;
+  reporterName?: string | null;
+};
+
+/**
+ * The Unproven awards as To review cards, from their score rows: the weekly
+ * check found nothing either way, so no review exists. `grantIds` comes from
+ * the decided loader, which owns what counts as Unproven.
+ */
+export async function loadUnprovenQueueItems(
+  client: Client,
+  grantIds: string[],
+): Promise<GrantAttributionItem[]> {
+  if (grantIds.length === 0) return [];
+  const scores = await client.grantAttributionScore.findMany({
+    where: { grantExternalId: { in: grantIds } },
+    orderBy: { scoredAt: "asc" },
+  });
+  return toItems(
+    client,
+    scores.map((sc) => ({
+      id: sc.grantExternalId,
+      cwid: sc.cwid,
+      grantExternalId: sc.grantExternalId,
+      score: sc.score,
+      band: sc.band,
+      cues: sc.cues,
+      award: sc.award,
+      status: "pending",
+      firstSeenAt: sc.scoredAt,
+      reopenedAt: null,
+      decidedAt: null,
+      decidedByCwid: null,
+      rejectionReason: null,
+      reporterName: sc.reporterName,
+    })),
+    true,
+  );
+}
+
+async function toItems(client: Client, rows: ItemRow[], unproven: boolean): Promise<GrantAttributionItem[]> {
+  if (rows.length === 0) return [];
   const cwids = new Set(rows.map((r) => r.cwid));
   for (const r of rows) if (r.decidedByCwid) cwids.add(r.decidedByCwid);
   const scholars = new Map(
@@ -149,13 +212,13 @@ export async function loadGrantAttributionQueue(
       return { ...c, coPi: { name: coPi.name, total: typeof coPi.total === "number" ? coPi.total : coPi.pmids.length, papers: shared.slice(0, COPI_PAPERS_SHOWN) } };
     });
 
-  return rows
-    .filter((r) => live === null || live.has(r.grantExternalId))
-    .map((r) => {
+  return rows.map((r) => {
       const s = scholars.get(r.cwid);
       const decider = r.decidedByCwid ? scholars.get(r.decidedByCwid) : undefined;
       return {
-        id: r.id,
+        id: unproven ? r.grantExternalId : r.id,
+        grantId: r.grantExternalId,
+        unproven,
         cwid: r.cwid,
         slug: s?.slug ?? null,
         scholarName: formatPublishedName(
@@ -178,7 +241,7 @@ export async function loadGrantAttributionQueue(
           ? (decider?.preferredName ?? decider?.fullName ?? r.decidedByCwid)
           : null,
         rejectionReason: r.rejectionReason,
-        reporterName: reporterNames.get(r.grantExternalId) ?? null,
+        reporterName: reporterNames.get(r.grantExternalId) ?? r.reporterName ?? null,
         scholarNames: namesOf(s),
       };
     });

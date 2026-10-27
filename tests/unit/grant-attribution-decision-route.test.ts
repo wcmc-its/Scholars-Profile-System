@@ -405,4 +405,40 @@ describe("deciding by grant from the decided tabs", () => {
     expect((await POST(request({ grant: ENTITY, decision: "undo" }, STEWARD))).status).toBe(400);
     expect((await POST(request({ grant: ENTITY, id: "rev-1", decision: "confirm" }, STEWARD))).status).toBe(400);
   });
+
+  it("returns the review a by-grant decision opened, for an undo", async () => {
+    h.tx.grantAttributionReview.findUnique.mockResolvedValueOnce(null);
+    tx.grantAttributionReview.create.mockResolvedValueOnce({ ...PENDING, id: "rev-opened" });
+    const res = await POST(request({ grant: ENTITY, decision: "confirm" }, STEWARD));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ decided: 1, reviews: { [ENTITY]: "rev-opened" } });
+  });
+
+  it("decides grants and review ids together in one transaction (To review bulk)", async () => {
+    const OTHER = "reporter:t000002:R21YY000002";
+    // The review id is read first, then the grant finds no review and opens one.
+    h.tx.grantAttributionReview.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id === "rev-1" ? { ...PENDING } : null,
+    );
+    tx.grantAttributionScore.findUnique.mockResolvedValue({ ...SCORE, grantExternalId: OTHER, cwid: "t000002" });
+    tx.grantAttributionReview.create.mockResolvedValueOnce({ ...PENDING, id: "rev-opened", grantExternalId: OTHER });
+    const res = await POST(request({ grants: [OTHER], ids: ["rev-1"], decision: "confirm" }, STEWARD));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ decided: 2, reviews: { [OTHER]: "rev-opened" } });
+    expect(actions()).toEqual(["grant_attribution_confirm", "grant_attribution_confirm"]);
+    // Only the opened one says it came from a score.
+    const before = h.appendAuditRow.mock.calls.map(
+      (c) => (c[1] as { beforeValues: Record<string, unknown> }).beforeValues.opened_from_score ?? false,
+    );
+    expect(before).toEqual([false, true]);
+  });
+
+  it("validates a grants batch: no undo, no duplicates, capped with the ids", async () => {
+    expect((await POST(request({ grants: [ENTITY], decision: "undo" }, STEWARD))).status).toBe(400);
+    expect((await POST(request({ grants: [ENTITY, ENTITY], decision: "confirm" }, STEWARD))).status).toBe(400);
+    expect((await POST(request({ grants: [], decision: "confirm" }, STEWARD))).status).toBe(400);
+    const many = Array.from({ length: 30 }, (_, i) => `g-${i}`);
+    const ids = Array.from({ length: 21 }, (_, i) => `r-${i}`);
+    expect((await POST(request({ grants: many, ids, decision: "confirm" }, STEWARD))).status).toBe(400);
+  });
 });

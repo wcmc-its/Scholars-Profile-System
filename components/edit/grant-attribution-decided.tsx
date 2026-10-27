@@ -820,7 +820,8 @@ function GroupedTable({
   const TAB_NAME: Record<DecidedTab | "pending", string> = {
     confirmed: "in Confirmed",
     rejected: "in Not this person",
-    unproven: "in Unproven",
+    // Unproven awards are listed in To review now.
+    unproven: "to review, nothing found",
     pending: "to review",
   };
   return (

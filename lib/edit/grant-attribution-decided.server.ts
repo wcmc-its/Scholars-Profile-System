@@ -323,6 +323,7 @@ export async function loadDecidedPage(
     counts,
     changed: changedTotal,
     matched,
+    unprovenIds: entries.filter((e) => e.tab === "unproven").map((e) => e.grantId),
     rows: params.group ? [] : rows,
     groups: groups
       ? groups.map((g): DecidedGroup => {

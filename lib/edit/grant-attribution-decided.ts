@@ -241,4 +241,7 @@ export type DecidedPage = {
   matched: number;
   rows: DecidedRow[];
   groups: DecidedGroup[] | null;
+  /** Every Unproven award's grant externalId: the To review tab lists them
+   *  beside the pending reviews. */
+  unprovenIds: string[];
 };

@@ -95,7 +95,13 @@ export type GrantAttributionAward = {
 };
 
 export type GrantAttributionItem = {
+  /** The review id; for an Unproven award, which has no review, its grant externalId. */
   id: string;
+  /** The grant's externalId, `reporter:{cwid}:{core}`. */
+  grantId: string;
+  /** Unproven: the weekly check found nothing either way and opened no review.
+   *  A decision on it goes by grant. */
+  unproven: boolean;
   cwid: string;
   slug: string | null;
   /** The name as the profile renders it. */

@@ -456,6 +456,7 @@ const page = (over: Partial<DecidedPage> = {}): DecidedPage => ({
   matched: 1,
   rows: [ROW],
   groups: null,
+  unprovenIds: [],
   ...over,
 });
 
