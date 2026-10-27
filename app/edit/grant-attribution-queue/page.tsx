@@ -36,6 +36,7 @@ import {
 import {
   loadGrantAttributionQueue,
   loadGrantAttributionRuns,
+  loadUnprovenQueueItems,
 } from "@/lib/edit/grant-attribution-queue.server";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -48,21 +49,22 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-const TABS: ReadonlyArray<readonly ["pending" | DecidedTab, string]> = [
+/** Unproven awards are listed in To review, beside the pending reviews. */
+type PageTab = "pending" | Exclude<DecidedTab, "unproven">;
+
+const TABS: ReadonlyArray<readonly [PageTab, string]> = [
   ["pending", "To review"],
   ["confirmed", "Confirmed"],
   ["rejected", "Not this person"],
-  ["unproven", "Unproven"],
 ];
 
-const INTRO: Record<"pending" | DecidedTab, string> = {
-  pending: "Evidence is weak or points both ways. Each stays off the profile until a curator decides.",
+const INTRO: Record<PageTab, string> = {
+  pending:
+    "Evidence is weak, points both ways, or wasn't found. Each stays off the profile until a curator decides; an award with nothing found is checked again every week and moves to Confirmed on its own if evidence turns up.",
   confirmed:
     "On the profile. The weekly check can move an Auto-confirmed award if evidence against it turns up; curator confirmations never change on their own.",
   rejected:
     "Kept off the profile because evidence points to someone else. Curator rejections never change on their own.",
-  unproven:
-    "Nothing found either way. Kept off the profile and checked again every week; an award moves to Confirmed on its own if evidence turns up.",
 };
 
 export default async function GrantAttributionQueuePage({
@@ -91,7 +93,9 @@ export default async function GrantAttributionQueuePage({
   }
 
   const sp = await searchParams;
-  const tab = parseQueueTab(sp);
+  const parsed = parseQueueTab(sp);
+  // An old ?tab=unproven link lands on To review, where those awards now are.
+  const tab: PageTab = parsed === "unproven" ? "pending" : parsed;
   const params = parseDecidedParams(sp, tab === "pending" ? "confirmed" : tab);
   const runs = await loadGrantAttributionRuns(db.read, 2);
   // The sub-nav's other pills stay truthful on this page too.
@@ -109,8 +113,10 @@ export default async function GrantAttributionQueuePage({
     session,
     rawSession ? impersonationActive(rawSession, nowSeconds()) : false,
   );
+  const unproven = tab === "pending" ? await loadUnprovenQueueItems(db.read, decided.unprovenIds) : [];
   const run = runs[0] ?? null;
-  const count = (t: "pending" | DecidedTab) => (t === "pending" ? pending.length : decided.counts[t].all);
+  const toReview = pending.length + decided.counts.unproven.all;
+  const count = (t: PageTab) => (t === "pending" ? toReview : decided.counts[t].all);
   const fmt = (n: number) => n.toLocaleString("en-US");
 
   return (
@@ -202,7 +208,7 @@ export default async function GrantAttributionQueuePage({
       <p className="m-0 mb-4 text-[13.5px] text-[#3a3532]">{INTRO[tab]}</p>
 
       {tab === "pending" ? (
-        <GrantAttributionQueue pending={pending} readOnly={readOnly} />
+        <GrantAttributionQueue pending={[...pending, ...unproven]} readOnly={readOnly} />
       ) : (
         <DecidedAwards key={tab} page={decided} readOnly={readOnly} />
       )}
