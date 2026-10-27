@@ -8,6 +8,7 @@ import {
   ChevronLeftIcon,
   EyeIcon,
   FlaskConicalIcon,
+  HandCoinsIcon,
   type LucideIcon,
   UsersIcon,
 } from "lucide-react";
@@ -81,6 +82,7 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   methods: FlaskConicalIcon,
   units: Building2Icon,
   profiles: UsersIcon,
+  "grant-matcha": HandCoinsIcon,
 };
 
 /** Generational / degree suffixes that stay whole and aren't the surname. */
