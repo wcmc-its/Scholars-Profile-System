@@ -449,6 +449,19 @@ export function surnameRule(
   return null;
 }
 
+/** The record's public name shares neither a given name nor the surname with
+ *  the scholar: a coauthor's iD, never theirs (sfs2002 had three, 2026-10-26).
+ *  A record with no public name can't be judged and stays. Pure. */
+export function nameDisagrees(
+  facts: Pick<RecordFacts, "names" | "given" | "family">,
+  scholar: NamedScholar,
+): boolean {
+  if (facts.names.length === 0) return false;
+  return (
+    !givenNamesAgree(facts.names, scholar) && surnameRule(recordFamilyName(facts), scholar) === null
+  );
+}
+
 /** Given name (`givenNamesAgree`) AND surname (`surnamesAgree`). Pure. */
 export function nameAgrees(
   facts: Pick<RecordFacts, "names" | "given" | "family">,
@@ -740,6 +753,12 @@ export function assembleEvidence(args: {
   reciter?: Map<string, Map<string, ReciterAssertion>>;
 }): EvidenceRow[] {
   const key = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
+  // A coauthor's iD gets no row and is no rule-2 competitor. On-file iDs stay.
+  const pairs = args.pairs.filter((p) => {
+    const f = args.facts.get(p.orcid);
+    const s = args.scholars.get(p.cwid);
+    return args.onFile.has(key(p.cwid, p.orcid)) || !f || !s || !nameDisagrees(f, s);
+  });
   const reciter = args.reciter ? withReciterAccepted(args.works, args.reciter) : null;
   const works = reciter?.works ?? args.works;
   // The record as this scholar sees it: works with no id matched to the
@@ -770,20 +789,20 @@ export function assembleEvidence(args: {
     return out;
   };
   const shared = new Map<string, number>();
-  for (const p of args.pairs) {
+  for (const p of pairs) {
     const f = factsFor(p.cwid, p.orcid);
     if (f) shared.set(key(p.cwid, p.orcid), sharedPapers(f.workIds, works.get(p.cwid)).size);
   }
   const byCwid = new Map<string, string[]>();
   const byOrcid = new Map<string, string[]>();
-  for (const p of args.pairs) {
+  for (const p of pairs) {
     byCwid.set(p.cwid, [...(byCwid.get(p.cwid) ?? []), p.orcid]);
     byOrcid.set(p.orcid, [...(byOrcid.get(p.orcid) ?? []), p.cwid]);
   }
   const index = buildNameIndex(args.active);
 
   const rows: EvidenceRow[] = [];
-  for (const p of args.pairs) {
+  for (const p of pairs) {
     if (args.onFile.has(key(p.cwid, p.orcid))) continue;
     const record = args.facts.get(p.orcid);
     const s = args.scholars.get(p.cwid);

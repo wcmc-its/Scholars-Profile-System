@@ -596,6 +596,60 @@ export async function loadOrcidQueue(
   return { summaries, filter };
 }
 
+/** The public name on an ORCID record (credit name, else given + family), or
+ *  null: private, or pub.orcid.org didn't answer in 3s. Never throws. The on-file
+ *  iD has no evidence row (the ETL scores candidates only), so it's read live. */
+export async function fetchOrcidName(orcid: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://pub.orcid.org/v3.0/${orcid}/personal-details`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const n = (
+      (await res.json()) as {
+        name?: {
+          "credit-name"?: { value?: string } | null;
+          "given-names"?: { value?: string } | null;
+          "family-name"?: { value?: string } | null;
+        } | null;
+      }
+    ).name;
+    const full = [n?.["given-names"]?.value, n?.["family-name"]?.value].filter(Boolean).join(" ");
+    return n?.["credit-name"]?.value?.trim() || full.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Unassigned scholars (no decision yet), for the Queues menu pill. Memoized
+ *  5 min like the Titles pill (a full queue load); null on failure, never throws. */
+const ORCID_PENDING_TTL_MS = 5 * 60 * 1000;
+let pendingMemo: { value: number; at: number } | null = null;
+let pendingInFlight: Promise<number> | null = null;
+export async function countOrcidQueueUnassigned(client: Client): Promise<number | null> {
+  const now = Date.now();
+  if (pendingMemo && now - pendingMemo.at < ORCID_PENDING_TTL_MS) return pendingMemo.value;
+  const p = (pendingInFlight ??= loadOrcidQueue(client).then(
+    (d) => d.summaries.filter((s) => !s.autoConfirmed).length,
+  ));
+  try {
+    const value = await p;
+    pendingMemo = { value, at: now };
+    return value;
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "orcid_queue_pending_count_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return null;
+  } finally {
+    if (pendingInFlight === p) pendingInFlight = null;
+  }
+}
+
 const ON_FILE_HOWS: readonly string[] = [
   "self",
   "proxy",
@@ -620,7 +674,8 @@ export async function loadOrcidQueueCard(
   const ps = pairsByScholar(st, autoConfirmed).get(cwid);
   if (!ps || ps.length === 0) return null;
 
-  const [details, me, reciterTotal] = await Promise.all([
+  const onFileGuess = ps.find((p) => p.onFile)?.onFile ?? null;
+  const [details, me, reciterTotal, onFileName] = await Promise.all([
     client.orcidCandidateEvidence.findMany({ where: { cwid } }),
     client.scholar.findUnique({
       where: { cwid },
@@ -633,6 +688,7 @@ export async function loadOrcidQueueCard(
       },
     }),
     client.publicationAuthor.count({ where: { cwid, isConfirmed: true } }),
+    onFileGuess ? fetchOrcidName(onFileGuess) : Promise.resolve(null),
   ]);
   const detailBy = new Map(details.map((d) => [d.orcid, d]));
   const onFileOrcid = ps.find((p) => p.onFile)?.onFile ?? me?.orcid ?? null;
@@ -666,6 +722,7 @@ export async function loadOrcidQueueCard(
       at: fromScholar ? (me?.orcidConfirmedAt?.toISOString() ?? null) : null,
       by,
       byName: by && by !== "ETL" ? publishedName(named.get(by), by) : null,
+      name: onFileOrcid === onFileGuess ? onFileName : await fetchOrcidName(onFileOrcid),
     };
   }
 

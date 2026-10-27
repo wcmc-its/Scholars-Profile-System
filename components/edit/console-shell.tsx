@@ -9,6 +9,7 @@ import {
 } from "@/lib/edit/news-queue";
 import { countTitlesNeedingReview } from "@/lib/edit/titles-queue";
 import { countPendingGrantAttribution } from "@/lib/edit/grant-attribution-queue.server";
+import { countOrcidQueueUnassigned } from "@/lib/edit/orcid-queue.server";
 import type { EditSession } from "@/lib/auth/superuser";
 
 /**
@@ -90,9 +91,10 @@ export async function ConsoleShell({
     : pendingGrantAttribution !== undefined
       ? pendingGrantAttribution
       : await countPendingGrantAttribution(db.read).catch(() => null);
-  const [newsPill, clipsPill] = await Promise.all([
+  const [newsPill, clipsPill, orcidPill] = await Promise.all([
     tabs.news && isNewsQueueEnabled() ? countPendingNews(db.read, "newsroom") : null,
     tabs.news && isMediaHighlightsQueueEnabled() ? countPendingNews(db.read, "clips") : null,
+    tabs.orcidQueue ? countOrcidQueueUnassigned(db.read) : null,
   ]);
   return (
     <div className="bg-apollo-page min-h-screen">
@@ -128,13 +130,18 @@ export async function ConsoleShell({
           usageTab={tabs.usage}
           orcidCoverageTab={tabs.orcidCoverage}
           orcidQueueTab={tabs.orcidQueue}
+          pendingOrcidQueue={orcidPill}
           coiTab={tabs.coi}
           activityTab={tabs.activity}
           etlStatusTab={tabs.etlStatus}
           viewerCanUseMatcha={session.isDeveloper === true || session.isObserver === true}
         />
       </ConsoleTopBar>
-      <main id="console-main" tabIndex={-1} className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+      <main
+        id="console-main"
+        tabIndex={-1}
+        className="mx-auto max-w-[var(--max-content)] px-6 py-8"
+      >
         {session.isObserver ? (
           <p
             role="note"
