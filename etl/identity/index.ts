@@ -67,7 +67,7 @@ const BATCH = 500;
  *  final check digit. Matches the bare-id form we store (no protocol/host). */
 const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 
-type IdentityRow = {
+export type IdentityRow = {
   uid?: string;
   identity?: { orcid?: string | null } | null;
 };
@@ -141,6 +141,30 @@ export function decideIdentityRow(
   return { kind: "candidate", cwid: current.cwid ?? cwid, orcid };
 }
 
+/** Every Identity item carrying a string ORCID (`IDENTITY_ORCID_SCAN`). Shared with
+ *  `demote-legacy.ts`. */
+export async function scanIdentityOrcids(): Promise<IdentityRow[]> {
+  const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
+  console.log(`Scanning ${TABLE} for records with non-null orcid...`);
+  const rows: IdentityRow[] = [];
+  let lastKey: Record<string, unknown> | undefined;
+  do {
+    const resp = await ddb.send(
+      new ScanCommand({
+        TableName: TABLE,
+        // Server-side filter: only rows carrying a string ORCID (most carry a typed
+        // NULL), and only the two attributes read below.
+        ...IDENTITY_ORCID_SCAN,
+        ExclusiveStartKey: lastKey,
+      }),
+    );
+    for (const it of (resp.Items ?? []) as IdentityRow[]) rows.push(it);
+    lastKey = resp.LastEvaluatedKey;
+  } while (lastKey);
+  console.log(`Identity scan returned ${rows.length} record(s) with an ORCID.`);
+  return rows;
+}
+
 async function main() {
   const start = Date.now();
   const run = await db.write.etlRun.create({
@@ -148,25 +172,7 @@ async function main() {
   });
 
   try {
-    const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
-
-    console.log(`Scanning ${TABLE} for records with non-null orcid...`);
-    const rows: IdentityRow[] = [];
-    let lastKey: Record<string, unknown> | undefined;
-    do {
-      const resp = await ddb.send(
-        new ScanCommand({
-          TableName: TABLE,
-          // Server-side filter: only rows carrying a string ORCID (most carry a typed
-          // NULL), and only the two attributes read below.
-          ...IDENTITY_ORCID_SCAN,
-          ExclusiveStartKey: lastKey,
-        }),
-      );
-      for (const it of (resp.Items ?? []) as IdentityRow[]) rows.push(it);
-      lastKey = resp.LastEvaluatedKey;
-    } while (lastKey);
-    console.log(`Identity scan returned ${rows.length} record(s) with an ORCID.`);
+    const rows = await scanIdentityOrcids();
     // Fail loud rather than wipe the `identity` candidates: an empty scan is an outage.
     if (rows.length === 0) throw new Error("0 Identity rows with an ORCID — refusing to mirror");
 
