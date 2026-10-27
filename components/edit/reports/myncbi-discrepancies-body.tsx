@@ -24,6 +24,7 @@ import {
   MYNCBI_DISCREPANCY_SHOW,
   MYNCBI_DISCREPANCY_SHOW_LABEL,
   MYNCBI_EXTRA_TITLE_CAP,
+  MYNCBI_SUSPECT_OVERLAP,
   loadMyncbiDiscrepancyReport,
   parseMyncbiDiscrepancyParams,
   type CitationItem,
@@ -37,6 +38,9 @@ const RADIO_INPUT = "accent-apollo-maroon size-4";
 const SEARCH =
   "border-apollo-border-strong bg-apollo-surface h-[34px] w-full rounded-md border px-2.5 text-sm";
 const LINK = "hover:underline";
+const FLAG = "bg-apollo-surface-2 border-apollo-border-strong rounded-full border px-2 py-0.5 text-[12px]";
+/** A missing list this short renders open; longer ones start collapsed. */
+const OPEN_MAX = 10;
 const fmt = (n: number) => n.toLocaleString("en-US");
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" });
@@ -73,6 +77,11 @@ function ScholarBlock({ s, curateBase }: { s: MyncbiDiscrepancyScholar; curateBa
         <a href={s.url} target="_blank" rel="noreferrer" className={`${LINK} text-[13px]`}>
           MyNCBI bibliography
         </a>
+        {s.suspect && (
+          <span className={FLAG}>
+            Only {Math.round((100 * s.matched) / s.listed)}% of this list is on the profile. It may be someone else&apos;s.
+          </span>
+        )}
         {curate && (
           <a href={curate} target="_blank" rel="noreferrer" className={`${LINK} text-[13px]`}>
             Curate in Publication Manager
@@ -83,12 +92,12 @@ function ScholarBlock({ s, curateBase }: { s: MyncbiDiscrepancyScholar; curateBa
         {fmt(s.listed)} PubMed citations on the list, {fmt(s.matched)} confirmed on the profile · fetched {day(s.fetchedAt)}
       </p>
       {s.missing.length > 0 && (
-        <div className="mt-2">
-          <div className="text-xs font-semibold tracking-[0.08em] uppercase">
+        <details className="mt-2" open={!s.suspect && s.missing.length <= OPEN_MAX}>
+          <summary className="cursor-pointer text-xs font-semibold tracking-[0.08em] uppercase hover:underline">
             On the list, not confirmed on the profile ({fmt(s.missing.length)})
-          </div>
+          </summary>
           <Citations items={s.missing} />
-        </div>
+        </details>
       )}
       {s.extraCount > 0 && (
         <details className="mt-2">
@@ -173,6 +182,7 @@ export async function renderMyncbiDiscrepanciesReport({
               { value: fmt(r.totals.matched), label: "confirmed on profiles" },
               { value: fmt(r.totals.missing), label: "missing from profiles" },
               { value: fmt(r.totals.withMissing), label: "scholars missing any" },
+              { value: fmt(r.totals.suspect), label: "lists that may be someone else's" },
             ]}
           />
           <div className="mt-5" data-testid="myncbi-discrepancy-list">
@@ -189,7 +199,9 @@ export async function renderMyncbiDiscrepanciesReport({
             </p>
           )}
           <p className="text-muted-foreground mt-4 text-[12px]">
-            Citations without a PMID are not compared. &ldquo;On the profile, not on the list&rdquo; is weaker evidence:
+            Citations without a PMID are not compared. A list with under{" "}
+            {Math.round(100 * MYNCBI_SUSPECT_OVERLAP)}% of its PubMed citations on the profile is set aside as possibly
+            someone else&apos;s and left out of the missing totals. &ldquo;On the profile, not on the list&rdquo; is weaker evidence:
             many people do not keep their MyNCBI list current. Up to {MYNCBI_EXTRA_TITLE_CAP} are titled per scholar.
           </p>
         </ReportCard>

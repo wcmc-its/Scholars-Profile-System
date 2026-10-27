@@ -11,6 +11,10 @@
  *    curate their MyNCBI list.
  * Citations without a PMID (books, reports) are not compared.
  *
+ * A list that barely overlaps the profile (`suspect`) is most likely someone
+ * else's — a co-investigator's link picked up with the biosketch. Those sit in
+ * their own view and stay out of the missing totals.
+ *
  * Read-only.
  */
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
@@ -30,11 +34,16 @@ type Client = Pick<
 export const MYNCBI_DISCREPANCY_LIST_CAP = 300;
 /** "On profile, not on list" items titled per scholar; the count is always whole. */
 export const MYNCBI_EXTRA_TITLE_CAP = 25;
+/** Below this share of listed PMIDs confirmed on the profile, the list is suspect. */
+export const MYNCBI_SUSPECT_OVERLAP = 0.2;
+/** Lists shorter than this are never suspect: too few PMIDs to judge. */
+export const MYNCBI_SUSPECT_MIN_LISTED = 5;
 
-export const MYNCBI_DISCREPANCY_SHOW = ["missing", "all"] as const;
+export const MYNCBI_DISCREPANCY_SHOW = ["missing", "suspect", "all"] as const;
 export type MyncbiDiscrepancyShow = (typeof MYNCBI_DISCREPANCY_SHOW)[number];
 export const MYNCBI_DISCREPANCY_SHOW_LABEL: Record<MyncbiDiscrepancyShow, string> = {
   missing: "Missing from profile",
+  suspect: "List may be someone else's",
   all: "Everyone with a bibliography",
 };
 
@@ -66,6 +75,8 @@ export type MyncbiDiscrepancyScholar = {
   /** PMIDs on the list (citations without one are not compared). */
   listed: number;
   matched: number;
+  /** Too little of the list is on the profile to trust it as theirs. */
+  suspect: boolean;
   missing: CitationItem[];
   extraCount: number;
   /** Newest first, at most MYNCBI_EXTRA_TITLE_CAP; filled for listed scholars only. */
@@ -73,11 +84,24 @@ export type MyncbiDiscrepancyScholar = {
 };
 
 export type MyncbiDiscrepancyReport = {
-  totals: { scholars: number; listed: number; matched: number; missing: number; withMissing: number; extra: number };
+  /** `missing` / `withMissing` leave suspect lists out; `suspect` counts them. */
+  totals: {
+    scholars: number;
+    listed: number;
+    matched: number;
+    missing: number;
+    withMissing: number;
+    suspect: number;
+    extra: number;
+  };
   scholars: MyncbiDiscrepancyScholar[];
   /** Matching scholars before the list cap. */
   matched: number;
 };
+
+/** Pure: whether a list overlaps the profile too little to be theirs. */
+export const isSuspectList = (listed: number, matched: number) =>
+  listed >= MYNCBI_SUSPECT_MIN_LISTED && matched / listed < MYNCBI_SUSPECT_OVERLAP;
 
 /** Pure: one scholar's list vs their confirmed PMIDs. Missing sorted newest first. */
 export function compareBibliography(
@@ -151,6 +175,7 @@ export async function loadMyncbiDiscrepancyReport(
       fetchedAt: b.fetchedAt.toISOString(),
       listed: cmp.listed,
       matched: cmp.matched,
+      suspect: isSuspectList(cmp.listed, cmp.matched),
       missing: cmp.missing,
       extraCount: cmp.extraPmids.length,
       extraPmids: cmp.extraPmids,
@@ -158,7 +183,13 @@ export async function loadMyncbiDiscrepancyReport(
   });
   // Most missing first: that is where the curation work is.
   all.sort((a, b) => b.missing.length - a.missing.length || a.name.localeCompare(b.name));
-  const matching = p.show === "missing" ? all.filter((s) => s.missing.length > 0) : all;
+  const trusted = all.filter((s) => !s.suspect);
+  const matching =
+    p.show === "missing"
+      ? trusted.filter((s) => s.missing.length > 0)
+      : p.show === "suspect"
+        ? all.filter((s) => s.suspect)
+        : all;
   const shown = matching.slice(0, MYNCBI_DISCREPANCY_LIST_CAP);
 
   // Titles for the "not on list" side, shown scholars only, newest first.
@@ -173,8 +204,9 @@ export async function loadMyncbiDiscrepancyReport(
       scholars: all.length,
       listed: all.reduce((n, s) => n + s.listed, 0),
       matched: all.reduce((n, s) => n + s.matched, 0),
-      missing: all.reduce((n, s) => n + s.missing.length, 0),
-      withMissing: all.filter((s) => s.missing.length > 0).length,
+      missing: trusted.reduce((n, s) => n + s.missing.length, 0),
+      withMissing: trusted.filter((s) => s.missing.length > 0).length,
+      suspect: all.length - trusted.length,
       extra: all.reduce((n, s) => n + s.extraCount, 0),
     },
     scholars: shown.map(({ extraPmids, ...s }) => ({
