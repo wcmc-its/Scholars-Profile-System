@@ -748,6 +748,9 @@ function ScholarDetail({
                 >
                   {card.onFile.orcid}
                 </a>
+                <span className={card.onFile.name ? undefined : "text-muted-foreground"}>
+                  · {card.onFile.name ?? "Name not public"}
+                </span>
               </span>
               <span className="text-muted-foreground text-[12.5px]">
                 {onFileProvenance(card.onFile)}
@@ -995,11 +998,27 @@ function CandidateRow({
       className={cn("border-apollo-border border-b", isOpen && "bg-apollo-surface-2")}
       data-testid={`orcid-queue-row-${r.cwid}-${r.orcid}`}
     >
-      <button
-        type="button"
-        onClick={onToggle}
+      {/* A div, not a <button>: the iD inside is a link people click and copy. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          // Selecting text to copy it shouldn't toggle the row.
+          if (!window.getSelection()?.isCollapsed) return;
+          if ((e.target as HTMLElement).closest("a")) return;
+          onToggle();
+        }}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          onToggle();
+        }}
         aria-expanded={isOpen}
-        className={cn(GRID, "w-full py-3.5 text-left text-[13.5px]", struck && "opacity-55")}
+        className={cn(
+          GRID,
+          "w-full cursor-pointer py-3.5 text-left text-[13.5px]",
+          struck && "opacity-55",
+        )}
       >
         <ChevronRight
           className={cn(
@@ -1009,9 +1028,18 @@ function CandidateRow({
           aria-hidden
         />
         <span className="flex flex-col gap-0.5">
-          <span className={cn(MONO, "text-[13px]", outcome === "dismissed" && "line-through")}>
+          <a
+            href={`${ORCID_URL_PREFIX}${r.orcid}`}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              MONO,
+              "w-fit text-[13px] hover:underline",
+              outcome === "dismissed" && "line-through",
+            )}
+          >
             {r.orcid}
-          </span>
+          </a>
           {isBest && pending ? (
             <span className="text-apollo-slate text-[11.5px] font-semibold">Best match</span>
           ) : null}
@@ -1102,7 +1130,7 @@ function CandidateRow({
             </span>
           ) : null}
         </span>
-      </button>
+      </div>
 
       {isOpen ? (
         <div className="flex flex-col gap-4 px-4 pt-1 pb-5 sm:pl-[52px]">
@@ -1208,10 +1236,19 @@ function CompetitorCallout({
         return (
           <WhoRow
             key={o.orcid}
-            primary={<span className={MONO}>{o.orcid}</span>}
+            primary={
+              <a
+                href={`${ORCID_URL_PREFIX}${o.orcid}`}
+                target="_blank"
+                rel="noreferrer"
+                className={cn(MONO, "hover:underline")}
+              >
+                {o.orcid}
+              </a>
+            }
             meta={
               onFile
-                ? "On file now for this scholar"
+                ? `On file now for this scholar · ${card.onFile?.name ?? "name not public"}`
                 : c
                   ? `Candidate ${i + 1} · ${ORCID_QUEUE_BAND_LABEL[c.band]} · ${fmt(c.shared)} of ${fmt(c.worksTotal)} shared`
                   : o.shared === null

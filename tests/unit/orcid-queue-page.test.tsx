@@ -622,8 +622,26 @@ describe("loaders", () => {
 
   it("the card: the iD on file and where it came from (WCM Identity; the ETL's email confirm)", async () => {
     const { loadOrcidQueueCard } = await actual();
+    // The on-file iD's public name is read live from pub.orcid.org.
+    const orcidApi = vi.fn(async (url: string) =>
+      url.endsWith(`${OTHER}/personal-details`)
+        ? new Response(
+            JSON.stringify({
+              name: { "given-names": { value: "Cara" }, "family-name": { value: "Dee" } },
+            }),
+          )
+        : new Response(null, { status: 404 }),
+    );
+    vi.stubGlobal("fetch", orcidApi);
     const c = (await loadOrcidQueueCard(client(), "c00001"))!;
-    expect(c.onFile).toEqual({ orcid: OTHER, how: "identity", at: null, by: null, byName: null });
+    expect(c.onFile).toEqual({
+      orcid: OTHER,
+      how: "identity",
+      at: null,
+      by: null,
+      byName: null,
+      name: "Cara Dee",
+    });
     expect(c.candidates[0]).toMatchObject({ state: "conflict", onFileOrcid: OTHER });
     const e = (await loadOrcidQueueCard(client(), "e00001"))!;
     expect(e.onFile).toMatchObject({
@@ -631,6 +649,7 @@ describe("loaders", () => {
       how: "email_verified",
       by: "ETL",
       byName: null,
+      name: null,
     });
     expect(e.candidates).toEqual([
       expect.objectContaining({ autoConfirmed: true, state: "auto_confirmed" }),
@@ -1053,6 +1072,7 @@ describe("client", () => {
           at: "2026-03-12T15:00:00Z",
           by: "dw0002",
           byName: "Dana Whit",
+          name: "Cara Dee",
         },
       },
       [{ ...ROW, state: "conflict", onFileOrcid: OTHER }],
@@ -1062,6 +1082,12 @@ describe("client", () => {
     expect(screen.getByTestId("orcid-queue-on-file").textContent).toContain(
       "Confirmed by a librarian (Dana Whit dw0002) on Mar 12, 2026",
     );
+    // The on-file iD's name, to compare against the candidate's; both iDs link out.
+    expect(screen.getByTestId("orcid-queue-on-file").textContent).toContain("Cara Dee");
+    const row = screen.getByTestId(`orcid-queue-row-jd0001-${ROW.orcid}`);
+    expect(within(row).getByRole("link", { name: ROW.orcid }).getAttribute("href")).toContain(
+      ROW.orcid,
+    );
     expect(screen.getByTestId("orcid-queue-confirm").textContent).toBe("Replace with this iD");
     fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
     await vi.waitFor(() => expect(posts()).toHaveLength(1));
@@ -1070,7 +1096,16 @@ describe("client", () => {
 
   it("Unassigned is the default: an email auto-confirmed scholar shows once the Decision pill is removed, with Undo", async () => {
     const auto = CARD(
-      { onFile: { orcid: ORCID, how: "email_verified", at: null, by: "ETL", byName: null } },
+      {
+        onFile: {
+          orcid: ORCID,
+          how: "email_verified",
+          at: null,
+          by: "ETL",
+          byName: null,
+          name: null,
+        },
+      },
       [
         {
           ...ROW,

@@ -39,6 +39,7 @@ import {
   recordFamilyName,
   surnamesAgree,
   type BandInput,
+  nameDisagrees,
 } from "@/etl/orcid-evidence/index";
 import { indexScholarWorks } from "@/etl/orcid-registry/index";
 import type { ExternalId, RecordResponse } from "@/etl/orcid-registry/orcid-api";
@@ -324,6 +325,27 @@ describe("recordFacts + the per-pair evidence", () => {
       active: [JANE],
     });
     expect(onFile).toEqual([]);
+  });
+
+  it("a coauthor's iD (neither given name nor surname agrees) gets no row and is no rule-2 competitor", () => {
+    const coauthor = { ...f, names: ["francesco soria"], given: "Francesco", family: "Soria" };
+    const rows = assembleEvidence({
+      pairs: [
+        { cwid: "jd0001", orcid: ORCID },
+        { cwid: "jd0001", orcid: ORCID_2 },
+      ],
+      onFile: new Set(),
+      facts: new Map([
+        [ORCID, f],
+        [ORCID_2, coauthor],
+      ]),
+      scholars: new Map([["jd0001", JANE]]),
+      works: indexScholarWorks(JANE_PAPERS),
+      active: [JANE],
+    });
+    expect(rows.map((r) => r.orcid)).toEqual([ORCID]);
+    expect(rows[0].competitor).toBe(false);
+    expect(nameDisagrees({ names: [], given: null, family: null }, JANE)).toBe(false);
   });
 });
 

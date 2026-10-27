@@ -374,6 +374,9 @@ export type OrcidOnFile = {
   /** Who confirmed it: a cwid, or "ETL". */
   by: string | null;
   byName: string | null;
+  /** The public name on the iD's ORCID record, read live; null when it is
+   *  private or ORCID didn't answer. */
+  name: string | null;
 };
 
 /** One scholar and every candidate iD for them, best first (v2 item 5). */
