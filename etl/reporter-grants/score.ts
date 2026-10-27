@@ -58,7 +58,8 @@ export type CueId =
   | "profile_proven"
   | "name_rare"
   | "name_common"
-  | "pi_name_mismatch";
+  | "pi_name_mismatch"
+  | "pi_given_name_mismatch";
 
 export interface CueHit {
   id: CueId;
@@ -158,6 +159,12 @@ export const WEIGHTS = {
    *  override, because people change surnames: with a strong tie the other way
    *  it queues (rule 2). Staging 2026-10-25: 102 awards, 11 scholars, 60 shown. */
   pi_name_mismatch: -5,
+  /** RePORTER's PI on our NIH profile shares the scholar's surname but not a
+   *  first name (`piGivenNameConflicts`): a relative or a namesake, e.g. a
+   *  spouse whose co-authored papers also cite the awards. Same weight and
+   *  effect as pi_name_mismatch. Staging 2026-10-27: 10 scholar/PI pairs, 11
+   *  shown awards. */
+  pi_given_name_mismatch: -5,
 } as const satisfies Record<CueId, number>;
 
 /** NIH PI profiles sharing the scholar's name at or above which it is common
@@ -260,6 +267,10 @@ export interface AttributionEvidence {
    *  (`piSurnameMatches`). null ⇒ no PI name to compare. Absent in older
    *  callers. */
   piSurnameMatches?: boolean | null;
+  /** Whether that PI, with the scholar's surname, has a first name the
+   *  scholar's names rule out (`piGivenNameConflicts`). null ⇒ not compared.
+   *  Absent in older callers. */
+  piGivenNameConflicts?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -473,6 +484,44 @@ export function piSurnameMatches(
   const ours = new Set(scholarNames.flatMap((n) => (n ? nameWords(n.split(",")[0]!) : [])));
   if (surname.length === 0 || ours.size === 0) return null;
   return surname.some((w) => ours.has(w));
+}
+
+/**
+ * Whether RePORTER's PI name, which carries the scholar's surname, has a first
+ * name the scholar's names rule out: they share no other full word, no name
+ * word contains another (Beth in Elizabeth), and RePORTER's first given
+ * initial starts none of the scholar's words. Lenient on purpose: a middle
+ * name in use ("R. Brad Jones", "Maria Virginia Pascual") shares a full word,
+ * and an initial-only first name rarely conflicts. null ⇒ the surnames don't
+ * match or there is nothing to compare. Pure.
+ */
+export function piGivenNameConflicts(
+  piName: string | null | undefined,
+  scholarNames: ReadonlyArray<string | null | undefined>,
+): boolean | null {
+  if (piSurnameMatches(piName, scholarNames) !== true) return null;
+  const raw = (piName ?? "").trim();
+  const words = (n: string) =>
+    n
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .split(/[\s,.\-']+/)
+      .map((w) => w.replace(/[^a-z]/g, ""))
+      .filter((w) => w.length > 0);
+  const theirs = words(raw);
+  const ours = new Set(scholarNames.flatMap((n) => (n ? words(n) : [])));
+  const first = (raw.includes(",") ? words(raw.split(",")[1] ?? "") : theirs)[0];
+  if (!first || ours.size === 0) return null;
+  // The surname is one shared full word; a second one is a given name.
+  if (theirs.filter((w) => w.length >= 2 && ours.has(w)).length >= 2) return false;
+  for (const x of theirs)
+    for (const y of ours)
+      if (x !== y && x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x))) return false;
+  // Initials of the scholar's given names only: the shared surname's would
+  // pass a "Charles Choi" for a "Mary Choi".
+  for (const y of ours) if (!(y.length >= 2 && theirs.includes(y)) && y[0] === first[0]) return false;
+  return true;
 }
 
 /**
@@ -721,10 +770,15 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
   if (e.priorInstitution) {
     add("prior_institution", `Held at an institution the scholar trained at (${e.priorInstitution})`);
   }
-  const piMismatch = e.piSurnameMatches === false;
-  if (piMismatch) {
+  const surnameMismatch = e.piSurnameMatches === false;
+  if (surnameMismatch) {
     add("pi_name_mismatch", "The NIH profile's PI has a different surname from the scholar");
   }
+  const givenMismatch = !surnameMismatch && e.piGivenNameConflicts === true;
+  if (givenMismatch) {
+    add("pi_given_name_mismatch", "The NIH profile's PI has the scholar's surname but a different first name");
+  }
+  const piMismatch = surnameMismatch || givenMismatch;
   // A profile that is not the scholar's vouches for nothing.
   if (!piMismatch && e.profileProven?.kind === "matched") {
     add("profile_proven", "The award is on the scholar's NIH profile that was matched by their publications");

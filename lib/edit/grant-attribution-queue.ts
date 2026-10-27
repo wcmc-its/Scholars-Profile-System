@@ -209,6 +209,7 @@ export const CUE_LABELS: Readonly<Record<string, string>> = {
   name_rare: "Rare name",
   name_common: "Common name",
   pi_name_mismatch: "PI has a different surname",
+  pi_given_name_mismatch: "PI has a different first name",
 };
 
 export function cueLabel(id: string): string {
@@ -373,6 +374,11 @@ export const EVIDENCE_ROWS: ReadonlyArray<{
   {
     ids: ["pi_name_mismatch"],
     label: "The NIH profile's PI has a different surname",
+    toward: false,
+  },
+  {
+    ids: ["pi_given_name_mismatch"],
+    label: "The NIH profile's PI has the scholar's surname but a different first name",
     toward: false,
   },
 ];

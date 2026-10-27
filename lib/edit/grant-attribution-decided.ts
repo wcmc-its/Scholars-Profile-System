@@ -186,7 +186,8 @@ export function checkedNothingFound(cueIds: ReadonlySet<string>): string[] {
   if (!cueIds.has("timeline_impossible") && !cueIds.has("timeline_unlikely"))
     out.push("The award fits the scholar's career stage");
   if (!cueIds.has("middle_initial_conflict")) out.push("No middle-initial conflict");
-  if (!cueIds.has("pi_name_mismatch")) out.push("The NIH profile's PI has the scholar's surname");
+  if (!cueIds.has("pi_name_mismatch") && !cueIds.has("pi_given_name_mismatch"))
+    out.push("The NIH profile's PI has the scholar's name");
   return out;
 }
 
