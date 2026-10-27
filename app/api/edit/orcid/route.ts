@@ -24,6 +24,7 @@
  *    `etl:orcid-push` clear it from Identity, `etl:identity` not re-offer it as a
  *    candidate, and the `orcid_candidate` readers (`withoutDismissed`) drop any
  *    mirror row for it.
+ *  Either way an `orcid_authentication` row (#3115) for any other iD is deleted.
  *  Plus the B03 audit row, same transaction.
  *
  * Gated by `SELF_EDIT_ORCID_SUGGESTION` (404 when off) — one kill switch for the
@@ -127,6 +128,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       } else {
         await tx.orcidDismissal.deleteMany({ where: { cwid: scholar.cwid, orcid } });
       }
+      // An ORCID sign-in (#3115) vouches only for the iD it returned; Remove or a
+      // change to a different iD drops it, token included.
+      await tx.orcidAuthentication.deleteMany({
+        where: { cwid: scholar.cwid, ...(orcid === null ? {} : { orcid: { not: orcid } }) },
+      });
       for (const d of toDismiss) {
         await tx.orcidDismissal.upsert({
           where: { cwid_orcid: { cwid: scholar.cwid, orcid: d } },

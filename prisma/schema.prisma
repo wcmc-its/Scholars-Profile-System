@@ -133,8 +133,9 @@ model Scholar {
   orcidConfirmedAt        DateTime? @map("orcid_confirmed_at")
   /// Who confirmed `orcid`: `self` | `proxy` (`POST /api/edit/orcid`, the real
   /// actor is or is not the scholar), `librarian` (`/edit/orcid-queue`) or
-  /// `email_verified` (etl/orcid-evidence's auto-confirm). `authenticated` is
-  /// reserved for #3115. Null = the iD came from WCM Identity, or none on file.
+  /// `email_verified` (etl/orcid-evidence's auto-confirm), or `authenticated`
+  /// (the scholar signed in to ORCID, #3115; see `OrcidAuthentication`). Null =
+  /// the iD came from WCM Identity, or none on file.
   /// Cleared with `orcid` on Remove and by the identity ETL's conflict rule.
   orcidConfirmMethod      String?   @map("orcid_confirm_method") @db.VarChar(16)
   /// The real actor's cwid for `self` / `proxy` / `librarian` (never an
@@ -184,6 +185,7 @@ model Scholar {
   nihProfiles          PersonNihProfile[]
   orcidCandidates      OrcidCandidate[]
   orcidDismissals      OrcidDismissal[]
+  orcidAuthentication  OrcidAuthentication?
   orcidEvidence        OrcidCandidateEvidence[]
   orcidQueueSamples    OrcidQueueSample[]
   reporterCandidates   ReporterProfileCandidate[]
@@ -1006,6 +1008,27 @@ model OrcidDismissal {
 
   @@id([cwid, orcid])
   @@map("orcid_dismissal")
+}
+
+/// #3115 — the scholar proved they own `orcid` by signing in to ORCID
+/// (`/authenticate` scope, `/api/edit/orcid/connect` → `/callback`). One row per
+/// scholar, replaced on re-connect, deleted with the iD on Remove. ORCID's member
+/// minimum requires storing the name, iD and token; the token is AES-256-GCM
+/// encrypted (`lib/edit/orcid-connect.ts`) and nothing reads it back.
+model OrcidAuthentication {
+  cwid            String    @id @db.VarChar(32)
+  scholar         Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid           String    @db.VarChar(19)
+  /// The name ORCID returned with the token (may be empty when private).
+  name            String?   @db.VarChar(255)
+  accessTokenEnc  String    @map("access_token_enc") @db.VarChar(512)
+  scope           String    @db.VarChar(64)
+  expiresAt       DateTime? @map("expires_at")
+  /// true = issued by sandbox.orcid.org (staging); never pushed to Identity.
+  sandbox         Boolean
+  authenticatedAt DateTime  @default(now()) @map("authenticated_at")
+
+  @@map("orcid_authentication")
 }
 
 /// The evidence behind each ORCID candidate pair, for the librarian queue

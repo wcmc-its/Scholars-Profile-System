@@ -765,6 +765,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_CONNECT",
+                "Value": "off",
+              },
+              {
+                "Name": "ORCID_CONNECT_BASE",
+                "Value": "https://orcid.org",
+              },
+              {
                 "Name": "SELF_EDIT_PROFILE_LINKS",
                 "Value": "on",
               },
@@ -5750,6 +5758,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_ORCID_SUGGESTION",
                 "Value": "on",
+              },
+              {
+                "Name": "ORCID_CONNECT",
+                "Value": "off",
+              },
+              {
+                "Name": "ORCID_CONNECT_BASE",
+                "Value": "https://sandbox.orcid.org",
               },
               {
                 "Name": "SELF_EDIT_PROFILE_LINKS",

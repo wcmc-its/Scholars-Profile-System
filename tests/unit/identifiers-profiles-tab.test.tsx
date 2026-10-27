@@ -321,6 +321,40 @@ describe("OrcidCard", () => {
   });
 });
 
+describe("OrcidCard — Connect your ORCID iD (#3115)", () => {
+  const ID = "0000-0002-1825-0097";
+  const base = { cwid: "self01", mode: "self" as const, scholarName: "Pat Example", suggested: null };
+
+  it("connect on, nothing on file: the ORCID sign-in link replaces the typed input", () => {
+    render(<OrcidCard {...base} onFile={null} connectEnabled />);
+    expect(screen.getByTestId("orcid-connect").getAttribute("href")).toBe("/api/edit/orcid/connect");
+    expect(screen.queryByTestId("orcid-form")).toBeNull();
+    cleanup();
+  });
+
+  it("connect on, an unauthenticated iD on file: no Change (typing), but connect is offered", () => {
+    render(<OrcidCard {...base} onFile={ID} connectEnabled />);
+    expect(screen.queryByTestId("orcid-change")).toBeNull();
+    expect(screen.getByTestId("orcid-connect").textContent).toContain("Connect a different ORCID iD");
+    cleanup();
+  });
+
+  it("an authenticated iD shows the Authenticated pill and no connect link", () => {
+    render(<OrcidCard {...base} onFile={ID} authenticated connectEnabled />);
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toContain("Authenticated");
+    expect(screen.queryByTestId("orcid-connect")).toBeNull();
+    cleanup();
+  });
+
+  it("the callback's ?orcid= outcome is shown once", () => {
+    window.history.replaceState(null, "", "/edit?attr=identifiers-profiles&orcid=denied");
+    render(<OrcidCard {...base} onFile={null} connectEnabled />);
+    expect(screen.getByTestId("orcid-connect-outcome").textContent).toContain("didn't grant access");
+    window.history.replaceState(null, "", "/");
+    cleanup();
+  });
+});
+
 describe("ProfileLinksCard", () => {
   const fetchMock = vi.fn();
   beforeEach(() => {

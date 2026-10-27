@@ -206,15 +206,28 @@ async function main(): Promise<number> {
   }
   const dryRun = process.argv.includes("--dry-run") || process.env.ORCID_PUSH_DRY_RUN === "1";
 
-  const targets = await db.write.scholar.findMany({
-    where: { deletedAt: null, orcid: { not: null } },
-    select: { cwid: true, orcid: true },
-    orderBy: { cwid: "asc" },
-  });
-  const dismissals = await db.write.orcidDismissal.findMany({
-    select: { cwid: true, orcid: true },
-    orderBy: [{ cwid: "asc" }, { orcid: "asc" }],
-  });
+  // A sandbox.orcid.org sign-in (staging, #3115) yields a test iD, and its
+  // dismissals are of real iDs: staging and prod share ONE Identity table, so
+  // neither may ever reach it.
+  const sandboxCwids = new Set(
+    (
+      await db.write.orcidAuthentication.findMany({ where: { sandbox: true }, select: { cwid: true } })
+    ).map((a) => a.cwid),
+  );
+  const targets = (
+    await db.write.scholar.findMany({
+      where: { deletedAt: null, orcid: { not: null } },
+      select: { cwid: true, orcid: true },
+      orderBy: { cwid: "asc" },
+    })
+  ).filter((t) => !sandboxCwids.has(t.cwid));
+  const dismissals = (
+    await db.write.orcidDismissal.findMany({
+      select: { cwid: true, orcid: true },
+      orderBy: [{ cwid: "asc" }, { orcid: "asc" }],
+    })
+  ).filter((d) => !sandboxCwids.has(d.cwid));
+  if (sandboxCwids.size > 0) console.log(`Skipping ${sandboxCwids.size} sandbox-authenticated scholar(s).`);
   const { actions, contradictions } = buildActions(
     targets.map((s) => ({ cwid: s.cwid, orcid: s.orcid as string })),
     dismissals,

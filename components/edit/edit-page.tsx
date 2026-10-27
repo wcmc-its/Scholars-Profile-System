@@ -629,6 +629,8 @@ export type EditPageProps = {
    *  Identifiers & Profiles tab, and the tab is in the rail on this flag alone
    *  (independent of the ORCID kill switch). */
   profileLinksEnabled?: boolean;
+  /** `ORCID_CONNECT` (#3115): the ORCID card offers "Connect your ORCID iD" to the scholar themselves. */
+  orcidConnectEnabled?: boolean;
   /** GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`): whether the "Grants for me"
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like the other feature gates; self + superuser only. */
@@ -763,6 +765,7 @@ export function EditPage({
   reciterPendingEnabled = false,
   orcidTabEnabled = false,
   profileLinksEnabled = false,
+  orcidConnectEnabled = false,
   grantRecsEnabled = false,
   grantRecsFeedbackEnabled = false,
   biosketchEnabled = false,
@@ -1034,6 +1037,7 @@ export function EditPage({
         orcidTabEnabled,
         profileLinksEnabled,
         grantRecsFeedbackEnabled,
+        orcidConnectEnabled,
       )}
     </EditShell>
   );
@@ -1164,6 +1168,7 @@ function renderPanel(
   orcidTabEnabled: boolean,
   profileLinksEnabled: boolean,
   grantRecsFeedbackEnabled: boolean,
+  orcidConnectEnabled = false,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -1591,6 +1596,8 @@ function renderPanel(
               onFile={row.onFile}
               onFileEvidence={row.onFileEvidence}
               suggested={row.suggested}
+              authenticated={ctx.scholar.orcidAuthenticated === true}
+              connectEnabled={orcidConnectEnabled && mode === "self"}
             />
           )}
           {profileLinksEnabled && (

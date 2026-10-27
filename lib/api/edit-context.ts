@@ -118,6 +118,8 @@ export type EditContextScholar = {
    *  visibility label and explainer on the read-only Email tab — never a control. */
   emailVisibility: string | null;
   orcid: string | null;
+  /** #3115 — `orcid` was proved by the scholar signing in to ORCID. */
+  orcidAuthenticated?: boolean;
   /** #536 — drives the edit-route guard: a hidden identity class (doctoral
    *  student) has no public profile, so only a superuser may reach its edit
    *  surface; a non-superuser (incl. the scholar themselves) 404s. */
@@ -973,6 +975,7 @@ export async function loadEditContext(
       email: true,
       emailVisibility: true,
       orcid: true,
+      orcidConfirmMethod: true,
       overview: true,
       deletedAt: true,
       roleCategory: true,
@@ -2098,6 +2101,7 @@ export async function loadEditContext(
         email: scholar.email,
         emailVisibility: scholar.emailVisibility,
         orcid: scholar.orcid,
+        orcidAuthenticated: scholar.orcidConfirmMethod === "authenticated",
         roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
         slugOverride,
@@ -2283,6 +2287,7 @@ export async function loadEditContext(
       email: scholar.email,
       emailVisibility: scholar.emailVisibility,
       orcid: scholar.orcid,
+      orcidAuthenticated: scholar.orcidConfirmMethod === "authenticated",
       roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
       slugOverride,
