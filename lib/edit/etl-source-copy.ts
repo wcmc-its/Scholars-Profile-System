@@ -115,6 +115,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Each scholar's ORCID iD, used by search engines and shown in the editor.",
     origin: "external", // WCM Identity DynamoDB table
   },
+  "Scholar-active-export": {
+    label: "Active scholars for Publication Manager",
+    description:
+      "The list of active scholars Publication Manager reads to show their ORCID iD as read-only, with a link to change it in Scholars.",
+    origin: "external", // WCM ReciterDB
+  },
   "RPM-orcid-candidates": {
     label: "ORCID candidates from Publication Manager",
     description:

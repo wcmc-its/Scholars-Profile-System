@@ -163,6 +163,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "Identity-orcid": { cadence: "nightly" },
   // RPM ORCID candidates (inferred + admin-entered) mirrored from reciterdb → orcid_candidate.
   "RPM-orcid-candidates": { cadence: "nightly" },
+  // Active scholars → reciterdb scholar_active (Publication Manager's ORCID gate); prod writes, staging dry-runs.
+  "Scholar-active-export": { cadence: "nightly" },
   // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_crossref / orcid_name); weekly step.
   "ORCID-registry": { cadence: "weekly" },
   // ORCID candidate evidence (etl/orcid-evidence) → orcid_candidate_evidence, the

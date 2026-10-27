@@ -69,6 +69,9 @@ async function main() {
     // even before #443 lands.
     ["ReCiter-COI-Statements", "etl/reciter/backfill-coi-statements.ts"],
     ["RPM-orcid-candidates", "etl/orcid-candidates/index.ts"],
+    // Active scholars → reciterdb scholar_active for Publication Manager. Dry run
+    // unless SCHOLARS_ENV=prod (staging and prod share one reciterdb).
+    ["Scholar-active-export", "etl/scholar-active-export/index.ts"],
     // Weekly in the deployed Step Function; here it runs with the rest of the chain.
     ["ORCID-registry", "etl/orcid-registry/index.ts"],
     // Evidence for the ORCID librarian queue; reads the registry's fresh candidates.
