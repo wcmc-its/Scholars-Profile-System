@@ -93,6 +93,9 @@ describe("unitKindsFor", () => {
       "13": ["core"],
       // Person-gated, institution-wide.
       "14": [],
+      // Superuser-gated, institution-wide.
+      "15": [],
+      "16": [],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);

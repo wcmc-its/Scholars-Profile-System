@@ -52,6 +52,7 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     cancerRelevantPercentAi: pct,
     cancerRelevantModel: null,
     cancerRelevantRationale: "because",
+    reviewerNote: null,
     cancerRelevantAnnualProjectDc: pct == null ? null : pct * 1000,
     isPeerReviewed: true,
     grantCwid: `zzz${over.id}`,
@@ -390,6 +391,44 @@ describe("report 2 table", () => {
     expect((f.mock.calls[0] as unknown[])[1]).toEqual(
       expect.objectContaining({ body: JSON.stringify({ cancerRelevantPercent: 37.5 }) }),
     );
+  });
+
+  it("the note link opens an editor row; blur saves reviewerNote, the link shows it through a lagged refresh", async () => {
+    const f = stubFetch();
+    const r = renderTable([AI]);
+    expect(r.q.queryByTestId("nci-2a-note")).toBeNull();
+    const link = r.q.getByTestId("nci-2a-note-link");
+    expect(link.textContent).toBe("Add note");
+    fireEvent.click(link);
+    expect(r.q.getByTestId("nci-2a-note-row")).toBeTruthy();
+    const note = r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement;
+    expect(note.placeholder).toBe("Why under 100%?");
+    fireEvent.change(note, { target: { value: " Aim 2 only " } });
+    fireEvent.blur(note);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect(f.mock.calls[0]).toEqual([
+      `/api/edit/center/${CENTER}/nci-2a/1`,
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ reviewerNote: "Aim 2 only" }) }),
+    ]);
+    fireEvent.click(r.q.getByRole("button", { name: "Done" }));
+    expect(r.q.queryByTestId("nci-2a-note-row")).toBeNull();
+    r.rerender(tableEl([AI])); // replica still says no note
+    expect(r.q.getByTestId("nci-2a-note-link").textContent).toBe("Aim 2 only");
+  });
+
+  it("Esc in the note editor undoes, closes and saves nothing", async () => {
+    const f = stubFetch();
+    const r = renderTable([{ ...AI, reviewerNote: "kept" }]);
+    fireEvent.click(r.q.getByTestId("nci-2a-note-link"));
+    const note = r.q.getByTestId("nci-2a-note") as HTMLTextAreaElement;
+    expect(note.value).toBe("kept");
+    fireEvent.change(note, { target: { value: "scrap" } });
+    fireEvent.keyDown(note, { key: "Escape" });
+    fireEvent.blur(note);
+    await act(async () => {});
+    expect(f).not.toHaveBeenCalled();
+    expect(r.q.queryByTestId("nci-2a-note-row")).toBeNull();
+    expect(r.q.getByTestId("nci-2a-note-link").textContent).toBe("kept");
   });
 
   it("Esc undoes the draft and saves nothing", async () => {

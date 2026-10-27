@@ -1711,9 +1711,8 @@ export class AppStack extends Stack {
         // small regardless: the page gate is isMatchaEnabled() && isGrantMatchaEnabled() &&
         // (superuser||developer), with a Tools nav tab for exactly that audience.
         // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
-        // ⚠ Since the find-researchers sunset (Phase 3c), /edit/grant-matcha is the development
-        // role's ONLY console page and their GLOBAL_ROLE_HOME landing. Flipping this (or MATCHA)
-        // off no longer degrades to an older surface — it 404s that role's entire console entry.
+        // ⚠ The development role's console is /edit/matcha (their GLOBAL_ROLE_HOME landing) plus
+        // this page. Flipping MATCHA off 404s that role's entire console entry.
         GRANT_MATCHA: "on",
         // MATCHA_ADMIN — the Grant Matcha corpus-admin surface (matcha-admin plan Phase 1b):
         // /api/edit/opportunity-admin suppress/restore on `opportunity` rows + the Browse-tab
@@ -1848,9 +1847,9 @@ export class AppStack extends Stack {
         // reads === "on" (lib/edit/grant-attribution-queue.ts); off => the page
         // AND the decision endpoint 404, and the Grants tab is hidden. Tracks
         // REPORTER_GRANTS_CORROBORATION_HIDE (cdk/lib/etl-stack.ts), which fills
-        // the queue: staging first, prod after the staging queue is reviewed.
+        // the queue: staging first, prod flipped 2026-10-27.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        GRANT_ATTRIBUTION_QUEUE: envConfig.envName === "staging" ? "on" : "off",
+        GRANT_ATTRIBUTION_QUEUE: "on",
         // ORCID librarian queue -- /edit/orcid-queue and /api/edit/orcid-queue/*
         // (superuser librarians confirm candidate iDs on etl/orcid-evidence's
         // bands). isOrcidLibrarianQueueEnabled() reads === "on"
@@ -1859,6 +1858,15 @@ export class AppStack extends Stack {
         // reviewed 2026-10-24. Takes effect ONLY on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         ORCID_LIBRARIAN_QUEUE: "on",
+        // ORCID queue v2.1 -- the Publication Manager base the queue's "Review in
+        // Publication Manager" (/curate/<uid>) and "Add in Publication Manager"
+        // (/curate/<uid>?add=external&doi=<doi>, PM #1047) links use.
+        // publicationManagerBaseUrl() (lib/edit/orcid-queue.ts) accepts https only
+        // and otherwise falls back to the SPS-wide PUBLICATION_MANAGER_URL constant.
+        // Same value in both envs, production Publication Manager: staging's scholars and
+        // candidates are prod's people, and the dev PM is not guaranteed to carry
+        // #1047. Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        PUBLICATION_MANAGER_URL: "https://reciter.weill.cornell.edu",
         // #1762 — the `honors_curator` role. The approver is the RESEARCH DEAN's
         // office (a different org unit from the Dean's office), which self-serves
         // from day one, so this is not a fast-follow: without it the queue is

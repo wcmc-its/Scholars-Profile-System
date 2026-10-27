@@ -15,7 +15,10 @@
  *            move the review back to pending.
  *
  * `{ grant, decision: "confirm" | "reject" }` decides by grant externalId from
- * the decided tabs. An award the weekly check settled on its own (no review,
+ * the decided tabs; `{ grants: [...], ids?: [...] }` decides several at once,
+ * by grant and by review together (the To review tab, whose Unproven awards
+ * have no review yet), in the same one transaction. The response's `reviews`
+ * maps each grant decided this way to its review id, for an undo. An award the weekly check settled on its own (no review,
  * or a withdrawn one) gets a pending review from its score row first; a
  * curator's opposite decision is undone first. Either way it is one
  * transaction, then the ordinary confirm or reject.
@@ -111,22 +114,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       : null;
   if (!decision) return editError(400, "invalid_body", "decision");
 
+  const isId = (x: unknown): x is string => typeof x === "string" && x.length > 0 && x.length <= 64;
   let ids: string[];
-  let byGrant: string | null = null;
+  let byGrant: string[] = [];
   if (body.grant !== undefined) {
     const g = body.grant;
-    if (
-      body.id !== undefined ||
-      body.ids !== undefined ||
-      decision === "undo" ||
-      typeof g !== "string" ||
-      g.length === 0 ||
-      g.length > 64
-    ) {
+    if (body.id !== undefined || body.ids !== undefined || body.grants !== undefined || decision === "undo" || !isId(g)) {
       return editError(400, "invalid_body", "grant");
     }
-    byGrant = g;
+    byGrant = [g];
     ids = [];
+  } else if (body.grants !== undefined) {
+    const raw = body.grants;
+    const rawIds = body.ids ?? [];
+    if (
+      body.id !== undefined ||
+      decision === "undo" ||
+      !Array.isArray(raw) ||
+      !Array.isArray(rawIds) ||
+      raw.length === 0 ||
+      raw.length + rawIds.length > GRANT_ATTRIBUTION_BULK_MAX ||
+      !raw.every(isId) ||
+      !rawIds.every(isId) ||
+      new Set(raw).size !== raw.length ||
+      new Set(rawIds).size !== rawIds.length
+    ) {
+      return editError(400, "invalid_body", "grants");
+    }
+    byGrant = raw;
+    ids = rawIds;
   } else if (body.ids !== undefined) {
     const raw = body.ids;
     if (
@@ -163,6 +179,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let result: {
     entities: string[];
     suppressions: Array<{ suppressionId: string; entityId: string }>;
+    reviews: Record<string, string>;
   };
   try {
     result = await db.write.$transaction(async (tx) => {
@@ -236,7 +253,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       };
 
       /** What a by-grant decision found before it opened a review, for the audit. */
-      let openedFrom: Record<string, unknown> | null = null;
+      const openedFrom = new Map<string, Record<string, unknown>>();
 
       /** The pending review a by-grant decision acts on. Opening one from the
        *  score works like the requeue route: the award is hidden and the
@@ -272,12 +289,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           });
           suppressions.push({ suppressionId: sup.id, entityId: grantId });
         }
-        openedFrom = {
+        openedFrom.set(grantId, {
           review_status: review?.status ?? null,
           opened_from_score: true,
           prior_score: review?.score ?? null,
           prior_band: review?.band ?? null,
-        };
+        });
         const fields = {
           score: score.score,
           band: score.band,
@@ -306,11 +323,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
       };
 
-      const targets: Array<{ review: Review | null; id: string }> = byGrant
-        ? [{ review: await pendingForGrant(byGrant), id: "" }]
-        : ids.map((id) => ({ review: null, id }));
-      // Set inside pendingForGrant; TS cannot see the closure write.
-      const opened = openedFrom as Record<string, unknown> | null;
+      const targets: Array<{ review: Review | null; id: string }> = ids.map((id) => ({ review: null, id }));
+      const reviews: Record<string, string> = {};
+      for (const g of byGrant) {
+        const review = await pendingForGrant(g);
+        reviews[g] = review.id;
+        targets.push({ review, id: "" });
+      }
       for (const target of targets) {
         const row =
           target.review ??
@@ -318,6 +337,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (!row) throw new Refused(404, "not_found");
         const id = row.id;
         const entityId = row.grantExternalId;
+        const opened = target.review ? (openedFrom.get(entityId) ?? null) : null;
         const snapshot = {
           review_id: row.id,
           status: row.status,
@@ -398,14 +418,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
         entities.push(entityId);
       }
-      return { entities, suppressions };
+      return { entities, suppressions, reviews };
     });
   } catch (err) {
-    if (err instanceof Refused)
-      return editError(err.status, err.code, byGrant ? "grant" : ids.length > 1 ? "ids" : "id");
+    const field = body.grants !== undefined ? "grants" : byGrant.length ? "grant" : ids.length > 1 ? "ids" : "id";
+    if (err instanceof Refused) return editError(err.status, err.code, field);
     // A concurrent by-grant create of the same review trips the unique key.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      return editError(409, "state_changed", byGrant ? "grant" : "id");
+      return editError(409, "state_changed", field);
     }
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
@@ -430,7 +450,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   return editOk({
     decision,
-    decided: byGrant ? 1 : result.entities.length,
+    decided: result.entities.length,
     status: decision === "undo" ? "pending" : decision === "confirm" ? "confirmed" : "rejected",
+    reviews: result.reviews,
   });
 }

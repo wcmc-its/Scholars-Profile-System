@@ -6,8 +6,10 @@
  * `/edit/reports/2` panel's write path. `[code]` is the raw `Center.code`,
  * matching `/edit/center/[code]/page.tsx`.
  *
- * Body (at least one of the two):
+ * Body (at least one of the three):
  *   cancerRelevantPercent: number in [0, 100]
+ *   reviewerNote: string (trimmed, at most NCI2A_NOTE_MAX chars) or null;
+ *     blank clears it. A note never changes any `source`.
  *   allocations: [{ programCode: string | null, programPercent: number }]
  *     — programPercent MUST sum to 100 (±0.01 for rounding); a programCode
  *       MUST be null or one of this center's live `CenterProgram` codes —
@@ -30,6 +32,7 @@ import { type NextRequest, type NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
+import { NCI2A_NOTE_MAX } from "@/lib/edit/nci-2a-report";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 
 const PATH = "/api/edit/center/[code]/nci-2a/[awardId]";
@@ -92,8 +95,19 @@ export async function PATCH(
 
   const wantsPercent = "cancerRelevantPercent" in body;
   const wantsAllocations = "allocations" in body;
-  if (!wantsPercent && !wantsAllocations) {
-    return editError(400, "invalid_value", "cancerRelevantPercent|allocations");
+  const wantsNote = "reviewerNote" in body;
+  if (!wantsPercent && !wantsAllocations && !wantsNote) {
+    return editError(400, "invalid_value", "cancerRelevantPercent|allocations|reviewerNote");
+  }
+
+  let reviewerNote: string | null = null;
+  if (wantsNote) {
+    const v = body.reviewerNote;
+    if (v !== null && typeof v !== "string") return editError(400, "invalid_value", "reviewerNote");
+    reviewerNote = v?.trim() || null;
+    if (reviewerNote && reviewerNote.length > NCI2A_NOTE_MAX) {
+      return editError(400, "invalid_value", "reviewerNote");
+    }
   }
 
   let cancerRelevantPercent: number | null = null;
@@ -141,6 +155,11 @@ export async function PATCH(
     after.allocations = allocations;
     fieldsChanged.push("allocations");
   }
+  if (wantsNote) {
+    before.reviewerNote = existing.reviewerNote;
+    after.reviewerNote = reviewerNote;
+    fieldsChanged.push("reviewerNote");
+  }
 
   try {
     await db.write.$transaction(async (tx) => {
@@ -150,6 +169,7 @@ export async function PATCH(
           ...(wantsPercent
             ? { cancerRelevantPercent, cancerRelevantPercentSource: "human" }
             : {}),
+          ...(wantsNote ? { reviewerNote } : {}),
           ...(wantsAllocations
             ? {
                 allocations: {

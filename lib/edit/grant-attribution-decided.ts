@@ -20,9 +20,9 @@ export type DecidedBy = "all" | "curator" | "auto";
 export type DecidedSort = "least" | "recent" | "scholar";
 
 export const DECIDED_TABS: ReadonlyArray<DecidedTab> = ["confirmed", "rejected", "unproven"];
-export const DECIDED_PAGE_SIZE = 50;
+export const DECIDED_PAGE_SIZE = 200;
 /** Scholars per page when grouped. */
-export const DECIDED_GROUP_PAGE_SIZE = 25;
+export const DECIDED_GROUP_PAGE_SIZE = 100;
 /** The scorer's thresholds (etl/reporter-grants/score.ts), for the margin line. */
 export const SHOW_AT = 2;
 export const HIDE_AT = -2;
@@ -37,6 +37,8 @@ export type DecidedParams = {
   sort: DecidedSort;
   q: string;
   page: number;
+  /** "Show all": every matching row on one page, no pager. */
+  all: boolean;
 };
 
 type Raw = Record<string, string | string[] | undefined>;
@@ -60,6 +62,7 @@ export function parseDecidedParams(sp: Raw, tab: DecidedTab): DecidedParams {
     sort: sort === "recent" || sort === "scholar" ? sort : tab === "unproven" ? "recent" : "least",
     q: one(sp.q).trim().slice(0, 200),
     page: Number.isFinite(page) && page > 1 ? page : 1,
+    all: one(sp.all) === "1",
   };
 }
 
@@ -72,7 +75,8 @@ export function decidedHref(p: DecidedParams, over: Partial<DecidedParams> = {})
   if (n.group) qs.set("group", "1");
   if (n.sort !== (n.tab === "unproven" ? "recent" : "least")) qs.set("sort", n.sort);
   if (n.q) qs.set("q", n.q);
-  if (n.page > 1) qs.set("page", String(n.page));
+  if (n.all) qs.set("all", "1");
+  else if (n.page > 1) qs.set("page", String(n.page));
   return `?${qs.toString()}`;
 }
 
@@ -186,7 +190,8 @@ export function checkedNothingFound(cueIds: ReadonlySet<string>): string[] {
   if (!cueIds.has("timeline_impossible") && !cueIds.has("timeline_unlikely"))
     out.push("The award fits the scholar's career stage");
   if (!cueIds.has("middle_initial_conflict")) out.push("No middle-initial conflict");
-  if (!cueIds.has("pi_name_mismatch")) out.push("The NIH profile's PI has the scholar's surname");
+  if (!cueIds.has("pi_name_mismatch") && !cueIds.has("pi_given_name_mismatch"))
+    out.push("The NIH profile's PI has the scholar's name");
   return out;
 }
 
@@ -241,4 +246,7 @@ export type DecidedPage = {
   matched: number;
   rows: DecidedRow[];
   groups: DecidedGroup[] | null;
+  /** Every Unproven award's grant externalId: the To review tab lists them
+   *  beside the pending reviews. */
+  unprovenIds: string[];
 };

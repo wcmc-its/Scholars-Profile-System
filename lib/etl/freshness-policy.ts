@@ -163,6 +163,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "Identity-orcid": { cadence: "nightly" },
   // RPM ORCID candidates (inferred + admin-entered) mirrored from reciterdb → orcid_candidate.
   "RPM-orcid-candidates": { cadence: "nightly" },
+  // Active scholars → reciterdb scholar_active (Publication Manager's ORCID gate); prod writes, staging dry-runs.
+  "Scholar-active-export": { cadence: "nightly" },
   // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_crossref / orcid_name); weekly step.
   "ORCID-registry": { cadence: "weekly" },
   // ORCID candidate evidence (etl/orcid-evidence) → orcid_candidate_evidence, the
@@ -295,6 +297,12 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // withEtlRun("DataSharing", main) call). Continue-tier, so freshness is the only
   // detector of a silently-dead schedule.
   DataSharing: { cadence: "weekly" },
+  // Deployed weekly step (cdk/lib/etl-stack.ts InfoedBiosketchWeekly, tier:"continue")
+  // that writes source "InfoEd-Biosketch" (etl/infoed-biosketch/index.ts withEtlRun).
+  "InfoEd-Biosketch": { cadence: "weekly" },
+  // Deployed weekly step (cdk/lib/etl-stack.ts MyncbiWeekly, tier:"continue") that
+  // writes source "MyNCBI" (etl/myncbi/index.ts withEtlRun).
+  MyNCBI: { cadence: "weekly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.

@@ -50,7 +50,7 @@ import { cn } from "@/lib/utils";
 
 type Outcome = { kind: "confirmed" | "rejected" | "reopened"; reason?: string };
 type EvidenceFilter = "all" | "co" | "red" | "timeline";
-type Sort = "oldest" | "high" | "low" | "scholar" | "start";
+type Sort = "strong" | "weak" | "oldest" | "scholar" | "start";
 
 const LEVEL_RANK: Record<AttributionLevel, number> = Object.fromEntries(
   ATTRIBUTION_LEVELS.map((l, i) => [l.key, i]),
@@ -93,14 +93,17 @@ function errorMessage(status: number, code: string | undefined): string {
 
 async function postDecision(
   body: Record<string, unknown>,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; reviews: Record<string, string> } | { ok: false; message: string }> {
   try {
     const res = await fetch("/api/edit/grant-attribution/decision", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (res.ok) return { ok: true };
+    if (res.ok) {
+      const data = (await res.json().catch(() => null)) as { reviews?: Record<string, string> } | null;
+      return { ok: true, reviews: data?.reviews ?? {} };
+    }
     const data = (await res.json().catch(() => null)) as { error?: string } | null;
     return { ok: false, message: errorMessage(res.status, data?.error) };
   } catch {
@@ -158,8 +161,10 @@ function prepare(items: GrantAttributionItem[]): Card[] {
 
 const SORTS: Record<Sort, (a: Card, b: Card) => number> = {
   oldest: (a, b) => a.order - b.order,
-  high: (a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || a.order - b.order,
-  low: (a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || a.order - b.order,
+  // By confidence level, then by the scorer's net evidence within a level. Net
+  // score alone interleaves levels: a conflict can outscore a likely.
+  strong: (a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || b.score - a.score || a.order - b.order,
+  weak: (a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || a.score - b.score || a.order - b.order,
   scholar: (a, b) => a.scholarName.localeCompare(b.scholarName) || a.order - b.order,
   start: (a, b) => (a.award.startYear ?? 0) - (b.award.startYear ?? 0) || a.order - b.order,
 };
@@ -200,7 +205,9 @@ export function GrantAttributionQueue({
   const [q, setQ] = useState("");
   const [evidence, setEvidence] = useState<EvidenceFilter>("all");
   const [levelFilter, setLevelFilter] = useState<AttributionLevel | "all">("all");
-  const [sort, setSort] = useState<Sort>("high");
+  const [sort, setSort] = useState<Sort>("strong");
+  /** Card id → review id, for an Unproven card a decision just opened a review for. */
+  const [reviewOf, setReviewOf] = useState<Record<string, string>>({});
   const [skipped, setSkipped] = useState<string[]>([]);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
@@ -264,12 +271,32 @@ export function GrantAttributionQueue({
       if (todo.length === 0) return;
       setBusy(true);
       setError(null);
-      const body: Record<string, unknown> = todo.length === 1 ? { id: todo[0] } : { ids: todo };
+      const byId = new Map(cards.map((c) => [c.id, c]));
+      // Unproven cards have no review yet: those go by grant, in the same call.
+      const grants = todo.filter((id) => byId.get(id)?.unproven && !reviewOf[id]).map((id) => byId.get(id)!.grantId);
+      const reviews = todo.filter((id) => !byId.get(id)?.unproven || reviewOf[id]).map((id) => reviewOf[id] ?? id);
+      const body: Record<string, unknown> =
+        grants.length === 0
+          ? reviews.length === 1
+            ? { id: reviews[0] }
+            : { ids: reviews }
+          : grants.length === 1 && reviews.length === 0
+            ? { grant: grants[0] }
+            : { grants, ...(reviews.length ? { ids: reviews } : {}) };
       const r = await postDecision({ ...body, decision, ...(why ? { reason: why } : {}) });
       setBusy(false);
       if (!r.ok) {
         setError(r.message);
         return;
+      }
+      if (grants.length) {
+        const opened: Record<string, string> = {};
+        for (const id of todo) {
+          const c = byId.get(id);
+          const rid = c && r.reviews[c.grantId];
+          if (rid) opened[id] = rid;
+        }
+        setReviewOf((m) => ({ ...m, ...opened }));
       }
       const next = { ...outcomes };
       for (const id of todo) next[id] = decision === "confirm" ? { kind: "confirmed" } : { kind: "rejected", reason: why };
@@ -292,7 +319,7 @@ export function GrantAttributionQueue({
       });
       if (one && todo[0] === focus) moveFocus(focus, 1, next, true);
     },
-    [canDecide, busy, outcomes, focus, moveFocus],
+    [canDecide, busy, outcomes, focus, moveFocus, cards, reviewOf],
   );
 
   const undo = useCallback(
@@ -300,7 +327,8 @@ export function GrantAttributionQueue({
       if (!ids || ids.length === 0 || undoing) return;
       setUndoing(true);
       setError(null);
-      const r = await postDecision(ids.length === 1 ? { id: ids[0], decision: "undo" } : { ids, decision: "undo" });
+      const rids = ids.map((id) => reviewOf[id] ?? id);
+      const r = await postDecision(rids.length === 1 ? { id: rids[0], decision: "undo" } : { ids: rids, decision: "undo" });
       setUndoing(false);
       if (!r.ok) {
         setError(r.message);
@@ -319,7 +347,7 @@ export function GrantAttributionQueue({
       setToast({ text: `Moved ${ids.length === 1 ? "the award" : `${ids.length} awards`} back to review.`, ids: null });
       if (ids.length === 1 && pendingIds.has(ids[0]!)) setFocusId(ids[0]!);
     },
-    [cards, undoing],
+    [cards, undoing, reviewOf],
   );
 
   const skip = useCallback(
@@ -491,9 +519,9 @@ export function GrantAttributionQueue({
             <label className="text-muted-foreground ml-auto flex items-center gap-1.5 text-[13px]">
               Sort
               <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className={CONTROL}>
+                <option value="strong">Strongest evidence first</option>
+                <option value="weak">Weakest evidence first</option>
                 <option value="oldest">Oldest first</option>
-                <option value="high">Most confident first</option>
-                <option value="low">Least confident first</option>
                 <option value="scholar">Scholar A–Z</option>
                 <option value="start">Award start year</option>
               </select>
@@ -797,8 +825,9 @@ function Detail({
             {initials(c.scholarName)}
           </span>
           <div className="flex min-w-[200px] flex-1 flex-col gap-0.5">
+            {/* self-start: a stretched full-width trigger left no room on the right, so the card flipped over the list */}
             <ScholarHoverCard cwid={c.cwid}>
-              <span className="text-[17px] font-semibold">{c.scholarName}</span>
+              <span className="self-start text-[17px] font-semibold">{c.scholarName}</span>
             </ScholarHoverCard>
             <span className="text-muted-foreground text-[13px]">
               {[c.title, c.department].filter(Boolean).join(" · ")} {/* pub-html-ok: the scholar's job title */}

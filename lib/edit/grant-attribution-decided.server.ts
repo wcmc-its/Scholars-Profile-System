@@ -303,17 +303,15 @@ export async function loadDecidedPage(
     for (const e of matching) byCwid.set(e.cwid, [...(byCwid.get(e.cwid) ?? []), e]);
     const all = [...byCwid.entries()].map(([cwid, rows]) => ({ cwid, rows }));
     matched = all.length;
-    groups = all.slice(
-      (params.page - 1) * DECIDED_GROUP_PAGE_SIZE,
-      params.page * DECIDED_GROUP_PAGE_SIZE,
-    );
+    groups = params.all
+      ? all
+      : all.slice((params.page - 1) * DECIDED_GROUP_PAGE_SIZE, params.page * DECIDED_GROUP_PAGE_SIZE);
     pageEntries = groups.flatMap((g) => g.rows);
   } else {
     matched = matching.length;
-    pageEntries = matching.slice(
-      (params.page - 1) * DECIDED_PAGE_SIZE,
-      params.page * DECIDED_PAGE_SIZE,
-    );
+    pageEntries = params.all
+      ? matching
+      : matching.slice((params.page - 1) * DECIDED_PAGE_SIZE, params.page * DECIDED_PAGE_SIZE);
   }
 
   const rows = opts.hydrate === false ? [] : await hydrate(client, pageEntries);
@@ -323,6 +321,7 @@ export async function loadDecidedPage(
     counts,
     changed: changedTotal,
     matched,
+    unprovenIds: entries.filter((e) => e.tab === "unproven").map((e) => e.grantId),
     rows: params.group ? [] : rows,
     groups: groups
       ? groups.map((g): DecidedGroup => {

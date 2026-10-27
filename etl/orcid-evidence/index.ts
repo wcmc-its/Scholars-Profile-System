@@ -5,8 +5,8 @@
  *
  * Population: every distinct (cwid, orcid) in `orcid_candidate` (all sources)
  * for an active scholar, minus pairs in `orcid_dismissal`, minus pairs already
- * on file — `scholar.orcid`, or an undismissed `rpm_admin` iD (WCM leaves
- * `scholar.orcid` NULL; /edit reads the RPM mirror, `heldFor`). Each iD's public `/record` is fetched
+ * on file in `scholar.orcid` (an `rpm_admin` or `identity` iD is a candidate like
+ * any other: Scholars is the authority). Each iD's public `/record` is fetched
  * ONCE and shared by every scholar it is a candidate for. Per pair:
  *
  *   - `email_verified` — a public email on the record with `verified: true`
@@ -44,6 +44,19 @@
  * email, the shared papers (title, year, journal from our publications), the
  * competitor detail, both names and the surname rule, and the pair's sources.
  *
+ * v2.1: PMIDs and ReCiter status. Every work with a DOI but no PMID goes through
+ * the DOI → PMID lookup (`pubmed-resolve.ts`: the PMC ID converter, then PubMed
+ * `[aid]`; a DOI no lookup answered, as in an NCBI outage, gets status unknown,
+ * not `not_in_pubmed`, and the run goes on), and a
+ * work with neither id is matched by exact normalized title + year ±1 against
+ * the scholar's own publications. Then ReCiter's assertions for the scholar
+ * (reciterdb `person_article.userAssertion`, read for the record's PMIDs only):
+ * a work ReCiter ACCEPTED counts as shared even when our publications lack it,
+ * and every new work carries its status (`pending`, `rejected`,
+ * `not_retrieved`, `not_in_pubmed`, `no_ids`) in the sample, with per-status
+ * counts in `evidence_detail.workStatus`. reciterdb unreachable = statuses
+ * unknown, never a failed run.
+ *
  * Then the email auto-confirm: each `email_verified` row whose scholar has no
  * iD on file gets `scholar.orcid` + `orcid_confirmed_at` + method
  * `email_verified` + `orcid_confirmed_by = "ETL"` and an
@@ -60,12 +73,15 @@
  * `/record` calls failing (a single dead iD just has no row until a re-run).
  * WCM only: nothing here reads a cwid's shape.
  *
- * Usage: `npm run etl:orcid-evidence [-- --dry-run]` (weekly; base task family —
- * HTTPS to ORCID + Aurora, plus the Identity table Scan on the shared task role).
+ * Usage: `npm run etl:orcid-evidence [-- --dry-run]` (weekly; the SOURCES task
+ * family since v2.1, for its reciterdb credentials — HTTPS to ORCID and NCBI,
+ * Aurora, reciterdb, plus the Identity table Scan on the shared task role).
  * Env: `ORCID_CLIENT_ID` / `ORCID_CLIENT_SECRET` (optional, anonymous otherwise),
  * `ORCID_EMAIL_AUTOCONFIRM`, `ORCID_HISTORY_BAND`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
  * Scan, as etl/identity; a failed Scan logs and the run goes on without that
  * source — a missing source can only lower a band, never raise one),
+ * `NCBI_API_KEY` (optional, raises the NCBI rate limit), `SCHOLARS_RECITERDB_*`
+ * (the ReCiter assertions; unset or unreachable = statuses unknown),
  * `ORCID_EVIDENCE_DRY_RUN=1`, `ORCID_EVIDENCE_MAX_RECORDS=<n>` (local smoke:
  * truncates the iD list and FORCES a dry run — the delete pass would otherwise
  * remove every row the sample did not cover).
@@ -93,13 +109,15 @@ import {
   type RecordResponse,
 } from "@/etl/orcid-registry/orcid-api";
 import {
-  heldFor,
   type OrcidEvidenceDetail,
   type OrcidInstitutionPair,
   type OrcidSharedPaper,
   type OrcidSurnameRule,
+  type OrcidWorkStatusDetail,
+  type ReciterWorkStatus,
 } from "@/lib/edit/orcid-queue";
 import { lastNameKey } from "@/lib/last-name-key";
+import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 import { loadIdentityInstitutions } from "./identity-institutions";
 import {
@@ -107,9 +125,13 @@ import {
   type HistoryInstitution,
   type OrcidAffiliation,
 } from "./institution-match";
+import { createPmidResolver, normalizeDoi } from "./pubmed-resolve";
 import { filterPublicationWorks } from "./work-filter";
 
 const BATCH = 500;
+/** reciterdb `person_article` reads: scholars, and PMIDs, per query. */
+const RECITER_CWID_BATCH = 200;
+const RECITER_PMID_BATCH = 2000;
 export const MIN_SHARED = 3;
 const NEW_WORKS_SAMPLE = 5;
 /** Shared papers kept in `evidence_detail` (the `shared` column has the full count). */
@@ -159,9 +181,19 @@ export type NewWork = {
   /** The ORCID work's own link (the depositing source's `url`), for the preview's
    *  link when the work has neither PMID nor DOI. */
   url: string | null;
+  /** v2.1: its ReCiter status for the scholar; null = ReCiter not read. */
+  status: ReciterWorkStatus | null;
 };
 
-type WorkFact = NewWork & { ids: Set<string>; type: string | null };
+type WorkFact = Omit<NewWork, "status"> & {
+  ids: Set<string>;
+  type: string | null;
+  /** v2.1: how the PMID was found when the record had none. */
+  resolvedBy?: "doi" | "title";
+  /** v2.1: a DOI-only work none of whose DOIs the PubMed lookup answered (an
+   *  NCBI outage, a failed batch): its status is unknown, not `not_in_pubmed`. */
+  pubmedUnknown?: true;
+};
 
 /** What one `/record` says, normalized once per iD. */
 export type RecordFacts = {
@@ -416,6 +448,19 @@ export function surnameRule(
   return null;
 }
 
+/** The record's public name shares neither a given name nor the surname with
+ *  the scholar: a coauthor's iD, never theirs (sfs2002 had three, 2026-10-26).
+ *  A record with no public name can't be judged and stays. Pure. */
+export function nameDisagrees(
+  facts: Pick<RecordFacts, "names" | "given" | "family">,
+  scholar: NamedScholar,
+): boolean {
+  if (facts.names.length === 0) return false;
+  return (
+    !givenNamesAgree(facts.names, scholar) && surnameRule(recordFamilyName(facts), scholar) === null
+  );
+}
+
 /** Given name (`givenNamesAgree`) AND surname (`surnamesAgree`). Pure. */
 export function nameAgrees(
   facts: Pick<RecordFacts, "names" | "given" | "family">,
@@ -424,18 +469,182 @@ export function nameAgrees(
   return givenNamesAgree(facts.names, scholar) && surnamesAgree(recordFamilyName(facts), scholar);
 }
 
+/** ReCiter's assertion on a (scholar, PMID), as `person_article` holds it. */
+export type ReciterAssertion = "ACCEPTED" | "REJECTED" | "PENDING";
+
+/** `person_article.userAssertion` → our three values: ACCEPTED, REJECTED, and
+ *  anything else on a row ReCiter holds (NULL, 'NULL', PENDING) = pending. Pure. */
+export function reciterAssertionOf(raw: unknown): ReciterAssertion {
+  const v = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+  return v === "ACCEPTED" ? "ACCEPTED" : v === "REJECTED" ? "REJECTED" : "PENDING";
+}
+
+/** A new work's ReCiter status for the scholar. `assertions` is the scholar's
+ *  PMID → assertion map; null/undefined = ReCiter was not read, so a PMID's
+ *  status is unknown (null). A DOI-only work the PubMed lookup never answered
+ *  (`pubmedUnknown`) is unknown too. Pure. */
+export function reciterStatusOf(
+  w: Pick<WorkFact, "pmid" | "doi" | "pubmedUnknown">,
+  assertions: ReadonlyMap<string, ReciterAssertion> | null | undefined,
+): ReciterWorkStatus | null {
+  if (!w.pmid) return w.doi ? (w.pubmedUnknown ? null : "not_in_pubmed") : "no_ids";
+  if (!assertions) return null;
+  const a = assertions.get(w.pmid);
+  if (a === "ACCEPTED") return "accepted";
+  if (a === "REJECTED") return "rejected";
+  if (a === "PENDING") return "pending";
+  return "not_retrieved";
+}
+
 /** Works on the record that are not in the scholar's publications (by any of
- *  their ids): the count and a sample, newest first. Pure. */
+ *  their ids): the count, a sample (newest first) with each work's ReCiter
+ *  status, and the per-status counts. Pure. */
 export function newWorksOf(
   facts: Pick<RecordFacts, "works">,
   mine: Map<string, string> | undefined,
-): { total: number; count: number; sample: NewWork[] } {
+  assertions?: ReadonlyMap<string, ReciterAssertion> | null,
+): {
+  total: number;
+  count: number;
+  sample: NewWork[];
+  counts: OrcidWorkStatusDetail["counts"];
+  unknown: number;
+} {
   const fresh = facts.works.filter((w) => ![...w.ids].some((k) => mine?.has(k)));
+  const counts: OrcidWorkStatusDetail["counts"] = {};
+  let unknown = 0;
+  for (const w of fresh) {
+    const st = reciterStatusOf(w, assertions);
+    if (st === null) unknown++;
+    else counts[st] = (counts[st] ?? 0) + 1;
+  }
   const sample = [...fresh]
     .sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
     .slice(0, NEW_WORKS_SAMPLE)
-    .map(({ title, year, doi, pmid, source, url }) => ({ title, year, doi, pmid, source, url }));
-  return { total: facts.works.length, count: fresh.length, sample };
+    .map(({ title, year, doi, pmid, source, url, pubmedUnknown }) => ({
+      title,
+      year,
+      doi,
+      pmid,
+      source,
+      url,
+      status: reciterStatusOf({ pmid, doi, pubmedUnknown }, assertions),
+    }));
+  return { total: facts.works.length, count: fresh.length, sample, counts, unknown };
+}
+
+/** The DOIs to look up: every DOI of a work that has no PMID. Normalized,
+ *  distinct. Pure. */
+export function doisToResolve(facts: Iterable<Pick<RecordFacts, "works">>): string[] {
+  const out = new Set<string>();
+  for (const f of facts)
+    for (const w of f.works) {
+      if ([...w.ids].some((k) => k.startsWith("pmid:"))) continue;
+      for (const k of w.ids) {
+        const d = k.startsWith("doi:") ? normalizeDoi(k.slice(4)) : null;
+        if (d) out.add(d);
+      }
+    }
+  return [...out];
+}
+
+/** The record with each DOI-only work given the PMID its DOI resolved to
+ *  (`resolved`: normalized DOI → PMID, or null = looked up and not in PubMed;
+ *  a DOI the lookup never answered is absent), in the work's ids, `pmid` and
+ *  the record's `workIds`. A work whose DOIs resolve to two PMIDs stays
+ *  unresolved; one none of whose DOIs was answered is marked `pubmedUnknown`.
+ *  Pure. */
+export function withResolvedPmids<F extends Pick<RecordFacts, "works" | "workIds">>(
+  f: F,
+  resolved: ReadonlyMap<string, string | null>,
+): F {
+  let changed = false;
+  const works = f.works.map((w) => {
+    if ([...w.ids].some((k) => k.startsWith("pmid:"))) return w;
+    const dois = [...w.ids]
+      .filter((k) => k.startsWith("doi:"))
+      .map((k) => normalizeDoi(k.slice(4)) ?? "");
+    if (dois.length > 0 && !dois.some((d) => resolved.has(d))) {
+      changed = true;
+      return { ...w, pubmedUnknown: true as const };
+    }
+    const hits = new Set(dois.map((d) => resolved.get(d)).filter((p): p is string => !!p));
+    if (hits.size !== 1) return w;
+    const pmid = [...hits][0]!;
+    changed = true;
+    return { ...w, pmid, ids: new Set([...w.ids, `pmid:${pmid}`]), resolvedBy: "doi" as const };
+  });
+  if (!changed) return f;
+  const workIds = new Set(f.workIds);
+  for (const w of works) for (const k of w.ids) workIds.add(k);
+  return { ...f, works, workIds };
+}
+
+/** Normalized titles that name a kind of item, not a paper: a scholar's one
+ *  "Letter to the editor" is no evidence that a homonym's is the same work. */
+const GENERIC_TITLES: readonly RegExp[] = [
+  /^(letters?|correspondence) (to|from) (the )?editors?$/,
+  /^((authors?|author s|editors?|editor s) )?((re|in) )?(reply|replies|response|responses|answer|rebuttal|comments?|notes?)( (to|on|by|from|regarding))?( (the|a|an))?( (authors?|author s|editors?|editor s))?( (letters?|comments?|commentary|editorial|correspondence))?( (to|on|by|from))?( (the|a|an))?( (editors?|authors?|editorial|letter|comment|commentary))?$/,
+  /^(invited |editorial )?(editorial|commentary|comment|editorial comment|perspective)$/,
+  /^(erratum|errata|correction|corrigendum|retraction|retraction notice|expression of concern|notice of retraction)$/,
+];
+
+/** A title as the v2.1 title match compares it: HTML tags removed, accents
+ *  folded, lowercased, punctuation to spaces. Null under 20 characters or for
+ *  a generic correspondence title (`GENERIC_TITLES`): too generic to match on. Pure. */
+export function titleMatchKey(title: string | null | undefined): string | null {
+  if (!title) return null;
+  const k = fold(title.replace(/<[^>]*>/g, " "))
+    .toLowerCase()
+    .replace(/&[a-z]+;|&#\d+;/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return k.length >= 20 && !GENERIC_TITLES.some((re) => re.test(k)) ? k : null;
+}
+
+export type ScholarTitle = { pmid: string; title: string | null; year: number | null };
+
+/** The scholar's PMID whose title equals the work's (normalized, exact) with
+ *  publication years at most one apart, for a work with NO id. Null when none,
+ *  when two papers match, or when either year is missing. Pure. */
+export function matchByTitle(
+  w: Pick<WorkFact, "ids" | "title" | "year">,
+  pubs: readonly ScholarTitle[] | undefined,
+): string | null {
+  if (w.ids.size > 0 || w.year === null || !pubs) return null;
+  const key = titleMatchKey(w.title);
+  if (!key) return null;
+  const hits = new Set(
+    pubs
+      .filter(
+        (p) => p.year !== null && Math.abs(p.year - w.year!) <= 1 && titleMatchKey(p.title) === key,
+      )
+      .map((p) => p.pmid),
+  );
+  return hits.size === 1 ? [...hits][0]! : null;
+}
+
+/** The work index with each scholar's ReCiter-ACCEPTED PMIDs added (a paper
+ *  ReCiter accepted is the scholar's even when our publications lack it), and
+ *  how many it added per lowercase cwid. Pure. */
+export function withReciterAccepted(
+  works: ScholarWorkIndex,
+  reciter: ReadonlyMap<string, ReadonlyMap<string, ReciterAssertion>>,
+): { works: ScholarWorkIndex; added: Map<string, Set<string>> } {
+  const out: ScholarWorkIndex = new Map(works);
+  const added = new Map<string, Set<string>>();
+  const cwidOf = new Map([...works.keys()].map((c) => [c.toLowerCase(), c]));
+  for (const [lower, assertions] of reciter) {
+    const cwid = cwidOf.get(lower) ?? lower;
+    let mine = out.get(cwid);
+    for (const [pmid, a] of assertions) {
+      if (a !== "ACCEPTED" || mine?.has(`pmid:${pmid}`)) continue;
+      if (!mine || mine === works.get(cwid)) out.set(cwid, (mine = new Map(mine ?? [])));
+      mine.set(`pmid:${pmid}`, pmid);
+      added.set(lower, (added.get(lower) ?? new Set()).add(pmid));
+    }
+  }
+  return { works: out, added };
 }
 
 /** The three competitor rules for one (cwid, orcid) pair. Pure.
@@ -535,28 +744,70 @@ export function assembleEvidence(args: {
   /** v2: let `history_match` count toward the band (`ORCID_HISTORY_BAND`).
    *  Absent = false: history_match is persisted but the band is inst_match's. */
   historyBand?: boolean;
+  /** v2.1: cwid → the scholar's publications' titles and years, for the title
+   *  match of works with no id. Absent = no title match. */
+  titles?: Map<string, ScholarTitle[]>;
+  /** v2.1: LOWERCASE cwid → PMID → ReCiter assertion, for the records' PMIDs.
+   *  Absent = ReCiter was not read: no accepted lift, statuses unknown. */
+  reciter?: Map<string, Map<string, ReciterAssertion>>;
 }): EvidenceRow[] {
   const key = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
-  const shared = new Map<string, number>();
-  for (const p of args.pairs) {
+  // A coauthor's iD gets no row and is no rule-2 competitor. On-file iDs stay.
+  const pairs = args.pairs.filter((p) => {
     const f = args.facts.get(p.orcid);
-    if (f) shared.set(key(p.cwid, p.orcid), sharedPapers(f.workIds, args.works.get(p.cwid)).size);
+    const s = args.scholars.get(p.cwid);
+    return args.onFile.has(key(p.cwid, p.orcid)) || !f || !s || !nameDisagrees(f, s);
+  });
+  const reciter = args.reciter ? withReciterAccepted(args.works, args.reciter) : null;
+  const works = reciter?.works ?? args.works;
+  // The record as this scholar sees it: works with no id matched to the
+  // scholar's own paper by title get that PMID (v2.1 item 3).
+  const pairFacts = new Map<string, Pick<RecordFacts, "works" | "workIds">>();
+  const factsFor = (cwid: string, orcid: string) => {
+    const k = key(cwid, orcid);
+    const hit = pairFacts.get(k);
+    if (hit) return hit;
+    const f = args.facts.get(orcid);
+    if (!f) return undefined;
+    const pubs = args.titles?.get(cwid);
+    let out: Pick<RecordFacts, "works" | "workIds"> = f;
+    if (pubs) {
+      const ws = f.works.map((w) => {
+        const pmid = matchByTitle(w, pubs);
+        return pmid
+          ? { ...w, pmid, ids: new Set([`pmid:${pmid}`]), resolvedBy: "title" as const }
+          : w;
+      });
+      if (ws.some((w, i) => w !== f.works[i])) {
+        const ids = new Set(f.workIds);
+        for (const w of ws) for (const id of w.ids) ids.add(id);
+        out = { works: ws, workIds: ids };
+      }
+    }
+    pairFacts.set(k, out);
+    return out;
+  };
+  const shared = new Map<string, number>();
+  for (const p of pairs) {
+    const f = factsFor(p.cwid, p.orcid);
+    if (f) shared.set(key(p.cwid, p.orcid), sharedPapers(f.workIds, works.get(p.cwid)).size);
   }
   const byCwid = new Map<string, string[]>();
   const byOrcid = new Map<string, string[]>();
-  for (const p of args.pairs) {
+  for (const p of pairs) {
     byCwid.set(p.cwid, [...(byCwid.get(p.cwid) ?? []), p.orcid]);
     byOrcid.set(p.orcid, [...(byOrcid.get(p.orcid) ?? []), p.cwid]);
   }
   const index = buildNameIndex(args.active);
 
   const rows: EvidenceRow[] = [];
-  for (const p of args.pairs) {
+  for (const p of pairs) {
     if (args.onFile.has(key(p.cwid, p.orcid))) continue;
-    const f = args.facts.get(p.orcid);
+    const record = args.facts.get(p.orcid);
     const s = args.scholars.get(p.cwid);
-    if (!f || !s) continue;
-    const mine = args.works.get(p.cwid);
+    if (!record || !s) continue;
+    const f = { ...record, ...factsFor(p.cwid, p.orcid)! };
+    const mine = works.get(p.cwid);
     const sameSurname = new Map<string, EvidenceScholar>();
     for (const k of new Set([lastNameKey(fold(s.fullName)), lastNameKey(fold(s.preferredName))])) {
       for (const o of index.get(k) ?? []) sameSurname.set(o.cwid, o as EvidenceScholar);
@@ -567,7 +818,7 @@ export function assembleEvidence(args: {
       mine,
       sameSurname: [...sameSurname.values()].map((o) => ({
         cwid: o.cwid,
-        works: args.works.get(o.cwid),
+        works: works.get(o.cwid),
       })),
       otherIds: (byCwid.get(p.cwid) ?? [])
         .filter((o) => o !== p.orcid)
@@ -593,7 +844,14 @@ export function assembleEvidence(args: {
       competitor: comp.competitor,
       nameAgrees: givenAgrees && rule !== null,
     };
-    const nw = newWorksOf(f, mine);
+    const assertions = args.reciter
+      ? (args.reciter.get(p.cwid.toLowerCase()) ?? new Map<string, ReciterAssertion>())
+      : null;
+    const nw = newWorksOf(f, mine, assertions);
+    const recordPmids = new Set(f.works.map((w) => w.pmid).filter((x): x is string => !!x));
+    const acceptedInReciter = [...(reciter?.added.get(p.cwid.toLowerCase()) ?? [])].filter((x) =>
+      recordPmids.has(x),
+    ).length;
     const sharedPmids = [...sharedPapers(f.workIds, mine)].sort((a, b) => Number(b) - Number(a));
     rows.push({
       cwid: p.cwid,
@@ -625,6 +883,15 @@ export function assembleEvidence(args: {
         competitors: comp.detail,
         sources: [...(args.sources?.get(key(p.cwid, p.orcid)) ?? [])].sort(),
         worksDropped: f.worksDropped ?? 0,
+        workStatus: {
+          counts: nw.counts,
+          unknown: nw.unknown,
+          reciterRead: args.reciter !== undefined,
+          acceptedInReciter,
+          resolvedByDoi: f.works.filter((w) => w.resolvedBy === "doi").length,
+          resolvedByTitle: f.works.filter((w) => w.resolvedBy === "title").length,
+          pubmedUnknown: f.works.filter((w) => w.pubmedUnknown).length,
+        },
       },
       recordModifiedAt: f.modifiedAt,
     });
@@ -704,7 +971,7 @@ export function substituteDeprecated(
 }
 
 /** The `email_verified` rows the auto-confirm may write: the scholar has no iD
- *  on file (`held`: `scholar.orcid` or an undismissed `rpm_admin` iD), the pair
+ *  on file (`held`: `scholar.orcid`), the pair
  *  is not dismissed, the scholar has exactly one such row, and no other scholar
  *  holds or is email-verified for the iD. The last two are stricter than the
  *  spec on purpose (see its Deviations). Pure. */
@@ -823,6 +1090,75 @@ export async function autoConfirmStep(
 const chunk = <T>(xs: T[], n: number): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
+/** The run's DOI → PMID lookup over every DOI-only work. Never throws: an NCBI
+ *  outage logs its counts and returns what was answered (possibly nothing). */
+async function resolveWorkPmids(
+  facts: Map<string, RecordFacts>,
+): Promise<Map<string, string | null>> {
+  const dois = doisToResolve(facts.values());
+  const resolver = createPmidResolver({ apiKey: process.env.NCBI_API_KEY });
+  let resolved = new Map<string, string | null>();
+  try {
+    resolved = await resolver.resolve(dois);
+  } catch (err) {
+    // The resolver does not throw; belt and braces, so a bug here never blocks the write.
+    console.warn(`DOI → PMID lookup failed: ${(err as Error).message}`);
+  }
+  const st = resolver.stats;
+  console.log(
+    `DOI → PMID: ${dois.length} DOI-only DOIs, ${[...resolved.values()].filter(Boolean).length} resolved (${st.byIdconv} PMC ID converter, ${st.byAid} PubMed [aid]), ${st.unresolved} unresolved (${dois.length - resolved.size} never answered: status unknown), ${st.failedBatches} failed batches${st.gaveUp ? " (NCBI unreachable: stopped early, the rest stay unknown)" : ""}`,
+  );
+  return resolved;
+}
+
+/** ReCiter's assertions on the given PMIDs per scholar, from reciterdb
+ *  `person_article`: LOWERCASE cwid → PMID → assertion. Null when reciterdb
+ *  cannot be read (unset credentials, unreachable): the statuses are then
+ *  unknown, and the run still writes its evidence. */
+async function loadReciterAssertions(
+  pmidsByCwid: Map<string, Set<string>>,
+): Promise<Map<string, Map<string, ReciterAssertion>> | null> {
+  const out = new Map<string, Map<string, ReciterAssertion>>();
+  const cwids = [...pmidsByCwid.keys()].filter((c) => (pmidsByCwid.get(c)?.size ?? 0) > 0);
+  try {
+    for (const part of chunk(cwids, RECITER_CWID_BATCH)) {
+      const pmids = [...new Set(part.flatMap((c) => [...pmidsByCwid.get(c)!]))].map(Number);
+      for (const ids of chunk(pmids, RECITER_PMID_BATCH)) {
+        const rows = (await withReciterConnection((conn) =>
+          conn.query(
+            `SELECT personIdentifier, pmid, userAssertion
+               FROM person_article
+              WHERE personIdentifier IN (?) AND pmid IN (?)`,
+            [part, ids],
+          ),
+        )) as Array<{ personIdentifier: string; pmid: number | string; userAssertion: unknown }>;
+        for (const r of rows) {
+          const cwid = r.personIdentifier?.trim().toLowerCase();
+          const pmid = String(Number(r.pmid));
+          if (!cwid || !/^\d+$/.test(pmid) || pmid === "0") continue;
+          const m = out.get(cwid) ?? new Map<string, ReciterAssertion>();
+          const a = reciterAssertionOf(r.userAssertion);
+          // Two rows for one pair: ACCEPTED beats REJECTED beats pending.
+          const rank = { ACCEPTED: 0, REJECTED: 1, PENDING: 2 } as const;
+          const prev = m.get(pmid);
+          if (!prev || rank[a] < rank[prev]) m.set(pmid, a);
+          out.set(cwid, m);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `ReCiter assertions unavailable (${(err as Error).message}); new works keep a PMID-less status only`,
+    );
+    return null;
+  }
+  const n = [...out.values()].reduce((t, m) => t + m.size, 0);
+  console.log(
+    `ReCiter assertions: ${n} (scholar, PMID) rows for ${out.size} of ${cwids.length} scholars`,
+  );
+  return out;
+}
+
 const maxRecords = Number(process.env.ORCID_EVIDENCE_MAX_RECORDS);
 // A truncated iD list is a local smoke only: the delete pass would remove every
 // evidence row the sample did not cover, so the knob forces a dry run.
@@ -854,10 +1190,9 @@ async function main(): Promise<number> {
   );
 
   // 1. Population: distinct non-dismissed candidate pairs of active scholars.
-  //    "On file" is `scholar.orcid` or an undismissed `rpm_admin` iD (`heldFor`).
+  //    "On file" is `scholar.orcid`.
   const seen = new Set<string>();
   const pairs: Array<{ cwid: string; orcid: string }> = [];
-  const admins = new Map<string, string[]>();
   const sources = new Map<string, string[]>();
   for (const c of await db.write.orcidCandidate.findMany({
     select: { cwid: true, orcid: true, source: true },
@@ -866,8 +1201,6 @@ async function main(): Promise<number> {
     if (dismissed.has(k) || !byCwid.has(c.cwid)) continue;
     if (!(sources.get(k) ?? []).includes(c.source))
       sources.set(k, [...(sources.get(k) ?? []), c.source]);
-    if (c.source === "rpm_admin" && !(admins.get(c.cwid) ?? []).includes(c.orcid))
-      admins.set(c.cwid, [...(admins.get(c.cwid) ?? []), c.orcid]);
     if (seen.has(k)) continue;
     seen.add(k);
     pairs.push({ cwid: c.cwid, orcid: c.orcid });
@@ -924,11 +1257,7 @@ async function main(): Promise<number> {
     );
   }
   const onFile = new Set(
-    pairs
-      .filter(
-        (p) => heldFor(p.orcid, byCwid.get(p.cwid)!.orcid, admins.get(p.cwid) ?? []) === p.orcid,
-      )
-      .map((p) => `${p.cwid}|${p.orcid}`),
+    pairs.filter((p) => byCwid.get(p.cwid)!.orcid === p.orcid).map((p) => `${p.cwid}|${p.orcid}`),
   );
   console.log(`${onFile.size} pairs already on file`);
   const maxFailed = Math.max(RECORD_FAIL_FLOOR, Math.ceil(RECORD_FAIL_SHARE * ids.length));
@@ -937,6 +1266,12 @@ async function main(): Promise<number> {
       `${failed} of ${ids.length} /record fetches failed after retries (> ${maxFailed}) — an ORCID outage, refusing to mirror`,
     );
   }
+
+  // 2b. DOI → PMID for works with a DOI and no PMID (v2.1 item 2). Never throws:
+  //     a DOI the lookup never answered (an NCBI outage) gets status unknown,
+  //     not "not in PubMed", and the run goes on.
+  const resolution = await resolveWorkPmids(facts);
+  for (const [orcid, f] of facts) facts.set(orcid, withResolvedPmids(f, resolution));
 
   // 3. Works for every scholar a rule reads: the pairs' scholars and their same-surname peers.
   const index = buildNameIndex(active);
@@ -981,6 +1316,28 @@ async function main(): Promise<number> {
     `history: ${education.length} degrees, ${appointments.length} external appointments, ${identity.size} Identity records with institutions`,
   );
 
+  // 4b. The pairs' scholars' publication titles (v2.1 item 3: title match of
+  //     works with no id), and ReCiter's assertions on the records' PMIDs (item 4).
+  const titles = new Map<string, ScholarTitle[]>();
+  for (const part of chunk(pairCwids, BATCH)) {
+    for (const r of await db.write.publicationAuthor.findMany({
+      where: { cwid: { in: part } },
+      select: { cwid: true, publication: { select: { pmid: true, title: true, year: true } } },
+    })) {
+      if (!r.cwid) continue;
+      titles.set(r.cwid, [...(titles.get(r.cwid) ?? []), r.publication]);
+    }
+  }
+  const pmidsByCwid = new Map<string, Set<string>>();
+  for (const p of pairs) {
+    const f = facts.get(p.orcid);
+    if (!f) continue;
+    const set = pmidsByCwid.get(p.cwid) ?? new Set<string>();
+    for (const w of f.works) if (w.pmid) set.add(w.pmid);
+    pmidsByCwid.set(p.cwid, set);
+  }
+  const reciter = await loadReciterAssertions(pmidsByCwid);
+
   const scored = assembleEvidence({
     pairs,
     onFile,
@@ -991,7 +1348,20 @@ async function main(): Promise<number> {
     history,
     sources,
     historyBand: isHistoryBandEnabled(),
+    titles,
+    reciter: reciter ?? undefined,
   });
+  const statusTotals: Record<string, number> = {};
+  for (const r of scored) {
+    const ws = r.evidenceDetail.workStatus!;
+    for (const [k, n] of Object.entries(ws.counts)) statusTotals[k] = (statusTotals[k] ?? 0) + n;
+    statusTotals.unknown = (statusTotals.unknown ?? 0) + ws.unknown;
+    statusTotals.accepted_in_reciter =
+      (statusTotals.accepted_in_reciter ?? 0) + ws.acceptedInReciter;
+    statusTotals.title_matched = (statusTotals.title_matched ?? 0) + ws.resolvedByTitle;
+    statusTotals.pubmed_unknown = (statusTotals.pubmed_unknown ?? 0) + (ws.pubmedUnknown ?? 0);
+  }
+  console.log(`new works by ReCiter status (all rows): ${JSON.stringify(statusTotals)}`);
 
   // 5. Shared papers' title, year, journal and DOI from our publications.
   const sharedPmids = [
@@ -1021,11 +1391,7 @@ async function main(): Promise<number> {
   );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 
-  const plan = planAutoConfirm(
-    rows,
-    new Map(active.map((s) => [s.cwid, s.orcid ?? admins.get(s.cwid)?.[0] ?? null])),
-    dismissed,
-  );
+  const plan = planAutoConfirm(rows, new Map(active.map((s) => [s.cwid, s.orcid])), dismissed);
   if (dryRun) {
     await autoConfirmStep(db.write, plan, { enabled: isEmailAutoconfirmEnabled(), dryRun });
     console.log("--dry-run: nothing written.");
@@ -1072,6 +1438,7 @@ if (isDirectInvocation) {
       process.exit(1);
     })
     .finally(async () => {
+      await closeReciterPool().catch(() => undefined);
       await db.write.$disconnect();
     });
 }

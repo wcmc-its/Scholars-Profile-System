@@ -141,6 +141,14 @@ describe("findVolumeRegressions — change-count sources (#2200)", () => {
     expect(out).toHaveLength(0);
   });
 
+  it("exempts ORCID-push, which counts only Identity rows it changed", () => {
+    const out = findVolumeRegressions(
+      [{ source: "ORCID-push", latest: 1, previous: 125, latestAt: hoursAgo(1) }],
+      { now: NOW },
+    );
+    expect(out).toHaveLength(0);
+  });
+
   it("exempts by exact source name, so a lookalike is still graded", () => {
     expect(CHANGE_COUNT_SOURCES.has("News")).toBe(true);
     const out = findVolumeRegressions(

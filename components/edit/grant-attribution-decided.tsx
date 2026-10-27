@@ -267,8 +267,8 @@ export function DecidedAwards({ page, readOnly }: { page: DecidedPage; readOnly:
 
   const counts = page.counts[p.tab];
   const pageSize = p.group ? DECIDED_GROUP_PAGE_SIZE : DECIDED_PAGE_SIZE;
-  const first = page.matched === 0 ? 0 : (p.page - 1) * pageSize + 1;
-  const last = Math.min(page.matched, p.page * pageSize);
+  const first = page.matched === 0 ? 0 : p.all ? 1 : (p.page - 1) * pageSize + 1;
+  const last = p.all ? page.matched : Math.min(page.matched, p.page * pageSize);
   const autoLabel =
     p.tab === "confirmed" ? "Auto-confirmed" : p.tab === "rejected" ? "Auto-rejected" : null;
   const rowProps = {
@@ -468,7 +468,27 @@ export function DecidedAwards({ page, readOnly }: { page: DecidedPage; readOnly:
             {page.matched.toLocaleString("en-US")}
             {p.group ? " scholars" : ""}
           </span>
-          <span className="ml-auto flex gap-2">
+          {/* Filters and sort keep "Show all"; only these two links change it. */}
+          {p.all ? (
+            <button
+              type="button"
+              onClick={() => go({ all: false })}
+              className="text-apollo-slate hover:underline"
+              data-testid="grant-attribution-show-paged"
+            >
+              Show {pageSize} per page
+            </button>
+          ) : page.matched > pageSize ? (
+            <button
+              type="button"
+              onClick={() => go({ all: true })}
+              className="text-apollo-slate hover:underline"
+              data-testid="grant-attribution-show-all"
+            >
+              Show all
+            </button>
+          ) : null}
+          <span className={cn("ml-auto flex gap-2", p.all && "hidden")}>
             <button
               type="button"
               disabled={p.page <= 1}
@@ -820,7 +840,8 @@ function GroupedTable({
   const TAB_NAME: Record<DecidedTab | "pending", string> = {
     confirmed: "in Confirmed",
     rejected: "in Not this person",
-    unproven: "in Unproven",
+    // Unproven awards are listed in To review now.
+    unproven: "to review, nothing found",
     pending: "to review",
   };
   return (

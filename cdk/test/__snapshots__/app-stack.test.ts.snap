@@ -798,11 +798,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "GRANT_ATTRIBUTION_QUEUE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_LIBRARIAN_QUEUE",
                 "Value": "on",
+              },
+              {
+                "Name": "PUBLICATION_MANAGER_URL",
+                "Value": "https://reciter.weill.cornell.edu",
               },
               {
                 "Name": "HONORS_CURATOR_ENABLED",
@@ -5794,6 +5798,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "ORCID_LIBRARIAN_QUEUE",
                 "Value": "on",
+              },
+              {
+                "Name": "PUBLICATION_MANAGER_URL",
+                "Value": "https://reciter.weill.cornell.edu",
               },
               {
                 "Name": "HONORS_CURATOR_ENABLED",

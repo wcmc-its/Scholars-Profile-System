@@ -137,11 +137,15 @@ export function staleSources(
 // ReciterAI-area-signals drains the AREAINPUT queue, which etl/area-signal-inputs
 // fills only with texts whose key is new or changed: the 3,375-text subarea
 // backfill, then ~20 a night.
+// ORCID-push returns pushed + cleared (etl/orcid-push): Identity rows that
+// differed from scholar.orcid. 125 newly confirmed iDs pushed once on 2026-10-25,
+// then 1 the next night with 142 equal. A dead ReCiter API throws on its own.
 export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "News",
   "NewsClips",
   "FundingDigest",
   "ReciterAI-area-signals",
+  "ORCID-push",
 ]);
 
 /**

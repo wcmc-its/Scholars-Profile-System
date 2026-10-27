@@ -33,7 +33,9 @@ const h = vi.hoisted(() => ({
     matched: 0,
     rows: [],
     groups: null,
+    unprovenIds: ["reporter:zzb0002:R21YY000002"],
   })),
+  unproven: vi.fn<(c: unknown, ids: string[]) => Promise<unknown[]>>(async () => []),
   shell: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("__NOT_FOUND__");
@@ -60,6 +62,7 @@ vi.mock("@/lib/edit/grant-attribution-queue.server", () => ({
   countGrantAttribution: vi.fn(async (_c: unknown, status: string) => (status === "confirmed" ? 321 : 7)),
   loadAutoConfirmed: vi.fn(async () => ({ items: [], total: 0 })),
   loadGrantAttributionRuns: vi.fn(async () => []),
+  loadUnprovenQueueItems: h.unproven,
 }));
 vi.mock("@/lib/edit/grant-attribution-decided.server", () => ({
   loadDecidedPage: h.decided,
@@ -109,6 +112,8 @@ const SCHOLAR = { cwid: "zzn0001", isSuperuser: false };
 
 const ITEM: GrantAttributionItem = {
   id: "rev-1",
+  grantId: "reporter:zza0001:R01XX000001",
+  unproven: false,
   cwid: "zza0001",
   slug: "pat-example",
   scholarName: "Pat Example, MD",
@@ -207,6 +212,30 @@ describe("page gate", () => {
     expect(el.props.pendingGrantAttribution).toBe(1);
   });
 
+  it("lists Unproven awards in To review, with no Unproven tab", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    h.load.mockImplementation(async (_c: unknown, status: string) => (status === "pending" ? [ITEM] : []));
+    h.unproven.mockResolvedValue([UNPROVEN]);
+    const el = (await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as { props: { children: unknown } };
+    render(el.props.children as React.ReactElement);
+    expect(h.unproven.mock.calls[0]![1]).toEqual(["reporter:zzb0002:R21YY000002"]);
+    expect(screen.queryByTestId("grant-attribution-tab-unproven")).toBeNull();
+    // 1 pending review + the decided pass's 4 Unproven.
+    expect(screen.getByTestId("grant-attribution-tab-pending").textContent).toContain("5");
+    const list = within(screen.getByTestId("grant-attribution-list"));
+    expect(list.getByText("Pat Example, MD")).toBeTruthy();
+    expect(list.getByText("Lee Sample, PhD")).toBeTruthy();
+  });
+
+  it("sends an old ?tab=unproven link to To review", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    h.load.mockResolvedValue([]);
+    h.unproven.mockResolvedValue([UNPROVEN]);
+    await GrantAttributionQueuePage({ searchParams: Promise.resolve({ tab: "unproven" }) });
+    expect(h.decided.mock.calls[0]![3]).toEqual({ hydrate: false });
+    expect(h.unproven).toHaveBeenCalled();
+  });
+
   it("loads one hydrated page of a decided tab from the URL", async () => {
     h.session.mockResolvedValue(STEWARD);
     h.load.mockResolvedValue([]);
@@ -237,6 +266,7 @@ describe("page gate", () => {
 const COAUTHOR: GrantAttributionItem = {
   ...ITEM,
   id: "rev-2",
+  grantId: "reporter:zza0001:R01XX000009",
   cues: [
     {
       id: "copi_coauthor",
@@ -250,6 +280,20 @@ const COAUTHOR: GrantAttributionItem = {
     },
   ],
   award: { ...ITEM.award, title: "A second synthetic study", applId: 456 },
+};
+
+/** An award the check found nothing on: no review, so its id is the grant's. */
+const UNPROVEN: GrantAttributionItem = {
+  ...ITEM,
+  id: "reporter:zzb0002:R21YY000002",
+  grantId: "reporter:zzb0002:R21YY000002",
+  unproven: true,
+  cwid: "zzb0002",
+  scholarName: "Lee Sample, PhD",
+  score: -1,
+  band: "hide",
+  cues: [],
+  award: { ...ITEM.award, title: "A third synthetic study", applId: 789 },
 };
 
 const queue = (readOnly = false, pending = [ITEM]) =>
@@ -375,6 +419,61 @@ describe("the review", () => {
       id: "rev-1",
       decision: "reject",
       reason: "Outside the scholar's career",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("sorts strongest evidence first by default, and weakest first on request", () => {
+    const strong: GrantAttributionItem = { ...COAUTHOR, id: "rev-3", score: 6, scholarName: "Strong Example" };
+    // Level first, then score: this conflict (score 9) still follows both likelies.
+    const conflict: GrantAttributionItem = { ...ITEM, score: 9 };
+    const likely: GrantAttributionItem = { ...COAUTHOR, score: 1, scholarName: "Likely Example" };
+    queue(false, [UNPROVEN, likely, conflict, strong]);
+    const names = () =>
+      [...screen.getByTestId("grant-attribution-list").querySelectorAll("[data-row] span.truncate.font-semibold")].map(
+        (n) => n.textContent,
+      );
+    expect(names()).toEqual(["Strong Example", "Likely Example", "Pat Example, MD", "Lee Sample, PhD"]);
+    fireEvent.change(screen.getByDisplayValue("Strongest evidence first"), { target: { value: "weak" } });
+    expect(names()).toEqual(["Lee Sample, PhD", "Pat Example, MD", "Likely Example", "Strong Example"]);
+  });
+
+  it("decides an Unproven award by grant, and undoes it by the review the route opened", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, init: RequestInit) =>
+        new Response(
+          JSON.stringify(
+            JSON.parse(init.body as string).grant ? { reviews: { "reporter:zzb0002:R21YY000002": "rev-new" } } : {},
+          ),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    queue(false, [UNPROVEN]);
+    await act(async () => {
+      fireEvent.click(detail().getByText("Confirm"));
+    });
+    const body = (i: number) => JSON.parse((fetchMock.mock.calls[i] as unknown as [string, RequestInit])[1].body as string);
+    expect(body(0)).toEqual({ grant: "reporter:zzb0002:R21YY000002", decision: "confirm" });
+    await act(async () => {
+      fireEvent.click(detail().getByText("Undo"));
+    });
+    expect(body(1)).toEqual({ id: "rev-new", decision: "undo" });
+    vi.unstubAllGlobals();
+  });
+
+  it("decides reviews and Unproven awards together in one bulk call", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ reviews: {} }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    queue(false, [ITEM, UNPROVEN]);
+    for (const cb of screen.getAllByRole("checkbox").slice(-2)) fireEvent.click(cb);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("grant-attribution-bulk-confirm"));
+    });
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+      grants: ["reporter:zzb0002:R21YY000002"],
+      ids: ["rev-1"],
+      decision: "confirm",
     });
     vi.unstubAllGlobals();
   });

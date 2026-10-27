@@ -205,9 +205,8 @@ describe("POST /api/edit/orcid", () => {
     });
   });
 
-  it("orcid: null REMOVES: scholar.orcid AND orcid_confirmed_at nulled, the rpm_admin mirror row dropped, the removed iD dismissed, one audit row", async () => {
-    // The removed iD is on the rpm_admin mirror row, NOT scholar.orcid (NULL for WCM).
-    mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
+  it("orcid: null REMOVES: scholar.orcid AND orcid_confirmed_at nulled, the removed iD dismissed, one audit row", async () => {
+    mockTxScholarFindUnique.mockResolvedValue({ orcid: ID });
     const res = await POST(post({ cwid: "self01", orcid: null }));
     expect(res.status).toBe(200);
     expect((await res.json()).orcid).toBeNull();
@@ -215,7 +214,7 @@ describe("POST /api/edit/orcid", () => {
       where: { cwid: "self01" },
       data: { orcid: null, orcidConfirmedAt: null, orcidConfirmMethod: null, orcidConfirmedBy: null },
     });
-    expect(mockTxCandidateDeleteMany).toHaveBeenCalledWith({ where: { cwid: "self01", source: "rpm_admin" } });
+    expect(mockTxCandidateDeleteMany).not.toHaveBeenCalled();
     // The dismissal is what stops the nightly mirror / Identity import bringing it back.
     expect(mockTxDismissalUpsert).toHaveBeenCalledTimes(1);
     expect(mockTxDismissalUpsert).toHaveBeenCalledWith({
@@ -232,22 +231,16 @@ describe("POST /api/edit/orcid", () => {
     expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
   });
 
-  it("a remove dismisses EVERY iD that made up on-file: scholar.orcid AND each rpm_admin row's iD (else the re-mirrored one is on file again tomorrow)", async () => {
+  it("a remove dismisses only scholar.orcid: an rpm_admin iD is a candidate, not on file, so it is left alone", async () => {
     mockTxScholarFindUnique.mockResolvedValue({ orcid: OTHER_ID });
     mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
     const res = await POST(post({ cwid: "self01", orcid: null }));
     expect(res.status).toBe(200);
-    expect(mockTxDismissalUpsert).toHaveBeenCalledTimes(2);
-    const pairs = mockTxDismissalUpsert.mock.calls.map(
-      (c) => (c[0] as { where: { cwid_orcid: { cwid: string; orcid: string } } }).where.cwid_orcid,
-    );
-    expect(pairs).toEqual(
-      expect.arrayContaining([
-        { cwid: "self01", orcid: OTHER_ID },
-        { cwid: "self01", orcid: ID },
-      ]),
-    );
-    // The audit `before` is the displayed value: scholar.orcid wins over rpm_admin.
+    expect(mockTxCandidateFindMany).not.toHaveBeenCalled();
+    expect(mockTxDismissalUpsert).toHaveBeenCalledTimes(1);
+    expect(mockTxDismissalUpsert.mock.calls[0][0]).toMatchObject({
+      where: { cwid_orcid: { cwid: "self01", orcid: OTHER_ID } },
+    });
     const args = mockTxExecuteRaw.mock.calls[0] as unknown[];
     expect(args.some((v) => typeof v === "string" && v.includes(`{"orcid":"${OTHER_ID}"}`))).toBe(true);
   });
@@ -273,7 +266,7 @@ describe("POST /api/edit/orcid", () => {
   });
 
   it("dismiss: [...] on a remove ('Remove both') also dismisses the rejected suggestion", async () => {
-    mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
+    mockTxScholarFindUnique.mockResolvedValue({ orcid: ID });
     const res = await POST(post({ cwid: "self01", orcid: null, dismiss: ["0000-0000-0000-001x"] }));
     expect(res.status).toBe(200);
     const pairs = mockTxDismissalUpsert.mock.calls.map(

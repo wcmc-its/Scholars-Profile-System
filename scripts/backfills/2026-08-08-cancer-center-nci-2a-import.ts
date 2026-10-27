@@ -46,6 +46,8 @@
  * record), or for NIH the same core project number, so a type-2 renewal under
  * a new OSRA record still matches. A supplement (S1, S2...) is its own award.
  * Bedrock still runs, so `cancerRelevantPercentAi` keeps the model's view.
+ * The reviewer's note on that prior row comes with the percent, never over a
+ * note already on the new row.
  *
  * AI ORIGINAL — every llm- or rule-sourced percent this script writes is also
  * written to `cancerRelevantPercentAi`, so the report can tell a reviewer's
@@ -148,6 +150,7 @@ export type PriorHumanPercent = {
   institutionNumber: number;
   projectNumber: string;
   cancerRelevantPercent: unknown; // Prisma Decimal
+  reviewerNote: string | null;
 };
 
 /** NIH core project number plus any supplement tag ("3 U54 CA242639-06S1" ->
@@ -160,8 +163,19 @@ export function nihGrantKey(projectNumber: string): string | null {
 /** The latest prior cycle's human percent for `row`'s award, else null (see
  *  CARRY-FORWARD). */
 export function carriedHumanPercent(row: ImportRow, prior: PriorHumanPercent[]): number | null {
+  const hit = priorHumanHit(row, prior);
+  return hit ? Number(hit.cancerRelevantPercent) : null;
+}
+
+/** The reviewer note that travels with `carriedHumanPercent`'s value (same
+ *  prior row), else null. */
+export function carriedHumanNote(row: ImportRow, prior: PriorHumanPercent[]): string | null {
+  return priorHumanHit(row, prior)?.reviewerNote ?? null;
+}
+
+function priorHumanHit(row: ImportRow, prior: PriorHumanPercent[]): PriorHumanPercent | undefined {
   const key = nihGrantKey(row.projectNumber);
-  const hit = prior
+  return prior
     .filter(
       (p) =>
         p.reportingCycle !== row.reportingCycle &&
@@ -169,7 +183,6 @@ export function carriedHumanPercent(row: ImportRow, prior: PriorHumanPercent[]):
         (p.institutionNumber === row.institutionNumber || (key != null && nihGrantKey(p.projectNumber) === key)),
     )
     .sort((a, b) => b.reportingCycle.localeCompare(a.reportingCycle))[0];
-  return hit ? Number(hit.cancerRelevantPercent) : null;
 }
 
 type GrantText = { awardNumber: string | null; cwid: string; abstract: string | null; phrText: string | null };
@@ -178,6 +191,7 @@ type ExistingAward = {
   id: string;
   cancerRelevantPercent: number | null;
   cancerRelevantPercentSource: string;
+  reviewerNote?: string | null;
   allocations: { source: string }[];
 };
 
@@ -514,6 +528,7 @@ export async function applyPlan(
   opts: ImportOptions,
   counts: ApplyCounts,
   carried: number | null = null,
+  carriedNote: string | null = null,
 ): Promise<void> {
   const { row, allocation } = plan;
   // A carried reviewer percent wins; the model's value still lands in *Ai.
@@ -524,6 +539,8 @@ export async function applyPlan(
     cancerRelevantRationale: plan.cancerRelevantRationale,
     ...plan.provenance,
   };
+  // The note travels with the carried percent it explains.
+  const noteData = carried != null && carriedNote ? { reviewerNote: carriedNote } : {};
   if (allocation.programCode) counts.membershipResolved += 1;
   else counts.unresolvedProgram += 1;
 
@@ -562,6 +579,7 @@ export async function applyPlan(
           institutionNumber: row.institutionNumber,
           ...awardScalars,
           ...percentData,
+          ...noteData,
           allocations: {
             create: [{ centerCode: CENTER_CODE, programCode: allocation.programCode, programPercent: 100, source: allocation.source }],
           },
@@ -606,6 +624,8 @@ export async function applyPlan(
     data: {
       ...awardScalars,
       ...(touchPercent ? percentData : {}),
+      // Never over a note a reviewer already wrote on this cycle's row.
+      ...(touchPercent && existing.reviewerNote == null ? noteData : {}),
       ...(anyHumanAllocation
         ? {}
         : {
@@ -664,11 +684,11 @@ const main = async () => {
 
   const priorHuman = await w.cancerCenterFundingAward.findMany({
     where: { centerCode: CENTER_CODE, cancerRelevantPercentSource: "human" },
-    select: { reportingCycle: true, institutionNumber: true, projectNumber: true, cancerRelevantPercent: true },
+    select: { reportingCycle: true, institutionNumber: true, projectNumber: true, cancerRelevantPercent: true, reviewerNote: true },
   });
   const counts = emptyCounts();
   for (const plan of plans) {
-    await applyPlan(w, plan, opts, counts, carriedHumanPercent(plan.row, priorHuman));
+    await applyPlan(w, plan, opts, counts, carriedHumanPercent(plan.row, priorHuman), carriedHumanNote(plan.row, priorHuman));
   }
 
   const ruleRows = plans.filter((p) => p.cancerRelevantPercentSource === "rule").length;

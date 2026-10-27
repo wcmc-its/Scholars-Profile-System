@@ -51,10 +51,7 @@ describe("identity ETL — per-row decision against SPS", () => {
   // check digit 9). Neither is a person; the repo is public.
   const ID = "0000-0002-1825-0097";
   const OTHER = "0000-0001-2345-6789";
-  const state = (
-    orcid: string | null,
-    orcidConfirmedAt: Date | null = null,
-  ): ScholarOrcidState => ({ orcid, orcidConfirmedAt });
+  const state = (orcid: string | null): ScholarOrcidState => ({ orcid });
   // The main() Map is keyed by cwid.toLowerCase(); mirror that here.
   const scholars = (m: Record<string, ScholarOrcidState>) =>
     new Map(Object.entries(m).map(([k, v]) => [k.toLowerCase(), v]));
@@ -64,7 +61,7 @@ describe("identity ETL — per-row decision against SPS", () => {
       { uid: "abc1234", identity: { orcid: ID } },
       scholars({ abc1234: state(null) }),
     );
-    expect(d).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
+    expect(d).toEqual({ kind: "candidate", cwid: "abc1234", orcid: ID });
   });
 
   it("an UPPERCASE Identity uid still matches (both sides are lowercased)", () => {
@@ -72,28 +69,13 @@ describe("identity ETL — per-row decision against SPS", () => {
       { uid: "ABC1234", identity: { orcid: ID } },
       scholars({ abc1234: state(null) }),
     );
-    expect(d).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
+    expect(d).toEqual({ kind: "candidate", cwid: "abc1234", orcid: ID });
     // ...and the one uppercase scholar row on the dump matches a lowercase uid.
     const d2 = decideIdentityRow(
       { uid: "abc1234", identity: { orcid: ID } },
       scholars({ ABC1234: state(null) }),
     );
-    expect(d2).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
-  });
-
-  it("an ORCID-authenticated iD (#3115) is never overridden by a different Identity value", () => {
-    const OTHER = "0000-0000-0000-001X";
-    const authed = { orcid: OTHER, orcidConfirmedAt: new Date(), orcidConfirmMethod: "authenticated" };
-    expect(
-      decideIdentityRow({ uid: "abc1234", identity: { orcid: ID } }, scholars({ abc1234: authed })),
-    ).toEqual({ kind: "authenticated" });
-    // A plain confirmation still loses to Identity.
-    expect(
-      decideIdentityRow(
-        { uid: "abc1234", identity: { orcid: ID } },
-        scholars({ abc1234: { ...authed, orcidConfirmMethod: "self" } }),
-      ),
-    ).toEqual({ kind: "conflict", cwid: "abc1234", orcid: ID });
+    expect(d2).toEqual({ kind: "candidate", cwid: "abc1234", orcid: ID });
   });
 
   it("no scholar row / malformed iD / missing fields are counted, never written", () => {
@@ -112,44 +94,35 @@ describe("identity ETL — per-row decision against SPS", () => {
     });
   });
 
-  it("Identity equal to SPS is unchanged — confirmed or not (a confirmation Identity agrees with is kept)", () => {
+  it("Identity equal to SPS is unchanged", () => {
     expect(
       decideIdentityRow({ uid: "abc1234", identity: { orcid: ID } }, scholars({ abc1234: state(ID) })),
     ).toEqual({ kind: "unchanged" });
-    expect(
-      decideIdentityRow(
-        { uid: "abc1234", identity: { orcid: ID } },
-        scholars({ abc1234: state(ID, new Date("2026-09-21T12:00:00Z")) }),
-      ),
-    ).toEqual({ kind: "unchanged" });
   });
 
-  it("an unconfirmed different value is a plain update (Identity backfills as before)", () => {
+  it("a DIFFERENT iD than Scholars holds is only a candidate: Identity never overwrites Scholars", () => {
     expect(
       decideIdentityRow(
         { uid: "abc1234", identity: { orcid: ID } },
         scholars({ abc1234: state(OTHER) }),
       ),
-    ).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
+    ).toEqual({ kind: "candidate", cwid: "abc1234", orcid: ID });
   });
 
-  it("conflict: Identity holds a DIFFERENT iD than one confirmed in SPS → Identity wins and the confirmation is cleared", () => {
-    const d = decideIdentityRow(
-      { uid: "abc1234", identity: { orcid: ID } },
-      scholars({ abc1234: state(OTHER, new Date("2026-09-21T12:00:00Z")) }),
-    );
-    // `conflict` (not `update`) is what main() keys the `orcidConfirmedAt: null` write and
-    // the summary counter on — a plain `update` here would keep a confirmation of the
-    // wrong iD on the row.
-    expect(d).toEqual({ kind: "conflict", cwid: "abc1234", orcid: ID });
+  it("the candidate carries the scholar's own cwid spelling (the FK)", () => {
+    expect(
+      decideIdentityRow(
+        { uid: "abc1234", identity: { orcid: ID } },
+        new Map([["abc1234", { cwid: "ABC1234", orcid: null }]]),
+      ),
+    ).toEqual({ kind: "candidate", cwid: "ABC1234", orcid: ID });
   });
 
   describe("dismissal rule — a Not-me pair is never re-imported", () => {
-    const CONFIRMED = new Date("2026-09-21T12:00:00Z");
     const dismissed = (...pairs: Array<[string, string]>) =>
       new Set(pairs.map(([c, o]) => dismissalKey(c, o)));
 
-    it("SPS null + dismissal of the iD Identity still holds → dismissed, not update (the re-import that fed the ping-pong)", () => {
+    it("SPS null + dismissal of the iD Identity still holds → dismissed, not a candidate (the re-import that fed the ping-pong)", () => {
       expect(
         decideIdentityRow(
           { uid: "abc1234", identity: { orcid: ID } },
@@ -159,11 +132,11 @@ describe("identity ETL — per-row decision against SPS", () => {
       ).toEqual({ kind: "dismissed" });
     });
 
-    it("confirmed Y + dismissed X, Identity still X → dismissed, NOT conflict (Y must survive)", () => {
+    it("confirmed Y + dismissed X, Identity still X → dismissed, not a candidate", () => {
       expect(
         decideIdentityRow(
           { uid: "abc1234", identity: { orcid: ID } },
-          scholars({ abc1234: state(OTHER, CONFIRMED) }),
+          scholars({ abc1234: state(OTHER) }),
           dismissed(["abc1234", ID]),
         ),
       ).toEqual({ kind: "dismissed" });
@@ -179,14 +152,14 @@ describe("identity ETL — per-row decision against SPS", () => {
       ).toEqual({ kind: "dismissed" });
     });
 
-    it("a dismissal of a DIFFERENT iD, or for a different person, does not block the import", () => {
+    it("a dismissal of a DIFFERENT iD, or for a different person, does not block the candidate", () => {
       expect(
         decideIdentityRow(
           { uid: "abc1234", identity: { orcid: ID } },
           scholars({ abc1234: state(null) }),
           dismissed(["abc1234", OTHER], ["zzz9999", ID]),
         ),
-      ).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
+      ).toEqual({ kind: "candidate", cwid: "abc1234", orcid: ID });
     });
 
     it("dismissalKey matches case-insensitively on cwid (the DB column is; the Set is not)", () => {
@@ -203,7 +176,7 @@ describe("identity ETL — per-row decision against SPS", () => {
     it("no dismissal set at all (the default) behaves as before", () => {
       expect(
         decideIdentityRow({ uid: "abc1234", identity: { orcid: ID } }, scholars({ abc1234: state(null) })),
-      ).toEqual({ kind: "update", cwid: "abc1234", orcid: ID });
+      ).toEqual({ kind: "candidate", cwid: "abc1234", orcid: ID });
     });
   });
 });

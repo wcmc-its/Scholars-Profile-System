@@ -99,7 +99,10 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   comms_steward: [{ label: "Admin console", href: "/edit/profiles" }],
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
-  development: [{ label: "Grant Matcha", href: "/edit/grant-matcha" }],
+  development: [
+    { label: "Matcha", href: "/edit/matcha" },
+    { label: "Grant Matcha", href: "/edit/grant-matcha" },
+  ],
   content_editor: [
     { label: "Profiles", href: "/edit/profiles" },
     { label: "Org units", href: "/edit/units" },

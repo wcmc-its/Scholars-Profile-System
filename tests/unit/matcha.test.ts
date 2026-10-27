@@ -271,6 +271,14 @@ describe("POST /api/edit/matcha (route)", () => {
     body: {} as Record<string, unknown>,
   };
 
+  // Own-scoped on history (not a superuser or developer) but admitted to write via isObserver.
+  const observerCtx = {
+    ...developerCtx,
+    session: { cwid: "obs1", isSuperuser: false, isDeveloper: false },
+    effective: { cwid: "obs1", isSuperuser: false, isDeveloper: false },
+    realCwid: "obs1",
+  };
+
   function postRequest(ctx: typeof developerCtx, body: Record<string, unknown>) {
     mockReadEditRequest.mockResolvedValue({ ok: true, ctx: { ...ctx, body } });
     return {} as NextRequest;
@@ -769,47 +777,57 @@ describe("POST /api/edit/matcha (route)", () => {
       //
       // Staging had exactly this: one paste, four rows. A retention promise that holds only for
       // pastes run exactly once is not a retention promise. The unit of erasure is the PASTE.
+      mockIsObserver.mockResolvedValue(true);
       mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-abc" });
       mockSubmissionDeleteMany.mockResolvedValue({ count: 3 }); // three runs of the same paste
 
-      const resp = await DELETE(postRequest(developerCtx, { submissionId: "s1" }));
+      const resp = await DELETE(postRequest(observerCtx, { submissionId: "s1" }));
 
       expect(resp.status).toBe(200);
       expect(await resp.json()).toEqual({ ok: true, deleted: "s1", count: 3 });
       // BY HASH, NOT BY ID. Revert this to `{ where: { id: "s1" } }` and the sponsor's words
       // survive their own deletion.
       expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
-        where: { descriptionHash: "h-abc", submittedBy: "dev1" },
+        where: { descriptionHash: "h-abc", submittedBy: "obs1" },
       });
     });
 
     it("DELETE is scoped like GET (#1776): out-of-scope 404s and erases nothing; own row erases", async () => {
-      // A developer is not a superuser, so GET shows them only their own rows. DELETE must apply
+      // An observer's GET shows them only their own rows. DELETE must apply
       // the SAME predicate — otherwise they could erase a paste they are not allowed to read.
       // Out of scope: the scoped lookup finds nothing (a real DB would not match another
       // officer's row under `submittedBy: "dev1"`).
+      mockIsObserver.mockResolvedValue(true);
       mockSubmissionFindUnique.mockResolvedValue(null);
-      const denied = await DELETE(postRequest(developerCtx, { submissionId: "theirs" }));
+      const denied = await DELETE(postRequest(observerCtx, { submissionId: "theirs" }));
       expect(denied.status).toBe(404);
       expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({
         id: "theirs",
-        submittedBy: "dev1",
+        submittedBy: "obs1",
       });
       expect(mockSubmissionDeleteMany).not.toHaveBeenCalled();
 
-      // In scope: the same developer deleting their own row succeeds, and the erase is bounded
+      // In scope: the same observer deleting their own row succeeds, and the erase is bounded
       // by the same scope so a colleague's run of an identical paste survives.
       mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-mine" });
       mockSubmissionDeleteMany.mockResolvedValue({ count: 1 });
-      const ok = await DELETE(postRequest(developerCtx, { submissionId: "mine" }));
+      const ok = await DELETE(postRequest(observerCtx, { submissionId: "mine" }));
       expect(ok.status).toBe(200);
       expect(mockSubmissionFindUnique.mock.calls[1][0].where).toEqual({
         id: "mine",
-        submittedBy: "dev1",
+        submittedBy: "obs1",
       });
       expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
-        where: { descriptionHash: "h-mine", submittedBy: "dev1" },
+        where: { descriptionHash: "h-mine", submittedBy: "obs1" },
       });
+    });
+
+    it("DELETE by a DEVELOPER is unscoped, like their GET (widened 2026-10-27)", async () => {
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-any" });
+      mockSubmissionDeleteMany.mockResolvedValue({ count: 1 });
+      const resp = await DELETE(postRequest(developerCtx, { submissionId: "theirs" }));
+      expect(resp.status).toBe(200);
+      expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({ id: "theirs" });
     });
 
     it("DELETE by a SUPERUSER is unscoped — erasure on behalf of any officer", async () => {
@@ -906,22 +924,18 @@ describe("POST /api/edit/matcha (route)", () => {
       ];
     }
 
-    it("a DEVELOPER sees ONLY THEIR OWN rows — isDeveloper IS NOT isSuperuser", async () => {
-      // THE TRAP. The PAGE gates on `isSuperuser || isDeveloper`, so a developer reaches this
-      // handler — and the obvious "symmetry" fix is to widen the read's leg to match the page's
-      // gate. That would leave the entire paste corpus readable by a strictly larger group than
-      // was decided (2026-07-17: SUPERUSER sees everyone's). Widen this and chairs' donor email
-      // is readable by every developer.
+    it("a DEVELOPER sees every officer's rows (widened 2026-10-27, owner decision)", async () => {
       mockGetEffectiveEditSession.mockResolvedValue({
         cwid: "dev1",
         isSuperuser: false,
-        isDeveloper: true, // ← the leg that must NOT unlock the global list
+        isDeveloper: true,
       });
       mockSubmissionFindMany.mockResolvedValue(historyRows());
 
-      await GET();
+      const body = await (await GET()).json();
 
-      expect(mockSubmissionFindMany.mock.calls[0][0].where).toEqual({ submittedBy: "dev1" });
+      expect(mockSubmissionFindMany.mock.calls[0][0].where).toBeUndefined();
+      expect(body.scope).toBe("all");
     });
 
     it("an OBSERVER reaches GET and sees ONLY THEIR OWN rows", async () => {
@@ -959,7 +973,7 @@ describe("POST /api/edit/matcha (route)", () => {
       // privileged one precisely so that absent ⇒ falsy ⇒ own rows. Invert it — write
       // `!session.isSuperuser ? { submittedBy } : undefined` and then drop the flag — and an
       // undefined flag silently unlocks everyone's pastes.
-      mockGetEffectiveEditSession.mockResolvedValue({ cwid: "who1", isDeveloper: true });
+      mockGetEffectiveEditSession.mockResolvedValue({ cwid: "who1", isObserver: true });
       mockSubmissionFindMany.mockResolvedValue(historyRows());
 
       const body = await (await GET()).json();
@@ -1037,7 +1051,7 @@ describe("POST /api/edit/matcha (route)", () => {
       mockGetEffectiveEditSession.mockResolvedValue({
         cwid: "dev1",
         isSuperuser: false,
-        isDeveloper: true,
+        isObserver: true,
       });
       mockSubmissionFindMany.mockResolvedValue(historyRows());
 
