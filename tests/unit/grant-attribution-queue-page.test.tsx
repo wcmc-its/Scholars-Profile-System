@@ -425,17 +425,17 @@ describe("the review", () => {
 
   it("sorts strongest evidence first by default, and weakest first on request", () => {
     const strong: GrantAttributionItem = { ...COAUTHOR, id: "rev-3", score: 6, scholarName: "Strong Example" };
-    // By score, not by level: this conflict (score 3) outranks a likely (score 1).
-    const conflict: GrantAttributionItem = { ...ITEM, score: 3 };
+    // Level first, then score: this conflict (score 9) still follows both likelies.
+    const conflict: GrantAttributionItem = { ...ITEM, score: 9 };
     const likely: GrantAttributionItem = { ...COAUTHOR, score: 1, scholarName: "Likely Example" };
     queue(false, [UNPROVEN, likely, conflict, strong]);
     const names = () =>
       [...screen.getByTestId("grant-attribution-list").querySelectorAll("[data-row] span.truncate.font-semibold")].map(
         (n) => n.textContent,
       );
-    expect(names()).toEqual(["Strong Example", "Pat Example, MD", "Likely Example", "Lee Sample, PhD"]);
+    expect(names()).toEqual(["Strong Example", "Likely Example", "Pat Example, MD", "Lee Sample, PhD"]);
     fireEvent.change(screen.getByDisplayValue("Strongest evidence first"), { target: { value: "weak" } });
-    expect(names()).toEqual(["Lee Sample, PhD", "Likely Example", "Pat Example, MD", "Strong Example"]);
+    expect(names()).toEqual(["Lee Sample, PhD", "Pat Example, MD", "Likely Example", "Strong Example"]);
   });
 
   it("decides an Unproven award by grant, and undoes it by the review the route opened", async () => {

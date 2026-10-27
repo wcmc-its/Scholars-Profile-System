@@ -161,9 +161,10 @@ function prepare(items: GrantAttributionItem[]): Card[] {
 
 const SORTS: Record<Sort, (a: Card, b: Card) => number> = {
   oldest: (a, b) => a.order - b.order,
-  // By the scorer's net evidence, as the ORCID queue sorts by match strength.
-  strong: (a, b) => b.score - a.score || LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || a.order - b.order,
-  weak: (a, b) => a.score - b.score || LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || a.order - b.order,
+  // By confidence level, then by the scorer's net evidence within a level. Net
+  // score alone interleaves levels: a conflict can outscore a likely.
+  strong: (a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || b.score - a.score || a.order - b.order,
+  weak: (a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || a.score - b.score || a.order - b.order,
   scholar: (a, b) => a.scholarName.localeCompare(b.scholarName) || a.order - b.order,
   start: (a, b) => (a.award.startYear ?? 0) - (b.award.startYear ?? 0) || a.order - b.order,
 };
