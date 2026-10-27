@@ -91,6 +91,12 @@ describe("namesMatch", () => {
     expect(namesMatch("J Q Doe", "J R Doe")).toBe(true);
   });
 
+  it("matches a short form that starts the other first name (3+ letters)", () => {
+    expect(namesMatch("Ben S Doe", "Benjamin S Doe")).toBe(true);
+    expect(namesMatch("Sarah Doe", "Sara Doe")).toBe(true);
+    expect(namesMatch("Su Doe", "Susan Doe")).toBe(false);
+  });
+
   it("trade-off: an initial no longer reaches a middle-name goer", () => {
     expect(namesMatch("J M Doe", "Michael Doe")).toBe(false);
   });

@@ -75,8 +75,10 @@ export function nameTokens(name: string): Set<string> {
  *  `Jane Smith` vs `John Smith`). A full given name matches in any position,
  *  so `R Brad Jones` matches `Brad Jones`. A one-letter initial matches only
  *  first-name-to-first-name: `J Smith` matches `John Smith`, but the middle
- *  initial in `Augustine M Choi` does not make it `Mary E Choi` (#3071). The
- *  trade-off: `J M Smith` no longer matches `Michael Smith`. */
+ *  initial in `Augustine M Choi` does not make it `Mary E Choi` (#3071). A
+ *  first name of 3+ letters that starts the other first name matches too
+ *  (`Ben` / `Benjamin`). The trade-off: `J M Smith` no longer matches
+ *  `Michael Smith`. */
 export function namesMatch(a: string, b: string): boolean {
   const at = Array.from(nameTokens(a));
   const bt = Array.from(nameTokens(b));
@@ -94,7 +96,9 @@ export function namesMatch(a: string, b: string): boolean {
   const [aFirst, bFirst] = [aRest[0], bRest[0]];
   if (!aFirst || !bFirst) return false;
   if (aFirst.length === 1 || bFirst.length === 1) return aFirst[0] === bFirst[0];
-  return false;
+  // A short form of the first name: Ben / Benjamin, Rob / Robert, Sara / Sarah.
+  const [short, long] = aFirst.length <= bFirst.length ? [aFirst, bFirst] : [bFirst, aFirst];
+  return short.length >= 3 && long.startsWith(short);
 }
 
 /** Treat "PI" / "PI-Subaward" / "Co-PI" as PI-level for matching
