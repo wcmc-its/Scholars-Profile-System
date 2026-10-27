@@ -122,13 +122,17 @@ export function ScholarHoverCard({
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
 }) {
-  const [state, setState] = useState<CardState>({ status: "idle" });
+  // Tagged with the cwid it was loaded for: a caller that keeps this instance
+  // and swaps the cwid (the attribution queue's detail pane) would otherwise
+  // keep showing the previous person's card.
+  const [loaded, setLoaded] = useState<{ cwid: string; state: CardState }>({ cwid, state: { status: "idle" } });
+  const state: CardState = loaded.cwid === cwid ? loaded.state : { status: "idle" };
   const load = () => {
     if (state.status !== "idle" && state.status !== "error") return;
-    setState({ status: "loading" });
+    setLoaded({ cwid, state: { status: "loading" } });
     fetchCard(cwid).then(
-      (card) => setState(card ? { status: "ok", card } : { status: "missing" }),
-      () => setState({ status: "error" }),
+      (card) => setLoaded({ cwid, state: card ? { status: "ok", card } : { status: "missing" } }),
+      () => setLoaded({ cwid, state: { status: "error" } }),
     );
   };
 
