@@ -82,7 +82,7 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   methods: FlaskConicalIcon,
   units: Building2Icon,
   profiles: UsersIcon,
-  "grant-matcha": HandCoinsIcon,
+  matcha: HandCoinsIcon,
 };
 
 /** Generational / degree suffixes that stay whole and aren't the surname. */

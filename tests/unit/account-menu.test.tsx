@@ -290,11 +290,14 @@ describe("AccountMenu — identity and View as", () => {
     ]);
   });
 
-  it("search-blind global role (development) → its one console page", () => {
+  it("search-blind global role (development) → Matcha first, then Grant Matcha", () => {
     viewing(target({ targetName: "lmp2006", role: "development", unitKind: null, unit: null }));
     render(<AccountMenu scholar={paul} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
-    expect(targetLinks()).toEqual([["Grant Matcha", "/edit/grant-matcha"]]);
+    expect(targetLinks()).toEqual([
+      ["Matcha", "/edit/matcha"],
+      ["Grant Matcha", "/edit/grant-matcha"],
+    ]);
   });
 
   it("comms_steward → the Admin console (the #2521 collapse)", () => {
