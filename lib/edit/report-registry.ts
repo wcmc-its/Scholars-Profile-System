@@ -87,6 +87,7 @@ import { renderCoreOutputReport } from "@/components/edit/reports/core-output-ov
 import { renderCoreUsersReport } from "@/components/edit/reports/core-users-body";
 import { renderGrantAttributionReport } from "@/components/edit/reports/grant-attribution-body";
 import { renderNihBiosketchesReport } from "@/components/edit/reports/nih-biosketches-body";
+import { renderMyncbiDiscrepanciesReport } from "@/components/edit/reports/myncbi-discrepancies-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -146,7 +147,7 @@ export type AdminReportProps = {
   basePath: string;
 };
 
-/** What a superuser-gated body (report 15) is handed: the gate is
+/** What a superuser-gated body (reports 15, 16) is handed: the gate is
  *  `session.isSuperuser` alone (not comms stewards), nothing to scope. */
 export type SuperuserReportProps = AdminReportProps;
 
@@ -227,6 +228,8 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
   },
   // NIH biosketches harvested from InfoEd (etl/infoed-biosketch). Superusers only.
   "15": { n: "15", gate: "superuser", render: renderNihBiosketchesReport },
+  // MyNCBI bibliographies vs confirmed publications (etl/myncbi). Superusers only.
+  "16": { n: "16", gate: "superuser", render: renderMyncbiDiscrepanciesReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page

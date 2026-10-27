@@ -153,14 +153,14 @@ beforeEach(() => {
 });
 
 describe("/edit/reports — Gap 5: zero reportable units", () => {
-  it("superuser → renders the index (Institution-wide: superuser-only report 15 alone), does not 404", async () => {
+  it("superuser → renders the index (Institution-wide: superuser-only reports 15 and 16 alone), does not 404", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     const result = await EditReportsIndexPage({ searchParams: sp() });
     expect(mockNotFound).not.toHaveBeenCalled();
     const index = findByType(result, mockReportsIndex);
     expect(index).not.toBeNull();
     expect(index!.props.units).toEqual([
-      expect.objectContaining({ kind: "institution", reports: [expect.objectContaining({ n: 15 })] }),
+      expect.objectContaining({ kind: "institution", reports: [expect.objectContaining({ n: 15 }), expect.objectContaining({ n: 16 })] }),
     ]);
   });
 
@@ -208,7 +208,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(mockGetDisplayTitlesScopes).not.toHaveBeenCalled();
   });
 
-  it("a superuser's institution row is 8, 9 and 15 — never report 10", async () => {
+  it("a superuser's institution row is 8, 9, 15 and 16 — never report 10", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockCanViewArticleCount.mockResolvedValue(true);
     mockGetHighImpactScopes.mockResolvedValue(new Set(["*"]));
@@ -219,7 +219,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
       reports: Array<{ n: number }>;
     }>;
     const institution = units.find((u) => u.kind === "institution");
-    expect(institution?.reports.map((r) => r.n)).toEqual([8, 9, 15]);
+    expect(institution?.reports.map((r) => r.n)).toEqual([8, 9, 15, 16]);
     expect(units.flatMap((u) => u.reports.map((r) => r.n))).not.toContain(10);
   });
 
@@ -342,7 +342,7 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(units.map((u) => u.kind)).toEqual(["institution", "program", "center"]);
     expect(units[2].reports.map((r) => r.accessText)).toEqual(Array(6).fill("Unit owners and curators"));
     expect(units[1].reports[0].accessText).toBe("Superusers and comms stewards + 1 other");
-    expect(units[0].reports.map((r) => [r.n, r.accessText])).toEqual([[15, "Superusers"]]);
+    expect(units[0].reports.map((r) => [r.n, r.accessText])).toEqual([[15, "Superusers"], [16, "Superusers"]]);
   });
 
   it("group order: Institution-wide, then Mentoring programs, then units", async () => {
