@@ -36,8 +36,9 @@ export const MYNCBI_DISCREPANCY_LIST_CAP = 300;
 export const MYNCBI_EXTRA_TITLE_CAP = 25;
 /** Below this share of listed PMIDs confirmed on the profile, the list is suspect. */
 export const MYNCBI_SUSPECT_OVERLAP = 0.2;
-/** Lists shorter than this are never suspect: too few PMIDs to judge. */
-export const MYNCBI_SUSPECT_MIN_LISTED = 5;
+/** Never suspect when the list or the profile has fewer PMIDs than this: too
+ *  little to judge, and a profile with nothing confirmed is the gap itself. */
+export const MYNCBI_SUSPECT_MIN = 5;
 
 export const MYNCBI_DISCREPANCY_SHOW = ["missing", "suspect", "all"] as const;
 export type MyncbiDiscrepancyShow = (typeof MYNCBI_DISCREPANCY_SHOW)[number];
@@ -100,14 +101,14 @@ export type MyncbiDiscrepancyReport = {
 };
 
 /** Pure: whether a list overlaps the profile too little to be theirs. */
-export const isSuspectList = (listed: number, matched: number) =>
-  listed >= MYNCBI_SUSPECT_MIN_LISTED && matched / listed < MYNCBI_SUSPECT_OVERLAP;
+export const isSuspectList = (listed: number, matched: number, confirmed: number) =>
+  listed >= MYNCBI_SUSPECT_MIN && confirmed >= MYNCBI_SUSPECT_MIN && matched / listed < MYNCBI_SUSPECT_OVERLAP;
 
 /** Pure: one scholar's list vs their confirmed PMIDs. Missing sorted newest first. */
 export function compareBibliography(
   list: readonly CitationItem[],
   confirmed: ReadonlySet<string>,
-): { listed: number; matched: number; missing: CitationItem[]; extraPmids: string[] } {
+): { listed: number; matched: number; confirmed: number; missing: CitationItem[]; extraPmids: string[] } {
   const byPmid = new Map(list.map((c) => [c.pmid, c]));
   const missing = [...byPmid.values()]
     .filter((c) => !confirmed.has(c.pmid))
@@ -115,6 +116,7 @@ export function compareBibliography(
   return {
     listed: byPmid.size,
     matched: byPmid.size - missing.length,
+    confirmed: confirmed.size,
     missing,
     // Keeps `confirmed`'s order (the loader passes it newest first).
     extraPmids: [...confirmed].filter((p) => !byPmid.has(p)),
@@ -175,7 +177,7 @@ export async function loadMyncbiDiscrepancyReport(
       fetchedAt: b.fetchedAt.toISOString(),
       listed: cmp.listed,
       matched: cmp.matched,
-      suspect: isSuspectList(cmp.listed, cmp.matched),
+      suspect: isSuspectList(cmp.listed, cmp.matched, cmp.confirmed),
       missing: cmp.missing,
       extraCount: cmp.extraPmids.length,
       extraPmids: cmp.extraPmids,

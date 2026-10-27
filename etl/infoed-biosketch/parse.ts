@@ -125,7 +125,10 @@ export function parseBiosketches(text: string, personnel: readonly Person[]): Pa
         /B\.\s*Positions[^.]{0,60}Honors|\bHonors\b/i,
         /C\.\s*Contributions?|Contributions? to Science|Personal Statement/i,
       ),
-      myncbiUrl: MYNCBI.exec(body)?.[0]?.slice(0, 512) ?? null,
+      // Legacy only: the Common Form has no MyNCBI field, and a common-form
+      // sketch's text runs on to the end of the package, so a link found there
+      // is another person's (17 of 25 such links on staging matched someone else).
+      myncbiUrl: format === "legacy" ? (MYNCBI.exec(body)?.[0]?.slice(0, 512) ?? null) : null,
     });
   }
   return out;

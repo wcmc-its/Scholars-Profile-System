@@ -30,11 +30,12 @@ describe("compareBibliography", () => {
 });
 
 describe("isSuspectList", () => {
-  it("flags a list mostly absent from the profile, never a short one", () => {
-    expect(isSuspectList(298, 0)).toBe(true);
-    expect(isSuspectList(100, 19)).toBe(true);
-    expect(isSuspectList(100, 20)).toBe(false);
-    expect(isSuspectList(4, 0)).toBe(false);
+  it("flags a list mostly absent from a profile that has papers; never a short list or an empty profile", () => {
+    expect(isSuspectList(298, 0, 58)).toBe(true);
+    expect(isSuspectList(100, 19, 40)).toBe(true);
+    expect(isSuspectList(100, 20, 40)).toBe(false);
+    expect(isSuspectList(4, 0, 40)).toBe(false);
+    expect(isSuspectList(100, 0, 0)).toBe(false);
   });
 });
 
