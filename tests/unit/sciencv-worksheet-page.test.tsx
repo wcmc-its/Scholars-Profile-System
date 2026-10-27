@@ -321,8 +321,6 @@ describe("/edit/biosketch/worksheet — authorization", () => {
       OWNER,
       expect.anything(),
       expect.any(Date),
-      undefined,
-      { includeOrcidSuggestion: expect.any(Boolean) },
     );
     expect(mockHonorFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -356,8 +354,6 @@ describe("/edit/biosketch/worksheet — authorization", () => {
       OWNER,
       expect.anything(),
       expect.any(Date),
-      undefined,
-      { includeOrcidSuggestion: expect.any(Boolean) },
     );
   });
 

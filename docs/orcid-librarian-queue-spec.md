@@ -92,7 +92,7 @@ Gate the page, routes and subnav link on flag `ORCID_LIBRARIAN_QUEUE` (`on` in s
 
 The build is stricter than the text above in these places:
 
-- **On file includes `rpm_admin`.** Everywhere this spec says "`scholar.orcid`" for what is on file (population, Conflicts, the bulk re-check, the auto-confirm's "`scholar.orcid` is null"), the build reads `scholar.orcid`, else an undismissed `rpm_admin` candidate iD. That is how `/api/edit/orcid` and the coverage fold read it; WCM usually leaves `scholar.orcid` NULL. Replacing an `rpm_admin` iD from Conflicts dismisses it, and dismissing one here is a 409 (that is Remove on /edit).
+- **On file is `scholar.orcid` only** (2026-10, Scholars is the ORCID authority). An iD typed into Publication Manager (`rpm_admin`) or held in WCM Identity (`identity`, written by `etl/identity`) is a candidate like any other: it is confirmed or dismissed here, and it never makes another candidate a conflict. Until then an undismissed `rpm_admin` iD counted as on file.
 - **Email auto-confirm** also requires exactly one `email_verified` row for the scholar and for the iD, and that no other scholar holds the iD: two verified matches are a question for a librarian, not the ETL.
 - **Bulk confirm and sampling** leave out a scholar with two qualifying rows in the band (only one iD can be theirs). Those rows stay in the tab for one-at-a-time decisions, and the bulk response counts them as skipped.
 - **A competitor that cannot be ruled out counts.** When another candidate iD of the same scholar could not be fetched this run, the pair is marked competitor, so a degraded run never lifts it into a confirmable band.
@@ -109,7 +109,7 @@ Cornell NetID scholars; mirroring iD + method to reciterdb (the publication lane
 
 ## v2 (2026-10-25)
 
-Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, approved from a review of the live prod queue. This PR builds its items 1 to 8; item 9 (the Publication Manager deep link) is a later PR. Everything in v1 above still holds: the superuser gate, the View-as refusal, the sample gate, the server re-check in bulk, never confirming over a dismissal, and `rpm_admin` counting as on file.
+Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, approved from a review of the live prod queue. This PR builds its items 1 to 8; item 9 (the Publication Manager deep link) is a later PR. Everything in v1 above still holds: the superuser gate, the View-as refusal, the sample gate, the server re-check in bulk, never confirming over a dismissal, and (until 2026-10) `rpm_admin` counting as on file.
 
 ### Data model (one migration, `20261025120000_orcid_queue_v2`)
 
@@ -128,7 +128,7 @@ Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, approved from a rev
 - **One card per scholar** (item 5): every candidate iD, best first (band, then shared papers, then name agreement). The card's tab is `cardTabOf`: Email verified when the ETL confirmed one of their iDs, Conflicts when another iD is on file, else the best band. Tab counts are scholars. Confirm and Not this person act per iD; on a card with other open candidates, Confirm also marks them Not this person in the same request (a checkbox, on by default, turns it off).
 - **Names side by side** (item 4): "Scholar" (fullName / preferredName) and "ORCID" (credit name, else given + family, with given + family and other names as "also known as"), with the result and the rule: same surname, same once accents are folded, a compound surname shares a part, or same once spaces and hyphens are removed; plus whether the full given name agrees.
 - **Chips that open** (item 2): Institution (each pair), Verified email, Name, Shared N (each paper linked), Competitor (who, K papers, which rule; an unfetched iD says so), How discovered.
-- **Filters** (items 6 and 7): one sticky bar, the `/edit/orcid-coverage` popover: person type, department / division, institution (`lib/edit/person-filter.ts` values and `personFilterWhere`), and how discovered (`orcid_candidate.source`: `rpm_inferred`, `rpm_admin`, `orcid_email`, `orcid_works`, `orcid_crossref`, `orcid_name`). URL params `type`, `unit`, `source`. The filter applies to the list, the counts, the sample draw and bulk confirm. A source chip on each iD, "N sources agree" when two or more found it.
+- **Filters** (items 6 and 7): one sticky bar, the `/edit/orcid-coverage` popover: person type, department / division, institution (`lib/edit/person-filter.ts` values and `personFilterWhere`), and how discovered (`orcid_candidate.source`: `rpm_inferred`, `rpm_admin`, `identity`, `orcid_email`, `orcid_works`, `orcid_crossref`, `orcid_name`). URL params `type`, `unit`, `source`. The filter applies to the list, the counts, the sample draw and bulk confirm. A source chip on each iD, "N sources agree" when two or more found it.
 - **Links** (item 8): each new work and each shared paper links to PubMed when it has a PMID, else doi.org, else the ORCID work's own URL (http/https only). The scholar name links to the profile, the iD to orcid.org.
 
 ### Routes

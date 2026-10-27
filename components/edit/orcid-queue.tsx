@@ -658,8 +658,7 @@ const ON_FILE_HOW: Record<OrcidOnFile["how"], string> = {
   librarian: "Confirmed by a librarian",
   email_verified: "Confirmed automatically from a verified email",
   authenticated: "Self-claimed by the scholar through ORCID sign-in",
-  identity: "From WCM Identity",
-  rpm_admin: "Entered by a Publication Manager admin",
+  identity: "From WCM Identity, not confirmed",
 };
 
 function onFileProvenance(f: OrcidOnFile): React.ReactNode {

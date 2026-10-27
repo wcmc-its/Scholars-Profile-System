@@ -337,30 +337,27 @@ describe("decide", () => {
     expect(audits()[0]!.afterValues).toMatchObject({ undo_email_autoconfirm: true });
   });
 
-  it("an rpm_admin iD is on file: another candidate is a 409 conflict, replace dismisses the rpm_admin iD", async () => {
+  it("an rpm_admin iD is a candidate, not on file: another candidate confirms without replace, and the admin iD is not dismissed", async () => {
     h.state.admins = [{ cwid: "jd0001", orcid: OTHER }];
-    const refused = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "confirm" }));
-    expect(refused.status).toBe(409);
-    expect((await refused.json()).error).toBe("on_file_differs");
-    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
-    const replaced = await decide(
-      req({ cwid: "jd0001", orcid: ORCID, decision: "confirm", replace: true }),
-    );
-    expect(replaced.status).toBe(200);
+    const res = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "confirm" }));
+    expect(res.status).toBe(200);
     expect(h.state.scholars.get("jd0001")!.orcid).toBe(ORCID);
-    expect(h.state.dismissals.has(k("jd0001", OTHER))).toBe(true);
-    expect(audits()[0]!.afterValues).toMatchObject({ dismissed: [OTHER] });
+    expect(h.state.dismissals.has(k("jd0001", OTHER))).toBe(false);
+    expect(audits()[0]!.afterValues).not.toHaveProperty("dismissed");
   });
 
-  it("an rpm_admin iD is on file: confirming it is 409 already_on_file, dismissing it is 409 on_file", async () => {
+  it("an rpm_admin iD confirms like any candidate", async () => {
     h.state.admins = [{ cwid: "jd0001", orcid: ORCID }];
     const confirm = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "confirm" }));
-    expect((await confirm.json()).error).toBe("already_on_file");
+    expect(confirm.status).toBe(200);
+    expect(h.state.scholars.get("jd0001")!.orcid).toBe(ORCID);
+  });
+
+  it("Not this person on an rpm_admin iD is a plain dismissal", async () => {
+    h.state.admins = [{ cwid: "jd0001", orcid: ORCID }];
     const dismiss = await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "dismiss" }));
-    expect(dismiss.status).toBe(409);
-    expect((await dismiss.json()).error).toBe("on_file");
-    expect(h.state.dismissals.size).toBe(0);
-    expect(h.appendAuditRow).not.toHaveBeenCalled();
+    expect(dismiss.status).toBe(200);
+    expect(h.state.dismissals.has(k("jd0001", ORCID))).toBe(true);
   });
 
   it("a dismissed rpm_admin iD is not on file: the candidate confirms", async () => {

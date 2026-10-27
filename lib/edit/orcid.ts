@@ -49,6 +49,8 @@ export function orcidEvidenceLine(e: OrcidEvidence, subject: string | null): str
         : `Matched on ${pubs(e.accepted)} in ReCiter`;
     case "rpm_admin":
       return "Entered in ReCiter Publication Manager";
+    case "identity":
+      return "Held in WCM Identity, which ReCiter reads";
     case "orcid_email":
       return `The ORCID registry record lists ${whose} WCM email`;
     case "orcid_works":

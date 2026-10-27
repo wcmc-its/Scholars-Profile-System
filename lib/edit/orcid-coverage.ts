@@ -4,12 +4,12 @@
  * list (`SCHOLAR_EXPORT_CAP` in `lib/api/export-scholars.ts` is policy).
  *
  * Definitions, because the copy on the page repeats them:
- *  - "Asserted ORCID" = `scholar.orcid` is set (WCM Identity, #2675/#2676, or
- *    confirmed in `/edit`) OR an RPM administrator entered one
- *    (`orcid_candidate.source = rpm_admin`). Identity is never NULLed on
- *    absence — it may lag ED. "Confirmed" is the subset the person (or someone
- *    editing for them) confirmed in `/edit`: `scholar.orcid_confirmed_at` set;
- *    the rest of asserted is Identity / RPM-admin.
+ *  - "Asserted ORCID" = `scholar.orcid` is set (confirmed in Scholars, or an
+ *    unconfirmed value WCM Identity's import wrote before Scholars became the
+ *    authority). An iD a Publication Manager administrator typed in
+ *    (`orcid_candidate.source = rpm_admin`) is a candidate, not asserted.
+ *    "Confirmed" is the subset confirmed in Scholars: `scholar.orcid_confirmed_at`
+ *    set; the rest of asserted is the legacy Identity import.
  *  - Dismissed (cwid, iD) pairs (`orcid_dismissal`: Remove in `/edit`) count
  *    nowhere — not as a candidate row (the mirrors re-create them nightly) and
  *    not as `scholar.orcid` (a contradiction `etl:orcid-push` also refuses).
@@ -32,7 +32,9 @@
  *    person by name) only when another non-name-only source names the same iD;
  *    an `orcid_works` or `orcid_crossref` row with ≥ STRONG_MIN_ACCEPTED papers; the SOLE
  *    `rpm_inferred` row when it has ≥ STRONG_MIN_ACCEPTED accepted articles and
- *    no rejected one; or an ORCID that an `rpm_*` row with NO rejected article
+ *    no rejected one; any `rpm_admin` or `identity` row (an iD already on file in
+ *    Publication Manager or WCM Identity, so the scholar is asked to confirm it);
+ *    or an ORCID that an `rpm_*` row with NO rejected article
  *    and an `orcid_*` row agree on (two independent sources, so the accepted
  *    counts no longer matter — but an RPM row with rejections saw the iD on
  *    articles the person REJECTED, a homonym's iD, and a registry name hit on
@@ -206,7 +208,8 @@ const isRpmSource = (source: string) => source.startsWith("rpm_");
 const isRegistrySource = (source: string) => source.startsWith("orcid_");
 
 /** What one scholar's candidate rows add up to. `orcid` is the iD to show: the
- *  RPM-admin iD when asserted, the sole strong-eligible iD when strong, else null.
+ *  sole strong-eligible iD when strong, else null. Never `asserted`: only
+ *  `scholar.orcid` is, and the caller folds it in.
  *  `accepted` is the RPM accepted-article count behind that iD (0 when the strength
  *  came from the registry alone), for the "seen on N of your accepted publications"
  *  line on the self-edit home board. `scholar.orcid` is folded in by the caller. */
@@ -237,8 +240,6 @@ export function orcidVerdict(
   const rpmAccepted = (orcid: string) =>
     Math.max(0, ...rows.filter((r) => isRpmSource(r.source) && r.orcid === orcid).map((r) => r.articlesAccepted));
   if (rows.length === 0) return { tier: "none", orcid: null, accepted: 0 };
-  const admin = rows.find((r) => r.source === "rpm_admin");
-  if (admin) return { tier: "asserted", orcid: admin.orcid, accepted: rpmAccepted(admin.orcid) };
   // The RPM rule is unchanged: only a SOLE rpm_inferred row can be strong on
   // its own counts. The fold does not trust the ETL's thresholds either — an
   // orcid_works row under STRONG_MIN_ACCEPTED (which the sweep never writes)
@@ -257,6 +258,11 @@ export function orcidVerdict(
   );
   const strongEligible = (r: CandidateRow) =>
     r.source === "orcid_email" ||
+    // Typed in by a Publication Manager administrator, or held in WCM Identity: an iD
+    // a person or system already put on file elsewhere, so the scholar is asked to
+    // confirm it. Neither is on file in Scholars by itself.
+    r.source === "rpm_admin" ||
+    r.source === "identity" ||
     // The iD on the person's own NIH biosketch (SciENcv fills it from their linked
     // ORCID account), tied to them by the SF424 profile email — etl/infoed-biosketch
     // writes only email-attributed rows.

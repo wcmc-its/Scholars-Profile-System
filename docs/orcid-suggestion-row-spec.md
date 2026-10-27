@@ -8,7 +8,7 @@ A fifth row on `/edit` "Complete your profile", under FROM WCM SYSTEMS, after Pu
 
 | state | marker | title | subtitle | CTA |
 |---|---|---|---|---|
-| on file (`scholar.orcid`, or an `rpm_admin` candidate row when the flag is on) | done | ORCID iD on file | the iD linked to orcid.org | none |
+| on file (`scholar.orcid`; an `rpm_admin` or `identity` iD is a strong candidate, asked as a suggestion) | done | ORCID iD on file | the iD linked to orcid.org | none |
 | strong (exactly one strong-eligible iD per `orcidVerdict` at `SUGGEST_MIN_ACCEPTED` = 1) | to-do | Is this your ORCID iD? | the iD (orcid.org link) · seen on N of your accepted publications, or "matches your record in the ORCID registry" when the strength is registry-only | Confirm in ReCiter → `ORCID_MANAGE_URL` |
 | weak / none | to-do | ORCID iD not on file | Needed for NIH SciENcv biosketches; also makes your publication matching more reliable. | Add it in ReCiter → `ORCID_MANAGE_URL` |
 
@@ -28,9 +28,9 @@ SPS is the durable record. The route runs one `db.write` transaction and calls n
 
 - The iD on file is re-read from `scholar.orcid` on the writer, not the reader, so a lagged replica cannot hide a confirm made a moment earlier.
 - Set / confirm (`orcid` non-null): `scholar.orcid` = the iD, `orcid_confirmed_at` = now, and any `orcid_dismissal` row for exactly this (cwid, iD) is deleted, since the person is re-confirming an iD they once removed.
-- Remove (`orcid: null`): `scholar.orcid` and `orcid_confirmed_at` are nulled. Every iD that made up "on file" gets an `orcid_dismissal` row: `scholar.orcid` and the iD on each `rpm_admin` candidate row. The local `rpm_admin` rows are deleted so the card flips now instead of after the 07:00 UTC re-mirror. The dismissal is what keeps a removed iD gone: the mirror re-creates `rpm_admin` rows from the still-populated `admin_orcid` every night, and every `orcid_candidate` reader drops dismissed pairs (`withoutDismissed`).
+- Remove (`orcid: null`): `scholar.orcid` and `orcid_confirmed_at` are nulled. The removed iD gets an `orcid_dismissal` row. The dismissal is what keeps it gone: the mirrors re-create candidate rows every night, and every `orcid_candidate` reader drops dismissed pairs (`withoutDismissed`).
 - `dismiss`: competing iDs the person rejected in the same action each get an `orcid_dismissal` row. The card's conflict state sends the suggested iD with "Keep the iD on file" (which confirms the on-file iD) and with "Remove both". `dismiss` may not include the iD being set.
-- The B03 audit row `orcid_set`. `before` is the displayed iD (`scholar.orcid`, else the `rpm_admin` iD). `after` carries `removed: true` on a remove, `dismissed: [...]` when any dismissal was written, and `confirmed_suggestion: true` when the iD came from the suggestion.
+- The B03 audit row `orcid_set`. `before` is `scholar.orcid`. `after` carries `removed: true` on a remove, `dismissed: [...]` when any dismissal was written, and `confirmed_suggestion: true` when the iD came from the suggestion.
 
 Then profile revalidation, so the row, the biosketch worksheet and the dashboard flip immediately. The nightly `etl:orcid-push` (before `etl:identity`) carries `scholar.orcid` into WCM Identity and clears a dismissed iD Identity still holds.
 

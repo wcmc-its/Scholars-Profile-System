@@ -383,10 +383,10 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByRole("link", { name: "Identifiers & profiles" })).toBeTruthy();
   });
 
-  it("Home: the ORCID row — on file (WCM Identity or an RPM-admin iD) → done, nothing left open", () => {
+  it("Home: the ORCID row — on file (scholar.orcid) → done, nothing left open", () => {
     const onFile: EditContext = {
       ...ctx,
-      orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+      scholar: { ...ctx.scholar, orcid: "0000-0002-1825-0097" },
     };
     render(<EditPage ctx={onFile} mode="self" />);
     const row = screen.getByTestId("home-item-orcid");
@@ -445,8 +445,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     try {
       const onFile: EditContext = {
         ...ctx,
-        scholar: { ...ctx.scholar, overview: "" },
-        orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+        scholar: { ...ctx.scholar, overview: "", orcid: "0000-0002-1825-0097" },
       };
       render(<EditPage ctx={onFile} mode="self" />);
       expect(await screen.findByText("Headshot added")).toBeTruthy();
@@ -462,7 +461,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     try {
       const complete: EditContext = {
         ...ctx,
-        orcidVerdict: { tier: "asserted", orcid: "0000-0002-1825-0097", accepted: 0 },
+        scholar: { ...ctx.scholar, orcid: "0000-0002-1825-0097" },
       };
       render(<EditPage ctx={complete} mode="self" />);
       expect(await screen.findByText("Headshot added")).toBeTruthy();

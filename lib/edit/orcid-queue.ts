@@ -58,22 +58,10 @@ export function bandLevel(band: OrcidQueueBand): number {
  *  are the ones it blocks. */
 export const COMPETITOR_CAP_LEVEL = 2;
 
-/** The iD on file for a scholar as the rest of the app reads it
- *  (`/api/edit/orcid`, the coverage fold): `scholar.orcid`, else an undismissed
- *  `rpm_admin` candidate iD. WCM usually leaves `scholar.orcid` NULL and the
- *  /edit card shows the RPM mirror row. `orcid` is the pair being placed, so a
- *  scholar with two `rpm_admin` iDs reads the pair's own as on file. Pure. */
-export function heldFor(
-  orcid: string,
-  scholarOrcid: string | null,
-  adminIds: readonly string[],
-): string | null {
-  if (scholarOrcid !== null) return scholarOrcid;
-  if (adminIds.includes(orcid)) return orcid;
-  return adminIds[0] ?? null;
-}
-
-/** Where a candidate pair stands against what is on file. Pure. */
+/** Where a candidate pair stands against what is on file. "On file" is
+ *  `scholar.orcid` only: Scholars is the ORCID authority for its scholars, and
+ *  every other system's iD (Publication Manager's admin field, WCM Identity) is a
+ *  candidate. Pure. */
 export type PairState = "queue" | "on_file" | "dismissed" | "conflict";
 export function pairState(orcid: string, held: string | null, dismissed: boolean): PairState {
   if (held === orcid) return "on_file";
@@ -128,6 +116,7 @@ export type OrcidQueueWork = {
 export const ORCID_CANDIDATE_SOURCES = [
   "rpm_inferred",
   "rpm_admin",
+  "identity",
   "orcid_email",
   "orcid_works",
   "orcid_crossref",
@@ -139,7 +128,8 @@ export type OrcidCandidateSource = (typeof ORCID_CANDIDATE_SOURCES)[number];
 
 export const ORCID_SOURCE_LABEL: Record<OrcidCandidateSource, string> = {
   rpm_inferred: "Publication Manager inference",
-  rpm_admin: "Publication Manager admin",
+  rpm_admin: "Entered in Publication Manager",
+  identity: "WCM Identity",
   orcid_email: "ORCID email",
   orcid_works: "ORCID shared works",
   orcid_crossref: "Crossref deposit",
@@ -360,11 +350,11 @@ export type OrcidQueueRow = {
   autoConfirmed: boolean;
 };
 
-/** How the iD on file got there: `scholar.orcid_confirm_method`, `identity`
- *  (NULL method: WCM Identity's import), or `rpm_admin` (a Publication Manager
- *  admin's row, with no `scholar.orcid`). */
+/** How the iD on file got there: `scholar.orcid_confirm_method`, or `identity`
+ *  (NULL method: an unconfirmed value WCM Identity's import wrote before Scholars
+ *  became the authority). */
 export type OrcidOnFileHow =
-  "self" | "proxy" | "librarian" | "email_verified" | "authenticated" | "identity" | "rpm_admin";
+  "self" | "proxy" | "librarian" | "email_verified" | "authenticated" | "identity";
 
 export type OrcidOnFile = {
   orcid: string;

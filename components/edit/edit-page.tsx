@@ -1082,18 +1082,17 @@ export function sectionVisibility(
   };
 }
 
-/** The ORCID row's inputs. `scholar.orcid` (WCM Identity) is on file; with
- *  `SELF_EDIT_ORCID_SUGGESTION` on, an RPM-admin iD counts as on file too and a sole
- *  strong-inferred iD becomes the "Is this yours?" suggestion. */
+/** The ORCID row's inputs. `scholar.orcid` is on file; with
+ *  `SELF_EDIT_ORCID_SUGGESTION` on, a sole strong candidate (an iD typed into
+ *  Publication Manager included) becomes the "Is this yours?" suggestion. */
 function orcidRowState(ctx: EditContext): OrcidRowState {
   const v = ctx.orcidVerdict;
-  const onFile = ctx.scholar.orcid ?? (v?.tier === "asserted" ? v.orcid : null);
+  const onFile = ctx.scholar.orcid;
   const evidenceFor = (id: string) =>
     ctx.orcidCandidates
       .filter((c) => c.orcid === id)
       .map(({ source, accepted, rejected }) => ({ source, accepted, rejected }));
-  // The verdict folds an `rpm_admin` row to "asserted" and never suggests past
-  // it, and the on-file iD's own rows can out-vote a rival; with an iD on file,
+  // The on-file iD's own rows can out-vote a rival; with an iD on file,
   // re-fold every row about OTHER iDs so a strong candidate that DISAGREES with
   // the on-file iD still surfaces ("we also found").
   let suggested = v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null;
