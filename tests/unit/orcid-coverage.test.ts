@@ -103,7 +103,7 @@ const ALL = parseOrcidCoverageParams({ role: "all" });
 const build = (params = ALL) => buildOrcidCoverage(SCHOLARS, NIH, ERA, params, TODAY, CANDIDATES);
 
 describe("orcidTiers", () => {
-  it("admin beats inferred; strong needs one candidate, ≥3 accepted, 0 rejected; everything else inferred is weak", () => {
+  it("an admin iD is a strong candidate, never asserted; strong inferred needs one candidate, ≥3 accepted, 0 rejected; everything else inferred is weak", () => {
     const rows = [
       ...CANDIDATES,
       cand("x1", "rpm_inferred", 3),
@@ -120,11 +120,12 @@ describe("orcidTiers", () => {
         ["f4", "weak"],
         ["f5", "weak"],
         ["u1", "weak"],
-        ["f6", "asserted"],
+        ["f6", "strong"],
         ["x1", "strong"],
         ["x2", "weak"],
         ["x3", "weak"],
-        ["x4", "asserted"],
+        // The admin iD is strong; the inferred iD with rejections is not eligible, so no rival.
+        ["x4", "strong"],
       ]),
     );
     expect(t.has("p2")).toBe(false);
@@ -177,7 +178,7 @@ describe("orcidTiers", () => {
     expect(t.get("m1")).toBe("weak");
   });
 
-  it("RPM and the registry agreeing on one iD is strong whatever the accepted counts — unless the RPM row has rejections; disagreeing is weak; admin still wins", () => {
+  it("RPM and the registry agreeing on one iD is strong whatever the accepted counts — unless the RPM row has rejections; disagreeing is weak, an admin iD included", () => {
     // a1 is two rows on the SAME token under different sources — legal only because `source`
     // is in the PK; the RPM nightly and the registry weekly never overwrite each other.
     // a4: the RPM side saw the iD on articles the person REJECTED (a homonym's iD), and a
@@ -198,7 +199,8 @@ describe("orcidTiers", () => {
       expect.arrayContaining([
         ["a1", "strong"],
         ["a2", "weak"],
-        ["a3", "asserted"],
+        // An admin iD and an email-verified registry iD disagree: two strong iDs, so weak.
+        ["a3", "weak"],
         ["a4", "weak"],
       ]),
     );
@@ -209,13 +211,13 @@ describe("orcidTiers", () => {
 describe("buildOrcidCoverage", () => {
   it("tiles are the unfiltered population regardless of filters", () => {
     const r = build(parseOrcidCoverageParams({ nih: "none", dept: "Dept B" }));
-    // Asserted: p1/f1 (Identity) + f2 (confirmed) + f6 (admin). Strong: f3. Weak: f4, f5, u1.
-    // None: p2.
+    // Asserted: p1/f1 (Identity) + f2 (confirmed). Strong: f3 + f6 (an admin iD is a
+    // candidate). Weak: f4, f5, u1. None: p2.
     const c = {
       people: 9,
-      orcid: 4,
+      orcid: 3,
       confirmed: 1,
-      strong: 1,
+      strong: 2,
       weak: 3,
       era: 2,
       both: 1,
@@ -226,25 +228,26 @@ describe("buildOrcidCoverage", () => {
       nihPiEra: 1,
     };
     expect(r.tiles.overall).toEqual(c);
-    expect(r.tiles.fullTime).toEqual({ ...c, people: 6, orcid: 3, weak: 2, nihPeople: 4 });
+    expect(r.tiles.fullTime).toEqual({ ...c, people: 6, orcid: 2, weak: 2, nihPeople: 4 });
     // f2, the confirmed one, is full-time AND NIH-funded, so every tile carries it.
     expect(r.tiles.nihFullTime).toEqual({
       ...c,
       people: 4,
       orcid: 1,
+      strong: 1,
       weak: 2,
       era: 1,
       both: 0,
       nihPeople: 4,
     });
-    expect(neither(r.tiles.overall)).toBe(4);
+    expect(neither(r.tiles.overall)).toBe(5);
     expect(nihNoOrcid(r.tiles.nihFullTime)).toBe(3);
     // f2 + f5 are PIs without an eRA row; u1/f4 are Co-Is and do NOT count as a resolver gap.
     expect(piNoEra(r.tiles.overall)).toBe(2);
   });
 
   it("dismissed (cwid, iD) pairs count nowhere: not as a candidate row, not as scholar.orcid — and only that exact pair", () => {
-    // Listed f6 → f2 (anti-sorted). f6's admin iD-a is dismissed, but f3's iD-a (another cwid,
+    // Listed f6 → f2 (anti-sorted). f6's admin iD-a (a strong candidate) is dismissed, but f3's iD-a (another cwid,
     // same token) must survive; f5 dismissed its SECOND candidate, which leaves the first one
     // sole and strong; f2 dismissed the iD on its own scholar row (the contradiction
     // etl:orcid-push also refuses), so it is neither asserted nor confirmed.
@@ -255,8 +258,8 @@ describe("buildOrcidCoverage", () => {
     ];
     const r = buildOrcidCoverage(SCHOLARS, NIH, ERA, ALL, TODAY, CANDIDATES, dismissals);
     expect(r.tiles.overall).toMatchObject({ people: 9, orcid: 2, confirmed: 0, strong: 2, weak: 2 });
-    // Without the dismissals the same rows are 4 asserted / 1 confirmed / 1 strong / 3 weak.
-    expect(build().tiles.overall).toMatchObject({ orcid: 4, confirmed: 1, strong: 1, weak: 3 });
+    // Without the dismissals the same rows are 3 asserted / 1 confirmed / 2 strong / 3 weak.
+    expect(build().tiles.overall).toMatchObject({ orcid: 3, confirmed: 1, strong: 2, weak: 3 });
   });
 
   it("groups by role_category, null → Unclassified, people desc; ignores `type`", () => {
@@ -565,10 +568,20 @@ describe("orcidVerdict", () => {
     ).toEqual({ tier: "strong", orcid: "iD-a", accepted: 1 });
   });
 
-  it("an rpm_admin row → asserted with the admin iD, whatever else is there", () => {
+  it("an rpm_admin or identity row is a strong candidate, never asserted; a rival strong iD makes it weak", () => {
+    expect(orcidVerdict([cand("x", "rpm_admin", 0, 0, "iD-a")])).toEqual({
+      tier: "strong",
+      orcid: "iD-a",
+      accepted: 0,
+    });
+    expect(orcidVerdict([cand("x", "identity", 0, 0, "iD-a")])).toEqual({
+      tier: "strong",
+      orcid: "iD-a",
+      accepted: 0,
+    });
     expect(
       orcidVerdict([cand("x", "rpm_inferred", 9, 0, "iD-b"), cand("x", "rpm_admin", 0, 0, "iD-a")]),
-    ).toEqual({ tier: "asserted", orcid: "iD-a", accepted: 0 });
+    ).toEqual({ tier: "weak", orcid: null, accepted: 0 });
   });
 
   it("orcidTiers is exactly the verdict tier per cwid", () => {
@@ -576,7 +589,7 @@ describe("orcidVerdict", () => {
     expect([...orcidTiers(rows)]).toEqual([
       ["x", "strong"],
       ["y", "weak"],
-      ["z", "asserted"],
+      ["z", "strong"],
     ]);
   });
 });

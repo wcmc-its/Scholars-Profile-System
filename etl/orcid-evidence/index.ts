@@ -5,8 +5,8 @@
  *
  * Population: every distinct (cwid, orcid) in `orcid_candidate` (all sources)
  * for an active scholar, minus pairs in `orcid_dismissal`, minus pairs already
- * on file — `scholar.orcid`, or an undismissed `rpm_admin` iD (WCM leaves
- * `scholar.orcid` NULL; /edit reads the RPM mirror, `heldFor`). Each iD's public `/record` is fetched
+ * on file in `scholar.orcid` (an `rpm_admin` or `identity` iD is a candidate like
+ * any other: Scholars is the authority). Each iD's public `/record` is fetched
  * ONCE and shared by every scholar it is a candidate for. Per pair:
  *
  *   - `email_verified` — a public email on the record with `verified: true`
@@ -109,7 +109,6 @@ import {
   type RecordResponse,
 } from "@/etl/orcid-registry/orcid-api";
 import {
-  heldFor,
   type OrcidEvidenceDetail,
   type OrcidInstitutionPair,
   type OrcidSharedPaper,
@@ -972,7 +971,7 @@ export function substituteDeprecated(
 }
 
 /** The `email_verified` rows the auto-confirm may write: the scholar has no iD
- *  on file (`held`: `scholar.orcid` or an undismissed `rpm_admin` iD), the pair
+ *  on file (`held`: `scholar.orcid`), the pair
  *  is not dismissed, the scholar has exactly one such row, and no other scholar
  *  holds or is email-verified for the iD. The last two are stricter than the
  *  spec on purpose (see its Deviations). Pure. */
@@ -1191,10 +1190,9 @@ async function main(): Promise<number> {
   );
 
   // 1. Population: distinct non-dismissed candidate pairs of active scholars.
-  //    "On file" is `scholar.orcid` or an undismissed `rpm_admin` iD (`heldFor`).
+  //    "On file" is `scholar.orcid`.
   const seen = new Set<string>();
   const pairs: Array<{ cwid: string; orcid: string }> = [];
-  const admins = new Map<string, string[]>();
   const sources = new Map<string, string[]>();
   for (const c of await db.write.orcidCandidate.findMany({
     select: { cwid: true, orcid: true, source: true },
@@ -1203,8 +1201,6 @@ async function main(): Promise<number> {
     if (dismissed.has(k) || !byCwid.has(c.cwid)) continue;
     if (!(sources.get(k) ?? []).includes(c.source))
       sources.set(k, [...(sources.get(k) ?? []), c.source]);
-    if (c.source === "rpm_admin" && !(admins.get(c.cwid) ?? []).includes(c.orcid))
-      admins.set(c.cwid, [...(admins.get(c.cwid) ?? []), c.orcid]);
     if (seen.has(k)) continue;
     seen.add(k);
     pairs.push({ cwid: c.cwid, orcid: c.orcid });
@@ -1261,11 +1257,7 @@ async function main(): Promise<number> {
     );
   }
   const onFile = new Set(
-    pairs
-      .filter(
-        (p) => heldFor(p.orcid, byCwid.get(p.cwid)!.orcid, admins.get(p.cwid) ?? []) === p.orcid,
-      )
-      .map((p) => `${p.cwid}|${p.orcid}`),
+    pairs.filter((p) => byCwid.get(p.cwid)!.orcid === p.orcid).map((p) => `${p.cwid}|${p.orcid}`),
   );
   console.log(`${onFile.size} pairs already on file`);
   const maxFailed = Math.max(RECORD_FAIL_FLOOR, Math.ceil(RECORD_FAIL_SHARE * ids.length));
@@ -1399,11 +1391,7 @@ async function main(): Promise<number> {
   );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 
-  const plan = planAutoConfirm(
-    rows,
-    new Map(active.map((s) => [s.cwid, s.orcid ?? admins.get(s.cwid)?.[0] ?? null])),
-    dismissed,
-  );
+  const plan = planAutoConfirm(rows, new Map(active.map((s) => [s.cwid, s.orcid])), dismissed);
   if (dryRun) {
     await autoConfirmStep(db.write, plan, { enabled: isEmailAutoconfirmEnabled(), dryRun });
     console.log("--dry-run: nothing written.");

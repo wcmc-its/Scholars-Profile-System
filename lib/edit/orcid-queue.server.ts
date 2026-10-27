@@ -26,7 +26,6 @@ import { formatPublishedName } from "@/lib/postnominal";
 import {
   compareCandidates,
   EMPTY_ORCID_QUEUE_FILTER,
-  heldFor,
   isOrcidCandidateSource,
   isReciterWorkStatus,
   ORCID_QUEUE_BANDS,
@@ -78,30 +77,8 @@ export class OrcidQueueRefused extends Error {
 
 const pairKey = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
 
-/** Each scholar's undismissed `rpm_admin` iDs: with `scholar.orcid`, what makes
- *  up "on file" (`heldFor`). */
-async function loadAdminIds(
-  client: Pick<PrismaClient, "orcidCandidate"> | Tx,
-  cwids: string[],
-  dismissed: Set<string>,
-): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>();
-  if (cwids.length === 0) return out;
-  const rows = await client.orcidCandidate.findMany({
-    where: { cwid: { in: cwids }, source: "rpm_admin" },
-    select: { cwid: true, orcid: true },
-  });
-  for (const r of rows) {
-    if (dismissed.has(pairKey(r.cwid, r.orcid))) continue;
-    const ids = out.get(r.cwid) ?? [];
-    if (!ids.includes(r.orcid)) ids.push(r.orcid);
-    out.set(r.cwid, ids);
-  }
-  return out;
-}
-
-/** One scholar's on-file state read on the writer: `scholar.orcid`, their
- *  undismissed `rpm_admin` iDs, and every iD they dismissed. */
+/** One scholar's on-file state read on the writer: `scholar.orcid` and every
+ *  iD they dismissed. */
 async function readOnFile(tx: Tx, cwid: string) {
   const held = await tx.scholar.findUnique({
     where: { cwid },
@@ -113,11 +90,7 @@ async function readOnFile(tx: Tx, cwid: string) {
       (d) => d.orcid,
     ),
   );
-  const admins =
-    (await loadAdminIds(tx, [cwid], new Set([...dismissed].map((o) => pairKey(cwid, o))))).get(
-      cwid,
-    ) ?? [];
-  return { held, admins, dismissed };
+  return { held, dismissed };
 }
 
 function asWorks(v: unknown): OrcidQueueWork[] {
@@ -229,23 +202,18 @@ async function loadQueueState(
     scholars.filter((s) => s.status === "active" && !s.deletedAt).map((s) => [s.cwid, s.orcid]),
   );
   const dismissed = new Set(dismissals.map((d) => pairKey(d.cwid, d.orcid)));
-  const admins = new Map<string, string[]>();
   const sources = new Map<string, OrcidCandidateSource[]>();
   for (const c of candidates) {
     const k = pairKey(c.cwid, c.orcid);
     if (isOrcidCandidateSource(c.source) && !(sources.get(k) ?? []).includes(c.source))
       sources.set(k, [...(sources.get(k) ?? []), c.source]);
-    if (c.source !== "rpm_admin" || dismissed.has(k)) continue;
-    const ids = admins.get(c.cwid) ?? [];
-    if (!ids.includes(c.orcid)) ids.push(c.orcid);
-    admins.set(c.cwid, ids);
   }
   for (const [k, v] of sources) sources.set(k, [...v].sort());
   const open: OpenPair[] = [];
   for (const r of all) {
     if (!held.has(r.cwid)) continue;
     if (!(ORCID_QUEUE_BANDS as readonly string[]).includes(r.band)) continue;
-    const onFile = heldFor(r.orcid, held.get(r.cwid) ?? null, admins.get(r.cwid) ?? []);
+    const onFile = held.get(r.cwid) ?? null;
     const state = pairState(r.orcid, onFile, dismissed.has(pairKey(r.cwid, r.orcid)));
     if (state !== "queue" && state !== "conflict") continue;
     open.push({
@@ -285,8 +253,8 @@ type WriteMeta = {
 
 /** Confirm one pair (method `librarian`). The pair must be in the evidence
  *  table and not dismissed (a librarian never overrides the scholar's own
- *  Remove or an earlier Not this person). "On file" is `scholar.orcid` or an
- *  undismissed `rpm_admin` iD, as on /edit. An iD already on file is refused; a
+ *  Remove or an earlier Not this person). "On file" is `scholar.orcid` alone (an
+ *  `rpm_admin` or `identity` iD is a candidate). An iD already on file is refused; a
  *  DIFFERENT iD on file (a possible error) is replaced only with `replace`, and
  *  every replaced iD is dismissed. Optimistic: the update re-checks what was read. */
 export async function confirmPair(
@@ -299,14 +267,12 @@ export async function confirmPair(
     select: { band: true },
   });
   if (!evidence) throw new OrcidQueueRefused(404, "not_in_queue");
-  const { held, admins, dismissed } = await readOnFile(tx, pair.cwid);
-  const onFile = heldFor(pair.orcid, held.orcid, admins);
+  const { held, dismissed } = await readOnFile(tx, pair.cwid);
+  const onFile = held.orcid;
   if (onFile === pair.orcid) throw new OrcidQueueRefused(409, "already_on_file");
   if (dismissed.has(pair.orcid)) throw new OrcidQueueRefused(409, "dismissed");
   if (onFile !== null && !pair.replace) throw new OrcidQueueRefused(409, "on_file_differs");
-  const replaced = [...new Set([held.orcid, ...admins])].filter(
-    (o): o is string => o !== null && o !== pair.orcid,
-  );
+  const replaced = held.orcid !== null && held.orcid !== pair.orcid ? [held.orcid] : [];
   const { count } = await tx.scholar.updateMany({
     where: { cwid: pair.cwid, orcid: held.orcid },
     data: {
@@ -347,16 +313,16 @@ export async function confirmPair(
 
 /** "Not this person": an `orcid_dismissal` row. On the iD on file it is the
  *  Undo of an email auto-confirm, which also clears `scholar.orcid` and its
- *  confirmation; any other iD on file, an `rpm_admin` one included, is refused
+ *  confirmation; any other iD on file is refused
  *  (that is Remove on /edit). */
 export async function dismissPair(
   tx: Tx,
   pair: { cwid: string; orcid: string },
   meta: WriteMeta,
 ): Promise<{ undid: boolean }> {
-  const { held, admins } = await readOnFile(tx, pair.cwid);
+  const { held } = await readOnFile(tx, pair.cwid);
   let undid = false;
-  if (heldFor(pair.orcid, held.orcid, admins) === pair.orcid) {
+  if (held.orcid === pair.orcid) {
     if (held.orcid !== pair.orcid || held.orcidConfirmMethod !== "email_verified")
       throw new OrcidQueueRefused(409, "on_file");
     const { count } = await tx.scholar.updateMany({
@@ -708,18 +674,14 @@ export async function loadOrcidQueueCard(
 
   let onFile: OrcidOnFile | null = null;
   if (onFileOrcid) {
-    const fromScholar = me?.orcid === onFileOrcid;
-    const method = fromScholar ? me?.orcidConfirmMethod : null;
-    const how: OrcidOnFileHow = !fromScholar
-      ? "rpm_admin"
-      : method && ON_FILE_HOWS.includes(method)
-        ? (method as OrcidOnFileHow)
-        : "identity";
-    const by = fromScholar ? (me?.orcidConfirmedBy ?? null) : null;
+    const method = me?.orcidConfirmMethod;
+    const how: OrcidOnFileHow =
+      method && ON_FILE_HOWS.includes(method) ? (method as OrcidOnFileHow) : "identity";
+    const by = me?.orcidConfirmedBy ?? null;
     onFile = {
       orcid: onFileOrcid,
       how,
-      at: fromScholar ? (me?.orcidConfirmedAt?.toISOString() ?? null) : null,
+      at: me?.orcidConfirmedAt?.toISOString() ?? null,
       by,
       byName: by && by !== "ETL" ? publishedName(named.get(by), by) : null,
       name: onFileOrcid === onFileGuess ? onFileName : await fetchOrcidName(onFileOrcid),

@@ -556,11 +556,11 @@ describe("loaders", () => {
     expect(by("e00001").candidates[0]).toMatchObject({ band: "email_verified" });
   });
 
-  it("an rpm_admin iD is on file: that scholar's other candidate is a conflict", async () => {
+  it("an rpm_admin iD is a candidate, not on file: that scholar's other candidate is not a conflict", async () => {
     const q = await (
       await actual()
     ).loadOrcidQueue(client({ admins: [{ cwid: "a00001", orcid: OTHER }] }));
-    expect(q.summaries.find((s) => s.cwid === "a00001")).toMatchObject({ conflict: true });
+    expect(q.summaries.find((s) => s.cwid === "a00001")).toMatchObject({ conflict: false });
   });
 
   it("the filter narrows the list: person type, how discovered (a kept scholar keeps every candidate)", async () => {

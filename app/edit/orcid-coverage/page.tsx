@@ -95,7 +95,7 @@ function Tile({ label, c }: { label: string; c: CoverageCounts }) {
         <span>
           <span className="text-foreground font-medium">{c.orcid.toLocaleString()}</span> of{" "}
           {c.people.toLocaleString()} asserted ({c.confirmed.toLocaleString()} confirmed here,{" "}
-          {(c.orcid - c.confirmed).toLocaleString()} from Identity or RPM admin)
+          {(c.orcid - c.confirmed).toLocaleString()} unconfirmed, from Identity)
         </span>
         <span>
           <span className="text-foreground font-medium">+{c.strong.toLocaleString()}</span> more by
@@ -308,8 +308,8 @@ function InferenceSources({ s }: { s: InferenceSourceCounts }) {
       </div>
       <p className="text-muted-foreground m-0 text-[12.5px] leading-normal">
         People per rule overlap: one person can match several, and still gets one tier. Rejected
-        articles veto an iD: they usually mean it belongs to a homonym. rpm_admin also lives in
-        orcid_candidate, but holds iDs Publication Manager administrators typed in, not inferences.
+        articles veto an iD: they usually mean it belongs to a homonym. An iD a Publication Manager
+        administrator typed in (rpm_admin) counts as strong on its own until it is confirmed.
       </p>
     </section>
   );
