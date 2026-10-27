@@ -1277,6 +1277,8 @@ export class EtlStack extends Stack {
       "etl:reciter",
       "etl:reciter:coi-statements",
       "etl:orcid-candidates",
+      // Writes reciterdb `scholar_active` (prod only; dry run elsewhere).
+      "etl:scholar-active-export",
       // ORCID queue v2.1: reads reciterdb person_article (each candidate work's
       // ReCiter assertion for the scholar), so the sources family since then.
       "etl:orcid-evidence",
@@ -1776,16 +1778,11 @@ export class EtlStack extends Stack {
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true, tier: "abort" },
-      // scholar.orcid → WCM Identity through the ReCiter engine API. After
-      // Dynamodb (scholar rows exist) and BEFORE Identity, on purpose: the pull
-      // below applies "Identity wins" to any confirmed iD that differs from the
-      // record, and Identity carries no write timestamp, so pull-then-push would
-      // read SPS's OWN previous night's push as a foreign change and revert a
-      // confirmation the person made in /edit that day (Y → X, confirmation
-      // cleared, Y never reaches Identity). Push-then-pull writes Y first, the
-      // pull then reads `unchanged`, and `conflict` fires only when someone
-      // else changed Identity between the two steps — the one case where
-      // "Identity wins" means anything. On the reciter-api def
+      // scholar.orcid → WCM Identity through the ReCiter engine API. Scholars is
+      // the ORCID authority (2026-10, #3189): Identity is the downstream copy.
+      // After Dynamodb (scholar rows exist) and BEFORE Identity, so the pull
+      // below reads tonight's push as `unchanged` and files only a genuinely
+      // different Identity iD as a candidate. On the reciter-api def
       // (RECITER_API_SCRIPTS) because it needs the ADMIN key, which no other
       // cadence step carries. Compare-then-write is what makes it safe to run
       // forever: the Institutional Client's rebuild still nulls Identity.orcid
@@ -1794,13 +1791,16 @@ export class EtlStack extends Stack {
       // Identity as the IC left it; the step itself throws on a dead API, so the
       // freshness row stays honest.
       { id: "OrcidPush", npmScript: "etl:orcid-push", external: true, tier: "continue" },
-      // #918 — populate Scholar.orcid from the WCM Identity table (DynamoDB
-      // Scan, external:true). After Dynamodb (scholars exist; both are DynamoDB
-      // scans) and after OrcidPush (see above); ORCID feeds the profile JSON-LD
-      // `sameAs`, not the search index, so there's no SearchIndex ordering
-      // dependency. Never NULLs an existing orcid — Identity may lag ED — so
-      // re-running nightly only self-heals.
+      // #918 — WCM Identity's iDs → `identity` candidates in orcid_candidate
+      // (DynamoDB Scan, external:true). Never writes scholar.orcid (#3189).
+      // After OrcidPush (see above).
       { id: "Identity", npmScript: "etl:identity", external: true, tier: "continue" },
+      // Active scholars → reciterdb `scholar_active`, which Publication Manager
+      // reads to make its ORCID field read-only. After OrcidPush, so
+      // has_confirmed_orcid matches what Identity now holds. Writes in prod only
+      // (both envs share one reciterdb); a dry run in staging. tier:"continue" —
+      // a missed night leaves yesterday's set, and PM treats it as missing past 48 h.
+      { id: "ScholarActiveExport", npmScript: "etl:scholar-active-export", external: true, tier: "continue" },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
       // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task
