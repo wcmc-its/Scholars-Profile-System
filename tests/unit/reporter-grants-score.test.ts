@@ -9,6 +9,7 @@ import {
   NAME_COMMON_MIN,
   nameProfileCountFrom,
   piSurnameMatches,
+  piGivenNameConflicts,
   authorKey,
   coauthorCounts,
   doctoralYearRange,
@@ -604,5 +605,42 @@ describe("the NIH profile's PI carries the scholar's surname", () => {
     expect(s.reasons.map((r) => r.id)).toEqual(["pi_name_mismatch"]);
     expect(s.band).toBe("hide");
     expect(ids(ev({ profileProven: { kind: "matched" }, piSurnameMatches: true }))).toEqual(["profile_proven"]);
+  });
+});
+
+describe("the NIH profile's PI, with the scholar's surname, has another first name", () => {
+  it("flags a relative or namesake whose middle initial is the scholar's first", () => {
+    // The spouse case: a middle initial M must not pass for a first name Morgan.
+    expect(piGivenNameConflicts("Avery M Example", ["Morgan E Example"])).toBe(true);
+    expect(piGivenNameConflicts("EXAMPLE, AVERY M", ["Morgan E Example"])).toBe(true);
+    // The surname's own initial doesn't count as a given name.
+    expect(piGivenNameConflicts("Eli Example", ["Morgan E Example"])).toBe(false);
+    expect(piGivenNameConflicts("Casey Example", ["Morgan Example"])).toBe(true);
+  });
+
+  it("passes a middle name in use, a nickname inside the name, and a matching initial", () => {
+    expect(piGivenNameConflicts("Avery Morgan Example", ["Morgan Example"])).toBe(false);
+    expect(piGivenNameConflicts("R. Morgan Example", ["Morgan Example"])).toBe(false);
+    expect(piGivenNameConflicts("Emma Elizabeth Example", ["Beth Example"])).toBe(false);
+    expect(piGivenNameConflicts("EXAMPLE, M", ["Morgan Example"])).toBe(false);
+    expect(piGivenNameConflicts("Morgan Q Example", ["Morgan E Example"])).toBe(false);
+    expect(piGivenNameConflicts("J Avery Example", ["J Example"])).toBe(false);
+  });
+
+  it("leaves a different surname to pi_name_mismatch, and nothing to compare null", () => {
+    expect(piGivenNameConflicts("Avery Other", ["Morgan Example"])).toBeNull();
+    expect(piGivenNameConflicts(null, ["Morgan Example"])).toBeNull();
+    expect(piGivenNameConflicts("Avery Example", [null])).toBeNull();
+  });
+
+  it("weighs like a surname mismatch and stops the profile vouching", () => {
+    const s = scoreAttribution(
+      ev({ profileProven: { kind: "siblings", linked: 2 }, piSurnameMatches: true, piGivenNameConflicts: true }),
+    );
+    expect(s.reasons.map((r) => r.id)).toEqual(["pi_given_name_mismatch"]);
+    expect(s.score).toBe(PRIOR + WEIGHTS.pi_given_name_mismatch);
+    expect(s.band).toBe("hide");
+    // Never both name cues on one award.
+    expect(ids(ev({ piSurnameMatches: false, piGivenNameConflicts: true }))).toEqual(["pi_name_mismatch"]);
   });
 });

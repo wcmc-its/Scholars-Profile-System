@@ -63,6 +63,7 @@ import { buildAwardEvidence, buildScholarFacts, profileProof } from "./evidence"
 import {
   evidenceKey,
   nameProfileCountFrom,
+  piGivenNameConflicts,
   piSurnameMatches,
   scoreAttribution,
   type AttributionScore,
@@ -636,6 +637,7 @@ async function scoreScholarAwards(
       nameProfileCount,
       wcmNamesakes,
       piSurnameMatches: piSurnameMatches(reporterName, scholarNames),
+      piGivenNameConflicts: piGivenNameConflicts(reporterName, scholarNames),
     });
     out.set(c.row.externalId, {
       score,
