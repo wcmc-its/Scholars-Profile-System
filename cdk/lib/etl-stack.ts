@@ -935,9 +935,9 @@ export class EtlStack extends Stack {
       // "system-unverified", user-revocable) an award from a NAME-ONLY resolved
       // NIH profile (name_query / name_match) when neither a WCM org in its
       // history nor a confirmed publication ties it to the scholar. Staging
-      // first; prod stays off until the staging run's hide count is reviewed.
+      // first; prod flipped 2026-10-27 after the staging queue was reviewed.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      REPORTER_GRANTS_CORROBORATION_HIDE: env === "staging" ? "on" : "off",
+      REPORTER_GRANTS_CORROBORATION_HIDE: "on",
       // ORCID librarian queue — etl:orcid-evidence (OrcidEvidenceWeekly) confirms an
       // iD whose public record lists the scholar's email as VERIFIED (method
       // email_verified, never over an iD on file) only when this is exactly "on";
