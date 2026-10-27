@@ -986,6 +986,27 @@ function Detail({
                       ) : null}
                     </div>
                   ) : null}
+                  {x.rejected && x.rejected.length > 0 ? (
+                    <div className="flex flex-col gap-[3px] pl-0.5" data-testid="grant-attribution-rejected-papers">
+                      {x.rejected.map((p) => (
+                        <a
+                          key={p.pmid}
+                          href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-apollo-slate text-[12.5px] leading-[1.4] hover:underline"
+                        >
+                          {p.title ? (
+                            <>
+                              <PubTitle value={p.title} /> <span className="text-muted-foreground">· PMID {p.pmid}</span>
+                            </>
+                          ) : (
+                            `PMID ${p.pmid}`
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

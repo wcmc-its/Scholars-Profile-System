@@ -1098,6 +1098,21 @@ function LedgerItem({ cue, main }: { cue: DecidedRow["cues"][number]; main: bool
           ) : null}
         </div>
         <div className="mt-0.5 text-[13px] text-[#3a3532]">{cue.reason}</div>
+        {cue.rejected && cue.rejected.length > 0 ? (
+          <ul
+            className="mt-1 flex flex-col gap-0.5 pl-[18px] text-[12.5px] text-[#3a3532]"
+            data-testid="grant-attribution-rejected-papers"
+          >
+            {cue.rejected.map((p) => (
+              <li key={p.pmid}>
+                <a href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`} target="_blank" rel="noopener">
+                  {p.title ? <PubTitle value={p.title} /> : `PMID ${p.pmid}`}
+                </a>
+                {p.title ? <span className="text-muted-foreground"> · PMID {p.pmid}</span> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {cue.coPi && cue.coPi.papers.length > 0 ? (
           <>
             <ul className="mt-1 flex flex-col gap-0.5 pl-[18px] text-[12.5px] text-[#3a3532]">

@@ -66,8 +66,12 @@ describe("buildAwardEvidence", () => {
   });
 
   it("counts cue 2 against the true link set, or as unknown when the core was restricted", () => {
-    expect(build().evidence.rejected).toEqual({ overlap: 1, linkedTotal: 2 });
-    expect(build({ linkedRestricted: true }).evidence.rejected).toEqual({ overlap: 1, linkedTotal: null });
+    expect(build().evidence.rejected).toEqual({ overlap: 1, linkedTotal: 2, pmids: ["2002"] });
+    expect(build({ linkedRestricted: true }).evidence.rejected).toEqual({
+      overlap: 1,
+      linkedTotal: null,
+      pmids: ["2002"],
+    });
     expect(build({ facts: facts({ rejected: null }) }).evidence.rejected).toBeNull();
   });
 

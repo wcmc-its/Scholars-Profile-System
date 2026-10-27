@@ -80,7 +80,22 @@ export type GrantAttributionCue = {
   /** Cue `copi_coauthor` from a run that recorded it: the co-PI, as RePORTER
    *  names them, and the papers they share with the scholar (newest first). */
   coPi?: { name: string; total: number; papers: GrantAttributionPaper[] };
+  /** Cue `rejected_pmids` from a run that recorded them: the papers RePORTER
+   *  links to the award that the scholar rejected in ReCiter (capped). The
+   *  title is PubMed's, null when the ETL could not fetch it. */
+  rejected?: GrantAttributionRejectedPaper[];
 };
+
+export type GrantAttributionRejectedPaper = { pmid: string; title: string | null };
+
+/** A stored cue's `rejected` list, or undefined when absent or malformed. */
+export function asRejectedPapers(v: unknown): GrantAttributionRejectedPaper[] | undefined {
+  if (!Array.isArray(v) || v.length === 0) return undefined;
+  const ok = v.every(
+    (p) => !!p && typeof p.pmid === "string" && (p.title === null || typeof p.title === "string"),
+  );
+  return ok ? v.map((p) => ({ pmid: p.pmid, title: p.title })) : undefined;
+}
 
 export type GrantAttributionAward = {
   title: string | null;

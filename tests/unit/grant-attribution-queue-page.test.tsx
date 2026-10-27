@@ -99,6 +99,7 @@ import {
   decidingReason,
   canViewGrantAttributionQueue,
   isGrantAttributionQueueReadOnly,
+  asRejectedPapers,
   type GrantAttributionItem,
 } from "@/lib/edit/grant-attribution-queue";
 
@@ -301,6 +302,17 @@ const queue = (readOnly = false, pending = [ITEM]) =>
 const detail = () => within(screen.getByTestId("grant-attribution-detail"));
 
 describe("helpers", () => {
+  it("reads a stored cue's rejected papers, dropping an empty or malformed list", () => {
+    expect(asRejectedPapers([{ pmid: "1", title: "T" }, { pmid: "2", title: null }])).toEqual([
+      { pmid: "1", title: "T" },
+      { pmid: "2", title: null },
+    ]);
+    expect(asRejectedPapers(undefined)).toBeUndefined();
+    expect(asRejectedPapers([])).toBeUndefined();
+    expect(asRejectedPapers([{ pmid: 1, title: "T" }])).toBeUndefined();
+    expect(asRejectedPapers([{ pmid: "1" }])).toBeUndefined();
+  });
+
   it("levels: a strong negative rules out, both sides conflict, a link or two cues is high", () => {
     expect(attributionLevel([{ id: "timeline_impossible", weight: -5 }, { id: "prior_institution", weight: 2 }])).toEqual({
       level: "out",
@@ -388,6 +400,30 @@ describe("the review", () => {
       "https://pubmed.ncbi.nlm.nih.gov/111/",
     );
     expect(detail().getByText("+ 4 more")).toBeTruthy();
+  });
+
+  it("lists the rejected papers under their cue, by PubMed title or by PMID", () => {
+    const rejected: GrantAttributionItem = {
+      ...ITEM,
+      cues: [
+        {
+          id: "rejected_pmids",
+          weight: -4,
+          reason: "2 of the 16 papers RePORTER links to this award were rejected in ReCiter as not the scholar's",
+          rejected: [
+            { pmid: "333", title: "A rejected synthetic paper" },
+            { pmid: "444", title: null },
+          ],
+        },
+      ],
+    };
+    queue(false, [rejected]);
+    const list = within(detail().getByTestId("grant-attribution-rejected-papers"));
+    expect(list.getByText("A rejected synthetic paper").closest("a")?.getAttribute("href")).toBe(
+      "https://pubmed.ncbi.nlm.nih.gov/333/",
+    );
+    expect(list.getByText("· PMID 333")).toBeTruthy();
+    expect(list.getByText("PMID 444").closest("a")?.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/444/");
   });
 
   it("offers no actions or selection to a read-only viewer", () => {

@@ -22,6 +22,8 @@ import { parseFirstLast } from "@/etl/reporter-grants/v2";
 
 /** Shared PMIDs kept on cue 6 for the queue to list. */
 const COPI_PMIDS_KEPT = 20;
+/** Rejected PMIDs kept on cue 2 for the queue to list. */
+const REJECTED_PMIDS_KEPT = 20;
 
 type NamePair = { fullName: string; preferredName: string } | undefined;
 
@@ -142,10 +144,14 @@ export function buildAwardEvidence(args: {
       namesMatch,
     }),
     rejected: facts.rejected
-      ? {
-          overlap: [...linked].filter((p) => facts.rejected!.has(p)).length,
-          linkedTotal: args.linkedRestricted ? null : linked.size,
-        }
+      ? (() => {
+          const hit = [...linked].filter((p) => facts.rejected!.has(p));
+          return {
+            overlap: hit.length,
+            linkedTotal: args.linkedRestricted ? null : linked.size,
+            pmids: hit.slice(0, REJECTED_PMIDS_KEPT),
+          };
+        })()
       : null,
     doctoralYears: facts.doctoralYears,
     middleInitialConflict: middleInitialConflict(
