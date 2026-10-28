@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 
 import { FundableWorkBrowser, toCsv, type FundableWorkRow } from "@/components/edit/fundable-work-browser";
+import { conferenceOf } from "@/lib/fundable-work";
 
 const row = (over: Partial<FundableWorkRow> & { id: string }): FundableWorkRow => ({
   type: "conference-abstract",
@@ -22,7 +23,7 @@ const row = (over: Partial<FundableWorkRow> & { id: string }): FundableWorkRow =
   pitch: "Pitch text.",
   abstract: "Abstract text.",
   funders: [{ name: "Bayer", kind: "pharma", why: "Prostate franchise." }],
-  authors: [{ cwid: "aaa1001", name: "Jane Doe", slug: "jane-doe", department: "Medicine", position: "last", isPostdoc: false }],
+  authors: [{ cwid: "aaa1001", name: "Jane Doe", slug: "jane-doe", department: "Medicine", position: "last", isPostdoc: false, hasHeadshot: false }],
   ...over,
 });
 
@@ -70,11 +71,33 @@ describe("FundableWorkBrowser", () => {
     expect(screen.getByText("Abstract text.")).toBeTruthy();
   });
 
+  it("derives the conference from the journal, and takes a meeting venue as stated", () => {
+    expect(conferenceOf({ type: "conference-abstract", venue: "Cancer Research", date: "2026-06-01" })).toEqual({
+      name: "AACR Annual Meeting 2026",
+      inferred: true,
+    });
+    expect(
+      conferenceOf({ type: "conference-abstract", venue: "ECS Meeting Abstracts", date: "2026-06-01" }),
+    ).toEqual({ name: "ECS Meeting Abstracts", inferred: false });
+    // A preprint has no conference, and nor does a journal we have no society for.
+    expect(conferenceOf({ type: "preprint", venue: "bioRxiv", date: "2026-06-01" })).toBeNull();
+    expect(conferenceOf({ type: "conference-abstract", venue: "Clinical Chemistry", date: "2026-06-01" })).toBeNull();
+  });
+
+  it("facets on the derived conference and marks it inferred", () => {
+    render(<FundableWorkBrowser rows={ROWS} truncated={false} />);
+    expect(screen.getAllByTitle(/^Inferred from the journal/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Conference: AACR Annual Meeting 2026" }));
+    expect(screen.getByText("Degrader study")).toBeTruthy();
+    expect(screen.queryByText("Vaccine antigen study")).toBeNull();
+  });
+
   it("exports names and departments but never a cwid", () => {
     const csv = toCsv(ROWS);
     expect(csv.split("\n")).toHaveLength(4);
     expect(csv).toContain('"Jane Doe (Medicine)"');
     expect(csv).toContain('"Bayer [pharma]"');
+    expect(csv).toContain('"AACR Annual Meeting 2026"');
     expect(csv).not.toContain("aaa1001");
   });
 
