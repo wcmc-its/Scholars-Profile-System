@@ -68,6 +68,8 @@ export const ORCID_DISMISS_REASONS = [
   "none_of_these",
   "other_confirmed",
   "removed",
+  "duplicate_retired",
+  "belongs_to_other",
 ] as const;
 export type OrcidDismissReason = (typeof ORCID_DISMISS_REASONS)[number];
 export const ORCID_DISMISS_REASON_LABEL: Record<OrcidDismissReason, string> = {
@@ -75,6 +77,8 @@ export const ORCID_DISMISS_REASON_LABEL: Record<OrcidDismissReason, string> = {
   none_of_these: "None of these",
   other_confirmed: "Another iD confirmed",
   removed: "Removed",
+  duplicate_retired: "Retired: duplicate record of this scholar",
+  belongs_to_other: "Belongs to another scholar",
 };
 
 export type PairState = "queue" | "on_file" | "dismissed" | "conflict";
@@ -390,6 +394,9 @@ export type OrcidRuledOut = {
   orcid: string;
   reason: OrcidDismissReason | null;
   keptOrcid: string | null;
+  /** belongs_to_other: the scholar it was confirmed for, and their name. */
+  otherCwid: string | null;
+  otherName: string | null;
   by: string | null;
   byName: string | null;
   /** ISO. */
@@ -443,6 +450,11 @@ export type OrcidQueueSummary = {
    *  (`orcid_pair_seen`); null when none is recorded (email-confirmed only). */
   firstQueuedAt: string | null;
   lastQueuedAt: string | null;
+  /** v3 B2: decisions on file for the scholar (null = none): an iD ruled out
+   *  by the scholar themselves or by staff (a librarian or proxy), an iD a
+   *  librarian confirmed, and the latest decision's ISO time. A scholar with
+   *  no candidates left is listed for these alone. */
+  decisions: { byScholar: boolean; byStaff: boolean; librarian: boolean; at: string | null } | null;
 };
 
 /** What the page hands the client: every scholar in the queue under the
@@ -522,6 +534,7 @@ export const ORCID_QUEUE_SORTS = [
   "gap",
   "oldest",
   "newest",
+  "decided",
   "dept",
   "name",
   "cwid",
@@ -533,6 +546,7 @@ export const ORCID_QUEUE_SORT_LABEL: Record<OrcidQueueSort, { label: string; hin
   gap: { label: "Clearest winner", hint: "Biggest gap between the best and next-best iD" },
   oldest: { label: "Oldest in queue", hint: "Longest waiting first" },
   newest: { label: "Newest found", hint: "Most recently found iD first" },
+  decided: { label: "Recently decided", hint: "Latest decision first" },
   dept: { label: "Department, then name", hint: "Work one department at a time" },
   name: { label: "Name A–Z", hint: "By surname" },
   cwid: { label: "CWID A–Z", hint: "Match against a list of CWIDs" },
@@ -555,6 +569,8 @@ export function compareSummaries(sort: OrcidQueueSort) {
       return byTime(a.firstQueuedAt ?? "~", b.firstQueuedAt ?? "~") || strong(a, b);
     if (sort === "newest")
       return byTime(b.lastQueuedAt ?? "", a.lastQueuedAt ?? "") || strong(a, b);
+    if (sort === "decided")
+      return byTime(b.decisions?.at ?? "", a.decisions?.at ?? "") || strong(a, b);
     if (sort === "dept")
       return (a.department ?? "￿").localeCompare(b.department ?? "￿") || byName(a, b);
     if (sort === "name") return byName(a, b);

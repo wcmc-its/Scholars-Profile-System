@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DecisionStatusBar } from "@/components/edit/news-review-shared";
 import {
+  hasDecision,
   OrcidQueueFilterBar,
   type OrcidQueueClientFilter,
 } from "@/components/edit/orcid-queue-filter-bar";
@@ -114,6 +115,16 @@ async function postDecision(
 }
 
 const pairKey = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
+
+/** A decision's extras: the other iDs it also rules out (v2), as "None of
+ *  these" (v3) or as the scholar's own retired duplicates (v3 B2), or (v3 B2)
+ *  an iD shared with another scholar: confirm it for them, or for neither. */
+type DecideOpts = {
+  others?: OrcidQueueRow[];
+  noneOfThese?: boolean;
+  retire?: boolean;
+  shared?: { cwid: string; name: string; belongs: boolean };
+};
 const fmt = (n: number) => n.toLocaleString("en-US");
 const plural = (n: number, one: string, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`;
 const dateTime = (iso: string) =>
@@ -185,8 +196,8 @@ export function OrcidQueue({
           )
             return false;
           if (view.errorsOnly && !s.conflict) return false;
-          if (view.decision === "open") return !isResolved(s, outcomes);
-          if (view.decision === "email") return s.autoConfirmed;
+          if (view.decision === "open") return s.candidates.length > 0 && !isResolved(s, outcomes);
+          if (view.decision) return hasDecision(s, view.decision);
           return true;
         })
         .sort(compareSummaries(sort)),
@@ -260,7 +271,7 @@ export function OrcidQueue({
       c: OrcidQueueCard,
       row: OrcidQueueRow,
       decision: "confirm" | "dismiss",
-      opts: { others?: OrcidQueueRow[]; noneOfThese?: boolean } = {},
+      opts: DecideOpts = {},
     ): Promise<boolean> => {
       if (!canDecide || busy) return false;
       setBusy(true);
@@ -273,6 +284,10 @@ export function OrcidQueue({
         ...(decision === "confirm" && row.state === "conflict" ? { replace: true } : {}),
         ...(others.length > 0 ? { dismissOthers: others.map((o) => o.orcid) } : {}),
         ...(opts.noneOfThese ? { noneOfThese: true } : {}),
+        ...(opts.retire && others.length > 0 ? { retireOthers: true } : {}),
+        ...(opts.shared
+          ? { shared: { cwid: opts.shared.cwid, belongs: opts.shared.belongs } }
+          : {}),
       });
       setBusy(false);
       if (!r.ok) {
@@ -292,17 +307,21 @@ export function OrcidQueue({
       setSticky(c.cwid);
       setSel(c.cwid);
       setToast(
-        undone
-          ? "Undone. The iD is off file and won't be suggested again."
-          : opts.noneOfThese
-            ? `Marked ${others.length === 0 ? "the iD" : `all ${others.length + 1} iDs`} not this person. They won't be suggested again.`
-            : decision === "confirm"
-              ? `${row.state === "conflict" ? "Replaced" : "Confirmed"}. The iD is on file and reaches WCM Identity overnight.${
-                  others.length > 0
-                    ? ` ${others.length === 1 ? "The other iD is" : `The other ${others.length} iDs are`} marked not this person.`
-                    : ""
-                }`
-              : "Marked not this person. The iD won't be suggested again.",
+        opts.shared
+          ? opts.shared.belongs
+            ? `Confirmed for ${opts.shared.name}, and ruled out here. Reaches WCM Identity overnight.`
+            : "Marked not this person for both scholars. The iD won't be suggested to either again."
+          : undone
+            ? "Undone. The iD is off file and won't be suggested again."
+            : opts.noneOfThese
+              ? `Marked ${others.length === 0 ? "the iD" : `all ${others.length + 1} iDs`} not this person. They won't be suggested again.`
+              : decision === "confirm"
+                ? `${row.state === "conflict" ? "Replaced" : "Confirmed"}. The iD is on file and reaches WCM Identity overnight.${
+                    others.length > 0
+                      ? ` ${others.length === 1 ? "The other iD is" : `The other ${others.length} iDs are`} ${opts.retire ? "retired as duplicate records." : "marked not this person."}`
+                      : ""
+                  }`
+                : "Marked not this person. The iD won't be suggested again.",
       );
       return true;
     },
@@ -696,7 +715,7 @@ function ScholarDetail({
   onDecide: (
     row: OrcidQueueRow,
     decision: "confirm" | "dismiss",
-    opts?: { others?: OrcidQueueRow[]; noneOfThese?: boolean },
+    opts?: DecideOpts,
   ) => Promise<boolean>;
   onNext: () => void;
 }) {
@@ -707,85 +726,103 @@ function ScholarDetail({
   const confirmed = rows.find((r) => outcomeOf(r) === "confirmed");
   const decided = !!auto || !!confirmed || (rows.length > 0 && open.length === 0);
   const ranked = rows.filter((r) => !r.autoConfirmed);
-  const best = ranked[0] ?? rows[0]!;
+  const best = ranked[0] ?? rows[0];
   const runner = ranked[1];
   const [openId, setOpenId] = useState<string | null>(open[0]?.orcid ?? rows[0]?.orcid ?? null);
   const [alsoDismiss, setAlsoDismiss] = useState(true);
+  const [retire, setRetire] = useState(false);
   const conflict = rows.some((r) => r.state === "conflict");
+
+  const header = (
+    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+      {card.department ? <span className={EYEBROW}>{card.department}</span> : null}
+      <h2 className="m-0 text-[26px] leading-tight font-semibold tracking-[-0.01em]">
+        {card.name}
+      </h2>
+      {card.title ? <span className="text-[15px] text-[#3a3532]">{card.title}</span> : null}
+      <span className="text-muted-foreground flex flex-wrap items-baseline gap-3 text-[13.5px]">
+        <span>
+          CWID <span className={cn(MONO, "text-foreground")}>{card.cwid}</span>
+        </span>
+        {card.slug ? (
+          <Link href={profilePath(card.slug)} className={LINK} target="_blank">
+            View profile ↗
+          </Link>
+        ) : null}
+      </span>
+      {card.onFile && !auto ? (
+        <div
+          className="border-apollo-border-strong bg-apollo-surface-2 mt-3 flex flex-col gap-0.5 rounded-lg border px-3.5 py-2.5 text-[13px]"
+          data-testid="orcid-queue-on-file"
+        >
+          <span className="flex items-center gap-2">
+            <Lock className="text-muted-foreground size-3.5" aria-hidden />
+            <span className="text-muted-foreground">On file</span>
+            <a
+              href={`${ORCID_URL_PREFIX}${card.onFile.orcid}`}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(MONO, "hover:underline")}
+            >
+              {card.onFile.orcid}
+            </a>
+            <span className={card.onFile.name ? undefined : "text-muted-foreground"}>
+              · {card.onFile.name ?? "Name not public"}
+            </span>
+          </span>
+          <span className="text-muted-foreground text-[12.5px]">
+            {onFileProvenance(card.onFile)}
+          </span>
+        </div>
+      ) : null}
+      {card.ruledOut.length > 0 ? (
+        <div
+          className="text-muted-foreground mt-2 flex flex-col gap-0.5 text-[12.5px]"
+          data-testid="orcid-queue-ruled-out"
+        >
+          <span className={EYEBROW}>Ruled out</span>
+          {card.ruledOut.map((d) => (
+            <span key={d.orcid}>
+              <span className={MONO}>{d.orcid}</span> ·{" "}
+              {d.reason ? ORCID_DISMISS_REASON_LABEL[d.reason] : "Ruled out"}
+              {d.keptOrcid ? (
+                <>
+                  {" "}
+                  (<span className={MONO}>{d.keptOrcid}</span>)
+                </>
+              ) : null}
+              {d.otherCwid ? (
+                <>
+                  {" "}
+                  ({d.otherName} <span className={MONO}>{d.otherCwid}</span>)
+                </>
+              ) : null}
+              {d.by ? (
+                <>
+                  {" "}
+                  by {d.byName} <span className={MONO}>{d.by}</span>
+                </>
+              ) : null}{" "}
+              on {dateTime(d.at)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+  // v3 B2: a decided scholar with nothing left open: who they are, what is on
+  // file and what was ruled out.
+  if (!best)
+    return (
+      <div className="flex flex-col px-7 pt-6 pb-5" data-testid={`orcid-queue-card-${card.cwid}`}>
+        {header}
+      </div>
+    );
 
   return (
     <div className="flex flex-col" data-testid={`orcid-queue-card-${card.cwid}`}>
       <div className="flex flex-wrap items-start justify-between gap-6 px-7 pt-6 pb-5">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {card.department ? <span className={EYEBROW}>{card.department}</span> : null}
-          <h2 className="m-0 text-[26px] leading-tight font-semibold tracking-[-0.01em]">
-            {card.name}
-          </h2>
-          {card.title ? <span className="text-[15px] text-[#3a3532]">{card.title}</span> : null}
-          <span className="text-muted-foreground flex flex-wrap items-baseline gap-3 text-[13.5px]">
-            <span>
-              CWID <span className={cn(MONO, "text-foreground")}>{card.cwid}</span>
-            </span>
-            {card.slug ? (
-              <Link href={profilePath(card.slug)} className={LINK} target="_blank">
-                View profile ↗
-              </Link>
-            ) : null}
-          </span>
-          {card.onFile && !auto ? (
-            <div
-              className="border-apollo-border-strong bg-apollo-surface-2 mt-3 flex flex-col gap-0.5 rounded-lg border px-3.5 py-2.5 text-[13px]"
-              data-testid="orcid-queue-on-file"
-            >
-              <span className="flex items-center gap-2">
-                <Lock className="text-muted-foreground size-3.5" aria-hidden />
-                <span className="text-muted-foreground">On file</span>
-                <a
-                  href={`${ORCID_URL_PREFIX}${card.onFile.orcid}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={cn(MONO, "hover:underline")}
-                >
-                  {card.onFile.orcid}
-                </a>
-                <span className={card.onFile.name ? undefined : "text-muted-foreground"}>
-                  · {card.onFile.name ?? "Name not public"}
-                </span>
-              </span>
-              <span className="text-muted-foreground text-[12.5px]">
-                {onFileProvenance(card.onFile)}
-              </span>
-            </div>
-          ) : null}
-          {card.ruledOut.length > 0 ? (
-            <div
-              className="text-muted-foreground mt-2 flex flex-col gap-0.5 text-[12.5px]"
-              data-testid="orcid-queue-ruled-out"
-            >
-              <span className={EYEBROW}>Ruled out</span>
-              {card.ruledOut.map((d) => (
-                <span key={d.orcid}>
-                  <span className={MONO}>{d.orcid}</span> ·{" "}
-                  {d.reason ? ORCID_DISMISS_REASON_LABEL[d.reason] : "Ruled out"}
-                  {d.keptOrcid ? (
-                    <>
-                      {" "}
-                      (<span className={MONO}>{d.keptOrcid}</span>)
-                    </>
-                  ) : null}
-                  {d.by ? (
-                    <>
-                      {" "}
-                      by {d.byName} <span className={MONO}>{d.by}</span>
-                    </>
-                  ) : null}{" "}
-                  on {dateTime(d.at)}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
+        {header}
         <div className="flex w-full max-w-[420px] flex-col gap-3">
           {decided ? (
             <DecisionBlock card={card} auto={auto} confirmed={confirmed} outcomes={outcomes} />
@@ -886,6 +923,9 @@ function ScholarDetail({
               open={open}
               alsoDismiss={alsoDismiss}
               onAlsoDismiss={setAlsoDismiss}
+              retire={retire}
+              onRetire={setRetire}
+              onShared={(shared) => void onDecide(r, "dismiss", { shared })}
               canDecide={canDecide}
               busy={busy}
               pmBaseUrl={pmBaseUrl}
@@ -893,6 +933,7 @@ function ScholarDetail({
               onConfirm={() =>
                 void onDecide(r, "confirm", {
                   others: alsoDismiss ? open.filter((o) => o.orcid !== r.orcid) : [],
+                  retire,
                 })
               }
               onDismiss={async () => {
@@ -991,6 +1032,9 @@ function CandidateRow({
   open,
   alsoDismiss,
   onAlsoDismiss,
+  retire,
+  onRetire,
+  onShared,
   canDecide,
   busy,
   pmBaseUrl,
@@ -1008,6 +1052,11 @@ function CandidateRow({
   open: OrcidQueueRow[];
   alsoDismiss: boolean;
   onAlsoDismiss: (v: boolean) => void;
+  /** v3 B2: the others are retired as this scholar's duplicate records. */
+  retire: boolean;
+  onRetire: (v: boolean) => void;
+  /** v3 B2: decide an iD shared with another scholar. */
+  onShared: (shared: { cwid: string; name: string; belongs: boolean }) => void;
   canDecide: boolean;
   busy: boolean;
   pmBaseUrl: string | null;
@@ -1161,7 +1210,14 @@ function CandidateRow({
 
       {isOpen ? (
         <div className="flex flex-col gap-4 px-4 pt-1 pb-5 sm:pl-[52px]">
-          {r.competitor ? <CompetitorCallout card={card} row={r} onOpen={onOpen} /> : null}
+          {r.competitor ? (
+            <CompetitorCallout
+              card={card}
+              row={r}
+              onOpen={onOpen}
+              onShared={canDecide && pending && !busy ? onShared : null}
+            />
+          ) : null}
           <div className="grid gap-4 xl:grid-cols-[minmax(240px,0.8fr)_minmax(0,2fr)]">
             <NameAndSignals card={card} row={r} />
             <Publications card={card} row={r} pmBaseUrl={pmBaseUrl} />
@@ -1218,7 +1274,18 @@ function CandidateRow({
                     onChange={(e) => onAlsoDismiss(e.target.checked)}
                     data-testid="orcid-queue-also-dismiss"
                   />
-                  Also mark the other {others} Not this person
+                  Also mark the other {others}
+                  <select
+                    value={retire ? "retire" : "not_me"}
+                    onChange={(e) => onRetire(e.target.value === "retire")}
+                    disabled={!alsoDismiss}
+                    className="border-apollo-border rounded border bg-transparent px-1 py-0.5 text-[13px]"
+                    data-testid="orcid-queue-others-as"
+                    aria-label="Mark the other iDs as"
+                  >
+                    <option value="not_me">Not this person</option>
+                    <option value="retire">Retired: duplicate records of this scholar</option>
+                  </select>
                 </label>
               ) : null}
             </div>
@@ -1248,10 +1315,13 @@ function CompetitorCallout({
   card,
   row: r,
   onOpen,
+  onShared,
 }: {
   card: OrcidQueueCard;
   row: OrcidQueueRow;
   onOpen: (orcid: string) => void;
+  /** v3 B2: rule 3's Belongs to / Not either; null = read-only or decided. */
+  onShared: ((shared: { cwid: string; name: string; belongs: boolean }) => void) | null;
 }) {
   const rules = competitorRules(r);
   const who = (rule: 1 | 2 | 3): React.ReactNode[] => {
@@ -1282,7 +1352,9 @@ function CompetitorCallout({
                     ? "Couldn't be fetched this run"
                     : `${fmt(o.shared)} shared`
             }
-            action={c && !onFile ? { label: "Open this iD", onClick: () => onOpen(o.orcid) } : null}
+            actions={
+              c && !onFile ? [{ label: "Open this iD", onClick: () => onOpen(o.orcid) }] : []
+            }
           />
         );
       });
@@ -1301,7 +1373,20 @@ function CompetitorCallout({
               ? `Also a candidate for this iD · ${c.shared ?? "3+"} shared`
               : `Holds ${c.shared ?? "3+"} of this record's papers`
           }
-          action={null}
+          actions={
+            rule === 3 && onShared
+              ? [
+                  {
+                    label: `Belongs to ${c.name}`,
+                    onClick: () => onShared({ cwid: c.cwid, name: c.name, belongs: true }),
+                  },
+                  {
+                    label: "Not either",
+                    onClick: () => onShared({ cwid: c.cwid, name: c.name, belongs: false }),
+                  },
+                ]
+              : []
+          }
         />
       ));
   };
@@ -1340,20 +1425,29 @@ function CompetitorCallout({
 function WhoRow({
   primary,
   meta,
-  action,
+  actions,
 }: {
   primary: React.ReactNode;
   meta: string;
-  action: { label: string; onClick: () => void } | null;
+  actions: Array<{ label: string; onClick: () => void }>;
 }) {
   return (
     <div className="border-apollo-amber-tint-border bg-apollo-surface flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border px-3 py-2">
       <span>{primary}</span>
       <span className="text-muted-foreground text-[12.5px]">{meta}</span>
-      {action ? (
-        <button type="button" onClick={action.onClick} className={cn(LINK, "ml-auto text-[13px]")}>
-          {action.label}
-        </button>
+      {actions.length > 0 ? (
+        <span className="ml-auto flex gap-3">
+          {actions.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              onClick={a.onClick}
+              className={cn(LINK, "text-[13px]")}
+            >
+              {a.label}
+            </button>
+          ))}
+        </span>
       ) : null}
     </div>
   );

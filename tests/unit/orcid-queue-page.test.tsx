@@ -245,6 +245,7 @@ const summaryOf = (
   autoConfirmed: c.candidates.some((r) => r.autoConfirmed),
   firstQueuedAt: null,
   lastQueuedAt: null,
+  decisions: null,
   ...over,
 });
 
@@ -535,6 +536,7 @@ describe("loaders", () => {
             };
           }) => {
             const w = args.where;
+            if (w.orcidConfirmMethod === "librarian") return [];
             if (w.orcidConfirmMethod)
               return typeof w.cwid === "string" && w.cwid !== "e00001"
                 ? []
@@ -548,7 +550,7 @@ describe("loaders", () => {
         ),
       },
       orcidDismissal: {
-        findMany: vi.fn(async (args: { where: { cwid: string | { in: string[] } } }) =>
+        findMany: vi.fn(async (args: { where?: { cwid: string | { in: string[] } } }) =>
           [
             {
               cwid: "b00001",
@@ -557,6 +559,7 @@ describe("loaders", () => {
               dismissedBy: null,
               reason: null,
               keptOrcid: null,
+              otherCwid: null,
             },
             {
               cwid: "a00001",
@@ -565,11 +568,14 @@ describe("loaders", () => {
               dismissedBy: "lib0001",
               reason: "other_confirmed",
               keptOrcid: ORCID,
+              otherCwid: null,
             },
           ].filter((d) =>
-            typeof args.where.cwid === "string"
-              ? d.cwid === args.where.cwid
-              : args.where.cwid.in.includes(d.cwid),
+            !args.where
+              ? true
+              : typeof args.where.cwid === "string"
+                ? d.cwid === args.where.cwid
+                : args.where.cwid.in.includes(d.cwid),
           ),
         ),
       },
@@ -586,7 +592,9 @@ describe("loaders", () => {
 
   it("one summary per scholar, candidates best first; a dismissed pair drops; conflicts and the ETL's iDs are flagged", async () => {
     const q = await (await actual()).loadOrcidQueue(client());
-    expect(cwidsOf(q)).toEqual(["a00001", "c00001", "d00001", "e00001", "f00001"]);
+    // b00001's only pair is dismissed: listed for that decision alone (v3 B2).
+    expect(cwidsOf(q)).toEqual(["a00001", "b00001", "c00001", "d00001", "e00001", "f00001"]);
+    expect(q.summaries.find((s) => s.cwid === "b00001")!.candidates).toEqual([]);
     const by = (c: string) => q.summaries.find((s) => s.cwid === c)!;
     expect(by("a00001")).toMatchObject({
       name: "Pref a00001",
@@ -720,6 +728,8 @@ describe("loaders", () => {
         orcid: "0000-0002-0000-0009",
         reason: "other_confirmed",
         keptOrcid: ORCID,
+        otherCwid: null,
+        otherName: null,
         by: "lib0001",
         byName: "Pref lib0001",
         at: "2026-10-03T00:00:00.000Z",
@@ -727,8 +737,37 @@ describe("loaders", () => {
     ]);
   });
 
-  it("the card is null for a scholar with nothing in the queue", async () => {
-    expect(await (await actual()).loadOrcidQueueCard(client(), "b00001")).toBeNull();
+  it("the card is null for a scholar with nothing in the queue and no decision", async () => {
+    expect(await (await actual()).loadOrcidQueueCard(client(), "z00001")).toBeNull();
+  });
+
+  it("v3 B2: a scholar with nothing open but a decision lists (Decision filter) and gets a header-only card", async () => {
+    const { loadOrcidQueue, loadOrcidQueueCard } = await actual();
+    const q = await loadOrcidQueue(client());
+    const b = q.summaries.find((s) => s.cwid === "b00001")!;
+    expect(b).toMatchObject({
+      candidates: [],
+      decisions: {
+        byScholar: false,
+        byStaff: true,
+        librarian: false,
+        at: "2026-10-02T00:00:00.000Z",
+      },
+    });
+    expect(q.summaries.find((s) => s.cwid === "a00001")!.decisions).toMatchObject({
+      byStaff: true,
+    });
+    expect(q.summaries.find((s) => s.cwid === "c00001")!.decisions).toBeNull();
+    // A source filter keeps no decided-only scholar.
+    const bySource = await loadOrcidQueue(client(), {
+      types: [],
+      units: [],
+      sources: ["orcid_works"],
+    });
+    expect(bySource.summaries.map((s) => s.cwid)).not.toContain("b00001");
+    const card = (await loadOrcidQueueCard(client(), "b00001"))!;
+    expect(card.candidates).toEqual([]);
+    expect(card.ruledOut.map((d) => d.orcid)).toEqual([ORCID]);
   });
 });
 
@@ -1114,6 +1153,79 @@ describe("client", () => {
     fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
     await vi.waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]).not.toHaveProperty("dismissOthers");
+  });
+
+  it("v3 B2: the others can be retired as the scholar's duplicate records", async () => {
+    const { posts } = mount([CARD({}, [ROW, SECOND])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    fireEvent.change(screen.getByTestId("orcid-queue-others-as"), { target: { value: "retire" } });
+    fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toMatchObject({
+      decision: "confirm",
+      dismissOthers: [OTHER],
+      retireOthers: true,
+    });
+  });
+
+  it("v3 B2: an iD shared with another scholar offers Belongs to X and Not either", async () => {
+    const shared: OrcidQueueRow = {
+      ...ROW,
+      competitor: true,
+      competitors: [{ cwid: "zz0009", name: "Zed Doe", shared: 5, reason: "same_id" }],
+    };
+    const { posts } = mount([CARD({}, [shared])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    const callout = screen.getByTestId("orcid-queue-competitor");
+    expect(within(callout).getByText("Not either")).toBeTruthy();
+    fireEvent.click(within(callout).getByText("Belongs to Zed Doe"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toMatchObject({
+      cwid: "jd0001",
+      orcid: ORCID,
+      decision: "dismiss",
+      shared: { cwid: "zz0009", belongs: true },
+    });
+  });
+
+  it("v3 B2: a decided scholar with no candidates shows a header-only card", async () => {
+    const card = CARD(
+      {
+        ruledOut: [
+          {
+            orcid: OTHER,
+            reason: "belongs_to_other",
+            keptOrcid: null,
+            otherCwid: "zz0009",
+            otherName: "Zed Doe",
+            by: "lib0001",
+            byName: "Lib Rarian",
+            at: "2026-10-28T12:00:00.000Z",
+          },
+        ],
+      },
+      [],
+    );
+    mount([card], {
+      summaries: [
+        summaryOf(card, {
+          decisions: {
+            byScholar: false,
+            byStaff: true,
+            librarian: false,
+            at: "2026-10-28T12:00:00.000Z",
+          },
+        }),
+      ],
+    });
+    // Unassigned (the default) hides it: nothing is open.
+    expect(screen.queryByTestId("orcid-queue-item-jd0001")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Remove Decision: Unassigned"));
+    const shown = await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(within(shown).getByTestId("orcid-queue-ruled-out").textContent).toContain(
+      "Belongs to another scholar (Zed Doe zz0009) by Lib Rarian lib0001",
+    );
+    expect(within(shown).queryByTestId("orcid-queue-evidence")).toBeNull();
   });
 
   it("Not this person opens the next open iD", async () => {

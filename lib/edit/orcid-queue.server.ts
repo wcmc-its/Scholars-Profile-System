@@ -252,7 +252,26 @@ type WriteMeta = {
   alongside?: string;
   /** v3: a dismissal made by "None of these". */
   noneOfThese?: boolean;
+  /** v3 B2: with `alongside`, the others are the scholar's own duplicate
+   *  ORCID records, retired (reason duplicate_retired) rather than not theirs. */
+  retire?: boolean;
+  /** v3 B2: the iD was confirmed for this other scholar (belongs_to_other). */
+  otherCwid?: string;
 };
+
+/** The `orcid_dismissal` who/why columns for a dismissal made with `meta`. */
+function dismissalWhy(meta: WriteMeta) {
+  if (meta.noneOfThese) return { reason: "none_of_these", keptOrcid: null, otherCwid: null };
+  if (meta.otherCwid)
+    return { reason: "belongs_to_other", keptOrcid: null, otherCwid: meta.otherCwid };
+  if (meta.alongside)
+    return {
+      reason: meta.retire ? "duplicate_retired" : "other_confirmed",
+      keptOrcid: meta.alongside,
+      otherCwid: null,
+    };
+  return { reason: "not_this_person", keptOrcid: null, otherCwid: null };
+}
 
 /** Confirm one pair (method `librarian`). The pair must be in the evidence
  *  table and not dismissed (a librarian never overrides the scholar's own
@@ -352,17 +371,7 @@ export async function dismissPair(
   });
   await tx.orcidDismissal.upsert({
     where: { cwid_orcid: { cwid: pair.cwid, orcid: pair.orcid } },
-    create: {
-      cwid: pair.cwid,
-      orcid: pair.orcid,
-      dismissedBy: meta.actor,
-      reason: meta.noneOfThese
-        ? "none_of_these"
-        : meta.alongside
-          ? "other_confirmed"
-          : "not_this_person",
-      keptOrcid: meta.noneOfThese ? null : (meta.alongside ?? null),
-    },
+    create: { cwid: pair.cwid, orcid: pair.orcid, dismissedBy: meta.actor, ...dismissalWhy(meta) },
     update: {},
   });
   await appendAuditRow(tx, {
@@ -380,11 +389,37 @@ export async function dismissPair(
       ...(undid ? { undo_email_autoconfirm: true } : {}),
       ...(meta.alongside ? { with_confirm_of: meta.alongside } : {}),
       ...(meta.noneOfThese ? { none_of_these: true } : {}),
+      ...(meta.retire && meta.alongside ? { duplicate_retired: true } : {}),
+      ...(meta.otherCwid ? { belongs_to: meta.otherCwid } : {}),
     },
     ts: meta.ts,
     requestId: meta.requestId,
   });
   return { undid };
+}
+
+/** v3 B2, an iD that is a candidate for two scholars. "Belongs to X"
+ *  (`belongsTo`): confirm it for X (`confirmPair`, so X's pair must be queued
+ *  and X must have no other iD on file) and rule it out here as
+ *  belongs_to_other. "Not either": Not this person for both. The other
+ *  scholar's pair must be in the evidence table (404 `other_not_in_queue`). */
+export async function decideSharedId(
+  tx: Tx,
+  pair: { cwid: string; orcid: string },
+  other: { cwid: string; belongs: boolean },
+  meta: WriteMeta,
+): Promise<{ undid: boolean }> {
+  const theirs = await tx.orcidCandidateEvidence.findUnique({
+    where: { cwid_orcid: { cwid: other.cwid, orcid: pair.orcid } },
+    select: { band: true },
+  });
+  if (!theirs || other.cwid === pair.cwid) throw new OrcidQueueRefused(404, "other_not_in_queue");
+  if (other.belongs) {
+    await confirmPair(tx, { cwid: other.cwid, orcid: pair.orcid }, meta);
+    return dismissPair(tx, pair, { ...meta, otherCwid: other.cwid });
+  }
+  await dismissPair(tx, { cwid: other.cwid, orcid: pair.orcid }, meta);
+  return dismissPair(tx, pair, meta);
 }
 
 /** v2 item 5: "Not this person" on the scholar's OTHER candidate iDs, in the
@@ -547,7 +582,56 @@ export async function loadOrcidQueue(
     st,
     autoConfirmed.filter((a) => !st.people || st.people.has(a.cwid)),
   );
-  const shown = [...byCwid].filter(([cwid, ps]) => ps.some((p) => pairInFilter(st, cwid, p.orcid)));
+  const inQueue: Array<[string, CardPair[]]> = [...byCwid].filter(([cwid, ps]) =>
+    ps.some((p) => pairInFilter(st, cwid, p.orcid)),
+  );
+  // v3 B2: decisions (every dismissal, every librarian confirm), so a scholar
+  // with nothing left open still lists under the Decision filter.
+  const [dismissals, librarian] = await Promise.all([
+    client.orcidDismissal.findMany({
+      select: { cwid: true, dismissedBy: true, dismissedAt: true },
+    }),
+    client.scholar.findMany({
+      where: {
+        orcidConfirmMethod: "librarian",
+        orcid: { not: null },
+        status: "active",
+        deletedAt: null,
+      },
+      select: { cwid: true, orcidConfirmedAt: true },
+    }),
+  ]);
+  const decided = new Map<
+    string,
+    { byScholar: boolean; byStaff: boolean; librarian: boolean; at: string | null }
+  >();
+  const mark = (cwid: string, at: Date | null, f: "byScholar" | "byStaff" | "librarian") => {
+    const d = decided.get(cwid) ?? { byScholar: false, byStaff: false, librarian: false, at: null };
+    const iso = at?.toISOString() ?? null;
+    decided.set(cwid, { ...d, [f]: true, at: iso && (!d.at || iso > d.at) ? iso : d.at });
+  };
+  for (const d of dismissals)
+    mark(d.cwid, d.dismissedAt, d.dismissedBy === d.cwid ? "byScholar" : "byStaff");
+  for (const l of librarian) mark(l.cwid, l.orcidConfirmedAt, "librarian");
+  // Decided-only scholars: active, in the person filter; a source filter keeps
+  // none of them (they have no live candidate to match it).
+  const outside = [...decided.keys()].filter((c) => !byCwid.has(c));
+  const [activeOutside, peopleOutside] =
+    outside.length === 0 || filter.sources.length > 0
+      ? [[], null]
+      : await Promise.all([
+          client.scholar.findMany({
+            where: { cwid: { in: outside }, status: "active", deletedAt: null },
+            select: { cwid: true },
+          }),
+          matchPeople(client, outside, filter),
+        ]);
+  const shown: Array<[string, CardPair[]]> = [
+    ...inQueue,
+    ...activeOutside
+      .filter((s) => !peopleOutside || peopleOutside.has(s.cwid))
+      .map((s): [string, CardPair[]] => [s.cwid, []]),
+  ];
   const shownCwids = shown.map(([c]) => c);
   const [scholarRows, seenRows] =
     shown.length === 0
@@ -582,6 +666,7 @@ export async function loadOrcidQueue(
       autoConfirmed: ps.some((p) => p.state === "auto_confirmed"),
       firstQueuedAt: queued[0] ?? null,
       lastQueuedAt: queued.at(-1) ?? null,
+      decisions: decided.get(cwid) ?? null,
     };
   });
   return { summaries, filter };
@@ -622,7 +707,7 @@ export async function countOrcidQueueUnassigned(client: Client): Promise<number 
   const now = Date.now();
   if (pendingMemo && now - pendingMemo.at < ORCID_PENDING_TTL_MS) return pendingMemo.value;
   const p = (pendingInFlight ??= loadOrcidQueue(client).then(
-    (d) => d.summaries.filter((s) => !s.autoConfirmed).length,
+    (d) => d.summaries.filter((s) => !s.autoConfirmed && s.candidates.length > 0).length,
   ));
   try {
     const value = await p;
@@ -662,8 +747,7 @@ export async function loadOrcidQueueCard(
     loadQueueState(client, EMPTY_ORCID_QUEUE_FILTER, cwid),
     loadAutoConfirmed(client, cwid),
   ]);
-  const ps = pairsByScholar(st, autoConfirmed).get(cwid);
-  if (!ps || ps.length === 0) return null;
+  const ps = pairsByScholar(st, autoConfirmed).get(cwid) ?? [];
 
   const onFileGuess = ps.find((p) => p.onFile)?.onFile ?? null;
   const [details, me, reciterTotal, onFileName, dismissals] = await Promise.all([
@@ -676,18 +760,31 @@ export async function loadOrcidQueueCard(
         orcidConfirmMethod: true,
         orcidConfirmedAt: true,
         orcidConfirmedBy: true,
+        status: true,
+        deletedAt: true,
       },
     }),
     client.publicationAuthor.count({ where: { cwid, isConfirmed: true } }),
     onFileGuess ? fetchOrcidName(onFileGuess) : Promise.resolve(null),
     client.orcidDismissal.findMany({ where: { cwid }, orderBy: { dismissedAt: "desc" } }),
   ]);
+  // v3 B2: nothing open, but decided (a dismissal or a librarian confirm): a card
+  // with no candidates, for the Decision filter's decided scholars.
+  const decidedOnly =
+    !!me &&
+    me.status === "active" &&
+    !me.deletedAt &&
+    (dismissals.length > 0 || (me.orcidConfirmMethod === "librarian" && !!me.orcid));
+  if (ps.length === 0 && !decidedOnly) return null;
   const detailBy = new Map(details.map((d) => [d.orcid, d]));
   const onFileOrcid = ps.find((p) => p.onFile)?.onFile ?? me?.orcid ?? null;
   const people = new Set<string>();
   for (const d of details) for (const c of asStrings(d.competitorCwids)) people.add(c);
   if (me?.orcidConfirmedBy && me.orcidConfirmedBy !== "ETL") people.add(me.orcidConfirmedBy);
-  for (const d of dismissals) if (d.dismissedBy) people.add(d.dismissedBy);
+  for (const d of dismissals) {
+    if (d.dismissedBy) people.add(d.dismissedBy);
+    if (d.otherCwid) people.add(d.otherCwid);
+  }
   const named = new Map(
     people.size === 0
       ? []
@@ -774,6 +871,8 @@ export async function loadOrcidQueueCard(
         ? (d.reason as OrcidDismissReason)
         : null,
       keptOrcid: d.keptOrcid,
+      otherCwid: d.otherCwid,
+      otherName: d.otherCwid ? publishedName(named.get(d.otherCwid), d.otherCwid) : null,
       by: d.dismissedBy,
       byName: d.dismissedBy ? publishedName(named.get(d.dismissedBy), d.dismissedBy) : null,
       at: d.dismissedAt.toISOString(),

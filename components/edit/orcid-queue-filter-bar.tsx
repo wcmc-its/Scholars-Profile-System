@@ -36,16 +36,35 @@ import { cn } from "@/lib/utils";
 
 /** The facets that run in the browser. `decision`: open = no decision yet
  *  ("Unassigned"), email = the ETL confirmed an iD from a verified email,
- *  null = any. */
+ *  v3 B2 librarian / staff / scholar = a librarian confirmed an iD, or an iD
+ *  was ruled out by staff or by the scholar; null = any. */
 export type OrcidQueueClientFilter = {
   q: string;
   bands: OrcidQueueBand[];
-  decision: "open" | "email" | null;
+  decision: OrcidQueueDecisionFacet | null;
   errorsOnly: boolean;
 };
 
+export type OrcidQueueDecisionFacet = "open" | "email" | "librarian" | "staff" | "scholar";
+
+/** The summary has that decision. Pure; `open` is left to the caller (it also
+ *  reads the decisions made on this page). */
+export function hasDecision(s: OrcidQueueSummary, d: Exclude<OrcidQueueDecisionFacet, "open">) {
+  if (d === "email") return s.autoConfirmed;
+  if (d === "librarian") return !!s.decisions?.librarian;
+  if (d === "staff") return !!s.decisions?.byStaff;
+  return !!s.decisions?.byScholar;
+}
+
 const SERVER_SCOPE = "Narrows the scholar list.";
-const DECISION_LABEL = { open: "Unassigned", email: "Confirmed by email" } as const;
+const DECISION_LABEL: Record<OrcidQueueDecisionFacet, string> = {
+  open: "Unassigned",
+  email: "Confirmed by email",
+  librarian: "Confirmed by a librarian",
+  staff: "Ruled out by staff",
+  scholar: "Ruled out by the scholar",
+};
+const DECISION_FACETS = Object.keys(DECISION_LABEL) as OrcidQueueDecisionFacet[];
 
 export function OrcidQueueFilterBar({
   facets,
@@ -98,10 +117,18 @@ export function OrcidQueueFilterBar({
     single: true,
     options: [
       { value: "all", label: "Any status", count: summaries.length },
-      { value: "open", label: DECISION_LABEL.open, count: count((s) => !s.autoConfirmed) },
-      { value: "email", label: DECISION_LABEL.email, count: count((s) => s.autoConfirmed) },
+      {
+        value: "open",
+        label: DECISION_LABEL.open,
+        count: count((s) => !s.autoConfirmed && s.candidates.length > 0),
+      },
+      ...DECISION_FACETS.filter((d) => d !== "open").map((d) => ({
+        value: d,
+        label: DECISION_LABEL[d],
+        count: count((s) => hasDecision(s, d as Exclude<OrcidQueueDecisionFacet, "open">)),
+      })),
     ],
-    scope: "Unassigned: no decision yet.",
+    scope: "Unassigned: no decision yet. Staff: a librarian or proxy.",
   };
   const serverDefs: FacetDef[] = [
     ...(facets
@@ -240,7 +267,14 @@ export function OrcidQueueFilterBar({
         <FacetPopover
           def={decision}
           selected={view.decision ? [view.decision] : []}
-          onToggle={(v) => onView({ ...view, decision: v === "open" || v === "email" ? v : null })}
+          onToggle={(v) =>
+            onView({
+              ...view,
+              decision: (DECISION_FACETS as string[]).includes(v)
+                ? (v as OrcidQueueDecisionFacet)
+                : null,
+            })
+          }
           onClear={() => onView({ ...view, decision: null })}
           valueLabel={(v) => labelOf(decision, v)}
           testIdPrefix="orcid-queue-filter"
