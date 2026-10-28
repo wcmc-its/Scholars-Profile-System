@@ -3,7 +3,7 @@
  * queue (`/edit/orcid-queue`, docs/orcid-librarian-queue-spec.md).
  *
  * Body `{ cwid, orcid, decision: "confirm" | "dismiss", replace?,
- * dismissOthers?, noneOfThese? }`.
+ * dismissOthers?, noneOfThese?, retireOthers?, shared? }`.
  *  - confirm: the pair must be in `orcid_candidate_evidence`. Same write as
  *    `POST /api/edit/orcid` (`scholar.orcid`, `orcid_confirmed_at`, the pair's
  *    dismissal deleted) plus `orcid_confirm_method = "librarian"` and
@@ -21,6 +21,12 @@
  *    `noneOfThese: true`, which the audit rows record). Each must be one of the
  *    scholar's candidates in the evidence table (404 `other_not_in_queue`
  *    rolls the whole decision back) and gets its own dismissal and audit row.
+ *    v3 B2 `retireOthers: true` (confirm only): the others are the scholar's
+ *    own duplicate ORCID records, recorded as duplicate_retired.
+ *  - v3 B2 `shared: { cwid, belongs }` (dismiss only, no dismissOthers): an iD
+ *    that is also a candidate for scholar `cwid`. belongs = confirm it for them
+ *    and rule it out here; otherwise Not this person for both
+ *    (`decideSharedId`).
  * One transaction with its audit row (`orcid_librarian_confirm` /
  * `orcid_librarian_dismiss`); the profile is re-reflected after commit.
  *
@@ -37,6 +43,7 @@ import { normalizeOrcid } from "@/lib/edit/orcid";
 import { isOrcidLibrarianQueueEnabled } from "@/lib/edit/orcid-queue";
 import {
   confirmPair,
+  decideSharedId,
   dismissOthers,
   dismissPair,
   OrcidQueueRefused,
@@ -87,15 +94,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (ids.some((o) => o === null)) return editError(400, "invalid_orcid", "dismissOthers");
     others = [...new Set(ids as string[])].filter((o) => o !== orcid);
   }
+  const retire = body.retireOthers === true;
+  if (retire && (decision !== "confirm" || others.length === 0))
+    return editError(400, "invalid_body", "retireOthers");
+  let shared: { cwid: string; belongs: boolean } | null = null;
+  if (body.shared !== undefined) {
+    const s = body.shared as { cwid?: unknown; belongs?: unknown } | null;
+    if (
+      decision !== "dismiss" ||
+      noneOfThese ||
+      others.length > 0 ||
+      !s ||
+      typeof s.cwid !== "string" ||
+      s.cwid.length === 0 ||
+      s.cwid.length > 32 ||
+      typeof s.belongs !== "boolean"
+    )
+      return editError(400, "invalid_body", "shared");
+    shared = { cwid: s.cwid, belongs: s.belongs };
+  }
 
   const ts = new Date();
-  const meta = { actor: realCwid, impersonatedCwid, requestId, ts, noneOfThese };
+  const meta = { actor: realCwid, impersonatedCwid, requestId, ts, noneOfThese, retire };
   let undid = false;
   let dismissed: string[] = [];
   try {
     await db.write.$transaction(async (tx) => {
       if (decision === "confirm")
         await confirmPair(tx, { cwid, orcid, replace: replace === true }, meta);
+      else if (shared) undid = (await decideSharedId(tx, { cwid, orcid }, shared, meta)).undid;
       else undid = (await dismissPair(tx, { cwid, orcid }, meta)).undid;
       if (others.length > 0) dismissed = await dismissOthers(tx, cwid, orcid, others, meta);
     });
@@ -106,9 +133,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // The iD feeds the profile's JSON-LD sameAs: reflect a change to scholar.orcid.
-  if (decision === "confirm" || undid) {
+  const reflect = [
+    ...(decision === "confirm" || undid ? [cwid] : []),
+    ...(shared?.belongs ? [shared.cwid] : []),
+  ];
+  for (const c of reflect) {
     try {
-      const s = await db.read.scholar.findUnique({ where: { cwid }, select: { slug: true } });
+      const s = await db.read.scholar.findUnique({ where: { cwid: c }, select: { slug: true } });
       if (s) await reflectOverviewEdit(s.slug);
     } catch (err) {
       logEditFailure(`${PATH}#reflect`, err);

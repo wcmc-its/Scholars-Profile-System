@@ -1011,10 +1011,13 @@ model OrcidDismissal {
   dismissedBy String?  @map("dismissed_by") @db.VarChar(32)
   /// Why (`OrcidDismissReason`): not_this_person | none_of_these |
   /// other_confirmed (a different iD was confirmed, `keptOrcid`) | removed
-  /// (Remove of the iD on file).
+  /// (Remove of the iD on file) | duplicate_retired (the scholar's own second
+  /// ORCID record, `keptOrcid`) | belongs_to_other (confirmed for `otherCwid`).
   reason      String?  @db.VarChar(32)
-  /// For other_confirmed: the iD confirmed in its place.
+  /// For other_confirmed and duplicate_retired: the iD confirmed in its place.
   keptOrcid   String?  @map("kept_orcid") @db.VarChar(19)
+  /// For belongs_to_other: the scholar the iD was confirmed for.
+  otherCwid   String?  @map("other_cwid") @db.VarChar(32)
 
   @@id([cwid, orcid])
   @@map("orcid_dismissal")

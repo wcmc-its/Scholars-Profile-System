@@ -336,6 +336,7 @@ describe("decide", () => {
           dismissedBy: "lib0001",
           reason: "not_this_person",
           keptOrcid: null,
+          otherCwid: null,
         },
       }),
     );
@@ -460,6 +461,112 @@ describe("v2: confirm one iD, dismiss the scholar's others in the same action", 
     );
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe("other_not_in_queue");
+  });
+
+  it("v3 B2 retireOthers: the others are retired as duplicate records (reason duplicate_retired, kept iD)", async () => {
+    h.state.evidence.push({ cwid: "jd0001", orcid: OTHER, band: "moderate" });
+    const res = await decide(
+      req({
+        cwid: "jd0001",
+        orcid: ORCID,
+        decision: "confirm",
+        dismissOthers: [OTHER],
+        retireOthers: true,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(tx.orcidDismissal.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          orcid: OTHER,
+          reason: "duplicate_retired",
+          keptOrcid: ORCID,
+        }),
+      }),
+    );
+    expect(audits()[1]!.afterValues).toMatchObject({
+      duplicate_retired: true,
+      with_confirm_of: ORCID,
+    });
+    // retireOthers needs a confirm with others.
+    expect(
+      (await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "dismiss", retireOthers: true })))
+        .status,
+    ).toBe(400);
+  });
+
+  it("v3 B2 shared, belongs: confirmed for the other scholar, ruled out here as belongs_to_other", async () => {
+    h.state.evidence.push({ cwid: "zz0002", orcid: ORCID, band: "moderate" });
+    h.state.scholars.set("zz0002", { orcid: null, orcidConfirmMethod: null });
+    const res = await decide(
+      req({
+        cwid: "jd0001",
+        orcid: ORCID,
+        decision: "dismiss",
+        shared: { cwid: "zz0002", belongs: true },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.state.scholars.get("zz0002")!).toMatchObject({
+      orcid: ORCID,
+      orcidConfirmMethod: "librarian",
+    });
+    expect(h.state.scholars.get("jd0001")!.orcid).toBeNull();
+    expect(h.state.dismissals).toEqual(new Set([k("jd0001", ORCID)]));
+    expect(tx.orcidDismissal.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          cwid: "jd0001",
+          reason: "belongs_to_other",
+          otherCwid: "zz0002",
+        }),
+      }),
+    );
+    expect(audits().map((a) => a.action)).toEqual([
+      "orcid_librarian_confirm",
+      "orcid_librarian_dismiss",
+    ]);
+    expect(audits()[1]!.afterValues).toMatchObject({ belongs_to: "zz0002" });
+  });
+
+  it("v3 B2 shared, not either: Not this person for both; refused when the other has no such candidate", async () => {
+    h.state.evidence.push({ cwid: "zz0002", orcid: ORCID, band: "moderate" });
+    h.state.scholars.set("zz0002", { orcid: null, orcidConfirmMethod: null });
+    const res = await decide(
+      req({
+        cwid: "jd0001",
+        orcid: ORCID,
+        decision: "dismiss",
+        shared: { cwid: "zz0002", belongs: false },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.state.dismissals).toEqual(new Set([k("jd0001", ORCID), k("zz0002", ORCID)]));
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    h.state.dismissals = new Set();
+    const missing = await decide(
+      req({
+        cwid: "jd0001",
+        orcid: ORCID,
+        decision: "dismiss",
+        shared: { cwid: "nobody", belongs: true },
+      }),
+    );
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toBe("other_not_in_queue");
+    // shared is a dismiss without others.
+    expect(
+      (
+        await decide(
+          req({
+            cwid: "jd0001",
+            orcid: ORCID,
+            decision: "confirm",
+            shared: { cwid: "zz0002", belongs: true },
+          }),
+        )
+      ).status,
+    ).toBe(400);
   });
 
   it("v3 None of these: a dismiss with the rest in dismissOthers, one transaction, flagged in each audit row", async () => {
