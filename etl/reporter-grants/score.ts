@@ -52,6 +52,7 @@ export type CueId =
   | "timeline_unlikely"
   | "middle_initial_conflict"
   | "prior_institution"
+  | "affiliate_org"
   | "copi_coauthor"
   | "topic_match"
   | "topic_mismatch"
@@ -105,8 +106,10 @@ export const WEIGHTS = {
   /** A confirmed publication of the scholar cites the award (RePORTER linkage
    *  or ReCiter's grant citation). The #3088 baseline's strongest tie. */
   pub_linked: 5,
-  /** WCM in the award's org history. Name-only profiles only: for a grant-join
-   *  profile every candidate award is WCM's, so it says nothing (#3092). */
+  /** WCM in the award's org history. For a grant-join profile only when the
+   *  NIH PI has the scholar's first and last name and no other WCM person
+   *  shares it: the join's failure is another WCM person with a similar name
+   *  (#3092), which those two checks rule out. */
   wcm_org: 5,
   /** WCM in the award's org history, but the WCM directory has another person,
    *  current or former, who could hold an NIH award and shares the scholar's
@@ -137,6 +140,10 @@ export const WEIGHTS = {
   /** The award's institution and years match a degree the scholar earned
    *  there. */
   prior_institution: 2,
+  /** The award was held at a WCM affiliate (`WCM_AFFILIATES`), where many WCM
+   *  faculty work. Weaker than WCM itself: the affiliate has investigators of
+   *  its own. */
+  affiliate_org: 2,
   /** A co-PI on the award co-authored at least COAUTHOR_MIN_PAPERS of the
    *  scholar's confirmed papers. */
   copi_coauthor: 2,
@@ -223,6 +230,9 @@ export interface AttributionEvidence {
   policy: CorroborationPolicy;
   /** WCM anywhere in the award's org history. */
   wcmOrgHistory: boolean;
+  /** The WCM affiliate in the award's org history (`affiliateOrgMatch`), or
+   *  null. Absent in older callers. */
+  affiliateOrg?: string | null;
   /** A confirmed publication of the scholar is linked to the award. */
   publicationLinked: boolean;
   /** NIH activity code (R01, F31, ...), or null when unparseable. */
@@ -274,6 +284,9 @@ export interface AttributionEvidence {
    *  scholar's names rule out (`piGivenNameConflicts`). null ⇒ not compared.
    *  Absent in older callers. */
   piGivenNameConflicts?: boolean | null;
+  /** Whether that PI's first name is one of the scholar's names
+   *  (`piGivenNameAgrees`). null ⇒ not compared. Absent in older callers. */
+  piGivenNameAgrees?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +541,25 @@ export function piGivenNameConflicts(
 }
 
 /**
+ * Whether RePORTER's PI name, which carries the scholar's surname, has a full
+ * first name (not an initial) that is one of the scholar's names. Stricter
+ * than `piGivenNameConflicts`, which lets an initial or a nickname through:
+ * this is what lets WCM count on a grant-join profile. null ⇒ the surnames
+ * don't match or there is nothing to compare. Pure.
+ */
+export function piGivenNameAgrees(
+  piName: string | null | undefined,
+  scholarNames: ReadonlyArray<string | null | undefined>,
+): boolean | null {
+  if (piSurnameMatches(piName, scholarNames) !== true) return null;
+  const raw = (piName ?? "").trim();
+  const first = nameWords(raw.includes(",") ? (raw.split(",")[1] ?? "") : raw)[0];
+  const ours = new Set(scholarNames.flatMap((n) => (n ? nameWords(n) : [])));
+  if (ours.size === 0) return null;
+  return first !== undefined && ours.has(first);
+}
+
+/**
  * True when the RePORTER PI's middle initial matches neither a middle nor a
  * first initial of the scholar (some people go by their middle name). null when
  * either side has no middle initial to compare. Pure.
@@ -730,6 +762,22 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
     } else {
       add("wcm_org", "Held at WCM at some point, and the NIH profile was matched by name only");
     }
+  }
+  // A grant-join profile: WCM counts only once the name rules out the other
+  // WCM person the join may have paired (#3092).
+  if (
+    e.policy === "publication-only" &&
+    e.wcmOrgHistory &&
+    e.piGivenNameAgrees === true &&
+    e.wcmNamesakes === 0
+  ) {
+    add(
+      "wcm_org",
+      "Held at WCM, and the NIH profile's PI has the scholar's name, which no other WCM person shares",
+    );
+  }
+  if (e.affiliateOrg) {
+    add("affiliate_org", `Held at ${e.affiliateOrg}, a WCM affiliate`);
   }
 
   if (e.infoedOther?.piLevel) {

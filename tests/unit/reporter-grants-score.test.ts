@@ -10,6 +10,7 @@ import {
   nameProfileCountFrom,
   piSurnameMatches,
   piGivenNameConflicts,
+  piGivenNameAgrees,
   authorKey,
   coauthorCounts,
   doctoralYearRange,
@@ -27,7 +28,7 @@ import {
   topicOverlap,
   type AttributionEvidence,
 } from "@/etl/reporter-grants/score";
-import { isWcmOrg } from "@/etl/reporter-grants/transform";
+import { affiliateOrgMatch, isWcmOrg } from "@/etl/reporter-grants/transform";
 import { profileProof } from "@/etl/reporter-grants/evidence";
 import { namesMatch } from "@/etl/nih-profile/resolver";
 
@@ -651,5 +652,78 @@ describe("the NIH profile's PI, with the scholar's surname, has another first na
     expect(s.band).toBe("hide");
     // Never both name cues on one award.
     expect(ids(ev({ piSurnameMatches: false, piGivenNameConflicts: true }))).toEqual(["pi_name_mismatch"]);
+  });
+});
+
+describe("held at WCM, on a grant-join profile", () => {
+  const joined = (over: Partial<AttributionEvidence> = {}) =>
+    ev({
+      policy: "publication-only",
+      wcmOrgHistory: true,
+      piGivenNameAgrees: true,
+      wcmNamesakes: 0,
+      ...over,
+    });
+
+  it("counts when the PI has the scholar's first and last name and nobody at WCM shares it", () => {
+    const s = scoreAttribution(joined());
+    expect(s.reasons.map((r) => r.id)).toEqual(["wcm_org"]);
+    expect(s.band).toBe("show");
+  });
+
+  it("stays withheld when the name could be another WCM person's", () => {
+    expect(ids(joined({ wcmNamesakes: 1 }))).toEqual([]);
+    expect(ids(joined({ wcmNamesakes: null }))).toEqual([]);
+    expect(ids(joined({ piGivenNameAgrees: false }))).toEqual([]);
+    expect(ids(joined({ piGivenNameAgrees: null }))).toEqual([]);
+    expect(ids(joined({ wcmOrgHistory: false }))).toEqual([]);
+  });
+});
+
+describe("the NIH profile's PI has the scholar's first name", () => {
+  it("needs RePORTER's first name, in full, among the scholar's names", () => {
+    expect(piGivenNameAgrees("EXAMPLE, MORGAN Q", ["Morgan E. Example, PhD"])).toBe(true);
+    expect(piGivenNameAgrees("Morgan Example", ["Morgan Example"])).toBe(true);
+    expect(piGivenNameAgrees("EXAMPLE, M", ["Morgan Example"])).toBe(false);
+    expect(piGivenNameAgrees("Emma Elizabeth Example", ["Beth Example"])).toBe(false);
+    expect(piGivenNameAgrees("Avery Example", ["Morgan Example"])).toBe(false);
+  });
+
+  it("is null for a different surname or nothing to compare", () => {
+    expect(piGivenNameAgrees("Morgan Other", ["Morgan Example"])).toBeNull();
+    expect(piGivenNameAgrees(null, ["Morgan Example"])).toBeNull();
+    expect(piGivenNameAgrees("Morgan Example", [null])).toBeNull();
+  });
+});
+
+describe("held at a WCM affiliate", () => {
+  it("names the affiliate anywhere in the award's org history", () => {
+    expect(affiliateOrgMatch([{ orgName: "SLOAN-KETTERING INST CAN RESEARCH" }])).toBe(
+      "Memorial Sloan Kettering",
+    );
+    expect(affiliateOrgMatch([{ orgName: "MEMORIAL SLOAN KETTERING CANCER CENTER" }])).toBe(
+      "Memorial Sloan Kettering",
+    );
+    expect(
+      affiliateOrgMatch([{ orgName: null }, { orgName: "HOSPITAL FOR SPECIAL SURGERY" }]),
+    ).toBe("Hospital for Special Surgery");
+    expect(affiliateOrgMatch([{ orgName: "NEW YORK-PRESBYTERIAN HOSPITAL" }])).toBe(
+      "NewYork-Presbyterian",
+    );
+    expect(affiliateOrgMatch([{ orgName: "ROCKEFELLER UNIVERSITY" }])).toBe(
+      "Rockefeller University",
+    );
+    expect(affiliateOrgMatch([{ orgName: "UNIVERSITY OF PENNSYLVANIA" }])).toBeNull();
+    expect(affiliateOrgMatch([{ orgName: "WEILL MEDICAL COLL OF CORNELL UNIV" }])).toBeNull();
+  });
+
+  it("is moderate: queues alone, shows next to another moderate tie", () => {
+    const alone = scoreAttribution(ev({ affiliateOrg: "Memorial Sloan Kettering" }));
+    expect(alone.reasons.map((r) => r.id)).toEqual(["affiliate_org"]);
+    expect(alone.score).toBe(PRIOR + WEIGHTS.affiliate_org);
+    expect(alone.band).toBe("queue");
+    expect(
+      scoreAttribution(ev({ affiliateOrg: "Memorial Sloan Kettering", coPiSharedPapers: 4 })).band,
+    ).toBe("show");
   });
 });

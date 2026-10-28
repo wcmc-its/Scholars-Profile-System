@@ -146,6 +146,17 @@ describe("names and wording", () => {
     expect(n).not.toContain("No confirmed paper of the scholar cites this award");
     expect(n).not.toContain("Not held at WCM");
     expect(n).toContain("No co-PI co-authors with the scholar");
+    expect(n).toContain("Not held at a WCM affiliate");
+  });
+
+  it("says a WCM award was withheld, not missed", () => {
+    expect(checkedNothingFound(new Set(), true)).toContain(
+      "Held at WCM, not counted: the NIH profile came from a WCM grant, and the PI's name doesn't rule out another WCM person",
+    );
+    expect(checkedNothingFound(new Set(), false)).toContain("Not held at WCM");
+    expect(checkedNothingFound(new Set(["affiliate_org"]))).not.toContain(
+      "Not held at a WCM affiliate",
+    );
   });
 });
 

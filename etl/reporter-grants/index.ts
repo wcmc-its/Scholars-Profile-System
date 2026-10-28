@@ -64,6 +64,7 @@ import { fillRejectedTitles } from "./rejected-titles";
 import {
   evidenceKey,
   nameProfileCountFrom,
+  piGivenNameAgrees,
   piGivenNameConflicts,
   piSurnameMatches,
   scoreAttribution,
@@ -639,6 +640,7 @@ async function scoreScholarAwards(
       wcmNamesakes,
       piSurnameMatches: piSurnameMatches(reporterName, scholarNames),
       piGivenNameConflicts: piGivenNameConflicts(reporterName, scholarNames),
+      piGivenNameAgrees: piGivenNameAgrees(reporterName, scholarNames),
     });
     out.set(c.row.externalId, {
       score,

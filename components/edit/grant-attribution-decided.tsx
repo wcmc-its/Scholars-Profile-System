@@ -933,7 +933,10 @@ function Evidence({ r, bare = false }: { r: DecidedRow; bare?: boolean }) {
     toward ? c.weight > 0 : c.weight < 0 || c.id === "infoed_other_wcm_pi_named",
   );
   const ids = new Set(r.cues.map((c) => c.id));
-  const nothing = checkedNothingFound(ids);
+  const nothing = checkedNothingFound(
+    ids,
+    r.award.orgs.some((o) => o.wcm),
+  );
   const rarity = r.cues.find((c) => c.id === "name_rare" || c.id === "name_common");
   const verdict =
     r.by === "curator"

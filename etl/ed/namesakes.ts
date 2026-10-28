@@ -7,7 +7,9 @@
  * name and could have held the award (a postdoc's F32, a fellow's K award).
  * Our scholar list can't see them; the directory can.
  *
- * For each scholar the weekly scorer judges under the name-only policy, count
+ * For each scholar the weekly scorer judges under the name-only or grant-join
+ * policy (for grant-join, "held at WCM" counts only when nobody shares the
+ * name), count
  * the other directory people with the same directory first and last name
  * (givenName, sn: the scholar's own entry's) who could hold
  * an NIH award, and store the count (never who they are) in `wcm_namesake`.
@@ -62,9 +64,8 @@ export async function refreshWcmNamesakes(client: Client): Promise<void> {
     e.sources.push(r.resolutionSource);
     byCwid.set(r.cwid, e);
   }
-  const cohort = [...byCwid.entries()].filter(
-    ([, v]) => corroborationPolicy(v.sources) === "wcm-or-publication",
-  );
+  // Grant-join profiles too: WCM counts for them only once the count is 0.
+  const cohort = [...byCwid.entries()].filter(([, v]) => corroborationPolicy(v.sources) !== "none");
 
   const counts = new Map<string, number>();
   const skipped: string[] = [];
