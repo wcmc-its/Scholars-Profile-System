@@ -1808,6 +1808,14 @@ describe("AppStack", () => {
         const serialized = JSON.stringify(stmt.Resource);
         expect(serialized).toContain("inference-profile/us.anthropic.claude-sonnet-4-");
         expect(serialized).toContain("foundation-model/anthropic.claude-sonnet-4-");
+        // The 5.5 defaults (lib/llm/models.ts) — without these every Bedrock call on
+        // the default model AccessDenies.
+        expect(serialized).toContain("inference-profile/us.anthropic.claude-opus-5-5*");
+        expect(serialized).toContain("foundation-model/anthropic.claude-opus-5-5*");
+        expect(serialized).toContain("inference-profile/us.anthropic.claude-sonnet-5-5*");
+        expect(serialized).toContain("foundation-model/anthropic.claude-sonnet-5-5*");
+        // Haiku is excluded on purpose.
+        expect(serialized).not.toContain("haiku");
       });
 
       it("the CloudFront invalidation grant is the single cloudfront:CreateInvalidation action, scoped to a distribution ARN, not * (#353)", () => {

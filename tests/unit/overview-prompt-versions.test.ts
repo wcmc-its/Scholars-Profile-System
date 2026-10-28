@@ -71,6 +71,8 @@ describe("humanizeModelId", () => {
     );
     expect(humanizeModelId("us.anthropic.claude-opus-4-8-20260101-v1:0")).toBe("Claude Opus 4.8");
     expect(humanizeModelId("us.anthropic.claude-haiku-4-5-20251001-v1:0")).toBe("Claude Haiku 4.5");
+    expect(humanizeModelId("us.anthropic.claude-opus-5-5")).toBe("Claude Opus 5.5");
+    expect(humanizeModelId("us.anthropic.claude-sonnet-5-5")).toBe("Claude Sonnet 5.5");
   });
 
   it("falls back to the raw id for an unrecognized model string", () => {
@@ -84,9 +86,9 @@ describe("resolveEffectiveOverviewModel — precedence", () => {
     expect(resolveEffectiveOverviewModel("v3")).toBe("us.anthropic.claude-sonnet-4-6-test-v1:0");
   });
 
-  it("falls back to the default Opus 4.8 model when nothing is set", () => {
+  it("falls back to the default Opus 5.5 model when nothing is set", () => {
     vi.stubEnv("OVERVIEW_GENERATE_MODEL", undefined);
-    expect(resolveEffectiveOverviewModel("v3")).toContain("claude-opus-4-8");
+    expect(resolveEffectiveOverviewModel("v3")).toContain("claude-opus-5-5");
   });
 });
 

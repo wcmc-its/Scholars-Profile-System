@@ -72,6 +72,7 @@ import { GrantRecsCard } from "@/components/edit/grant-recs-card";
 import { BiosketchTool } from "@/components/edit/biosketch-tool";
 import { CvTool } from "@/components/edit/cv-tool";
 import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prompt-versions";
+import { DEFAULT_GENERATE_MODEL } from "@/lib/llm/models";
 
 /** The model the biosketch route will actually generate on — surfaced to the
  *  privileged cost line in the Services panel. Resolution order matches
@@ -79,7 +80,7 @@ import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prom
 const BIOSKETCH_EFFECTIVE_MODEL =
   process.env.BIOSKETCH_GENERATE_MODEL ??
   process.env.OVERVIEW_GENERATE_MODEL ??
-  "us.anthropic.claude-opus-4-8";
+  DEFAULT_GENERATE_MODEL;
 
 type AttrKey =
   | "home"

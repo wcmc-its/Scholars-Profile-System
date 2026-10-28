@@ -703,10 +703,12 @@ export class EtlStack extends Stack {
     // before this leaves the building) — that review, not this IAM grant, is
     // the real gate on a prod population run.
     //
-    // Sonnet 4.x family only, not Opus — inferCancerFundingJudgments always
-    // calls DEFAULT_EXTRACT_MODEL (lib/llm/models.ts), a Sonnet 4.5 id, and
-    // nothing in this CDK app overrides CANCER_FUNDING_MODEL to anything
-    // else. Same resource-ARN shape as the app task role's
+    // Sonnet 5.5 + the Sonnet 4.x family only, not Opus —
+    // inferCancerFundingJudgments and the newsroom honors ETL call
+    // DEFAULT_EXTRACT_MODEL (lib/llm/models.ts), a Sonnet 5.5 id, and nothing
+    // in this CDK app overrides CANCER_FUNDING_MODEL to anything else. Sonnet
+    // 4.x stays granted so a CANCER_FUNDING_MODEL rollback to the previous
+    // generation needs no IAM change. Same resource-ARN shape as the app task role's
     // TaskRoleBedrockPolicy (app-stack.ts): the us. cross-region inference
     // profile plus the underlying AWS-owned foundation model, region `*`
     // because a us. profile call fans out across us-east-1/-2/us-west-2.

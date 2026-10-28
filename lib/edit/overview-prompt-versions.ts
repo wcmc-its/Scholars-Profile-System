@@ -44,8 +44,9 @@ export type OverviewPromptVersionMeta = {
    * profile id). Almost always unset — the version then runs on the operator's
    * `OVERVIEW_GENERATE_MODEL` env or the generator's `DEFAULT_MODEL`. Set it only
    * to tie a version to a specific model for a prompt×model experiment. The
-   * IAM policy scopes Bedrock to the `claude-sonnet-4-*` family, so a pin outside
-   * that family would be denied at invoke time.
+   * IAM policy scopes Bedrock to `claude-opus-5-5*`, `claude-opus-4-8*`,
+   * `claude-sonnet-5-5*` and the `claude-sonnet-4-*` family, so a pin outside
+   * those would be denied at invoke time.
    */
   model?: string;
   /**
@@ -169,7 +170,8 @@ export function promptVersionElementLabel(
 
 /**
  * A human-readable model name for display next to the version, e.g.
- * "us.anthropic.claude-sonnet-4-5-20250929-v1:0" → "Claude Sonnet 4.5". Best-effort
+ * "us.anthropic.claude-sonnet-4-5-20250929-v1:0" → "Claude Sonnet 4.5",
+ * "us.anthropic.claude-opus-5-5" → "Claude Opus 5.5". Best-effort
  * pattern match on the Anthropic Bedrock inference-profile id; falls back to the
  * raw id for anything it doesn't recognize. Pure / display-only — never used for
  * routing.

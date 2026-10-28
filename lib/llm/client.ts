@@ -24,7 +24,7 @@ export function bedrockClient() {
  * and read at ~0.1× input price on every later call within the 5-minute TTL
  * (writes cost 1.25×). Message-level only in the installed `@ai-sdk/amazon-bedrock`
  * (5.x): a part-level option is ignored. Silently a no-op when the prefix is
- * under the model minimum (1024 tokens on Opus 4.8 / Sonnet 4.5) — harmless, but it
+ * under the model minimum (512 tokens on Opus 5.5 / Sonnet 5.5; 1024 on Opus 4.8 / Sonnet 4.5) — harmless, but it
  * spends one of the request's 4 checkpoints for nothing — so mark a prefix only when
  * it clears the minimum on at least one live path: the revise / product-mapping /
  * source-attribution system prompts are ~200-350 tokens and deliberately carry none,

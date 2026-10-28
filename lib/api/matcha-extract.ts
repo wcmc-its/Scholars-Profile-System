@@ -29,7 +29,11 @@ import { createHash } from "node:crypto";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { bedrockClient } from "@/lib/llm/client";
-import { DEFAULT_EXTRACT_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
+import {
+  DEFAULT_EXTRACT_MODEL,
+  bedrockCallOptions,
+  modelAcceptsTemperature,
+} from "@/lib/llm/models";
 import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 
 /** One extracted concept: a canonical noun phrase, its funder-centrality in [0,1]
@@ -80,15 +84,17 @@ export type MatchaExtraction = {
 const MAX_CONCEPTS = 15;
 
 /** Near-deterministic extraction (bake-off run-to-run comparability). Passed only when
- *  the model accepts it — Sonnet does; Opus 4.7/4.8 and Fable reject an explicit
- *  temperature with HTTP 400, so the gate keeps a future Opus pin from breaking. */
+ *  the model accepts it — Sonnet 4.x does; Opus 4.7/4.8, every 5.x model (the Sonnet 5.5
+ *  default included) and Fable reject an explicit temperature with HTTP 400, so on the
+ *  default it is omitted and a `MATCHA_EXTRACT_MODEL` rollback to Sonnet 4.5 gets it back. */
 export const EXTRACT_TEMPERATURE = 0;
 
 /** Output budget. ≤15 concepts, each a short noun phrase + centrality + kind + a ≤15-word gloss.
  *  Raised 1024→1280 alongside MAX_CONCEPTS 12→15: a truncated JSON object fails the schema and
  *  drops the WHOLE extraction to the dictionary fallback, so the budget must comfortably clear the
- *  larger output rather than sit at its edge. */
-export const EXTRACT_MAX_TOKENS = 1280;
+ *  larger output rather than sit at its edge. Raised 1280→4096 for Sonnet 5.5, which thinks by
+ *  default and counts the thinking against this cap (run at effort `low`, see the call). */
+export const EXTRACT_MAX_TOKENS = 4096;
 
 /** Bound a Bedrock hang so it can't stall the spine worker (which then makes many
  *  sequential `searchPeople` round-trips). The overview generator sets none and leans
@@ -350,9 +356,10 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
   if (text.length === 0) return { concepts: [] };
 
   // Operator override first, else the pinned default (parity with the overview
-  // generator's `OVERVIEW_GENERATE_MODEL` lever; the IAM policy scopes the whole
-  // `us.anthropic.claude-sonnet-4-*` family so an intra-family repoint needs no
-  // cdk/IAM change). `modelAcceptsTemperature` still gates temperature by id.
+  // generator's `OVERVIEW_GENERATE_MODEL` lever; the IAM policy scopes the
+  // `us.anthropic.claude-sonnet-4-*` family plus `claude-sonnet-5-5*`, so a repoint
+  // inside those needs no cdk/IAM change). `modelAcceptsTemperature` still gates
+  // temperature by id.
   const modelId = process.env.MATCHA_EXTRACT_MODEL ?? DEFAULT_EXTRACT_MODEL;
 
   // Memoize the Bedrock call: extraction is a pure function of (trimmed paste, model id). Sonnet
@@ -379,6 +386,7 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
           maxOutputTokens: EXTRACT_MAX_TOKENS,
           abortSignal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
           ...(modelAcceptsTemperature(modelId) ? { temperature: EXTRACT_TEMPERATURE } : {}),
+          ...bedrockCallOptions(modelId, { effort: "low" }),
         });
         return {
           concepts: sanitizeConcepts(object.concepts),

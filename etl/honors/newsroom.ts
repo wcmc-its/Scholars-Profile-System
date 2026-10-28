@@ -36,7 +36,11 @@ import { z } from "zod";
 
 import type { HonorListCategory, HonorListMeta } from "@/lib/honors/lists";
 import { bedrockClient, BEDROCK_CACHE_POINT } from "@/lib/llm/client";
-import { DEFAULT_EXTRACT_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
+import {
+  DEFAULT_EXTRACT_MODEL,
+  bedrockCallOptions,
+  modelAcceptsTemperature,
+} from "@/lib/llm/models";
 
 import { CWID_RE, NEWS_ORIGIN, NEWS_PATH_PREFIX } from "../news/seed";
 import { parseDate, stripControl, stripTags } from "../news/scrape";
@@ -251,9 +255,11 @@ export const bedrockExtract: Extractor = async (post, system) => {
     // A message, not `system`, so the long vocabulary prefix can carry the
     // prompt-cache checkpoint; the prompt is ours, not user input.
     allowSystemInMessages: true,
-    maxOutputTokens: 8000,
+    // 8000→16000: Sonnet 5.5 thinks by default and the thinking counts against this cap.
+    maxOutputTokens: 16000,
     abortSignal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
     ...(modelAcceptsTemperature(MODEL_ID) ? { temperature: 0 } : {}),
+    ...bedrockCallOptions(MODEL_ID, { effort: "low" }),
   });
   return object.honors;
 };
