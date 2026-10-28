@@ -22,9 +22,9 @@ describe("parseMyncbiPage", () => {
     expect(r.total).toBe(3);
     expect(r.lastPage).toBe(2);
     expect(r.citations).toEqual([
-      { citationId: "101", pmid: "123456", title: "On engines", source: "Proc Anal Soc", year: 2024 },
-      { citationId: "102", pmid: "654321", title: "More engines", source: "Proc Anal Soc", year: 2024 },
-      { citationId: "9", pmid: null, title: "Lovelace A. Notes on the & engine. London; 1843", source: null, year: null },
+      { citationId: "101", pmid: "123456", authors: "Lovelace A, Babbage C", title: "On engines", source: "Proc Anal Soc", year: 2024 },
+      { citationId: "102", pmid: "654321", authors: "Lovelace A, Babbage C", title: "More engines", source: "Proc Anal Soc", year: 2024 },
+      { citationId: "9", pmid: null, authors: null, title: "Lovelace A. Notes on the & engine. London; 1843", source: null, year: null },
     ]);
   });
 
