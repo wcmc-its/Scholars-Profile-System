@@ -121,7 +121,11 @@ export function rankByPmidOverlap(
   return { autoLock, suggestions, ranked };
 }
 
-const isWcmOrg = (org: string | null | undefined): boolean => /weill|cornell/i.test(org ?? "");
+/** WCM as RePORTER names it: "WEILL MEDICAL COLL OF CORNELL UNIV", or an older
+ *  Cornell medical college or center. Plain "CORNELL UNIVERSITY" is Ithaca, a
+ *  separate institution (#3071). */
+export const isWcmOrg = (org: string | null | undefined): boolean =>
+  /weill/i.test(org ?? "") || /cornell.*\bmed/i.test(org ?? "");
 
 /** NIH phased awards (UG3/UH3, K99/R00, R61/R33) share an IC prefix + serial but
  *  differ by activity code. `coreProjectNum` is activity(3) + IC-prefix(2) + serial,

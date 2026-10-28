@@ -79,6 +79,16 @@ describe("#3071 uncorroborated name-only default-hide", () => {
     ]);
     expect(isWcmOrg(other!.orgName)).toBe(false);
   });
+
+  it("reads WCM's RePORTER names, old and new, but not Cornell's Ithaca campus", () => {
+    expect(isWcmOrg("WEILL MEDICAL COLL OF CORNELL UNIV")).toBe(true);
+    expect(isWcmOrg("JOAN AND SANFORD I. WEILL MED COLL OF CORNELL")).toBe(true);
+    expect(isWcmOrg("CORNELL UNIVERSITY MEDICAL COLLEGE")).toBe(true);
+    expect(isWcmOrg("CORNELL UNIV MED CTR")).toBe(true);
+    expect(isWcmOrg("CORNELL UNIVERSITY")).toBe(false);
+    expect(isWcmOrg("CORNELL UNIVERSITY ITHACA")).toBe(false);
+    expect(isWcmOrg(null)).toBe(false);
+  });
 });
 
 describe("#3071 case D: grant-join profiles need a publication tie", () => {

@@ -10,7 +10,7 @@
  */
 import { parseNihAward } from "@/lib/award-number";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
-import type { ReporterProject } from "@/lib/edit/reporter-grants";
+import { isWcmOrg, type ReporterProject } from "@/lib/edit/reporter-grants";
 import type { ReporterGrantProject, ReporterPI } from "@/etl/nih-profile/fetcher";
 
 /**
@@ -123,8 +123,7 @@ export interface GroupedProject {
   pis: ReporterPI[];
 }
 
-export const isWcmOrg = (org: string | null | undefined): boolean =>
-  /weill|cornell/i.test(org ?? "");
+export { isWcmOrg };
 
 /** #3071 — institutions whose faculty often hold WCM appointments, as RePORTER
  *  prints them, with the name the evidence shows. */
