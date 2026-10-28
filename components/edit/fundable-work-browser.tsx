@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The `/edit/fundable-work` browse UI (mockup `Fundable work/Fundable Work.dc.html`,
+ * The `/edit/fundable-work` browse UI (mockup `Fundable work - v2/Fundable Work.dc.html`,
  * 2026-10-28): a sticky facet rail, free-text search, sort, removable chips, and
  * one card per work with its score, people, rationale, funding pitch, suggested
  * funders and full abstract.
@@ -19,13 +19,13 @@ import { useMemo, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 
 import { FiltersSheet } from "@/components/edit/filters-sheet";
-import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
+import { Headshot, ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import type { FundableWorkFunder } from "@/lib/fundable-work";
-import { cn, initials } from "@/lib/utils";
+import { conferenceOf, type FundableWorkFunder } from "@/lib/fundable-work";
+import { cn } from "@/lib/utils";
 
 export type FundableWorkAuthorRow = {
   cwid: string;
@@ -35,6 +35,7 @@ export type FundableWorkAuthorRow = {
   /** OpenAlex author position: "first" | "middle" | "last". */
   position: string;
   isPostdoc: boolean;
+  hasHeadshot: boolean;
 };
 
 export type FundableWorkRow = {
@@ -79,7 +80,16 @@ const FUNDER_KIND_CLASS: Record<string, string> = {
   foundation: "border-elig-border bg-elig-fill text-elig-text",
 };
 
-type FacetKey = "type" | "stage" | "funderKind" | "funder" | "person" | "department" | "personType" | "venue";
+type FacetKey =
+  | "type"
+  | "stage"
+  | "funderKind"
+  | "funder"
+  | "person"
+  | "department"
+  | "personType"
+  | "conference"
+  | "venue";
 
 type Facet = {
   key: FacetKey;
@@ -103,6 +113,15 @@ const FACETS: Facet[] = [
     limit: 5,
   },
   { key: "personType", title: "Person type", vals: (r) => uniq(r.authors.map((a) => (a.isPostdoc ? "Postdoc" : "Faculty"))) },
+  {
+    key: "conference",
+    title: "Conference",
+    vals: (r) => {
+      const c = conferenceOf(r);
+      return c ? [c.name] : [];
+    },
+    limit: 5,
+  },
   { key: "venue", title: "Venue", vals: (r) => (r.venue ? [r.venue] : []), limit: 5 },
 ];
 
@@ -123,6 +142,7 @@ function haystack(r: FundableWorkRow): string {
     r.modality ?? "",
     r.rationale,
     r.venue ?? "",
+    conferenceOf(r)?.name ?? "",
     ...r.authors.map((a) => a.name),
     ...r.funders.map((f) => f.name),
   ]
@@ -274,7 +294,7 @@ export function FundableWorkBrowser({ rows, truncated }: { rows: FundableWorkRow
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-3xl">
-          <h1 className="text-2xl font-semibold">Emerging research to fund</h1>
+          <h1 className="text-2xl font-semibold">Matcha for emergent research</h1>
           <p className="text-muted-foreground mt-1.5 text-sm">
             Conference abstracts and preprints by full-time faculty from the last two years, with postdoc co-authors
             listed, scored 1–5 for industry and foundation funding potential. Scores, pitches and funder suggestions
@@ -287,7 +307,7 @@ export function FundableWorkBrowser({ rows, truncated }: { rows: FundableWorkRow
       </header>
 
       <div className="flex flex-wrap items-start gap-6">
-        <aside className="bg-apollo-surface border-apollo-border sticky top-4 hidden w-[264px] shrink-0 flex-col rounded-[var(--apollo-radius-card)] border lg:flex">
+        <aside className="bg-apollo-surface border-apollo-border sticky top-4 hidden max-h-[calc(100vh-2rem)] w-[264px] shrink-0 flex-col overflow-y-auto rounded-[var(--apollo-radius-card)] border lg:flex">
           <div className="border-apollo-border flex items-center justify-between border-b px-4 py-3.5">
             <div className="text-sm font-semibold">Filters</div>
             <button type="button" onClick={clearAll} className="text-apollo-slate text-[13px] hover:underline">
@@ -419,6 +439,7 @@ function WorkCard({
   onPickPerson: (name: string) => void;
 }) {
   const people = showAllPeople ? r.authors : r.authors.slice(0, PEOPLE_SHOWN);
+  const conference = conferenceOf(r);
   return (
     <article className="bg-apollo-surface border-apollo-border grid grid-cols-[44px_minmax(0,1fr)] gap-4 rounded-[var(--apollo-radius-card)] border px-5 py-4.5">
       <div className="flex flex-col items-center gap-0.5">
@@ -438,6 +459,20 @@ function WorkCard({
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="secondary">{typeLabel(r.type)}</Badge>
           <Badge variant="outline">{r.stage}</Badge>
+          {conference && (
+            <>
+              <span className="text-[13px] font-medium">{conference.name}</span>
+              {conference.inferred && (
+                <span
+                  title="Inferred from the journal that carried the supplement, not stated in the record"
+                  className="border-apollo-border-strong text-muted-foreground cursor-help rounded-full border border-dashed px-1.5 text-[11px]"
+                >
+                  inferred
+                </span>
+              )}
+              <span className="text-muted-foreground text-[13px]">·</span>
+            </>
+          )}
           <span className="text-muted-foreground text-[13px]">
             {r.venue ?? "Unknown venue"} · {r.date}
           </span>
@@ -463,12 +498,10 @@ function WorkCard({
               <button
                 type="button"
                 onClick={() => onPickPerson(a.name)}
-                title={`Filter to ${a.name}`}
+                title={`${a.position} author · filter to ${a.name}`}
                 className="border-apollo-border-strong bg-apollo-surface hover:bg-apollo-surface-2 inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border py-0.5 pr-2.5 pl-0.5 text-[13px]"
               >
-                <span className="bg-apollo-surface-2 text-muted-foreground flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-medium">
-                  {initials(a.name)}
-                </span>
+                <Headshot cwid={a.cwid} name={a.name} present={a.hasHeadshot} px={24} />
                 <span className="truncate">
                   <span className="font-medium">{a.name}</span>
                   <span className="text-muted-foreground">
@@ -557,6 +590,7 @@ const CSV_HEADERS = [
   "stage",
   "modality",
   "title",
+  "conference",
   "venue",
   "date",
   "url",
@@ -578,6 +612,7 @@ export function toCsv(rows: FundableWorkRow[]): string {
         r.stage,
         r.modality ?? "",
         r.title,
+        conferenceOf(r)?.name ?? "",
         r.venue ?? "",
         r.date,
         r.url,

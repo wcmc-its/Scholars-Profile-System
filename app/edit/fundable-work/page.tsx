@@ -57,7 +57,15 @@ export default async function FundableWorkPage() {
       include: {
         authors: {
           include: {
-            scholar: { select: { preferredName: true, slug: true, primaryDepartment: true, roleCategory: true } },
+            scholar: {
+              select: {
+                preferredName: true,
+                slug: true,
+                primaryDepartment: true,
+                roleCategory: true,
+                hasHeadshot: true,
+              },
+            },
           },
         },
       },
@@ -87,6 +95,7 @@ export default async function FundableWorkPage() {
       department: a.scholar.primaryDepartment,
       position: a.position,
       isPostdoc: a.scholar.roleCategory === "postdoc",
+      hasHeadshot: a.scholar.hasHeadshot === true,
     })),
   }));
 
