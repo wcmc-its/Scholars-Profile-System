@@ -1731,8 +1731,12 @@ export class AppStack extends Stack {
         MATCHA_ADMIN: env === "staging" ? "on" : "off",
         // FUNDABLE_WORK — /edit/fundable-work: WCM conference abstracts + preprints scored for
         // private-funding potential (etl/fundable-work, weekly). Read via isFundableWorkEnabled();
-        // the page notFound()s while off. ON in staging; OFF in prod until CTL has reviewed scores.
-        FUNDABLE_WORK: env === "staging" ? "on" : "off",
+        // the page notFound()s while off. ON in BOTH envs since 2026-10-28 — CTL (Bellush) reviews
+        // the scores on the live prod page rather than on staging, at the owner's call. The surface
+        // stays admin-only regardless (superuser | development | observer).
+        // ⚠ Prod has its OWN fundable_work table: it is empty until `etl:fundable-work` has run
+        // against prod, so flipping this on without that backfill shows an empty page.
+        FUNDABLE_WORK: "on",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim

@@ -498,7 +498,7 @@ export function AdminSubnav({
         show: (superuserSurfaces || viewerCanUseMatcha) && isFundableWorkEnabled(),
         id: "fundable-work",
         href: "/edit/fundable-work",
-        label: "Fundable work",
+        label: "Matcha for emergent research",
       },
     ] satisfies TabSpec[]
   ).filter((t) => t.show);
