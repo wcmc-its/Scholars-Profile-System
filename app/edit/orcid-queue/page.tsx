@@ -44,6 +44,7 @@ import {
   publicationManagerBaseUrl,
 } from "@/lib/edit/orcid-queue";
 import { loadOrcidQueue } from "@/lib/edit/orcid-queue.server";
+import { ORCID_TAB_URL } from "@/lib/edit/request-a-change";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +70,12 @@ export default async function OrcidQueuePage({
   }
   // Superuser re-check on every GET. Emits the `edit_authz_denied` line.
   if (requireSuperuserGet({ session, path: BASE_PATH, targetId: "orcid-queue" }) !== null) {
+    // A deep link for one person (PM's "Change in Scholars") sends anyone without
+    // queue rights to that person's ORCID tab, which runs its own edit check.
+    const q = (await searchParams)?.q;
+    if (typeof q === "string" && /^[a-z0-9]{2,16}$/i.test(q.trim())) {
+      redirect(ORCID_TAB_URL.replace("{cwid}", encodeURIComponent(q.trim().toLowerCase())));
+    }
     return (
       <ConsoleShell
         active="orcid-queue"

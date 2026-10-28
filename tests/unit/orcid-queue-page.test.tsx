@@ -318,6 +318,21 @@ describe("page gate", () => {
     expect(h.load).not.toHaveBeenCalled();
   });
 
+  it("a non-superuser deep-linked to one cwid goes to that person's ORCID tab", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    await expect(
+      OrcidQueuePage({ searchParams: Promise.resolve({ q: " ABA4016 " }) }),
+    ).rejects.toThrow("__REDIRECT__ /edit/scholar/aba4016?attr=identifiers-profiles");
+    expect(h.load).not.toHaveBeenCalled();
+  });
+
+  it("a non-superuser with a free-text q still gets the 403 page", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    render(await OrcidQueuePage({ searchParams: Promise.resolve({ q: "smith jones" }) }));
+    expect(h.redirect).not.toHaveBeenCalled();
+    expect(h.load).not.toHaveBeenCalled();
+  });
+
   it("a superuser gets the queue under the URL's filter (a stray ?tab= is ignored)", async () => {
     h.session.mockResolvedValue(SUPER);
     render(
