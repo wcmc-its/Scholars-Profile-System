@@ -11021,7 +11021,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
     },
     "EdEmailVisibilityBridgeStateMachineArn": {
-      "Description": "SPS ED email-visibility bridge state machine ARN (#443; export@edExportVpc → import@SpsVpc).",
+      "Description": "SPS ED email-visibility bridge state machine ARN (#443; export → import, both in the ETL subnets).",
       "Value": {
         "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
       },
@@ -13395,14 +13395,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-08cab06d3084fba41","subnet-07ffed73356c01f6c"],"SecurityGroups":["",
-              {
-                "Fn::GetAtt": [
-                  "EdExportSg72D4CEF3",
-                  "GroupId",
-                ],
-              },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:export-email-visibility"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskEdEmailVisibilityImport":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":60,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEdEmailVisibilityImport"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:export-email-visibility"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskEdEmailVisibilityImport":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":60,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEdEmailVisibilityImport"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -13962,20 +13955,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
-    },
-    "EdExportSg72D4CEF3": {
-      "Properties": {
-        "GroupDescription": "SPS ED email-visibility export task egress (staging).",
-        "SecurityGroupEgress": [
-          {
-            "CidrIp": "0.0.0.0/0",
-            "Description": "Allow all outbound traffic by default",
-            "IpProtocol": "-1",
-          },
-        ],
-        "VpcId": "vpc-02c4dd698f3e3869c",
-      },
-      "Type": "AWS::EC2::SecurityGroup",
     },
     "EtlCtscTaskDefinitionEABC0142": {
       "Properties": {
