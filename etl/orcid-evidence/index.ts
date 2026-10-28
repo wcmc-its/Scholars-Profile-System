@@ -1415,6 +1415,12 @@ async function main(): Promise<number> {
   const { count: removed } = await db.write.orcidCandidateEvidence.deleteMany({
     where: { computedAt: { lt: now } },
   });
+  // Queue age (v3 B1): first sighting only; never updated, never deleted.
+  const { count: firstSeen } = await db.write.orcidPairSeen.createMany({
+    data: rows.map((r) => ({ cwid: r.cwid, orcid: r.orcid, firstQueuedAt: now })),
+    skipDuplicates: true,
+  });
+  console.log(`orcid_pair_seen: ${firstSeen} new pairs.`);
   console.log(
     `orcid_candidate_evidence mirrored: ${rows.length} rows, ${removed} stale rows removed.`,
   );

@@ -1006,9 +1006,32 @@ model OrcidDismissal {
   scholar     Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   orcid       String   @db.VarChar(19)
   dismissedAt DateTime @default(now()) @map("dismissed_at")
+  /// Who: the real actor's cwid (the scholar, a proxy, a librarian). Null on
+  /// rows written before queue v3 B1 that the audit backfill could not match.
+  dismissedBy String?  @map("dismissed_by") @db.VarChar(32)
+  /// Why (`OrcidDismissReason`): not_this_person | none_of_these |
+  /// other_confirmed (a different iD was confirmed, `keptOrcid`) | removed
+  /// (Remove of the iD on file).
+  reason      String?  @db.VarChar(32)
+  /// For other_confirmed: the iD confirmed in its place.
+  keptOrcid   String?  @map("kept_orcid") @db.VarChar(19)
 
   @@id([cwid, orcid])
   @@map("orcid_dismissal")
+}
+
+/// When each (cwid, orcid) pair first entered the librarian queue. The
+/// evidence ETL inserts pairs it has not seen and never deletes, so the date
+/// survives the full replace of `orcid_candidate_evidence`. Rows from before
+/// queue v3 B1 were backfilled from the earliest candidate/evidence time: a
+/// floor, not the true first sighting. Drives the Oldest / Newest sorts.
+model OrcidPairSeen {
+  cwid          String   @db.VarChar(32)
+  orcid         String   @db.VarChar(19)
+  firstQueuedAt DateTime @default(now()) @map("first_queued_at")
+
+  @@id([cwid, orcid])
+  @@map("orcid_pair_seen")
 }
 
 /// #3115 — the scholar proved they own `orcid` by signing in to ORCID

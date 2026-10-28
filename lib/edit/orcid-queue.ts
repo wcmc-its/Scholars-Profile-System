@@ -62,6 +62,21 @@ export const COMPETITOR_CAP_LEVEL = 2;
  *  `scholar.orcid` only: Scholars is the ORCID authority for its scholars, and
  *  every other system's iD (Publication Manager's admin field, WCM Identity) is a
  *  candidate. Pure. */
+/** `orcid_dismissal.reason`: why an iD was ruled out for a scholar. */
+export const ORCID_DISMISS_REASONS = [
+  "not_this_person",
+  "none_of_these",
+  "other_confirmed",
+  "removed",
+] as const;
+export type OrcidDismissReason = (typeof ORCID_DISMISS_REASONS)[number];
+export const ORCID_DISMISS_REASON_LABEL: Record<OrcidDismissReason, string> = {
+  not_this_person: "Not this person",
+  none_of_these: "None of these",
+  other_confirmed: "Another iD confirmed",
+  removed: "Removed",
+};
+
 export type PairState = "queue" | "on_file" | "dismissed" | "conflict";
 export function pairState(orcid: string, held: string | null, dismissed: boolean): PairState {
   if (held === orcid) return "on_file";
@@ -369,6 +384,18 @@ export type OrcidOnFile = {
   name: string | null;
 };
 
+/** One `orcid_dismissal` row as the card shows it. `reason`/`by` are null on
+ *  rows from before v3 B1 the backfill could not match. */
+export type OrcidRuledOut = {
+  orcid: string;
+  reason: OrcidDismissReason | null;
+  keptOrcid: string | null;
+  by: string | null;
+  byName: string | null;
+  /** ISO. */
+  at: string;
+};
+
 /** One scholar and every candidate iD for them, best first (v2 item 5). */
 export type OrcidQueueCard = {
   cwid: string;
@@ -383,6 +410,8 @@ export type OrcidQueueCard = {
   /** v3: the scholar's confirmed publications (ReCiter's, as Scholars holds them). */
   reciterTotal: number;
   candidates: OrcidQueueRow[];
+  /** v3 B1: iDs already ruled out for this scholar, newest first. */
+  ruledOut: OrcidRuledOut[];
 };
 
 /** v3: one candidate in the scholar list, enough to score, sort and search. */
@@ -410,6 +439,10 @@ export type OrcidQueueSummary = {
   conflict: boolean;
   /** The ETL confirmed one of the scholar's iDs from a verified email. */
   autoConfirmed: boolean;
+  /** ISO times the scholar's earliest and latest pair entered the queue
+   *  (`orcid_pair_seen`); null when none is recorded (email-confirmed only). */
+  firstQueuedAt: string | null;
+  lastQueuedAt: string | null;
 };
 
 /** What the page hands the client: every scholar in the queue under the
@@ -484,12 +517,22 @@ export function matchesQueueSearch(
   );
 }
 
-export const ORCID_QUEUE_SORTS = ["strong", "gap", "dept", "name", "cwid"] as const;
+export const ORCID_QUEUE_SORTS = [
+  "strong",
+  "gap",
+  "oldest",
+  "newest",
+  "dept",
+  "name",
+  "cwid",
+] as const;
 export type OrcidQueueSort = (typeof ORCID_QUEUE_SORTS)[number];
 
 export const ORCID_QUEUE_SORT_LABEL: Record<OrcidQueueSort, { label: string; hint: string }> = {
   strong: { label: "Strongest match", hint: "Easy confirmations first" },
   gap: { label: "Clearest winner", hint: "Biggest gap between the best and next-best iD" },
+  oldest: { label: "Oldest in queue", hint: "Longest waiting first" },
+  newest: { label: "Newest found", hint: "Most recently found iD first" },
   dept: { label: "Department, then name", hint: "Work one department at a time" },
   name: { label: "Name A–Z", hint: "By surname" },
   cwid: { label: "CWID A–Z", hint: "Match against a list of CWIDs" },
@@ -497,6 +540,8 @@ export const ORCID_QUEUE_SORT_LABEL: Record<OrcidQueueSort, { label: string; hin
 
 /** v3: the scholar list's comparator for a sort. Ties fall back to the
  *  strongest match, then the cwid, so the order is stable. Pure. */
+const byTime = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+
 export function compareSummaries(sort: OrcidQueueSort) {
   const best = (s: OrcidQueueSummary) => (s.candidates[0] ? candidateScore(s.candidates[0]) : 0);
   const strong = (a: OrcidQueueSummary, b: OrcidQueueSummary) =>
@@ -505,6 +550,11 @@ export function compareSummaries(sort: OrcidQueueSort) {
     a.surname.localeCompare(b.surname) || a.name.localeCompare(b.name) || strong(a, b);
   return (a: OrcidQueueSummary, b: OrcidQueueSummary): number => {
     if (sort === "gap") return scholarGap(b) - scholarGap(a) || strong(a, b);
+    // ISO strings sort as times; a missing date sorts last either way.
+    if (sort === "oldest")
+      return byTime(a.firstQueuedAt ?? "~", b.firstQueuedAt ?? "~") || strong(a, b);
+    if (sort === "newest")
+      return byTime(b.lastQueuedAt ?? "", a.lastQueuedAt ?? "") || strong(a, b);
     if (sort === "dept")
       return (a.department ?? "￿").localeCompare(b.department ?? "￿") || byName(a, b);
     if (sort === "name") return byName(a, b);

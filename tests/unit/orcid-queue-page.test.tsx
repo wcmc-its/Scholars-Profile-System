@@ -218,6 +218,7 @@ const CARD = (
   onFile: null,
   reciterTotal: 20,
   candidates: rows,
+  ruledOut: [],
   ...over,
 });
 
@@ -242,6 +243,8 @@ const summaryOf = (
   ),
   conflict: c.candidates.some((r) => r.state === "conflict"),
   autoConfirmed: c.candidates.some((r) => r.autoConfirmed),
+  firstQueuedAt: null,
+  lastQueuedAt: null,
   ...over,
 });
 
@@ -545,7 +548,36 @@ describe("loaders", () => {
         ),
       },
       orcidDismissal: {
-        findMany: vi.fn(async () => [{ cwid: "b00001", orcid: ORCID }]),
+        findMany: vi.fn(async (args: { where: { cwid: string | { in: string[] } } }) =>
+          [
+            {
+              cwid: "b00001",
+              orcid: ORCID,
+              dismissedAt: new Date("2026-10-02T00:00:00Z"),
+              dismissedBy: null,
+              reason: null,
+              keptOrcid: null,
+            },
+            {
+              cwid: "a00001",
+              orcid: "0000-0002-0000-0009",
+              dismissedAt: new Date("2026-10-03T00:00:00Z"),
+              dismissedBy: "lib0001",
+              reason: "other_confirmed",
+              keptOrcid: ORCID,
+            },
+          ].filter((d) =>
+            typeof args.where.cwid === "string"
+              ? d.cwid === args.where.cwid
+              : args.where.cwid.in.includes(d.cwid),
+          ),
+        ),
+      },
+      orcidPairSeen: {
+        findMany: vi.fn(async () => [
+          { cwid: "a00001", orcid: ORCID, firstQueuedAt: new Date("2026-09-01T00:00:00Z") },
+          { cwid: "a00001", orcid: OTHER_2, firstQueuedAt: new Date("2026-10-01T00:00:00Z") },
+        ]),
       },
     } as never;
   };
@@ -671,6 +703,30 @@ describe("loaders", () => {
     ]);
   });
 
+  it("v3 B1: queue age from orcid_pair_seen; null when no pair is recorded", async () => {
+    const q = await (await actual()).loadOrcidQueue(client());
+    const by = (c: string) => q.summaries.find((s) => s.cwid === c)!;
+    expect(by("a00001")).toMatchObject({
+      firstQueuedAt: "2026-09-01T00:00:00.000Z",
+      lastQueuedAt: "2026-10-01T00:00:00.000Z",
+    });
+    expect(by("c00001")).toMatchObject({ firstQueuedAt: null, lastQueuedAt: null });
+  });
+
+  it("v3 B1: the card lists ruled-out iDs with who and why", async () => {
+    const card = (await (await actual()).loadOrcidQueueCard(client(), "a00001"))!;
+    expect(card.ruledOut).toEqual([
+      {
+        orcid: "0000-0002-0000-0009",
+        reason: "other_confirmed",
+        keptOrcid: ORCID,
+        by: "lib0001",
+        byName: "Pref lib0001",
+        at: "2026-10-03T00:00:00.000Z",
+      },
+    ]);
+  });
+
   it("the card is null for a scholar with nothing in the queue", async () => {
     expect(await (await actual()).loadOrcidQueueCard(client(), "b00001")).toBeNull();
   });
@@ -699,6 +755,23 @@ describe("v3 pure rules", () => {
       })),
       ...over,
     }) as OrcidQueueSummary;
+
+  it("v3 B1 sorts: Oldest in queue (missing date last), Newest found", () => {
+    const a = sum([["weak", 0, 0]], {
+      cwid: "a",
+      firstQueuedAt: "2026-01-01T00:00:00.000Z",
+      lastQueuedAt: "2026-05-01T00:00:00.000Z",
+    });
+    const b = sum([["weak", 0, 0]], {
+      cwid: "b",
+      firstQueuedAt: "2026-02-01T00:00:00.000Z",
+      lastQueuedAt: "2026-03-01T00:00:00.000Z",
+    });
+    const n = sum([["weak", 0, 0]], { cwid: "n", firstQueuedAt: null, lastQueuedAt: null });
+    expect([n, b, a].sort(compareSummaries("oldest")).map((s) => s.cwid)).toEqual(["a", "b", "n"]);
+    expect([n, b, a].sort(compareSummaries("newest")).map((s) => s.cwid)).toEqual(["a", "b", "n"]);
+    expect([n, a, b].sort(compareSummaries("newest")).map((s) => s.cwid)).toEqual(["a", "b", "n"]);
+  });
 
   it("meter level, score and gap", () => {
     expect(bandLevel("weak")).toBe(1);

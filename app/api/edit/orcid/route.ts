@@ -97,7 +97,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     unitDb: db.read as unknown as UnitScholarLookup,
   });
   if (!authz.ok) {
-    logEditDenial({ actorCwid: session.cwid, targetCwid: scholar.cwid, path: PATH, reason: authz.reason });
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: scholar.cwid,
+      path: PATH,
+      reason: authz.reason,
+    });
     return editError(403, authz.reason);
   }
 
@@ -136,7 +141,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       for (const d of toDismiss) {
         await tx.orcidDismissal.upsert({
           where: { cwid_orcid: { cwid: scholar.cwid, orcid: d } },
-          create: { cwid: scholar.cwid, orcid: d },
+          create: {
+            cwid: scholar.cwid,
+            orcid: d,
+            dismissedBy: realCwid,
+            reason: orcid === null && d === held ? "removed" : "not_this_person",
+          },
           update: {},
         });
       }

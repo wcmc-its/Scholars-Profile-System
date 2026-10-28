@@ -98,7 +98,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       for (const d of others) {
         await tx.orcidDismissal.upsert({
           where: { cwid_orcid: { cwid: scholar.cwid, orcid: d } },
-          create: { cwid: scholar.cwid, orcid: d },
+          create: {
+            cwid: scholar.cwid,
+            orcid: d,
+            dismissedBy: scholar.cwid,
+            reason: "other_confirmed",
+            keptOrcid: orcid,
+          },
           update: {},
         });
       }
