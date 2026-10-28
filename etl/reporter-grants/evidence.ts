@@ -17,7 +17,12 @@ import {
   topicOverlap,
   type AttributionEvidence,
 } from "./score";
-import { isWcmOrg, type CorroborationPolicy, type GroupedProject } from "./transform";
+import {
+  affiliateOrgMatch,
+  isWcmOrg,
+  type CorroborationPolicy,
+  type GroupedProject,
+} from "./transform";
 import { parseFirstLast } from "@/etl/reporter-grants/v2";
 
 /** Shared PMIDs kept on cue 6 for the queue to list. */
@@ -133,6 +138,7 @@ export function buildAwardEvidence(args: {
   const evidence: AttributionEvidence = {
     policy: args.policy,
     wcmOrgHistory: isWcmOrg(group.orgName),
+    affiliateOrg: affiliateOrgMatch(group.orgHistory),
     publicationLinked: args.linkedViaGrantPub || [...linked].some((p) => facts.pmids.has(p)),
     activityCode: parseNihAward(group.coreProjectNum).mechanism,
     startYear: firstHeldYear(group.orgHistory),

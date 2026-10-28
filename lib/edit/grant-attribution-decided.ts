@@ -175,15 +175,23 @@ export function partsDiffer(a: string, b: string): boolean {
 
 /** The checks that ran and found nothing, for the evidence panel. Only checks
  *  every award goes through are listed; ones the cues can't speak to (an
- *  unavailable source) are left out rather than claimed. */
-export function checkedNothingFound(cueIds: ReadonlySet<string>): string[] {
+ *  unavailable source) are left out rather than claimed. `heldAtWcm`: WCM is in
+ *  the award's org history, so a WCM cue that didn't fire was withheld, not
+ *  missed. */
+export function checkedNothingFound(cueIds: ReadonlySet<string>, heldAtWcm = false): string[] {
   const out: string[] = [];
   if (!cueIds.has("pub_linked")) out.push("No confirmed paper of the scholar cites this award");
   if (!cueIds.has("rejected_pmids")) out.push("No paper the scholar rejected cites it");
   if (!cueIds.has("profile_proven"))
     out.push("The NIH profile isn't linked by the scholar's accepted papers");
-  if (!cueIds.has("wcm_org") && !cueIds.has("wcm_org_shared_name")) out.push("Not held at WCM");
+  if (!cueIds.has("wcm_org") && !cueIds.has("wcm_org_shared_name"))
+    out.push(
+      heldAtWcm
+        ? "Held at WCM, not counted: the NIH profile came from a WCM grant, and the PI's name doesn't rule out another WCM person"
+        : "Not held at WCM",
+    );
   if (!cueIds.has("prior_institution")) out.push("Not held where the scholar trained");
+  if (!cueIds.has("affiliate_org")) out.push("Not held at a WCM affiliate");
   if (!cueIds.has("copi_coauthor")) out.push("No co-PI co-authors with the scholar");
   if (!cueIds.has("infoed_other_wcm_pi") && !cueIds.has("infoed_other_wcm_pi_named"))
     out.push("InfoEd names no other WCM investigator");
