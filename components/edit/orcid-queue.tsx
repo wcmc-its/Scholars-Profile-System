@@ -47,6 +47,7 @@ import {
   competitorRules,
   isOrcidCandidateSource,
   matchesQueueSearch,
+  ORCID_DISMISS_REASON_LABEL,
   ORCID_QUEUE_BAND_LABEL,
   ORCID_QUEUE_SORT_LABEL,
   ORCID_QUEUE_SORTS,
@@ -754,6 +755,33 @@ function ScholarDetail({
               <span className="text-muted-foreground text-[12.5px]">
                 {onFileProvenance(card.onFile)}
               </span>
+            </div>
+          ) : null}
+          {card.ruledOut.length > 0 ? (
+            <div
+              className="text-muted-foreground mt-2 flex flex-col gap-0.5 text-[12.5px]"
+              data-testid="orcid-queue-ruled-out"
+            >
+              <span className={EYEBROW}>Ruled out</span>
+              {card.ruledOut.map((d) => (
+                <span key={d.orcid}>
+                  <span className={MONO}>{d.orcid}</span> ·{" "}
+                  {d.reason ? ORCID_DISMISS_REASON_LABEL[d.reason] : "Ruled out"}
+                  {d.keptOrcid ? (
+                    <>
+                      {" "}
+                      (<span className={MONO}>{d.keptOrcid}</span>)
+                    </>
+                  ) : null}
+                  {d.by ? (
+                    <>
+                      {" "}
+                      by {d.byName} <span className={MONO}>{d.by}</span>
+                    </>
+                  ) : null}{" "}
+                  on {dateTime(d.at)}
+                </span>
+              ))}
             </div>
           ) : null}
         </div>

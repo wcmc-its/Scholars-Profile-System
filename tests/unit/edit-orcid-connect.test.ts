@@ -93,7 +93,13 @@ function callback(query: string, state: string | null = "s1"): NextRequest {
 }
 const tokenOk = () =>
   new Response(
-    JSON.stringify({ orcid: ID, name: "Test Person", access_token: "tok-123", scope: "/authenticate", expires_in: 631138518 }),
+    JSON.stringify({
+      orcid: ID,
+      name: "Test Person",
+      access_token: "tok-123",
+      scope: "/authenticate",
+      expires_in: 631138518,
+    }),
     { status: 200 },
   );
 
@@ -102,20 +108,29 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   Object.assign(process.env, ENV);
-  mockGetEditSession.mockResolvedValue({ cwid: "self01", isSuperuser: false, isCommsSteward: false });
+  mockGetEditSession.mockResolvedValue({
+    cwid: "self01",
+    isSuperuser: false,
+    isCommsSteward: false,
+  });
   mockImpersonationActive.mockReturnValue(false);
   mockScholarFindUnique.mockResolvedValue({ cwid: "self01", slug: "self01-slug" });
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockTxScholarFindUnique.mockResolvedValue({ orcid: OLD_ID });
   mockTxCandidateFindMany.mockResolvedValue([{ orcid: OLD_ID }]);
   mockTxExecuteRaw.mockResolvedValue(1);
-  vi.stubGlobal("fetch", vi.fn(async () => tokenOk()));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => tokenOk()),
+  );
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("orcid-connect helpers", () => {
   it("config needs every piece, a 32-byte key and an ORCID host", () => {
-    expect(orcidConnectConfig(ENV)?.redirectUri).toBe("https://scholars.example.edu/api/edit/orcid/callback");
+    expect(orcidConnectConfig(ENV)?.redirectUri).toBe(
+      "https://scholars.example.edu/api/edit/orcid/callback",
+    );
     expect(orcidConnectConfig(ENV)?.sandbox).toBe(true);
     expect(orcidConnectConfig({ ...ENV, ORCID_CONNECT_TOKEN_KEY: "c2hvcnQ=" })).toBeNull();
     expect(orcidConnectConfig({ ...ENV, ORCID_CONNECT_BASE: "https://evil.example" })).toBeNull();
@@ -173,7 +188,8 @@ describe("GET /api/edit/orcid/connect", () => {
 });
 
 describe("GET /api/edit/orcid/callback", () => {
-  const outcome = (res: Response) => new URL(res.headers.get("location")!).searchParams.get("orcid");
+  const outcome = (res: Response) =>
+    new URL(res.headers.get("location")!).searchParams.get("orcid");
 
   it("a state mismatch writes nothing", async () => {
     const res = await CALLBACK(callback("code=c&state=s1", "other"));
@@ -189,7 +205,10 @@ describe("GET /api/edit/orcid/callback", () => {
   });
 
   it("a failed token exchange writes nothing", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 400 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("no", { status: 400 })),
+    );
     const res = await CALLBACK(callback("code=c&state=s1"));
     expect(outcome(res)).toBe("failed");
     expect(mockTransaction).not.toHaveBeenCalled();
@@ -203,11 +222,25 @@ describe("GET /api/edit/orcid/callback", () => {
     );
     expect(mockTxScholarUpdate).toHaveBeenCalledWith({
       where: { cwid: "self01" },
-      data: expect.objectContaining({ orcid: ID, orcidConfirmMethod: "authenticated", orcidConfirmedBy: "self01" }),
+      data: expect.objectContaining({
+        orcid: ID,
+        orcidConfirmMethod: "authenticated",
+        orcidConfirmedBy: "self01",
+      }),
     });
-    expect(mockTxDismissalDeleteMany).toHaveBeenCalledWith({ where: { cwid: "self01", orcid: ID } });
+    expect(mockTxDismissalDeleteMany).toHaveBeenCalledWith({
+      where: { cwid: "self01", orcid: ID },
+    });
     expect(mockTxDismissalUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({ create: { cwid: "self01", orcid: OLD_ID } }),
+      expect.objectContaining({
+        create: {
+          cwid: "self01",
+          orcid: OLD_ID,
+          dismissedBy: "self01",
+          reason: "other_confirmed",
+          keptOrcid: ID,
+        },
+      }),
     );
     const stored = mockTxAuthUpsert.mock.calls[0][0].create;
     expect(stored).toMatchObject({ cwid: "self01", orcid: ID, name: "Test Person", sandbox: true });

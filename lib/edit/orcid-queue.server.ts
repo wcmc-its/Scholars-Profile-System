@@ -34,6 +34,8 @@ import {
   type OrcidEvidenceDetail,
   type OrcidOnFile,
   type OrcidOnFileHow,
+  ORCID_DISMISS_REASONS,
+  type OrcidDismissReason,
   type OrcidQueueBand,
   type OrcidQueueCard,
   type OrcidQueueData,
@@ -49,6 +51,7 @@ type Client = Pick<
   | "orcidCandidateEvidence"
   | "publicationAuthor"
   | "orcidDismissal"
+  | "orcidPairSeen"
   | "scholar"
   | "orcidCandidate"
   | "division"
@@ -288,7 +291,13 @@ export async function confirmPair(
   for (const r of replaced) {
     await tx.orcidDismissal.upsert({
       where: { cwid_orcid: { cwid: pair.cwid, orcid: r } },
-      create: { cwid: pair.cwid, orcid: r },
+      create: {
+        cwid: pair.cwid,
+        orcid: r,
+        dismissedBy: meta.actor,
+        reason: "other_confirmed",
+        keptOrcid: pair.orcid,
+      },
       update: {},
     });
   }
@@ -343,7 +352,17 @@ export async function dismissPair(
   });
   await tx.orcidDismissal.upsert({
     where: { cwid_orcid: { cwid: pair.cwid, orcid: pair.orcid } },
-    create: { cwid: pair.cwid, orcid: pair.orcid },
+    create: {
+      cwid: pair.cwid,
+      orcid: pair.orcid,
+      dismissedBy: meta.actor,
+      reason: meta.noneOfThese
+        ? "none_of_these"
+        : meta.alongside
+          ? "other_confirmed"
+          : "not_this_person",
+      keptOrcid: meta.noneOfThese ? null : (meta.alongside ?? null),
+    },
     update: {},
   });
   await appendAuditRow(tx, {
@@ -529,18 +548,22 @@ export async function loadOrcidQueue(
     autoConfirmed.filter((a) => !st.people || st.people.has(a.cwid)),
   );
   const shown = [...byCwid].filter(([cwid, ps]) => ps.some((p) => pairInFilter(st, cwid, p.orcid)));
-  const scholars = new Map(
+  const shownCwids = shown.map(([c]) => c);
+  const [scholarRows, seenRows] =
     shown.length === 0
-      ? []
-      : (
-          await client.scholar.findMany({
-            where: { cwid: { in: shown.map(([c]) => c) } },
-            select: SCHOLAR_SELECT,
-          })
-        ).map((s) => [s.cwid, s]),
-  );
+      ? [[], []]
+      : await Promise.all([
+          client.scholar.findMany({ where: { cwid: { in: shownCwids } }, select: SCHOLAR_SELECT }),
+          client.orcidPairSeen.findMany({ where: { cwid: { in: shownCwids } } }),
+        ]);
+  const scholars = new Map(scholarRows.map((s) => [s.cwid, s]));
+  const seenAt = new Map(seenRows.map((r) => [pairKey(r.cwid, r.orcid), r.firstQueuedAt]));
   const summaries: OrcidQueueSummary[] = shown.map(([cwid, ps]) => {
     const s = scholars.get(cwid);
+    const queued = ps
+      .map((p) => seenAt.get(pairKey(cwid, p.orcid))?.toISOString())
+      .filter((t): t is string => !!t)
+      .sort();
     return {
       cwid,
       name: publishedName(s, cwid),
@@ -557,6 +580,8 @@ export async function loadOrcidQueue(
       })),
       conflict: ps.some((p) => p.state === "conflict"),
       autoConfirmed: ps.some((p) => p.state === "auto_confirmed"),
+      firstQueuedAt: queued[0] ?? null,
+      lastQueuedAt: queued.at(-1) ?? null,
     };
   });
   return { summaries, filter };
@@ -641,7 +666,7 @@ export async function loadOrcidQueueCard(
   if (!ps || ps.length === 0) return null;
 
   const onFileGuess = ps.find((p) => p.onFile)?.onFile ?? null;
-  const [details, me, reciterTotal, onFileName] = await Promise.all([
+  const [details, me, reciterTotal, onFileName, dismissals] = await Promise.all([
     client.orcidCandidateEvidence.findMany({ where: { cwid } }),
     client.scholar.findUnique({
       where: { cwid },
@@ -655,12 +680,14 @@ export async function loadOrcidQueueCard(
     }),
     client.publicationAuthor.count({ where: { cwid, isConfirmed: true } }),
     onFileGuess ? fetchOrcidName(onFileGuess) : Promise.resolve(null),
+    client.orcidDismissal.findMany({ where: { cwid }, orderBy: { dismissedAt: "desc" } }),
   ]);
   const detailBy = new Map(details.map((d) => [d.orcid, d]));
   const onFileOrcid = ps.find((p) => p.onFile)?.onFile ?? me?.orcid ?? null;
   const people = new Set<string>();
   for (const d of details) for (const c of asStrings(d.competitorCwids)) people.add(c);
   if (me?.orcidConfirmedBy && me.orcidConfirmedBy !== "ETL") people.add(me.orcidConfirmedBy);
+  for (const d of dismissals) if (d.dismissedBy) people.add(d.dismissedBy);
   const named = new Map(
     people.size === 0
       ? []
@@ -741,5 +768,15 @@ export async function loadOrcidQueueCard(
     onFile,
     reciterTotal,
     candidates,
+    ruledOut: dismissals.map((d) => ({
+      orcid: d.orcid,
+      reason: (ORCID_DISMISS_REASONS as readonly string[]).includes(d.reason ?? "")
+        ? (d.reason as OrcidDismissReason)
+        : null,
+      keptOrcid: d.keptOrcid,
+      by: d.dismissedBy,
+      byName: d.dismissedBy ? publishedName(named.get(d.dismissedBy), d.dismissedBy) : null,
+      at: d.dismissedAt.toISOString(),
+    })),
   };
 }

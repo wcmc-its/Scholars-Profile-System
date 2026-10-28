@@ -298,6 +298,17 @@ describe("decide", () => {
     expect(replaced.status).toBe(200);
     expect(h.state.scholars.get("jd0001")!.orcid).toBe(ORCID);
     expect(h.state.dismissals.has(k("jd0001", OTHER))).toBe(true);
+    expect(tx.orcidDismissal.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: {
+          cwid: "jd0001",
+          orcid: OTHER,
+          dismissedBy: "lib0001",
+          reason: "other_confirmed",
+          keptOrcid: ORCID,
+        },
+      }),
+    );
   });
 
   it("400 on a bad iD or decision, before any write", async () => {
@@ -317,6 +328,17 @@ describe("decide", () => {
     expect(h.state.dismissals.has(k("jd0001", ORCID))).toBe(true);
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
     expect(audits()).toEqual([expect.objectContaining({ action: "orcid_librarian_dismiss" })]);
+    expect(tx.orcidDismissal.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: {
+          cwid: "jd0001",
+          orcid: ORCID,
+          dismissedBy: "lib0001",
+          reason: "not_this_person",
+          keptOrcid: null,
+        },
+      }),
+    );
   });
 
   it("dismiss on an email auto-confirmed iD is the Undo: clears scholar.orcid and dismisses", async () => {
@@ -420,6 +442,15 @@ describe("v2: confirm one iD, dismiss the scholar's others in the same action", 
       dismissed: [ORCID_3],
       with_confirm_of: ORCID,
     });
+    expect(tx.orcidDismissal.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          orcid: ORCID_3,
+          reason: "other_confirmed",
+          keptOrcid: ORCID,
+        }),
+      }),
+    );
   });
 
   it("an other iD not in the scholar's queue refuses the whole decision (404)", async () => {
@@ -454,6 +485,11 @@ describe("v2: confirm one iD, dismiss the scholar's others in the same action", 
       "orcid_librarian_dismiss",
       "orcid_librarian_dismiss",
     ]);
+    for (const [arg] of vi.mocked(tx.orcidDismissal.upsert).mock.calls)
+      expect((arg as { create: object }).create).toMatchObject({
+        reason: "none_of_these",
+        keptOrcid: null,
+      });
     for (const a of audits()) {
       expect(a.afterValues).toMatchObject({ none_of_these: true });
       expect(a.afterValues).not.toHaveProperty("with_confirm_of");
