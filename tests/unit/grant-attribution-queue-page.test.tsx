@@ -6,11 +6,11 @@
  *     predicate is the page gate (same function, I2 parity).
  *   - Page: no session → SSO redirect; flag off → 404 for everyone; a viewer
  *     who cannot read → ForbiddenEditPage; a reader gets the queue.
- *   - Review: a list beside the focused award's detail; every cue with its
- *     reason, the co-PI co-author named with the shared papers, the scholar
- *     marked in the PI list; actions only for a decider; a rejection takes a
- *     reason; bulk select and filters.
- *   - Helpers: confidence levels and RePORTER name handling.
+ *   - Review: a list beside the focused award's detail; every cue in the
+ *     score ledger, the co-PI co-author named with the shared papers;
+ *     actions only for a decider; a rejection takes a reason; bulk select,
+ *     filters, sort and undo.
+ *   - Helpers: RePORTER name handling.
  *
  * Fixture people and awards are invented.
  */
@@ -29,13 +29,13 @@ const h = vi.hoisted(() => ({
       rejected: { all: 7, curator: 2, auto: 5 },
       unproven: { all: 4, curator: 0, auto: 4 },
     },
-    changed: 0,
+    changed: { confirmed: 0, rejected: 0, unproven: 0 },
     matched: 0,
     rows: [],
-    groups: null,
     unprovenIds: ["reporter:zzb0002:R21YY000002"],
   })),
   unproven: vi.fn<(c: unknown, ids: string[]) => Promise<unknown[]>>(async () => []),
+  runs: vi.fn<() => Promise<unknown[]>>(async () => []),
   shell: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("__NOT_FOUND__");
@@ -61,7 +61,7 @@ vi.mock("@/lib/edit/grant-attribution-queue.server", () => ({
   countPendingGrantAttribution: vi.fn(),
   countGrantAttribution: vi.fn(async (_c: unknown, status: string) => (status === "confirmed" ? 321 : 7)),
   loadAutoConfirmed: vi.fn(async () => ({ items: [], total: 0 })),
-  loadGrantAttributionRuns: vi.fn(async () => []),
+  loadGrantAttributionRuns: h.runs,
   loadUnprovenQueueItems: h.unproven,
 }));
 vi.mock("@/lib/edit/grant-attribution-decided.server", () => ({
@@ -87,13 +87,11 @@ vi.mock("@/components/edit/scholar-hover-card", () => ({
 }));
 
 import GrantAttributionQueuePage from "@/app/edit/grant-attribution-queue/page";
-import { GrantAttributionQueue } from "@/components/edit/grant-attribution-queue";
+import { GrantAttributionBoard } from "@/components/edit/grant-attribution-board";
+import { fromQueueItem } from "@/lib/edit/grant-attribution-board";
 import { TAB_PREDICATES } from "@/lib/edit/console-tabs.server";
 import {
-  attributionLevel,
   canDecideGrantAttribution,
-  isCoauthorshipOnly,
-  isScholarPi,
   reporterNameForDisplay,
   reporterNameParts,
   decidingReason,
@@ -155,6 +153,7 @@ beforeEach(() => {
   h.load.mockResolvedValue([]);
   h.rawSession.mockResolvedValue({ cwid: "zzs0001" });
   h.impersonating.mockReturnValue(false);
+  h.runs.mockResolvedValue([]);
 });
 
 describe("predicates", () => {
@@ -228,6 +227,39 @@ describe("page gate", () => {
     expect(list.getByText("Lee Sample, PhD")).toBeTruthy();
   });
 
+  it("marks what the latest weekly check opened, from the previous run's end", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    h.load.mockResolvedValue([ITEM]);
+    h.runs.mockResolvedValue([
+      {
+        ranAt: "2026-10-26T12:00:00Z",
+        scholars: 1,
+        show: 0,
+        hide: 0,
+        queue: 1,
+        recovered: 0,
+        cues: {},
+      },
+      {
+        ranAt: "2026-10-18T12:00:00Z",
+        scholars: 1,
+        show: 0,
+        hide: 0,
+        queue: 1,
+        recovered: 0,
+        cues: {},
+      },
+    ]);
+    const el = (await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as {
+      props: { children: unknown };
+    };
+    render(el.props.children as React.ReactElement);
+    expect(
+      within(screen.getByTestId("grant-attribution-list")).getByText("New this run"),
+    ).toBeTruthy();
+    expect(screen.getByText("Changed this run (1)")).toBeTruthy();
+  });
+
   it("sends an old ?tab=unproven link to To review", async () => {
     h.session.mockResolvedValue(STEWARD);
     h.load.mockResolvedValue([]);
@@ -297,8 +329,16 @@ const UNPROVEN: GrantAttributionItem = {
   award: { ...ITEM.award, title: "A third synthetic study", applId: 789 },
 };
 
-const queue = (readOnly = false, pending = [ITEM]) =>
-  render(<GrantAttributionQueue pending={pending} readOnly={readOnly} />);
+const queue = (readOnly = false, pending = [ITEM], since: string | null = null) =>
+  render(
+    <GrantAttributionBoard
+      tab="pending"
+      rows={pending.map((it) => fromQueueItem(it, since))}
+      counts={{ pending: pending.length, confirmed: 321, rejected: 7 }}
+      readOnly={readOnly}
+      server={null}
+    />,
+  );
 const detail = () => within(screen.getByTestId("grant-attribution-detail"));
 
 describe("helpers", () => {
@@ -313,44 +353,9 @@ describe("helpers", () => {
     expect(asRejectedPapers([{ pmid: "1" }])).toBeUndefined();
   });
 
-  it("levels: a strong negative rules out, both sides conflict, a link or two cues is high", () => {
-    expect(attributionLevel([{ id: "timeline_impossible", weight: -5 }, { id: "prior_institution", weight: 2 }])).toEqual({
-      level: "out",
-      veto: "timeline_impossible",
-    });
-    // A strong tie the other way makes it a conflict, not a ruling.
-    expect(attributionLevel([{ id: "timeline_impossible", weight: -5 }, { id: "pub_linked", weight: 5 }])).toEqual({
-      level: "conflict",
-      veto: null,
-    });
-    // Reviews stored before 2026-10-24 carry the named InfoEd cue at weight 0.
-    expect(attributionLevel([{ id: "infoed_other_wcm_pi_named", weight: 0 }]).level).toBe("out");
-    expect(attributionLevel([{ id: "prior_institution", weight: 2 }, { id: "middle_initial_conflict", weight: -1 }]).level).toBe("conflict");
-    expect(attributionLevel([{ id: "pub_linked", weight: 4 }]).level).toBe("high");
-    expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }, { id: "topic_match", weight: 1 }]).level).toBe("high");
-    expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }]).level).toBe("likely");
-    expect(attributionLevel([]).level).toBe("unclear");
-    // Name rarity never counts as a cue of its own.
-    expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }, { id: "name_rare", weight: 1 }]).level).toBe("likely");
-    expect(attributionLevel([{ id: "copi_coauthor", weight: 2 }, { id: "name_common", weight: -1 }]).level).toBe("likely");
-  });
-
-  it("co-authorship-only is co-PI and topic cues and nothing else", () => {
-    expect(isCoauthorshipOnly([{ id: "copi_coauthor" }, { id: "topic_match" }])).toBe(true);
-    expect(isCoauthorshipOnly([{ id: "copi_coauthor" }, { id: "wcm_org" }])).toBe(false);
-    expect(isCoauthorshipOnly([])).toBe(false);
-    // Name rarity is a modifier: it neither makes nor breaks co-authorship-only.
-    expect(isCoauthorshipOnly([{ id: "copi_coauthor" }, { id: "name_rare" }])).toBe(true);
-    expect(isCoauthorshipOnly([{ id: "name_rare" }])).toBe(false);
-  });
-
-  it("title-cases RePORTER names and finds the scholar by surname", () => {
+  it("title-cases RePORTER names", () => {
     expect(reporterNameForDisplay("REYES-HART, DANIEL L.")).toBe("Daniel L. Reyes-Hart");
     expect(reporterNameForDisplay("PAT Q EXAMPLE")).toBe("Pat Q Example");
-    expect(isScholarPi("EXAMPLE, PAT Q", "Example")).toBe(true);
-    expect(isScholarPi("Pat Q Example", "Example")).toBe(true);
-    expect(isScholarPi("SAMPLE, LEE", "Example")).toBe(false);
-    expect(isScholarPi("EXAMPLE, PAT", null)).toBe(false);
   });
 
   it("marks only the RePORTER words the scholar's names have no match for", () => {
@@ -379,25 +384,74 @@ describe("helpers", () => {
 });
 
 describe("the review", () => {
-  it("shows the focused award beside the list, with every cue and the scholar marked", () => {
+  const listNames = () =>
+    [
+      ...screen
+        .getByTestId("grant-attribution-list")
+        .querySelectorAll('[data-testid="grant-attribution-row-name"]'),
+    ].map((n) => n.textContent);
+  const fetchOk = (body: unknown = {}) => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(JSON.stringify(body), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+  const bodyOf = (m: ReturnType<typeof fetchOk>, i: number) =>
+    JSON.parse(m.mock.calls[i]![1].body as string);
+
+  it("shows the focused award beside the list: evidence and decision apart, the award, and the score ledger", () => {
     queue();
     expect(within(screen.getByTestId("grant-attribution-list")).getByText("Pat Example, MD")).toBeTruthy();
+    // Score 0 with cues both ways.
+    expect(
+      within(screen.getByTestId("grant-attribution-list")).getByTestId("grant-attribution-level")
+        .textContent,
+    ).toBe("0Mixed");
     expect(detail().getByText("A synthetic study")).toBeTruthy();
-    expect(detail().getByText("Pat Q Example").tagName).toBe("MARK");
-    expect(detail().getByTestId("grant-attribution-cue-prior_institution").textContent).toContain("✓");
-    expect(detail().getByTestId("grant-attribution-cue-middle_initial_conflict").textContent).toContain("✕");
-    expect(detail().getByText(/middle initial differs from/)).toBeTruthy();
-    expect(detail().getByText("Evidence points both ways")).toBeTruthy();
+    expect(detail().getByTestId("grant-attribution-decision").textContent).toContain("Not decided");
+    expect(detail().getByTestId("grant-attribution-decision").textContent).toContain(
+      "Off the profile until a curator decides.",
+    );
+    expect(detail().getByTestId("grant-attribution-on-award").textContent).toBe(
+      "Name on awardPatQExample",
+    );
+    const ledger = within(detail().getByTestId("grant-attribution-evidence"));
+    expect(ledger.getByText("Every award starts here")).toBeTruthy();
+    expect(ledger.getByTestId("grant-attribution-cue-prior_institution").textContent).toBe(
+      "Trained there",
+    );
+    expect(ledger.getByText("Main reason")).toBeTruthy();
+    expect(ledger.getByText(/middle initial differs from/)).toBeTruthy();
+    expect(ledger.getByText("Score · Mixed")).toBeTruthy();
     expect(detail().getByText("RePORTER ↗").getAttribute("href")).toBe("https://reporter.nih.gov/project-details/123");
-    expect(detail().getByText("Confirm")).toBeTruthy();
+    expect(detail().getByRole("button", { name: /^Confirm/ })).toBeTruthy();
+  });
+
+  it("marks the parts of the name on the award that differ from the profile", () => {
+    queue(false, [{ ...ITEM, reporterName: "EXAMPLE, PAT D" }]);
+    const line = detail().getByTestId("grant-attribution-on-award");
+    expect(line.querySelector("mark")?.textContent).toBe("D");
+    expect(within(line).getByText("differs from profile")).toBeTruthy();
+  });
+
+  it("folds the checks that found nothing, with a count", () => {
+    queue();
+    expect(detail().queryByText("Not held at a WCM affiliate")).toBeNull();
+    fireEvent.click(detail().getByTestId("grant-attribution-nothing-toggle"));
+    expect(detail().getByText("Not held at a WCM affiliate")).toBeTruthy();
   });
 
   it("names the co-author co-PI and lists the shared papers", () => {
     queue(false, [COAUTHOR]);
-    expect(detail().getByText("Lee Sample, a co-PI on this award, co-authored 5 of the scholar's papers.")).toBeTruthy();
-    expect(detail().getByText("co-author")).toBeTruthy();
-    expect(detail().getByText(/A shared synthetic paper/).closest("a")?.getAttribute("href")).toBe(
-      "https://pubmed.ncbi.nlm.nih.gov/111/",
+    expect(
+      detail().getByText(
+        "Lee Sample, a co-PI on this award, co-authored 5 of the scholar's papers.",
+      ),
+    ).toBeTruthy();
+    expect(detail().getByTestId("grant-attribution-pis").textContent).toBe(
+      "PIs Pat Q Example · Lee Sample (co-author)",
     );
     expect(detail().getByText("+ 4 more")).toBeTruthy();
   });
@@ -428,50 +482,70 @@ describe("the review", () => {
 
   it("offers no actions or selection to a read-only viewer", () => {
     queue(true);
-    expect(screen.queryByText("Confirm")).toBeNull();
-    expect(screen.queryByRole("checkbox")).toBeNull();
-    // The page, not the queue, says it is read-only.
+    expect(screen.queryByRole("button", { name: /^Confirm/ })).toBeNull();
+    expect(screen.queryByLabelText(/^Select /)).toBeNull();
+    // The page, not the board, says it is read-only.
     expect(screen.queryByText(/Read-only/)).toBeNull();
   });
 
   it("Not this person asks for a reason and has no reasonless submit", () => {
     queue();
-    fireEvent.click(detail().getByText("Not this person"));
+    fireEvent.click(detail().getByRole("button", { name: /^Not this person/ }));
     const box = within(screen.getByTestId("grant-attribution-reasons"));
     expect(box.getByText("A reason is required.")).toBeTruthy();
     expect(box.getByText("A different person with the same name")).toBeTruthy();
-    expect(screen.queryByText("Hide as not this person")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Confirm/ })).toBeNull();
   });
 
-  it("posts the picked reason with the rejection", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    queue();
-    fireEvent.click(detail().getByText("Not this person"));
+  it("posts the picked reason, takes the award out of the list and offers Undo", async () => {
+    const fetchMock = fetchOk();
+    queue(false, [ITEM, COAUTHOR]);
+    fireEvent.click(detail().getByRole("button", { name: /^Not this person/ }));
     await act(async () => {
       fireEvent.click(screen.getByText("Outside the scholar's career"));
     });
-    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+    expect(bodyOf(fetchMock, 0)).toEqual({
       id: "rev-1",
       decision: "reject",
       reason: "Outside the scholar's career",
     });
+    expect(screen.getByTestId("grant-attribution-status").textContent).toContain(
+      "Marked not this person: Pat Example",
+    );
+    expect(screen.queryByTestId("grant-attribution-item-rev-1")).toBeNull();
+    // The focus lands on the next award, and the counts follow.
+    expect(detail().getByText("A second synthetic study")).toBeTruthy();
+    expect(screen.getByTestId("grant-attribution-tab-pending").textContent).toContain("1");
+    expect(screen.getByTestId("grant-attribution-tab-rejected").textContent).toContain("8");
     vi.unstubAllGlobals();
   });
 
-  it("sorts strongest evidence first by default, and weakest first on request", () => {
+  it("sorts score high to low by default, low to high or by scholar on request", () => {
     const strong: GrantAttributionItem = { ...COAUTHOR, id: "rev-3", score: 6, scholarName: "Strong Example" };
-    // Level first, then score: this conflict (score 9) still follows both likelies.
-    const conflict: GrantAttributionItem = { ...ITEM, score: 9 };
-    const likely: GrantAttributionItem = { ...COAUTHOR, score: 1, scholarName: "Likely Example" };
-    queue(false, [UNPROVEN, likely, conflict, strong]);
-    const names = () =>
-      [...screen.getByTestId("grant-attribution-list").querySelectorAll("[data-row] span.truncate.font-semibold")].map(
-        (n) => n.textContent,
-      );
-    expect(names()).toEqual(["Strong Example", "Likely Example", "Pat Example, MD", "Lee Sample, PhD"]);
-    fireEvent.change(screen.getByDisplayValue("Strongest evidence first"), { target: { value: "weak" } });
-    expect(names()).toEqual(["Lee Sample, PhD", "Pat Example, MD", "Likely Example", "Strong Example"]);
+    const high: GrantAttributionItem = { ...ITEM, score: 9 };
+    const low: GrantAttributionItem = { ...COAUTHOR, score: 1, scholarName: "Avery Abel" };
+    queue(false, [UNPROVEN, low, high, strong]);
+    expect(listNames()).toEqual([
+      "Pat Example, MD",
+      "Strong Example",
+      "Avery Abel",
+      "Lee Sample, PhD",
+    ]);
+    fireEvent.change(screen.getByDisplayValue("Score, high to low"), { target: { value: "low" } });
+    expect(listNames()).toEqual([
+      "Lee Sample, PhD",
+      "Avery Abel",
+      "Strong Example",
+      "Pat Example, MD",
+    ]);
+    fireEvent.change(screen.getByDisplayValue("Score, low to high"), { target: { value: "name" } });
+    // By surname: Abel, Example, Example, Sample.
+    expect(listNames()).toEqual([
+      "Avery Abel",
+      "Pat Example, MD",
+      "Strong Example",
+      "Lee Sample, PhD",
+    ]);
   });
 
   it("decides an Unproven award by grant, and undoes it by the review the route opened", async () => {
@@ -487,26 +561,30 @@ describe("the review", () => {
     vi.stubGlobal("fetch", fetchMock);
     queue(false, [UNPROVEN]);
     await act(async () => {
-      fireEvent.click(detail().getByText("Confirm"));
+      fireEvent.click(detail().getByRole("button", { name: /^Confirm/ }));
     });
     const body = (i: number) => JSON.parse((fetchMock.mock.calls[i] as unknown as [string, RequestInit])[1].body as string);
     expect(body(0)).toEqual({ grant: "reporter:zzb0002:R21YY000002", decision: "confirm" });
+    expect(screen.queryByTestId("grant-attribution-detail")).toBeNull();
     await act(async () => {
-      fireEvent.click(detail().getByText("Undo"));
+      fireEvent.click(screen.getByTestId("grant-attribution-status-undo"));
     });
     expect(body(1)).toEqual({ id: "rev-new", decision: "undo" });
+    // Back in the list, now as a pending review.
+    expect(detail().getByText("A third synthetic study")).toBeTruthy();
     vi.unstubAllGlobals();
   });
 
-  it("decides reviews and Unproven awards together in one bulk call", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ reviews: {} }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+  it("decides reviews and Unproven awards together in one bulk call from the list header", async () => {
+    const fetchMock = fetchOk({ reviews: {} });
     queue(false, [ITEM, UNPROVEN]);
-    for (const cb of screen.getAllByRole("checkbox").slice(-2)) fireEvent.click(cb);
+    fireEvent.click(screen.getByLabelText("Select Pat Example, MD"));
+    fireEvent.click(screen.getByLabelText("Select Lee Sample, PhD"));
+    expect(screen.getByText("2 selected")).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByTestId("grant-attribution-bulk-confirm"));
     });
-    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+    expect(bodyOf(fetchMock, 0)).toEqual({
       grants: ["reporter:zzb0002:R21YY000002"],
       ids: ["rev-1"],
       decision: "confirm",
@@ -514,14 +592,50 @@ describe("the review", () => {
     vi.unstubAllGlobals();
   });
 
-  it("filters by evidence and selects in bulk", () => {
+  it("a bulk Not this person waits for a reason", async () => {
+    const fetchMock = fetchOk({ reviews: {} });
     queue(false, [ITEM, COAUTHOR]);
-    fireEvent.change(screen.getByLabelText(/Evidence/), { target: { value: "co" } });
-    expect(screen.getByText(/Showing 1 of 2/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Select all shown"));
+    fireEvent.click(screen.getByTestId("grant-attribution-bulk-reject"));
+    const box = within(screen.getByTestId("grant-attribution-bulk-reasons"));
+    expect((box.getByRole("button", { name: "Mark 2" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(box.getByLabelText("Reason for not this person"), {
+      target: { value: "A different person with the same name" },
+    });
+    await act(async () => {
+      fireEvent.click(box.getByRole("button", { name: "Mark 2" }));
+    });
+    expect(bodyOf(fetchMock, 0)).toEqual({
+      ids: ["rev-1", "rev-2"],
+      decision: "reject",
+      reason: "A different person with the same name",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("filters by evidence level and by what changed this run", () => {
+    queue(false, [ITEM, COAUTHOR], "2026-10-20T00:00:00.000Z");
+    fireEvent.change(screen.getByLabelText(/Evidence/), { target: { value: "mixed" } });
+    expect(screen.getByText("Showing 1 of 2")).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Evidence/), { target: { value: "all" } });
-    fireEvent.click(screen.getByText("Select 1 co-authorship-only"));
-    expect(screen.getByText("1 award selected")).toBeTruthy();
-    expect((screen.getByTestId("grant-attribution-bulk-reject") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Showing 2 of 2")).toBeTruthy();
+    // Both were first seen before the previous run ended.
+    fireEvent.click(screen.getByTestId("grant-attribution-changed"));
+    expect(screen.getByText("Nothing matches these filters.")).toBeTruthy();
+  });
+
+  it("moves with J and K, and C confirms the focused award", async () => {
+    const fetchMock = fetchOk();
+    queue(false, [ITEM, COAUTHOR]);
+    fireEvent.keyDown(window, { key: "j" });
+    expect(detail().getByText("A second synthetic study")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "k" });
+    expect(detail().getByText("A synthetic study")).toBeTruthy();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "c" });
+    });
+    expect(bodyOf(fetchMock, 0)).toEqual({ id: "rev-1", decision: "confirm" });
+    vi.unstubAllGlobals();
   });
 
   it("links the profile at its canonical path", () => {
@@ -531,5 +645,3 @@ describe("the review", () => {
     expect(hrefs).not.toContain("/scholars/pat-example");
   });
 });
-
-
