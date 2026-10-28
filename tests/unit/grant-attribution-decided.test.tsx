@@ -650,7 +650,28 @@ describe("the board on a decided tab", () => {
     expect(screen.getByTestId("grant-attribution-status").textContent).toContain(
       "Moved the award back to review.",
     );
+    // It is in To review now, not back on this tab.
+    expect(screen.queryByTestId(`grant-attribution-item-${ROW.grantId}`)).toBeNull();
     expect(screen.getByTestId("grant-attribution-tab-pending").textContent).toContain("6");
+  });
+
+  it("confirms a curator's rejection instead by grant, so the route undoes it first", async () => {
+    const fetchMock = fetchOk({ reviews: { "g-cur": "rev-9" } });
+    const curator = {
+      ...ROW,
+      tab: "rejected" as const,
+      grantId: "g-cur",
+      by: "curator" as const,
+      reviewId: "rev-9",
+    };
+    board(page({ params: parseDecidedParams({}, "rejected"), rows: [curator] }));
+    await act(async () => {
+      fireEvent.click(detail().getByRole("button", { name: /^Confirm instead/ }));
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toEqual({
+      grant: "g-cur",
+      decision: "confirm",
+    });
   });
 
   it("moves a curator decision to review by undoing it, and an auto one through requeue", async () => {
