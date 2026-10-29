@@ -44,9 +44,11 @@ import {
 } from "./fetcher";
 import {
   aggregatePreferred,
+  dropRuledOut,
   resolveByNameFallback,
   resolveByPiNameQuery,
   resolveProjectGrantJoin,
+  ruledOutLinks,
   selectNihScholarPool,
   type GrantRowForResolution,
   type PoolGrantRow,
@@ -141,6 +143,17 @@ async function main() {
   const nihPool = await loadNihScholarPool();
   console.log(`  ${nihPool.length} scholars with ≥1 NIH grant.`);
 
+  // #3071 — links a person or the cleanup ruled out are never written back.
+  const ruledOut = ruledOutLinks(
+    await db.write.reporterProfileCandidate.findMany({
+      where: { status: { in: ["rejected", "revoked"] } },
+      select: { cwid: true, externalProfileId: true, status: true },
+    }),
+  );
+  console.log(
+    `  ${ruledOut.pairs.size} ruled-out links; ${ruledOut.nameBlocked.size} scholars get no name-only link.`,
+  );
+
   console.log("\nWalking NIH RePORTER /projects/search...");
   const observations: ResolvedObservation[] = [];
   const unresolvedPis: Array<{ pi: ReporterPI; project: ReporterProject }> = [];
@@ -184,7 +197,9 @@ async function main() {
   // names with no NIH funding history.
   console.log("Pass 3 (subaward path): querying RePORTER by PI name for unmapped NIH-grant scholars...");
   const mappedCwids = new Set(observations.map((o) => o.cwid));
-  const unmappedNihScholars = nihPool.filter((s) => !mappedCwids.has(s.cwid));
+  const unmappedNihScholars = nihPool.filter(
+    (s) => !mappedCwids.has(s.cwid) && !ruledOut.nameBlocked.has(s.cwid),
+  );
   console.log(`  ${unmappedNihScholars.length} unmapped NIH-grant scholars to probe.`);
 
   let nameQueryResolved = 0;
@@ -228,7 +243,11 @@ async function main() {
   console.log(`  ${unmappedNihScholars.length - nameQueryResolved - nameQuerySkipped} still unmapped.\n`);
 
   // Pass 4: aggregate per (cwid, profile_id), pick is_preferred.
-  const aggregated = aggregatePreferred(observations);
+  const kept = dropRuledOut(observations, ruledOut);
+  if (kept.length < observations.length) {
+    console.log(`Dropped ${observations.length - kept.length} observations of ruled-out links.`);
+  }
+  const aggregated = aggregatePreferred(kept);
   console.log(`Writing ${aggregated.length} (cwid, profile_id) rows to person_nih_profile...`);
 
   const verifiedAt = new Date();
