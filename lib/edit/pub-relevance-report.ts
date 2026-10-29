@@ -7,6 +7,18 @@
 
 export type PubRelevanceSource = "rule" | "llm" | "human";
 
+/**
+ * Is this publication a review? Its own marker, independent of cancer
+ * relevance (Jackie, 2026-10-29): MCC exports cancer-relevant reviews and
+ * cancer-relevant non-reviews separately, and only the second feeds the
+ * collaboration matrix. Read from `Publication.publicationType` (ReCiter's
+ * canonical type, which files systematic and scoping reviews and meta-analyses
+ * under "Review"), so no column stores it.
+ */
+export function isReviewPublicationType(type: string | null | undefined): boolean {
+  return type === "Review";
+}
+
 export type PubRelevanceMember = { cwid: string; name: string; programCode: string | null };
 
 export type PubRelevanceRow = {
@@ -15,7 +27,9 @@ export type PubRelevanceRow = {
   journal: string | null;
   year: number | null;
   publicationType: string | null;
-  /** The publication's confirmed authors who are research members of the center. */
+  /** `isReviewPublicationType(publicationType)`. */
+  isReview: boolean;
+  /** The publication's confirmed authors who are research or clinical members of the center. */
   members: PubRelevanceMember[];
   /** Null = the ETL has not decided it yet (new, or its model call failed). */
   relevant: boolean | null;
@@ -51,7 +65,15 @@ const STATUS_FILTERS: readonly PubRelevanceStatusFilter[] = [
   "not-scored",
 ];
 
-export type PubRelevanceParams = { year: number; status: PubRelevanceStatusFilter };
+/** Reviews only, non-reviews only, or both. */
+export type PubRelevanceKindFilter = "all" | "review" | "non-review";
+const KIND_FILTERS: readonly PubRelevanceKindFilter[] = ["all", "review", "non-review"];
+
+export type PubRelevanceParams = {
+  year: number;
+  status: PubRelevanceStatusFilter;
+  kind: PubRelevanceKindFilter;
+};
 
 /** The years the year select offers, newest first: this one and the three before. */
 export function pubRelevanceYears(now = new Date()): number[] {
@@ -63,17 +85,24 @@ export function parsePubRelevanceParams(sp: URLSearchParams, now = new Date()): 
   const years = pubRelevanceYears(now);
   const year = Number(sp.get("year"));
   const status = sp.get("status") as PubRelevanceStatusFilter | null;
+  const kind = sp.get("kind") as PubRelevanceKindFilter | null;
   return {
     year: years.includes(year) ? year : years[0],
     status: status && STATUS_FILTERS.includes(status) ? status : "all",
+    kind: kind && KIND_FILTERS.includes(kind) ? kind : "all",
   };
 }
 
-/** The rows a status filter selects, plus the per-status counts its segments show. */
+/**
+ * The rows the kind and status filters select, plus the per-status counts its
+ * segments show (within the kind).
+ */
 export function filterPubRelevance(
-  rows: ReadonlyArray<PubRelevanceRow>,
+  all: ReadonlyArray<PubRelevanceRow>,
   status: PubRelevanceStatusFilter,
+  kind: PubRelevanceKindFilter = "all",
 ): { rows: PubRelevanceRow[]; counts: Record<PubRelevanceStatusFilter, number> } {
+  const rows = kind === "all" ? all : all.filter((r) => r.isReview === (kind === "review"));
   const counts: Record<PubRelevanceStatusFilter, number> = {
     all: rows.length,
     ai: 0,
