@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  authoredBy,
   compareBibliography,
   isSuspectList,
   parseMyncbiDiscrepancyParams,
+  surnameKeys,
   type CitationItem,
 } from "@/lib/edit/myncbi-discrepancy-report";
 
@@ -26,6 +28,39 @@ describe("compareBibliography", () => {
   it("an empty list leaves everything extra, nothing missing", () => {
     const r = compareBibliography([], new Set(["5"]));
     expect([r.listed, r.matched, r.missing.length, r.extraPmids]).toEqual([0, 0, 0, ["5"]]);
+  });
+});
+
+describe("surnameKeys / authoredBy", () => {
+  it("takes the last word of each name, splitting hyphens and dropping suffixes", () => {
+    expect(surnameKeys("Ada M Lovelace-Byron Jr.", "Ada Lovelace")).toEqual(["lovelace", "byron"]);
+    expect(surnameKeys(null, "")).toEqual([]);
+  });
+
+  it("matches a surname among the authors, accent- and case-blind, hyphen parts included", () => {
+    expect(authoredBy("Babbage C, Lovelace A", ["lovelace"])).toBe(true);
+    expect(authoredBy("Babbage C, Byron-Lovelace AA", ["lovelace"])).toBe(true);
+    expect(authoredBy("Babbage C, Lövelace A", ["lovelace"])).toBe(true);
+    expect(authoredBy("Ceceli AO, Huang Y, Goldstein RZ", ["lovelace"])).toBe(false);
+    // An initial is not a surname: "Lovelace" in initials position never matches "a".
+    expect(authoredBy("Babbage A", ["a"])).toBe(false);
+  });
+
+  it("unknown authors or no surname to test count as authored", () => {
+    expect(authoredBy(null, ["lovelace"])).toBe(true);
+    expect(authoredBy("Babbage C", [])).toBe(true);
+  });
+
+  it("compareBibliography sets other people's papers apart from missing", () => {
+    const by = (pmid: string, authors: string | null) => ({ ...c(pmid), authors });
+    const r = compareBibliography(
+      [by("1", "Lovelace A"), by("2", "Babbage C"), by("3", null), by("4", "Babbage C")],
+      new Set(["4"]),
+      ["lovelace"],
+    );
+    expect(r.missing.map((m) => m.pmid)).toEqual(["1", "3"]);
+    expect(r.notAuthored.map((m) => m.pmid)).toEqual(["2"]);
+    expect(r.matched).toBe(1); // a confirmed paper is matched whoever the authors are
   });
 });
 

@@ -1339,6 +1339,7 @@ model MyncbiCitation {
   scholar    Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   citationId String  @map("citation_id") @db.VarChar(32)
   pmid       String? @db.VarChar(32)
+  authors    String? @db.Text
   title      String  @db.VarChar(1000)
   source     String? @db.VarChar(255)
   year       Int?
