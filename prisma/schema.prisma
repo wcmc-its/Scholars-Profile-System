@@ -2934,6 +2934,12 @@ model CenterPublicationRelevance {
   reviewedBy String?   @map("reviewed_by") @db.VarChar(32)
   reviewedAt DateTime? @map("reviewed_at")
 
+  /// Some author lists only non-WCM affiliations in PubMed
+  /// (`lib/edit/pubmed-affiliations.ts`): the collaborative publication
+  /// matrix's inter-institutional column. Null: not looked up yet, or PubMed
+  /// lists no affiliations.
+  externalAuthor Boolean? @map("external_author")
+
   center Center @relation(fields: [centerCode], references: [code], onDelete: Cascade)
 
   @@id([centerCode, pmid])

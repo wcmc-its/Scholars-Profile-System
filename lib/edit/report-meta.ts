@@ -72,6 +72,7 @@ export const REPORT_KEYS = [
   "16",
   "17",
   "18",
+  "19",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -233,6 +234,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Publication citation report",
     summary:
       "The center's publications in a period, each WCM author with their current program, and the cancer relevance answer. Downloads as EVAL's .xlsx.",
+    descriptionHtml: null,
+  },
+  "19": {
+    slug: "collaborative-publication-matrix",
+    name: "Collaborative publication matrix",
+    summary:
+      "Per program, how many cancer-relevant publications were inter-programmatic, intra-programmatic, inter-institutional or high impact. EVAL's matrix, with its xlsx.",
     descriptionHtml: null,
   },
 };

@@ -291,7 +291,7 @@ describe("loadReportLiveness", () => {
     });
     const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
     const meyer = result.get("meyer");
-    expect(meyer?.liveCount).toBe(7); // 1, 3, 4, 5, 6, 17, 18 — not 2 (zero funding rows)
+    expect(meyer?.liveCount).toBe(8); // 1, 3, 4, 5, 6, 17, 18, 19 — not 2 (zero funding rows)
     expect(meyer?.totalCount).toBe(REPORT_CATALOG_SIZE);
     expect(meyer?.lastRefreshedAt).toEqual(d1);
     expect(meyer?.perReport).toEqual([
@@ -303,6 +303,7 @@ describe("loadReportLiveness", () => {
       { n: 6, live: true, lastRefreshedAt: null },
       { n: 17, live: true, lastRefreshedAt: null },
       { n: 18, live: true, lastRefreshedAt: null },
+      { n: 19, live: true, lastRefreshedAt: null },
     ]);
   });
 
@@ -319,6 +320,7 @@ describe("loadReportLiveness", () => {
         { n: 6, live: false, lastRefreshedAt: null },
         { n: 17, live: false, lastRefreshedAt: null },
         { n: 18, live: false, lastRefreshedAt: null },
+        { n: 19, live: false, lastRefreshedAt: null },
       ],
       liveCount: 0,
       totalCount: REPORT_CATALOG_SIZE,
@@ -430,7 +432,7 @@ describe("loadReportLiveness", () => {
       ],
       db as never,
     );
-    expect(result.get("meyer")?.totalCount).toBe(8);
+    expect(result.get("meyer")?.totalCount).toBe(9);
     expect(result.get("surg")?.totalCount).toBe(2);
   });
 });

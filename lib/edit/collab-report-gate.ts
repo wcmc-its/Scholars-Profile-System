@@ -4,7 +4,8 @@
  * caller must be signed in (401), the center must exist (404), and
  * `canEditUnit` must pass: superuser, comms_steward, or the center's
  * Owner/Curator (403, denial logged). One copy, so the three downloads can't
- * drift apart on who may pull a scholar list.
+ * drift apart on who may pull a scholar list. Report 19's matrix download
+ * (`collab-pub-matrix/xlsx`) uses it too.
  *
  * Server-only (`@/lib/db`).
  */
