@@ -1,14 +1,15 @@
 /**
  * ORCID push — SPS → WCM Identity, through the ReCiter engine API.
  *
- * `scholar.orcid` is SPS's belief about a person's ORCID iD, from either of
- * two writers: the WCM Identity table (etl/identity) or the person confirming
- * it in `/edit` (which also stamps `orcid_confirmed_at`). Identity is the
- * AUTHORITY — ReCiter's retrieval and Publication Manager read it there — but
- * today it cannot hold a value: the Institutional Client's nightly rebuild PUTs
- * every WCM identity with `orcid: null` (IC #155), which is how it erased RPM's
- * 2026-04 bulk load. Until that fix ships, the durable record of a confirmation
- * is SPS's own row, and this step copies it back into Identity every night.
+ * Scholars is the ORCID AUTHORITY for its scholars: `scholar.orcid` is set only
+ * in Scholars (the person or a proxy on `/edit`, a librarian in the queue, the
+ * email auto-confirm). Every other system's iD, Identity's included
+ * (`etl/identity`), reaches Scholars as a candidate. WCM Identity is the
+ * downstream copy that ReCiter's retrieval and Publication Manager read, and this
+ * step makes it match `scholar.orcid` every night. It also re-heals a value the
+ * Institutional Client's rebuild once wiped (IC #155; IC #156 now preserves it).
+ * Where Scholars holds no iD and Identity does, Identity is left alone and
+ * `etl/identity` queues the iD, so ReCiter keeps the evidence meanwhile.
  *
  * Compare-then-write, per scholar, sequentially:
  *   - every active scholar with a non-null `orcid` (whichever writer set it):
@@ -205,15 +206,28 @@ async function main(): Promise<number> {
   }
   const dryRun = process.argv.includes("--dry-run") || process.env.ORCID_PUSH_DRY_RUN === "1";
 
-  const targets = await db.write.scholar.findMany({
-    where: { deletedAt: null, orcid: { not: null } },
-    select: { cwid: true, orcid: true },
-    orderBy: { cwid: "asc" },
-  });
-  const dismissals = await db.write.orcidDismissal.findMany({
-    select: { cwid: true, orcid: true },
-    orderBy: [{ cwid: "asc" }, { orcid: "asc" }],
-  });
+  // A sandbox.orcid.org sign-in (staging, #3115) yields a test iD, and its
+  // dismissals are of real iDs: staging and prod share ONE Identity table, so
+  // neither may ever reach it.
+  const sandboxCwids = new Set(
+    (
+      await db.write.orcidAuthentication.findMany({ where: { sandbox: true }, select: { cwid: true } })
+    ).map((a) => a.cwid),
+  );
+  const targets = (
+    await db.write.scholar.findMany({
+      where: { deletedAt: null, orcid: { not: null } },
+      select: { cwid: true, orcid: true },
+      orderBy: { cwid: "asc" },
+    })
+  ).filter((t) => !sandboxCwids.has(t.cwid));
+  const dismissals = (
+    await db.write.orcidDismissal.findMany({
+      select: { cwid: true, orcid: true },
+      orderBy: [{ cwid: "asc" }, { orcid: "asc" }],
+    })
+  ).filter((d) => !sandboxCwids.has(d.cwid));
+  if (sandboxCwids.size > 0) console.log(`Skipping ${sandboxCwids.size} sandbox-authenticated scholar(s).`);
   const { actions, contradictions } = buildActions(
     targets.map((s) => ({ cwid: s.cwid, orcid: s.orcid as string })),
     dismissals,

@@ -133,8 +133,9 @@ model Scholar {
   orcidConfirmedAt        DateTime? @map("orcid_confirmed_at")
   /// Who confirmed `orcid`: `self` | `proxy` (`POST /api/edit/orcid`, the real
   /// actor is or is not the scholar), `librarian` (`/edit/orcid-queue`) or
-  /// `email_verified` (etl/orcid-evidence's auto-confirm). `authenticated` is
-  /// reserved for #3115. Null = the iD came from WCM Identity, or none on file.
+  /// `email_verified` (etl/orcid-evidence's auto-confirm), or `authenticated`
+  /// (the scholar signed in to ORCID, #3115; see `OrcidAuthentication`). Null =
+  /// the iD came from WCM Identity, or none on file.
   /// Cleared with `orcid` on Remove and by the identity ETL's conflict rule.
   orcidConfirmMethod      String?   @map("orcid_confirm_method") @db.VarChar(16)
   /// The real actor's cwid for `self` / `proxy` / `librarian` (never an
@@ -184,13 +185,18 @@ model Scholar {
   nihProfiles          PersonNihProfile[]
   orcidCandidates      OrcidCandidate[]
   orcidDismissals      OrcidDismissal[]
+  orcidAuthentication  OrcidAuthentication?
   orcidEvidence        OrcidCandidateEvidence[]
   orcidQueueSamples    OrcidQueueSample[]
   reporterCandidates   ReporterProfileCandidate[]
   grantReviews         GrantAttributionReview[]
   grantScores          GrantAttributionScore[]
   wcmNamesake          WcmNamesake?
+  infoedBiosketches    InfoedBiosketch[]
+  myncbiBibliography   MyncbiBibliography?
+  myncbiCitations      MyncbiCitation[]
   clinicalTrials       PersonClinicalTrial[]
+  fundableWorkAuthors  FundableWorkAuthor[]
   datasetDeposits      PersonDatasetDeposit[]
   overviewGenerations  OverviewGeneration[]
   biosketchGenerations BiosketchGeneration[]
@@ -1000,9 +1006,56 @@ model OrcidDismissal {
   scholar     Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   orcid       String   @db.VarChar(19)
   dismissedAt DateTime @default(now()) @map("dismissed_at")
+  /// Who: the real actor's cwid (the scholar, a proxy, a librarian). Null on
+  /// rows written before queue v3 B1 that the audit backfill could not match.
+  dismissedBy String?  @map("dismissed_by") @db.VarChar(32)
+  /// Why (`OrcidDismissReason`): not_this_person | none_of_these |
+  /// other_confirmed (a different iD was confirmed, `keptOrcid`) | removed
+  /// (Remove of the iD on file) | duplicate_retired (the scholar's own second
+  /// ORCID record, `keptOrcid`) | belongs_to_other (confirmed for `otherCwid`).
+  reason      String?  @db.VarChar(32)
+  /// For other_confirmed and duplicate_retired: the iD confirmed in its place.
+  keptOrcid   String?  @map("kept_orcid") @db.VarChar(19)
+  /// For belongs_to_other: the scholar the iD was confirmed for.
+  otherCwid   String?  @map("other_cwid") @db.VarChar(32)
 
   @@id([cwid, orcid])
   @@map("orcid_dismissal")
+}
+
+/// When each (cwid, orcid) pair first entered the librarian queue. The
+/// evidence ETL inserts pairs it has not seen and never deletes, so the date
+/// survives the full replace of `orcid_candidate_evidence`. Rows from before
+/// queue v3 B1 were backfilled from the earliest candidate/evidence time: a
+/// floor, not the true first sighting. Drives the Oldest / Newest sorts.
+model OrcidPairSeen {
+  cwid          String   @db.VarChar(32)
+  orcid         String   @db.VarChar(19)
+  firstQueuedAt DateTime @default(now()) @map("first_queued_at")
+
+  @@id([cwid, orcid])
+  @@map("orcid_pair_seen")
+}
+
+/// #3115 — the scholar proved they own `orcid` by signing in to ORCID
+/// (`/authenticate` scope, `/api/edit/orcid/connect` → `/callback`). One row per
+/// scholar, replaced on re-connect, deleted with the iD on Remove. ORCID's member
+/// minimum requires storing the name, iD and token; the token is AES-256-GCM
+/// encrypted (`lib/edit/orcid-connect.ts`) and nothing reads it back.
+model OrcidAuthentication {
+  cwid            String    @id @db.VarChar(32)
+  scholar         Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  orcid           String    @db.VarChar(19)
+  /// The name ORCID returned with the token (may be empty when private).
+  name            String?   @db.VarChar(255)
+  accessTokenEnc  String    @map("access_token_enc") @db.VarChar(512)
+  scope           String    @db.VarChar(64)
+  expiresAt       DateTime? @map("expires_at")
+  /// true = issued by sandbox.orcid.org (staging); never pushed to Identity.
+  sandbox         Boolean
+  authenticatedAt DateTime  @default(now()) @map("authenticated_at")
+
+  @@map("orcid_authentication")
 }
 
 /// The evidence behind each ORCID candidate pair, for the librarian queue
@@ -1240,6 +1293,61 @@ model GrantAttributionRun {
 /// nightly by etl:ed (the LDAP task); read by the weekly grants scorer, which
 /// stops counting "held at WCM" as strong when it is above 0. A count only:
 /// never who they are.
+/// NIH biosketches harvested from InfoEd proposal PDFs (etl/infoed-biosketch), one row
+/// per (scholar, InfoEd document version). Text sections are for /edit and the overview
+/// generator, never published verbatim; Confidential proposals are never harvested.
+model InfoedBiosketch {
+  cwid              String   @db.VarChar(32)
+  scholar           Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// InfoEd `ProjDocVer.DocVersionID`.
+  docVersionId      String   @map("doc_version_id") @db.VarChar(64)
+  propNo            String   @map("prop_no") @db.VarChar(32)
+  uploadedAt        DateTime @map("uploaded_at")
+  /// "common" (NIH Biosketch Common Form, 2026+) | "legacy".
+  format            String   @db.VarChar(8)
+  /// "email" (SF424 profile email = CWID) | "name" (unique name match on the proposal).
+  attributedBy      String   @map("attributed_by") @db.VarChar(8)
+  orcid             String?  @db.VarChar(19)
+  personalStatement String?  @map("personal_statement") @db.Text
+  contributions     String?  @db.Text
+  honors            String?  @db.Text
+  myncbiUrl         String?  @map("myncbi_url") @db.VarChar(512)
+  extractedAt       DateTime @default(now()) @map("extracted_at")
+
+  @@id([cwid, docVersionId])
+  @@index([orcid])
+  @@map("infoed_biosketch")
+}
+
+/// A scholar's public MyNCBI bibliography, fetched from the URL on their own NIH
+/// biosketch (etl/myncbi). One row per scholar; `status` "ok" | "empty" | "error".
+model MyncbiBibliography {
+  cwid          String   @id @db.VarChar(32)
+  scholar       Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  url           String   @db.VarChar(512)
+  status        String   @db.VarChar(8)
+  error         String?  @db.VarChar(255)
+  citationCount Int      @map("citation_count")
+  fetchedAt     DateTime @map("fetched_at")
+
+  @@map("myncbi_bibliography")
+}
+
+/// One citation on a scholar's MyNCBI bibliography. `pmid` null for non-PubMed items.
+model MyncbiCitation {
+  cwid       String  @db.VarChar(32)
+  scholar    Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  citationId String  @map("citation_id") @db.VarChar(32)
+  pmid       String? @db.VarChar(32)
+  title      String  @db.VarChar(1000)
+  source     String? @db.VarChar(255)
+  year       Int?
+
+  @@id([cwid, citationId])
+  @@index([pmid])
+  @@map("myncbi_citation")
+}
+
 model WcmNamesake {
   cwid      String   @id @db.VarChar(32)
   scholar   Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
@@ -2741,6 +2849,11 @@ model CancerCenterFundingAward {
   cancerRelevantPromptHash    String?  @map("cancer_relevant_prompt_hash") @db.VarChar(12)
   cancerRelevantInputHash     String?  @map("cancer_relevant_input_hash") @db.VarChar(64)
   cancerRelevantInferredAt    DateTime? @map("cancer_relevant_inferred_at")
+  /// A reviewer's free-text note on the award (e.g. why it is under 100%
+  /// cancer-relevant), set on `/edit/reports` beside the percent and carried
+  /// into the CSV. Human-only: the import never writes it, except to carry a
+  /// prior cycle's note forward with the reviewer percent. NULL = no note.
+  reviewerNote                String?   @map("reviewer_note") @db.Text
   /// DT2A rule #4 (CCSG Data Guide p.7): "Only grant and contracts from NCI,
   /// NIH, or organizations listed in [the closed allowlist] are considered
   /// peer-reviewed." Fully deterministic — no Bedrock call, no `source`
@@ -4757,4 +4870,51 @@ model CtscFeedIssue {
 
   @@index([reason])
   @@map("ctsc_feed_issue")
+}
+
+/// A WCM conference abstract or preprint (OpenAlex) with a full-time faculty author (postdoc
+/// co-authors are linked too, never alone), scored
+/// for private-funding potential (industry + foundations) at ingest by etl/fundable-work.
+/// Read by `/edit/fundable-work`. Scored once; a re-run skips rows already here.
+model FundableWork {
+  /// OpenAlex work key, e.g. "W4391234567".
+  id              String   @id @db.VarChar(32)
+  /// "conference-abstract" | "preprint" (OpenAlex `type`).
+  type            String   @db.VarChar(32)
+  doi             String?  @db.VarChar(255)
+  title           String   @db.VarChar(1000)
+  abstract        String   @db.Text
+  /// Journal/server as OpenAlex names it ("Blood", "bioRxiv") — the conference itself is not a field.
+  venue           String?  @db.VarChar(255)
+  publicationDate DateTime @map("publication_date") @db.Date
+  /// 1-5, private-funding potential.
+  score           Int
+  /// "discovery" | "preclinical" | "clinical" | "population" | "methods".
+  stage           String   @db.VarChar(16)
+  modality        String?  @db.VarChar(255)
+  rationale       String   @db.Text
+  pitch           String   @db.Text
+  /// [{ name, kind, why }] — suggested funders.
+  funders         Json
+  model           String   @db.VarChar(128)
+  scoredAt        DateTime @default(now()) @map("scored_at")
+
+  authors FundableWorkAuthor[]
+
+  @@index([score])
+  @@map("fundable_work")
+}
+
+model FundableWorkAuthor {
+  workId   String @map("work_id") @db.VarChar(32)
+  cwid     String @db.VarChar(32)
+  /// OpenAlex `author_position`: "first" | "middle" | "last".
+  position String @db.VarChar(8)
+
+  work    FundableWork @relation(fields: [workId], references: [id], onDelete: Cascade)
+  scholar Scholar      @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@id([workId, cwid])
+  @@index([cwid])
+  @@map("fundable_work_author")
 }

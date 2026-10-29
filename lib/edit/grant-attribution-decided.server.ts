@@ -8,21 +8,21 @@
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { isWcmOrg } from "@/etl/reporter-grants/transform";
 import { doctoralDegree } from "@/lib/edit/honor-queue";
+import { formatPublishedName } from "@/lib/postnominal";
 
+import { evidenceLevel } from "./grant-attribution-board";
 import {
-  DECIDED_GROUP_PAGE_SIZE,
   DECIDED_PAGE_SIZE,
   DECIDED_TABS,
-  certainty,
   decidedTabOf,
   sortableName,
-  type DecidedGroup,
   type DecidedPage,
   type DecidedParams,
   type DecidedRow,
   type DecidedTab,
 } from "./grant-attribution-decided";
 import {
+  asRejectedPapers,
   decidingReason,
   type GrantAttributionAward,
   type GrantAttributionCue,
@@ -66,7 +66,14 @@ function asCues(v: unknown): StoredCue[] {
         typeof p.name === "string" &&
         Array.isArray(p.pmids) &&
         p.pmids.every((x) => typeof x === "string");
-      return { id: c.id, weight: c.weight, reason: c.reason, ...(ok ? { coPi: p } : {}) };
+      const rejected = asRejectedPapers(c.rejected);
+      return {
+        id: c.id,
+        weight: c.weight,
+        reason: c.reason,
+        ...(ok ? { coPi: p } : {}),
+        ...(rejected ? { rejected } : {}),
+      };
     });
 }
 
@@ -196,19 +203,16 @@ export async function loadDecidedPage(
   const counts = Object.fromEntries(
     DECIDED_TABS.map((t) => [t, { all: 0, curator: 0, auto: 0 }]),
   ) as DecidedPage["counts"];
-  const pendingByCwid = new Map<string, number>();
-  const tabByCwid = new Map<string, Partial<Record<DecidedTab, number>>>();
-  let changedTotal = 0;
+  const changedCounts = Object.fromEntries(
+    DECIDED_TABS.map((t) => [t, 0]),
+  ) as DecidedPage["changed"];
   const entries: Entry[] = [];
 
   for (const id of ids) {
     const sc = scoreOf.get(id);
     const rv = reviewOf.get(id);
     const cwid = sc?.cwid ?? rv!.cwid;
-    if (rv?.status === "pending") {
-      pendingByCwid.set(cwid, (pendingByCwid.get(cwid) ?? 0) + 1);
-      continue;
-    }
+    if (rv?.status === "pending") continue;
     if (activeRecency.has(id)) continue; // hidden for age: out of scope
     const cues = asCues(sc?.cues ?? rv?.cues);
     const band = sc?.band ?? rv?.band ?? "";
@@ -225,7 +229,13 @@ export async function loadDecidedPage(
 
     const recovered =
       cls.by === "auto" && cls.tab === "confirmed" ? (recoveredAt.get(id) ?? null) : null;
-    const changed = recovered !== null && (since === null || recovered > since);
+    const newer = (d: Date | null | undefined) => !!d && (since === null || d > since);
+    // Shown again, or newly hidden as someone else's, by the latest check.
+    const changed =
+      cls.by === "auto" &&
+      (cls.tab === "confirmed"
+        ? newer(recovered)
+        : cls.tab === "rejected" && newer(hiddenAt.get(id)));
     const when =
       cls.by === "curator"
         ? (rv?.decidedAt ?? null)
@@ -269,10 +279,7 @@ export async function loadDecidedPage(
     });
     counts[cls.tab].all++;
     counts[cls.tab][cls.by]++;
-    if (changed) changedTotal++;
-    const t = tabByCwid.get(cwid) ?? {};
-    t[cls.tab] = (t[cls.tab] ?? 0) + 1;
-    tabByCwid.set(cwid, t);
+    if (changed) changedCounts[cls.tab]++;
   }
 
   const needle = params.q.toLowerCase();
@@ -281,67 +288,29 @@ export async function loadDecidedPage(
       e.tab === params.tab &&
       (params.by === "all" || e.by === params.by) &&
       (!params.changed || e.changed) &&
+      (params.level === "all" || evidenceLevel(e.score, e.cues) === params.level) &&
       (!needle || e.haystack.includes(needle)),
   );
-  const cmp: Record<DecidedParams["sort"], (a: Entry, b: Entry) => number> = {
-    least: (a, b) =>
-      certainty(params.tab, a.score) - certainty(params.tab, b.score) ||
-      a.name.localeCompare(b.name),
-    recent: (a, b) =>
-      (b.when?.getTime() ?? 0) - (a.when?.getTime() ?? 0) || a.name.localeCompare(b.name),
-    scholar: (a, b) =>
-      a.name.localeCompare(b.name) ||
-      certainty(params.tab, a.score) - certainty(params.tab, b.score),
-  };
-  matching.sort(cmp[params.sort]);
+  const byName = (a: Entry, b: Entry) => a.name.localeCompare(b.name);
+  matching.sort(
+    params.sort === "name"
+      ? (a, b) => byName(a, b) || b.score - a.score
+      : params.sort === "low"
+        ? (a, b) => a.score - b.score || byName(a, b)
+        : (a, b) => b.score - a.score || byName(a, b),
+  );
 
-  let pageEntries: Entry[];
-  let groups: Array<{ cwid: string; rows: Entry[] }> | null = null;
-  let matched: number;
-  if (params.group) {
-    const byCwid = new Map<string, Entry[]>();
-    for (const e of matching) byCwid.set(e.cwid, [...(byCwid.get(e.cwid) ?? []), e]);
-    const all = [...byCwid.entries()].map(([cwid, rows]) => ({ cwid, rows }));
-    matched = all.length;
-    groups = all.slice(
-      (params.page - 1) * DECIDED_GROUP_PAGE_SIZE,
-      params.page * DECIDED_GROUP_PAGE_SIZE,
-    );
-    pageEntries = groups.flatMap((g) => g.rows);
-  } else {
-    matched = matching.length;
-    pageEntries = matching.slice(
-      (params.page - 1) * DECIDED_PAGE_SIZE,
-      params.page * DECIDED_PAGE_SIZE,
-    );
-  }
+  const pageEntries = params.all
+    ? matching
+    : matching.slice((params.page - 1) * DECIDED_PAGE_SIZE, params.page * DECIDED_PAGE_SIZE);
 
-  const rows = opts.hydrate === false ? [] : await hydrate(client, pageEntries);
-  const rowOf = new Map(rows.map((r) => [r.grantId, r]));
   return {
     params,
     counts,
-    changed: changedTotal,
-    matched,
-    rows: params.group ? [] : rows,
-    groups: groups
-      ? groups.map((g): DecidedGroup => {
-          const t = tabByCwid.get(g.cwid) ?? {};
-          const pending = pendingByCwid.get(g.cwid) ?? 0;
-          const elsewhere: DecidedGroup["elsewhere"] = {};
-          for (const k of DECIDED_TABS) if (k !== params.tab && t[k]) elsewhere[k] = t[k];
-          if (pending) elsewhere.pending = pending;
-          const here = t[params.tab] ?? 0;
-          return {
-            cwid: g.cwid,
-            shown: g.rows.length,
-            rows: g.rows.map((e) => rowOf.get(e.grantId)).filter((r): r is DecidedRow => !!r),
-            here,
-            total: here + Object.values(elsewhere).reduce((s, n) => s + (n ?? 0), 0),
-            elsewhere,
-          };
-        })
-      : null,
+    changed: changedCounts,
+    matched: matching.length,
+    unprovenIds: entries.filter((e) => e.tab === "unproven").map((e) => e.grantId),
+    rows: opts.hydrate === false ? [] : await hydrate(client, pageEntries),
   };
 }
 
@@ -363,6 +332,7 @@ async function hydrate(client: Client, entries: Entry[]): Promise<DecidedRow[]> 
         preferredName: true,
         postnominal: true,
         roleCategory: true,
+        primaryTitle: true,
         primaryDepartment: true,
       },
     }),
@@ -423,6 +393,7 @@ async function hydrate(client: Client, entries: Entry[]): Promise<DecidedRow[]> 
       tab: e.tab,
       by: e.by,
       was: e.was,
+      changed: e.changed,
       stillHidden: e.stillHidden,
       when: e.when ? e.when.toISOString() : null,
       decidedByName: e.decidedByCwid
@@ -438,7 +409,13 @@ async function hydrate(client: Client, entries: Entry[]): Promise<DecidedRow[]> 
         cwid: e.cwid,
         slug: s?.slug ?? null,
         name: e.name,
+        displayName: formatPublishedName(
+          s?.preferredName ?? s?.fullName ?? e.cwid,
+          s?.postnominal ?? null,
+          s?.roleCategory ?? null,
+        ),
         degrees: s?.postnominal ?? null,
+        title: s?.primaryTitle ?? null,
         department: s?.primaryDepartment ?? null,
         career: doctorate.get(e.cwid) ?? null,
         names: [s?.preferredName, s?.fullName].filter((n): n is string => !!n),

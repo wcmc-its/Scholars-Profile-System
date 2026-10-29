@@ -18,6 +18,7 @@ vi.mock("@aws-sdk/credential-providers", () => ({ fromNodeProviderChain: () => u
 vi.mock("@/lib/llm/models", () => ({
   DEFAULT_GENERATE_MODEL: "test-model",
   modelAcceptsTemperature: () => false,
+  bedrockCallOptions: () => ({}),
 }));
 vi.mock("@/lib/edit/overview-generator", () => ({
   groundOverviewDraft: mockGround,

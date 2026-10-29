@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregatePreferred,
+  dropRuledOut,
   namesMatch,
   resolveByNameFallback,
   resolveByPiNameQuery,
   resolveProjectGrantJoin,
+  ruledOutLinks,
   selectNihScholarPool,
   type GrantRowForResolution,
   type PoolGrantRow,
@@ -70,6 +72,35 @@ describe("namesMatch", () => {
   it("preserves hyphenated last names", () => {
     expect(namesMatch("Maria T Diaz-Meco", "Maria Diaz-Meco")).toBe(true);
     expect(namesMatch("Maria Meco", "Maria Diaz-Meco")).toBe(false);
+  });
+
+  // #3071: a middle initial matched the other person's first name, so a
+  // spouse's NIH profile passed as the scholar's.
+  it("does not let a middle initial stand for the other side's first name", () => {
+    expect(namesMatch("Arthur M Doe", "Mary E Doe")).toBe(false);
+    expect(namesMatch("Mary E Doe", "Arthur M Doe")).toBe(false);
+  });
+
+  it("matches a full given name in any position (going by a middle name)", () => {
+    expect(namesMatch("R Brad Doe", "Brad Doe")).toBe(true);
+    expect(namesMatch("Ana Lucia Doe", "Lucia Doe")).toBe(true);
+    expect(namesMatch("Lucia Doe", "Ana Lucia Doe")).toBe(true);
+  });
+
+  it("matches an initial against the first name, either side", () => {
+    expect(namesMatch("J Doe", "John Doe")).toBe(true);
+    expect(namesMatch("John Q Doe", "J Doe")).toBe(true);
+    expect(namesMatch("J Q Doe", "J R Doe")).toBe(true);
+  });
+
+  it("matches a short form that starts the other first name (3+ letters)", () => {
+    expect(namesMatch("Ben S Doe", "Benjamin S Doe")).toBe(true);
+    expect(namesMatch("Sarah Doe", "Sara Doe")).toBe(true);
+    expect(namesMatch("Su Doe", "Susan Doe")).toBe(false);
+  });
+
+  it("trade-off: an initial no longer reaches a middle-name goer", () => {
+    expect(namesMatch("J M Doe", "Michael Doe")).toBe(false);
   });
 });
 
@@ -397,5 +428,52 @@ describe("resolveByPiNameQuery", () => {
     ];
     const out = resolveByPiNameQuery("Jane Doe", results);
     expect(out?.profileId).toBe(200);
+  });
+});
+
+describe("ruled-out links (#3071)", () => {
+  const obs = (
+    cwid: string,
+    profileId: number,
+    resolutionSource: ResolvedObservation["resolutionSource"],
+  ) => ({
+    cwid,
+    profileId,
+    fullName: "Pat Example",
+    projectEndDate: null,
+    resolutionSource,
+  });
+
+  it("drops a rejected or revoked pair from any source and keeps the rest", () => {
+    const ruled = ruledOutLinks([
+      { cwid: "aaa1", externalProfileId: 1, status: "rejected" },
+      { cwid: "bbb2", externalProfileId: 2, status: "confirmed" },
+    ]);
+    const kept = dropRuledOut(
+      [obs("aaa1", 1, "grant_join_pi"), obs("aaa1", 9, "name_query"), obs("bbb2", 2, "name_query")],
+      ruled,
+    );
+    expect(kept.map((o) => `${o.cwid}:${o.profileId}`)).toEqual(["aaa1:9", "bbb2:2"]);
+  });
+
+  it("gives a scholar with a revoked link no name-only link, but keeps a grant join", () => {
+    const ruled = ruledOutLinks([{ cwid: "aaa1", externalProfileId: 1, status: "revoked" }]);
+    expect([...ruled.nameBlocked]).toEqual(["aaa1"]);
+    const kept = dropRuledOut(
+      [
+        obs("aaa1", 1, "name_query"),
+        obs("aaa1", 7, "name_query"),
+        obs("aaa1", 8, "name_match"),
+        obs("aaa1", 9, "grant_join_contact"),
+      ],
+      ruled,
+    );
+    expect(kept.map((o) => o.profileId)).toEqual([9]);
+  });
+
+  it("does not name-block on a rejected proposal alone", () => {
+    const ruled = ruledOutLinks([{ cwid: "aaa1", externalProfileId: 1, status: "rejected" }]);
+    expect(ruled.nameBlocked.size).toBe(0);
+    expect(dropRuledOut([obs("aaa1", 7, "name_query")], ruled)).toHaveLength(1);
   });
 });

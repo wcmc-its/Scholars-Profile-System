@@ -140,3 +140,20 @@ export function planAward(
   }
   return pending ? { ...NOTHING, review: "withdraw" } : NOTHING;
 }
+
+/**
+ * Pending reviews whose award this run no longer holds: its NIH profile was
+ * unlinked, or it aged out of the fetch, and the reconcile deletes the grant
+ * row. The scorer never sees the award again, so nothing else would withdraw
+ * the card. Same scope as the reconcile: a scholar whose fetch errored keeps
+ * their cards. Decided reviews are left alone (the caller passes pending only).
+ */
+export function orphanedPendingReviews(
+  pending: ReadonlyArray<{ grantExternalId: string; cwid: string }>,
+  keptIds: ReadonlySet<string>,
+  erroredCwids: ReadonlySet<string>,
+): string[] {
+  return pending
+    .filter((r) => !keptIds.has(r.grantExternalId) && !erroredCwids.has(r.cwid))
+    .map((r) => r.grantExternalId);
+}

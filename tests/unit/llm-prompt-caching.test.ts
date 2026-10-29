@@ -38,6 +38,7 @@ vi.mock("@aws-sdk/credential-providers", () => ({ fromNodeProviderChain: () => u
 vi.mock("@/lib/llm/models", () => ({
   DEFAULT_GENERATE_MODEL: "test-model",
   modelAcceptsTemperature: () => false,
+  bedrockCallOptions: () => ({}),
 }));
 // The cv route's non-LLM collaborators, stubbed to the happy path so POST reaches its one
 // `generateText` call: flag on, request authorized + under the rate cap, one scholar with no

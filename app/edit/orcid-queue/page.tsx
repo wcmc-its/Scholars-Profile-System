@@ -6,17 +6,19 @@
  * institution in the record's affiliations, papers shared with the scholar's
  * publications, name agreement, and competing scholars or iDs.
  *
- * Band tabs (Email verified, Strong, Shared papers, Moderate, Weak) plus
- * Conflicts, where the scholar already holds a different iD. `?tab=` picks
- * one (default Strong); the server loads that tab's rows and every tab's
- * count. Strong and Shared papers carry the sample gate: a passed sample of 50
- * unlocks "Confirm remaining N".
+ * v3 (Roadmap/orcid-queue-v3-redesign-plan.md, PR A): master–detail. The
+ * server loads every scholar in the queue as a list summary; the client
+ * scores, searches, filters and sorts them, and fetches the selected
+ * scholar's card from `GET /api/edit/orcid-queue/scholar`. The band tabs, the
+ * sample gate and bulk confirm are gone.
  *
- * v2: one card per scholar with every candidate iD; tab counts are scholars.
- * `type` / `unit` / `source` (the filter bar) narrow the list, the counts, the
- * sample and bulk confirm. The filter-bar facets load beside the queue; when
- * they fail the queue still renders (the URL's filter still applies) and the
- * bar offers the source filter only.
+ * `type` / `unit` / `source` (the server half of the filter bar) narrow the
+ * list. The filter-bar facets load beside the queue; when they fail the queue
+ * still renders (the URL's filter still applies) and the bar offers the source
+ * filter only.
+ *
+ * v2.1: each new work's Publication Manager link uses `PUBLICATION_MANAGER_URL`
+ * (cdk/lib/app-stack.ts, per env; https only, else the SPS-wide default).
  *
  * Order of checks, every GET: session, then the flag (`ORCID_LIBRARIAN_QUEUE`
  * off ⇒ 404 for everyone), then `requireSuperuserGet` (librarians are
@@ -36,8 +38,13 @@ import { getSession } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { isOrcidLibrarianQueueEnabled, parseOrcidQueueFilter } from "@/lib/edit/orcid-queue";
+import {
+  isOrcidLibrarianQueueEnabled,
+  parseOrcidQueueFilter,
+  publicationManagerBaseUrl,
+} from "@/lib/edit/orcid-queue";
 import { loadOrcidQueue } from "@/lib/edit/orcid-queue.server";
+import { ORCID_TAB_URL } from "@/lib/edit/request-a-change";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +70,12 @@ export default async function OrcidQueuePage({
   }
   // Superuser re-check on every GET. Emits the `edit_authz_denied` line.
   if (requireSuperuserGet({ session, path: BASE_PATH, targetId: "orcid-queue" }) !== null) {
+    // A deep link for one person (PM's "Change in Scholars") sends anyone without
+    // queue rights to that person's ORCID tab, which runs its own edit check.
+    const q = (await searchParams)?.q;
+    if (typeof q === "string" && /^[a-z0-9]{2,16}$/i.test(q.trim())) {
+      redirect(ORCID_TAB_URL.replace("{cwid}", encodeURIComponent(q.trim().toLowerCase())));
+    }
     return (
       <ConsoleShell
         active="orcid-queue"
@@ -76,10 +89,9 @@ export default async function OrcidQueuePage({
   }
 
   const params = (await searchParams) ?? {};
-  const tab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
   const filter = parseOrcidQueueFilter(params);
   const [data, rawSession, pendingSlugRequests, pendingHonors, facets] = await Promise.all([
-    loadOrcidQueue(db.read, tab, filter),
+    loadOrcidQueue(db.read, filter),
     getSession(),
     isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
@@ -106,8 +118,8 @@ export default async function OrcidQueuePage({
       <div className="mb-[22px] flex flex-col gap-1.5">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">ORCID queue</h1>
         <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
-          ORCID iDs that may belong to a scholar, one card per scholar, with the evidence from each
-          public ORCID record. A confirmed iD goes on file and reaches WCM Identity overnight.
+          ORCID iDs that may belong to a scholar, with the evidence from each public ORCID record. A
+          confirmed iD goes on file and reaches WCM Identity overnight.
         </p>
       </div>
       <OrcidQueue
@@ -115,6 +127,7 @@ export default async function OrcidQueuePage({
         facets={facets}
         basePath={BASE_PATH}
         readOnly={rawSession ? impersonationActive(rawSession, nowSeconds()) : false}
+        pmBaseUrl={publicationManagerBaseUrl()}
       />
     </ConsoleShell>
   );

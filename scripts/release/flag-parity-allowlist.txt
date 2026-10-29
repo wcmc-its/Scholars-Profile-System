@@ -23,6 +23,9 @@ NCBI_API_KEY
 OPENALEX_MAILTO
 ORCID_CLIENT_ID                     # etl/orcid-registry: optional /read-public token; unset = anonymous pub.orcid.org pool. The deployed weekly run is anonymous BY DESIGN until scholars/<env>/orcid-api is wired to the ETL base family (and the app task, for the Connect-your-iD OAuth) — a new secret is a cdk deploy, not a merge
 ORCID_CLIENT_SECRET                 # with ORCID_CLIENT_ID
+ORCID_CONNECT_CLIENT_ID             # #3115 Connect-your-iD member client; from scholars/<env>/orcid-api once it exists (a new secret ref breaks task start if absent). Unset = /api/edit/orcid/connect 500s; ORCID_CONNECT is off both envs until then
+ORCID_CONNECT_CLIENT_SECRET         # with ORCID_CONNECT_CLIENT_ID
+ORCID_CONNECT_TOKEN_KEY             # with ORCID_CONNECT_CLIENT_ID (AES key for the stored token)
 SERPAPI_KEY
 
 # --- SAML/session optional overrides (lib/auth/config.ts optionalEnv(), safe code default) ---
@@ -35,14 +38,14 @@ SESSION_COOKIE_NAME       # falls back to "__Secure-sps_session"
 # --- code-default tunables: numeric/mode levers with baked-in defaults ---
 BIOSKETCH_GENERATE_MODEL
 CLIPS_LOOKBACK_DAYS                 # etl:news-clips S3 re-read window (code default 30 days)
-CANCER_FUNDING_MODEL                # NCI Table 2A inference model rollback lever (code default Sonnet 4.5)
+CANCER_FUNDING_MODEL                # NCI Table 2A inference model rollback lever (code default Sonnet 5.5)
 EDIT_BIOSKETCH_GENERATE_RATE_LIMIT
 EDIT_CV_EXPORT_RATE_LIMIT           # CV-export Bedrock cap (code default 10/hr)
 GRANT_MATCHER_DENSE_REL
 GRANT_MATCHER_REL_BOOST
 IMPERSONATION_READONLY
 IMPERSONATION_TTL_SECONDS
-MATCHA_EXTRACT_MODEL                # Matcha concept-extractor model rollback lever (code default Sonnet 4.5)
+MATCHA_EXTRACT_MODEL                # Matcha concept-extractor model rollback lever (code default Sonnet 5.5)
 OVERVIEW_GENERATE_MODEL
 OVERVIEW_GENERATE_TEMPERATURE
 RECITER_REFRESH_DELAY_MINUTES

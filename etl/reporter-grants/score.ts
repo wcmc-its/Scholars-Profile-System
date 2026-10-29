@@ -52,13 +52,15 @@ export type CueId =
   | "timeline_unlikely"
   | "middle_initial_conflict"
   | "prior_institution"
+  | "affiliate_org"
   | "copi_coauthor"
   | "topic_match"
   | "topic_mismatch"
   | "profile_proven"
   | "name_rare"
   | "name_common"
-  | "pi_name_mismatch";
+  | "pi_name_mismatch"
+  | "pi_given_name_mismatch";
 
 export interface CueHit {
   id: CueId;
@@ -71,6 +73,9 @@ export interface CueHit {
   /** Cue 6 only: the co-PI and the scholar's PMIDs they co-authored, so the
    *  queue can name them and list the papers. */
   coPi?: { name: string; pmids: string[]; total: number };
+  /** Cue 2 only: the rejected papers RePORTER links to the award (capped), with
+   *  PubMed's title when the ETL could fetch it, so the queue can list them. */
+  rejected?: Array<{ pmid: string; title: string | null }>;
 }
 
 export interface AttributionScore {
@@ -101,8 +106,10 @@ export const WEIGHTS = {
   /** A confirmed publication of the scholar cites the award (RePORTER linkage
    *  or ReCiter's grant citation). The #3088 baseline's strongest tie. */
   pub_linked: 5,
-  /** WCM in the award's org history. Name-only profiles only: for a grant-join
-   *  profile every candidate award is WCM's, so it says nothing (#3092). */
+  /** WCM in the award's org history. For a grant-join profile only when the
+   *  NIH PI has the scholar's first and last name and no other WCM person
+   *  shares it: the join's failure is another WCM person with a similar name
+   *  (#3092), which those two checks rule out. */
   wcm_org: 5,
   /** WCM in the award's org history, but the WCM directory has another person,
    *  current or former, who could hold an NIH award and shares the scholar's
@@ -133,6 +140,10 @@ export const WEIGHTS = {
   /** The award's institution and years match a degree the scholar earned
    *  there. */
   prior_institution: 2,
+  /** The award was held at a WCM affiliate (`WCM_AFFILIATES`), where many WCM
+   *  faculty work. Weaker than WCM itself: the affiliate has investigators of
+   *  its own. */
+  affiliate_org: 2,
   /** A co-PI on the award co-authored at least COAUTHOR_MIN_PAPERS of the
    *  scholar's confirmed papers. */
   copi_coauthor: 2,
@@ -158,6 +169,12 @@ export const WEIGHTS = {
    *  override, because people change surnames: with a strong tie the other way
    *  it queues (rule 2). Staging 2026-10-25: 102 awards, 11 scholars, 60 shown. */
   pi_name_mismatch: -5,
+  /** RePORTER's PI on our NIH profile shares the scholar's surname but not a
+   *  first name (`piGivenNameConflicts`): a relative or a namesake, e.g. a
+   *  spouse whose co-authored papers also cite the awards. Same weight and
+   *  effect as pi_name_mismatch. Staging 2026-10-27: 10 scholar/PI pairs, 11
+   *  shown awards. */
+  pi_given_name_mismatch: -5,
 } as const satisfies Record<CueId, number>;
 
 /** NIH PI profiles sharing the scholar's name at or above which it is common
@@ -213,6 +230,9 @@ export interface AttributionEvidence {
   policy: CorroborationPolicy;
   /** WCM anywhere in the award's org history. */
   wcmOrgHistory: boolean;
+  /** The WCM affiliate in the award's org history (`affiliateOrgMatch`), or
+   *  null. Absent in older callers. */
+  affiliateOrg?: string | null;
   /** A confirmed publication of the scholar is linked to the award. */
   publicationLinked: boolean;
   /** NIH activity code (R01, F31, ...), or null when unparseable. */
@@ -225,7 +245,7 @@ export interface AttributionEvidence {
   /** Cue 2. null ⇒ the scholar's ReCiter rejections are unavailable.
    *  `linkedTotal` null ⇒ the core is over RePORTER's offset cap, so its true
    *  link count is unknown and it counts as a large set. */
-  rejected: { overlap: number; linkedTotal: number | null } | null;
+  rejected: { overlap: number; linkedTotal: number | null; pmids?: string[] } | null;
   /** Cue 3. The scholar's earliest and latest doctoral degree years, or null
    *  when none is on file. */
   doctoralYears: { earliest: number; latest: number } | null;
@@ -260,6 +280,13 @@ export interface AttributionEvidence {
    *  (`piSurnameMatches`). null ⇒ no PI name to compare. Absent in older
    *  callers. */
   piSurnameMatches?: boolean | null;
+  /** Whether that PI, with the scholar's surname, has a first name the
+   *  scholar's names rule out (`piGivenNameConflicts`). null ⇒ not compared.
+   *  Absent in older callers. */
+  piGivenNameConflicts?: boolean | null;
+  /** Whether that PI's first name is one of the scholar's names
+   *  (`piGivenNameAgrees`). null ⇒ not compared. Absent in older callers. */
+  piGivenNameAgrees?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +503,63 @@ export function piSurnameMatches(
 }
 
 /**
+ * Whether RePORTER's PI name, which carries the scholar's surname, has a first
+ * name the scholar's names rule out: they share no other full word, no name
+ * word contains another (Beth in Elizabeth), and RePORTER's first given
+ * initial starts none of the scholar's words. Lenient on purpose: a middle
+ * name in use ("R. Brad Jones", "Maria Virginia Pascual") shares a full word,
+ * and an initial-only first name rarely conflicts. null ⇒ the surnames don't
+ * match or there is nothing to compare. Pure.
+ */
+export function piGivenNameConflicts(
+  piName: string | null | undefined,
+  scholarNames: ReadonlyArray<string | null | undefined>,
+): boolean | null {
+  if (piSurnameMatches(piName, scholarNames) !== true) return null;
+  const raw = (piName ?? "").trim();
+  const words = (n: string) =>
+    n
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .split(/[\s,.\-']+/)
+      .map((w) => w.replace(/[^a-z]/g, ""))
+      .filter((w) => w.length > 0);
+  const theirs = words(raw);
+  const ours = new Set(scholarNames.flatMap((n) => (n ? words(n) : [])));
+  const first = (raw.includes(",") ? words(raw.split(",")[1] ?? "") : theirs)[0];
+  if (!first || ours.size === 0) return null;
+  // The surname is one shared full word; a second one is a given name.
+  if (theirs.filter((w) => w.length >= 2 && ours.has(w)).length >= 2) return false;
+  for (const x of theirs)
+    for (const y of ours)
+      if (x !== y && x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x))) return false;
+  // Initials of the scholar's given names only: the shared surname's would
+  // pass a "Charles Choi" for a "Mary Choi".
+  for (const y of ours) if (!(y.length >= 2 && theirs.includes(y)) && y[0] === first[0]) return false;
+  return true;
+}
+
+/**
+ * Whether RePORTER's PI name, which carries the scholar's surname, has a full
+ * first name (not an initial) that is one of the scholar's names. Stricter
+ * than `piGivenNameConflicts`, which lets an initial or a nickname through:
+ * this is what lets WCM count on a grant-join profile. null ⇒ the surnames
+ * don't match or there is nothing to compare. Pure.
+ */
+export function piGivenNameAgrees(
+  piName: string | null | undefined,
+  scholarNames: ReadonlyArray<string | null | undefined>,
+): boolean | null {
+  if (piSurnameMatches(piName, scholarNames) !== true) return null;
+  const raw = (piName ?? "").trim();
+  const first = nameWords(raw.includes(",") ? (raw.split(",")[1] ?? "") : raw)[0];
+  const ours = new Set(scholarNames.flatMap((n) => (n ? nameWords(n) : [])));
+  if (ours.size === 0) return null;
+  return first !== undefined && ours.has(first);
+}
+
+/**
  * True when the RePORTER PI's middle initial matches neither a middle nor a
  * first initial of the scholar (some people go by their middle name). null when
  * either side has no middle initial to compare. Pure.
@@ -679,6 +763,22 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
       add("wcm_org", "Held at WCM at some point, and the NIH profile was matched by name only");
     }
   }
+  // A grant-join profile: WCM counts only once the name rules out the other
+  // WCM person the join may have paired (#3092).
+  if (
+    e.policy === "publication-only" &&
+    e.wcmOrgHistory &&
+    e.piGivenNameAgrees === true &&
+    e.wcmNamesakes === 0
+  ) {
+    add(
+      "wcm_org",
+      "Held at WCM, and the NIH profile's PI has the scholar's name, which no other WCM person shares",
+    );
+  }
+  if (e.affiliateOrg) {
+    add("affiliate_org", `Held at ${e.affiliateOrg}, a WCM affiliate`);
+  }
 
   if (e.infoedOther?.piLevel) {
     if (e.infoedOther.profileNameMatchesOther) {
@@ -702,6 +802,8 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
           : `${overlap} of the ${linkedTotal} papers RePORTER links to this award were rejected ` +
               `in ReCiter as not the scholar's`,
       );
+      const pmids = e.rejected.pmids ?? [];
+      if (pmids.length > 0) hits[hits.length - 1]!.rejected = pmids.map((pmid) => ({ pmid, title: null }));
     }
   }
 
@@ -721,10 +823,15 @@ export function scoreAttribution(e: AttributionEvidence): AttributionScore {
   if (e.priorInstitution) {
     add("prior_institution", `Held at an institution the scholar trained at (${e.priorInstitution})`);
   }
-  const piMismatch = e.piSurnameMatches === false;
-  if (piMismatch) {
+  const surnameMismatch = e.piSurnameMatches === false;
+  if (surnameMismatch) {
     add("pi_name_mismatch", "The NIH profile's PI has a different surname from the scholar");
   }
+  const givenMismatch = !surnameMismatch && e.piGivenNameConflicts === true;
+  if (givenMismatch) {
+    add("pi_given_name_mismatch", "The NIH profile's PI has the scholar's surname but a different first name");
+  }
+  const piMismatch = surnameMismatch || givenMismatch;
   // A profile that is not the scholar's vouches for nothing.
   if (!piMismatch && e.profileProven?.kind === "matched") {
     add("profile_proven", "The award is on the scholar's NIH profile that was matched by their publications");

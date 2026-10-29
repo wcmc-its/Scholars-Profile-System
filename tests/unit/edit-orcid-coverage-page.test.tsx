@@ -154,7 +154,7 @@ describe("/edit/orcid-coverage", () => {
     const tiles = page.getByTestId("orcid-coverage-tiles").textContent;
     expect(tiles).toContain("50.0%asserted · 75.0% with strong inference");
     // The asserted split: f1 confirmed its iD here, f3's came from Identity.
-    expect(tiles).toContain("2 of 4 asserted (1 confirmed here, 1 from Identity or RPM admin)");
+    expect(tiles).toContain("2 of 4 asserted (1 confirmed here, 1 unconfirmed, from Identity)");
     expect(tiles).toContain("+1 more by strong inference");
     const byRole = within(page.getByTestId("orcid-coverage-by-role"));
     expect(byRole.getByText("Full-time faculty")).toBeTruthy();

@@ -17,11 +17,18 @@ import {
   topicOverlap,
   type AttributionEvidence,
 } from "./score";
-import { isWcmOrg, type CorroborationPolicy, type GroupedProject } from "./transform";
+import {
+  affiliateOrgMatch,
+  isWcmOrg,
+  type CorroborationPolicy,
+  type GroupedProject,
+} from "./transform";
 import { parseFirstLast } from "@/etl/reporter-grants/v2";
 
 /** Shared PMIDs kept on cue 6 for the queue to list. */
 const COPI_PMIDS_KEPT = 20;
+/** Rejected PMIDs kept on cue 2 for the queue to list. */
+const REJECTED_PMIDS_KEPT = 20;
 
 type NamePair = { fullName: string; preferredName: string } | undefined;
 
@@ -131,6 +138,7 @@ export function buildAwardEvidence(args: {
   const evidence: AttributionEvidence = {
     policy: args.policy,
     wcmOrgHistory: isWcmOrg(group.orgName),
+    affiliateOrg: affiliateOrgMatch(group.orgHistory),
     publicationLinked: args.linkedViaGrantPub || [...linked].some((p) => facts.pmids.has(p)),
     activityCode: parseNihAward(group.coreProjectNum).mechanism,
     startYear: firstHeldYear(group.orgHistory),
@@ -142,10 +150,14 @@ export function buildAwardEvidence(args: {
       namesMatch,
     }),
     rejected: facts.rejected
-      ? {
-          overlap: [...linked].filter((p) => facts.rejected!.has(p)).length,
-          linkedTotal: args.linkedRestricted ? null : linked.size,
-        }
+      ? (() => {
+          const hit = [...linked].filter((p) => facts.rejected!.has(p));
+          return {
+            overlap: hit.length,
+            linkedTotal: args.linkedRestricted ? null : linked.size,
+            pmids: hit.slice(0, REJECTED_PMIDS_KEPT),
+          };
+        })()
       : null,
     doctoralYears: facts.doctoralYears,
     middleInitialConflict: middleInitialConflict(

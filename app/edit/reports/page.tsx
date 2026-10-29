@@ -235,6 +235,20 @@ export default async function EditReportsIndexPage({
     ...(grantAttributionScopes.size > 0
       ? [catalogEntry(meta, 14, await loadReportAccessPopoverProps(GRANT_ATTRIBUTION_REPORT, session))]
       : []),
+    ...(session.isSuperuser
+      ? [
+          catalogEntry(meta, 15, {
+            mode: "unit",
+            audience: "Superusers",
+            rule: "Only superusers can run this report.",
+          }),
+          catalogEntry(meta, 16, {
+            mode: "unit",
+            audience: "Superusers",
+            rule: "Only superusers can run this report.",
+          }),
+        ]
+      : []),
   ];
   const institutionUnit = institutionReports.length > 0 ? buildInstitutionUnit(institutionReports) : null;
   // Group order on the index: Institution-wide, then Mentoring programs, then units.

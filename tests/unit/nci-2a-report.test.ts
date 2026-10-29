@@ -50,6 +50,7 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     cancerRelevantPercentAi: pct,
     cancerRelevantModel: null,
     cancerRelevantRationale: null,
+    reviewerNote: null,
     cancerRelevantAnnualProjectDc: pct == null ? null : (dc * pct) / 100,
     isPeerReviewed: true,
     grantCwid: `zzz${over.id}`,
@@ -292,6 +293,16 @@ describe("numbers", () => {
 });
 
 describe("nci2aCsv", () => {
+  it("puts the reviewer note in the last column, quoted, and defuses a formula", () => {
+    const col = NCI2A_CSV_HEADER.indexOf("Notes");
+    expect(col).toBe(NCI2A_CSV_HEADER.length - 1);
+    const line = nci2aCsv([{ ...B, reviewerNote: "Half basic biology,\r\nhalf cancer" }]).split("\n").slice(1).join("\n");
+    expect(line.endsWith('"Half basic biology,\r\nhalf cancer"')).toBe(true);
+    const formula = nci2aCsv([{ ...B, reviewerNote: "=HYPERLINK(1)" }]).split("\n")[1];
+    expect(formula.endsWith(",'=HYPERLINK(1)")).toBe(true);
+    expect(nci2aCsv([B]).split("\n")[1].endsWith(",")).toBe(true);
+  });
+
   it("has a Review Status column and no CWID anywhere", () => {
     const csv = nci2aCsv(ALL);
     const [header, ...lines] = csv.split("\n");
@@ -344,7 +355,7 @@ describe("nci2aCsv", () => {
     expect(lines).toHaveLength(4);
     expect(lines[1].startsWith('"Beta, Bob"')).toBe(true);
     expect(lines[2].startsWith('"Quote, ""Q"""')).toBe(true);
-    expect(lines[3]).toBe(",,,,,,,,,,,CT,40,20000");
+    expect(lines[3]).toBe(",,,,,,,,,,,CT,40,20000,");
   });
 });
 

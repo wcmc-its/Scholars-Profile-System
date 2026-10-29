@@ -44,7 +44,7 @@ describe("ForbiddenEditPage — single destination redirects straight through (2
   it.each([
     ["isHonorsCurator", "/edit/honors-queue"],
     ["isDataSharingViewer", "/edit/data-sharing"],
-    ["isDeveloper", "/edit/grant-matcha"],
+    ["isDeveloper", "/edit/matcha"],
   ] as const)("with only %s on the session, redirects straight to %s — no interstitial", (flag, href) => {
     // React re-invokes a throwing function component once to distinguish a
     // transient error from a deterministic one (test-harness behavior, not
@@ -76,11 +76,11 @@ describe("ForbiddenEditPage — multiple destinations renders a choice, doesn't 
     render(<ForbiddenEditPage session={{ isCommsSteward: true, isHonorsCurator: true, isDeveloper: true }} />);
     expect(mockRedirect).not.toHaveBeenCalled();
     const links = screen.getAllByRole("link");
-    expect(links.map((l) => l.textContent)).toEqual(["Profiles", "Honors queue", "Grant Matcha"]);
+    expect(links.map((l) => l.textContent)).toEqual(["Profiles", "Honors queue", "Matcha"]);
     expect(links.map((l) => l.getAttribute("href"))).toEqual([
       "/edit/profiles",
       "/edit/honors-queue",
-      "/edit/grant-matcha",
+      "/edit/matcha",
     ]);
   });
 

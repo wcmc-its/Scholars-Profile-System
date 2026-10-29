@@ -68,6 +68,8 @@ export const REPORT_KEYS = [
   "12",
   "13",
   "14",
+  "15",
+  "16",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -201,6 +203,20 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Grant attribution",
     summary:
       "How the weekly check sorted NIH awards matched to scholars by name: confirmed, hidden as someone else's, or sent to a curator.",
+    descriptionHtml: null,
+  },
+  "15": {
+    slug: "nih-biosketches",
+    name: "NIH biosketches",
+    summary:
+      "Every NIH biosketch found in a scholar's InfoEd grant applications: ORCID iD, MyNCBI bibliography, and statement text, with disagreements flagged.",
+    descriptionHtml: null,
+  },
+  "16": {
+    slug: "nih-bibliography-discrepancies",
+    name: "NIH bibliography discrepancies",
+    summary:
+      "Publications on a scholar's public MyNCBI bibliography that are not confirmed on their profile, and the reverse.",
     descriptionHtml: null,
   },
 };

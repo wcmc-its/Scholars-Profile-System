@@ -29,6 +29,7 @@ import { ConsoleNavSheet, type ConsoleNavSection } from "@/components/edit/conso
 import { BAR_TAB_ACTIVE, BAR_TAB_INACTIVE } from "@/components/edit/console-tab-classes";
 import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { isFundableWorkEnabled } from "@/lib/fundable-work";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
@@ -57,6 +58,7 @@ export type AdminSubnavActive =
   | "cores"
   | "matcha"
   | "grant-matcha"
+  | "fundable-work"
   /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
    *  profile actions live in the right-end account menu. */
   | "self";
@@ -128,6 +130,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   /** Paste an input, get a ranked result. */
   matcha: "tools",
   "grant-matcha": "tools",
+  "fundable-work": "tools",
   /** The viewer's own `/edit` — no group is active, so tier 2 does not render. */
   self: null,
 };
@@ -160,6 +163,7 @@ export function AdminSubnav({
   usageTab = false,
   orcidCoverageTab = false,
   orcidQueueTab = false,
+  pendingOrcidQueue = null,
   coiTab = false,
   activityTab = false,
   etlStatusTab = false,
@@ -244,6 +248,8 @@ export function AdminSubnav({
   /** Show the "ORCID queue" tab (`/edit/orcid-queue`): superuser librarians with
    *  `ORCID_LIBRARIAN_QUEUE` on (`TAB_PREDICATES.orcidQueue`). Default `false`. */
   orcidQueueTab?: boolean;
+  /** Its pill: scholars with no decision yet. `null` shows the tab with no pill. */
+  pendingOrcidQueue?: number | null;
   /** Show COI / Activity / ETL status to a viewer who is NOT a superuser: an
    *  observer or content editor (COI), or an ad hoc dashboard grantee
    *  (`lib/edit/dashboard-access.ts`). Mirrors the matching
@@ -302,7 +308,12 @@ export function AdminSubnav({
    */
   const tabs: TabSpec[] = (
     [
-      { show: superuserSurfaces || profilesTab, id: "profiles", href: "/edit/profiles", label: "Profiles" },
+      {
+        show: superuserSurfaces || profilesTab,
+        id: "profiles",
+        href: "/edit/profiles",
+        label: "Profiles",
+      },
       { show: unitsTab, id: "units", href: "/edit/units", label: "Org units" },
       // Gated on `pendingHonors !== null` ALONE — deliberately without
       // `superuserSurfaces`, unlike the Profile URLs tab. This queue has a
@@ -421,7 +432,12 @@ export function AdminSubnav({
       },
       // Fleet-wide edit-activity oversight. Superuser, or an ad hoc grantee
       // (`activityTab`); no separate flag.
-      { show: superuserSurfaces || activityTab, id: "activity", href: "/edit/activity", label: "Activity" },
+      {
+        show: superuserSurfaces || activityTab,
+        id: "activity",
+        href: "/edit/activity",
+        label: "Activity",
+      },
       // Wider audience than the other superuser tabs: a superuser OR any unit admin
       // (via `usageTab`, set when `canViewUsage` passes).
       { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
@@ -437,6 +453,7 @@ export function AdminSubnav({
         id: "orcid-queue",
         href: "/edit/orcid-queue",
         label: "ORCID queue",
+        count: pendingOrcidQueue ?? undefined,
       },
       // Read-only ETL health board. Superuser, or an ad hoc grantee
       // (`etlStatusTab`); no separate flag.
@@ -469,10 +486,19 @@ export function AdminSubnav({
       // `lib/edit/console-tabs.server.ts`). Unlike Matcha this renders through
       // the plain `AdminTab` link — no Radix hover content (#1783).
       {
-        show: (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled() && isGrantMatchaEnabled(),
+        show:
+          (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled() && isGrantMatchaEnabled(),
         id: "grant-matcha",
         href: "/edit/grant-matcha",
         label: "Grant Matcha",
+      },
+      // Fundable work — scored WCM abstracts and preprints for CTL. Matcha's
+      // audience, its own flag (FUNDABLE_WORK).
+      {
+        show: (superuserSurfaces || viewerCanUseMatcha) && isFundableWorkEnabled(),
+        id: "fundable-work",
+        href: "/edit/fundable-work",
+        label: "Matcha for emergent research",
       },
     ] satisfies TabSpec[]
   ).filter((t) => t.show);

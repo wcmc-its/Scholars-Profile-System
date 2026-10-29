@@ -1,24 +1,28 @@
 /**
  * #3071 — the queue's decided tabs (Confirmed, Not this person, Unproven):
  * where an award lands, the URL state, the loader's filters and counts, and
- * the rows, evidence panel and actions. Fixture people and awards are invented.
+ * the board on a decided tab: the detail, its actions, and the URL-driven
+ * filters and pager. Fixture people and awards are invented.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }));
+vi.mock("@/components/edit/scholar-hover-card", () => ({
+  ScholarHoverCard: ({ children }: { children: unknown }) => children,
+}));
 
-import { DecidedAwards } from "@/components/edit/grant-attribution-decided";
+import { GrantAttributionBoard } from "@/components/edit/grant-attribution-board";
+import { fromDecidedRow } from "@/lib/edit/grant-attribution-board";
 import {
+  DECIDED_PAGE_SIZE,
   checkedNothingFound,
   decidedHref,
   decidedTabOf,
-  marginText,
   nameParts,
   parseDecidedParams,
   parseQueueTab,
-  partsDiffer,
   sortableName,
   type DecidedPage,
   type DecidedRow,
@@ -81,25 +85,43 @@ describe("URL state", () => {
     expect(parseQueueTab({ tab: "unproven" })).toBe("unproven");
     expect(parseQueueTab({ tab: "nonsense" })).toBe("pending");
     const p = parseDecidedParams(
-      { by: "auto", changed: "1", group: "1", sort: "recent", q: " lee ", page: "3" },
+      { by: "auto", changed: "1", level: "leans-for", sort: "name", q: " lee ", page: "3" },
       "confirmed",
     );
     expect(p).toEqual({
       tab: "confirmed",
       by: "auto",
       changed: true,
-      group: true,
-      sort: "recent",
+      level: "leans-for",
+      sort: "name",
       q: "lee",
       page: 3,
+      all: false,
     });
     expect(decidedHref(p)).toBe(
-      "?tab=confirmed&by=auto&changed=1&group=1&sort=recent&q=lee&page=3",
+      "?tab=confirmed&by=auto&changed=1&level=leans-for&sort=name&q=lee&page=3",
     );
+    // Show all replaces the page number and survives a filter change.
+    const all = parseDecidedParams({ by: "auto", all: "1", page: "3" }, "confirmed");
+    expect(all.all).toBe(true);
+    expect(decidedHref(all)).toBe("?tab=confirmed&by=auto&all=1");
+    expect(decidedHref(all, { by: "curator", page: 1 })).toBe("?tab=confirmed&by=curator&all=1");
     expect(decidedHref(parseDecidedParams({}, "rejected"))).toBe("?tab=rejected");
-    // "Changed this run" only exists on Confirmed; Unproven defaults to most recent.
-    expect(parseDecidedParams({ changed: "1" }, "rejected").changed).toBe(false);
-    expect(parseDecidedParams({}, "unproven").sort).toBe("recent");
+  });
+
+  it("reads Confirmed low to high and the rest high to low, and drops unknown values", () => {
+    expect(parseDecidedParams({}, "confirmed").sort).toBe("low");
+    expect(parseDecidedParams({}, "rejected").sort).toBe("high");
+    // An old ?sort=least or ?level=high is not an error, just the default.
+    expect(parseDecidedParams({ sort: "least", level: "high" }, "rejected")).toMatchObject({
+      sort: "high",
+      level: "all",
+    });
+    expect(decidedHref(parseDecidedParams({ sort: "low" }, "rejected"))).toBe(
+      "?tab=rejected&sort=low",
+    );
+    expect(parseDecidedParams({ changed: "1" }, "rejected").changed).toBe(true);
+    expect(parseDecidedParams({ changed: "1" }, "unproven").changed).toBe(false);
   });
 });
 
@@ -122,16 +144,6 @@ describe("names and wording", () => {
       middle: "A",
     });
     expect(sortableName("Lee A. Sample")).toBe("Sample, Lee A");
-    expect(partsDiffer("D", "A")).toBe(true);
-    expect(partsDiffer("L", "Lee")).toBe(false);
-    expect(partsDiffer("", "A")).toBe(false);
-  });
-
-  it("says how far a score sits from its line", () => {
-    expect(marginText("confirmed", 2, "auto")).toBe("confirms at +2");
-    expect(marginText("confirmed", 4, "auto")).toBe("2 over the line");
-    expect(marginText("rejected", -8, "auto")).toBe("6 under the line");
-    expect(marginText("rejected", -8, "curator")).toBe("curator decided");
   });
 
   it("lists only the checks that found nothing", () => {
@@ -139,6 +151,17 @@ describe("names and wording", () => {
     expect(n).not.toContain("No confirmed paper of the scholar cites this award");
     expect(n).not.toContain("Not held at WCM");
     expect(n).toContain("No co-PI co-authors with the scholar");
+    expect(n).toContain("Not held at a WCM affiliate");
+  });
+
+  it("says a WCM award was withheld, not missed", () => {
+    expect(checkedNothingFound(new Set(), true)).toContain(
+      "Held at WCM, not counted: the NIH profile came from a WCM grant, and the PI's name doesn't rule out another WCM person",
+    );
+    expect(checkedNothingFound(new Set(), false)).toContain("Not held at WCM");
+    expect(checkedNothingFound(new Set(["affiliate_org"]))).not.toContain(
+      "Not held at a WCM affiliate",
+    );
   });
 });
 
@@ -156,6 +179,7 @@ function client(data: {
       slug: "lee-sample",
       postnominal: "PhD",
       roleCategory: null,
+      primaryTitle: "Professor of Medicine",
       primaryDepartment: "Medicine",
     },
     {
@@ -213,6 +237,19 @@ const RUNS = [
   },
 ];
 
+describe("loadDecidedPage paging", () => {
+  it("pages at DECIDED_PAGE_SIZE, and Show all returns every match", async () => {
+    const scores = Array.from({ length: DECIDED_PAGE_SIZE + 5 }, (_, i) =>
+      score(`P${i}`, "zza0001", "show", 5, [{ id: "pub_linked", weight: 5, reason: "cited" }]),
+    );
+    const paged = await loadDecidedPage(client({ scores }), parseDecidedParams({}, "confirmed"), RUNS);
+    expect(paged.matched).toBe(DECIDED_PAGE_SIZE + 5);
+    expect(paged.rows).toHaveLength(DECIDED_PAGE_SIZE);
+    const all = await loadDecidedPage(client({ scores }), parseDecidedParams({ all: "1" }, "confirmed"), RUNS);
+    expect(all.rows).toHaveLength(DECIDED_PAGE_SIZE + 5);
+  });
+});
+
 describe("loadDecidedPage", () => {
   const data = {
     scores: [
@@ -267,13 +304,66 @@ describe("loadDecidedPage", () => {
       rejected: { all: 2, curator: 1, auto: 1 },
       unproven: { all: 1, curator: 0, auto: 1 },
     });
-    expect(page.changed).toBe(1);
+    expect(page.changed).toEqual({ confirmed: 1, rejected: 0, unproven: 0 });
     expect(page.rows.map((r) => r.grantId)).toEqual(["G1", "G2"]);
     expect(page.rows[0]).toMatchObject({
       was: "hidden",
+      changed: true,
       reason: "linked",
-      scholar: { name: "Sample, Lee A", career: "PhD 2009" },
+      scholar: { name: "Sample, Lee A", career: "PhD 2009", title: "Professor of Medicine" },
     });
+    expect(page.rows[1]!.changed).toBe(false);
+  });
+
+  it("marks an award the latest check hid as changed on Not this person", async () => {
+    const hid = (at: string) => ({
+      ...data,
+      supps: [
+        ...data.supps,
+        {
+          entityId: "G3",
+          createdBy: "system-unverified",
+          createdAt: new Date(at),
+          revokedAt: null,
+          revokedBy: null,
+        },
+      ],
+    });
+    const fresh = await loadDecidedPage(
+      client(hid("2026-10-25T11:00:00Z")),
+      parseDecidedParams({ changed: "1" }, "rejected"),
+      RUNS,
+    );
+    expect(fresh.changed.rejected).toBe(1);
+    expect(fresh.rows.map((r) => r.grantId)).toEqual(["G3"]);
+    // Hidden before the previous run ended: not this run's change.
+    const old = await loadDecidedPage(
+      client(hid("2026-10-10T11:00:00Z")),
+      parseDecidedParams({}, "rejected"),
+      RUNS,
+    );
+    expect(old.changed.rejected).toBe(0);
+  });
+
+  it("filters by evidence level and sorts by score or scholar", async () => {
+    const c = client(data);
+    const against = await loadDecidedPage(
+      c,
+      parseDecidedParams({ level: "against" }, "rejected"),
+      RUNS,
+    );
+    expect(against.rows.map((r) => r.grantId)).toEqual(["G3"]);
+    // The curator's rejection scored +3 with no cues: the evidence still supports.
+    const supports = await loadDecidedPage(
+      c,
+      parseDecidedParams({ level: "supports" }, "rejected"),
+      RUNS,
+    );
+    expect(supports.rows.map((r) => r.grantId)).toEqual(["G5"]);
+    const high = await loadDecidedPage(c, parseDecidedParams({ sort: "high" }, "confirmed"), RUNS);
+    expect(high.rows.map((r) => r.grantId)).toEqual(["G2", "G1"]);
+    const byName = await loadDecidedPage(c, parseDecidedParams({ sort: "name" }, "rejected"), RUNS);
+    expect(byName.rows.map((r) => r.grantId)).toEqual(["G5", "G3"]);
   });
 
   it("filters by who decided, what changed and search", async () => {
@@ -291,22 +381,6 @@ describe("loadDecidedPage", () => {
         (r) => r.grantId,
       ),
     ).toEqual(["G4"]);
-  });
-
-  it("groups by scholar, with what they have on the other tabs", async () => {
-    const page = await loadDecidedPage(
-      client(data),
-      parseDecidedParams({ group: "1" }, "rejected"),
-      RUNS,
-    );
-    expect(page.rows).toEqual([]);
-    expect(page.groups).toHaveLength(1);
-    expect(page.groups![0]).toMatchObject({
-      cwid: "zza0002",
-      here: 2,
-      elsewhere: { unproven: 1 },
-      total: 3,
-    });
   });
 
   it("leaves out a hidden award a person lifted by hand, and keeps a confirmed one the check could not lift yet", async () => {
@@ -392,6 +466,7 @@ const ROW: DecidedRow = {
   tab: "confirmed",
   by: "auto",
   was: "hidden",
+  changed: true,
   stillHidden: false,
   when: "2026-10-25T11:00:00.000Z",
   decidedByName: null,
@@ -439,7 +514,9 @@ const ROW: DecidedRow = {
     cwid: "zza0001",
     slug: "lee-sample",
     name: "Sample, Lee A",
+    displayName: "Lee A. Sample, PhD",
     degrees: "PhD",
+    title: null,
     department: "Medicine",
     career: "PhD 2009",
     names: ["Lee A. Sample"],
@@ -452,99 +529,226 @@ const page = (over: Partial<DecidedPage> = {}): DecidedPage => ({
     rejected: { all: 0, curator: 0, auto: 0 },
     unproven: { all: 0, curator: 0, auto: 0 },
   },
-  changed: 1,
+  changed: { confirmed: 1, rejected: 0, unproven: 0 },
   matched: 1,
   rows: [ROW],
-  groups: null,
+  unprovenIds: [],
   ...over,
 });
 
-describe("DecidedAwards", () => {
-  const row = () => within(screen.getByTestId(`grant-attribution-row-${ROW.grantId}`));
+/** The board on a decided tab, as the page renders it. */
+function board(p: DecidedPage, readOnly = false) {
+  const tab = p.params.tab === "rejected" ? "rejected" : "confirmed";
+  return render(
+    <GrantAttributionBoard
+      tab={tab}
+      rows={p.rows.map(fromDecidedRow)}
+      counts={{ pending: 5, confirmed: p.counts.confirmed.all, rejected: p.counts.rejected.all }}
+      readOnly={readOnly}
+      server={{
+        params: p.params,
+        matched: p.matched,
+        byCounts: { curator: p.counts[tab].curator, auto: p.counts[tab].auto },
+        changed: p.changed[tab],
+      }}
+    />,
+  );
+}
 
-  it("shows the scholar, the name on the award with its difference marked, the score and why", () => {
-    render(<DecidedAwards page={page()} readOnly={false} />);
-    expect(row().getByText("Sample, Lee A")).toBeTruthy();
-    expect(row().getByTestId("grant-attribution-on-award").querySelector("mark")?.textContent).toBe(
-      "D",
+describe("the board on a decided tab", () => {
+  const detail = () => within(screen.getByTestId("grant-attribution-detail"));
+  const item = () => within(screen.getByTestId(`grant-attribution-item-${ROW.grantId}`));
+  const fetchOk = (body: unknown = {}) => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(JSON.stringify(body), { status: 200 }),
     );
-    expect(row().getByText("+3")).toBeTruthy();
-    expect(row().getByText("1 over the line")).toBeTruthy();
-    expect(row().getByText(/Auto-confirmed · was hidden/)).toBeTruthy();
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+
+  it("lists the scholar with the evidence chip and who placed it, apart from the evidence", () => {
+    board(page());
+    expect(item().getByText("Lee A. Sample, PhD")).toBeTruthy();
+    expect(item().getByTestId("grant-attribution-level").textContent).toBe("+3Supports");
+    expect(item().getByText("Automatic · Oct 25 · was hidden")).toBeTruthy();
+    expect(detail().getByTestId("grant-attribution-decision").textContent).toContain(
+      "Confirmed automatically · Oct 25",
+    );
+    expect(detail().getByTestId("grant-attribution-decision").textContent).toContain(
+      "Can move if the weekly check finds evidence against.",
+    );
     expect(
-      row()
-        .getByRole("link", { name: /R01XX000001 in NIH RePORTER/ })
-        .getAttribute("href"),
-    ).toContain("123");
+      detail().getByTestId("grant-attribution-on-award").querySelector("mark")?.textContent,
+    ).toBe("D");
+    expect(detail().getByText("Medicine · PhD 2009")).toBeTruthy();
+    expect(detail().getByText("RePORTER ↗").getAttribute("href")).toContain("123");
   });
 
-  it("opens the evidence ledger: start, each cue with its weight, the total and what was not found", () => {
-    render(<DecidedAwards page={page()} readOnly={false} />);
-    fireEvent.click(row().getByTestId(`grant-attribution-evidence-${ROW.grantId}`));
-    const ev = within(screen.getAllByTestId("grant-attribution-evidence")[0]!);
+  it("shows a curator's decision as a decision, never as score", () => {
+    board(
+      page({
+        rows: [
+          {
+            ...ROW,
+            by: "curator",
+            reviewId: "rev-9",
+            decidedByName: "Kim Curator",
+            when: "2026-10-28T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    expect(item().getByText("Curator · Oct 28")).toBeTruthy();
+    expect(item().getByTestId("grant-attribution-level").textContent).toBe("+3Supports");
+    expect(detail().getByTestId("grant-attribution-decision").textContent).toContain(
+      "Confirmed by Kim Curator · Oct 28",
+    );
+    expect(detail().getByTestId("grant-attribution-decision").textContent).toContain(
+      "Won’t change on its own.",
+    );
+  });
+
+  it("adds the score up in one ledger: start, each cue, the total on the scale", () => {
+    board(page());
+    const ev = within(detail().getByTestId("grant-attribution-evidence"));
     expect(ev.getByText("Every award starts here")).toBeTruthy();
     expect(ev.getByText("Main reason")).toBeTruthy();
     expect(ev.getByText("A shared synthetic paper")).toBeTruthy();
-    expect(ev.getByRole("button", { name: "Copy 2 PMIDs: 111, 222" })).toBeTruthy();
-    expect(ev.getByText("Score: confirmed")).toBeTruthy();
-    // Once as the names verdict, once as the ledger item.
-    expect(ev.getAllByText(/^Middle initial differs/).length).toBe(2);
-    expect(ev.getByText("No confirmed paper of the scholar cites this award")).toBeTruthy();
+    expect(ev.getByText("Score · Supports")).toBeTruthy();
+    expect(ev.getByRole("img").getAttribute("aria-label")).toBe(
+      "Score +3. Hide at −2 or below, confirm at +2 or above.",
+    );
+    fireEvent.click(detail().getByTestId("grant-attribution-nothing-toggle"));
+    expect(detail().getByText("No confirmed paper of the scholar cites this award")).toBeTruthy();
   });
 
-  it("marks an auto-confirmed award not this person by grant, with a reason", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    render(<DecidedAwards page={page()} readOnly={false} />);
-    fireEvent.click(row().getByRole("button", { name: "Not this person" }));
-    fireEvent.change(row().getByLabelText("Rejection reason"), {
-      target: { value: "A different person with the same name" },
-    });
+  it("marks an auto-confirmed award not this person by grant, with a reason, and offers Undo", async () => {
+    const fetchMock = fetchOk({ reviews: { [ROW.grantId]: "rev-new" } });
+    board(page());
+    fireEvent.click(detail().getByRole("button", { name: /^Not this person/ }));
     await act(async () => {
-      fireEvent.click(row().getByRole("button", { name: "Not this person" }));
+      fireEvent.click(screen.getByText("A different person with the same name"));
     });
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("/api/edit/grant-attribution/decision");
     expect(JSON.parse(init.body as string)).toEqual({
       grant: ROW.grantId,
       decision: "reject",
       reason: "A different person with the same name",
     });
-    expect(row().getByText("Marked not this person.")).toBeTruthy();
+    expect(screen.queryByTestId(`grant-attribution-item-${ROW.grantId}`)).toBeNull();
+    expect(screen.getByTestId("grant-attribution-tab-rejected").textContent).toContain("1");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("grant-attribution-status-undo"));
+    });
+    // Undo leaves the award in review.
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual({
+      id: "rev-new",
+      decision: "undo",
+    });
+    expect(screen.getByTestId("grant-attribution-status").textContent).toContain(
+      "Moved the award back to review.",
+    );
+    // It is in To review now, not back on this tab.
+    expect(screen.queryByTestId(`grant-attribution-item-${ROW.grantId}`)).toBeNull();
+    expect(screen.getByTestId("grant-attribution-tab-pending").textContent).toContain("6");
+  });
+
+  it("confirms a curator's rejection instead by grant, so the route undoes it first", async () => {
+    const fetchMock = fetchOk({ reviews: { "g-cur": "rev-9" } });
+    const curator = {
+      ...ROW,
+      tab: "rejected" as const,
+      grantId: "g-cur",
+      by: "curator" as const,
+      reviewId: "rev-9",
+    };
+    board(page({ params: parseDecidedParams({}, "rejected"), rows: [curator] }));
+    await act(async () => {
+      fireEvent.click(detail().getByRole("button", { name: /^Confirm instead/ }));
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toEqual({
+      grant: "g-cur",
+      decision: "confirm",
+    });
   });
 
   it("moves a curator decision to review by undoing it, and an auto one through requeue", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = fetchOk();
     const curator = { ...ROW, grantId: "g-cur", by: "curator" as const, reviewId: "rev-9" };
-    render(<DecidedAwards page={page({ rows: [ROW, curator], matched: 2 })} readOnly={false} />);
+    board(page({ rows: [ROW, curator], matched: 2 }));
     await act(async () => {
-      fireEvent.click(
-        within(screen.getByTestId("grant-attribution-row-g-cur")).getByRole("button", {
-          name: "Move to review",
-        }),
-      );
+      fireEvent.click(detail().getByRole("button", { name: /^Move to review/ }));
     });
     await act(async () => {
-      fireEvent.click(row().getByRole("button", { name: "Move to review" }));
+      fireEvent.click(detail().getByRole("button", { name: /^Move to review/ }));
     });
-    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
-    expect(calls[0]![0]).toBe("/api/edit/grant-attribution/decision");
-    expect(JSON.parse(calls[0]![1].body as string)).toEqual({ id: "rev-9", decision: "undo" });
-    expect(calls[1]![0]).toBe("/api/edit/grant-attribution/requeue");
+    const calls = fetchMock.mock.calls;
+    expect(calls[0]![0]).toBe("/api/edit/grant-attribution/requeue");
+    expect(calls[1]![0]).toBe("/api/edit/grant-attribution/decision");
+    expect(JSON.parse(calls[1]![1].body as string)).toEqual({ id: "rev-9", decision: "undo" });
+    expect(screen.getByTestId("grant-attribution-empty")).toBeTruthy();
+  });
+
+  it("moves several to review from the list header", async () => {
+    const fetchMock = fetchOk();
+    const curator = { ...ROW, grantId: "g-cur", by: "curator" as const, reviewId: "rev-9" };
+    board(page({ rows: [ROW, curator], matched: 2 }));
+    fireEvent.click(screen.getByLabelText("Select all shown"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("grant-attribution-bulk-review"));
+    });
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      "/api/edit/grant-attribution/decision",
+      "/api/edit/grant-attribution/requeue",
+    ]);
+    expect(screen.getByTestId("grant-attribution-status").textContent).toContain(
+      "Moved to review: 2 awards",
+    );
   });
 
   it("gives a read-only viewer the evidence but no actions", () => {
-    render(<DecidedAwards page={page()} readOnly />);
-    expect(row().queryByRole("button", { name: "Not this person" })).toBeNull();
-    expect(row().getByTestId(`grant-attribution-evidence-${ROW.grantId}`)).toBeTruthy();
+    board(page(), true);
+    expect(screen.queryByRole("button", { name: /^Not this person/ })).toBeNull();
+    expect(detail().getByTestId("grant-attribution-evidence")).toBeTruthy();
   });
 
-  it("puts filters in the URL", () => {
-    render(<DecidedAwards page={page()} readOnly={false} />);
+  it("offers Show all past one page, and a way back to paging", () => {
+    board(page({ matched: DECIDED_PAGE_SIZE + 1 }));
+    expect(
+      screen.getByText(`Showing 1–${DECIDED_PAGE_SIZE} of ${DECIDED_PAGE_SIZE + 1}`),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByTestId("grant-attribution-show-all"));
+    expect(push).toHaveBeenLastCalledWith("?tab=confirmed&all=1", { scroll: false });
+  });
+
+  it("hides the pager when showing all", () => {
+    board(
+      page({
+        matched: DECIDED_PAGE_SIZE + 1,
+        params: { ...parseDecidedParams({ all: "1" }, "confirmed") },
+      }),
+    );
+    expect(screen.queryByText("Next")).toBeNull();
+    fireEvent.click(screen.getByTestId("grant-attribution-show-paged"));
+    expect(push).toHaveBeenLastCalledWith("?tab=confirmed", { scroll: false });
+  });
+
+  it("no pager when everything fits on one page", () => {
+    board(page());
+    expect(screen.queryByTestId("grant-attribution-show-all")).toBeNull();
+  });
+
+  it("puts filters and sort in the URL", () => {
+    board(page());
     fireEvent.click(screen.getByTestId("grant-attribution-by-auto"));
     expect(push).toHaveBeenCalledWith("?tab=confirmed&by=auto", { scroll: false });
     fireEvent.click(screen.getByTestId("grant-attribution-changed"));
     expect(push).toHaveBeenLastCalledWith("?tab=confirmed&changed=1", { scroll: false });
+    fireEvent.change(screen.getByLabelText(/Evidence/), { target: { value: "supports" } });
+    expect(push).toHaveBeenLastCalledWith("?tab=confirmed&level=supports", { scroll: false });
+    fireEvent.change(screen.getByDisplayValue("Score, low to high"), { target: { value: "name" } });
+    expect(push).toHaveBeenLastCalledWith("?tab=confirmed&sort=name", { scroll: false });
   });
 });

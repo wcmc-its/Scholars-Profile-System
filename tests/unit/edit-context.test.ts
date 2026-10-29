@@ -2111,12 +2111,12 @@ describe("loadEditContext — ORCID suggestion (includeOrcidSuggestion)", () => 
     expect(ctx!.orcidCandidates.map((r) => r.orcid)).toEqual(["iD-b"]);
   });
 
-  it("without a dismissal the same rows read as asserted (the admin iD on file)", async () => {
+  it("without a dismissal the admin iD is a candidate, not on file: it and the inferred iD disagree, so weak", async () => {
     const c = orcidClient([row("iD-a", "rpm_admin"), row("iD-b", "rpm_inferred", 2)], []);
     const ctx = await loadEditContext(SELF, asClient(c), new Date(), undefined, {
       includeOrcidSuggestion: true,
     });
-    expect(ctx!.orcidVerdict).toEqual({ tier: "asserted", orcid: "iD-a", accepted: 0 });
+    expect(ctx!.orcidVerdict).toEqual({ tier: "weak", orcid: null, accepted: 0 });
     expect(ctx!.orcidCandidates.map((r) => r.orcid)).toEqual(["iD-a", "iD-b"]);
   });
 

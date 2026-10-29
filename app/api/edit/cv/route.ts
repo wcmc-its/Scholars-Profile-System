@@ -25,7 +25,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { generateText } from "ai";
 
 import { BEDROCK_CACHE_POINT, bedrockClient } from "@/lib/llm/client";
-import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
+import {
+  DEFAULT_GENERATE_MODEL,
+  bedrockCallOptions,
+  modelAcceptsTemperature,
+} from "@/lib/llm/models";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeCvExport } from "@/lib/edit/overview-authz";
@@ -91,6 +95,7 @@ async function generateResearchSummary(facts: OverviewFacts): Promise<string> {
       ...(steering === null ? [] : [{ role: "user" as const, content: steering }]),
     ],
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0.4 } : {}),
+    ...bedrockCallOptions(modelId, { effort: "high" }),
   });
   return text;
 }

@@ -74,6 +74,7 @@ const NO_TABS: ConsoleTabState = {
   cores: false,
   matcha: false,
   grantMatcha: false,
+  fundableWork: false,
   roleVocabulary: false,
   titles: false,
   grantAttribution: false,

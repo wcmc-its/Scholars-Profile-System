@@ -330,8 +330,18 @@ function RailLink({
               {item.count > 9 ? "9+" : item.count}
             </span>
           )}
-          {kind === "sourced" && <span className="sr-only"> (sourced from WCM systems)</span>}
-          {kind === "readonly" && <span className="sr-only"> (read-only, from WCM systems)</span>}
+          {kind === "sourced" && (
+            <>
+              {" "}
+              <span className="sr-only">(sourced from WCM systems)</span>
+            </>
+          )}
+          {kind === "readonly" && (
+            <>
+              {" "}
+              <span className="sr-only">(read-only, from WCM systems)</span>
+            </>
+          )}
         </span>
         <span className="flex shrink-0 items-center gap-1.5">
           {item.tag && (

@@ -54,14 +54,18 @@ import {
   SYSTEM_RESCORED,
   attributionGate,
   isReopenedFromDecision,
+  orphanedPendingReviews,
   planAward,
   type AwardPlan,
   type AwardState,
 } from "./attribution-plan";
 import { buildAwardEvidence, buildScholarFacts, profileProof } from "./evidence";
+import { fillRejectedTitles } from "./rejected-titles";
 import {
   evidenceKey,
   nameProfileCountFrom,
+  piGivenNameAgrees,
+  piGivenNameConflicts,
   piSurnameMatches,
   scoreAttribution,
   type AttributionScore,
@@ -635,6 +639,8 @@ async function scoreScholarAwards(
       nameProfileCount,
       wcmNamesakes,
       piSurnameMatches: piSurnameMatches(reporterName, scholarNames),
+      piGivenNameConflicts: piGivenNameConflicts(reporterName, scholarNames),
+      piGivenNameAgrees: piGivenNameAgrees(reporterName, scholarNames),
     });
     out.set(c.row.externalId, {
       score,
@@ -644,6 +650,7 @@ async function scoreScholarAwards(
       reporterName,
     });
   });
+  await fillRejectedTitles([...out.values()].map((s) => s.score.reasons));
   return out;
 }
 
@@ -1067,8 +1074,13 @@ async function main() {
               : { band: "show", lastSeenAt: now };
             const prior = reviews.get(row.externalId);
             if (plan.review === "create" && scored) {
-              await tx.grantAttributionReview.create({
-                data: {
+              // Upsert, not create: `reviews` is read once at start, so an
+              // overlapping run (e.g. a manual one during the weekly) may have
+              // queued this award since. Its row stands (#3157).
+              await tx.grantAttributionReview.upsert({
+                where: { grantExternalId: row.externalId },
+                update: {},
+                create: {
                   cwid,
                   grantExternalId: row.externalId,
                   score: scored.score.score,
@@ -1263,6 +1275,25 @@ async function main() {
     deleted += res.count;
   }
   console.log(`Reconcile: deleted ${deleted} stale RePORTER grant rows.`);
+
+  // #3071 — withdraw the attribution cards of awards this run no longer holds.
+  const orphaned = orphanedPendingReviews(
+    await db.write.grantAttributionReview.findMany({
+      where: { status: "pending" },
+      select: { grantExternalId: true, cwid: true },
+    }),
+    keptIds,
+    erroredCwids,
+  );
+  let withdrawnOrphans = 0;
+  for (const batch of chunks(orphaned, DELETE_BATCH)) {
+    const res = await db.write.grantAttributionReview.updateMany({
+      where: { grantExternalId: { in: batch }, status: "pending" },
+      data: { status: "withdrawn", decidedByCwid: SYSTEM_RESCORED, decidedAt: new Date() },
+    });
+    withdrawnOrphans += res.count;
+  }
+  console.log(`Reconcile: withdrew ${withdrawnOrphans} pending reviews of awards no longer returned.`);
   console.log("\nRePORTER Grants ETL complete.\n");
 }
 

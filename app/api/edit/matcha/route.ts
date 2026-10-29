@@ -467,7 +467,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 /**
  * GET — the retained searches, newest first, ONE ROW PER PASTE, SCOPED TO THE VIEWER.
  *
- * A SUPERUSER SEES EVERY OFFICER'S; EVERYONE ELSE SEES ONLY THEIR OWN (decided 2026-07-17).
+ * A SUPERUSER OR DEVELOPER SEES EVERY OFFICER'S; EVERYONE ELSE SEES ONLY THEIR OWN (decided
+ * 2026-07-17, developers added 2026-10-27).
  * This list was global, and its doc-comment argued that cross-officer visibility WAS the point:
  * the value over the old localStorage history was learning that a colleague had already run this
  * sponsor. That reasoning held while `/edit` was a handful of developers pasting public sponsor
@@ -475,15 +476,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  * chair A pastes a donor thread, chair B opens the drawer and reads it. The de-duplication win
  * was never worth a shared inbox, and it is not what this surface is being opened up for.
  *
- * 🔴 `isDeveloper` IS NOT `isSuperuser`, and the asymmetry with the page gate is DELIBERATE.
- * The surface gates on `isSuperuser || isDeveloper`, so a developer reaches this handler — but
- * the decision says SUPERUSER sees everyone's. Widening this leg to match the page gate out of
- * symmetry would leave the paste corpus readable by a strictly larger group than was agreed.
- * The gate here is `isSuperuser` ALONE, and `matcha.test.ts` proves a developer sees only their
- * own rows.
+ * WIDENED 2026-10-27 to DEVELOPERS too (owner decision): the Development team needs the full
+ * history of searches run against the scholar corpus. Observers and every other role still see
+ * only their own; `matcha.test.ts` pins both legs.
  *
  * FAIL-CLOSED BY CONSTRUCTION: the ternary's TRUE leg is the privileged one, so an absent or
- * undefined `isSuperuser` degrades to `{ submittedBy: session.cwid }` — own rows — rather than
+ * undefined `isSuperuser`/`isDeveloper` degrades to `{ submittedBy: session.cwid }` — own rows — rather than
  * falling through to an unfiltered read. Never invert it.
  *
  * The paste itself rides along, because the officer must be able to read back what was searched
@@ -514,11 +512,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 /**
  * The ONE scope predicate for retained searches, shared by GET and DELETE so the two cannot
  * drift apart again (#1776: the read was scoped while DELETE erased any row by id).
- * Superuser ⇒ no filter (everyone's). Anyone else — INCLUDING a developer or observer — ⇒ their own. The
+ * Superuser or developer ⇒ no filter (everyone's). Anyone else — INCLUDING an observer — ⇒ their own. The
  * TRUE leg is the privileged one so an absent flag fails closed. See GET's doc-comment.
  */
-function submissionScope(session: Pick<EditSession, "cwid" | "isSuperuser">) {
-  return session.isSuperuser ? undefined : { submittedBy: session.cwid };
+function submissionScope(session: Pick<EditSession, "cwid" | "isSuperuser" | "isDeveloper">) {
+  return session.isSuperuser || session.isDeveloper === true ? undefined : { submittedBy: session.cwid };
 }
 
 export async function GET(): Promise<NextResponse> {
@@ -529,7 +527,7 @@ export async function GET(): Promise<NextResponse> {
   }
   try {
     const rows = await db.read.sponsorMatchSubmission.findMany({
-      // Superuser ⇒ everyone's. Anyone else — INCLUDING a developer — ⇒ their own.
+      // Superuser or developer ⇒ everyone's. Anyone else ⇒ their own.
       where: submissionScope(session),
       orderBy: { createdAt: "desc" },
       take: SUBMISSION_SCAN_MAX,
@@ -578,7 +576,7 @@ export async function GET(): Promise<NextResponse> {
     // the number of rows THIS viewer can actually see and open, never a count of a wider set.
     // (`reference_funding_tagged_count_counts_the_or` is the bug this repo already shipped once
     // by counting the pre-filter population.)
-    return editOk({ submissions, scope: session.isSuperuser ? "all" : "own" });
+    return editOk({ submissions, scope: submissionScope(session) === undefined ? "all" : "own" });
   } catch (err) {
     logEditFailure(`${PATH}#list`, err);
     return editError(500, "submissions_unavailable");
@@ -588,8 +586,8 @@ export async function GET(): Promise<NextResponse> {
 /**
  * DELETE `{ submissionId }` — erase a retained search.
  *
- * SCOPED EXACTLY AS GET IS (#1776), via the same `submissionScope`: a superuser may delete any
- * row; everyone else — including a developer — only their own. This was previously open to any
+ * SCOPED EXACTLY AS GET IS (#1776), via the same `submissionScope`: a superuser or developer may
+ * delete any row; everyone else only their own. This was previously open to any
  * officer on the surface, so a user could erase a paste they were not permitted to READ. Erasure
  * on behalf of an absent colleague remains possible through a superuser, who sees and may erase
  * every row. An out-of-scope id answers 404, exactly as a missing one does, so the response does

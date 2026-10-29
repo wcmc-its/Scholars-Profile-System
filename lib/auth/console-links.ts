@@ -40,6 +40,10 @@
  *     their only door was "Org units". (The roster's own COI-review column is
  *     superuser-only, so it earns no separate link here — see
  *     `lib/edit/data-quality.ts`.)
+ *   - **Developer** (not a superuser) → "Matcha" (`/edit/matcha`), the role's
+ *     front door (`GLOBAL_ROLE_HOME.development`). Its console nav fans out to
+ *     Grant Matcha, so one row is enough. Without it a developer with no other
+ *     role had an empty dropdown and no door in.
  *
  * A viewer holding several non-superuser roles gets several links. The list is
  * profile-independent: a steward or unit admin with no `Scholar` row still gets
@@ -49,7 +53,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units" | "profiles";
+  id: "manage-profiles" | "methods" | "units" | "profiles" | "matcha";
   label: string;
   href: string;
 };
@@ -70,6 +74,8 @@ export type ConsoleLinkVerdicts = {
   /** The viewer holds ≥1 direct `unit_admin` grant
    *  (`loadManageableUnits(...).total > 0`). */
   managesUnits: boolean;
+  /** `isDeveloper(cwid)` — gated by its own `DEVELOPMENT_ENABLED` kill switch. */
+  isDeveloper: boolean;
 };
 
 /**
@@ -79,9 +85,9 @@ export type ConsoleLinkVerdicts = {
  *
  * The superuser roster row is labeled "Admin console" (account-dropdown-nav
  * handoff, Workstream B; the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag that gated
- * the relabel was retired in #1440). The GrantRecs matcher tools are not
- * dropdown rows — they live in the in-console `AdminSubnav`
- * (`/edit/grant-matcha`, `/edit/matcha`).
+ * the relabel was retired in #1440). A superuser reaches the GrantRecs matcher
+ * tools through the in-console `AdminSubnav`; a non-superuser developer gets a
+ * direct "Matcha" row, since that is their console.
  */
 export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   const links: ConsoleLink[] = [];
@@ -112,6 +118,10 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
     if (v.managesUnits) {
       links.push({ id: "units", label: "Org units", href: "/edit/units" });
     }
+  }
+
+  if (v.isDeveloper && !v.isSuperuser) {
+    links.push({ id: "matcha", label: "Matcha", href: "/edit/matcha" });
   }
 
   return links;

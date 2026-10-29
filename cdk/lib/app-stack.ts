@@ -918,14 +918,17 @@ export class AppStack extends Stack {
     // the single action bedrock:InvokeModel (the generator uses generateText,
     // not streaming, so no InvokeModelWithResponseStream).
     //
-    // Scoped to the Claude Opus 4.8 and Sonnet 4.x families, NOT a bare `*`:
+    // Scoped to Claude Opus 5.5 + 4.8, Sonnet 5.5 and the Sonnet 4.x family,
+    // NOT a bare `*`:
     //   - the us. cross-region INFERENCE PROFILE the model id resolves to
     //     (account-scoped), and
     //   - the underlying FOUNDATION MODELs (AWS-owned, empty account field)
     //     the profile routes to.
-    // Opus 4.8 is now the DEFAULT generate model and is granted here. Sonnet
-    // stays granted because the verify/revise critic pass and the
-    // OVERVIEW_GENERATE_MODEL rollback lever still run on Sonnet.
+    // Opus 5.5 is the DEFAULT generate model and Sonnet 5.5 the DEFAULT
+    // extract model (lib/llm/models.ts). Opus 4.8 and Sonnet 4.x stay granted
+    // so the OVERVIEW_GENERATE_MODEL / BIOSKETCH_GENERATE_MODEL /
+    // MATCHA_EXTRACT_MODEL / CANCER_FUNDING_MODEL env vars can roll back to
+    // the previous generation without an IAM change.
     // Region is `*` because a us. inference-profile call fans out across the
     // US regions (us-east-1/-2, us-west-2); the family wildcards let an
     // intra-family bump (e.g. Sonnet 4.5 -> 4.6) via OVERVIEW_GENERATE_MODEL
@@ -941,6 +944,10 @@ export class AppStack extends Stack {
           effect: iam.Effect.ALLOW,
           actions: ["bedrock:InvokeModel"],
           resources: [
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-opus-5-5*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*",
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-5-5*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-opus-4-8*`,
             "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*",
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
@@ -1711,9 +1718,8 @@ export class AppStack extends Stack {
         // small regardless: the page gate is isMatchaEnabled() && isGrantMatchaEnabled() &&
         // (superuser||developer), with a Tools nav tab for exactly that audience.
         // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
-        // ⚠ Since the find-researchers sunset (Phase 3c), /edit/grant-matcha is the development
-        // role's ONLY console page and their GLOBAL_ROLE_HOME landing. Flipping this (or MATCHA)
-        // off no longer degrades to an older surface — it 404s that role's entire console entry.
+        // ⚠ The development role's console is /edit/matcha (their GLOBAL_ROLE_HOME landing) plus
+        // this page. Flipping MATCHA off 404s that role's entire console entry.
         GRANT_MATCHA: "on",
         // MATCHA_ADMIN — the Grant Matcha corpus-admin surface (matcha-admin plan Phase 1b):
         // /api/edit/opportunity-admin suppress/restore on `opportunity` rows + the Browse-tab
@@ -1723,6 +1729,14 @@ export class AppStack extends Stack {
         // columns), so flag-off leaves any already-suppressed rows suppressed in reads — the
         // flag gates the WRITE surface, not the read filters.
         MATCHA_ADMIN: env === "staging" ? "on" : "off",
+        // FUNDABLE_WORK — /edit/fundable-work: WCM conference abstracts + preprints scored for
+        // private-funding potential (etl/fundable-work, weekly). Read via isFundableWorkEnabled();
+        // the page notFound()s while off. ON in BOTH envs since 2026-10-28 — CTL (Bellush) reviews
+        // the scores on the live prod page rather than on staging, at the owner's call. The surface
+        // stays admin-only regardless (superuser | development | observer).
+        // ⚠ Prod has its OWN fundable_work table: it is empty until `etl:fundable-work` has run
+        // against prod, so flipping this on without that backfill shows an empty page.
+        FUNDABLE_WORK: "on",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
@@ -1746,6 +1760,14 @@ export class AppStack extends Stack {
         // refresh it waited on landed 2026-09-21). Kept as a flag: it is the single
         // kill switch for the ORCID tab, its write and the suggestion.
         SELF_EDIT_ORCID_SUGGESTION: "on",
+        // ORCID_CONNECT (#3115) — "Connect your ORCID iD" (ORCID sign-in,
+        // `/authenticate` only) on the scholar's own Identifiers & Profiles card,
+        // and `GET /api/edit/orcid/connect` + `/callback`. OFF both envs: the
+        // client credentials (scholars/<env>/orcid-api) are not wired yet, and
+        // prod needs ORCID's demo review first. Staging runs against the sandbox.
+        ORCID_CONNECT: "off",
+        ORCID_CONNECT_BASE:
+          envConfig.envName === "prod" ? "https://orcid.org" : "https://sandbox.orcid.org",
         // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
         // (LinkedIn, X, Bluesky, Google Scholar, ResearchGate): the External
         // Profiles card on the Identifiers & Profiles tab, the `profileLinks`
@@ -1840,9 +1862,9 @@ export class AppStack extends Stack {
         // reads === "on" (lib/edit/grant-attribution-queue.ts); off => the page
         // AND the decision endpoint 404, and the Grants tab is hidden. Tracks
         // REPORTER_GRANTS_CORROBORATION_HIDE (cdk/lib/etl-stack.ts), which fills
-        // the queue: staging first, prod after the staging queue is reviewed.
+        // the queue: staging first, prod flipped 2026-10-27.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        GRANT_ATTRIBUTION_QUEUE: envConfig.envName === "staging" ? "on" : "off",
+        GRANT_ATTRIBUTION_QUEUE: "on",
         // ORCID librarian queue -- /edit/orcid-queue and /api/edit/orcid-queue/*
         // (superuser librarians confirm candidate iDs on etl/orcid-evidence's
         // bands). isOrcidLibrarianQueueEnabled() reads === "on"
@@ -1851,6 +1873,15 @@ export class AppStack extends Stack {
         // reviewed 2026-10-24. Takes effect ONLY on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         ORCID_LIBRARIAN_QUEUE: "on",
+        // ORCID queue v2.1 -- the Publication Manager base the queue's "Review in
+        // Publication Manager" (/curate/<uid>) and "Add in Publication Manager"
+        // (/curate/<uid>?add=external&doi=<doi>, PM #1047) links use.
+        // publicationManagerBaseUrl() (lib/edit/orcid-queue.ts) accepts https only
+        // and otherwise falls back to the SPS-wide PUBLICATION_MANAGER_URL constant.
+        // Same value in both envs, production Publication Manager: staging's scholars and
+        // candidates are prod's people, and the dev PM is not guaranteed to carry
+        // #1047. Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        PUBLICATION_MANAGER_URL: "https://reciter.weill.cornell.edu",
         // #1762 — the `honors_curator` role. The approver is the RESEARCH DEAN's
         // office (a different org unit from the Dean's office), which self-serves
         // from day one, so this is not a fast-follow: without it the queue is

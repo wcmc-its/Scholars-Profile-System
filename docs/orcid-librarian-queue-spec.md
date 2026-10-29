@@ -92,7 +92,7 @@ Gate the page, routes and subnav link on flag `ORCID_LIBRARIAN_QUEUE` (`on` in s
 
 The build is stricter than the text above in these places:
 
-- **On file includes `rpm_admin`.** Everywhere this spec says "`scholar.orcid`" for what is on file (population, Conflicts, the bulk re-check, the auto-confirm's "`scholar.orcid` is null"), the build reads `scholar.orcid`, else an undismissed `rpm_admin` candidate iD. That is how `/api/edit/orcid` and the coverage fold read it; WCM usually leaves `scholar.orcid` NULL. Replacing an `rpm_admin` iD from Conflicts dismisses it, and dismissing one here is a 409 (that is Remove on /edit).
+- **On file is `scholar.orcid` only** (2026-10, Scholars is the ORCID authority). An iD typed into Publication Manager (`rpm_admin`) or held in WCM Identity (`identity`, written by `etl/identity`) is a candidate like any other: it is confirmed or dismissed here, and it never makes another candidate a conflict. Until then an undismissed `rpm_admin` iD counted as on file.
 - **Email auto-confirm** also requires exactly one `email_verified` row for the scholar and for the iD, and that no other scholar holds the iD: two verified matches are a question for a librarian, not the ETL.
 - **Bulk confirm and sampling** leave out a scholar with two qualifying rows in the band (only one iD can be theirs). Those rows stay in the tab for one-at-a-time decisions, and the bulk response counts them as skipped.
 - **A competitor that cannot be ruled out counts.** When another candidate iD of the same scholar could not be fetched this run, the pair is marked competitor, so a degraded run never lifts it into a confirmable band.
@@ -109,7 +109,7 @@ Cornell NetID scholars; mirroring iD + method to reciterdb (the publication lane
 
 ## v2 (2026-10-25)
 
-Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, approved from a review of the live prod queue. This PR builds its items 1 to 8; item 9 (the Publication Manager deep link) is a later PR. Everything in v1 above still holds: the superuser gate, the View-as refusal, the sample gate, the server re-check in bulk, never confirming over a dismissal, and `rpm_admin` counting as on file.
+Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, approved from a review of the live prod queue. This PR builds its items 1 to 8; item 9 (the Publication Manager deep link) is a later PR. Everything in v1 above still holds: the superuser gate, the View-as refusal, the sample gate, the server re-check in bulk, never confirming over a dismissal, and (until 2026-10) `rpm_admin` counting as on file.
 
 ### Data model (one migration, `20261025120000_orcid_queue_v2`)
 
@@ -128,7 +128,7 @@ Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, approved from a rev
 - **One card per scholar** (item 5): every candidate iD, best first (band, then shared papers, then name agreement). The card's tab is `cardTabOf`: Email verified when the ETL confirmed one of their iDs, Conflicts when another iD is on file, else the best band. Tab counts are scholars. Confirm and Not this person act per iD; on a card with other open candidates, Confirm also marks them Not this person in the same request (a checkbox, on by default, turns it off).
 - **Names side by side** (item 4): "Scholar" (fullName / preferredName) and "ORCID" (credit name, else given + family, with given + family and other names as "also known as"), with the result and the rule: same surname, same once accents are folded, a compound surname shares a part, or same once spaces and hyphens are removed; plus whether the full given name agrees.
 - **Chips that open** (item 2): Institution (each pair), Verified email, Name, Shared N (each paper linked), Competitor (who, K papers, which rule; an unfetched iD says so), How discovered.
-- **Filters** (items 6 and 7): one sticky bar, the `/edit/orcid-coverage` popover: person type, department / division, institution (`lib/edit/person-filter.ts` values and `personFilterWhere`), and how discovered (`orcid_candidate.source`: `rpm_inferred`, `rpm_admin`, `orcid_email`, `orcid_works`, `orcid_crossref`, `orcid_name`). URL params `type`, `unit`, `source`. The filter applies to the list, the counts, the sample draw and bulk confirm. A source chip on each iD, "N sources agree" when two or more found it.
+- **Filters** (items 6 and 7): one sticky bar, the `/edit/orcid-coverage` popover: person type, department / division, institution (`lib/edit/person-filter.ts` values and `personFilterWhere`), and how discovered (`orcid_candidate.source`: `rpm_inferred`, `rpm_admin`, `identity`, `orcid_email`, `orcid_works`, `orcid_crossref`, `orcid_name`). URL params `type`, `unit`, `source`. The filter applies to the list, the counts, the sample draw and bulk confirm. A source chip on each iD, "N sources agree" when two or more found it.
 - **Links** (item 8): each new work and each shared paper links to PubMed when it has a PMID, else doi.org, else the ORCID work's own URL (http/https only). The scholar name links to the profile, the iD to orcid.org.
 
 ### Routes
@@ -148,3 +148,52 @@ Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, approved from a rev
 - **Figure titles** are dropped when the work is typed `other` or not typed at all. A work group with any `journal-article` copy counts as a journal article.
 - **Preprints group by title** only when the normalized title has at least 20 characters, so short generic titles ("Reply") never collapse; groups with no preprint are never collapsed.
 - **Not built here**: item 9 and item 8's Publication Manager curate link (both PM links, the next PR).
+
+## v2.1 (2026-10-26)
+
+Source: `~/Dropbox/Projects/Roadmap/orcid-queue-v2-spec.md`, section "v2.1", from a review of the prod queue after #3155. Items 1 to 5. No migration: the new facts live in `new_works_sample` entries and `evidence_detail`.
+
+### Evidence ETL
+
+- **Supplements** (item 1, `work-filter.ts`): dropped whatever the ORCID type when the title opens "Supplementary / Supplemental <material noun> ..." (materials, data, information, files, tables, figures, methods, appendix, videos, text, notes, ...), or "(Figure|Fig.|Table|Data|Movie|Video|File|Appendix) S?<n>[a-z]? (from|for|of) ...", or "Supplementary (Figures|Tables) S<n>-S<n> from ..."; and any AACR supplement DOI, `10.1158/<ISSN>.<6+ digits>[.vN]` (an AACR article DOI has letters after the ISSN and is kept).
+- **DOI to PMID** (item 2, `pubmed-resolve.ts`): every DOI of a work with no PMID goes to the PMC ID converter (`pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/`, 200 per call), then what is left to PubMed ESearch `"<doi>"[aid] OR ...` (40 per call) mapped back to each DOI through ESummary `articleids`. Exact only: a DOI two PMIDs claim stays unresolved. 3 req/s, 10 with `NCBI_API_KEY` (already allowlisted as an optional key; not wired in cdk, so the deployed run is keyless until it is); 3 retries on a network error, 429 or 5xx; 20 s per request. Cached per run. Never throws: a failed batch leaves its DOIs unresolved and is counted, and three failed batches in a row stop the lookups for the run. The run logs requested / converter / [aid] / unresolved / failed batches. A resolved PMID joins the work's ids, so it can count as shared (and so move a band) like a PMID the record carried.
+- **Title match** (item 3): a work with no id at all is matched to the scholar's own publications by title (HTML tags and entities removed, accents folded, lowercased, punctuation to spaces, at least 20 characters) and publication year within one. Exact normalized equality, and exactly one of the scholar's papers; a missing year on either side never matches. A match gives the work that paper's PMID, so it counts as shared and leaves the new works.
+- **ReCiter status** (item 4): each scholar's assertions are read from reciterdb `person_article` (`SELECT personIdentifier, pmid, userAssertion ... WHERE personIdentifier IN (?) AND pmid IN (?)`, only the PMIDs on that scholar's candidate records, 200 scholars x 2,000 PMIDs per query) through `lib/sources/reciterdb.ts`, the client `etl:reciter` uses. `ACCEPTED` = accepted, `REJECTED` = rejected, any other row (NULL, 'NULL', PENDING) = pending; no row for a known PMID = `not_retrieved`; a DOI that did not resolve = `not_in_pubmed`; neither id = `no_ids`. An accepted PMID our publications lack is added to the scholar's work index, so it counts as shared and is excluded from new works (the 33 wrongly shown as missing). Each `new_works_sample` entry carries `status`; `evidence_detail.workStatus` holds the new works per status, `unknown`, `reciterRead`, `acceptedInReciter`, `resolvedByDoi` and `resolvedByTitle`. The run logs the totals.
+- **Task family moved**: SPS does not mirror pending assertions (it keeps accepted authorships in `publication_author` and, since #3071, rejections in `reciter_rejected_pmid`), so the evidence step reads reciterdb itself. `etl:orcid-evidence` is now in `SOURCES_SCRIPTS` (`cdk/lib/etl-stack.ts`) and `OrcidEvidenceWeekly` runs on `sps-etl-sources-<env>`, which carries the reciterdb secret; same task role, so the Identity Scan grant is unchanged. Snapshots updated. Takes effect on a `cdk deploy --exclusively Sps-Etl-<env>`.
+
+### Queue page
+
+- **Status per work** (item 5): the preview header adds "ReCiter: N pending · N rejected · N not retrieved · N not in PubMed · N with no identifiers", plus "N accepted in ReCiter counted as shared" and, when the run could not read reciterdb, says so. Each work shows its status chip and its link: the title links to PubMed for any PMID (else doi.org, else its own https URL, unchanged); pending and rejected get "Review in Publication Manager" (`<pm>/curate/<uid>`), rejected labelled "Rejected in ReCiter: re-review"; `not_in_pubmed` gets "Add in Publication Manager" (`<pm>/curate/<uid>?add=external&doi=<doi>`, PM #1047).
+- **PM base URL**: `PUBLICATION_MANAGER_URL`, wired in `cdk/lib/app-stack.ts` (both envs `https://reciter.weill.cornell.edu`), read by `publicationManagerBaseUrl()`; https only (no credentials, query or fragment), else the SPS-wide `PUBLICATION_MANAGER_URL` constant in `lib/edit/request-a-change.ts`. `pmCurateHref` URL-encodes the uid and the DOI and returns null for a non-https base. doi.org links now encode the DOI per path segment.
+
+### Deviations (deliberate)
+
+- **"Supplementary / Supplemental" alone does not drop a work**: it must be followed by a material noun, so "Supplemental oxygen after surgery" and "Supplemental Nutrition Assistance Program ..." stay. The item-word pattern must open the title. The title rules (not the AACR DOI rule) still spare a work whose ORCID record carries a PMID.
+- **No migration**: the per-status counts are in `evidence_detail.workStatus`, not columns; the spec allowed either.
+- **Status unknown**: when reciterdb cannot be read, a PMID work's status is null (no chip), counted as `unknown`, and no accepted lift happens; `not_in_pubmed` and `no_ids` do not depend on ReCiter and are still set. The run never fails on it.
+- **Both envs link to production Publication Manager**: staging's scholars are prod's people, and the dev PM is not guaranteed to carry #1047.
+- **Pending and rejected come from reciterdb, not DynamoDB GoldStandard**: `person_article` already holds every candidate ReCiter retrieved for the person with its assertion, which is also what separates `pending` from `not_retrieved`; GoldStandard holds only accepted and rejected PMIDs.
+- **Bands can move**: a resolved PMID, a title match or a ReCiter acceptance raises `shared` like any shared paper. Compare band counts on the first v2.1 run.
+
+## v3 PR A (2026-10-26): master–detail redesign
+
+Plan: `Roadmap/orcid-queue-v3-redesign-plan.md` (Projects). Mockup: `Projects/Scholars-Profile-System/mockups/ORCID Queue Redesign/` v5. UI only; no schema change.
+
+### Queue page
+
+- The band tabs are gone. The page loads every scholar in the queue as a summary (`loadOrcidQueue`); the selected scholar's card comes from `GET /api/edit/orcid-queue/scholar?cwid=` (`loadOrcidQueueCard`), gated like the page.
+- Each scholar carries a 5-step "Match evidence" meter from their best iD (`bandLevel`: Weak 1 … Email verified 5). A competitor blocks steps 3–5, drawn amber.
+- Search (name, CWID, iD with or without dashes), Confidence, Decision (default Unassigned) and Possible errors (a different iD on file) run in the browser. Person type, department, institution and how discovered stay server-side (`?type=&unit=&source=`).
+- Sorts: Strongest match (`candidateScore`), Clearest winner (`scholarGap`), Department then name, Name, CWID.
+- One table per scholar, a column per signal. An opened row shows the competitor rule that fired (`competitorRules`: 1 same-surname scholar, 2 another plausible iD, 3 iD shared with another scholar), names, signals, and publications ORCID vs. ReCiter (`reciterTotal` = confirmed `publication_author` rows).
+- The card shows the iD on file and where it came from (`OrcidOnFile.how`).
+
+### Routes
+
+- `decide` drops `sampleId`. "None of these" is a dismiss with the rest in `dismissOthers` and `noneOfThese: true`; each audit row carries `none_of_these: true`.
+- `sample` and `bulk-confirm` are removed. The `orcid_queue_sample` table stays; nothing writes it.
+
+### Deviations (deliberate)
+
+- No "Only in ReCiter" list, only its count: the ETL keeps a capped sample of shared papers, so the exact set isn't known. PR B.
+- No Undo of a librarian decision, no "Same person, duplicate iD", no one-iD-two-scholars compare, no "Decided by", and no queue-age sorts. Each needs the `orcid_decision` table (PR B).

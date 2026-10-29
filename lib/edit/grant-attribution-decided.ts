@@ -17,12 +17,23 @@ import {
 
 export type DecidedTab = "confirmed" | "rejected" | "unproven";
 export type DecidedBy = "all" | "curator" | "auto";
-export type DecidedSort = "least" | "recent" | "scholar";
+/** Score high to low, low to high, or Scholar A–Z. */
+export type DecidedSort = "high" | "low" | "name";
+/** The evidence scale's keys (`EVIDENCE_LEVELS` in grant-attribution-board.ts). */
+export type DecidedLevel =
+  "all" | "supports" | "leans-for" | "mixed" | "none" | "leans-against" | "against";
 
 export const DECIDED_TABS: ReadonlyArray<DecidedTab> = ["confirmed", "rejected", "unproven"];
-export const DECIDED_PAGE_SIZE = 50;
-/** Scholars per page when grouped. */
-export const DECIDED_GROUP_PAGE_SIZE = 25;
+export const DECIDED_PAGE_SIZE = 200;
+const DECIDED_LEVELS: ReadonlyArray<DecidedLevel> = [
+  "all",
+  "supports",
+  "leans-for",
+  "mixed",
+  "none",
+  "leans-against",
+  "against",
+];
 /** The scorer's thresholds (etl/reporter-grants/score.ts), for the margin line. */
 export const SHOW_AT = 2;
 export const HIDE_AT = -2;
@@ -31,12 +42,15 @@ export const PRIOR = -2;
 export type DecidedParams = {
   tab: DecidedTab;
   by: DecidedBy;
-  /** Confirmed only: just the awards the check showed again since the last run. */
+  /** Just the awards the latest weekly check moved here on its own: shown
+   *  again (Confirmed) or newly hidden (Not this person). */
   changed: boolean;
-  group: boolean;
+  level: DecidedLevel;
   sort: DecidedSort;
   q: string;
   page: number;
+  /** "Show all": every matching row on one page, no pager. */
+  all: boolean;
 };
 
 type Raw = Record<string, string | string[] | undefined>;
@@ -48,18 +62,26 @@ export function parseQueueTab(sp: Raw): "pending" | DecidedTab {
   return (DECIDED_TABS as readonly string[]).includes(t) ? (t as DecidedTab) : "pending";
 }
 
+/** Confirmed reads least certain first (score low to high); the others high
+ *  to low. */
+export function defaultDecidedSort(tab: DecidedTab): DecidedSort {
+  return tab === "confirmed" ? "low" : "high";
+}
+
 export function parseDecidedParams(sp: Raw, tab: DecidedTab): DecidedParams {
   const by = one(sp.by);
   const sort = one(sp.sort);
+  const level = one(sp.level) as DecidedLevel;
   const page = Number.parseInt(one(sp.page), 10);
   return {
     tab,
     by: by === "curator" || by === "auto" ? by : "all",
-    changed: tab === "confirmed" && one(sp.changed) === "1",
-    group: one(sp.group) === "1",
-    sort: sort === "recent" || sort === "scholar" ? sort : tab === "unproven" ? "recent" : "least",
+    changed: tab !== "unproven" && one(sp.changed) === "1",
+    level: DECIDED_LEVELS.includes(level) ? level : "all",
+    sort: sort === "high" || sort === "low" || sort === "name" ? sort : defaultDecidedSort(tab),
     q: one(sp.q).trim().slice(0, 200),
     page: Number.isFinite(page) && page > 1 ? page : 1,
+    all: one(sp.all) === "1",
   };
 }
 
@@ -69,10 +91,11 @@ export function decidedHref(p: DecidedParams, over: Partial<DecidedParams> = {})
   const qs = new URLSearchParams({ tab: n.tab });
   if (n.by !== "all") qs.set("by", n.by);
   if (n.changed) qs.set("changed", "1");
-  if (n.group) qs.set("group", "1");
-  if (n.sort !== (n.tab === "unproven" ? "recent" : "least")) qs.set("sort", n.sort);
+  if (n.level !== "all") qs.set("level", n.level);
+  if (n.sort !== defaultDecidedSort(n.tab)) qs.set("sort", n.sort);
   if (n.q) qs.set("q", n.q);
-  if (n.page > 1) qs.set("page", String(n.page));
+  if (n.all) qs.set("all", "1");
+  else if (n.page > 1) qs.set("page", String(n.page));
   return `?${qs.toString()}`;
 }
 
@@ -98,27 +121,12 @@ export function decidedTabOf(input: {
   return null;
 }
 
-/** How far a score sits inside its band: small is close to the line. */
-export function certainty(tab: DecidedTab, score: number): number {
-  if (tab === "confirmed") return score - SHOW_AT;
-  return HIDE_AT - score;
-}
-
-/** The line under a score: "2 over", "at the line", "6 under". */
-export function marginText(tab: DecidedTab, score: number, by: "curator" | "auto"): string {
-  if (by === "curator") return "curator decided";
-  if (tab === "unproven") return "nothing found";
-  const m = certainty(tab, score);
-  if (m === 0) return tab === "confirmed" ? "confirms at +2" : "hides at −2";
-  return tab === "confirmed" ? `${m} over the line` : `${m} under the line`;
-}
-
 /** "+4", "−8", "0". */
 export function signed(n: number): string {
   return n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0";
 }
 
-/** A name in parts, for the name comparison table. RePORTER prints
+/** A name in parts, for sorting by surname. RePORTER prints
  *  "LAST, FIRST M"; Scholars names read "First M. Last" (postnominals after a
  *  comma are dropped). */
 export function nameParts(
@@ -159,34 +167,33 @@ export function sortableName(fullName: string): string {
   return [p.last, [p.first, p.middle].filter(Boolean).join(" ")].filter(Boolean).join(", ");
 }
 
-/** Compare two name parts: same, one an initial of the other, or different. */
-export function partsDiffer(a: string, b: string): boolean {
-  const x = a.replace(/[^A-Za-z]/g, "").toLowerCase();
-  const y = b.replace(/[^A-Za-z]/g, "").toLowerCase();
-  if (!x || !y) return false;
-  if (x === y) return false;
-  if (x.length === 1 || y.length === 1) return x[0] !== y[0];
-  return true;
-}
-
 /** The checks that ran and found nothing, for the evidence panel. Only checks
  *  every award goes through are listed; ones the cues can't speak to (an
- *  unavailable source) are left out rather than claimed. */
-export function checkedNothingFound(cueIds: ReadonlySet<string>): string[] {
+ *  unavailable source) are left out rather than claimed. `heldAtWcm`: WCM is in
+ *  the award's org history, so a WCM cue that didn't fire was withheld, not
+ *  missed. */
+export function checkedNothingFound(cueIds: ReadonlySet<string>, heldAtWcm = false): string[] {
   const out: string[] = [];
   if (!cueIds.has("pub_linked")) out.push("No confirmed paper of the scholar cites this award");
   if (!cueIds.has("rejected_pmids")) out.push("No paper the scholar rejected cites it");
   if (!cueIds.has("profile_proven"))
     out.push("The NIH profile isn't linked by the scholar's accepted papers");
-  if (!cueIds.has("wcm_org") && !cueIds.has("wcm_org_shared_name")) out.push("Not held at WCM");
+  if (!cueIds.has("wcm_org") && !cueIds.has("wcm_org_shared_name"))
+    out.push(
+      heldAtWcm
+        ? "Held at WCM, not counted: the NIH profile came from a WCM grant, and the PI's name doesn't rule out another WCM person"
+        : "Not held at WCM",
+    );
   if (!cueIds.has("prior_institution")) out.push("Not held where the scholar trained");
+  if (!cueIds.has("affiliate_org")) out.push("Not held at a WCM affiliate");
   if (!cueIds.has("copi_coauthor")) out.push("No co-PI co-authors with the scholar");
   if (!cueIds.has("infoed_other_wcm_pi") && !cueIds.has("infoed_other_wcm_pi_named"))
     out.push("InfoEd names no other WCM investigator");
   if (!cueIds.has("timeline_impossible") && !cueIds.has("timeline_unlikely"))
     out.push("The award fits the scholar's career stage");
   if (!cueIds.has("middle_initial_conflict")) out.push("No middle-initial conflict");
-  if (!cueIds.has("pi_name_mismatch")) out.push("The NIH profile's PI has the scholar's surname");
+  if (!cueIds.has("pi_name_mismatch") && !cueIds.has("pi_given_name_mismatch"))
+    out.push("The NIH profile's PI has the scholar's name");
   return out;
 }
 
@@ -199,6 +206,9 @@ export type DecidedRow = {
   by: "curator" | "auto";
   /** Auto-confirmed rows the check had hidden or queued before. */
   was: "hidden" | "queued" | null;
+  /** The latest weekly check moved it here on its own: shown again, or newly
+   *  hidden. */
+  changed: boolean;
   /** Auto-confirmed, but the check could not lift its hide yet (revoking was
    *  off that run): still off the profile until the next run. */
   stillHidden: boolean;
@@ -213,32 +223,27 @@ export type DecidedRow = {
   scholar: {
     cwid: string;
     slug: string | null;
+    /** "Lindqvist, Priya S", for sorting. */
     name: string;
+    /** As the profile renders it, postnominals included. */
+    displayName: string;
     degrees: string | null;
+    title: string | null;
     department: string | null;
     career: string | null;
     names: string[];
   };
 };
 
-export type DecidedGroup = {
-  cwid: string;
-  rows: DecidedRow[];
-  /** Rows matching the filters; `here` counts the whole tab. */
-  shown: number;
-  /** This scholar's awards on this tab, and on the other tabs. */
-  here: number;
-  total: number;
-  elsewhere: Partial<Record<DecidedTab | "pending", number>>;
-};
-
 export type DecidedPage = {
   params: DecidedParams;
   counts: Record<DecidedTab, { all: number; curator: number; auto: number }>;
-  /** Confirmed rows the check showed again since the previous run. */
-  changed: number;
-  /** Rows (or groups) matching the filters, before paging. */
+  /** Per tab, the rows the latest weekly check moved there on its own. */
+  changed: Record<DecidedTab, number>;
+  /** Rows matching the filters, before paging. */
   matched: number;
   rows: DecidedRow[];
-  groups: DecidedGroup[] | null;
+  /** Every Unproven award's grant externalId: the To review tab lists them
+   *  beside the pending reviews. */
+  unprovenIds: string[];
 };

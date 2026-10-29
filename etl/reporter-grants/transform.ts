@@ -10,7 +10,7 @@
  */
 import { parseNihAward } from "@/lib/award-number";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
-import type { ReporterProject } from "@/lib/edit/reporter-grants";
+import { isWcmOrg, type ReporterProject } from "@/lib/edit/reporter-grants";
 import type { ReporterGrantProject, ReporterPI } from "@/etl/nih-profile/fetcher";
 
 /**
@@ -123,8 +123,25 @@ export interface GroupedProject {
   pis: ReporterPI[];
 }
 
-export const isWcmOrg = (org: string | null | undefined): boolean =>
-  /weill|cornell/i.test(org ?? "");
+export { isWcmOrg };
+
+/** #3071 — institutions whose faculty often hold WCM appointments, as RePORTER
+ *  prints them, with the name the evidence shows. */
+export const WCM_AFFILIATES: ReadonlyArray<{ pattern: RegExp; name: string }> = [
+  { pattern: /sloan[\s-]*kettering/i, name: "Memorial Sloan Kettering" },
+  { pattern: /new york[\s-]*presbyterian|society of the new york hosp/i, name: "NewYork-Presbyterian" },
+  { pattern: /hospital for special surgery/i, name: "Hospital for Special Surgery" },
+  { pattern: /rockefeller univ/i, name: "Rockefeller University" },
+];
+
+/** The WCM affiliate anywhere in the award's org history, or null. Pure. */
+export function affiliateOrgMatch(
+  orgHistory: ReadonlyArray<{ orgName: string | null }>,
+): string | null {
+  for (const o of orgHistory)
+    for (const a of WCM_AFFILIATES) if (o.orgName && a.pattern.test(o.orgName)) return a.name;
+  return null;
+}
 
 function parseReporterDate(s: string | null): Date | null {
   if (!s) return null;

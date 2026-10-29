@@ -356,13 +356,14 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates eight state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler + grants export + honors lists), eight EventBridge rules, two SNS topics", () => {
+      it("creates nine state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler + grants export + honors lists + funding digest), nine EventBridge rules, two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
         // the #353 cdn reconciler (PR-2) + the grants-export machine, now
         // that grantsExportScheduleEnabled is true in prod too, + the
-        // honors-list scraper (weekly + the console's Run now).
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 8);
-        template.resourceCountIs("AWS::Events::Rule", 8);
+        // honors-list scraper (weekly + the console's Run now) + the funding
+        // digest import, started by its email landing in the inbound bucket.
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 9);
+        template.resourceCountIs("AWS::Events::Rule", 9);
         // The heartbeat + both reconcilers + grants export reuse the cadence
         // failure topic; PR-7 adds the etl-page P1 topic, so two total:
         // etl-failures + etl-page.
@@ -371,7 +372,7 @@ describe("EtlStack", () => {
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates eighteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status)", () => {
+      it("creates nineteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status + funding digest status)", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
         // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
         // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
@@ -380,8 +381,10 @@ describe("EtlStack", () => {
         // + the Phase 0a opportunity-corpus-freshness alarm (custom SPS/ETL
         // metric, not an AWS/States one).
         // + the honors-list scraper's status alarm (its absence is graded by the
-        // freshness heartbeat, TRACKED.HonorsLists, not a cadence alarm).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 18);
+        // freshness heartbeat, TRACKED.HonorsLists, not a cadence alarm)
+        // + the funding digest import's status alarm (event-driven, so no
+        // cadence alarm; TRACKED.FundingDigest grades its absence).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 19);
       });
 
       it("creates eight ECS task definitions (5 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -737,10 +740,10 @@ describe("EtlStack", () => {
         // grants-export alarms (status + cadence), now that
         // grantsExportScheduleEnabled is true in prod too, + the Phase 0a
         // opportunity-corpus-freshness alarm + the honors-list scraper's
-        // status alarm; all share the
+        // and the funding digest import's status alarms; all share the
         // topic -- a duration alarm that routed elsewhere would be invisible,
         // so it is covered by the same loop below.
-        expect(Object.keys(alarms)).toHaveLength(18);
+        expect(Object.keys(alarms)).toHaveLength(19);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -1933,6 +1936,27 @@ describe("EtlStack", () => {
       expect(stagingEnv).toMatch(/"MESH_ANCHOR_SCORE_MIN"[^}]*"0\.9"/);
     });
 
+    it("starts the funding digest import when an email lands under funding/ in the inbound bucket", () => {
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-funding-digest-staging",
+        State: "ENABLED",
+        EventPattern: {
+          source: ["aws.s3"],
+          "detail-type": ["Object Created"],
+          detail: {
+            bucket: { name: [Match.stringLikeRegexp("^sps-inbound-mail-")] },
+            object: { key: [{ prefix: "funding/" }] },
+          },
+        },
+        Targets: [Match.objectLike({ Arn: { Ref: Match.stringLikeRegexp("^FundingDigestStateMachine") } })],
+      });
+      const machines = template.findResources("AWS::StepFunctions::StateMachine", {
+        Properties: { StateMachineName: "scholars-funding-digest-staging" },
+      });
+      const definition = JSON.stringify(Object.values(machines)[0]?.Properties?.DefinitionString);
+      expect(definition).toContain("etl:funding-digest");
+    });
+
     it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + grantsExportScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
@@ -1942,8 +1966,8 @@ describe("EtlStack", () => {
       // The #1218 opportunity-projection rule was RETIRED in staging on
       // 2026-07-20 (the nightly now covers the work); the honors-list scraper's
       // weekly rule brings it to 10 (enabled after staging's clean supervised
-      // first run on 2026-09-25).
-      expect(Object.keys(rules)).toHaveLength(10);
+      // first run on 2026-09-25); the funding digest arrival rule makes 11.
+      expect(Object.keys(rules)).toHaveLength(11);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });

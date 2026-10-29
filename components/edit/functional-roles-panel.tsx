@@ -838,8 +838,7 @@ export function FunctionalRolesPanel({
                           className="text-muted-foreground text-[12.5px] whitespace-nowrap"
                           data-testid={`functional-role-locked-${key}`}
                         >
-                          Read-only
-                          <span className="sr-only"> — {IMPORTED_NOTE[r.source]}</span>
+                          Read-only <span className="sr-only">— {IMPORTED_NOTE[r.source]}</span>
                         </span>
                       ) : (
                         <>

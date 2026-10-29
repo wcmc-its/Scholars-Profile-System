@@ -49,6 +49,8 @@ export function orcidEvidenceLine(e: OrcidEvidence, subject: string | null): str
         : `Matched on ${pubs(e.accepted)} in ReCiter`;
     case "rpm_admin":
       return "Entered in ReCiter Publication Manager";
+    case "identity":
+      return "Held in WCM Identity, which ReCiter reads";
     case "orcid_email":
       return `The ORCID registry record lists ${whose} WCM email`;
     case "orcid_works":
@@ -57,6 +59,10 @@ export function orcidEvidenceLine(e: OrcidEvidence, subject: string | null): str
         : `${e.accepted} works on the ORCID record match ${whose} publications`;
     case "orcid_crossref":
       return `Publishers recorded this iD on ${e.accepted} of ${whose} papers`;
+    case "infoed_biosketch":
+      return `Listed on ${whose} NIH biosketch in a WCM grant application`;
+    case "infoed_biosketch_name":
+      return `Listed on an NIH biosketch matched to ${who} by name in a WCM grant application`;
     case "orcid_name":
       return `The ORCID registry record matches ${whose} name`;
     default:

@@ -80,7 +80,22 @@ export type GrantAttributionCue = {
   /** Cue `copi_coauthor` from a run that recorded it: the co-PI, as RePORTER
    *  names them, and the papers they share with the scholar (newest first). */
   coPi?: { name: string; total: number; papers: GrantAttributionPaper[] };
+  /** Cue `rejected_pmids` from a run that recorded them: the papers RePORTER
+   *  links to the award that the scholar rejected in ReCiter (capped). The
+   *  title is PubMed's, null when the ETL could not fetch it. */
+  rejected?: GrantAttributionRejectedPaper[];
 };
+
+export type GrantAttributionRejectedPaper = { pmid: string; title: string | null };
+
+/** A stored cue's `rejected` list, or undefined when absent or malformed. */
+export function asRejectedPapers(v: unknown): GrantAttributionRejectedPaper[] | undefined {
+  if (!Array.isArray(v) || v.length === 0) return undefined;
+  const ok = v.every(
+    (p) => !!p && typeof p.pmid === "string" && (p.title === null || typeof p.title === "string"),
+  );
+  return ok ? v.map((p) => ({ pmid: p.pmid, title: p.title })) : undefined;
+}
 
 export type GrantAttributionAward = {
   title: string | null;
@@ -95,7 +110,13 @@ export type GrantAttributionAward = {
 };
 
 export type GrantAttributionItem = {
+  /** The review id; for an Unproven award, which has no review, its grant externalId. */
   id: string;
+  /** The grant's externalId, `reporter:{cwid}:{core}`. */
+  grantId: string;
+  /** Unproven: the weekly check found nothing either way and opened no review.
+   *  A decision on it goes by grant. */
+  unproven: boolean;
   cwid: string;
   slug: string | null;
   /** The name as the profile renders it. */
@@ -202,6 +223,7 @@ export const CUE_LABELS: Readonly<Record<string, string>> = {
   timeline_unlikely: "Unlikely timeline",
   middle_initial_conflict: "Middle initial differs",
   prior_institution: "Trained there",
+  affiliate_org: "Held at a WCM affiliate",
   copi_coauthor: "Co-PI is a co-author",
   topic_match: "Topics match",
   topic_mismatch: "Topics differ",
@@ -209,6 +231,7 @@ export const CUE_LABELS: Readonly<Record<string, string>> = {
   name_rare: "Rare name",
   name_common: "Common name",
   pi_name_mismatch: "PI has a different surname",
+  pi_given_name_mismatch: "PI has a different first name",
 };
 
 export function cueLabel(id: string): string {
@@ -220,58 +243,10 @@ export function reporterProjectUrl(applId: number | null): string | null {
   return applId ? nihReporterProjectUrl(applId) : null;
 }
 
-/** Confidence levels, strongest first. Rule-based on the cues that fired, until
- *  they can be checked against past decisions. */
-export const ATTRIBUTION_LEVELS = [
-  { key: "high", label: "High" },
-  { key: "likely", label: "Likely" },
-  { key: "conflict", label: "Conflicting" },
-  { key: "unclear", label: "Unclear" },
-  { key: "out", label: "Ruled out" },
-] as const;
-
-export type AttributionLevel = (typeof ATTRIBUTION_LEVELS)[number]["key"];
-
 /** A strong negative (|weight| ≥ STRONG in score.ts). The named InfoEd cue
  *  counts too: reviews stored before 2026-10-24 carry it at weight 0. */
 export function isVetoCue(c: Pick<GrantAttributionCue, "id" | "weight">): boolean {
   return c.id === "infoed_other_wcm_pi_named" || c.weight <= -4;
-}
-
-/** Cues that only adjust other evidence (score.ts rules 3 and 4), never
- *  evidence on their own. */
-const MODIFIER_CUES: ReadonlySet<string> = new Set([
-  "topic_match",
-  "topic_mismatch",
-  "name_rare",
-  "name_common",
-]);
-
-/** The cues are only a co-PI co-author plus modifiers: weak by design. */
-export function isCoauthorshipOnly(cues: ReadonlyArray<Pick<GrantAttributionCue, "id">>): boolean {
-  return (
-    cues.some((c) => c.id === "copi_coauthor") &&
-    cues.every((c) => c.id === "copi_coauthor" || MODIFIER_CUES.has(c.id))
-  );
-}
-
-export function attributionLevel(cues: ReadonlyArray<Pick<GrantAttributionCue, "id" | "weight">>): {
-  level: AttributionLevel;
-  veto: string | null;
-} {
-  // Ruled out only when nothing strong points the other way; otherwise the
-  // scorer queued it as a conflict.
-  const veto = cues.find(isVetoCue);
-  if (veto && !cues.some((c) => c.weight >= 4)) return { level: "out", veto: veto.id };
-  if (veto) return { level: "conflict", veto: null };
-  // Name rarity only adjusts other evidence, so it never counts as a cue here.
-  const pos = cues.filter((c) => c.weight > 0 && c.id !== "name_rare");
-  const neg = cues.some((c) => c.weight < 0 && c.id !== "name_common");
-  if (pos.length > 0 && neg) return { level: "conflict", veto: null };
-  if (pos.some((c) => c.id === "pub_linked") || pos.length >= 2)
-    return { level: "high", veto: null };
-  if (pos.length === 1) return { level: "likely", veto: null };
-  return { level: "unclear", veto: null };
 }
 
 const titleWord = (w: string) =>
@@ -293,16 +268,6 @@ const letters = (x: string) =>
     .normalize("NFD")
     .replace(/[^A-Za-z]/g, "")
     .toLowerCase();
-
-/** The RePORTER PI ("LAST, FIRST" or "First Last") carries the scholar's
- *  surname. */
-export function isScholarPi(raw: string, surname: string | null): boolean {
-  if (!surname) return false;
-  const last = letters(
-    raw.includes(",") ? raw.split(",")[0]! : (raw.trim().split(/\s+/).pop() ?? ""),
-  );
-  return last.length > 0 && last === letters(surname);
-}
 
 /** RePORTER's name for display, word by word, each marked when the scholar's
  *  names on record have no match for it. An initial matches a word it starts
@@ -352,6 +317,7 @@ export const EVIDENCE_ROWS: ReadonlyArray<{
     toward: true,
   },
   { ids: ["prior_institution"], label: "They trained there", toward: true },
+  { ids: ["affiliate_org"], label: "Held at a WCM affiliate", toward: true },
   { ids: ["topic_match"], label: "Topics match their papers", toward: true },
   { ids: ["name_rare"], label: "Rare name: the only NIH PI profile with it", toward: true },
   { ids: ["middle_initial_conflict"], label: "Middle initial differs", toward: false },
@@ -373,6 +339,11 @@ export const EVIDENCE_ROWS: ReadonlyArray<{
   {
     ids: ["pi_name_mismatch"],
     label: "The NIH profile's PI has a different surname",
+    toward: false,
+  },
+  {
+    ids: ["pi_given_name_mismatch"],
+    label: "The NIH profile's PI has the scholar's surname but a different first name",
     toward: false,
   },
 ];

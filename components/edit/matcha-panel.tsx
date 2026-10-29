@@ -1299,8 +1299,8 @@ export function MatchaPanel({
                 they paste, not after. */}
             <SheetDescription>
               {historyScope === "all"
-                ? "As an administrator you are seeing every user's searches."
-                : "Only you and console administrators can see your searches."}{" "}
+                ? "You are seeing every user's searches."
+                : "Only you, developers, and console administrators can see your searches."}{" "}
               They&rsquo;re saved — including the description you pasted — so we can measure and
               improve match quality against real opportunity text. Delete any search to remove its
               text for good.

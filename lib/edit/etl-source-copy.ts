@@ -115,6 +115,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Each scholar's ORCID iD, used by search engines and shown in the editor.",
     origin: "external", // WCM Identity DynamoDB table
   },
+  "Scholar-active-export": {
+    label: "Active scholars for Publication Manager",
+    description:
+      "The list of active scholars Publication Manager reads to show their ORCID iD as read-only, with a link to change it in Scholars.",
+    origin: "external", // WCM ReciterDB
+  },
   "RPM-orcid-candidates": {
     label: "ORCID candidates from Publication Manager",
     description:
@@ -130,8 +136,8 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   "ORCID-evidence": {
     label: "ORCID candidate evidence",
     description:
-      "The evidence on each candidate ORCID iD (a verified email, the institution, shared papers, name agreement, competing scholars) read from its public ORCID record. Feeds the ORCID librarian queue.",
-    origin: "external", // pub.orcid.org public API
+      "The evidence on each candidate ORCID iD (a verified email, the institution, shared papers, name agreement, competing scholars) read from its public ORCID record, with each work's PubMed ID (NCBI) and ReCiter status. Feeds the ORCID librarian queue.",
+    origin: "external", // pub.orcid.org public API, NCBI E-utilities, ReciterDB
   },
   "ORCID-push": {
     label: "ORCID iDs pushed to Identity",
@@ -248,6 +254,16 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     label: "Clinical Trials",
     description: "Adds the clinical trials each scholar leads as principal investigator.",
     origin: "external", // sibling ReCiterDB
+  },
+  MyNCBI: {
+    label: "NIH Bibliographies",
+    description: "Reads the public MyNCBI bibliography linked on a scholar's own NIH biosketch.",
+    origin: "external", // ncbi.nlm.nih.gov
+  },
+  "InfoEd-Biosketch": {
+    label: "NIH Biosketches",
+    description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",
+    origin: "external", // InfoEd proposal attachments
   },
   DataSharing: {
     label: "Dataset Deposits",

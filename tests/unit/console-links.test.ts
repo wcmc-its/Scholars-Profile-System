@@ -13,6 +13,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       isCommsSteward: false,
       managesUnits: false,
+      isDeveloper: false,
     });
     expect(links).toEqual([
       { id: "manage-profiles", label: "Admin console", href: "/edit/profiles" },
@@ -24,6 +25,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       isCommsSteward: true,
       managesUnits: true,
+      isDeveloper: false,
     });
     expect(links.map((l) => l.id)).toEqual(["manage-profiles"]);
   });
@@ -37,6 +39,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       isCommsSteward: true,
       managesUnits: false,
+      isDeveloper: false,
     });
     expect(links).toEqual([
       { id: "manage-profiles", label: "Admin console", href: "/edit/profiles" },
@@ -53,6 +56,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       isCommsSteward: true,
       managesUnits: true,
+      isDeveloper: false,
     });
     expect(links).toEqual([
       { id: "manage-profiles", label: "Admin console", href: "/edit/profiles" },
@@ -69,6 +73,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       isCommsSteward: false,
       managesUnits: true,
+      isDeveloper: false,
     });
     expect(links).toEqual([
       { id: "profiles", label: "Profiles", href: "/edit/profiles" },
@@ -81,21 +86,28 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       isCommsSteward: false,
       managesUnits: false,
+      isDeveloper: false,
     });
     expect(links).toEqual([]);
   });
 
-  // The GrantRecs matcher tools are NOT dropdown rows — they live in the
-  // in-console AdminSubnav (`/edit/grant-matcha`). The dropdown never carries them.
-  it("never surfaces a grant-matcha / matcher-tool row, for any viewer", () => {
-    const matrices = [
-      { isSuperuser: true, isCommsSteward: false, managesUnits: false },
-      { isSuperuser: true, isCommsSteward: true, managesUnits: true },
-      { isSuperuser: false, isCommsSteward: true, managesUnits: true },
-      { isSuperuser: false, isCommsSteward: false, managesUnits: true },
-    ];
-    for (const v of matrices) {
-      expect(buildConsoleLinks(v).some((l) => l.href === "/edit/grant-matcha")).toBe(false);
-    }
+  // 2026-10-27: a developer with no other role saw an empty dropdown.
+  it("developer (not a superuser) → 'Matcha', alongside any other role's rows", () => {
+    expect(
+      buildConsoleLinks({ isSuperuser: false, isCommsSteward: false, managesUnits: false, isDeveloper: true }),
+    ).toEqual([{ id: "matcha", label: "Matcha", href: "/edit/matcha" }]);
+    expect(
+      buildConsoleLinks({ isSuperuser: false, isCommsSteward: true, managesUnits: false, isDeveloper: true }).map(
+        (l) => l.id,
+      ),
+    ).toEqual(["manage-profiles", "matcha"]);
+  });
+
+  it("superuser who is also a developer → still only 'Admin console'", () => {
+    expect(
+      buildConsoleLinks({ isSuperuser: true, isCommsSteward: false, managesUnits: false, isDeveloper: true }).map(
+        (l) => l.id,
+      ),
+    ).toEqual(["manage-profiles"]);
   });
 });

@@ -52,6 +52,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "cores",
   "matcha",
   "grantMatcha",
+  "fundableWork",
   "roleVocabulary",
   "titles",
   "grantAttribution",
@@ -71,7 +72,7 @@ export interface MatrixRow {
 }
 
 // Flag-gated tabs (honors, news, administrators, methods, dataSharing, cores,
-// matcha, grantMatcha) assume their flag is ON — these rows exercise
+// matcha, grantMatcha, fundableWork) assume their flag is ON — these rows exercise
 // role/grant logic, not env config. `console-tab-matrix.test.ts`'s "feature
 // flags" block covers the flag-off direction separately, against the real
 // `isXTabVisible` functions (this fixture has no flags-off rows to avoid
@@ -134,6 +135,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "grantAttribution",
       "matcha",
       "grantMatcha",
+      "fundableWork",
     ],
     pins:
       "2026-10-01 — an observer sees every queue and dashboard read-only, COI " +
@@ -220,7 +222,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     name: "pure developer",
     session: sess({ isDeveloper: true }),
     grants: grants(),
-    expect: ["matcha", "grantMatcha"],
+    expect: ["matcha", "grantMatcha", "fundableWork"],
     pins: "Gap 1b — reachable from the /edit landing page, not only once already there",
   },
   {

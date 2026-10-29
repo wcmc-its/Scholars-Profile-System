@@ -72,6 +72,7 @@ import { GrantRecsCard } from "@/components/edit/grant-recs-card";
 import { BiosketchTool } from "@/components/edit/biosketch-tool";
 import { CvTool } from "@/components/edit/cv-tool";
 import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prompt-versions";
+import { DEFAULT_GENERATE_MODEL } from "@/lib/llm/models";
 
 /** The model the biosketch route will actually generate on — surfaced to the
  *  privileged cost line in the Services panel. Resolution order matches
@@ -79,7 +80,7 @@ import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prom
 const BIOSKETCH_EFFECTIVE_MODEL =
   process.env.BIOSKETCH_GENERATE_MODEL ??
   process.env.OVERVIEW_GENERATE_MODEL ??
-  "us.anthropic.claude-opus-4-8";
+  DEFAULT_GENERATE_MODEL;
 
 type AttrKey =
   | "home"
@@ -629,6 +630,8 @@ export type EditPageProps = {
    *  Identifiers & Profiles tab, and the tab is in the rail on this flag alone
    *  (independent of the ORCID kill switch). */
   profileLinksEnabled?: boolean;
+  /** `ORCID_CONNECT` (#3115): the ORCID card offers "Connect your ORCID iD" to the scholar themselves. */
+  orcidConnectEnabled?: boolean;
   /** GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`): whether the "Grants for me"
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like the other feature gates; self + superuser only. */
@@ -763,6 +766,7 @@ export function EditPage({
   reciterPendingEnabled = false,
   orcidTabEnabled = false,
   profileLinksEnabled = false,
+  orcidConnectEnabled = false,
   grantRecsEnabled = false,
   grantRecsFeedbackEnabled = false,
   biosketchEnabled = false,
@@ -1034,6 +1038,7 @@ export function EditPage({
         orcidTabEnabled,
         profileLinksEnabled,
         grantRecsFeedbackEnabled,
+        orcidConnectEnabled,
       )}
     </EditShell>
   );
@@ -1082,18 +1087,17 @@ export function sectionVisibility(
   };
 }
 
-/** The ORCID row's inputs. `scholar.orcid` (WCM Identity) is on file; with
- *  `SELF_EDIT_ORCID_SUGGESTION` on, an RPM-admin iD counts as on file too and a sole
- *  strong-inferred iD becomes the "Is this yours?" suggestion. */
+/** The ORCID row's inputs. `scholar.orcid` is on file; with
+ *  `SELF_EDIT_ORCID_SUGGESTION` on, a sole strong candidate (an iD typed into
+ *  Publication Manager included) becomes the "Is this yours?" suggestion. */
 function orcidRowState(ctx: EditContext): OrcidRowState {
   const v = ctx.orcidVerdict;
-  const onFile = ctx.scholar.orcid ?? (v?.tier === "asserted" ? v.orcid : null);
+  const onFile = ctx.scholar.orcid;
   const evidenceFor = (id: string) =>
     ctx.orcidCandidates
       .filter((c) => c.orcid === id)
       .map(({ source, accepted, rejected }) => ({ source, accepted, rejected }));
-  // The verdict folds an `rpm_admin` row to "asserted" and never suggests past
-  // it, and the on-file iD's own rows can out-vote a rival; with an iD on file,
+  // The on-file iD's own rows can out-vote a rival; with an iD on file,
   // re-fold every row about OTHER iDs so a strong candidate that DISAGREES with
   // the on-file iD still surfaces ("we also found").
   let suggested = v?.tier === "strong" && v.orcid ? { orcid: v.orcid, accepted: v.accepted } : null;
@@ -1165,6 +1169,7 @@ function renderPanel(
   orcidTabEnabled: boolean,
   profileLinksEnabled: boolean,
   grantRecsFeedbackEnabled: boolean,
+  orcidConnectEnabled = false,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -1592,6 +1597,8 @@ function renderPanel(
               onFile={row.onFile}
               onFileEvidence={row.onFileEvidence}
               suggested={row.suggested}
+              authenticated={ctx.scholar.orcidAuthenticated === true}
+              connectEnabled={orcidConnectEnabled && mode === "self"}
             />
           )}
           {profileLinksEnabled && (

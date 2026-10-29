@@ -33,6 +33,7 @@ const ALL_FLAGS_ON: Record<string, string> = {
   CORE_PAGES: "on",
   MATCHA: "on",
   GRANT_MATCHA: "on",
+  FUNDABLE_WORK: "on",
   ORG_UNIT_ROLE_CONSOLE: "on",
   GRANT_ATTRIBUTION_QUEUE: "on",
   ORCID_LIBRARIAN_QUEUE: "on",
@@ -125,6 +126,7 @@ describe("feature flags", () => {
     ["CORE_PAGES", ["cores"]],
     ["MATCHA", ["matcha", "grantMatcha"]],
     ["GRANT_MATCHA", ["grantMatcha"]],
+    ["FUNDABLE_WORK", ["fundableWork"]],
     ["GRANT_ATTRIBUTION_QUEUE", ["grantAttribution"]],
     ["ORCID_LIBRARIAN_QUEUE", ["orcidQueue"]],
   ];

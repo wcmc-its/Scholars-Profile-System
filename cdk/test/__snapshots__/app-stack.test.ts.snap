@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`AppStack prod matches the snapshot 1`] = `
 {
@@ -757,12 +757,24 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "FUNDABLE_WORK",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_ORCID_SUGGESTION",
                 "Value": "on",
+              },
+              {
+                "Name": "ORCID_CONNECT",
+                "Value": "off",
+              },
+              {
+                "Name": "ORCID_CONNECT_BASE",
+                "Value": "https://orcid.org",
               },
               {
                 "Name": "SELF_EDIT_PROFILE_LINKS",
@@ -790,11 +802,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "GRANT_ATTRIBUTION_QUEUE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_LIBRARIAN_QUEUE",
                 "Value": "on",
+              },
+              {
+                "Name": "PUBLICATION_MANAGER_URL",
+                "Value": "https://reciter.weill.cornell.edu",
               },
               {
                 "Name": "HONORS_CURATOR_ENABLED",
@@ -4484,6 +4500,10 @@ service:
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
               "Resource": [
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-4-*",
@@ -5740,12 +5760,24 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "FUNDABLE_WORK",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_ORCID_SUGGESTION",
                 "Value": "on",
+              },
+              {
+                "Name": "ORCID_CONNECT",
+                "Value": "off",
+              },
+              {
+                "Name": "ORCID_CONNECT_BASE",
+                "Value": "https://sandbox.orcid.org",
               },
               {
                 "Name": "SELF_EDIT_PROFILE_LINKS",
@@ -5778,6 +5810,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "ORCID_LIBRARIAN_QUEUE",
                 "Value": "on",
+              },
+              {
+                "Name": "PUBLICATION_MANAGER_URL",
+                "Value": "https://reciter.weill.cornell.edu",
               },
               {
                 "Name": "HONORS_CURATOR_ENABLED",
@@ -9566,6 +9602,10 @@ service:
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
               "Resource": [
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*",
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-5-5*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-4-*",

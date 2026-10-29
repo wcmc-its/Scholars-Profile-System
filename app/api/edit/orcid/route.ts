@@ -11,8 +11,7 @@
  * SPS is the durable record; one `db.write` transaction, nothing outside SPS.
  * `etl:orcid-push` (nightly, before `etl:identity`) copies the result into WCM
  * Identity, which ReCiter and Publication Manager read. ReciterDB `admin_orcid`
- * is NOT written: RPM stopped writing it 2026-04-05 and nothing reads it back
- * into Identity.
+ * is NOT written; an iD there is only a candidate (`rpm_admin`) to SPS.
  *  - Set / confirm (`orcid` non-null): `scholar.orcid` = the iD,
  *    `orcid_confirmed_at` = now, `orcid_confirm_method` = `self` when the REAL
  *    actor is the scholar and `proxy` otherwise (a View-as superuser is a
@@ -20,13 +19,12 @@
  *    for exactly this (cwid, iD) is deleted — the person re-confirming an iD
  *    they once removed.
  *  - Remove (`orcid: null`): `scholar.orcid`, `orcid_confirmed_at`,
- *    `orcid_confirm_method` and `orcid_confirmed_by` are nulled and EVERY iD that made up "on file" (`scholar.orcid` and each
- *    `rpm_admin` row's iD) gets an `orcid_dismissal` row. The dismissal is
- *    what makes `etl:orcid-push` clear it from Identity, `etl:identity` not
- *    re-import it, and the `orcid_candidate` readers (`withoutDismissed`) drop
- *    the `rpm_admin` row the nightly mirror re-creates from the dead-but-still-
- *    populated `admin_orcid`. The local `rpm_admin` row is also deleted here so
- *    the card flips now, not after the 07:00 UTC re-mirror.
+ *    `orcid_confirm_method` and `orcid_confirmed_by` are nulled and the iD that
+ *    was on file gets an `orcid_dismissal` row. The dismissal is what makes
+ *    `etl:orcid-push` clear it from Identity, `etl:identity` not re-offer it as a
+ *    candidate, and the `orcid_candidate` readers (`withoutDismissed`) drop any
+ *    mirror row for it.
+ *  Either way an `orcid_authentication` row (#3115) for any other iD is deleted.
  *  Plus the B03 audit row, same transaction.
  *
  * Gated by `SELF_EDIT_ORCID_SUGGESTION` (404 when off) — one kill switch for the
@@ -99,14 +97,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     unitDb: db.read as unknown as UnitScholarLookup,
   });
   if (!authz.ok) {
-    logEditDenial({ actorCwid: session.cwid, targetCwid: scholar.cwid, path: PATH, reason: authz.reason });
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: scholar.cwid,
+      path: PATH,
+      reason: authz.reason,
+    });
     return editError(403, authz.reason);
   }
 
   // --- scholar.orcid + dismissal + the B03 audit row, one transaction ---
   try {
     await db.write.$transaction(async (tx) => {
-      // `before` is re-read on the writer: the `db.read` lookup above can lag
+      // `held` is re-read on the writer: the `db.read` lookup above can lag
       // (Aurora reader) behind a confirm made a moment ago, and would dismiss
       // the wrong iD — or none.
       const held =
@@ -124,31 +127,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                 orcidConfirmedBy: realCwid,
               },
       });
-      // The iD being removed is usually NOT on `scholar.orcid` (NULL for WCM —
-      // the card reads it from the `rpm_admin` mirror row), so read it before
-      // the row goes, or the audit row would say null → null and nothing
-      // would be dismissed.
-      let before = held;
       const toDismiss = new Set(dismiss);
       if (orcid === null) {
-        const admins = await tx.orcidCandidate.findMany({
-          where: { cwid: scholar.cwid, source: "rpm_admin" },
-          select: { orcid: true },
-        });
-        before ??= admins[0]?.orcid ?? null;
-        // Every iD that made up "on file" is dismissed, not just the one shown:
-        // an undismissed `rpm_admin` iD is re-mirrored from `admin_orcid` at
-        // 07:00 UTC and would be "on file" again the next morning.
         if (held !== null) toDismiss.add(held);
-        for (const a of admins) toDismiss.add(a.orcid);
-        await tx.orcidCandidate.deleteMany({ where: { cwid: scholar.cwid, source: "rpm_admin" } });
       } else {
         await tx.orcidDismissal.deleteMany({ where: { cwid: scholar.cwid, orcid } });
       }
+      // An ORCID sign-in (#3115) vouches only for the iD it returned; Remove or a
+      // change to a different iD drops it, token included.
+      await tx.orcidAuthentication.deleteMany({
+        where: { cwid: scholar.cwid, ...(orcid === null ? {} : { orcid: { not: orcid } }) },
+      });
       for (const d of toDismiss) {
         await tx.orcidDismissal.upsert({
           where: { cwid_orcid: { cwid: scholar.cwid, orcid: d } },
-          create: { cwid: scholar.cwid, orcid: d },
+          create: {
+            cwid: scholar.cwid,
+            orcid: d,
+            dismissedBy: realCwid,
+            reason: orcid === null && d === held ? "removed" : "not_this_person",
+          },
           update: {},
         });
       }
@@ -162,7 +160,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         targetEntityId: scholar.cwid,
         action: "orcid_set",
         fieldsChanged: ["orcid"],
-        beforeValues: { orcid: before },
+        beforeValues: { orcid: held },
         afterValues: {
           orcid,
           ...(orcid === null ? { removed: true } : {}),

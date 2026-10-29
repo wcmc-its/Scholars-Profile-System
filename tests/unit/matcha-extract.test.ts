@@ -6,8 +6,8 @@
  *    dedupe (first wins), capped at 15;
  *  - the model id defaults to the pinned Sonnet profile and honours the
  *    `MATCHA_EXTRACT_MODEL` override (runtime rollback lever);
- *  - a deterministic config reaches the call (temperature 0 on the Sonnet profile,
- *    which accepts it; a structured schema; a bounded output budget);
+ *  - the Sonnet 5.5 request shape reaches the call (no temperature, effort low; temperature 0
+ *    and no effort only on a Sonnet 4.x rollback; a structured schema; a bounded budget);
  *  - an empty/whitespace paste short-circuits WITHOUT calling the model;
  *  - a Bedrock error OR an unparseable (no-object) result returns [] — NEVER throws,
  *    so the spine can fall back to the dictionary extractor.
@@ -152,23 +152,43 @@ describe("extractMatchaConcepts", () => {
     expect(out.concepts[0].term).toBe("concept-0"); // order preserved (most-central-first from the model)
   });
 
-  it("sends a deterministic config — temperature 0, a schema, and a bounded output budget", async () => {
+  it("sends the Sonnet 5.5 request shape — no temperature, effort low, a schema, a bounded budget", async () => {
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
 
     await extractMatchaConcepts("cystic fibrosis research");
 
     const args = mockGenerateObject.mock.calls[0][0];
-    expect(args.temperature).toBe(0); // Sonnet accepts temperature (gate → true)
+    // Sonnet 5.5 400s on an explicit temperature (gate → false).
+    expect(args.temperature).toBeUndefined();
+    // Thinks by default: keep it short. Structured output stays on the provider's `auto`.
+    expect(args.providerOptions).toEqual({
+      bedrock: { reasoningConfig: { maxReasoningEffort: "low" } },
+    });
     expect(args.schema).toBeDefined();
     expect(typeof args.maxOutputTokens).toBe("number");
     expect(args.system).toContain("CENTRALITY");
+  });
+
+  it("a MATCHA_EXTRACT_MODEL rollback to Sonnet 4.5 gets temperature 0 back and no effort", async () => {
+    mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
+    const orig = process.env.MATCHA_EXTRACT_MODEL;
+    process.env.MATCHA_EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+    try {
+      await extractMatchaConcepts("cystic fibrosis research");
+    } finally {
+      if (orig === undefined) delete process.env.MATCHA_EXTRACT_MODEL;
+      else process.env.MATCHA_EXTRACT_MODEL = orig;
+    }
+    const args = mockGenerateObject.mock.calls[0][0];
+    expect(args.temperature).toBe(0);
+    expect(args.providerOptions).toBeUndefined(); // Sonnet 4.5 400s on output_config.effort
   });
 
   it("defaults to the pinned Sonnet profile and honours the MATCHA_EXTRACT_MODEL override", async () => {
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
 
     await extractMatchaConcepts("some sponsor prose");
-    expect(capturedModelIds.at(-1)).toBe("us.anthropic.claude-sonnet-4-5-20250929-v1:0");
+    expect(capturedModelIds.at(-1)).toBe("us.anthropic.claude-sonnet-5-5");
 
     const orig = process.env.MATCHA_EXTRACT_MODEL;
     process.env.MATCHA_EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-6-v1:0";
@@ -235,8 +255,8 @@ describe("extractMatchaConcepts", () => {
       await extractMatchaConcepts("  cystic fibrosis gene therapy  "); // trims to the same input
       const key0 = String(mockCachedReasonAgg.mock.calls[0][0]);
       const key1 = String(mockCachedReasonAgg.mock.calls[1][0]);
-      // `matcha:extract:<modelId>:<sha256>` — note the pinned Sonnet id itself ends in `:0`.
-      expect(key0).toMatch(/^matcha:extract:us\.anthropic\.claude-sonnet-4-5-\d+-v1:0:[0-9a-f]{64}$/);
+      // `matcha:extract:<modelId>:<sha256>`.
+      expect(key0).toMatch(/^matcha:extract:us\.anthropic\.claude-sonnet-5-5:[0-9a-f]{64}$/);
       expect(key1).toBe(key0);
     });
 

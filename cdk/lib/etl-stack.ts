@@ -193,6 +193,8 @@ export class EtlStack extends Stack {
   public readonly cdnReconcileStateMachine: sfn.StateMachine;
   /** Honors-list scraper, `scholars-honors-<env>`: weekly + the console's Run now. */
   public readonly honorsStateMachine: sfn.StateMachine;
+  /** Funding digest import, started when a digest email lands in the inbound mail bucket. */
+  public readonly fundingDigestStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
@@ -701,10 +703,12 @@ export class EtlStack extends Stack {
     // before this leaves the building) — that review, not this IAM grant, is
     // the real gate on a prod population run.
     //
-    // Sonnet 4.x family only, not Opus — inferCancerFundingJudgments always
-    // calls DEFAULT_EXTRACT_MODEL (lib/llm/models.ts), a Sonnet 4.5 id, and
-    // nothing in this CDK app overrides CANCER_FUNDING_MODEL to anything
-    // else. Same resource-ARN shape as the app task role's
+    // Sonnet 5.5 + the Sonnet 4.x family only, not Opus —
+    // inferCancerFundingJudgments and the newsroom honors ETL call
+    // DEFAULT_EXTRACT_MODEL (lib/llm/models.ts), a Sonnet 5.5 id, and nothing
+    // in this CDK app overrides CANCER_FUNDING_MODEL to anything else. Sonnet
+    // 4.x stays granted so a CANCER_FUNDING_MODEL rollback to the previous
+    // generation needs no IAM change. Same resource-ARN shape as the app task role's
     // TaskRoleBedrockPolicy (app-stack.ts): the us. cross-region inference
     // profile plus the underlying AWS-owned foundation model, region `*`
     // because a us. profile call fans out across us-east-1/-2/us-west-2.
@@ -719,6 +723,10 @@ export class EtlStack extends Stack {
           resources: [
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
             "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
+            // Sonnet 5.5 for the weekly fundable-work scorer (etl/fundable-work). Pinned to
+            // 5-5, not a sonnet-5 glob, so a later family bump stays a reviewed change.
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-5-5*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
           ],
         }),
       ],
@@ -933,9 +941,9 @@ export class EtlStack extends Stack {
       // "system-unverified", user-revocable) an award from a NAME-ONLY resolved
       // NIH profile (name_query / name_match) when neither a WCM org in its
       // history nor a confirmed publication ties it to the scholar. Staging
-      // first; prod stays off until the staging run's hide count is reviewed.
+      // first; prod flipped 2026-10-27 after the staging queue was reviewed.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      REPORTER_GRANTS_CORROBORATION_HIDE: env === "staging" ? "on" : "off",
+      REPORTER_GRANTS_CORROBORATION_HIDE: "on",
       // ORCID librarian queue — etl:orcid-evidence (OrcidEvidenceWeekly) confirms an
       // iD whose public record lists the scholar's email as VERIFIED (method
       // email_verified, never over an iD on file) only when this is exactly "on";
@@ -949,8 +957,10 @@ export class EtlStack extends Stack {
       // Strong only when this is exactly "on". Off: history_match and
       // evidence_detail are still written and the run logs the band moves the term
       // would make; the spec's Phasing step 2 compares those counts before the
-      // switch. Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      ORCID_HISTORY_BAND: "off",
+      // switch. On in both envs since 2026-10-26: the staging run's moves were
+      // 322 shared_only->strong and 331 weak->moderate, reviewed and approved.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_HISTORY_BAND: "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
@@ -1273,8 +1283,14 @@ export class EtlStack extends Stack {
       "etl:reciter",
       "etl:reciter:coi-statements",
       "etl:orcid-candidates",
+      // Writes reciterdb `scholar_active` (prod only; dry run elsewhere).
+      "etl:scholar-active-export",
+      // ORCID queue v2.1: reads reciterdb person_article (each candidate work's
+      // ReCiter assertion for the scholar), so the sources family since then.
+      "etl:orcid-evidence",
       "etl:asms",
       "etl:infoed",
+      "etl:infoed-biosketch",
       "etl:coi",
       "etl:frt",
       "etl:jenzabar",
@@ -1768,16 +1784,11 @@ export class EtlStack extends Stack {
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true, tier: "abort" },
-      // scholar.orcid → WCM Identity through the ReCiter engine API. After
-      // Dynamodb (scholar rows exist) and BEFORE Identity, on purpose: the pull
-      // below applies "Identity wins" to any confirmed iD that differs from the
-      // record, and Identity carries no write timestamp, so pull-then-push would
-      // read SPS's OWN previous night's push as a foreign change and revert a
-      // confirmation the person made in /edit that day (Y → X, confirmation
-      // cleared, Y never reaches Identity). Push-then-pull writes Y first, the
-      // pull then reads `unchanged`, and `conflict` fires only when someone
-      // else changed Identity between the two steps — the one case where
-      // "Identity wins" means anything. On the reciter-api def
+      // scholar.orcid → WCM Identity through the ReCiter engine API. Scholars is
+      // the ORCID authority (2026-10, #3189): Identity is the downstream copy.
+      // After Dynamodb (scholar rows exist) and BEFORE Identity, so the pull
+      // below reads tonight's push as `unchanged` and files only a genuinely
+      // different Identity iD as a candidate. On the reciter-api def
       // (RECITER_API_SCRIPTS) because it needs the ADMIN key, which no other
       // cadence step carries. Compare-then-write is what makes it safe to run
       // forever: the Institutional Client's rebuild still nulls Identity.orcid
@@ -1786,13 +1797,16 @@ export class EtlStack extends Stack {
       // Identity as the IC left it; the step itself throws on a dead API, so the
       // freshness row stays honest.
       { id: "OrcidPush", npmScript: "etl:orcid-push", external: true, tier: "continue" },
-      // #918 — populate Scholar.orcid from the WCM Identity table (DynamoDB
-      // Scan, external:true). After Dynamodb (scholars exist; both are DynamoDB
-      // scans) and after OrcidPush (see above); ORCID feeds the profile JSON-LD
-      // `sameAs`, not the search index, so there's no SearchIndex ordering
-      // dependency. Never NULLs an existing orcid — Identity may lag ED — so
-      // re-running nightly only self-heals.
+      // #918 — WCM Identity's iDs → `identity` candidates in orcid_candidate
+      // (DynamoDB Scan, external:true). Never writes scholar.orcid (#3189).
+      // After OrcidPush (see above).
       { id: "Identity", npmScript: "etl:identity", external: true, tier: "continue" },
+      // Active scholars → reciterdb `scholar_active`, which Publication Manager
+      // reads to make its ORCID field read-only. After OrcidPush, so
+      // has_confirmed_orcid matches what Identity now holds. Writes in prod only
+      // (both envs share one reciterdb); a dry run in staging. tier:"continue" —
+      // a missed night leaves yesterday's set, and PM treats it as missing past 48 h.
+      { id: "ScholarActiveExport", npmScript: "etl:scholar-active-export", external: true, tier: "continue" },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
       // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task
@@ -1997,14 +2011,29 @@ export class EtlStack extends Stack {
       // because the registry moves slowly; `continue` because the only consumer is
       // the advisory /edit/orcid-coverage dashboard, never the public profile.
       { id: "OrcidRegistryWeekly", npmScript: "etl:orcid-registry", external: false, tier: "continue" },
+      // NIH biosketches from InfoEd proposal PDFs (etl/infoed-biosketch) -> infoed_biosketch,
+      // plus their email-attributed ORCID iDs -> orcid_candidate (source infoed_biosketch).
+      // InfoEd credentials, so the sources family (SOURCES_SCRIPTS). Before
+      // OrcidEvidenceWeekly so the new candidates are scored the same run. `continue`:
+      // feeds /edit and the ORCID queue only, never the public profile.
+      { id: "InfoedBiosketchWeekly", npmScript: "etl:infoed-biosketch", external: true, tier: "continue" },
+      // Public MyNCBI bibliographies (etl/myncbi) for the URLs on scholars' own biosketches
+      // -> myncbi_bibliography / myncbi_citation, for the bibliography-discrepancy report.
+      // Right after InfoedBiosketchWeekly so a new URL is fetched the same run. Public
+      // pages over NAT egress, no secret, so the base family (external: false). Each
+      // scholar at most every 30 days, one request every 2s. `continue`: report data only.
+      { id: "MyncbiWeekly", npmScript: "etl:myncbi", external: false, tier: "continue" },
       // ORCID candidate evidence (etl/orcid-evidence) -> orcid_candidate_evidence, the
       // bands /edit/orcid-queue reads, then the email auto-confirm (behind
       // ORCID_EMAIL_AUTOCONFIRM, off). Right after OrcidRegistryWeekly so it scores the
-      // fresh candidates; one public /record per iD over NAT egress with no credential,
-      // so external: false like the registry. v2 also Scans the Identity table for each
-      // scholar's prior institutions through the shared task role (the etl:identity
-      // grant), no secret. `continue`: the queue is a librarian tool.
-      { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: false, tier: "continue" },
+      // fresh candidates; one public /record per iD over NAT egress with no credential.
+      // v2 also Scans the Identity table for each scholar's prior institutions through
+      // the shared task role (the etl:identity grant), no secret. v2.1 resolves DOIs to
+      // PMIDs on the public NCBI E-utilities (NAT egress, optional NCBI_API_KEY) and
+      // reads each candidate work's ReCiter assertion from reciterdb person_article, so
+      // it runs on the sources family (SOURCES_SCRIPTS) and is external: true. `continue`:
+      // the queue is a librarian tool.
+      { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: true, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public
       // directory (no secret); reporter-grants + clinical-trials read ReciterDB
@@ -2078,6 +2107,10 @@ export class EtlStack extends Stack {
       // drain scores them. Prod submits; staging is a logged dry run (the queue
       // table is shared). external:false (S3 + DynamoDB), continue-tier.
       { id: "FundingDigestWeekly", npmScript: "etl:funding-digest", external: false, tier: "continue" },
+      // Fundable work (etl/fundable-work) — OpenAlex WCM conference abstracts + preprints,
+      // Sonnet 5.5-scored for private-funding potential -> fundable_work. Public API + Bedrock,
+      // external:false; continue-tier (a miss only delays new scores a week).
+      { id: "FundableWorkWeekly", npmScript: "etl:fundable-work", external: false, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
@@ -3387,6 +3420,106 @@ export class EtlStack extends Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     honorsStatusAlarm.addAlarmAction(alarmAction);
+
+    // ------------------------------------------------------------------
+    // Funding digest on arrival. SES writes each funding@ message to the
+    // inbound mail bucket under funding/ (inbound-mail-stack.ts, which sends
+    // the bucket's Object Created events to EventBridge). This rule starts the
+    // same `etl:funding-digest` step as soon as one lands, instead of leaving a
+    // Monday digest for the next Sunday weekly run. FundingDigestWeekly stays in
+    // the weekly chain as a backstop; the step skips any link already in the
+    // corpus or the queue, so a second read of the same email submits nothing.
+    // Staging's run is a dry run (only prod submits; see the step's header).
+    // ------------------------------------------------------------------
+    const fundingDigestUnit = taskUnitFor("etl:funding-digest");
+    const fundingDigestTask = new tasks.EcsRunTask(this, "TaskFundingDigestOnArrival", {
+      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+      cluster: ecsCluster,
+      taskDefinition: fundingDigestUnit.taskDefinition,
+      launchTarget: new tasks.EcsFargateLaunchTarget({
+        platformVersion: ecs.FargatePlatformVersion.LATEST,
+      }),
+      assignPublicIp: false,
+      subnets: etlTaskSubnets,
+      securityGroups: [etlSecurityGroup],
+      containerOverrides: [
+        {
+          containerDefinition: fundingDigestUnit.container,
+          command: ["npm", "run", "etl:funding-digest"],
+        },
+      ],
+      // A run reads a few emails and checks ~200 links; minutes, not tens.
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(30)),
+    });
+    fundingDigestTask.addCatch(
+      new tasks.SnsPublish(this, "NotifyFundingDigestOnArrival", {
+        topic: this.failureTopic,
+        subject: `SPS funding digest import ${env} -- run failed`,
+        message: sfn.TaskInput.fromObject({
+          env,
+          step: "FundingDigestOnArrival",
+          stateMachine: sfn.JsonPath.stateMachineName,
+          execution: sfn.JsonPath.executionName,
+          error: sfn.JsonPath.stringAt("$.error"),
+        }),
+      }).next(
+        new sfn.Fail(this, "FailFundingDigestOnArrival", { cause: "funding digest import failed" }),
+      ),
+      { errors: ["States.ALL"], resultPath: "$.error" },
+    );
+
+    const fundingDigestSmLogGroup = new logs.LogGroup(this, "FundingDigestSmLogGroup", {
+      logGroupName: `/aws/states/funding-digest-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.fundingDigestStateMachine = new sfn.StateMachine(this, "FundingDigestStateMachine", {
+      stateMachineName: `scholars-funding-digest-${env}`,
+      stateMachineType: sfn.StateMachineType.STANDARD,
+      definitionBody: sfn.DefinitionBody.fromChainable(fundingDigestTask),
+      // Over the 30 min task timeout so the task's own timeout (which the Catch
+      // sees and pages on) always fires first; a machine TIMED_OUT runs no Catch.
+      timeout: Duration.minutes(45),
+      logs: {
+        destination: fundingDigestSmLogGroup,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
+      },
+      tracingEnabled: true,
+    });
+
+    const fundingDigestRule = new events.Rule(this, "FundingDigestArrivalRule", {
+      ruleName: `sps-funding-digest-${env}`,
+      description: `SPS funding digest import -- on each email SES writes under ${FUNDING_PREFIX} (${env}).`,
+      eventPattern: {
+        source: ["aws.s3"],
+        detailType: ["Object Created"],
+        detail: {
+          bucket: { name: [inboundMailBucketName(this.account)] },
+          object: { key: [{ prefix: FUNDING_PREFIX }] },
+        },
+      },
+    });
+    fundingDigestRule.addTarget(
+      new eventsTargets.SfnStateMachine(this.fundingDigestStateMachine, {
+        input: events.RuleTargetInput.fromObject({}),
+        retryAttempts: 2,
+      }),
+    );
+
+    const fundingDigestStatusAlarm = new cloudwatch.Alarm(this, "FundingDigestStatusAlarm", {
+      alarmName: `sps-funding-digest-status-${env}`,
+      alarmDescription: `SPS funding digest import (${env}) -- a run started by a digest email did not finish successfully. That digest's links were not submitted; the Sunday weekly run retries them. Next: open the Step Functions execution for scholars-funding-digest-${env} and read the task log (event funding_digest_complete or the error).`,
+      metric: unsuccessfulMetric(
+        { StateMachineArn: this.fundingDigestStateMachine.stateMachineArn },
+        Duration.days(1),
+      ),
+      evaluationPeriods: 1,
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    fundingDigestStatusAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
     // Grants bulk-export schedule -- nightly all-scholars `export:grants-bulk`

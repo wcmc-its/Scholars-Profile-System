@@ -1,7 +1,8 @@
 /**
  * ORCID librarian queue (`/edit/orcid-queue`, docs/orcid-librarian-queue-spec.md):
- * the flag, the viewer predicate, the band/tab vocabulary, the row types, and
- * the pure rules the page and the three routes share.
+ * the flag, the viewer predicate, the band vocabulary, the row types, and the
+ * pure rules (v3: score, gap, competitor rules, search, sort) the page and the
+ * routes share.
  *
  * 🔴 CLIENT-BUNDLED. `components/edit/orcid-queue.tsx` imports this module at
  * runtime, so it must never import `@/lib/db` or anything that builds a Prisma
@@ -13,6 +14,8 @@
  * content editor, and never an impersonated decision (the routes refuse View
  * as, so `orcid_confirmed_by` is always the real librarian).
  */
+
+import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
 
 /** `ORCID_LIBRARIAN_QUEUE`: exactly "on" shows the page, the tab and the routes. */
 export function isOrcidLibrarianQueueEnabled(): boolean {
@@ -34,49 +37,50 @@ export const ORCID_QUEUE_BANDS = [
 ] as const;
 export type OrcidQueueBand = (typeof ORCID_QUEUE_BANDS)[number];
 
-/** The bands plus Conflicts (the scholar holds a DIFFERENT iD on file). */
-export const ORCID_QUEUE_TABS = [...ORCID_QUEUE_BANDS, "conflicts"] as const;
-export type OrcidQueueTab = (typeof ORCID_QUEUE_TABS)[number];
-export const DEFAULT_ORCID_QUEUE_TAB: OrcidQueueTab = "strong";
-
-export const ORCID_QUEUE_TAB_LABEL: Record<OrcidQueueTab, string> = {
+export const ORCID_QUEUE_BAND_LABEL: Record<OrcidQueueBand, string> = {
   email_verified: "Email verified",
   strong: "Strong",
   shared_only: "Shared papers",
   moderate: "Moderate",
   weak: "Weak",
-  conflicts: "Conflicts",
 };
 
-export function isOrcidQueueTab(v: unknown): v is OrcidQueueTab {
-  return typeof v === "string" && (ORCID_QUEUE_TABS as readonly string[]).includes(v);
+export function isOrcidQueueBand(v: unknown): v is OrcidQueueBand {
+  return typeof v === "string" && (ORCID_QUEUE_BANDS as readonly string[]).includes(v);
 }
 
-/** Only these bands are bulk-confirmable, and only after a passed sample. */
-export const ORCID_SAMPLE_BANDS = ["strong", "shared_only"] as const;
-export type OrcidSampleBand = (typeof ORCID_SAMPLE_BANDS)[number];
-export const ORCID_QUEUE_SAMPLE_SIZE = 50;
-
-export function isOrcidSampleBand(v: unknown): v is OrcidSampleBand {
-  return typeof v === "string" && (ORCID_SAMPLE_BANDS as readonly string[]).includes(v);
+/** v3: a band as a step on the 5-step "Match evidence" meter (Weak = 1). */
+export function bandLevel(band: OrcidQueueBand): number {
+  return ORCID_QUEUE_BANDS.length - bandRank(band);
 }
 
-/** The iD on file for a scholar as the rest of the app reads it
- *  (`/api/edit/orcid`, the coverage fold): `scholar.orcid`, else an undismissed
- *  `rpm_admin` candidate iD. WCM usually leaves `scholar.orcid` NULL and the
- *  /edit card shows the RPM mirror row. `orcid` is the pair being placed, so a
- *  scholar with two `rpm_admin` iDs reads the pair's own as on file. Pure. */
-export function heldFor(
-  orcid: string,
-  scholarOrcid: string | null,
-  adminIds: readonly string[],
-): string | null {
-  if (scholarOrcid !== null) return scholarOrcid;
-  if (adminIds.includes(orcid)) return orcid;
-  return adminIds[0] ?? null;
-}
+/** v3: a competitor keeps an iD out of Strong and above, so meter steps 3–5
+ *  are the ones it blocks. */
+export const COMPETITOR_CAP_LEVEL = 2;
 
-/** Where a candidate pair stands against what is on file. Pure. */
+/** Where a candidate pair stands against what is on file. "On file" is
+ *  `scholar.orcid` only: Scholars is the ORCID authority for its scholars, and
+ *  every other system's iD (Publication Manager's admin field, WCM Identity) is a
+ *  candidate. Pure. */
+/** `orcid_dismissal.reason`: why an iD was ruled out for a scholar. */
+export const ORCID_DISMISS_REASONS = [
+  "not_this_person",
+  "none_of_these",
+  "other_confirmed",
+  "removed",
+  "duplicate_retired",
+  "belongs_to_other",
+] as const;
+export type OrcidDismissReason = (typeof ORCID_DISMISS_REASONS)[number];
+export const ORCID_DISMISS_REASON_LABEL: Record<OrcidDismissReason, string> = {
+  not_this_person: "Not this person",
+  none_of_these: "None of these",
+  other_confirmed: "Another iD confirmed",
+  removed: "Removed",
+  duplicate_retired: "Retired: duplicate record of this scholar",
+  belongs_to_other: "Belongs to another scholar",
+};
+
 export type PairState = "queue" | "on_file" | "dismissed" | "conflict";
 export function pairState(orcid: string, held: string | null, dismissed: boolean): PairState {
   if (held === orcid) return "on_file";
@@ -85,30 +89,34 @@ export function pairState(orcid: string, held: string | null, dismissed: boolean
   return "queue";
 }
 
-/** open = undecided rows and no dismissal; passed = all decided, none
- *  dismissed; locked = any dismissal (bulk stays off for the band). Pure. */
-export type SampleStatus = "open" | "passed" | "locked";
-export function sampleStatus(rows: ReadonlyArray<{ decision: string | null }>): SampleStatus {
-  if (rows.some((r) => r.decision === "dismissed")) return "locked";
-  if (rows.length > 0 && rows.every((r) => r.decision !== null)) return "passed";
-  return "open";
-}
+/** v2.1: where a record's work stands in ReCiter for the scholar.
+ *  `accepted` works are the scholar's and never reach the new-works preview
+ *  (they count as shared); `pending` / `rejected` = ReCiter holds it for the
+ *  scholar with that assertion; `not_retrieved` = a PMID ReCiter never
+ *  retrieved for them; `not_in_pubmed` = a DOI that did not resolve to a PMID;
+ *  `no_ids` = neither id (and no title match). */
+export const RECITER_WORK_STATUSES = [
+  "accepted",
+  "pending",
+  "rejected",
+  "not_retrieved",
+  "not_in_pubmed",
+  "no_ids",
+] as const;
+export type ReciterWorkStatus = (typeof RECITER_WORK_STATUSES)[number];
 
-export type OrcidQueueSampleState = {
-  id: string;
-  band: OrcidSampleBand;
-  startedAt: string;
-  /** `orcidQueueFilterKey` of the filter the sample was drawn under; it
-   *  authorizes bulk confirm for that filter only. */
-  filterKey: string;
-  total: number;
-  decided: number;
-  dismissed: number;
-  status: SampleStatus;
-  /** A passed sample whose band was re-scored by a later ETL run: it no longer
-   *  authorizes bulk confirm, and a new sample is needed. */
-  stale?: boolean;
+export const RECITER_WORK_STATUS_LABEL: Record<ReciterWorkStatus, string> = {
+  accepted: "Accepted in ReCiter",
+  pending: "Pending in ReCiter",
+  rejected: "Rejected in ReCiter",
+  not_retrieved: "Not retrieved by ReCiter",
+  not_in_pubmed: "Not in PubMed",
+  no_ids: "No identifiers",
 };
+
+export function isReciterWorkStatus(v: unknown): v is ReciterWorkStatus {
+  return typeof v === "string" && (RECITER_WORK_STATUSES as readonly string[]).includes(v);
+}
 
 export type OrcidQueueWork = {
   title: string | null;
@@ -118,26 +126,35 @@ export type OrcidQueueWork = {
   source: string | null;
   /** The ORCID work's own link (v2; absent on rows a v1 run wrote). */
   url?: string | null;
+  /** v2.1: the work's ReCiter status; null when ReCiter could not be read
+   *  this run, absent on rows an earlier run wrote. */
+  status?: ReciterWorkStatus | null;
 };
 
 /** `orcid_candidate.source` values, in the order the filter lists them. */
 export const ORCID_CANDIDATE_SOURCES = [
   "rpm_inferred",
   "rpm_admin",
+  "identity",
   "orcid_email",
   "orcid_works",
   "orcid_crossref",
   "orcid_name",
+  "infoed_biosketch",
+  "infoed_biosketch_name",
 ] as const;
 export type OrcidCandidateSource = (typeof ORCID_CANDIDATE_SOURCES)[number];
 
 export const ORCID_SOURCE_LABEL: Record<OrcidCandidateSource, string> = {
   rpm_inferred: "Publication Manager inference",
-  rpm_admin: "Publication Manager admin",
+  rpm_admin: "Entered in Publication Manager",
+  identity: "WCM Identity",
   orcid_email: "ORCID email",
   orcid_works: "ORCID shared works",
   orcid_crossref: "Crossref deposit",
   orcid_name: "ORCID name only",
+  infoed_biosketch: "NIH biosketch",
+  infoed_biosketch_name: "NIH biosketch (name match)",
 };
 
 export function isOrcidCandidateSource(v: unknown): v is OrcidCandidateSource {
@@ -200,6 +217,30 @@ export type OrcidEvidenceDetail = {
   sources: string[];
   /** Works the non-publication filter dropped or collapsed. */
   worksDropped: number;
+  /** v2.1: the new works by ReCiter status, and how the PMIDs were found.
+   *  Absent on rows an earlier run wrote. */
+  workStatus?: OrcidWorkStatusDetail;
+};
+
+export type OrcidWorkStatusDetail = {
+  /** New works (not in the scholar's publications) per status; `accepted`
+   *  is never here (accepted works are shared, see `acceptedInReciter`). */
+  counts: Partial<Record<ReciterWorkStatus, number>>;
+  /** New works whose status is unknown: a PMID when ReCiter was not read, or a
+   *  DOI the PubMed lookup never answered (`pubmedUnknown`). */
+  unknown: number;
+  /** False when the run could not read ReCiter's assertions. */
+  reciterRead: boolean;
+  /** Record works ReCiter accepted for the scholar that our publications lack:
+   *  counted as shared, not as new. */
+  acceptedInReciter: number;
+  /** Record works whose PMID came from the DOI lookup, or from a title match. */
+  resolvedByDoi: number;
+  resolvedByTitle: number;
+  /** Record works with a DOI and no PMID the PubMed lookup never answered (an
+   *  NCBI outage): neither resolved nor shown as not in PubMed. Absent on rows
+   *  written before it existed. */
+  pubmedUnknown?: number;
 };
 
 /** A work's link: PubMed when it has a PMID, else doi.org, else its own URL
@@ -212,7 +253,9 @@ export function workHref(w: {
 }): string | null {
   if (w.pmid && /^\d+$/.test(w.pmid.trim()))
     return `https://pubmed.ncbi.nlm.nih.gov/${w.pmid.trim()}/`;
-  if (w.doi?.trim()) return `https://doi.org/${w.doi.trim()}`;
+  // Each path segment encoded (old SICI DOIs carry `<`, `>`, `;`, `#`), the `/` kept.
+  if (w.doi?.trim())
+    return `https://doi.org/${w.doi.trim().split("/").map(encodeURIComponent).join("/")}`;
   const url = w.url?.trim();
   if (url && /^https:\/\//i.test(url)) {
     try {
@@ -224,9 +267,48 @@ export function workHref(w: {
   return null;
 }
 
+/** An https origin (+ optional path) with no trailing slash, or null. Pure. */
+function httpsBase(raw: string | null | undefined): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) return null;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/** v2.1: Publication Manager's base URL for the queue's links, from
+ *  `PUBLICATION_MANAGER_URL` (wired per env in cdk/lib/app-stack.ts), else the
+ *  front door the rest of SPS links to (`request-a-change.ts`). https only:
+ *  anything else falls back to the default. Server-side (reads env). */
+export function publicationManagerBaseUrl(): string {
+  return httpsBase(process.env.PUBLICATION_MANAGER_URL) ?? httpsBase(PUBLICATION_MANAGER_URL)!;
+}
+
+/** A scholar's Publication Manager curate page, or with `doi` its Add tab
+ *  with that DOI filled in (`/curate/<uid>?add=external&doi=<doi>`, PM #1047).
+ *  Null unless `base` is https. The uid and the DOI are URL-encoded. Pure. */
+export function pmCurateHref(
+  base: string | null | undefined,
+  cwid: string,
+  opts: { doi?: string | null } = {},
+): string | null {
+  const b = httpsBase(base);
+  const uid = cwid.trim();
+  if (!b || !uid) return null;
+  const href = `${b}/curate/${encodeURIComponent(uid)}`;
+  const doi = opts.doi?.trim();
+  return doi ? `${href}?add=external&doi=${encodeURIComponent(doi)}` : href;
+}
+
 /** The queue's filter (v2 item 6/7): person type (`role_category`), unit
  *  (`dept:` / `div:` / `inst:` values, the `lib/edit/person-filter.ts`
- *  vocabulary) and candidate source. Empty = no filter on that facet. */
+ *  vocabulary) and candidate source. Empty = no filter on that facet. Applied
+ *  on the server (it reads the person tables); v3's search, confidence,
+ *  decision and possible-errors facets run in the browser over the summaries. */
 export type OrcidQueueFilter = {
   types: string[];
   units: string[];
@@ -238,42 +320,8 @@ export const EMPTY_ORCID_QUEUE_FILTER: OrcidQueueFilter = { types: [], units: []
 /** Unit kinds the queue offers (no centers). */
 const QUEUE_UNIT = /^(dept|div|inst):[^\s]{1,64}$/;
 const MAX_FILTER_VALUES = 50;
-/** `orcid_queue_sample.filter_key` is VARCHAR(1024): a filter whose canonical
- *  key is longer is refused (routes) or trimmed (page), never truncated. */
-export const MAX_FILTER_KEY_LENGTH = 1024;
 
-const cleanList = (v: unknown, ok: (s: string) => boolean): string[] | null => {
-  if (v === undefined || v === null) return [];
-  const xs = Array.isArray(v) ? v : [v];
-  if (xs.length > MAX_FILTER_VALUES) return null;
-  const out: string[] = [];
-  for (const x of xs) {
-    if (typeof x !== "string") return null;
-    const t = x.trim();
-    if (!t) continue;
-    if (t.length > 72 || !ok(t)) return null;
-    if (!out.includes(t)) out.push(t);
-  }
-  return out.sort();
-};
-
-/** A filter from a request body or URL values; null when malformed (the
- *  routes 400). Values sorted and de-duplicated, so two spellings of one
- *  selection compare equal. Pure. */
-export function sanitizeOrcidQueueFilter(raw: unknown): OrcidQueueFilter | null {
-  if (raw === undefined || raw === null) return { types: [], units: [], sources: [] };
-  if (typeof raw !== "object" || Array.isArray(raw)) return null;
-  const r = raw as Record<string, unknown>;
-  const types = cleanList(r.types, () => true);
-  const units = cleanList(r.units, (u) => QUEUE_UNIT.test(u));
-  const sources = cleanList(r.sources, isOrcidCandidateSource);
-  if (!types || !units || !sources) return null;
-  const f = { types, units, sources: sources as OrcidCandidateSource[] };
-  return orcidQueueFilterKey(f).length > MAX_FILTER_KEY_LENGTH ? null : f;
-}
-
-/** The canonical key a sample stores (`orcid_queue_sample.filter_key`): ""
- *  for no filter, so every v1 sample reads as unfiltered. Pure. */
+/** `type=…&unit=…&source=…`, sorted: "" for no filter. Pure. */
 export function orcidQueueFilterKey(f: OrcidQueueFilter): string {
   const q = new URLSearchParams();
   for (const t of [...f.types].sort()) q.append("type", t);
@@ -286,10 +334,10 @@ export function isEmptyOrcidQueueFilter(f: OrcidQueueFilter): boolean {
   return f.types.length === 0 && f.units.length === 0 && f.sources.length === 0;
 }
 
-/** `?tab=…&type=…&unit=…&source=…` for the page's links. Pure. */
-export function orcidQueueHref(basePath: string, tab: string, f: OrcidQueueFilter): string {
+/** `?type=…&unit=…&source=…` for the page's links. Pure. */
+export function orcidQueueHref(basePath: string, f: OrcidQueueFilter): string {
   const key = orcidQueueFilterKey(f);
-  return `${basePath}?tab=${encodeURIComponent(tab)}${key ? `&${key}` : ""}`;
+  return key ? `${basePath}?${key}` : basePath;
 }
 
 /** One candidate iD on a scholar's card. */
@@ -298,9 +346,8 @@ export type OrcidQueueRow = {
   orcid: string;
   band: OrcidQueueBand;
   /** queue = nothing on file; conflict = a DIFFERENT iD is on file (Replace);
-   *  auto_confirmed = the iD the ETL email-confirmed (Undo); on_file = a
-   *  sampled pair that went on file since (shown decided). */
-  state: "queue" | "conflict" | "auto_confirmed" | "on_file";
+   *  auto_confirmed = the iD the ETL email-confirmed (Undo). */
+  state: "queue" | "conflict" | "auto_confirmed";
   instMatch: boolean;
   historyMatch: boolean;
   emailVerified: boolean;
@@ -314,14 +361,46 @@ export type OrcidQueueRow = {
   newWorksSample: OrcidQueueWork[];
   /** `orcid_candidate.source` values for the pair, read live. */
   sources: OrcidCandidateSource[];
-  /** The ETL's facts behind the chips; null on a row a v1 run wrote. */
+  /** The ETL's facts behind the evidence; null on a row a v1 run wrote. */
   detail: OrcidEvidenceDetail | null;
   /** Conflicts / email verified: the iD on file. */
   onFileOrcid: string | null;
-  /** Email verified: already confirmed by the ETL (shows Undo). */
+  /** Already confirmed by the ETL from a verified email (shows Undo). */
   autoConfirmed: boolean;
-  /** This row's decision in the band's current sample; undefined = not sampled. */
-  sampleDecision?: "confirmed" | "dismissed" | null;
+};
+
+/** How the iD on file got there: `scholar.orcid_confirm_method`, or `identity`
+ *  (NULL method: an unconfirmed value WCM Identity's import wrote before Scholars
+ *  became the authority). */
+export type OrcidOnFileHow =
+  "self" | "proxy" | "librarian" | "email_verified" | "authenticated" | "identity";
+
+export type OrcidOnFile = {
+  orcid: string;
+  how: OrcidOnFileHow;
+  /** ISO time, when known (`orcid_confirmed_at`). */
+  at: string | null;
+  /** Who confirmed it: a cwid, or "ETL". */
+  by: string | null;
+  byName: string | null;
+  /** The public name on the iD's ORCID record, read live; null when it is
+   *  private or ORCID didn't answer. */
+  name: string | null;
+};
+
+/** One `orcid_dismissal` row as the card shows it. `reason`/`by` are null on
+ *  rows from before v3 B1 the backfill could not match. */
+export type OrcidRuledOut = {
+  orcid: string;
+  reason: OrcidDismissReason | null;
+  keptOrcid: string | null;
+  /** belongs_to_other: the scholar it was confirmed for, and their name. */
+  otherCwid: string | null;
+  otherName: string | null;
+  by: string | null;
+  byName: string | null;
+  /** ISO. */
+  at: string;
 };
 
 /** One scholar and every candidate iD for them, best first (v2 item 5). */
@@ -333,41 +412,63 @@ export type OrcidQueueCard = {
   scholarNames: string[];
   title: string | null;
   department: string | null;
-  /** The tab the card sits in: its best candidate's band, or conflicts /
-   *  email verified (`cardTabOf`). */
-  tab: OrcidQueueTab;
+  /** v3: the iD on file and where it came from; null when none. */
+  onFile: OrcidOnFile | null;
+  /** v3: the scholar's confirmed publications (ReCiter's, as Scholars holds them). */
+  reciterTotal: number;
   candidates: OrcidQueueRow[];
+  /** v3 B1: iDs already ruled out for this scholar, newest first. */
+  ruledOut: OrcidRuledOut[];
 };
 
-/** What the page hands the client: one tab's cards and every tab's count
- *  (scholars, not pairs), under one filter. */
+/** v3: one candidate in the scholar list, enough to score, sort and search. */
+export type OrcidQueueSummaryCandidate = {
+  orcid: string;
+  band: OrcidQueueBand;
+  shared: number;
+  worksTotal: number;
+  nameAgrees: boolean;
+  competitor: boolean;
+  /** `orcid_candidate.source` values for the pair (the How discovered counts). */
+  sources: OrcidCandidateSource[];
+};
+
+/** v3: one row of the scholar list. `candidates` best first; email
+ *  auto-confirmed iDs are in it, flagged by `autoConfirmed`. */
+export type OrcidQueueSummary = {
+  cwid: string;
+  name: string;
+  /** For Name A–Z: the last word of the scholar's full name. */
+  surname: string;
+  department: string | null;
+  candidates: OrcidQueueSummaryCandidate[];
+  /** A different iD is on file: a possible error. */
+  conflict: boolean;
+  /** The ETL confirmed one of the scholar's iDs from a verified email. */
+  autoConfirmed: boolean;
+  /** ISO times the scholar's earliest and latest pair entered the queue
+   *  (`orcid_pair_seen`); null when none is recorded (email-confirmed only). */
+  firstQueuedAt: string | null;
+  lastQueuedAt: string | null;
+  /** v3 B2: decisions on file for the scholar (null = none): an iD ruled out
+   *  by the scholar themselves or by staff (a librarian or proxy), an iD a
+   *  librarian confirmed, and the latest decision's ISO time. A scholar with
+   *  no candidates left is listed for these alone. */
+  decisions: { byScholar: boolean; byStaff: boolean; librarian: boolean; at: string | null } | null;
+};
+
+/** What the page hands the client: every scholar in the queue under the
+ *  server-side filter. The selected scholar's card is fetched on demand
+ *  (`GET /api/edit/orcid-queue/scholar`). */
 export type OrcidQueueData = {
-  tab: OrcidQueueTab;
-  cards: OrcidQueueCard[];
-  counts: Record<OrcidQueueTab, number>;
+  summaries: OrcidQueueSummary[];
   filter: OrcidQueueFilter;
-  /** The band's latest sample (Strong / Shared papers only). */
-  sample: OrcidQueueSampleState | null;
-  /** Rows a passed sample's "Confirm remaining N" would confirm now. */
-  remaining: number | null;
 };
 
 /** Band strength: 0 = strongest. Pure. */
 export function bandRank(band: string): number {
   const i = (ORCID_QUEUE_BANDS as readonly string[]).indexOf(band);
   return i < 0 ? ORCID_QUEUE_BANDS.length : i;
-}
-
-/** The tab a scholar's card sits in: email verified when the ETL confirmed one
- *  of their iDs, Conflicts when another iD is on file, else the best band among
- *  their open candidates. Pure. */
-export function cardTabOf(
-  candidates: ReadonlyArray<Pick<OrcidQueueRow, "band" | "state">>,
-): OrcidQueueTab {
-  if (candidates.some((c) => c.state === "auto_confirmed")) return "email_verified";
-  if (candidates.some((c) => c.state === "conflict")) return "conflicts";
-  const best = [...candidates].sort((a, b) => bandRank(a.band) - bandRank(b.band))[0];
-  return best ? best.band : "weak";
 }
 
 /** Best candidate first: band, then shared papers, then name agreement. Pure. */
@@ -383,6 +484,101 @@ export function compareCandidates(
   );
 }
 
+/** v3: a candidate's score: its meter step, plus the share of the record's
+ *  works the scholar also holds (0–1) as a tie-break inside the step. Pure. */
+export function candidateScore(
+  c: Pick<OrcidQueueSummaryCandidate, "band" | "shared" | "worksTotal">,
+): number {
+  return bandLevel(c.band) + (c.worksTotal > 0 ? Math.min(1, c.shared / c.worksTotal) : 0);
+}
+
+/** v3 "Clearest winner": the best iD's lead over the next best. A scholar with
+ *  one candidate leads by more than any pair can (+5). Pure. */
+export function scholarGap(s: Pick<OrcidQueueSummary, "candidates">): number {
+  const [a, b] = s.candidates;
+  if (!a) return 0;
+  return b ? candidateScore(a) - candidateScore(b) : candidateScore(a) + 5;
+}
+
+/** v3: which competitor rules fired on a row. 1: a same-surname scholar holds
+ *  3+ of the record's papers; 2: the scholar has another plausible iD; 3: the
+ *  iD is a candidate for another scholar too. Pure. */
+export function competitorRules(
+  r: Pick<OrcidQueueRow, "competitor" | "competitors" | "competitorOrcids">,
+): Array<1 | 2 | 3> {
+  if (!r.competitor) return [];
+  const out: Array<1 | 2 | 3> = [];
+  if (r.competitors.some((c) => c.reason !== "same_id")) out.push(1);
+  if (r.competitorOrcids.length > 0) out.push(2);
+  if (r.competitors.some((c) => c.reason === "same_id")) out.push(3);
+  return out;
+}
+
+/** v3 search: name, CWID, or ORCID iD with or without dashes. Pure. */
+export function matchesQueueSearch(
+  s: Pick<OrcidQueueSummary, "name" | "cwid" | "candidates">,
+  raw: string,
+): boolean {
+  const q = raw.trim().toLowerCase();
+  if (!q) return true;
+  if (s.name.toLowerCase().includes(q) || s.cwid.toLowerCase().includes(q)) return true;
+  const bare = q.replace(/[-\s]/g, "");
+  return (
+    bare.length > 0 &&
+    s.candidates.some((c) => c.orcid.replace(/-/g, "").toLowerCase().includes(bare))
+  );
+}
+
+export const ORCID_QUEUE_SORTS = [
+  "strong",
+  "gap",
+  "oldest",
+  "newest",
+  "decided",
+  "dept",
+  "name",
+  "cwid",
+] as const;
+export type OrcidQueueSort = (typeof ORCID_QUEUE_SORTS)[number];
+
+export const ORCID_QUEUE_SORT_LABEL: Record<OrcidQueueSort, { label: string; hint: string }> = {
+  strong: { label: "Strongest match", hint: "Easy confirmations first" },
+  gap: { label: "Clearest winner", hint: "Biggest gap between the best and next-best iD" },
+  oldest: { label: "Oldest in queue", hint: "Longest waiting first" },
+  newest: { label: "Newest found", hint: "Most recently found iD first" },
+  decided: { label: "Recently decided", hint: "Latest decision first" },
+  dept: { label: "Department, then name", hint: "Work one department at a time" },
+  name: { label: "Name A–Z", hint: "By surname" },
+  cwid: { label: "CWID A–Z", hint: "Match against a list of CWIDs" },
+};
+
+/** v3: the scholar list's comparator for a sort. Ties fall back to the
+ *  strongest match, then the cwid, so the order is stable. Pure. */
+const byTime = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+
+export function compareSummaries(sort: OrcidQueueSort) {
+  const best = (s: OrcidQueueSummary) => (s.candidates[0] ? candidateScore(s.candidates[0]) : 0);
+  const strong = (a: OrcidQueueSummary, b: OrcidQueueSummary) =>
+    best(b) - best(a) || a.cwid.localeCompare(b.cwid);
+  const byName = (a: OrcidQueueSummary, b: OrcidQueueSummary) =>
+    a.surname.localeCompare(b.surname) || a.name.localeCompare(b.name) || strong(a, b);
+  return (a: OrcidQueueSummary, b: OrcidQueueSummary): number => {
+    if (sort === "gap") return scholarGap(b) - scholarGap(a) || strong(a, b);
+    // ISO strings sort as times; a missing date sorts last either way.
+    if (sort === "oldest")
+      return byTime(a.firstQueuedAt ?? "~", b.firstQueuedAt ?? "~") || strong(a, b);
+    if (sort === "newest")
+      return byTime(b.lastQueuedAt ?? "", a.lastQueuedAt ?? "") || strong(a, b);
+    if (sort === "decided")
+      return byTime(b.decisions?.at ?? "", a.decisions?.at ?? "") || strong(a, b);
+    if (sort === "dept")
+      return (a.department ?? "￿").localeCompare(b.department ?? "￿") || byName(a, b);
+    if (sort === "name") return byName(a, b);
+    if (sort === "cwid") return a.cwid.localeCompare(b.cwid);
+    return strong(a, b);
+  };
+}
+
 /** The filter from page search params, lenient: unknown values are dropped,
  *  not refused (a mangled link narrows less, never errors). Pure. */
 export function parseOrcidQueueFilter(
@@ -393,16 +589,9 @@ export function parseOrcidQueueFilter(
     return (Array.isArray(v) ? v : v === undefined ? [] : [v]).map((x) => x.trim()).filter(Boolean);
   };
   const uniq = <T extends string>(xs: T[]) => [...new Set(xs)].sort() as T[];
-  const f: OrcidQueueFilter = {
+  return {
     types: uniq(list("type").filter((t) => t.length <= 72)).slice(0, MAX_FILTER_VALUES),
     units: uniq(list("unit").filter((u) => QUEUE_UNIT.test(u))).slice(0, MAX_FILTER_VALUES),
     sources: uniq(list("source").filter(isOrcidCandidateSource)),
   };
-  // Too long to store as a sample's key: drop the last values until it fits.
-  while (orcidQueueFilterKey(f).length > MAX_FILTER_KEY_LENGTH) {
-    if (f.units.length > 0) f.units.pop();
-    else if (f.types.length > 0) f.types.pop();
-    else f.sources.pop();
-  }
-  return f;
 }

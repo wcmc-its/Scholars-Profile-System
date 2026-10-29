@@ -50,7 +50,11 @@ import {
   EXTRACT_TEMPERATURE,
   buildExtractPrompt,
 } from "@/lib/api/matcha-extract";
-import { DEFAULT_EXTRACT_MODEL } from "@/lib/llm/models";
+import {
+  DEFAULT_EXTRACT_MODEL,
+  bedrockCallOptions,
+  modelAcceptsTemperature,
+} from "@/lib/llm/models";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
 
@@ -269,7 +273,9 @@ async function gate0(pastes: { id: string; paste: string }[]) {
           prompt: buildExtractPrompt(paste),
           maxOutputTokens: EXTRACT_MAX_TOKENS * 2, // the addendum widens the output
           abortSignal: AbortSignal.timeout(60_000),
-          temperature: EXTRACT_TEMPERATURE,
+          // Same request shape as production `extractMatchaConcepts`.
+          ...(modelAcceptsTemperature(DEFAULT_EXTRACT_MODEL) ? { temperature: EXTRACT_TEMPERATURE } : {}),
+          ...bedrockCallOptions(DEFAULT_EXTRACT_MODEL, { effort: "low" }),
         })
       ).object;
     } catch (err) {

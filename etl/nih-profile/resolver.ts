@@ -72,8 +72,13 @@ export function nameTokens(name: string): Set<string> {
 /** A PI's full_name matches a candidate's fullName when their last token
  *  matches and at least one other token matches (covers `J A Smith` vs
  *  `John A Smith` vs `John Adam Smith` without false-firing on
- *  `Jane Smith` vs `John Smith`). Initials count: a one-letter token
- *  matches the first letter of any other-side token. */
+ *  `Jane Smith` vs `John Smith`). A full given name matches in any position,
+ *  so `R Brad Jones` matches `Brad Jones`. A one-letter initial matches only
+ *  first-name-to-first-name: `J Smith` matches `John Smith`, but the middle
+ *  initial in `Augustine M Choi` does not make it `Mary E Choi` (#3071). A
+ *  first name of 3+ letters that starts the other first name matches too
+ *  (`Ben` / `Benjamin`). The trade-off: `J M Smith` no longer matches
+ *  `Michael Smith`. */
 export function namesMatch(a: string, b: string): boolean {
   const at = Array.from(nameTokens(a));
   const bt = Array.from(nameTokens(b));
@@ -83,19 +88,17 @@ export function namesMatch(a: string, b: string): boolean {
   const aLast = at[at.length - 1]!;
   const bLast = bt[bt.length - 1]!;
   if (aLast !== bLast) return false;
-  // Beyond the last name, require ≥1 additional token match. Initials
-  // count: a single-character token matches the first character of any
-  // multi-character token on the other side.
+  // Beyond the last name, require ≥1 additional token match: a full given
+  // name anywhere, or an initial against the other side's first name only.
   const aRest = at.slice(0, -1);
   const bRest = bt.slice(0, -1);
-  for (const x of aRest) {
-    for (const y of bRest) {
-      if (x === y) return true;
-      if (x.length === 1 && y.startsWith(x)) return true;
-      if (y.length === 1 && x.startsWith(y)) return true;
-    }
-  }
-  return false;
+  for (const x of aRest) for (const y of bRest) if (x.length > 1 && x === y) return true;
+  const [aFirst, bFirst] = [aRest[0], bRest[0]];
+  if (!aFirst || !bFirst) return false;
+  if (aFirst.length === 1 || bFirst.length === 1) return aFirst[0] === bFirst[0];
+  // A short form of the first name: Ben / Benjamin, Rob / Robert, Sara / Sarah.
+  const [short, long] = aFirst.length <= bFirst.length ? [aFirst, bFirst] : [bFirst, aFirst];
+  return short.length >= 3 && long.startsWith(short);
 }
 
 /** Treat "PI" / "PI-Subaward" / "Co-PI" as PI-level for matching
@@ -283,6 +286,45 @@ export function resolveByPiNameQuery(
     profileId: winner.profileId,
     latestEndDate: winner.latestEnd === "0000-00-00" ? null : winner.latestEnd,
   };
+}
+
+/** #3071 — the links a person or the cleanup ruled out, from
+ *  `reporter_profile_candidate`: `rejected` and `revoked` pairs are never
+ *  written again. A scholar with a `revoked` pair also gets no name-only link:
+ *  their name already led to someone else's profile once, and dropping only the
+ *  revoked id would hand the link to the next namesake. */
+export type RuledOutLinks = {
+  pairs: Set<string>;
+  nameBlocked: Set<string>;
+};
+
+export const ruledOutKey = (cwid: string, profileId: number) => `${cwid}::${profileId}`;
+
+export function ruledOutLinks(
+  candidates: Array<{ cwid: string; externalProfileId: number; status: string }>,
+): RuledOutLinks {
+  const pairs = new Set<string>();
+  const nameBlocked = new Set<string>();
+  for (const c of candidates) {
+    if (c.status !== "rejected" && c.status !== "revoked") continue;
+    pairs.add(ruledOutKey(c.cwid, c.externalProfileId));
+    if (c.status === "revoked") nameBlocked.add(c.cwid);
+  }
+  return { pairs, nameBlocked };
+}
+
+export function dropRuledOut(
+  observations: ResolvedObservation[],
+  ruledOut: RuledOutLinks,
+): ResolvedObservation[] {
+  return observations.filter(
+    (o) =>
+      !ruledOut.pairs.has(ruledOutKey(o.cwid, o.profileId)) &&
+      !(
+        ruledOut.nameBlocked.has(o.cwid) &&
+        (o.resolutionSource === "name_match" || o.resolutionSource === "name_query")
+      ),
+  );
 }
 
 /** Given a stream of (profile_id, cwid) observations, pick the
