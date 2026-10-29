@@ -95,6 +95,7 @@ import { renderNciTable2aReport } from "@/components/edit/reports/nci-table-2a-b
 import { renderNihFundedPubsReport } from "@/components/edit/reports/nih-funded-pubs-body";
 import { renderOptimizeMembershipReport } from "@/components/edit/reports/optimize-membership-body";
 import { renderPublicationsReport } from "@/components/edit/reports/publications-body";
+import { renderPubCitationReport } from "@/components/edit/reports/pub-citation-body";
 import { renderPubRelevanceReport } from "@/components/edit/reports/pub-relevance-body";
 import type { EditSession } from "@/lib/auth/superuser";
 import {
@@ -233,6 +234,8 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
   "16": { n: "16", gate: "superuser", render: renderMyncbiDiscrepanciesReport },
   // Center-only: the cancer-relevance review queue (etl/center-pub-relevance).
   "17": { n: "17", gate: "unit", render: renderPubRelevanceReport },
+  // Center-only: EVAL's publication export over report 17's answers.
+  "18": { n: "18", gate: "unit", render: renderPubCitationReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page
