@@ -7,6 +7,12 @@
  *
  * Parser, loader, builders and workbook: `lib/edit/core-users-report.ts`; the
  * download (`/api/edit/reports/core-users`) takes the same query string.
+ *
+ * Under the download, for a core's own owners only (`canContactCoreUsers`, one
+ * core, never `center=all`): "Email these users", which copies the filtered
+ * active people's addresses for an Outlook Bcc — or, above `CORE_CONTACT_CAP`
+ * recipients, the reason there is none. Only the COUNT is rendered here; the
+ * addresses are fetched on click (`lib/edit/core-users-contact.ts`).
  * Unit-gated, core-only (`REPORT_NUMBERS_BY_KIND`); the frame is the dynamic
  * page's (`lib/edit/report-registry.ts`).
  */
@@ -29,7 +35,10 @@ import {
   ReportRail,
   ReportStats,
 } from "@/components/edit/reports/report-ui";
+import { CoreUsersContactButton } from "@/components/edit/reports/core-users-contact-button";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
+import { db } from "@/lib/db";
+import { getCoreOwnerRole, type CoreOwnerLookup } from "@/lib/edit/authz";
 import {
   coreQueryString,
   isAllCores,
@@ -37,6 +46,12 @@ import {
   toSearchParams,
   yearOptions,
 } from "@/lib/edit/core-report-common";
+import {
+  canContactCoreUsers,
+  coreContactAllowed,
+  coreContactOverCapMessage,
+  loadCoreContactRecipients,
+} from "@/lib/edit/core-users-contact";
 import {
   CLIENT_LABEL,
   coreUsersExportAllowed,
@@ -72,12 +87,16 @@ export function CoreUsersView({
   params,
   result,
   totalConfirmed,
+  contactCount = null,
 }: {
   coreId: string;
   basePath: string;
   params: CoreUsersParams;
   result: CoreUsersResult;
   totalConfirmed: number;
+  /** Recipients "Email these users" would copy; `null` = the viewer may not
+   *  (not this core's owner, a read-only role, or the all-cores roll-up). */
+  contactCount?: number | null;
 }) {
   const href = (view: CoreUsersParams["view"]) =>
     `${basePath}?${coreQueryString(coreId, coreUsersQuery(params, view))}`;
@@ -95,20 +114,41 @@ export function CoreUsersView({
           },
         ]}
         aside={
-          <DownloadAside
-            href={
-              allowed && people.length > 0
-                ? `/api/edit/reports/core-users?${coreQueryString(coreId, coreUsersQuery(params))}`
-                : null
-            }
-            note={
-              allowed
-                ? "Includes the Criteria, People and Departments sheets."
-                : coreUsersOverCapMessage(people.length)
-            }
-            refused={!allowed}
-            testId="core-users"
-          />
+          <div className="flex flex-col items-start gap-4">
+            <DownloadAside
+              href={
+                allowed && people.length > 0
+                  ? `/api/edit/reports/core-users?${coreQueryString(coreId, coreUsersQuery(params))}`
+                  : null
+              }
+              note={
+                allowed
+                  ? "Includes the Criteria, People and Departments sheets."
+                  : coreUsersOverCapMessage(people.length)
+              }
+              refused={!allowed}
+              testId="core-users"
+            />
+            {contactCount !== null &&
+              people.length > 0 &&
+              (contactCount === 0 ? (
+                <p
+                  className="text-muted-foreground text-[13px]"
+                  data-testid="core-users-contact-note"
+                >
+                  No one here has a current Weill Cornell address to email.
+                </p>
+              ) : coreContactAllowed(contactCount) ? (
+                <CoreUsersContactButton
+                  query={coreQueryString(coreId, coreUsersQuery(params, "people"))}
+                  count={contactCount}
+                />
+              ) : (
+                <p className="text-apollo-amber text-[13px]" data-testid="core-users-contact-note">
+                  {coreContactOverCapMessage(contactCount)}
+                </p>
+              ))}
+          </div>
         }
       />
       <CoreTabs
@@ -239,12 +279,22 @@ export function CoreUsersView({
 export async function renderCoreUsersReport({
   code,
   ctx,
+  session,
   searchParams,
   basePath,
 }: UnitReportProps): Promise<ReportRender> {
   const params = parseCoreUsersParams(toSearchParams(searchParams));
   const pmids = await loadCoreConfirmedPmids(code);
   const result = await loadCoreUsersReport(code, pmids, params);
+  const contactCount =
+    !isAllCores(code) &&
+    canContactCoreUsers(
+      session,
+      code,
+      await getCoreOwnerRole(session, code, db.read as unknown as CoreOwnerLookup),
+    )
+      ? (await loadCoreContactRecipients(result.people.map((p) => p.cwid))).length
+      : null;
   const resetHref = isCoreUsersDefault(params)
     ? null
     : `${basePath}?${coreQueryString(code, coreUsersQuery({ ...parseCoreUsersParams(new URLSearchParams()), view: params.view }))}`;
@@ -350,6 +400,7 @@ export async function renderCoreUsersReport({
               params={params}
               result={result}
               totalConfirmed={pmids.length}
+              contactCount={contactCount}
             />
           </ReportCard>
         </div>
