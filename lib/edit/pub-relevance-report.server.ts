@@ -1,10 +1,15 @@
 /**
- * Report 17 loader: one year of a center's publications with ≥1 confirmed
+ * Report 17 loader: one year (by `publicationDate`) of a center's publications with ≥1 confirmed
  * research- or clinical-member author (the set `etl/center-pub-relevance` decides), each
  * with its `center_publication_relevance` row, if any. The caller has passed
  * the unit gate. Server-only (reads `@/lib/db`).
  */
 import { db } from "@/lib/db";
+import {
+  publicationInPeriod,
+  publicationPeriodWhere,
+  UNKNOWN_AUTHOR_NAME,
+} from "@/lib/edit/center-pub-attribution";
 import {
   isReviewPublicationType,
   type PubRelevanceRow,
@@ -23,14 +28,19 @@ export async function loadPubRelevanceReport(
   const program = new Map(members.map((m) => [m.cwid, m.programCode]));
   const cwids = [...program.keys()];
 
-  const pubs = await db.read.publication.findMany({
-    where: { year, authors: { some: { isConfirmed: true, cwid: { in: cwids } } } },
+  const [from, to] = [`${year}-01-01`, `${year}-12-31`];
+  const found = await db.read.publication.findMany({
+    where: {
+      ...publicationPeriodWhere(from, to),
+      authors: { some: { isConfirmed: true, cwid: { in: cwids } } },
+    },
     orderBy: [{ dateAddedToEntrez: "desc" }, { pmid: "desc" }],
     select: {
       pmid: true,
       title: true,
       journal: true,
       year: true,
+      dateAddedToEntrez: true,
       publicationType: true,
       authors: {
         where: { isConfirmed: true, cwid: { in: cwids } },
@@ -38,6 +48,7 @@ export async function loadPubRelevanceReport(
       },
     },
   });
+  const pubs = found.filter((p) => publicationInPeriod(p, from, to));
   const decided = pubs.length
     ? await db.read.centerPublicationRelevance.findMany({
         where: { centerCode, pmid: { in: pubs.map((p) => p.pmid) } },
@@ -57,7 +68,7 @@ export async function loadPubRelevanceReport(
       isReview: isReviewPublicationType(p.publicationType),
       members: p.authors.map((a) => ({
         cwid: a.cwid as string,
-        name: a.scholar?.preferredName ?? (a.cwid as string),
+        name: a.scholar?.preferredName ?? UNKNOWN_AUTHOR_NAME,
         programCode: program.get(a.cwid as string) ?? null,
       })),
       relevant: d?.relevant ?? null,

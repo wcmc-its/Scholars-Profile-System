@@ -79,24 +79,52 @@ describe("pubRelevanceNeedsDecision", () => {
   });
 
   it("redoes a review's rule row from the retired review rule, though its inputs did not change", () => {
-    expect(pubRelevanceNeedsDecision({ source: "rule", inputHash: hash }, REVIEW)).toBe(true);
+    expect(
+      pubRelevanceNeedsDecision({ source: "rule", inputHash: hash, promptHash: null }, REVIEW),
+    ).toBe(true);
   });
 
   it("keeps a current rule row, and an llm row whose inputs did not change", () => {
     const PRE = { ...INPUT, publicationType: "Preprint" };
     expect(
-      pubRelevanceNeedsDecision({ source: "rule", inputHash: pubRelevanceInputHash(PRE) }, PRE),
+      pubRelevanceNeedsDecision(
+        { source: "rule", inputHash: pubRelevanceInputHash(PRE), promptHash: null },
+        PRE,
+      ),
     ).toBe(false);
-    expect(pubRelevanceNeedsDecision({ source: "llm", inputHash: hash }, REVIEW)).toBe(false);
+    expect(
+      pubRelevanceNeedsDecision(
+        { source: "llm", inputHash: hash, promptHash: PUB_RELEVANCE_PROMPT_HASH },
+        REVIEW,
+      ),
+    ).toBe(false);
   });
 
   it("redoes an llm row whose inputs changed", () => {
-    expect(pubRelevanceNeedsDecision({ source: "llm", inputHash: "stale" }, REVIEW)).toBe(true);
+    expect(
+      pubRelevanceNeedsDecision(
+        { source: "llm", inputHash: "stale", promptHash: PUB_RELEVANCE_PROMPT_HASH },
+        REVIEW,
+      ),
+    ).toBe(true);
+  });
+
+  it("redoes an llm row decided under another prompt, though its inputs did not change", () => {
+    expect(
+      pubRelevanceNeedsDecision(
+        { source: "llm", inputHash: hash, promptHash: "oldprompt" },
+        REVIEW,
+      ),
+    ).toBe(true);
   });
 
   it("never touches a reviewer's row, a review's included", () => {
-    expect(pubRelevanceNeedsDecision({ source: "human", inputHash: "stale" }, REVIEW)).toBe(false);
-    expect(pubRelevanceNeedsDecision({ source: "human", inputHash: null }, INPUT)).toBe(false);
+    expect(
+      pubRelevanceNeedsDecision({ source: "human", inputHash: "stale", promptHash: "old" }, REVIEW),
+    ).toBe(false);
+    expect(
+      pubRelevanceNeedsDecision({ source: "human", inputHash: null, promptHash: null }, INPUT),
+    ).toBe(false);
   });
 });
 

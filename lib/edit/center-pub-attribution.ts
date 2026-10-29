@@ -47,6 +47,9 @@ import { isReviewPublicationType, type PubRelevanceSource } from "@/lib/edit/pub
 /** The appointment sources that establish WCM tenure. */
 export const WCM_TENURE_SOURCES = ["ED", "ED-HISTORICAL"] as const;
 
+/** Display name for an author with no scholar row; never the cwid. */
+export const UNKNOWN_AUTHOR_NAME = "Unknown author";
+
 export type AttributionMembershipType = "research" | "clinical";
 
 export type AttributionMembership = {
@@ -142,6 +145,30 @@ export function publicationDate(p: {
   return p.year ? `${String(p.year).padStart(4, "0")}-01-01` : null;
 }
 
+/** Is the publication's `publicationDate` in `[from, to]` (inclusive ISO dates; no `to` = open)? */
+export function publicationInPeriod(
+  p: { dateAddedToEntrez: Date | null; year: number | null },
+  from: string,
+  to?: string,
+): boolean {
+  const date = publicationDate(p);
+  return !!date && date >= from && (to === undefined || date <= to);
+}
+
+/**
+ * Prisma `where` for the publications `publicationInPeriod` can accept. Coarse
+ * on the date column's time of day; callers re-test with `publicationInPeriod`.
+ */
+export function publicationPeriodWhere(from: string, to?: string) {
+  const year = (d: string) => Number(d.slice(0, 4));
+  return {
+    OR: [
+      { dateAddedToEntrez: { gte: new Date(from), ...(to ? { lte: new Date(to) } : {}) } },
+      { dateAddedToEntrez: null, year: { gte: year(from), ...(to ? { lte: year(to) } : {}) } },
+    ],
+  };
+}
+
 export function withinTenure(date: string, t: WcmTenure): boolean {
   return date >= t.start && (t.end === null || date <= t.end);
 }
@@ -175,8 +202,8 @@ export function attributeCenterPublications(input: {
   const publications: AttributedPublication[] = [];
   let unknownTenurePublications = 0;
   for (const p of input.publications) {
-    const date = publicationDate(p);
-    if (!date || date < from || date > to) continue;
+    if (!publicationInPeriod(p, from, to)) continue;
+    const date = publicationDate(p) as string;
     const credited: AttributedMember[] = [];
     for (const a of p.authors) {
       const m = members.get(a.cwid);

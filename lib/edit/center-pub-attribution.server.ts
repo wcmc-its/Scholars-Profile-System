@@ -8,6 +8,8 @@ import { todayIso } from "@/lib/api/center-member-count";
 import { db } from "@/lib/db";
 import {
   attributeCenterPublications,
+  publicationPeriodWhere,
+  UNKNOWN_AUTHOR_NAME,
   WCM_TENURE_SOURCES,
   type AttributionMembershipType,
   type CenterPubAttribution,
@@ -47,8 +49,6 @@ export async function loadCenterPubAttribution(
       relevance: new Map(),
     });
 
-  const fromYear = Number(opts.from.slice(0, 4));
-  const toYear = Number(opts.to.slice(0, 4));
   const [appointments, pubs] = await Promise.all([
     db.read.appointment.findMany({
       where: { cwid: { in: cwids }, source: { in: [...WCM_TENURE_SOURCES] } },
@@ -58,10 +58,7 @@ export async function loadCenterPubAttribution(
       // Coarse in SQL; the exact date test is attributeCenterPublications'.
       where: {
         authors: { some: { isConfirmed: true, cwid: { in: cwids } } },
-        OR: [
-          { dateAddedToEntrez: { gte: new Date(opts.from), lte: new Date(opts.to) } },
-          { dateAddedToEntrez: null, year: { gte: fromYear, lte: toYear } },
-        ],
+        ...publicationPeriodWhere(opts.from, opts.to),
       },
       orderBy: [{ dateAddedToEntrez: "desc" }, { pmid: "desc" }],
       select: {
@@ -92,7 +89,7 @@ export async function loadCenterPubAttribution(
       ...p,
       authors: p.authors.map((a) => ({
         cwid: a.cwid as string,
-        name: a.scholar?.preferredName ?? (a.cwid as string),
+        name: a.scholar?.preferredName ?? UNKNOWN_AUTHOR_NAME,
       })),
     })),
     relevance: new Map(relevance.map((r) => [r.pmid, r])),
