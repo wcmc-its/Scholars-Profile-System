@@ -212,6 +212,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "center/[code]/disease-auto-publish": "allow",
   "center/[code]/nci-2a/[awardId]": "allow",
   "center/[code]/nci-2a/accept": "allow",
+  "center/[code]/pub-relevance/[pmid]": "allow",
   "clear-field": "deny",
   "coi-gap/[id]/dismiss": "deny",
   "coi-gap/[id]/feedback": "deny",

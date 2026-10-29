@@ -2297,6 +2297,7 @@ model Center {
   programs         CenterProgram[]
   fundingAwards    CancerCenterFundingAward[]
   collabCandidates CenterCollabCandidate[]
+  pubRelevance     CenterPublicationRelevance[]
 
   @@index([slug])
   @@index([sortOrder])
@@ -2903,6 +2904,40 @@ model CancerCenterProgramAllocation {
   @@index([awardId])
   @@index([centerCode, programCode])
   @@map("cancer_center_program_allocation")
+}
+
+/// Is this publication cancer relevant, for this center? One row per (center,
+/// pmid) with a confirmed RESEARCH-member author, written by
+/// `etl/center-pub-relevance` and reviewed on the center's publication
+/// relevance report. `source`: `rule` (a preprint, erratum, letter, comment,
+/// editorial or retraction by PubMed publication type: final, no review; a
+/// review is NOT a rule type, it is judged on topic and marked by its type at
+/// read time), `llm` (Sonnet on title, abstract and MeSH under MCC's rubric) or
+/// `human` (a reviewer confirmed or flipped it; the ETL never overwrites it).
+/// Provenance mirrors `CancerCenterFundingAward`: model id (or
+/// `rule:publication-type`), first 12 hex of sha256(system prompt) (null on a
+/// rule row), and sha256 of the inputs, which is how the ETL tells a changed
+/// publication from one it already scored. No FK to `publication`: a
+/// reviewer's call must survive a publication row being rebuilt.
+model CenterPublicationRelevance {
+  centerCode String    @map("center_code") @db.VarChar(64)
+  pmid       String    @db.VarChar(32)
+  relevant   Boolean
+  source     String    @db.VarChar(16)
+  /// One sentence in MCC's style ("This is cancer relevant. ..."); the
+  /// reviewer can rewrite it.
+  reason     String?   @db.Text
+  model      String?   @db.VarChar(128)
+  promptHash String?   @map("prompt_hash") @db.VarChar(12)
+  inputHash  String?   @map("input_hash") @db.VarChar(64)
+  inferredAt DateTime? @map("inferred_at")
+  reviewedBy String?   @map("reviewed_by") @db.VarChar(32)
+  reviewedAt DateTime? @map("reviewed_at")
+
+  center Center @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+
+  @@id([centerCode, pmid])
+  @@map("center_publication_relevance")
 }
 
 /// A member's disease-expertise assignment for the Example Cancer Center — one

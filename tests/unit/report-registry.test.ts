@@ -96,6 +96,8 @@ describe("unitKindsFor", () => {
       // Superuser-gated, institution-wide.
       "15": [],
       "16": [],
+      // Center-only review queue.
+      "17": ["center"],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);

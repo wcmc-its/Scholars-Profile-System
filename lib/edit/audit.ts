@@ -356,7 +356,13 @@ export type AuditAction =
    *  `targetEntityType='core'`, `targetEntityId` the core id; before is null,
    *  after carries `{ recipients, filters }` — never an address. Requires the
    *  `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
-  | "core_users_contact_copy";
+  | "core_users_contact_copy"
+  /** A reviewer confirmed or flipped a publication's cancer relevance, or
+   *  edited its note, on the center's publication relevance report.
+   *  `targetEntityType='center_publication_relevance'`, `targetEntityId`
+   *  `"{centerCode}:{pmid}"`; before/after carry `{ relevant, reason, source }`.
+   *  ENUM extended in scripts/sql/audit-log.sql. */
+  | "pub_relevance_review";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -462,7 +468,12 @@ export type AuditEntityType =
    *  `targetEntityId` is the sample id. Only `orcid_bulk_confirm` uses it.
    *  Requires the `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
-  | "orcid_queue_sample";
+  | "orcid_queue_sample"
+  /** one center's `center_publication_relevance` row; `targetEntityId` is
+   *  `"{centerCode}:{pmid}"`. Only `pub_relevance_review` uses it. Requires the
+   *  `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "center_publication_relevance";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

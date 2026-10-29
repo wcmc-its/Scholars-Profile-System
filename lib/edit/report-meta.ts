@@ -70,6 +70,7 @@ export const REPORT_KEYS = [
   "14",
   "15",
   "16",
+  "17",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -217,6 +218,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "NIH bibliography discrepancies",
     summary:
       "Publications on a scholar's public MyNCBI bibliography that are not confirmed on their profile, and the reverse.",
+    descriptionHtml: null,
+  },
+  "17": {
+    slug: "publication-cancer-relevance",
+    name: "Publication cancer relevance",
+    summary:
+      "Is each research and clinical member's publication cancer relevant? MCC rule for preprints, errata, letters, comments, editorials and retractions, an AI call on topic for the rest; reviews are judged on topic and flagged separately. Confirm or flip it here.",
     descriptionHtml: null,
   },
 };
