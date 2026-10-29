@@ -349,7 +349,13 @@ export type AuditAction =
    *  email as VERIFIED (`ORCID_EMAIL_AUTOCONFIRM`). Actor `"ETL"`,
    *  `targetEntityType='scholar'`, `targetEntityId` the cwid; before/after
    *  carry `{ orcid }`. ENUM extended in scripts/sql/audit-log.sql. */
-  | "orcid_email_autoconfirm";
+  | "orcid_email_autoconfirm"
+  /** A reviewer confirmed or flipped a publication's cancer relevance, or
+   *  edited its note, on the center's publication relevance report.
+   *  `targetEntityType='center_publication_relevance'`, `targetEntityId`
+   *  `"{centerCode}:{pmid}"`; before/after carry `{ relevant, reason, source }`.
+   *  ENUM extended in scripts/sql/audit-log.sql. */
+  | "pub_relevance_review";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -455,7 +461,12 @@ export type AuditEntityType =
    *  `targetEntityId` is the sample id. Only `orcid_bulk_confirm` uses it.
    *  Requires the `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
-  | "orcid_queue_sample";
+  | "orcid_queue_sample"
+  /** one center's `center_publication_relevance` row; `targetEntityId` is
+   *  `"{centerCode}:{pmid}"`. Only `pub_relevance_review` uses it. Requires the
+   *  `scholars_audit` target_entity_type ENUM be extended, see
+   *  `scripts/sql/audit-log.sql`. */
+  | "center_publication_relevance";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
