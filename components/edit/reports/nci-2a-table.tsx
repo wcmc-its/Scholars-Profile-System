@@ -28,6 +28,11 @@
  * field saves, Esc undoes. MCC uses it to say why an award is under 100%
  * cancer-relevant; it is the CSV's Notes column.
  *
+ * Trainee slots: a training award (`isTrainingAward`) gets a number field
+ * under its title (`traineeSlots`, same PATCH; blank clears). It feeds the
+ * CSV's "T" section; MCC takes the number from the Graduate School or the
+ * Postdoc Office.
+ *
  * Program is read-only here: the PI's center membership, edited in the
  * center roster. Nothing here reaches `@/lib/db`.
  */
@@ -43,8 +48,10 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   applyNci2aWrite,
   bulkAcceptTargets,
+  isTrainingAward,
   money,
   NCI2A_NOTE_MAX,
+  NCI2A_TRAINEE_SLOTS_MAX,
   nci2aCsv,
   nci2aStatus,
   nci2aWriteLanded,
@@ -114,6 +121,68 @@ export function Nci2aDownloadButton({
 
 type Save = (awardId: string, value: number) => Promise<boolean>;
 type SaveNote = (awardId: string, note: string | null) => Promise<boolean>;
+type SaveSlots = (awardId: string, slots: number | null) => Promise<boolean>;
+
+/** A training award's trainee slots. Leaving the field saves; Esc undoes; a
+ *  value that isn't a whole number in range reverts, never saves. */
+function TraineeSlotsField({ award, save }: { award: Nci2aAward; save: SaveSlots }) {
+  const [draft, setDraft] = React.useState<string | undefined>(undefined);
+  // The value this row saved, shown until the (possibly lagging) replica has it.
+  const [saved, setSaved] = React.useState<number | null | undefined>(undefined);
+  const [busy, setBusy] = React.useState(false);
+  const cancelled = React.useRef(false);
+  if (saved !== undefined && saved === award.traineeSlots) setSaved(undefined);
+  const current = saved !== undefined ? saved : award.traineeSlots;
+
+  async function commit() {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
+    if (draft === undefined) return;
+    const next = draft.trim() === "" ? null : Number(draft);
+    if (next !== null && (!Number.isInteger(next) || next < 0 || next > NCI2A_TRAINEE_SLOTS_MAX)) {
+      setDraft(undefined);
+      return;
+    }
+    if (next === current) {
+      setDraft(undefined);
+      return;
+    }
+    setBusy(true);
+    const ok = await save(award.id, next);
+    setBusy(false);
+    if (ok) setSaved(next);
+    setDraft(undefined);
+  }
+
+  return (
+    <label className="text-muted-foreground mt-1.5 flex items-center gap-1.5 text-xs">
+      Trainee slots
+      <input
+        type="number"
+        min={0}
+        max={NCI2A_TRAINEE_SLOTS_MAX}
+        step={1}
+        value={draft ?? (current == null ? "" : String(current))}
+        disabled={busy}
+        aria-label={`Trainee slots, ${award.projectNumber}`}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          else if (e.key === "Escape") {
+            cancelled.current = true;
+            setDraft(undefined);
+            e.currentTarget.blur();
+          }
+        }}
+        className="bg-apollo-surface border-apollo-border-strong h-[26px] w-[52px] rounded-md border px-1.5 text-right text-[13px] text-foreground tabular-nums"
+        data-testid="nci-2a-trainee-slots"
+      />
+    </label>
+  );
+}
 
 const value0 = (a: Nci2aAward) =>
   a.cancerRelevantPercent == null ? "" : String(a.cancerRelevantPercent);
@@ -348,11 +417,13 @@ function Nci2aRow({
   award: a,
   save,
   saveNote,
+  saveSlots,
   rosterHref,
 }: {
   award: Nci2aAward;
   save: Save;
   saveNote: SaveNote;
+  saveSlots: SaveSlots;
   rosterHref: string;
 }) {
   const note = useNote(a, saveNote);
@@ -399,6 +470,7 @@ function Nci2aRow({
           >
             {a.projectTitle}
           </div>
+          {isTrainingAward(a) && <TraineeSlotsField award={a} save={saveSlots} />}
         </td>
         <td className="p-3 text-right">{money(a.annualProjectDirectCosts)}</td>
         <td className={cn("p-3", !a.isPeerReviewed && "text-muted-foreground")}>
@@ -553,7 +625,8 @@ export function Nci2aTable({
     return true;
   };
 
-  const saveNote: SaveNote = async (awardId, note) => {
+  /** A note or trainee-slots PATCH: no local copy beyond the field's own. */
+  const patchField = async (awardId: string, body: object, what: string) => {
     setError(null);
     try {
       const res = await fetch(
@@ -561,20 +634,23 @@ export function Nci2aTable({
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ reviewerNote: note }),
+          body: JSON.stringify(body),
         },
       );
       if (!res.ok) {
-        setError(`Save failed (${res.status}). The note was not changed.`);
+        setError(`Save failed (${res.status}). The ${what} was not changed.`);
         return false;
       }
     } catch {
-      setError("Save failed. The note was not changed.");
+      setError(`Save failed. The ${what} was not changed.`);
       return false;
     }
     React.startTransition(() => router.refresh());
     return true;
   };
+  const saveNote: SaveNote = (awardId, note) => patchField(awardId, { reviewerNote: note }, "note");
+  const saveSlots: SaveSlots = (awardId, slots) =>
+    patchField(awardId, { traineeSlots: slots }, "trainee-slots value");
 
   const sortHeader = (k: Nci2aSortKey, label: string) => (
     <Link
@@ -674,6 +750,7 @@ export function Nci2aTable({
                   award={a}
                   save={save}
                   saveNote={saveNote}
+                  saveSlots={saveSlots}
                   rosterHref={rosterHref}
                 />
               ))}

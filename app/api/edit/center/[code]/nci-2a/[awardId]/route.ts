@@ -6,10 +6,12 @@
  * `/edit/reports/2` panel's write path. `[code]` is the raw `Center.code`,
  * matching `/edit/center/[code]/page.tsx`.
  *
- * Body (at least one of the three):
+ * Body (at least one of the four):
  *   cancerRelevantPercent: number in [0, 100]
  *   reviewerNote: string (trimmed, at most NCI2A_NOTE_MAX chars) or null;
  *     blank clears it. A note never changes any `source`.
+ *   traineeSlots: integer in [0, NCI2A_TRAINEE_SLOTS_MAX] or null (clears);
+ *     a training award's slots for the CSV's "T" section. No `source` either.
  *   allocations: [{ programCode: string | null, programPercent: number }]
  *     — programPercent MUST sum to 100 (±0.01 for rounding); a programCode
  *       MUST be null or one of this center's live `CenterProgram` codes —
@@ -32,7 +34,7 @@ import { type NextRequest, type NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
-import { NCI2A_NOTE_MAX } from "@/lib/edit/nci-2a-report";
+import { NCI2A_NOTE_MAX, NCI2A_TRAINEE_SLOTS_MAX } from "@/lib/edit/nci-2a-report";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 
 const PATH = "/api/edit/center/[code]/nci-2a/[awardId]";
@@ -96,8 +98,18 @@ export async function PATCH(
   const wantsPercent = "cancerRelevantPercent" in body;
   const wantsAllocations = "allocations" in body;
   const wantsNote = "reviewerNote" in body;
-  if (!wantsPercent && !wantsAllocations && !wantsNote) {
-    return editError(400, "invalid_value", "cancerRelevantPercent|allocations|reviewerNote");
+  const wantsSlots = "traineeSlots" in body;
+  if (!wantsPercent && !wantsAllocations && !wantsNote && !wantsSlots) {
+    return editError(400, "invalid_value", "cancerRelevantPercent|allocations|reviewerNote|traineeSlots");
+  }
+
+  let traineeSlots: number | null = null;
+  if (wantsSlots) {
+    const v = body.traineeSlots;
+    if (v !== null && (!Number.isInteger(v) || (v as number) < 0 || (v as number) > NCI2A_TRAINEE_SLOTS_MAX)) {
+      return editError(400, "invalid_value", "traineeSlots");
+    }
+    traineeSlots = v as number | null;
   }
 
   let reviewerNote: string | null = null;
@@ -160,6 +172,11 @@ export async function PATCH(
     after.reviewerNote = reviewerNote;
     fieldsChanged.push("reviewerNote");
   }
+  if (wantsSlots) {
+    before.traineeSlots = existing.traineeSlots;
+    after.traineeSlots = traineeSlots;
+    fieldsChanged.push("traineeSlots");
+  }
 
   try {
     await db.write.$transaction(async (tx) => {
@@ -170,6 +187,7 @@ export async function PATCH(
             ? { cancerRelevantPercent, cancerRelevantPercentSource: "human" }
             : {}),
           ...(wantsNote ? { reviewerNote } : {}),
+          ...(wantsSlots ? { traineeSlots } : {}),
           ...(wantsAllocations
             ? {
                 allocations: {

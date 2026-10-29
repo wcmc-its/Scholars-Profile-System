@@ -48,7 +48,7 @@ const SELECT =
   "border-apollo-border-strong bg-apollo-surface h-[34px] min-w-0 rounded-md border px-2 text-sm";
 
 export const NCI2A_BANNER =
-  "Cancer-Relevant Percent follows MCC's rubric: 100, 50, 25 or 0, read from the project title, abstract and Public Health Relevance statement. NCI awards and Lynch syndrome are 100 by rule (MCC rule); the rest marked AI-suggested is a Bedrock proposal. Confirming or correcting it here is what makes it defensible in peer-review — review before this leaves the building.";
+  "Cancer-Relevant Percent follows MCC's rubric: 100, 50, 25 or 0, read from the project title, abstract and Public Health Relevance statement. NCI awards (an NCI subcontract included), Lynch syndrome and HPV are 100 by rule (MCC rule); the rest marked AI-suggested is a Bedrock proposal. Confirming or correcting it here is what makes it defensible in peer-review — review before this leaves the building.";
 
 function toSearchParams(sp: UnitReportProps["searchParams"]): URLSearchParams {
   const out = new URLSearchParams();
@@ -97,8 +97,8 @@ function QueryAndAssumptions({ cycle }: { cycle: string }) {
         </li>
         <li>
           Cancer-relevant %: MCC&apos;s rubric, in bands of 100, 50, 25 or 0, from the project
-          title, abstract and Public Health Relevance statement. An NCI award, or a project naming
-          Lynch syndrome, is 100 by rule (MCC rule; it needs no review and bulk Accept skips it).
+          title, abstract and Public Health Relevance statement. An NCI award (or a subcontract
+          whose prime sponsor is NCI), or a project naming Lynch syndrome or HPV, is 100 by rule (MCC rule; it needs no review and bulk Accept skips it).
           Any other project is proposed by Bedrock and marked AI-suggested until a reviewer
           accepts it (Confirmed) or saves a different value (Corrected, which names what the AI
           said). Review progress counts the projects that have
@@ -116,7 +116,10 @@ function QueryAndAssumptions({ cycle }: { cycle: string }) {
         <li>
           The CSV holds the rows these filters select (its name ends in -filtered when that is not
           the whole cycle), one line per program, with a Review Status column (Confirmed, Corrected
-          or Needs review). It is award-level NCI submission data, so it is exempt from the
+          or Needs review). A 25 or 50 percent row&apos;s Notes give the relevance reason after any
+          reviewer note. Training awards (T, F, K12, KL2, R25 and D43 activity codes) follow in a
+          separate section labeled T, with a Trainee Slots column a reviewer fills in under the
+          project. It is award-level NCI submission data, so it is exempt from the
           50-person limit on scholar exports: it names PIs but has no CWID column.
         </li>
       </ul>
