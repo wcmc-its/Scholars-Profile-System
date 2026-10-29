@@ -157,7 +157,7 @@ describe("parseCollabPubMatrixParams", () => {
   });
   it("round-trips through the query string and rejects junk", () => {
     const p = parseCollabPubMatrixParams(
-      new URLSearchParams("from=2024&to=2023&type=bogus&exclude=BB&exclude=AA&confirmed=1"),
+      new URLSearchParams("from=2024&to=2023&membership=bogus&exclude=BB&exclude=AA&confirmed=1"),
       now,
     );
     expect(p).toEqual({

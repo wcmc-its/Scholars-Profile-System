@@ -48,7 +48,7 @@ export function parseCollabPubMatrixParams(
   };
   const from = year("from", years[1]);
   const to = Math.max(from, year("to", from));
-  const type = sp.get("type") as MatrixMembershipType | null;
+  const type = sp.get("membership") as MatrixMembershipType | null;
   return {
     from,
     to,
@@ -64,7 +64,11 @@ export function matrixPeriodLabel(p: Pick<CollabPubMatrixParams, "from" | "to">)
 }
 
 export function collabPubMatrixQuery(p: CollabPubMatrixParams): string {
-  const q = new URLSearchParams({ from: String(p.from), to: String(p.to), type: p.membershipType });
+  const q = new URLSearchParams({
+    from: String(p.from),
+    to: String(p.to),
+    membership: p.membershipType,
+  });
   for (const c of p.excluded) q.append("exclude", c);
   if (p.confirmedOnly) q.set("confirmed", "1");
   return q.toString();

@@ -75,7 +75,7 @@ export async function renderCollabPubMatrixReport({
               ))}
               <YearWindow from={params.from} to={params.to} years={pubRelevanceYears()} />
               <select
-                name="type"
+                name="membership"
                 defaultValue={params.membershipType}
                 aria-label="Membership type"
                 className="border-apollo-border-strong bg-apollo-surface h-[34px] rounded-md border px-2 text-sm"
