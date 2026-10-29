@@ -43,7 +43,12 @@ export function ReporterNameLine({
           )}
         </span>
       ))}
-      {differs ? <span className="sr-only"> (differs from the scholar&rsquo;s name)</span> : null}
+      {differs ? (
+        <>
+          {" "}
+          <span className="sr-only">(differs from the scholar&rsquo;s name)</span>
+        </>
+      ) : null}
     </span>
   );
 }
