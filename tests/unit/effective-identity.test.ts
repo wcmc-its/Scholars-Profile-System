@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #637 — "View as" impersonation: the effective-identity seam + role × route
  * matrix (impersonation-spec.md §2/§3/§9, edge cases E1/E3/E4/E5/E9).
@@ -316,6 +317,7 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isCoreDirector: false,
     });
   });
 
@@ -334,6 +336,7 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isCoreDirector: false,
     });
   });
 });

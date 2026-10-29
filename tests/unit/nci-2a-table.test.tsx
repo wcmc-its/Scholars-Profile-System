@@ -53,6 +53,7 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     cancerRelevantModel: null,
     cancerRelevantRationale: "because",
     reviewerNote: null,
+    traineeSlots: null,
     cancerRelevantAnnualProjectDc: pct == null ? null : pct * 1000,
     isPeerReviewed: true,
     grantCwid: `zzz${over.id}`,
@@ -414,6 +415,29 @@ describe("report 2 table", () => {
     expect(r.q.queryByTestId("nci-2a-note-row")).toBeNull();
     r.rerender(tableEl([AI])); // replica still says no note
     expect(r.q.getByTestId("nci-2a-note-link").textContent).toBe("Aim 2 only");
+  });
+
+  it("only a training award gets a trainee-slots field; blur saves, it holds through a lagged refresh", async () => {
+    const f = stubFetch();
+    const t32 = { ...AI, projectNumber: "5 T32 CA000001-03" };
+    expect(renderTable([AI]).q.queryByTestId("nci-2a-trainee-slots")).toBeNull();
+    cleanup();
+    const r = renderTable([t32]);
+    const slots = r.q.getByTestId("nci-2a-trainee-slots") as HTMLInputElement;
+    expect(slots.value).toBe("");
+    fireEvent.change(slots, { target: { value: "2.5" } });
+    fireEvent.blur(slots);
+    await act(async () => {});
+    expect(f).not.toHaveBeenCalled();
+    fireEvent.change(slots, { target: { value: "6" } });
+    fireEvent.blur(slots);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect(f.mock.calls[0]).toEqual([
+      `/api/edit/center/${CENTER}/nci-2a/1`,
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ traineeSlots: 6 }) }),
+    ]);
+    r.rerender(tableEl([t32])); // replica still says none
+    expect((r.q.getByTestId("nci-2a-trainee-slots") as HTMLInputElement).value).toBe("6");
   });
 
   it("Esc in the note editor undoes, closes and saves nothing", async () => {

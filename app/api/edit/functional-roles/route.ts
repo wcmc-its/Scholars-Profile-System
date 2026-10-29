@@ -11,7 +11,9 @@
  *   - `scopes` ("grant", "set_scopes"): a non-empty string array, each key
  *     one of the role's scope options (External Affairs: its functions,
  *     `communications` / `development`; Reporting: `"*"`, a report key, or
- *     `reportKey:scope`); normalized ("*" swallows the rest);
+ *     `reportKey:scope`); normalized ("*" swallows the rest). A scope-less
+ *     role (Cores director, `isScopelessRole`) takes no scopes: `scopes`
+ *     must be absent or `[]`, and anything else is a 400 `invalid_scopes`;
  *   - `name` ("grant", optional): the picker's directory display name,
  *     stored as `grantee_name` when 1–255 chars, else null (never a 400).
  *
@@ -26,7 +28,8 @@
  * Responds with the full list the write re-read on the writer.
  *
  * While `FUNCTIONAL_ROLES_AUTHZ` is off, nothing here changes who can open
- * anything. When it is "on", a manual External Affairs or Reporting row ADDS
+ * anything. When it is "on", a manual External Affairs, Reporting or Cores
+ * director row ADDS
  * access through the existing gates (`lib/auth/functional-role-authz.ts`), so
  * a grant or revoke here takes effect on the grantee's next request.
  */
@@ -36,6 +39,7 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   isFunctionalRole,
+  isScopelessRole,
   normalizeScopes,
   type FunctionalRoleRow,
 } from "@/lib/edit/functional-roles";
@@ -58,6 +62,12 @@ function granteeNameFrom(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length >= 1 && trimmed.length <= GRANTEE_NAME_MAX ? trimmed : null;
+}
+
+/** A scope-less role's `scopes`: absent or `[]` only. */
+function scopelessFrom(value: unknown): string[] | null {
+  if (value === undefined || (Array.isArray(value) && value.length === 0)) return [];
+  return null;
 }
 
 function scopesFrom(value: unknown): string[] | null {
@@ -115,7 +125,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   let scopes: string[] = [];
   if (op !== "revoke") {
-    const parsed = scopesFrom(body.scopes);
+    const parsed = isScopelessRole(role) ? scopelessFrom(body.scopes) : scopesFrom(body.scopes);
     if (!parsed || !validScopes(role, parsed)) {
       return editError(400, "invalid_scopes", "scopes");
     }

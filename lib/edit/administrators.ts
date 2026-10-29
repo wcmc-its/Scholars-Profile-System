@@ -57,13 +57,15 @@ export function isAdministratorsTabVisible(
  * `db.read` client) satisfies it structurally. Kept narrow so the unit tests can
  * mock exactly these models.
  */
-export type OwnerScopeClient = Pick<PrismaClient, "unitAdmin" | "division">;
+export type OwnerScopeClient = Pick<PrismaClient, "unitAdmin" | "division" | "core">;
 
 /**
  * The unit codes a non-superuser Owner manages, expanded for the dept→division
  * cascade (Amendment 1 § A1.2): an owned **department** also covers each of its
  * **divisions**, so those division codes are added to the scope; an owned
- * **division** or **center** contributes only its own code. Returns `[]` for a
+ * **division** or **center** contributes only its own code. A Cores director
+ * (`session.isCoreDirector`) owns every core, so every core id is in scope.
+ * Returns `[]` for a
  * user who owns nothing (the page then renders Forbidden).
  *
  * Superuser callers should not invoke this — they see all grants (scope
@@ -73,13 +75,19 @@ export async function loadOwnerManagedUnitScope(
   session: EditSession,
   db: OwnerScopeClient,
 ): Promise<string[]> {
-  const ownedRows = await db.unitAdmin.findMany({
-    where: { cwid: session.cwid, role: "owner" },
-    select: { entityType: true, entityId: true },
-  });
-  if (ownedRows.length === 0) return [];
+  const [ownedRows, directorCores] = await Promise.all([
+    db.unitAdmin.findMany({
+      where: { cwid: session.cwid, role: "owner" },
+      select: { entityType: true, entityId: true },
+    }),
+    // A Cores director owns every core (`core_director` functional role).
+    session.isCoreDirector === true
+      ? db.core.findMany({ select: { id: true } })
+      : Promise.resolve([]),
+  ]);
+  if (ownedRows.length === 0 && directorCores.length === 0) return [];
 
-  const scope = new Set<string>();
+  const scope = new Set<string>(directorCores.map((c) => c.id));
   const ownedDeptCodes: string[] = [];
   for (const row of ownedRows) {
     scope.add(row.entityId);

@@ -267,7 +267,7 @@ export default async function EditReportsIndexPage({
   let preselectedCode = preselected;
   if (preselected) {
     if (isAllCores(preselected) && kind === "core") {
-      // "all" is a superuser's alone.
+      // "all" is a superuser's or a Cores director's alone (`canViewAllCores`).
       if (!canViewAllCores(session)) return forbidden(session, preselected);
     } else if (!baseUnits.some((u) => u.kind === kind && u.code === preselected)) {
       // Not on the actor's roster: the per-unit gate the one-unit view used

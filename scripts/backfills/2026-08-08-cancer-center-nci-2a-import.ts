@@ -21,8 +21,8 @@
  * whose award number doesn't resolve at all) gets `programCode: null,
  * source: "membership"` — an explicit, honest gap, never a guess.
  * `cancerRelevantPercent` has no data source anywhere. MCC's rubric decides
- * two cases outright (`cancerRelevanceRule`: an NCI award, Lynch syndrome →
- * 100, `source: "rule"`, no Bedrock call); every other row asks Bedrock, with
+ * three cases outright (`cancerRelevanceRule`: an NCI award, Lynch syndrome,
+ * HPV → 100, `source: "rule"`, no Bedrock call); every other row asks Bedrock, with
  * the matching `Grant`'s abstract and PHR statement, regardless of program
  * resolution — see `lib/edit/cancer-center-funding-generator.ts`. That is a
  * fully separate concept from program assignment above.
@@ -111,6 +111,10 @@ export type ImportRow = {
   /** OSRA's own "NIH Award" Y/N flag -- feeds the deterministic Peer-Reviewed
    *  classification (DT2A rule #4), see `lib/edit/cancer-center-peer-review.ts`. */
   nihAward: boolean;
+  /** OSRA "Originating Sponsor": the prime sponsor of an incoming subaward
+   *  (an NCI prime makes the row `rule:nci`). Absent in a file built before
+   *  build-2a-skeleton.py carried it; read as no prime. */
+  originatingSponsor?: string | null;
 };
 
 export type ImportOptions = {
@@ -405,24 +409,44 @@ export type RowPlan = {
 
 const NCI_RATIONALE = "NCI award: 100% under MCC's rubric.";
 const LYNCH_RATIONALE = "Lynch syndrome: 100% under MCC's rubric.";
+const HPV_RATIONALE = "HPV: 100% under MCC's rubric.";
 
-/** MCC's rubric (10-01) cases that are ALWAYS 100% — decided here, before any
- *  Bedrock call (deterministic, like `cancer-center-peer-review.ts`). NCI =
- *  a CA infix on either award number, or a funding source naming the National
- *  Cancer Institute (a flow-through row may carry a non-NIH number). */
+/** The US National Cancer Institute as a sponsor name, after any chain of
+ *  NIH/HHS prefixes ("DHHS/NIH/National Cancer Institute", "National Institutes
+ *  of Health/National Cancer Institute"). Not "National Cancer Institute of
+ *  Canada" or "Italian National Cancer Institute": a non-US NCI is not an NCI
+ *  award. "at <place>" is foreign except NCI at Frederick. */
+const US_NCI =
+  /^(?:(?:NIH|U\.?S\.?|DHHS|HHS|National Institutes of Health)\b[\s/,-]*)*national cancer institute\b(?!\s+of\b|\s+at\b(?!\s+frederick\b))/i;
+export const isUsNciSponsor = (name: string | null | undefined) => US_NCI.test((name ?? "").trim());
+
+/** MCC's rubric (10-01, 10-29) cases that are ALWAYS 100% — decided here,
+ *  before any Bedrock call (deterministic, like `cancer-center-peer-review.ts`).
+ *  NCI = a CA infix on either award number, or a funding source or prime
+ *  sponsor naming the National Cancer Institute (an NCI subcontract may carry
+ *  a non-NIH number). HPV = "HPV" or "papillomavirus" in the title, abstract
+ *  or PHR. */
 export function cancerRelevanceRule(
-  row: Pick<ImportRow, "sourceAwardNumber" | "projectNumber" | "specificFundingSource" | "projectTitle">,
+  row: Pick<
+    ImportRow,
+    "sourceAwardNumber" | "projectNumber" | "specificFundingSource" | "projectTitle" | "originatingSponsor"
+  >,
   text: { abstract: string | null; phrText: string | null },
-): { model: "rule:nci" | "rule:lynch"; rationale: string } | null {
+): { model: "rule:nci" | "rule:lynch" | "rule:hpv"; rationale: string } | null {
   if (
     parseNihAward(row.sourceAwardNumber).nihIc === "NCI" ||
     parseNihAward(row.projectNumber).nihIc === "NCI" ||
-    /national cancer institute/i.test(row.specificFundingSource)
+    isUsNciSponsor(row.specificFundingSource) ||
+    isUsNciSponsor(row.originatingSponsor)
   ) {
     return { model: "rule:nci", rationale: NCI_RATIONALE };
   }
-  if (/\blynch syndrome\b/i.test([row.projectTitle, text.abstract, text.phrText].join(" "))) {
+  const words = [row.projectTitle, text.abstract, text.phrText].join(" ");
+  if (/\blynch syndrome\b/i.test(words)) {
     return { model: "rule:lynch", rationale: LYNCH_RATIONALE };
+  }
+  if (/\b(?:hr-?)?hpv(?:\d|\b)|papilloma\s?virus/i.test(words)) {
+    return { model: "rule:hpv", rationale: HPV_RATIONALE };
   }
   return null;
 }

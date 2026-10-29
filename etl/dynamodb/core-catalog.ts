@@ -10,22 +10,34 @@
  * catalog, then guard the usage rows" flow Block 1 uses for `topic`.
  *
  * Keep in sync with the dictionary as cores are resolved. Cores 1-14 mirror a
- * resolved dictionary entry. Cores with no firing staff/alias signal yet
+ * resolved dictionary entry, except 9 (Advanced Biomolecular Analysis) and 12
+ * (Nuclear Magnetic Resonance), which were REMOVED 2026-10 at the cores
+ * director's request: neither facility exists. Their ids are retired, never
+ * reused; their rows were deleted by scripts/sql/remove-cores-9-12.sql,
+ * and with no catalog entry here the ETL can neither re-seed them nor project
+ * usage rows for them (the publication_core FK guard drops unknown core ids).
+ * Cores with no firing staff/alias signal yet
  * (6 Institutional Biorepository, 7 Metabolic Phenotyping, 8 Microbiome, 10 Human
  * Immune Monitoring) seed a catalog row but currently project zero usage rows — an
  * empty core page until the upstream ReCiter target feed surfaces their staff. That
  * is harmless: the FK guard simply has no usage rows to attach.
  *
- * Cores 15 (Data Core) and 16 (Scientific Computing Unit) are catalog-ONLY: they
+ * Cores 15 (Data Core), 16 (High Performance Computing, formerly Scientific
+ * Computing Unit), 17 (Electron Microscopy and Histology), 18 (Human Therapeutic
+ * Organoid), 19 (Molecular Biophysics), 20 (Cryo-EM) and 21 (Neuro-anatomy
+ * Electron Microscopy) are catalog-ONLY: they
  * have no `core_dictionary.yaml` entry yet, because that file's loader RAISES on a
  * core with no `aliases:` (pipeline_cores/dictionary.py `_validate`) and validates
  * the WHOLE file on every load — so seeding them upstream without confirmed
- * acknowledgement strings would fail the nightly cores run for all 14 resolved
- * cores, not just these two. Seeding them HERE is the safe half: the row exists, so
+ * acknowledgement strings would fail the nightly cores run for every resolved
+ * core, not just these. Seeding them HERE is the safe half: the row exists, so
  * the core is claimable / ownable / editable on /edit/core, and it projects zero
  * usage rows until the dictionary entry lands (the same harmless state cores 6/7/8/
  * 10 sit in today). `source` stays the dictionary constant because that is where
- * these two are headed, not where they are.
+ * these are headed, not where they are.
+ *
+ * Renames land on the next nightly: Block 6 upserts `name` and `facility` on
+ * existing rows, not only on insert.
  */
 export type CoreCatalogEntry = {
   /** Dictionary `core_id`, e.g. "2". Stable string key (the DynamoDB SK suffix). */
@@ -47,13 +59,16 @@ export const CORE_CATALOG: ReadonlyArray<CoreCatalogEntry> = [
   { id: "5", name: "Genomics Resources", facility: "Genomics Resources Core Facility" },
   { id: "6", name: "Institutional Biorepository Core", facility: "Institutional Biorepository Core" },
   { id: "7", name: "Metabolic Phenotyping Center", facility: "Metabolic Phenotyping Center" },
-  { id: "8", name: "Microbiome Sequencing", facility: "Microbiome Core" },
-  { id: "9", name: "Advanced Biomolecular Analysis Core", facility: "Advanced Biomolecular Analysis Core" },
+  { id: "8", name: "Microbiome Core", facility: "Microbiome Core" },
   { id: "10", name: "Human Immune Monitoring", facility: "Human Immune Monitoring Core" },
   { id: "11", name: "Microscopy and Image Analysis", facility: "Microscopy and Image Analysis Core" },
-  { id: "12", name: "Nuclear Magnetic Resonance", facility: "Nuclear Magnetic Resonance (NMR) Core Facility" },
   { id: "13", name: "Proteomics and Metabolomics", facility: "Proteomics & Metabolomics Core Facility" },
   { id: "14", name: "Research Informatics", facility: "Research Informatics" },
   { id: "15", name: "Data Core", facility: "Data Core" },
-  { id: "16", name: "Scientific Computing Unit", facility: "Scientific Computing Unit" },
+  { id: "16", name: "High Performance Computing", facility: "High Performance Computing" },
+  { id: "17", name: "Electron Microscopy and Histology", facility: "Electron Microscopy and Histology Core" },
+  { id: "18", name: "Human Therapeutic Organoid", facility: "Human Therapeutic Organoid Core" },
+  { id: "19", name: "Molecular Biophysics", facility: "Molecular Biophysics Core" },
+  { id: "20", name: "Cryo-EM", facility: "Cryo-EM Core" },
+  { id: "21", name: "Neuro-anatomy Electron Microscopy", facility: "Neuro-anatomy Electron Microscopy Core" },
 ];

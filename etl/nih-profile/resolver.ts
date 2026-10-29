@@ -288,6 +288,45 @@ export function resolveByPiNameQuery(
   };
 }
 
+/** #3071 — the links a person or the cleanup ruled out, from
+ *  `reporter_profile_candidate`: `rejected` and `revoked` pairs are never
+ *  written again. A scholar with a `revoked` pair also gets no name-only link:
+ *  their name already led to someone else's profile once, and dropping only the
+ *  revoked id would hand the link to the next namesake. */
+export type RuledOutLinks = {
+  pairs: Set<string>;
+  nameBlocked: Set<string>;
+};
+
+export const ruledOutKey = (cwid: string, profileId: number) => `${cwid}::${profileId}`;
+
+export function ruledOutLinks(
+  candidates: Array<{ cwid: string; externalProfileId: number; status: string }>,
+): RuledOutLinks {
+  const pairs = new Set<string>();
+  const nameBlocked = new Set<string>();
+  for (const c of candidates) {
+    if (c.status !== "rejected" && c.status !== "revoked") continue;
+    pairs.add(ruledOutKey(c.cwid, c.externalProfileId));
+    if (c.status === "revoked") nameBlocked.add(c.cwid);
+  }
+  return { pairs, nameBlocked };
+}
+
+export function dropRuledOut(
+  observations: ResolvedObservation[],
+  ruledOut: RuledOutLinks,
+): ResolvedObservation[] {
+  return observations.filter(
+    (o) =>
+      !ruledOut.pairs.has(ruledOutKey(o.cwid, o.profileId)) &&
+      !(
+        ruledOut.nameBlocked.has(o.cwid) &&
+        (o.resolutionSource === "name_match" || o.resolutionSource === "name_query")
+      ),
+  );
+}
+
 /** Given a stream of (profile_id, cwid) observations, pick the
  *  preferred mapping for each cwid. When a scholar has more than one
  *  profile_id (rare), the one tied to the most recent project end-date

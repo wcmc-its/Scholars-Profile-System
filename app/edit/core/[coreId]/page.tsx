@@ -48,6 +48,7 @@ import {
   type CoreOwnerLookup,
 } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import { resolveDirectoryNames } from "@/lib/edit/directory-names";
 import { isCorePagesEnabled, isCorePubModalEnabled } from "@/lib/profile/cores-flags";
 
 export const dynamic = "force-dynamic";
@@ -126,7 +127,14 @@ export default async function EditCorePage({
     canManageAccess
       ? db.read.unitAdmin.findMany({
           where: { entityType: "core", entityId: coreId },
-          select: { cwid: true, role: true, source: true, grantedBy: true, createdAt: true },
+          select: {
+            cwid: true,
+            role: true,
+            source: true,
+            grantedBy: true,
+            createdAt: true,
+            granteeName: true,
+          },
           orderBy: { createdAt: "asc" },
         })
       : Promise.resolve([]),
@@ -141,9 +149,13 @@ export default async function EditCorePage({
   if (!core) notFound();
   const candidates = queue?.candidates ?? [];
 
-  // Batch-resolve leader + access cwids to display names (a unit admin is
-  // often non-Scholar staff, so a miss is expected — UnitAccessCard
-  // re-resolves those names client-side via /api/directory/people).
+  // Batch-resolve leader + access cwids to display names. Scholar first; core
+  // staff are often non-faculty with no Scholar row (all of Research
+  // Informatics, for one), so a miss falls back to the access row's stored
+  // `granteeName`, then to ONE batched ED lookup (`resolveDirectoryNames`:
+  // cached, time-boxed, never throws). Fail-soft: if ED is down the page
+  // renders as before — a leader with no name, an access row showing its CWID
+  // (which UnitAccessCard then retries client-side via /api/directory/people).
   const nameCwids = [...new Set([...leaderRows.map((l) => l.cwid), ...accessRows.map((a) => a.cwid)])];
   const scholars = nameCwids.length
     ? await db.read.scholar.findMany({
@@ -152,12 +164,26 @@ export default async function EditCorePage({
       })
     : [];
   const nameMap = new Map(scholars.map((s) => [s.cwid, { name: s.preferredName, title: s.primaryTitle }]));
+  const storedNames = new Map(
+    accessRows.flatMap((a) => (a.granteeName ? [[a.cwid, a.granteeName] as const] : [])),
+  );
+  const directoryMisses = nameCwids.filter((c) => !nameMap.has(c) && !storedNames.has(c));
+  let directoryNames = new Map<string, string>();
+  if (directoryMisses.length > 0) {
+    try {
+      directoryNames = await resolveDirectoryNames(directoryMisses);
+    } catch (err) {
+      console.warn("edit core page: ED name lookup failed", err);
+    }
+  }
+  const fallbackName = (cwid: string): string | null =>
+    storedNames.get(cwid) ?? directoryNames.get(cwid.trim().toLowerCase()) ?? null;
 
   const roleLabels = Object.fromEntries(coreRoleRows.map((r) => [r.key, r.label]));
 
   const leaders: CoreLeaderState[] = leaderRows.map((l) => ({
     cwid: l.cwid,
-    name: nameMap.get(l.cwid)?.name ?? null,
+    name: nameMap.get(l.cwid)?.name ?? fallbackName(l.cwid),
     title: nameMap.get(l.cwid)?.title ?? null,
     role: l.role,
     interim: l.interim,
@@ -167,7 +193,7 @@ export default async function EditCorePage({
   const access = canManageAccess
     ? accessRows.map((a) => ({
         cwid: a.cwid,
-        name: nameMap.get(a.cwid)?.name ?? a.cwid,
+        name: nameMap.get(a.cwid)?.name ?? fallbackName(a.cwid) ?? a.cwid,
         title: nameMap.get(a.cwid)?.title ?? null,
         role: a.role,
         source: a.source,

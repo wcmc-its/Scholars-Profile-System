@@ -2130,7 +2130,7 @@ describe("EtlStack", () => {
       expect(covered).toEqual(machines);
     });
 
-    it("staging schedules the ED email-visibility bridge (#443): weekly rule → 2-step SM (export@scholars-dev → import@Sps-VPC), export SG in the on-prem VPC, scoped ed/* PutObject grant", () => {
+    it("staging schedules the ED email-visibility bridge (#443): weekly rule → 2-step SM (export → import, both in the ETL subnets), scoped ed/* PutObject grant", () => {
       // Weekly rule, Sunday 05:00 UTC, enabled in staging.
       template.hasResourceProperties("AWS::Events::Rule", {
         Name: "sps-ed-email-visibility-staging",
@@ -2148,18 +2148,15 @@ describe("EtlStack", () => {
       );
       expect(def).toMatch(/etl:ed:export-email-visibility/);
       expect(def).toMatch(/etl:ed:import-email-visibility/);
-      // The export step's ENI is placed in scholars-dev's two private app
-      // subnets (the on-prem-reachable VPC), with the dedicated EdExportSg --
-      // NOT the Sps etl SG. (The import half runs in the Sps VPC.)
-      expect(def).toMatch(/subnet-08cab06d3084fba41/);
-      expect(def).toMatch(/subnet-07ffed73356c01f6c/);
-      expect(def).toMatch(/EdExportSg/);
-      // The export SG lives in the imported scholars-dev VPC, egress-only.
-      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
-        VpcId: "vpc-02c4dd698f3e3869c",
-        GroupDescription:
-          "SPS ED email-visibility export task egress (staging).",
-      });
+      // #3171 — the export no longer leaves the shared VPC: no scholars-dev
+      // subnet, no dedicated export SG.
+      expect(def).not.toMatch(/subnet-08cab06d3084fba41|subnet-07ffed73356c01f6c/);
+      expect(def).not.toMatch(/EdExportSg/);
+      expect(
+        Object.keys(template.findResources("AWS::EC2::SecurityGroup", {
+          Properties: { VpcId: "vpc-02c4dd698f3e3869c" },
+        })),
+      ).toHaveLength(0);
       // A cadence alarm guards against silent schedule death.
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "sps-ed-email-visibility-cadence-staging",

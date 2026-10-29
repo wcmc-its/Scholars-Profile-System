@@ -107,8 +107,8 @@ function DisclosureRow({
       {/* The visible cluster text (the count / method label) is the button's
           accessible name; this appends an explicit affordance so a screen reader
           announces what the disclosure reveals, while `aria-expanded` carries the
-          state. */}
-      <span className="sr-only"> {srLabel}</span>
+          state. */}{" "}
+      <span className="sr-only">{srLabel}</span>
       <ChevronDown
         aria-hidden
         strokeWidth={2.5}

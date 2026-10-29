@@ -90,7 +90,7 @@ export function RoleChipRow({
                 : "border-apollo-border-strong bg-white text-foreground hover:bg-apollo-surface-2"
             }`}
           >
-            <span>{g.label}</span>
+            <span>{g.label}</span>{" "}
             <span className={isActive ? "opacity-85" : "text-muted-foreground"}>
               {count.toLocaleString()}
             </span>

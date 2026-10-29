@@ -63,6 +63,14 @@ import { institutionDisplayName } from "@/lib/institutions";
  * top-50.
  */
 export const SCHOLAR_EXPORT_CAP = 50;
+/**
+ * The ONE carve-out from `SCHOLAR_EXPORT_CAP` for email addresses (decision of
+ * 2026-10-29): a core owner may copy the addresses of their core's known users
+ * (report 11 "Core users", `lib/edit/core-users-contact.ts`) for up to this
+ * many recipients. Above it the copy is REFUSED whole (the route 409s, the page
+ * shows why instead of the button), never truncated. Applies to that path only.
+ */
+export const CORE_CONTACT_CAP = 200;
 /** Loaders truncate to this many rows — AFTER the carve — so an over-cap cohort
  *  is detectable. */
 const ROSTER_FETCH_LIMIT = SCHOLAR_EXPORT_CAP + 1;

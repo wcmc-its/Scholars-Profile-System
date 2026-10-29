@@ -3856,53 +3856,25 @@ export class EtlStack extends Stack {
     // s3://wcmc-reciterai-artifacts/ed/email-visibility/bridge.ndjson;
     // `etl:ed:import-email-visibility` reads that object and writes
     // Scholar.emailVisibility in Aurora. Historically the export ran WCM-side
-    // (an operator laptop on the WCM network) because the Sps app VPC has no
-    // on-prem route — the #443 blocker. WCM networking has since stood up
-    // TGW-attached VPCs (scholars-dev / scholars-prod, see envConfig.edExportVpc)
-    // whose private `app` subnets reach the on-prem LDAP host, so the export can
-    // run unattended and the bridge becomes a scheduled two-step chain:
-    //   export  (in edExportVpc — needs LDAP + S3, NOT the DB)
-    //     → import (in the Sps VPC — needs S3 + the in-VPC Aurora, NOT LDAP).
+    // (an operator laptop on the WCM network) because the old Sps app VPC had no
+    // on-prem route — the #443 blocker. The export then ran in the TGW-attached
+    // scholars-dev VPC; since the move to the shared its-reciter-vpc01 (which is
+    // TGW-attached, and where TaskEd binds the same LDAP host nightly) both
+    // steps run in the ETL subnets (#3171):
+    //   export  (needs LDAP + S3, NOT the DB)
+    //     → import (needs S3 + the in-VPC Aurora, NOT LDAP).
     //
     // Both steps reuse the shared ETL task def (same image, same injected
     // SCHOLARS_LDAP_* + DATABASE_URL secrets); per-step differentiation is the
-    // command override + the network placement. The export's awsvpc ENI lands in
-    // the imported VPC's app subnets even though the task launches on the Sps ECS
-    // cluster — ECS places the ENI in whatever subnets the network config names,
-    // independent of the cluster's own VPC (verified 2026-06-18 by a cross-VPC
-    // run-task that bound LDAPS + searched 2440 org units from scholars-dev). The
+    // command override (and the task unit: the export routes to the LDAP def). The
     // export writes via the task role's IAM credentials, so the role gains a
     // narrow PutObject grant on the ed/* prefix below (it already had GetObject
     // for the import). Creation-gated on `edEmailVisibilityBridgeEnabled` (like
     // the curated backup): staging builds + schedules it; prod creates nothing
-    // until scholars-prod is verified end-to-end and the flag flips. See
+    // until the flag flips. See
     // docs/onprem-ed-export-runbook.md.
     // ------------------------------------------------------------------
     if (envConfig.edEmailVisibilityBridgeEnabled) {
-      const edVpcCfg = envConfig.edExportVpc;
-      // Import the externally-created VPC by attributes (no context lookup, so
-      // synth stays deterministic without account creds). Only the private app
-      // subnets are referenced — they carry the TGW (on-prem) + NAT routes.
-      const edExportVpc = ec2.Vpc.fromVpcAttributes(this, "EdExportVpc", {
-        vpcId: edVpcCfg.vpcId,
-        availabilityZones: [...edVpcCfg.availabilityZones],
-        privateSubnetIds: [...edVpcCfg.appSubnetIds],
-      });
-      const edExportSubnets: ec2.SubnetSelection = {
-        subnets: edVpcCfg.appSubnetIds.map((id, i) =>
-          ec2.Subnet.fromSubnetId(this, `EdExportSubnet${i}`, id),
-        ),
-      };
-      // Dedicated egress-only SG in the imported VPC. allowAllOutbound covers
-      // the task's egress: LDAPS :636 to on-prem via the TGW, plus ECR / Secrets
-      // Manager / S3 / CloudWatch Logs over :443 and DNS :53 via the app subnets'
-      // NAT. No ingress — a batch task accepts no inbound connections.
-      const edExportSg = new ec2.SecurityGroup(this, "EdExportSg", {
-        vpc: edExportVpc,
-        description: `SPS ED email-visibility export task egress (${env}).`,
-        allowAllOutbound: true,
-      });
-
       // The export writes the NDJSON via the task role's IAM credentials, so the
       // role needs PutObject on exactly the ed/* prefix (it already has
       // GetObject for the import). Scoped to ed/*; the rest of the shared
@@ -3970,14 +3942,15 @@ export class EtlStack extends Stack {
         return task;
       };
 
-      // Step 1: export in the on-prem-reachable VPC (LDAP + S3, no DB).
+      // Step 1: export (LDAP + S3, no DB). Same placement as TaskEd, which binds
+      // the same on-prem LDAP host from the shared VPC every night.
       const edExportTask = buildBridgeStep(
         "EdEmailVisibilityExport",
         "etl:ed:export-email-visibility",
-        edExportSubnets,
-        [edExportSg],
+        etlTaskSubnets,
+        [etlSecurityGroup],
       );
-      // Step 2: import in the Sps VPC (S3 + in-VPC Aurora, no LDAP). A failed
+      // Step 2: import (S3 + in-VPC Aurora, no LDAP). A failed
       // export Catches to a Fail above, so the import only runs on a fresh file.
       const edImportTask = buildBridgeStep(
         "EdEmailVisibilityImport",
@@ -4093,7 +4066,7 @@ export class EtlStack extends Stack {
       new CfnOutput(this, "EdEmailVisibilityBridgeStateMachineArn", {
         value: edBridgeStateMachine.stateMachineArn,
         description:
-          "SPS ED email-visibility bridge state machine ARN (#443; export@edExportVpc → import@SpsVpc).",
+          "SPS ED email-visibility bridge state machine ARN (#443; export → import, both in the ETL subnets).",
       });
     }
 

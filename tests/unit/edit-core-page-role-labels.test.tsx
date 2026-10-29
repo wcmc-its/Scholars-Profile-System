@@ -40,6 +40,7 @@ const {
   mockLoadConsoleTabs,
   mockLogAuthzDenied,
   mockSections,
+  mockResolveDirectoryNames,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -58,6 +59,7 @@ const {
   mockLoadConsoleTabs: vi.fn(),
   mockLogAuthzDenied: vi.fn(),
   mockSections: vi.fn(() => null),
+  mockResolveDirectoryNames: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
@@ -65,6 +67,7 @@ vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockG
 vi.mock("@/lib/auth/authz-events", () => ({ logAuthzDenied: mockLogAuthzDenied }));
 vi.mock("@/lib/api/core-queue", () => ({ loadCoreReviewQueue: mockLoadQueue }));
 vi.mock("@/lib/edit/console-tabs.server", () => ({ loadConsoleTabs: mockLoadConsoleTabs }));
+vi.mock("@/lib/edit/directory-names", () => ({ resolveDirectoryNames: mockResolveDirectoryNames }));
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
@@ -133,6 +136,7 @@ beforeEach(() => {
   mockOrgUnitRoleFindMany.mockResolvedValue([{ key: "director", label: "Executive Director" }]);
   mockLoadQueue.mockResolvedValue({ candidates: [] });
   mockLoadConsoleTabs.mockResolvedValue({ units: true, cores: true });
+  mockResolveDirectoryNames.mockResolvedValue(new Map());
 });
 
 describe("/edit/core/[coreId] — #2559 role-label wiring", () => {
@@ -262,5 +266,58 @@ describe("/edit/core/[coreId] — single-scroll page data", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("/edit/core/[coreId] — non-Scholar staff names", () => {
+  beforeEach(() => {
+    // A leader and two access holders with NO Scholar row (non-faculty staff);
+    // one access row carries a stored ED-pull `granteeName`.
+    mockCoreLeaderFindMany.mockResolvedValue([
+      { cwid: "stf0001", role: "director", interim: false, sortOrder: 0 },
+    ]);
+    mockUnitAdminFindMany.mockResolvedValue([
+      {
+        cwid: "stf0001",
+        role: "owner",
+        source: "manual",
+        grantedBy: "sup001",
+        createdAt: new Date(),
+        granteeName: null,
+      },
+      {
+        cwid: "stf0002",
+        role: "curator",
+        source: "manual",
+        grantedBy: "sup001",
+        createdAt: new Date(),
+        granteeName: "Stored Name",
+      },
+    ]);
+    mockScholarFindMany.mockResolvedValue([]);
+  });
+
+  it("falls back to ONE ED lookup for CWIDs neither Scholar nor a stored name covers", async () => {
+    mockResolveDirectoryNames.mockResolvedValue(new Map([["stf0001", "Sam Staff"]]));
+    const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+    const props = findByType(result, mockSections)!.props;
+    expect(mockResolveDirectoryNames).toHaveBeenCalledTimes(1);
+    expect(mockResolveDirectoryNames).toHaveBeenCalledWith(["stf0001"]);
+    expect(props.leaders).toMatchObject([{ cwid: "stf0001", name: "Sam Staff" }]);
+    expect(props.access).toMatchObject([
+      { cwid: "stf0001", name: "Sam Staff" },
+      { cwid: "stf0002", name: "Stored Name" },
+    ]);
+  });
+
+  it("is fail-soft: an ED error keeps today's no-name leader and bare-CWID access row", async () => {
+    mockResolveDirectoryNames.mockRejectedValue(new Error("ldap down"));
+    const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
+    const props = findByType(result, mockSections)!.props;
+    expect(props.leaders).toMatchObject([{ cwid: "stf0001", name: null }]);
+    expect(props.access).toMatchObject([
+      { cwid: "stf0001", name: "stf0001" },
+      { cwid: "stf0002", name: "Stored Name" },
+    ]);
   });
 });

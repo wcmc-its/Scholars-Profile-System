@@ -1339,6 +1339,7 @@ model MyncbiCitation {
   scholar    Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   citationId String  @map("citation_id") @db.VarChar(32)
   pmid       String? @db.VarChar(32)
+  authors    String? @db.Text
   title      String  @db.VarChar(1000)
   source     String? @db.VarChar(255)
   year       Int?
@@ -2842,7 +2843,7 @@ model CancerCenterFundingAward {
   cancerRelevantRationale     String?  @map("cancer_relevant_rationale") @db.Text
   /// Provenance of the AI or rule value (`cancerRelevantPercentAi`), written
   /// with it by the import and left alone by a reviewer's override. Model is
-  /// the Bedrock model id, or `rule:nci` / `rule:lynch` for a row MCC's rubric
+  /// the Bedrock model id, or `rule:nci` / `rule:lynch` / `rule:hpv` for a row MCC's rubric
   /// decides outright (`cancerRelevantPercentSource = "rule"`). Prompt hash =
   /// first 12 hex chars of sha256(system prompt); input hash = sha256 of the
   /// award prompt sent. Both null on a rule row (nothing was sent).
@@ -2855,6 +2856,10 @@ model CancerCenterFundingAward {
   /// into the CSV. Human-only: the import never writes it, except to carry a
   /// prior cycle's note forward with the reviewer percent. NULL = no note.
   reviewerNote                String?   @map("reviewer_note") @db.Text
+  /// Trainee slots on a training award (the DT2A "T" section). No feed: MCC
+  /// takes it from the Graduate School or the Postdoc Office and a reviewer
+  /// enters it on `/edit/reports`. The import never writes it. NULL = not entered.
+  traineeSlots                Int?      @map("trainee_slots")
   /// DT2A rule #4 (CCSG Data Guide p.7): "Only grant and contracts from NCI,
   /// NIH, or organizations listed in [the closed allowlist] are considered
   /// peer-reviewed." Fully deterministic — no Bedrock call, no `source`

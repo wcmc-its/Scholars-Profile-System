@@ -13,12 +13,13 @@
  *                       ("Corrected · AI said X%").
  *   - `ai`            — an LLM value nobody has reviewed yet.
  *   - `rule`          — MCC's rubric decided it outright (an NCI award, Lynch
- *                       syndrome → 100%); shown as "MCC rule", needs no review
+ *                       syndrome, HPV → 100%); shown as "MCC rule", needs no review
  *                       and is left out of bulk Accept.
  *   - `not-inferred`  — the percent is null (the Bedrock call failed or the
  *                       import skipped it). Counts under Needs review, and is
  *                       left out of the Cancer-relevant $ figure.
  */
+import { parseNihAward } from "@/lib/award-number";
 
 export type Nci2aProgram = { code: string; label: string };
 
@@ -44,11 +45,13 @@ export type Nci2aAward = {
   cancerRelevantPercentSource: "llm" | "rule" | "human";
   /** What Bedrock (or MCC's rule) proposed (`cancer_relevant_percent_ai`); null = no AI value. */
   cancerRelevantPercentAi: number | null;
-  /** Bedrock model id, or `rule:nci` / `rule:lynch`; null = not recorded. */
+  /** Bedrock model id, or `rule:nci` / `rule:lynch` / `rule:hpv`; null = not recorded. */
   cancerRelevantModel: string | null;
   cancerRelevantRationale: string | null;
   /** A reviewer's free-text note (e.g. why it is under 100%); null = none. */
   reviewerNote: string | null;
+  /** Reviewer-entered trainee slots on a training award; null = not entered. */
+  traineeSlots: number | null;
   cancerRelevantAnnualProjectDc: number | null;
   isPeerReviewed: boolean;
   grantCwid: string | null;
@@ -66,6 +69,15 @@ export type Nci2aStatus = "confirmed" | "corrected" | "ai" | "rule" | "not-infer
 
 /** The AI-or-rule value came from an MCC rule, not a model. */
 export const isRuleModel = (model: string | null) => model?.startsWith("rule:") ?? false;
+
+/** NIH training activity codes (T32, TL1, F31, K12, KL2, R25, D43...). */
+const TRAINING_ACTIVITY = /^(?:T[0-9L]\d|F\d\d|K12|KL2|R25|D43)$/;
+
+/** A training award, by the activity code in its project number. The CCSG
+ *  Data Guide lists these in their own DT2A-format table, not the overall
+ *  DT2A: the CSV's "T" section. */
+export const isTrainingAward = (a: Pick<Nci2aAward, "projectNumber">) =>
+  TRAINING_ACTIVITY.test(parseNihAward(a.projectNumber).mechanism ?? "");
 
 export function nci2aStatus(
   a: Pick<
@@ -394,6 +406,9 @@ export const nci2aWriteLanded = (a: Nci2aAward, pct: number) =>
 /** Longest reviewer note the PATCH route takes. */
 export const NCI2A_NOTE_MAX = 2000;
 
+/** Most trainee slots the PATCH route takes on one award. */
+export const NCI2A_TRAINEE_SLOTS_MAX = 999;
+
 // ── Bulk Accept ──────────────────────────────────────────────────────────
 
 /** Most awards one `POST .../nci-2a/accept` takes (one transaction). */
@@ -469,14 +484,41 @@ export const NCI2A_CSV_HEADER = [
 export const nci2aCsvFilename = (cycle: string, filtered: boolean) =>
   `nci-table-2a-${cycle}${filtered ? "-filtered" : ""}.csv`;
 
+/** The "T" section's header: the DT2A columns plus Trainee Slots before Notes. */
+export const NCI2A_T_CSV_HEADER = [...NCI2A_CSV_HEADER.slice(0, -1), "Trainee Slots", "Notes"] as const;
+
+/** The Notes cell: the reviewer note, then on a 25 or 50 row the reason for
+ *  the partial percent (MCC, 10-29), when the percent is still the one the
+ *  rationale explains (a reviewer's different value has its own note). */
+function notesCell(a: Nci2aAward): string | null {
+  const partial = a.cancerRelevantPercent === 25 || a.cancerRelevantPercent === 50;
+  const reason =
+    partial && a.cancerRelevantRationale && a.cancerRelevantPercentAi === a.cancerRelevantPercent
+      ? `Relevance: ${a.cancerRelevantRationale}`
+      : null;
+  return csvText([a.reviewerNote, reason].filter(Boolean).join(" ") || null);
+}
+
 /**
  * The NCI worksheet shape: one line per program allocation, the award columns
- * on the first. Award-grain NCI submission data, exempt from
- * SCHOLAR_EXPORT_CAP (approved 2026-09-25) on the condition that it carries NO
- * CWID column — PI names only. An award with no allocation still gets a line.
+ * on the first. Training awards (`isTrainingAward`) follow in their own
+ * section, a "T" label line then the same columns plus Trainee Slots: the
+ * CCSG Data Guide keeps them out of the overall DT2A. Award-grain NCI
+ * submission data, exempt from SCHOLAR_EXPORT_CAP (approved 2026-09-25) on the
+ * condition that it carries NO CWID column — PI names only. An award with no
+ * allocation still gets a line.
  */
 export function nci2aCsv(awards: ReadonlyArray<Nci2aAward>): string {
-  const lines = [NCI2A_CSV_HEADER.join(",")];
+  const training = awards.filter(isTrainingAward);
+  const lines = [
+    ...nci2aCsvLines(awards.filter((a) => !isTrainingAward(a)), false),
+    ...(training.length ? ["", "T", ...nci2aCsvLines(training, true)] : []),
+  ];
+  return lines.join("\n");
+}
+
+function nci2aCsvLines(awards: ReadonlyArray<Nci2aAward>, t: boolean): string[] {
+  const lines = [(t ? NCI2A_T_CSV_HEADER : NCI2A_CSV_HEADER).join(",")];
   for (const a of awards) {
     const allocations: Array<Pick<
       Nci2aAllocation,
@@ -500,12 +542,13 @@ export function nci2aCsv(awards: ReadonlyArray<Nci2aAward>): string {
           al?.programCode ?? "",
           al?.programPercent ?? "",
           al?.annualProgramDirectCosts ?? "",
-          first ? (csvText(a.reviewerNote) ?? "") : "",
+          ...(t ? [first ? (a.traineeSlots ?? "") : ""] : []),
+          first ? (notesCell(a) ?? "") : "",
         ]
           .map(csvCell)
           .join(","),
       );
     });
   }
-  return lines.join("\n");
+  return lines;
 }

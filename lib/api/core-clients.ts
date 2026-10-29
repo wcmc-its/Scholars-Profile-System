@@ -14,6 +14,7 @@
  */
 import { db } from "@/lib/db";
 import { recentFloorYear, type CoreClientPaperCount } from "@/lib/cores/paper-counts";
+import { resolveDirectoryNames } from "@/lib/edit/directory-names";
 
 export { parseCwidBlock } from "@/lib/cores/cwid-block";
 export type { CoreClientPaperCount } from "@/lib/cores/paper-counts";
@@ -26,9 +27,10 @@ export interface CoreClientRow {
   /** `null` on a NAME-ONLY row (someone with no CWID). Such a row is
    *  roster-only: it never flags a byline and is never mirrored to the engine. */
   cwid: string | null;
-  /** Display name: the Scholar's preferred name for a CWID row, the owner-typed
+  /** Display name: the Scholar's preferred name for a CWID row (else its ED
+   *  name — non-faculty core users have no Scholar row), the owner-typed
    *  `displayName` for a name-only row, or `null` when a CWID resolves to
-   *  nothing (a legitimate, non-faculty core user — never rejected for this). */
+   *  nothing (a legitimate core user — never rejected for this). */
   name: string | null;
   /** Profile slug, or `null` when unresolved / ED-only / name-only. */
   slug: string | null;
@@ -38,9 +40,10 @@ export interface CoreClientRow {
   addedAt: Date;
   /** EFFECTIVE actor cwid who added the row. */
   addedBy: string;
-  /** That actor's Scholar name, when they have one — the roster's provenance
-   *  line reads "added by Doug Ballon (djb2001)". `null` for a cwid with no
-   *  Scholar row (a steward, a service account), where the cwid stands alone. */
+  /** That actor's Scholar name (else ED name), when they have one — the
+   *  roster's provenance line reads "added by Doug Ballon (djb2001)". `null`
+   *  when neither knows the cwid (a service account), where the cwid stands
+   *  alone. */
   addedByName: string | null;
 }
 
@@ -97,6 +100,7 @@ export type CoreClientLookup = {
 export async function loadCoreClients(
   coreId: string,
   client: CoreClientLookup = db.read as unknown as CoreClientLookup,
+  directory: (cwids: string[]) => Promise<Map<string, string>> = resolveDirectoryNames,
 ): Promise<CoreClientRow[]> {
   const rows = await client.coreClient.findMany({
     where: { coreId, removedAt: null },
@@ -137,6 +141,25 @@ export async function loadCoreClients(
         });
   const byLowerCwid = new Map(scholars.map((s) => [s.cwid.toLowerCase(), s]));
 
+  // CWIDs no Scholar row names (non-faculty clients, stewards) fall back to ONE
+  // batched ED lookup. Fail-soft: `resolveDirectoryNames` never throws, and a
+  // throwing injected lookup is caught too — the row keeps a null name, as before.
+  const misses = [
+    ...new Set(
+      [...withCwid.map((r) => r.cwid), ...actors]
+        .map((c) => c.toLowerCase())
+        .filter((c) => !byLowerCwid.has(c)),
+    ),
+  ];
+  let edNames = new Map<string, string>();
+  if (misses.length > 0) {
+    try {
+      edNames = await directory(misses);
+    } catch (err) {
+      console.warn("core clients: ED name lookup failed", err);
+    }
+  }
+
   return rows.map((row) => {
     const scholar = row.cwid ? byLowerCwid.get(row.cwid.toLowerCase()) : undefined;
     return {
@@ -144,12 +167,18 @@ export async function loadCoreClients(
       cwid: row.cwid,
       // A name-only row's own `displayName` is the name; a CWID row's name comes
       // from Scholar, and stays null when the CWID resolves to nobody.
-      name: scholar?.preferredName ?? row.displayName ?? null,
+      name:
+        scholar?.preferredName ??
+        row.displayName ??
+        (row.cwid ? (edNames.get(row.cwid.toLowerCase()) ?? null) : null),
       slug: scholar?.slug ?? null,
       affiliation: scholar?.primaryDepartment ?? row.affiliation ?? null,
       addedAt: row.addedAt,
       addedBy: row.addedBy,
-      addedByName: byLowerCwid.get(row.addedBy.toLowerCase())?.preferredName ?? null,
+      addedByName:
+        byLowerCwid.get(row.addedBy.toLowerCase())?.preferredName ??
+        edNames.get(row.addedBy.toLowerCase()) ??
+        null,
     };
   });
 }
