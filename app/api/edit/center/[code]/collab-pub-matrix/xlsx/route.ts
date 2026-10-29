@@ -1,5 +1,5 @@
 /**
- * GET /api/edit/center/[code]/collab-pub-matrix/xlsx[?from=&to=&membership=&exclude=&confirmed=]
+ * GET /api/edit/center/[code]/collab-pub-matrix/xlsx[?from=&to=&asOf=&membership=&exclude=&confirmed=]
  *
  * Report 19 ("Collaborative publication matrix") as an `.xlsx` for the
  * page's params (`parseCollabPubMatrixParams`, the parser the page uses):

@@ -2,7 +2,8 @@
  * Report 19 as an `.xlsx`, laid out like EVAL's Collaborative Publication
  * Matrix export: a "Publication Data" sheet (title, header, the unique row,
  * one row per program, counts then whole percents) and a "Report Details"
- * sheet (run date, period, membership type, excluded programs). Counts only,
+ * sheet (run date, period, as-of date, membership type, excluded programs,
+ * and publications counted without a known WCM tenure). Counts only,
  * no people, so no SCHOLAR_EXPORT_CAP applies.
  */
 import ExcelJS from "exceljs";
@@ -56,9 +57,13 @@ export async function buildCollabPubMatrixWorkbook(
     TITLE,
     `Run Date: ${usDate(runDate)}`,
     `Report Period: ${matrixPeriodLabel(p)}`,
+    `Membership and Program As Of: ${usDate(new Date(p.asOf))}`,
     `Membership Type: ${p.membershipType.toUpperCase()}`,
     `Excluded Program Areas: ${p.excluded.length ? p.excluded.join(", ") : "None"}`,
     `Include AI Relevance Decisions Not Yet Confirmed: ${p.confirmedOnly ? "No" : "Yes"}`,
+    ...(m.unknownTenure > 0
+      ? [`Publications Counted Without a Known WCM Tenure: ${m.unknownTenure}`]
+      : []),
   ])
     details.addRow([line]);
   boldRow(details, 1);

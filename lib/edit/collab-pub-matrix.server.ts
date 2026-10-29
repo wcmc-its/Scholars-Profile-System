@@ -1,82 +1,68 @@
 /**
- * Report 19 loader: the center's programs, its members of the chosen type,
- * and the period's publications with ≥1 confirmed such author, each with its
- * `center_publication_relevance` decision and journal JIF, counted by
- * `computeCollabPubMatrix`. The caller has passed the unit gate. Server-only
- * (reads `@/lib/db`).
+ * Report 19 loader: the center's programs and the shared attribution
+ * (`loadCenterPubAttribution`: members active on the as-of date, program on
+ * that date, publications from their WCM tenure) narrowed to the matrix's
+ * universe (`matrixUniverse`), each with its inter-institutional flag and
+ * journal JIF, counted by `computeCollabPubMatrix`. The caller has passed the
+ * unit gate. Server-only (reads `@/lib/db`).
  */
 import { db } from "@/lib/db";
 import { HIGH_IMPACT_THRESHOLD } from "@/lib/edit/cancer-center-publications-report";
+import { loadCenterPubAttribution } from "@/lib/edit/center-pub-attribution.server";
 import {
   computeCollabPubMatrix,
+  matrixUniverse,
   type CollabPubMatrix,
   type CollabPubMatrixParams,
-  type MatrixPub,
 } from "@/lib/edit/collab-pub-matrix";
 import { normalizeJournalAbbrev } from "@/lib/journal-abbrev";
 
 export type CollabPubMatrixReport = CollabPubMatrix & {
   /** Every program of the center, for the exclude control (excluded ones too). */
   allPrograms: Array<{ code: string; label: string }>;
-  /** Period publications with a member author and no relevance decision yet. */
+  /** Period non-review publications with a member author and no relevance decision yet. */
   notScored: number;
+  /** Members active on the as-of date with no known WCM tenure. */
+  unknownTenureMembers: number;
 };
 
 export async function loadCollabPubMatrix(
   centerCode: string,
   p: CollabPubMatrixParams,
 ): Promise<CollabPubMatrixReport> {
-  const [allPrograms, members] = await Promise.all([
+  const [allPrograms, attribution] = await Promise.all([
     db.read.centerProgram.findMany({
       where: { centerCode },
       orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
       select: { code: true, label: true },
     }),
-    db.read.centerMembership.findMany({
-      where: {
-        centerCode,
-        ...(p.membershipType === "any" ? {} : { membershipType: p.membershipType }),
-      },
-      select: {
-        cwid: true,
-        programCode: true,
-        startDate: true,
-        endDate: true,
-        membershipRoleKey: true,
-      },
+    loadCenterPubAttribution(centerCode, {
+      from: `${p.from}-01-01`,
+      to: `${p.to}-12-31`,
+      asOf: p.asOf,
+      membershipType: p.membershipType,
     }),
   ]);
-  const cwids = members.map((m) => m.cwid);
-  const pubs = cwids.length
-    ? await db.read.publication.findMany({
-        where: {
-          year: { gte: p.from, lte: p.to },
-          authors: { some: { isConfirmed: true, cwid: { in: cwids } } },
-        },
-        select: {
-          pmid: true,
-          year: true,
-          dateAddedToEntrez: true,
-          journalAbbrev: true,
-          authors: { where: { isConfirmed: true, cwid: { in: cwids } }, select: { cwid: true } },
-        },
-      })
-    : [];
-  const decided = pubs.length
-    ? await db.read.centerPublicationRelevance.findMany({
-        where: { centerCode, pmid: { in: pubs.map((x) => x.pmid) } },
-        select: { pmid: true, relevant: true, source: true, externalAuthor: true },
-      })
-    : [];
-  const byPmid = new Map(decided.map((d) => [d.pmid, d]));
+  const pubs = matrixUniverse(attribution.publications, p.confirmedOnly);
+  const pmids = pubs.map((x) => x.pmid);
+  const [flags, journals] = pmids.length
+    ? await Promise.all([
+        db.read.centerPublicationRelevance.findMany({
+          where: { centerCode, pmid: { in: pmids } },
+          select: { pmid: true, externalAuthor: true },
+        }),
+        db.read.publication.findMany({
+          where: { pmid: { in: pmids } },
+          select: { pmid: true, journalAbbrev: true },
+        }),
+      ])
+    : [[], []];
+  const external = new Map(flags.map((f) => [f.pmid, f.externalAuthor]));
+  const abbrevByPmid = new Map(
+    journals.map((j) => [j.pmid, j.journalAbbrev ? normalizeJournalAbbrev(j.journalAbbrev) : ""]),
+  );
 
-  const abbrevs = [
-    ...new Set(
-      pubs
-        .map((x) => (x.journalAbbrev ? normalizeJournalAbbrev(x.journalAbbrev) : ""))
-        .filter(Boolean),
-    ),
-  ];
+  const abbrevs = [...new Set(abbrevByPmid.values())].filter(Boolean);
   const jif = abbrevs.length
     ? new Map(
         (
@@ -88,25 +74,21 @@ export async function loadCollabPubMatrix(
       )
     : new Map<string, number | null>();
 
-  const universe: MatrixPub[] = [];
-  for (const x of pubs) {
-    const d = byPmid.get(x.pmid);
-    if (!d?.relevant || (p.confirmedOnly && d.source !== "human")) continue;
-    universe.push({
+  const matrix = computeCollabPubMatrix(
+    pubs.map((x) => ({
       pmid: x.pmid,
-      // No full publication date is stored; the PubMed entry date stands in.
-      pubDate: x.dateAddedToEntrez?.toISOString().slice(0, 10) ?? `${x.year}-01-01`,
-      memberCwids: x.authors.map((a) => a.cwid as string),
-      externalAuthor: d.externalAuthor,
-      impactScore1: x.journalAbbrev
-        ? (jif.get(normalizeJournalAbbrev(x.journalAbbrev)) ?? null)
-        : null,
-    });
-  }
-
-  return {
-    ...computeCollabPubMatrix(universe, members, allPrograms, p.excluded, HIGH_IMPACT_THRESHOLD),
+      members: x.members,
+      externalAuthor: external.get(x.pmid) ?? null,
+      impactScore1: jif.get(abbrevByPmid.get(x.pmid) ?? "") ?? null,
+    })),
     allPrograms,
-    notScored: pubs.filter((x) => !byPmid.has(x.pmid)).length,
+    p.excluded,
+    HIGH_IMPACT_THRESHOLD,
+  );
+  return {
+    ...matrix,
+    allPrograms,
+    notScored: attribution.publications.filter((x) => x.relevant === null && !x.isReview).length,
+    unknownTenureMembers: attribution.unknownTenureMembers,
   };
 }

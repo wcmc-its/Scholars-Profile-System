@@ -1,7 +1,7 @@
 /**
  * Report 19 — Collaborative publication matrix body. Unit-gated, center-only
  * (`REPORT_NUMBERS_BY_KIND`). EVAL's report of the same name: the period,
- * membership type, excluded programs and confirmed-only switch are URL
+ * as-of date, membership type, excluded programs and confirmed-only switch are URL
  * params, shared with the xlsx download; the counting is
  * `computeCollabPubMatrix` (`lib/edit/collab-pub-matrix.ts`), over report 17's
  * relevance decisions.
@@ -74,6 +74,15 @@ export async function renderCollabPubMatrixReport({
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
               <YearWindow from={params.from} to={params.to} years={pubRelevanceYears()} />
+              <label className="flex items-center gap-1.5 text-sm">
+                As of
+                <input
+                  type="date"
+                  name="asOf"
+                  defaultValue={params.asOf}
+                  className="border-apollo-border-strong bg-apollo-surface h-[34px] rounded-md border px-2 text-sm"
+                />
+              </label>
               <select
                 name="membership"
                 defaultValue={params.membershipType}
@@ -82,7 +91,6 @@ export async function renderCollabPubMatrixReport({
               >
                 <option value="research">Research members</option>
                 <option value="clinical">Clinical members</option>
-                <option value="any">All members</option>
               </select>
               <fieldset className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 <legend className="text-muted-foreground float-left mr-2 text-[13px]">
@@ -154,17 +162,20 @@ export async function renderCollabPubMatrixReport({
           >
             <li>
               Rows: publications from {matrixPeriodLabel(params)} marked cancer relevant on the
-              publication cancer relevance report, with at least one confirmed author who was a
-              member of this type on the publication&apos;s PubMed entry date. A member counts
-              toward their current program.
+              publication cancer relevance report, reviews left out, with at least one confirmed
+              author who is a member of this type on {params.asOf}. Each member counts toward their
+              program on that date, for publications from while they were at WCM.
+              {m.unknownTenure > 0 &&
+                ` ${m.unknownTenure.toLocaleString()} counted publications are credited only to the ${m.unknownTenureMembers.toLocaleString()} members with no known WCM start date, and are counted anyway.`}
             </li>
             <li>
-              Inter-programmatic: members from two or more programs. Intra-programmatic: two or more
-              members in the row&apos;s program (on the unique row, in any one program).
+              Intra-programmatic: two or more members in the row&apos;s program (on the unique row,
+              in any one program). Inter-programmatic: a member in the row&apos;s program and one in
+              another program. Collaborative: either, each publication counted once.
             </li>
             <li>
-              Inter-institutional: an author whose PubMed affiliations are all outside Weill
-              Cornell, Cornell and NewYork-Presbyterian.
+              Inter-institutional: an author with no Weill Cornell Medicine affiliation in PubMed
+              (NewYork-Presbyterian, MSK, Rockefeller and Cornell Ithaca count as outside).
               {m.unknownAffiliation > 0 &&
                 ` ${m.unknownAffiliation.toLocaleString()} counted publications have no affiliations yet and are not counted as inter-institutional.`}
             </li>

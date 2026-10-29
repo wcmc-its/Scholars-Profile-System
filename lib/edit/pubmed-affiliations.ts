@@ -8,7 +8,9 @@
  *
  * An author is WCM when any of their affiliations matches WCM_AFFILIATION; a
  * publication is external when some author lists affiliations and none is
- * WCM. An author with no affiliation decides nothing.
+ * WCM. An author with no affiliation decides nothing. Changing the matcher
+ * means the stored flags must be recomputed: null them (as migration
+ * 20261029150000 does) and the ETL asks PubMed again.
  */
 import { DOMParser, type Element as XmlElement } from "@xmldom/xmldom";
 
@@ -18,9 +20,14 @@ const ID_BATCH = 200;
 /** Under the keyless 3 req/s limit. */
 const DELAY_MS = 350;
 
-/** Weill Cornell (incl. Qatar), Cornell University and NewYork-Presbyterian. */
-export const WCM_AFFILIATION =
-  /weill\s+cornell|weill\s+medical\s+college|cornell\s+university|new\s*york[-\s]*presbyterian/i;
+/**
+ * Weill Cornell Medicine only, incl. WCM-Qatar and the Weill Cornell Graduate
+ * School. Everyone else is outside WCM (Jackie, 2026-10-29, Q1), including
+ * NewYork-Presbyterian, MSK, Rockefeller and Cornell's Ithaca campus. An
+ * affiliation that names Weill Cornell anywhere ("NewYork-Presbyterian/Weill
+ * Cornell Medical Center") reads as WCM.
+ */
+export const WCM_AFFILIATION = /weill[\s-]+cornell|weill\s+medical\s+college/i;
 
 const text = (el: XmlElement) => (el.textContent ?? "").trim();
 
