@@ -2904,9 +2904,10 @@ model CancerCenterProgramAllocation {
 /// Is this publication cancer relevant, for this center? One row per (center,
 /// pmid) with a confirmed RESEARCH-member author, written by
 /// `etl/center-pub-relevance` and reviewed on the center's publication
-/// relevance report. `source`: `rule` (a review, preprint, erratum, letter,
-/// comment, editorial or retraction by PubMed publication type: final, no
-/// review), `llm` (Sonnet on title, abstract and MeSH under MCC's rubric) or
+/// relevance report. `source`: `rule` (a preprint, erratum, letter, comment,
+/// editorial or retraction by PubMed publication type: final, no review; a
+/// review is NOT a rule type, it is judged on topic and marked by its type at
+/// read time), `llm` (Sonnet on title, abstract and MeSH under MCC's rubric) or
 /// `human` (a reviewer confirmed or flipped it; the ETL never overwrites it).
 /// Provenance mirrors `CancerCenterFundingAward`: model id (or
 /// `rule:publication-type`), first 12 hex of sha256(system prompt) (null on a

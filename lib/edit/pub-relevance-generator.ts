@@ -6,13 +6,19 @@
  *
  * Two steps, mirroring the NCI 2A classifier
  * (`lib/edit/cancer-center-funding-generator.ts`):
- *   1. RULE. MCC marks every review, preprint, erratum, letter, comment,
- *      editorial and retraction "not cancer relevant" whatever its topic (the
- *      EVAL export of 2026-08-31). Decided here from the stored PubMed
- *      publication type (ReCiter's `publicationTypeCanonical`), with no model
- *      call. A rule row is final: it needs no review.
+ *   1. RULE. MCC marks every preprint, erratum, letter, comment, editorial
+ *      and retraction "not cancer relevant" whatever its topic (the EVAL
+ *      export of 2026-08-31). Decided here from the stored PubMed publication
+ *      type (ReCiter's `publicationTypeCanonical`), with no model call. A rule
+ *      row is final: it needs no review.
  *   2. MODEL. Anything else goes to Sonnet with the title, abstract and MeSH:
  *      Yes or No plus one sentence in the style of MCC's own notes.
+ *
+ * A REVIEW is not a rule type (Jackie, 2026-10-29): EVAL marked reviews "not
+ * cancer relevant" only because that was its one way to drop them from the
+ * counts. Review is now its own marker, read from the publication type
+ * (`isReviewPublicationType`), and a review gets the same topic judgment as a
+ * research article. The reports decide which of the two to count.
  *
  * FAILURE POSTURE: like the 2A classifier, never throws. A Bedrock error,
  * timeout or unusable answer returns null and the caller leaves the row
@@ -57,7 +63,6 @@ export const PUB_RELEVANCE_RULE_MODEL = "rule:publication-type";
 
 /** Canonical type → how MCC's note names it. */
 const RULE_TYPES: Record<string, string> = {
-  Review: "a review",
   Preprint: "a preprint",
   Erratum: "a published erratum",
   Letter: "a letter",
@@ -111,9 +116,12 @@ const RELEVANCE_SYSTEM_PROMPT = [
   "title or abstract. A cancer word used only as a cell-line name or a passing mention does not",
   "make it relevant.",
   "",
-  "Also answer false for anything that is not an original research article, whatever its",
-  "topic: a case report, a consensus statement or guideline, news and views, a research",
-  "highlight or spotlight, a commentary, or a summary of another paper.",
+  "Also answer false for anything that is not an original research article or a review,",
+  "whatever its topic: a case report, a consensus statement or guideline, news and views, a",
+  "research highlight or spotlight, a commentary, or a summary of another paper.",
+  "",
+  "Judge a review (narrative, systematic or scoping review, or meta-analysis) on its topic,",
+  "exactly as you would a research article. Whether it is a review is recorded separately.",
   "",
   "Write reason as ONE short sentence after a fixed opening, in the style of the center's",
   "notes:",
@@ -144,6 +152,21 @@ export const PUB_RELEVANCE_PROMPT_HASH = sha256(RELEVANCE_SYSTEM_PROMPT).slice(0
 /** sha256 of the inputs — the ETL's "did this publication change" test. */
 export function pubRelevanceInputHash(input: PubRelevanceInput): string {
   return sha256(buildPubRelevancePrompt(input));
+}
+
+/**
+ * Does the ETL need to (re)decide this publication? Never a reviewer's row; a
+ * rule row whose type no longer matches a rule (a review, decided under the
+ * retired review rule), always; otherwise only when the inputs changed.
+ */
+export function pubRelevanceNeedsDecision(
+  row: { source: string; inputHash: string | null } | undefined,
+  input: PubRelevanceInput,
+): boolean {
+  if (!row) return true;
+  if (row.source === "human") return false;
+  if (row.source === "rule" && !publicationTypeRule(input.publicationType)) return true;
+  return row.inputHash !== pubRelevanceInputHash(input);
 }
 
 /**

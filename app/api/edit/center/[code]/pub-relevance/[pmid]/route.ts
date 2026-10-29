@@ -78,7 +78,9 @@ export async function PATCH(
   }
 
   const where = { centerCode_pmid: { centerCode: center.code, pmid } };
-  const existing = await db.read.centerPublicationRelevance.findUnique({
+  // Primary, not replica: a note save right after a flip would otherwise read
+  // the pre-flip answer and write it back.
+  const existing = await db.write.centerPublicationRelevance.findUnique({
     where,
     select: { relevant: true, reason: true, source: true },
   });

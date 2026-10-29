@@ -4,10 +4,12 @@
  * publication citation report and the collaborative publication matrix).
  *
  *   1. SCOPE   Per center, every publication with ≥1 confirmed author who holds
- *              a RESEARCH membership (`CenterMembership.membershipType`), in the
+ *              a research or clinical membership (`CenterMembership.membershipType`), in the
  *              year window.
  *   2. SKIP    A row a reviewer set (`source: "human"`), and a row whose input
- *              hash still matches (nothing about the publication changed).
+ *              hash still matches (nothing about the publication changed),
+ *              unless it is a rule row its type no longer earns (a review
+ *              decided under the retired review rule): that one is redone.
  *   3. DECIDE  `inferPubRelevance`: the publication-type rule, else one Sonnet
  *              call (`lib/edit/pub-relevance-generator.ts`).
  *   4. WRITE   Each row as it lands, so a crash keeps what it paid for. A
@@ -20,7 +22,7 @@ import { db, disconnect } from "../../lib/db";
 import { withEtlRun } from "@/lib/etl-run";
 import {
   inferPubRelevance,
-  pubRelevanceInputHash,
+  pubRelevanceNeedsDecision,
   type PubRelevanceInput,
 } from "@/lib/edit/pub-relevance-generator";
 
@@ -50,7 +52,9 @@ function meshLabels(json: unknown): string[] {
 async function main(): Promise<number> {
   const year = yearWindow(process.argv.slice(2));
   const members = await db.read.centerMembership.findMany({
-    where: { membershipType: "research" },
+    // research AND clinical: reports 18/19 filter by either type, and a
+    // pub with no row reads as "Not scored", an undercount.
+    where: { membershipType: { in: ["research", "clinical"] } },
     select: { centerCode: true, cwid: true },
   });
   const cwidsByCenter = new Map<string, string[]>();
@@ -77,8 +81,7 @@ async function main(): Promise<number> {
         meshTerms: meshLabels(p.meshTerms),
         publicationType: p.publicationType,
       };
-      const row = prior.get(p.pmid);
-      if (row?.source === "human" || row?.inputHash === pubRelevanceInputHash(input)) continue;
+      if (!pubRelevanceNeedsDecision(prior.get(p.pmid), input)) continue;
       todo.push({ centerCode, pmid: p.pmid, input });
     }
     console.log(

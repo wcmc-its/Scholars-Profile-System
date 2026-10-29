@@ -1,7 +1,10 @@
 /**
  * Publication cancer relevance (`lib/edit/pub-relevance-generator.ts`):
  *  - the publication-type rule: MCC's never-counted types get a fixed reason
- *    and no model call; every other type (and none) goes to the model;
+ *    and no model call; every other type (and none), a review included, goes
+ *    to the model;
+ *  - the ETL's re-decide test: a review's old rule row is redone, a human row
+ *    never is;
  *  - the output parser: adds a missing opening, rejects one that contradicts
  *    the answer, rejects an empty reason;
  *  - provenance: prompt hash on an AI row, none on a rule row, an input hash
@@ -24,6 +27,7 @@ import {
   PUB_RELEVANCE_RULE_MODEL,
   publicationTypeRule,
   pubRelevanceInputHash,
+  pubRelevanceNeedsDecision,
 } from "@/lib/edit/pub-relevance-generator";
 
 const INPUT = {
@@ -40,7 +44,6 @@ beforeEach(() => {
 
 describe("publicationTypeRule", () => {
   it.each([
-    ["Review", "This is not cancer relevant. This is a review."],
     ["Preprint", "This is not cancer relevant. This is a preprint."],
     ["Erratum", "This is not cancer relevant. This is a published erratum."],
     ["Letter", "This is not cancer relevant. This is a letter."],
@@ -53,6 +56,7 @@ describe("publicationTypeRule", () => {
 
   it.each([
     "Academic Article",
+    "Review",
     "Article",
     "Case Report",
     "Guideline",
@@ -63,6 +67,36 @@ describe("publicationTypeRule", () => {
     undefined,
   ])("%j goes to the model", (type) => {
     expect(publicationTypeRule(type)).toBeNull();
+  });
+});
+
+describe("pubRelevanceNeedsDecision", () => {
+  const REVIEW = { ...INPUT, publicationType: "Review" };
+  const hash = pubRelevanceInputHash(REVIEW);
+
+  it("decides a publication with no row", () => {
+    expect(pubRelevanceNeedsDecision(undefined, REVIEW)).toBe(true);
+  });
+
+  it("redoes a review's rule row from the retired review rule, though its inputs did not change", () => {
+    expect(pubRelevanceNeedsDecision({ source: "rule", inputHash: hash }, REVIEW)).toBe(true);
+  });
+
+  it("keeps a current rule row, and an llm row whose inputs did not change", () => {
+    const PRE = { ...INPUT, publicationType: "Preprint" };
+    expect(
+      pubRelevanceNeedsDecision({ source: "rule", inputHash: pubRelevanceInputHash(PRE) }, PRE),
+    ).toBe(false);
+    expect(pubRelevanceNeedsDecision({ source: "llm", inputHash: hash }, REVIEW)).toBe(false);
+  });
+
+  it("redoes an llm row whose inputs changed", () => {
+    expect(pubRelevanceNeedsDecision({ source: "llm", inputHash: "stale" }, REVIEW)).toBe(true);
+  });
+
+  it("never touches a reviewer's row, a review's included", () => {
+    expect(pubRelevanceNeedsDecision({ source: "human", inputHash: "stale" }, REVIEW)).toBe(false);
+    expect(pubRelevanceNeedsDecision({ source: "human", inputHash: null }, INPUT)).toBe(false);
   });
 });
 
@@ -125,6 +159,18 @@ describe("inferPubRelevance", () => {
       reason: "This is not cancer relevant. This is a preprint.",
     });
     expect(r?.inputHash).toBe(pubRelevanceInputHash({ ...INPUT, publicationType: "Preprint" }));
+  });
+
+  it("sends a review to the model, not the rule, and the prompt judges reviews on topic", async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: { relevant: true, reason: "This is cancer relevant. It reviews melanoma therapy." },
+    });
+    const r = await inferPubRelevance({ ...INPUT, publicationType: "Review" });
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ relevant: true, source: "llm" });
+    const call = mockGenerateObject.mock.calls[0][0];
+    expect(call.prompt).toContain("Publication type: Review");
+    expect(call.system).toContain("Judge a review");
   });
 
   it("returns the model's answer with provenance", async () => {
