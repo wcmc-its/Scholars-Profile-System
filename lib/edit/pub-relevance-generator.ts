@@ -157,15 +157,18 @@ export function pubRelevanceInputHash(input: PubRelevanceInput): string {
 /**
  * Does the ETL need to (re)decide this publication? Never a reviewer's row; a
  * rule row whose type no longer matches a rule (a review, decided under the
- * retired review rule), always; otherwise only when the inputs changed.
+ * retired review rule), always; an llm row decided under another system
+ * prompt, always; otherwise only when the inputs changed.
  */
 export function pubRelevanceNeedsDecision(
-  row: { source: string; inputHash: string | null } | undefined,
+  row: { source: string; inputHash: string | null; promptHash: string | null } | undefined,
   input: PubRelevanceInput,
 ): boolean {
   if (!row) return true;
   if (row.source === "human") return false;
   if (row.source === "rule" && !publicationTypeRule(input.publicationType)) return true;
+  // A rule row never carries a prompt hash; an llm row from an older prompt is redone.
+  if (row.source === "llm" && row.promptHash !== PUB_RELEVANCE_PROMPT_HASH) return true;
   return row.inputHash !== pubRelevanceInputHash(input);
 }
 

@@ -224,7 +224,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "publication-cancer-relevance",
     name: "Publication cancer relevance",
     summary:
-      "Is each research member's publication cancer relevant? MCC rule for reviews, preprints and errata, an AI call for the rest; confirm or flip it here.",
+      "Is each research and clinical member's publication cancer relevant? MCC rule for preprints, errata, letters, comments, editorials and retractions, an AI call on topic for the rest; reviews are judged on topic and flagged separately. Confirm or flip it here.",
     descriptionHtml: null,
   },
 };
