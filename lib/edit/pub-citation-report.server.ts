@@ -1,105 +1,110 @@
 /**
- * Report 18 loader: the center's publications added to PubMed in the period
- * with ≥1 confirmed author who held a membership of the chosen type ON the
- * publication date, each with its `center_publication_relevance` answer. The
- * caller has passed the unit gate. Server-only (reads `@/lib/db`).
+ * Report 18 loader: the center's publications in the period, attributed by
+ * the shared rules (`loadCenterPubAttribution`: members of the chosen type
+ * active on the as-of date, their program on that date, publications only
+ * from their WCM tenure), filtered on relevance and the review marker, each
+ * with its `center_publication_relevance` reason and every confirmed WCM
+ * author in byline order. The caller has passed the unit gate. Server-only
+ * (reads `@/lib/db`).
  */
 import { db } from "@/lib/db";
+import type { AttributedPublication } from "@/lib/edit/center-pub-attribution";
+import { loadCenterPubAttribution } from "@/lib/edit/center-pub-attribution.server";
 import {
   investigatorLine,
-  programAsOf,
-  stintCovers,
+  keepsRelevance,
   type PubCitationParams,
   type PubCitationRow,
 } from "@/lib/edit/pub-citation-report";
 
+export type PubCitationReport = {
+  rows: PubCitationRow[];
+  /** Rows credited ONLY through members of unknown WCM tenure (included on trust). */
+  unknownTenure: number;
+};
+
 export async function loadPubCitationReport(
   centerCode: string,
   params: PubCitationParams,
-): Promise<PubCitationRow[]> {
-  const stints = await db.read.centerMembership.findMany({
-    where: { centerCode },
-    select: {
-      cwid: true,
-      membershipType: true,
-      programCode: true,
-      startDate: true,
-      endDate: true,
-      membershipRoleKey: true,
-    },
-  });
-  const stintOf = new Map(stints.map((s) => [s.cwid, s]));
-  const eligible = stints
-    .filter((s) => params.membership === "all" || s.membershipType === params.membership)
-    .map((s) => s.cwid);
-  if (eligible.length === 0) return [];
+): Promise<PubCitationReport> {
+  const types =
+    params.membership === "all" ? (["research", "clinical"] as const) : [params.membership];
+  const attributions = await Promise.all(
+    types.map((membershipType) =>
+      loadCenterPubAttribution(centerCode, {
+        from: params.start,
+        to: params.end,
+        asOf: params.asOf,
+        membershipType,
+      }),
+    ),
+  );
+  // "All" = research ∪ clinical: one row per pmid, its credited members merged.
+  const byPmid = new Map<string, AttributedPublication>();
+  for (const a of attributions)
+    for (const p of a.publications) {
+      const prev = byPmid.get(p.pmid);
+      byPmid.set(p.pmid, prev ? { ...prev, members: [...prev.members, ...p.members] } : p);
+    }
+  const kept = [...byPmid.values()]
+    .filter((p) => keepsRelevance(params.relevance, p))
+    .sort((a, b) => b.date.localeCompare(a.date) || Number(b.pmid) - Number(a.pmid));
+  if (kept.length === 0) return { rows: [], unknownTenure: 0 };
 
-  const pubs = await db.read.publication.findMany({
-    where: {
-      dateAddedToEntrez: {
-        gte: new Date(`${params.start}T00:00:00Z`),
-        lte: new Date(`${params.end}T00:00:00Z`),
-      },
-      authors: { some: { isConfirmed: true, cwid: { in: eligible } } },
-    },
-    orderBy: [{ dateAddedToEntrez: "desc" }, { pmid: "desc" }],
-    select: {
-      pmid: true,
-      title: true,
-      journal: true,
-      dateAddedToEntrez: true,
-      authors: {
-        where: { isConfirmed: true, cwid: { not: null } },
-        select: {
-          cwid: true,
-          position: true,
-          isFirst: true,
-          isLast: true,
-          totalAuthors: true,
-          scholar: { select: { fullName: true } },
+  const pmids = kept.map((p) => p.pmid);
+  const [details, reasons] = await Promise.all([
+    db.read.publication.findMany({
+      where: { pmid: { in: pmids } },
+      select: {
+        pmid: true,
+        authors: {
+          where: { isConfirmed: true, cwid: { not: null } },
+          select: {
+            cwid: true,
+            position: true,
+            isFirst: true,
+            isLast: true,
+            totalAuthors: true,
+            scholar: { select: { fullName: true } },
+          },
         },
       },
-    },
-  });
-  const decided = pubs.length
-    ? await db.read.centerPublicationRelevance.findMany({
-        where: { centerCode, pmid: { in: pubs.map((p) => p.pmid) } },
-        select: { pmid: true, relevant: true, reason: true },
-      })
-    : [];
-  const byPmid = new Map(decided.map((d) => [d.pmid, d]));
-  const eligibleSet = new Set(eligible);
+    }),
+    db.read.centerPublicationRelevance.findMany({
+      where: { centerCode, pmid: { in: pmids } },
+      select: { pmid: true, reason: true },
+    }),
+  ]);
+  const authorsOf = new Map(details.map((d) => [d.pmid, d.authors]));
+  const reasonOf = new Map(reasons.map((r) => [r.pmid, r.reason]));
 
-  const rows: PubCitationRow[] = [];
-  for (const p of pubs) {
-    const date = p.dateAddedToEntrez!.toISOString().slice(0, 10);
-    const authors = p.authors.map((a) => ({ ...a, cwid: a.cwid as string }));
-    // In scope only when an eligible author's stint covers the publication date.
-    if (!authors.some((a) => eligibleSet.has(a.cwid) && stintCovers(stintOf.get(a.cwid), date)))
-      continue;
-    const d = byPmid.get(p.pmid);
-    const relevant = d?.relevant ?? null;
-    if (params.relevance === "yes" && relevant !== true) continue;
+  const rows = kept.map((p): PubCitationRow => {
+    const program = new Map(p.members.map((m) => [m.cwid, m.programCode]));
+    const authors = (authorsOf.get(p.pmid) ?? []).map((a) => ({ ...a, cwid: a.cwid as string }));
     // Byline order. `position` 0 is "middle, rank unknown" (#2227), so it
     // sorts just before the last author rather than first.
     const rank = (a: (typeof authors)[number]) =>
       a.isFirst ? 0 : a.isLast ? Infinity : a.position || a.totalAuthors;
-    rows.push({
+    return {
       pmid: p.pmid,
       title: p.title,
       journal: p.journal,
-      date,
-      relevant,
-      reason: d?.reason ?? null,
+      date: p.date,
+      relevant: p.relevant,
+      reason: reasonOf.get(p.pmid) ?? null,
       // Names only, never a CWID: an author without a scholar row is left out.
+      // The program is the credited member's on the as-of date.
       investigators: authors
         .filter((a) => a.scholar)
         .sort((a, b) => rank(a) - rank(b))
         .map((a) => ({
           cwid: a.cwid,
-          line: investigatorLine(a.scholar!.fullName, programAsOf(stintOf.get(a.cwid), date)),
+          line: investigatorLine(a.scholar!.fullName, program.get(a.cwid) ?? null),
         })),
-    });
-  }
-  return rows;
+    };
+  });
+  return {
+    rows,
+    unknownTenure: kept.filter((p) => p.members.every((m) => m.tenureUnknown)).length,
+  };
 }

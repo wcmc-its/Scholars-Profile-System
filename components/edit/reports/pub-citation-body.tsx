@@ -4,8 +4,8 @@
  * (`/api/edit/center/[code]/pub-citation`) takes the same query string behind
  * the same `canEditUnit` gate.
  *
- * EVAL's publication export: the period, the membership type and the
- * relevance answer are GET params on a plain form; the table and the `.xlsx`
+ * EVAL's publication export: the period, the as-of date, the membership type
+ * and the relevance filter are GET params on a plain form; the table and the `.xlsx`
  * show the same rows in the same seven columns. The answers come from report
  * 17 (`center_publication_relevance`).
  */
@@ -18,6 +18,7 @@ import { nci2aUnitQuery } from "@/lib/edit/nci-2a-report";
 import {
   parsePubCitationParams,
   PUB_CITATION_COLUMNS,
+  PUB_CITATION_RELEVANCE_LABELS,
   pubCitationQueryString,
 } from "@/lib/edit/pub-citation-report";
 import { loadPubCitationReport } from "@/lib/edit/pub-citation-report.server";
@@ -46,7 +47,7 @@ export async function renderPubCitationReport({
   for (const [k, v] of Object.entries(searchParams))
     for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) sp.append(k, x);
   const params = parsePubCitationParams(sp);
-  const rows = await loadPubCitationReport(code, params);
+  const { rows, unknownTenure } = await loadPubCitationReport(code, params);
   const unitQuery = nci2aUnitQuery(code, kind);
   const yes = rows.filter((r) => r.relevant === true).length;
 
@@ -71,6 +72,10 @@ export async function renderPubCitationReport({
               <input type="date" name="end" defaultValue={params.end} className={CONTROL} />
             </label>
             <label className="flex flex-col gap-1 text-[13px]">
+              Members as of
+              <input type="date" name="asOf" defaultValue={params.asOf} className={CONTROL} />
+            </label>
+            <label className="flex flex-col gap-1 text-[13px]">
               Membership type
               <select name="membership" defaultValue={params.membership} className={CONTROL}>
                 <option value="research">Research</option>
@@ -79,10 +84,13 @@ export async function renderPubCitationReport({
               </select>
             </label>
             <label className="flex flex-col gap-1 text-[13px]">
-              Cancer relevant
+              Publications
               <select name="relevance" defaultValue={params.relevance} className={CONTROL}>
-                <option value="yes">Yes only</option>
-                <option value="all">All</option>
+                {Object.entries(PUB_CITATION_RELEVANCE_LABELS).map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </label>
             <button
@@ -97,6 +105,9 @@ export async function renderPubCitationReport({
               stats={[
                 { value: rows.length.toLocaleString(), label: "publications" },
                 { value: yes.toLocaleString(), label: "cancer relevant" },
+                ...(unknownTenure > 0
+                  ? [{ value: unknownTenure.toLocaleString(), label: "on unknown WCM tenure" }]
+                  : []),
               ]}
               aside={
                 <Button asChild variant="apollo">
@@ -175,12 +186,18 @@ export async function renderPubCitationReport({
           >
             <li>
               Rows: publications added to PubMed in the period with at least one confirmed author
-              who was a {params.membership === "all" ? "" : `${params.membership} `}member of this
-              center on that date.
+              who is a {params.membership === "all" ? "" : `${params.membership} `}member of this
+              center on {longDate(params.asOf)}, counted only from while that member was at WCM.
+              {unknownTenure > 0 &&
+                ` ${unknownTenure.toLocaleString()} are included only through members with no known WCM start date.`}
             </li>
             <li>
-              Investigators: every confirmed WCM author, with their program when they were a member
-              on the publication date.
+              Investigators: every confirmed WCM author, with the program a credited member is in on{" "}
+              {longDate(params.asOf)}.
+            </li>
+            <li>
+              Reviews are a separate marker from cancer relevance. Only cancer-relevant non-reviews
+              feed the collaborative publication matrix.
             </li>
             <li>
               Cancer relevant and Notes: the answer and reason from the Publication cancer relevance

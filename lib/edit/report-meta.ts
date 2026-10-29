@@ -232,7 +232,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "publication-citation-report",
     name: "Publication citation report",
     summary:
-      "The center's publications in a period, each WCM author with their program on the publication date, and the cancer relevance answer. Downloads as EVAL's .xlsx.",
+      "The center's publications in a period, each WCM author with their program on the reporting date, and the cancer relevance answer. Downloads as EVAL's .xlsx.",
     descriptionHtml: null,
   },
 };

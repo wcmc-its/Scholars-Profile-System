@@ -6,22 +6,28 @@
  * investigator line and the workbook; the loader is
  * `pub-citation-report.server.ts`. DB-free.
  *
+ * Which publications, members and programs are in scope is the shared
+ * attribution (`center-pub-attribution.ts`): members active on the as-of
+ * date, their program on that date, publications only from their WCM tenure.
+ *
  * Exempt from SCHOLAR_EXPORT_CAP (approved 2026-10-29) on the condition that
  * the export carries NO CWID column: publication-grain citation data with
  * investigator names only, like the NCI 2A export.
  */
 import ExcelJS from "exceljs";
 
-import { isCenterMembershipActive } from "@/lib/api/center-member-count";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
 
 export type PubCitationMembershipType = "research" | "clinical" | "all";
-export type PubCitationRelevance = "yes" | "all";
+/** Jackie Q4 (2026-10-29): relevance and review are independent; only "relevant" feeds report 19. */
+export type PubCitationRelevance = "relevant" | "reviews" | "all";
 
 export type PubCitationParams = {
   /** `YYYY-MM-DD`, both ends inclusive. */
   start: string;
   end: string;
+  /** The reporting date members and programs are read on, `YYYY-MM-DD`. */
+  asOf: string;
   membership: PubCitationMembershipType;
   relevance: PubCitationRelevance;
 };
@@ -30,7 +36,7 @@ export type PubCitationRow = {
   pmid: string;
   title: string;
   journal: string | null;
-  /** `Publication.dateAddedToEntrez` as `YYYY-MM-DD`. */
+  /** `Publication.dateAddedToEntrez` (else 1 January of `year`) as `YYYY-MM-DD`. */
   date: string;
   /** Null = the relevance step has not decided it. */
   relevant: boolean | null;
@@ -52,9 +58,22 @@ export const PUB_CITATION_COLUMNS = [
 ] as const;
 
 const TYPES: readonly PubCitationMembershipType[] = ["research", "clinical", "all"];
+const RELEVANCE: readonly PubCitationRelevance[] = ["relevant", "reviews", "all"];
+
+export const PUB_CITATION_RELEVANCE_LABELS: Record<PubCitationRelevance, string> = {
+  relevant: "Cancer-relevant, excluding reviews",
+  reviews: "Cancer-relevant reviews",
+  all: "All",
+};
+
+/** Does the relevance filter keep a publication with this answer and review marker? */
+export const keepsRelevance = (
+  filter: PubCitationRelevance,
+  p: { relevant: boolean | null; isReview: boolean },
+) => filter === "all" || (p.relevant === true && p.isReview === (filter === "reviews"));
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Defaults: this calendar year to date, research members, relevant only. */
+/** Defaults: this calendar year to date, as of today, research members, relevant non-reviews. */
 export function parsePubCitationParams(sp: URLSearchParams, now = new Date()): PubCitationParams {
   const date = (k: string, fallback: string) => {
     const v = sp.get(k) ?? "";
@@ -62,11 +81,13 @@ export function parsePubCitationParams(sp: URLSearchParams, now = new Date()): P
   };
   const today = now.toISOString().slice(0, 10);
   const membership = sp.get("membership") as PubCitationMembershipType | null;
+  const relevance = sp.get("relevance") as PubCitationRelevance | null;
   return {
     start: date("start", `${today.slice(0, 4)}-01-01`),
     end: date("end", today),
+    asOf: date("asOf", today),
     membership: membership && TYPES.includes(membership) ? membership : "research",
-    relevance: sp.get("relevance") === "all" ? "all" : "yes",
+    relevance: relevance && RELEVANCE.includes(relevance) ? relevance : "relevant",
   };
 }
 
@@ -74,25 +95,10 @@ export const pubCitationQueryString = (p: PubCitationParams) =>
   new URLSearchParams({
     start: p.start,
     end: p.end,
+    asOf: p.asOf,
     membership: p.membership,
     relevance: p.relevance,
   }).toString();
-
-/** A membership row, as {@link programAsOf} reads it. */
-export type PubCitationStint = {
-  programCode: string | null;
-  startDate: Date | null;
-  endDate: Date | null;
-  membershipRoleKey: string | null;
-};
-
-/** Does the stint cover `dateIso`? Inclusive, open-ended on a null bound; never an invitee. */
-export const stintCovers = (stint: PubCitationStint | undefined, dateIso: string) =>
-  !!stint && isCenterMembershipActive(stint, dateIso);
-
-/** The member's program on `dateIso`: their code only while the stint covers that date. */
-export const programAsOf = (stint: PubCitationStint | undefined, dateIso: string) =>
-  stint && stintCovers(stint, dateIso) ? stint.programCode : null;
 
 /** "Given Middle Surname" → "Surname, Given Middle". A one-word name is left alone. */
 export function lastFirst(fullName: string): string {
@@ -101,7 +107,7 @@ export function lastFirst(fullName: string): string {
   return `${words[words.length - 1]}, ${words.slice(0, -1).join(" ")}`;
 }
 
-/** EVAL's line: "Last, First - PROGRAM", the bare name for a non-member or out-of-stint author. */
+/** EVAL's line: "Last, First - PROGRAM", the bare name for an author not credited as a member. */
 export const investigatorLine = (fullName: string, programCode: string | null) =>
   programCode ? `${lastFirst(fullName)} - ${programCode}` : lastFirst(fullName);
 
@@ -109,14 +115,16 @@ const relevantLabel = (r: boolean | null) => (r === null ? "" : r ? "Yes" : "No"
 
 export function pubCitationCriteria(p: PubCitationParams): Array<[string, string]> {
   return [
-    ["Period", `${p.start} to ${p.end} (date added to PubMed)`],
+    ["Period", `${p.start} to ${p.end} (date added to PubMed, else 1 January of the year)`],
+    ["Members and programs as of", p.asOf],
     [
       "Membership type",
       p.membership === "all"
         ? "All members"
         : `${p.membership[0].toUpperCase()}${p.membership.slice(1)} members`,
     ],
-    ["Cancer relevant", p.relevance === "yes" ? "Yes only" : "All"],
+    ["Publications included", PUB_CITATION_RELEVANCE_LABELS[p.relevance]],
+    ["WCM tenure", "Only publications from while the member was at WCM"],
   ];
 }
 
@@ -129,6 +137,8 @@ export async function buildPubCitationWorkbook(
   rows: readonly PubCitationRow[],
   params: PubCitationParams,
   generatedAt: Date,
+  /** Rows credited only through members of unknown WCM tenure. */
+  unknownTenure = 0,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const groups: Array<[string, PubCitationRow[]]> = [
@@ -159,6 +169,7 @@ export async function buildPubCitationWorkbook(
   addCriteriaSheet(wb, [
     ...pubCitationCriteria(params),
     ["Publications", rows.length.toLocaleString()],
+    ["Included on unknown WCM tenure", unknownTenure.toLocaleString()],
     ["Generated", generatedAt.toISOString()],
   ]);
   return workbookBuffer(wb);

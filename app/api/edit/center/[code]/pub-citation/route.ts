@@ -1,5 +1,5 @@
 /**
- * GET /api/edit/center/[code]/pub-citation?start=&end=&membership=&relevance= —
+ * GET /api/edit/center/[code]/pub-citation?start=&end=&asOf=&membership=&relevance= —
  * report 18 (Publication citation report) as EVAL's `.xlsx`. Same query
  * string as the page (`parsePubCitationParams`). `[code]` is the raw
  * `Center.code`.
@@ -59,11 +59,8 @@ export async function GET(
   }
 
   const p = parsePubCitationParams(request.nextUrl.searchParams);
-  const buffer = await buildPubCitationWorkbook(
-    await loadPubCitationReport(center.code, p),
-    p,
-    new Date(),
-  );
+  const { rows, unknownTenure } = await loadPubCitationReport(center.code, p);
+  const buffer = await buildPubCitationWorkbook(rows, p, new Date(), unknownTenure);
   const filename = `Publications ${p.start} to ${p.end}.xlsx`;
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,
