@@ -317,6 +317,7 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isCoreDirector: false,
     });
   });
 
@@ -335,6 +336,7 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isCoreDirector: false,
     });
   });
 });
