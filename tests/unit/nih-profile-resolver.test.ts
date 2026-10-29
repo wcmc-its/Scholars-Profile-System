@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregatePreferred,
+  dropRuledOut,
   namesMatch,
   resolveByNameFallback,
   resolveByPiNameQuery,
   resolveProjectGrantJoin,
+  ruledOutLinks,
   selectNihScholarPool,
   type GrantRowForResolution,
   type PoolGrantRow,
@@ -426,5 +428,52 @@ describe("resolveByPiNameQuery", () => {
     ];
     const out = resolveByPiNameQuery("Jane Doe", results);
     expect(out?.profileId).toBe(200);
+  });
+});
+
+describe("ruled-out links (#3071)", () => {
+  const obs = (
+    cwid: string,
+    profileId: number,
+    resolutionSource: ResolvedObservation["resolutionSource"],
+  ) => ({
+    cwid,
+    profileId,
+    fullName: "Pat Example",
+    projectEndDate: null,
+    resolutionSource,
+  });
+
+  it("drops a rejected or revoked pair from any source and keeps the rest", () => {
+    const ruled = ruledOutLinks([
+      { cwid: "aaa1", externalProfileId: 1, status: "rejected" },
+      { cwid: "bbb2", externalProfileId: 2, status: "confirmed" },
+    ]);
+    const kept = dropRuledOut(
+      [obs("aaa1", 1, "grant_join_pi"), obs("aaa1", 9, "name_query"), obs("bbb2", 2, "name_query")],
+      ruled,
+    );
+    expect(kept.map((o) => `${o.cwid}:${o.profileId}`)).toEqual(["aaa1:9", "bbb2:2"]);
+  });
+
+  it("gives a scholar with a revoked link no name-only link, but keeps a grant join", () => {
+    const ruled = ruledOutLinks([{ cwid: "aaa1", externalProfileId: 1, status: "revoked" }]);
+    expect([...ruled.nameBlocked]).toEqual(["aaa1"]);
+    const kept = dropRuledOut(
+      [
+        obs("aaa1", 1, "name_query"),
+        obs("aaa1", 7, "name_query"),
+        obs("aaa1", 8, "name_match"),
+        obs("aaa1", 9, "grant_join_contact"),
+      ],
+      ruled,
+    );
+    expect(kept.map((o) => o.profileId)).toEqual([9]);
+  });
+
+  it("does not name-block on a rejected proposal alone", () => {
+    const ruled = ruledOutLinks([{ cwid: "aaa1", externalProfileId: 1, status: "rejected" }]);
+    expect(ruled.nameBlocked.size).toBe(0);
+    expect(dropRuledOut([obs("aaa1", 7, "name_query")], ruled)).toHaveLength(1);
   });
 });
