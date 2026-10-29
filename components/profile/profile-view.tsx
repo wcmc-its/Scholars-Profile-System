@@ -987,8 +987,7 @@ export function Section({
               <div className="flex items-baseline gap-4 text-sm">
                 {count ? (
                   <span className="text-muted-foreground tabular-nums">
-                    {count.value.toLocaleString()}
-                    <span className="sr-only"> {count.unit}</span>
+                    {count.value.toLocaleString()} <span className="sr-only">{count.unit}</span>
                   </span>
                 ) : null}
                 {headerAction}
