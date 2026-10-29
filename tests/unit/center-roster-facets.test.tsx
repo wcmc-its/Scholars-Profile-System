@@ -99,7 +99,7 @@ describe("RosterFacet — searchable Methods facet (#972)", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "elisa" } });
     // Case-insensitive match, surfaced past the collapse cap.
     expect(screen.getByRole("button", { name: /ELISA/ })).toBeTruthy();
-    expect(optionLabels()).toEqual(["ELISA1"]); // only the match; count rendered inline
+    expect(optionLabels()).toEqual(["ELISA 1"]); // only the match; count rendered inline
   });
 
   it("keeps a SELECTED option visible + de-selectable even when it does NOT match the query", () => {

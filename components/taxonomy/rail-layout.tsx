@@ -240,8 +240,8 @@ function RailLayoutInner({
                 <span className="flex shrink-0 items-center gap-2">
                   {typeof triggerCount === "number" && (
                     <span className="text-muted-foreground text-xs tabular-nums">
-                      {triggerCount.toLocaleString()}
-                      <span className="sr-only"> {mobile.countNoun ?? "publications"}</span>
+                      {triggerCount.toLocaleString()}{" "}
+                      <span className="sr-only">{mobile.countNoun ?? "publications"}</span>
                     </span>
                   )}
                   <span className="text-xs font-semibold text-[var(--color-primary-cornell-red)]">
