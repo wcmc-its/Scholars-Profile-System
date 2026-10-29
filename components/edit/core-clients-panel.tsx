@@ -99,8 +99,8 @@ function formatAdded(d: Date): string {
  *  did. "not found" is a claim about the PERSON, and is reserved for the case
  *  where BOTH stores answered and neither held the CWID. A directory that never
  *  answered has said nothing about them, so it gets its own wording instead —
- *  the row is written either way, and this receipt is the only place a directory
- *  name is ever shown (the roster below resolves names from Scholars alone). */
+ *  the row is written either way. (The roster below resolves names from
+ *  Scholars, then ED, at load — `loadCoreClients`.) */
 function sourceNote(source: AddedPerson["source"]): string {
   switch (source) {
     case "scholars":

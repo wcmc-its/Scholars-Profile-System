@@ -7,7 +7,12 @@
  * client component imports) but is the other end of `loadCoreClientPaperCounts`,
  * so it is covered here beside it.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The default ED lookup must never reach a directory from a test.
+vi.mock("@/lib/sources/ldap", () => ({
+  fetchDirectoryPeopleByCwid: vi.fn().mockRejectedValue(new Error("not in tests")),
+}));
 
 import {
   loadCoreClientPaperCounts,
@@ -214,6 +219,31 @@ describe("loadCoreClients", () => {
     const addedAt = new Date("2026-09-01T00:00:00Z");
     const db = fakeDb([{ cwid: "djb2001", addedAt, addedBy: "svc0001" }], []);
     expect((await loadCoreClients("2", db))[0].addedByName).toBeNull();
+  });
+
+  it("falls back to ED names for a client and an actor with no Scholar row", async () => {
+    const addedAt = new Date("2026-09-01T00:00:00Z");
+    const db = fakeDb([{ cwid: "Stf0001", addedAt, addedBy: "stw0002" }], []);
+    const directory = vi.fn().mockResolvedValue(
+      new Map([
+        ["stf0001", "Sam Staff"],
+        ["stw0002", "Sky Steward"],
+      ]),
+    );
+    const rows = await loadCoreClients("2", db, directory);
+    expect(directory).toHaveBeenCalledTimes(1);
+    expect(directory).toHaveBeenCalledWith(["stf0001", "stw0002"]);
+    expect(rows[0].name).toBe("Sam Staff");
+    expect(rows[0].addedByName).toBe("Sky Steward");
+  });
+
+  it("keeps a null name when the ED lookup throws (fail-soft)", async () => {
+    const addedAt = new Date("2026-09-01T00:00:00Z");
+    const db = fakeDb([{ cwid: "stf0001", addedAt, addedBy: "stw0002" }], []);
+    const directory = vi.fn().mockRejectedValue(new Error("ldap down"));
+    const rows = await loadCoreClients("2", db, directory);
+    expect(rows[0].name).toBeNull();
+    expect(rows[0].addedByName).toBeNull();
   });
 
   it("preserves the addedAt-ascending order the query returns", async () => {
