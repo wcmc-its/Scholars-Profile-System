@@ -58,12 +58,17 @@ function meshLabels(json: unknown): string[] {
     .filter((l): l is string => typeof l === "string");
 }
 
-/** Step 5. Rows PubMed gives no affiliations for stay null and are asked again next run. */
-async function markExternalAuthors(): Promise<void> {
-  const rows = await db.read.centerPublicationRelevance.findMany({
+/**
+ * Step 5. Rows PubMed gives no affiliations for stay null and are asked again
+ * next run; newest decisions first, so those rows cannot crowd new ones out of
+ * the take. Read from the primary: step 4 just wrote these rows.
+ */
+export async function markExternalAuthors(): Promise<void> {
+  const rows = await db.write.centerPublicationRelevance.findMany({
     where: { relevant: true, externalAuthor: null },
     distinct: ["pmid"],
     select: { pmid: true },
+    orderBy: [{ inferredAt: "desc" }, { pmid: "asc" }],
     take: MAX_AFFILIATION_LOOKUPS,
   });
   if (rows.length === 0) return;
@@ -188,9 +193,11 @@ async function main(): Promise<number> {
   return written;
 }
 
-withEtlRun("CenterPubRelevance", main)
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(disconnect);
+if (process.env.NODE_ENV !== "test") {
+  withEtlRun("CenterPubRelevance", main)
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    })
+    .finally(disconnect);
+}

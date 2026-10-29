@@ -219,6 +219,14 @@ describe("parseCollabPubMatrixParams", () => {
     expect(parseCollabPubMatrixParams(new URLSearchParams("asOf=12/31/2025"), now).asOf).toBe(
       "2026-10-29",
     );
+    // Impossible calendar dates JS would roll over; a real leap day passes.
+    for (const asOf of ["2025-02-31", "2025-02-29", "2025-04-31"])
+      expect(parseCollabPubMatrixParams(new URLSearchParams({ asOf }), now).asOf, asOf).toBe(
+        "2026-10-29",
+      );
+    expect(parseCollabPubMatrixParams(new URLSearchParams("asOf=2024-02-29"), now).asOf).toBe(
+      "2024-02-29",
+    );
   });
 });
 
@@ -257,8 +265,23 @@ describe("externalAuthorFlags", () => {
       "Memorial Sloan Kettering Cancer Center, New York, NY",
       "The Rockefeller University, New York, NY",
       "Department of Molecular Biology, Cornell University, Ithaca, NY",
+      "Cornell University, Ithaca, New York, NY 14853",
+      "Cornell University, Example Hall, Ithaca, NY 14853",
+      "Cornell University", // no New York City location: Ithaca for all we know
     ])
       expect(flags([[WCM], [outside]]), outside).toBe(true);
+  });
+
+  it("Meyer, Englander and Cornell University in New York City are WCM", () => {
+    for (const inside of [
+      "Sandra and Edward Meyer Cancer Center, New York, NY",
+      "Englander Institute for Precision Medicine, New York, NY",
+      "Department of Medicine, Cornell University, New York, NY",
+      "Cornell University, 1300 York Avenue, 10065",
+      "Cornell University Medical College, 10021",
+      "Cornell University, New York, New York, USA",
+    ])
+      expect(flags([[WCM], [inside]]), inside).toBe(false);
   });
 
   it("WCM-Qatar, the Graduate School and hyphenated spellings are WCM", () => {
@@ -318,15 +341,16 @@ describe("buildCollabPubMatrixWorkbook", () => {
     const details = wb.getWorksheet("Report Details")!;
     expect(details.getRow(2).getCell(1).value).toBe("Run Date: 10/28/2026");
     expect(details.getRow(3).getCell(1).value).toBe("Report Period: 01/01/2025 through 12/31/2025");
-    expect(details.getRow(4).getCell(1).value).toBe("Membership and Program As Of: 12/31/2025");
-    expect(details.getRow(5).getCell(1).value).toBe("Membership Type: RESEARCH");
-    expect(details.getRow(6).getCell(1).value).toBe("Excluded Program Areas: CC");
-    expect(details.rowCount).toBe(7); // no unknown-tenure line when there are none
+    expect(details.getRow(4).getCell(1).value).toBe("Members as of 12/31/2025");
+    expect(details.getRow(5).getCell(1).value).toBe("Program: each member's current program");
+    expect(details.getRow(6).getCell(1).value).toBe("Membership Type: RESEARCH");
+    expect(details.getRow(7).getCell(1).value).toBe("Excluded Program Areas: CC");
+    expect(details.rowCount).toBe(8); // no unknown-tenure line when there are none
   });
 
   it("records the unknown-tenure count when there is one", async () => {
     const wb = await load(run([pub("1", ["a1"], { unknownTenure: ["a1"] })]), "");
-    expect(wb.getWorksheet("Report Details")!.getRow(8).getCell(1).value).toBe(
+    expect(wb.getWorksheet("Report Details")!.getRow(9).getCell(1).value).toBe(
       "Publications Counted Without a Known WCM Tenure: 1",
     );
   });

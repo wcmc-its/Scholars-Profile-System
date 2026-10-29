@@ -47,6 +47,12 @@ export type CollabPubMatrixParams = {
 };
 
 /** Default period: last calendar year, the one EVAL's annual matrix reports. */
+/** The round trip rejects dates JS rolls over (2025-02-31 → 2025-03-03). */
+const isCalendarDate = (iso: string) => {
+  const t = Date.parse(iso);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === iso;
+};
+
 export function parseCollabPubMatrixParams(
   sp: URLSearchParams,
   now = new Date(),
@@ -64,7 +70,7 @@ export function parseCollabPubMatrixParams(
     from,
     to,
     asOf:
-      /^\d{4}-\d{2}-\d{2}$/.test(asOf) && !Number.isNaN(Date.parse(asOf))
+      /^\d{4}-\d{2}-\d{2}$/.test(asOf) && isCalendarDate(asOf)
         ? asOf
         : now.toISOString().slice(0, 10),
     membershipType: type && MEMBERSHIP_TYPES.includes(type) ? type : "research",

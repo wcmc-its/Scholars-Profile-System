@@ -6,11 +6,11 @@
  * its own (WCM) authors, and ReCiterDB keeps an affiliation for the target
  * author only, so PubMed is the one source with every author's.
  *
- * An author is WCM when any of their affiliations matches WCM_AFFILIATION; a
+ * An author is WCM when any of their affiliations passes isWcmAffiliation; a
  * publication is external when some author lists affiliations and none is
  * WCM. An author with no affiliation decides nothing. Changing the matcher
- * means the stored flags must be recomputed: null them (as migration
- * 20261029150000 does) and the ETL asks PubMed again.
+ * once flags are stored means they must be recomputed: a data migration that
+ * sets `external_author` back to NULL, and the ETL asks PubMed again.
  */
 import { DOMParser, type Element as XmlElement } from "@xmldom/xmldom";
 
@@ -21,13 +21,22 @@ const ID_BATCH = 200;
 const DELAY_MS = 350;
 
 /**
- * Weill Cornell Medicine only, incl. WCM-Qatar and the Weill Cornell Graduate
- * School. Everyone else is outside WCM (Jackie, 2026-10-29, Q1), including
- * NewYork-Presbyterian, MSK, Rockefeller and Cornell's Ithaca campus. An
- * affiliation that names Weill Cornell anywhere ("NewYork-Presbyterian/Weill
- * Cornell Medical Center") reads as WCM.
+ * Weill Cornell Medicine only, incl. WCM-Qatar, the Weill Cornell Graduate
+ * School, the Meyer Cancer Center and the Englander Institute. Everyone else is
+ * outside WCM (Jackie, 2026-10-29, Q1), including NewYork-Presbyterian, MSK,
+ * Rockefeller and Cornell's Ithaca campus. An affiliation that names Weill
+ * Cornell anywhere ("NewYork-Presbyterian/Weill Cornell Medical Center") reads
+ * as WCM.
  */
-export const WCM_AFFILIATION = /weill[\s-]+cornell|weill\s+medical\s+college/i;
+const WCM_AFFILIATION =
+  /weill[\s-]+cornell|weill\s+medical\s+college|meyer\s+cancer\s+cent(er|re)|englander\s+institute/i;
+/** "Cornell University" in New York City is WCM; Ithaca is not. */
+const CORNELL = /cornell\s+university/i;
+const NYC = /new\s+york,\s*(ny|new\s+york)\b|\b100(65|21)\b/i;
+
+export function isWcmAffiliation(a: string): boolean {
+  return WCM_AFFILIATION.test(a) || (CORNELL.test(a) && NYC.test(a) && !/ithaca/i.test(a));
+}
 
 const text = (el: XmlElement) => (el.textContent ?? "").trim();
 
@@ -47,7 +56,7 @@ export function externalAuthorFlags(xml: string): Map<string, boolean | null> {
     for (const author of list ? Array.from(list.getElementsByTagName("Author")) : []) {
       const affs = Array.from(author.getElementsByTagName("Affiliation")).map(text).filter(Boolean);
       if (affs.length === 0) continue;
-      if (affs.some((a) => WCM_AFFILIATION.test(a))) flag ??= false;
+      if (affs.some(isWcmAffiliation)) flag ??= false;
       else {
         flag = true;
         break;

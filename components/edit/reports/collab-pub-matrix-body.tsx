@@ -75,7 +75,7 @@ export async function renderCollabPubMatrixReport({
               ))}
               <YearWindow from={params.from} to={params.to} years={pubRelevanceYears()} />
               <label className="flex items-center gap-1.5 text-sm">
-                As of
+                Members as of
                 <input
                   type="date"
                   name="asOf"
@@ -163,11 +163,12 @@ export async function renderCollabPubMatrixReport({
             <li>
               Rows: publications from {matrixPeriodLabel(params)} marked cancer relevant on the
               publication cancer relevance report, reviews left out, with at least one confirmed
-              author who is a member of this type on {params.asOf}. Each member counts toward their
-              program on that date, for publications from while they were at WCM.
+              author who is a member of this type on {params.asOf}. Each member counts for
+              publications from while they were at WCM.
               {m.unknownTenure > 0 &&
                 ` ${m.unknownTenure.toLocaleString()} counted publications are credited only to the ${m.unknownTenureMembers.toLocaleString()} members with no known WCM start date, and are counted anyway.`}
             </li>
+            <li>Program: each member&apos;s current program.</li>
             <li>
               Intra-programmatic: two or more members in the row&apos;s program (on the unique row,
               in any one program). Inter-programmatic: a member in the row&apos;s program and one in
