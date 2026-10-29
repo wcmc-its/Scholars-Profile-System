@@ -13,6 +13,7 @@ import {
   resolveImpersonationDisplay,
   type ImpersonationUnitKind,
 } from "@/lib/edit/impersonation-display";
+import { isCoreDirector } from "@/lib/auth/core-director";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { db } from "@/lib/db";
 import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
@@ -145,7 +146,10 @@ export async function GET(): Promise<NextResponse> {
       isObserver(session.cwid).catch(() => false),
       // Flag-gated: no directory call when `COMMS_STEWARD_ENABLED` is off.
       isCommsSteward(session.cwid).catch(() => false),
-      loadManageableUnits(session.cwid, db.read).catch(() => null),
+      // A Cores director (flag-gated, fail-closed) manages every core.
+      isCoreDirector(session.cwid)
+        .then((cd) => loadManageableUnits(session.cwid, db.read, { allCores: cd }))
+        .catch(() => null),
     ]);
 
   // GrantRecs Phase 4 — the top-nav "Researchers for funding" link is gated to the

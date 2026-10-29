@@ -201,7 +201,7 @@ export default async function EditReportPage({
     // to the resolver's center default, exactly as the per-page `parseKind`
     // (reports 3/6) and the kind-blind pages (1/2/4/5) behaved.
     const requestedKind: ReportableUnitKind | undefined = allowedKinds.find((k) => k === kindParam);
-    // All cores: a superuser only (anyone else falls through to the ordinary
+    // All cores: a superuser or a Cores director (anyone else falls through to the ordinary
     // resolve, which refuses `all` as it always did).
     const allCores = requestedKind === "core" && isAllCores(center) && canViewAllCores(session);
     if (allCores && !(ALL_CORES_REPORTS as readonly string[]).includes(n)) {

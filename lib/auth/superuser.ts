@@ -25,6 +25,7 @@
 import { cache } from "react";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isContentEditor } from "@/lib/auth/content-editor";
+import { isCoreDirector } from "@/lib/auth/core-director";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
@@ -93,6 +94,14 @@ export interface EditSession {
    * admit a content editor's write.
    */
   isContentEditor?: boolean;
+  /**
+   * Live `core_director` verdict (`lib/auth/core-director.ts`): Owner of every
+   * core facility and the all-cores report roll-up. OPTIONAL like
+   * `isDeveloper`: the synthetic `EditSession` shapes need not carry it, and an
+   * absent flag reads as "not a director" (fail-closed). The live resolvers
+   * always populate it; `getFlatUnitRole` and `canViewAllCores` read it.
+   */
+  isCoreDirector?: boolean;
 }
 
 
@@ -165,7 +174,7 @@ export async function getEditSession(): Promise<EditSession | null> {
   // #1514 — six independent LDAPS group checks; resolve concurrently so the
   // wall-clock cost is one directory round-trip, not six. All six are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc, dsv, obs, ce] = await Promise.all([
+  const [su, cs, dev, hc, dsv, obs, ce, cd] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
@@ -173,6 +182,7 @@ export async function getEditSession(): Promise<EditSession | null> {
     isDataSharingViewer(session.cwid),
     isObserver(session.cwid),
     isContentEditor(session.cwid),
+    isCoreDirector(session.cwid),
   ]);
   // Content editor first: its synthetic steward grant then makes the observer
   // view a no-op, so someone in both groups edits rather than viewing only.
@@ -185,6 +195,7 @@ export async function getEditSession(): Promise<EditSession | null> {
         isDeveloper: dev,
         isHonorsCurator: hc,
         isDataSharingViewer: dsv,
+        isCoreDirector: cd,
       },
       ce,
     ),

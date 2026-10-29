@@ -63,6 +63,8 @@ import {
   EXTERNAL_AFFAIRS_SCOPE_OPTIONS,
   FUNCTIONAL_ROLES,
   isFunctionalRole,
+  isScopelessRole,
+  NO_SCOPE_OPTIONS,
   normalizeScopes,
   DASHBOARDS,
   DASHBOARD_LABEL,
@@ -139,6 +141,7 @@ export function functionalRoleScopeOptions(): FunctionalRoleScopeOptions {
   return {
     external_affairs: EXTERNAL_AFFAIRS_SCOPE_OPTIONS,
     reporting: reportingScopeOptions(),
+    core_director: NO_SCOPE_OPTIONS,
   };
 }
 
@@ -153,8 +156,10 @@ function isReportingUnitScope(key: string): boolean {
   return isUnitScopeKey(scope) && isGrantableScopeKey(key.slice(0, cut), scope);
 }
 
-/** Whether every key is a valid scope for `role` (and there is at least one). */
+/** Whether every key is a valid scope for `role` (and there is at least one).
+ *  A scope-less role (`isScopelessRole`) is valid with NO scopes only. */
 export function validScopes(role: FunctionalRole, scopes: ReadonlyArray<string>): boolean {
+  if (isScopelessRole(role)) return scopes.length === 0;
   if (scopes.length === 0) return false;
   const allowed = new Set(functionalRoleScopeOptions()[role].map((o) => o.key));
   return scopes.every((s) => allowed.has(s) || (role === "reporting" && isReportingUnitScope(s)));
