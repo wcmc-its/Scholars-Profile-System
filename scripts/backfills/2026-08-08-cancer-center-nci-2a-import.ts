@@ -411,10 +411,13 @@ const NCI_RATIONALE = "NCI award: 100% under MCC's rubric.";
 const LYNCH_RATIONALE = "Lynch syndrome: 100% under MCC's rubric.";
 const HPV_RATIONALE = "HPV: 100% under MCC's rubric.";
 
-/** The US National Cancer Institute as a sponsor name, optionally after an
- *  NIH/HHS prefix. Not "National Cancer Institute of Canada" or "Italian
- *  National Cancer Institute": a non-US NCI is not an NCI award. */
-const US_NCI = /^(?:(?:NIH|U\.?S\.?|DHHS|HHS)\b[\s/,-]*)?national cancer institute\b(?!\s+(?:of|at)\b)/i;
+/** The US National Cancer Institute as a sponsor name, after any chain of
+ *  NIH/HHS prefixes ("DHHS/NIH/National Cancer Institute", "National Institutes
+ *  of Health/National Cancer Institute"). Not "National Cancer Institute of
+ *  Canada" or "Italian National Cancer Institute": a non-US NCI is not an NCI
+ *  award. "at <place>" is foreign except NCI at Frederick. */
+const US_NCI =
+  /^(?:(?:NIH|U\.?S\.?|DHHS|HHS|National Institutes of Health)\b[\s/,-]*)*national cancer institute\b(?!\s+of\b|\s+at\b(?!\s+frederick\b))/i;
 export const isUsNciSponsor = (name: string | null | undefined) => US_NCI.test((name ?? "").trim());
 
 /** MCC's rubric (10-01, 10-29) cases that are ALWAYS 100% — decided here,
@@ -442,7 +445,7 @@ export function cancerRelevanceRule(
   if (/\blynch syndrome\b/i.test(words)) {
     return { model: "rule:lynch", rationale: LYNCH_RATIONALE };
   }
-  if (/\bhpv\b|papilloma\s?virus/i.test(words)) {
+  if (/\b(?:hr-?)?hpv(?:\d|\b)|papilloma\s?virus/i.test(words)) {
     return { model: "rule:hpv", rationale: HPV_RATIONALE };
   }
   return null;

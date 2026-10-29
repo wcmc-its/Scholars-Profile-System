@@ -385,6 +385,9 @@ describe("planRow", () => {
       expect((await planRow(LLM_ROW, new Map(), new Map(), textIndex)).provenance.cancerRelevantModel).toBe("rule:hpv");
     }
     expect(mockInfer).not.toHaveBeenCalled();
+    for (const projectTitle of ["HPV16 E7 oncoprotein", "hrHPV testing", "hr-HPV self-sampling"]) {
+      expect(cancerRelevanceRule({ ...LLM_ROW, projectTitle }, { abstract: null, phrText: null })?.model).toBe("rule:hpv");
+    }
     // A word merely containing the letters is not HPV.
     expect(cancerRelevanceRule({ ...LLM_ROW, projectTitle: "SHPV2 kinase" }, { abstract: null, phrText: null })).toBeNull();
   });
@@ -408,7 +411,14 @@ describe("planRow", () => {
       expect(isUsNciSponsor(name)).toBe(false);
       expect(cancerRelevanceRule({ ...LLM_ROW, specificFundingSource: name }, { abstract: null, phrText: null })).toBeNull();
     }
-    for (const name of ["National Cancer Institute", "NIH/National Cancer Institute", "US National Cancer Institute (NCI)"]) {
+    for (const name of [
+      "National Cancer Institute",
+      "NIH/National Cancer Institute",
+      "US National Cancer Institute (NCI)",
+      "DHHS/NIH/National Cancer Institute",
+      "National Institutes of Health/National Cancer Institute",
+      "National Cancer Institute at Frederick",
+    ]) {
       expect(isUsNciSponsor(name)).toBe(true);
     }
   });
