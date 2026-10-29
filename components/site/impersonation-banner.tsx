@@ -55,6 +55,7 @@ export type SubjectRole =
   | "data_sharing_viewer"
   | "development"
   | "content_editor"
+  | "core_director"
   | "observer";
 
 const ROLE_LABEL: Record<SubjectRole, string> = {
@@ -66,6 +67,7 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
   content_editor: "Content Editor",
+  core_director: "Cores director",
   observer: "Observer",
 };
 
@@ -107,6 +109,7 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
     { label: "Profiles", href: "/edit/profiles" },
     { label: "Org units", href: "/edit/units" },
   ],
+  core_director: [{ label: "Cores", href: "/edit/core" }],
   observer: [
     { label: "Profiles", href: "/edit/profiles" },
     { label: "Org units", href: "/edit/units" },

@@ -26,6 +26,7 @@
  * never pull this into the Edge middleware bundle or a client component.
  */
 import { isContentEditor } from "@/lib/auth/content-editor";
+import { isCoreDirector } from "@/lib/auth/core-director";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
@@ -36,6 +37,7 @@ export type GlobalRole =
   | "data_sharing_viewer"
   | "development"
   | "content_editor"
+  | "core_director"
   | "observer";
 
 /** Display label per role — reused by the session route; client components
@@ -45,6 +47,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
   content_editor: "Content Editor",
+  core_director: "Cores director",
   observer: "Observer",
 };
 
@@ -64,6 +67,7 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
   // Matcha is the front door; its console nav reaches Grant Matcha too.
   development: { href: "/edit/matcha", label: "Matcha" },
   content_editor: { href: "/edit/profiles", label: "Profiles" },
+  core_director: { href: "/edit/core", label: "Cores" },
   observer: { href: "/edit/profiles", label: "Profiles" },
 };
 
@@ -72,6 +76,8 @@ const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string
   { role: "data_sharing_viewer", check: isDataSharingViewer },
   { role: "development", check: isDeveloper },
   { role: "content_editor", check: isContentEditor },
+  // A functional_role_grant row, not an LDAP group (`lib/auth/core-director.ts`).
+  { role: "core_director", check: isCoreDirector },
   // Last: observer is the broadest read-only role, so any narrower one held alongside it wins.
   { role: "observer", check: isObserver },
 ];
