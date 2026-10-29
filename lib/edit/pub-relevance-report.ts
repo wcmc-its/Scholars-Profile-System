@@ -15,7 +15,7 @@ export type PubRelevanceRow = {
   journal: string | null;
   year: number | null;
   publicationType: string | null;
-  /** The publication's confirmed authors who are research members of the center. */
+  /** The publication's confirmed authors who are research or clinical members of the center. */
   members: PubRelevanceMember[];
   /** Null = the ETL has not decided it yet (new, or its model call failed). */
   relevant: boolean | null;

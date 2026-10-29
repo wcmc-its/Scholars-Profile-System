@@ -1,6 +1,6 @@
 /**
  * Report 17 loader: one year of a center's publications with ≥1 confirmed
- * RESEARCH-member author (the set `etl/center-pub-relevance` decides), each
+ * research- or clinical-member author (the set `etl/center-pub-relevance` decides), each
  * with its `center_publication_relevance` row, if any. The caller has passed
  * the unit gate. Server-only (reads `@/lib/db`).
  */
@@ -12,7 +12,7 @@ export async function loadPubRelevanceReport(
   year: number,
 ): Promise<PubRelevanceRow[]> {
   const members = await db.read.centerMembership.findMany({
-    where: { centerCode, membershipType: "research" },
+    where: { centerCode, membershipType: { in: ["research", "clinical"] } },
     select: { cwid: true, programCode: true },
   });
   if (members.length === 0) return [];
