@@ -45,9 +45,9 @@ vi.mock("@/lib/db", () => ({
     read: {
       center: { findUnique: mockCenterFindUnique },
       unitAdmin: { findMany: mockUnitAdminFindMany },
-      centerPublicationRelevance: { findUnique: mockRelevanceFindUnique },
     },
-    write: { $transaction: mockTransaction },
+    // The before-row is read from the primary (see the route).
+    write: { $transaction: mockTransaction, centerPublicationRelevance: { findUnique: mockRelevanceFindUnique } },
   },
 }));
 
