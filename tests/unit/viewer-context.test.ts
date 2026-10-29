@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * #866 — the internal-viewer predicate (lib/auth/viewer-context.ts).
  *

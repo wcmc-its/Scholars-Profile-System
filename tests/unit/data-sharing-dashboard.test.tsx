@@ -213,11 +213,14 @@ describe("DataSharingDashboard — repositories", () => {
     const { container } = render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
     const table = container.querySelector('[data-testid="ds-repo-table"]') as HTMLElement;
     expect(table.closest("details")).toBeTruthy();
+    // Matched in JS, not with an a[href^="..."] selector: jsdom 29's selector
+    // engine never matches an attribute value that holds both "/" and "&".
+    const itemsHrefs = Array.from(table.querySelectorAll("a"), (a) => a.getAttribute("href"));
     expect(
-      table.querySelector(
-        'a[href^="/edit/data-sharing/export?section=repositories&grain=items&repository="]',
+      itemsHrefs.some((h) =>
+        h?.startsWith("/edit/data-sharing/export?section=repositories&grain=items&repository="),
       ),
-    ).toBeTruthy();
+    ).toBe(true);
   });
 });
 

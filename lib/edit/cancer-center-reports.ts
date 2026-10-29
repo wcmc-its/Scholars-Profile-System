@@ -346,7 +346,10 @@ export async function loadReportableUnitsForActor(
         parentName: u.parentDeptName,
       }));
   } else {
-    const manageable = await loadManageableUnits(session.cwid, db);
+    // A Cores director's `cores` group is every catalog core (owner of each).
+    const manageable = await loadManageableUnits(session.cwid, db, {
+      allCores: session.isCoreDirector === true,
+    });
     candidates = [
       ...(wantsKind("center")
         ? manageable.centers.map((u) => ({ code: u.code, kind: "center" as const, name: u.name, centerType: null }))

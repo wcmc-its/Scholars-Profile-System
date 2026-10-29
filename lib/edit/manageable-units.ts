@@ -122,7 +122,8 @@ function byName(a: { name: string }, b: { name: string }): number {
 }
 
 /**
- * Load the units `cwid` may curate from their direct `unit_admin` grants.
+ * Load the units `cwid` may curate from their direct `unit_admin` grants
+ * (plus every core when `opts.allCores`: a Cores director).
  *
  * Dedupes a unit granted twice to the same person (keeps the higher role —
  * owner subsumes curator), resolves each unit's name in one batched query per
@@ -133,11 +134,19 @@ function byName(a: { name: string }, b: { name: string }): number {
 export async function loadManageableUnits(
   cwid: string,
   db: ManageableUnitsClient,
+  opts?: {
+    /** A Cores director (`EditSession.isCoreDirector`) owns every core: list
+     *  each catalog core as an Owner entry, whatever their own grants say. */
+    allCores?: boolean;
+  },
 ): Promise<ManageableUnits> {
-  const grants = await db.unitAdmin.findMany({
-    where: { cwid },
-    select: { entityType: true, entityId: true, role: true },
-  });
+  const [grants, directorCores] = await Promise.all([
+    db.unitAdmin.findMany({
+      where: { cwid },
+      select: { entityType: true, entityId: true, role: true },
+    }),
+    opts?.allCores ? db.core.findMany({ select: { id: true } }) : Promise.resolve([]),
+  ]);
 
   // Dedupe (kind, code) → highest role. owner wins over curator.
   const best = new Map<
@@ -151,6 +160,9 @@ export async function loadManageableUnits(
     if (!existing || (existing.role === "curator" && g.role === "owner")) {
       best.set(key, { kind: g.entityType, code: g.entityId, role: g.role });
     }
+  }
+  for (const c of directorCores) {
+    best.set(`core:${c.id}`, { kind: "core", code: c.id, role: "owner" });
   }
   if (best.size === 0) {
     return { departments: [], divisions: [], centers: [], cores: [], institutions: [], total: 0 };

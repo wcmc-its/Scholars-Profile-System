@@ -10,7 +10,9 @@ import { describe, expect, it } from "vitest";
 import {
   applyNci2aWrite,
   filterNci2a,
+  isTrainingAward,
   NCI2A_CSV_HEADER,
+  NCI2A_T_CSV_HEADER,
   nci2aCsvFilename,
   nci2aFiltered,
   nci2aHref,
@@ -51,6 +53,7 @@ function award(over: Partial<Nci2aAward> & { id: string }): Nci2aAward {
     cancerRelevantModel: null,
     cancerRelevantRationale: null,
     reviewerNote: null,
+    traineeSlots: null,
     cancerRelevantAnnualProjectDc: pct == null ? null : (dc * pct) / 100,
     isPeerReviewed: true,
     grantCwid: `zzz${over.id}`,
@@ -356,6 +359,42 @@ describe("nci2aCsv", () => {
     expect(lines[1].startsWith('"Beta, Bob"')).toBe(true);
     expect(lines[2].startsWith('"Quote, ""Q"""')).toBe(true);
     expect(lines[3]).toBe(",,,,,,,,,,,CT,40,20000,");
+  });
+
+  it("a 25 or 50 row's Notes: the reviewer note, then the relevance reason", () => {
+    const notes = (a: Nci2aAward) => nci2aCsv([a]).split("\n")[1].split(",").at(-1);
+    const half = award({ id: "5", cancerRelevantPercent: 50, cancerRelevantRationale: "Aim 2 only" });
+    expect(notes(half)).toBe("Relevance: Aim 2 only");
+    expect(notes({ ...half, reviewerNote: "Checked" })).toBe("Checked Relevance: Aim 2 only");
+    expect(notes(award({ id: "6", cancerRelevantPercent: 25, cancerRelevantRationale: "Minor" }))).toBe(
+      "Relevance: Minor",
+    );
+    // A 100 row, or a reviewer's value the rationale no longer explains, gets no reason.
+    expect(notes(award({ id: "7", cancerRelevantPercent: 100, cancerRelevantRationale: "All" }))).toBe("");
+    expect(notes({ ...half, cancerRelevantPercentSource: "human", cancerRelevantPercentAi: 100 })).toBe("");
+  });
+
+  it("training awards follow in a T section with a Trainee Slots column", () => {
+    const t32 = award({ id: "8", projectNumber: "5 T32 CA000008-03", traineeSlots: 6 });
+    const f31 = award({ id: "9", projectNumber: "1F31CA000009-01" });
+    for (const pn of ["5 K12 CA000001-01", "KL2 TR000001", "R25 CA000001", "D43 TW000001", "TL1 TR000001"])
+      expect(isTrainingAward({ projectNumber: pn })).toBe(true);
+    for (const pn of ["5 R01 CA000001-01", "K08 CA000001", "FHCRC 203865-01", "not-nih"])
+      expect(isTrainingAward({ projectNumber: pn })).toBe(false);
+
+    const lines = nci2aCsv([A, t32, f31]).split("\n");
+    expect(lines[0]).toBe(NCI2A_CSV_HEADER.join(","));
+    expect(lines[1].startsWith('"Alpha, Ann"')).toBe(true);
+    expect(lines.slice(2, 4)).toEqual(["", "T"]);
+    expect(lines[4].split(",")).toEqual([...NCI2A_T_CSV_HEADER]);
+    const slots = NCI2A_T_CSV_HEADER.indexOf("Trainee Slots");
+    expect(slots).toBe(NCI2A_T_CSV_HEADER.length - 2);
+    // +1: the quoted PI name holds a comma.
+    expect(lines[5].split(",")[slots + 1]).toBe("6");
+    expect(lines[6].split(",")[slots + 1]).toBe("");
+    expect(lines).toHaveLength(7);
+    // No training award, no T section.
+    expect(nci2aCsv([A])).not.toContain("\nT\n");
   });
 });
 

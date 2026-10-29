@@ -265,6 +265,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "reporter-profile/[id]/reject": "deny",
   "reporter-profile/[id]/revoke": "deny",
   "reports/article-count/cwid-list": "allow",
+  "reports/core-users/contacts": "deny",
   "request-change": "allow",
   revoke: "allow",
   roles: "deny",

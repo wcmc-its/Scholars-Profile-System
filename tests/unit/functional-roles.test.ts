@@ -193,8 +193,8 @@ describe("scope helpers", () => {
     expect(md?.label).toBe("Mentors and mentees · MD");
   });
 
-  it("the roles are External Affairs and Reporting; EA's scopes are its two functions", () => {
-    expect(FUNCTIONAL_ROLES).toEqual(["external_affairs", "reporting"]);
+  it("the roles are External Affairs, Reporting and Cores director; EA's scopes are its two functions", () => {
+    expect(FUNCTIONAL_ROLES).toEqual(["external_affairs", "reporting", "core_director"]);
     expect(isFunctionalRole("external_communications")).toBe(false);
     expect(isFunctionalRole("development")).toBe(false);
     const opts = functionalRoleScopeOptions();
@@ -215,6 +215,10 @@ describe("scope helpers", () => {
     expect(validScopes("reporting", [])).toBe(false);
     expect(validScopes("reporting", ["nope"])).toBe(false);
     expect(validScopes("external_affairs", ["article-count"])).toBe(false);
+    // Cores director is scope-less: valid with NO scopes, and only then.
+    expect(validScopes("core_director", [])).toBe(true);
+    expect(validScopes("core_director", ["*"])).toBe(false);
+    expect(validScopes("core_director", ["article-count"])).toBe(false);
     expect(validScopes("external_affairs", ["communications", "development"])).toBe(true);
     expect(validScopes("external_affairs", ["development"])).toBe(true);
     // No wildcard for EA: each function is chosen explicitly.

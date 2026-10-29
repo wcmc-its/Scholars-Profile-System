@@ -10,9 +10,20 @@
 import { cleanup, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ pmids: vi.fn(), load: vi.fn() }));
+const h = vi.hoisted(() => ({
+  pmids: vi.fn(),
+  load: vi.fn(),
+  role: vi.fn(async () => null),
+  scholars: vi.fn(async () => []),
+}));
 
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
+vi.mock("@/lib/db", () => ({
+  db: {
+    read: { unitAdmin: { findUnique: h.role }, scholar: { findMany: h.scholars } },
+    write: {},
+  },
+  prisma: {},
+}));
 vi.mock("@/lib/edit/core-report-common", async (orig) => ({
   ...(await orig<typeof import("@/lib/edit/core-report-common")>()),
   loadCoreConfirmedPmids: h.pmids,
@@ -117,6 +128,57 @@ describe("report 11 — CoreUsersView", () => {
     expect(view.queryByTestId("core-users-download")).toBeNull();
     expect(view.getByTestId("core-users-download-note").textContent).toMatch(
       /51 people match.*50 or fewer/,
+    );
+  });
+
+  it("Email these users: hidden without a contact count (not an owner)", () => {
+    const { container } = render(
+      <CoreUsersView
+        coreId={CORE}
+        basePath={BASE}
+        params={parseCoreUsersParams(new URLSearchParams())}
+        result={users(2)}
+        totalConfirmed={2}
+      />,
+    );
+    expect(within(container).queryByTestId("core-users-contact-button")).toBeNull();
+    expect(within(container).queryByTestId("core-users-contact-note")).toBeNull();
+  });
+
+  it("Email these users: a button carrying the count but no address, under the cap", () => {
+    const { container } = render(
+      <CoreUsersView
+        coreId={CORE}
+        basePath={BASE}
+        params={parseCoreUsersParams(new URLSearchParams("client=yes"))}
+        result={users(3)}
+        totalConfirmed={3}
+        contactCount={2}
+      />,
+    );
+    const contact = within(container).getByTestId("core-users-contact");
+    expect(within(contact).getByTestId("core-users-contact-button").textContent).toContain(
+      "Email these users",
+    );
+    expect(contact.textContent).toContain("Copies the 2 addresses");
+    expect(container.innerHTML).not.toContain("@");
+  });
+
+  it("Email these users: above CORE_CONTACT_CAP the note replaces the button", () => {
+    const { container } = render(
+      <CoreUsersView
+        coreId={CORE}
+        basePath={BASE}
+        params={parseCoreUsersParams(new URLSearchParams())}
+        result={users(250)}
+        totalConfirmed={250}
+        contactCount={201}
+      />,
+    );
+    const view = within(container);
+    expect(view.queryByTestId("core-users-contact-button")).toBeNull();
+    expect(view.getByTestId("core-users-contact-note").textContent).toMatch(
+      /201 people.*200 or fewer/,
     );
   });
 

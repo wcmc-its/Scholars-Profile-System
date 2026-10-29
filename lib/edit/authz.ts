@@ -485,6 +485,14 @@ export type FlatUnitKind = "core" | "institution";
  * The actor's role on a flat unit: `UnitAdmin(entityType, entityId)` and
  * nothing else — no dept→division cascade. Superuser is NOT minted here (the
  * callers handle it) so the audit log records the role the actor actually held.
+ *
+ * The one exception: a Cores director (`session.isCoreDirector`, the
+ * `core_director` functional role, `lib/auth/core-director.ts`) IS the Owner
+ * of every core, current and future, so this answers "owner" for any core
+ * without a per-core row. That is the role they actually hold, not a
+ * synthetic superuser tier, so every `getCoreOwnerRole` caller and the core
+ * branch of `/api/edit/grant` treat them exactly like a per-core Owner. Not
+ * institutions: the role is about cores only.
  */
 export async function getFlatUnitRole(
   session: EditSession,
@@ -492,6 +500,7 @@ export async function getFlatUnitRole(
   entityId: string,
   db: CoreOwnerLookup,
 ): Promise<EffectiveUnitRole> {
+  if (entityType === "core" && session.isCoreDirector === true) return "owner";
   const row = await db.unitAdmin.findUnique({
     where: { entityType_entityId_cwid: { entityType, entityId, cwid: session.cwid } },
     select: { role: true },
@@ -501,7 +510,8 @@ export async function getFlatUnitRole(
 
 /**
  * The actor's role on a core facility. A core owner is
- * `UnitAdmin(entityType="core", entityId=coreId)`. See {@link getFlatUnitRole};
+ * `UnitAdmin(entityType="core", entityId=coreId)`, or a Cores director (Owner
+ * of every core). See {@link getFlatUnitRole};
  * superuser is handled in {@link authorizeCoreClaim}.
  */
 export async function getCoreOwnerRole(

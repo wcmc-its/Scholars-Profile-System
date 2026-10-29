@@ -3961,7 +3961,7 @@ describe("CoreClaimQueue — header rows", () => {
       within(tabs)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["To review1", "Confirmed1"]);
+    ).toEqual(["To review 1", "Confirmed 1"]);
     expect(within(tabs).queryByRole("button", { name: /Rejected/ })).toBeNull();
   });
 

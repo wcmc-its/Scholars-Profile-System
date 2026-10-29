@@ -12,7 +12,7 @@
  * never replaces a list we already hold (the page or the account went away, or
  * NCBI is degraded — not "they have no papers").
  *
- * Usage: npm run etl:myncbi
+ * Usage: npm run etl:myncbi [-- --all]   (--all refetches every list, due or not)
  */
 import { db, disconnect } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
@@ -72,9 +72,10 @@ async function main(): Promise<number> {
       b,
     ]),
   );
+  const all = process.argv.includes("--all");
   const due = [...urlOf].filter(([cwid, url]) => {
     const b = fresh.get(cwid);
-    return !b || b.url !== url || b.fetchedAt < cutoff;
+    return all || !b || b.url !== url || b.fetchedAt < cutoff;
   });
   console.log(`${urlOf.size} scholars with a MyNCBI URL, ${due.length} due`);
 

@@ -4,14 +4,16 @@
  *
  * The page is server-rendered: each citation is a `<div class="citation-wrap">`
  * whose checkbox carries the citation id (`value`) and, for PubMed items, a
- * `pmid` attribute; the docsum holds the title link, `<span class="source">` and
- * `<span class="pubdate">`. Items without a PMID (books, reports) keep their text.
+ * `pmid` attribute; the docsum holds `<span class="authors">`, the title link,
+ * `<span class="source">` and `<span class="pubdate">`. Items without a PMID (books, reports) keep their text.
  * Pagination is `?page=N`; the highest page number linked is the last page.
  */
 
 export type MyncbiCitation = {
   citationId: string;
   pmid: string | null;
+  /** The author list as shown ("Ceceli AO, Huang Y, ..."); null when the page has none. */
+  authors: string | null;
   title: string;
   source: string | null;
   year: number | null;
@@ -37,6 +39,7 @@ export function parseMyncbiPage(html: string): { citations: MyncbiCitation[]; la
     if (!id) continue;
     const pmid = /\bpmid="(\d+)"/.exec(block)?.[1] ?? null;
     const docsum = /<div class="ncbi-docsum">([\s\S]*?)<\/div>/.exec(block)?.[1] ?? block;
+    const authors = /<span class="authors">([\s\S]*?)<\/span>/.exec(docsum)?.[1];
     const linked = /<a [^>]*>([\s\S]*?)<\/a>/.exec(docsum)?.[1];
     const title = strip(linked ?? docsum).replace(/\.$/, "").slice(0, 1000);
     const source = /<span class="source">([\s\S]*?)<\/span>/.exec(docsum)?.[1];
@@ -45,6 +48,7 @@ export function parseMyncbiPage(html: string): { citations: MyncbiCitation[]; la
     citations.push({
       citationId: id,
       pmid,
+      authors: authors ? strip(authors).replace(/\.$/, "") || null : null,
       title,
       source: source ? strip(source).slice(0, 255) : null,
       year: year ? Number(year) : null,

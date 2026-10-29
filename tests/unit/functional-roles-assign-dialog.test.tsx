@@ -34,6 +34,7 @@ const SCOPES: FunctionalRoleScopeOptions = {
     { key: "*", label: "All reports" },
     { key: "article-count", label: "Article counts" },
   ],
+  core_director: [],
 };
 
 function stubRoute(status: number, payload: Record<string, unknown>) {
@@ -104,6 +105,27 @@ describe("AssignFunctionalRoleDialog", () => {
       role: "external_affairs",
       cwid: "fake001",
       scopes: ["communications", "development"],
+    });
+  });
+
+  it("Cores director: scope-less, so no picker and it submits with scopes []", async () => {
+    const fetchSpy = stubRoute(200, { ok: true, op: "grant", changed: true, rows: [] });
+    const onAssigned = vi.fn();
+    render(<AssignFunctionalRoleDialog scopeOptions={SCOPES} onAssigned={onAssigned} />);
+    fireEvent.click(screen.getByTestId("functional-roles-assign-trigger"));
+    await screen.findByTestId("functional-roles-assign-dialog");
+    fireEvent.click(screen.getByTestId("mock-pick-grantee"));
+    fireEvent.click(screen.getByTestId("functional-roles-assign-role-core_director"));
+    expect(screen.queryByTestId("functional-roles-assign-scopes")).toBeNull();
+    const submit = screen.getByTestId("functional-roles-assign-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(onAssigned).toHaveBeenCalledWith([]));
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]![1]!.body))).toMatchObject({
+      op: "grant",
+      role: "core_director",
+      cwid: "fake001",
+      scopes: [],
     });
   });
 });

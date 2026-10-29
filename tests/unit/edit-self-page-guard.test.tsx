@@ -262,7 +262,9 @@ describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () 
     await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow(
       "__REDIRECT__:/edit/center/meyer_cancer_center",
     );
-    expect(mockLoadManageableUnits).toHaveBeenCalledWith("self01", expect.anything());
+    expect(mockLoadManageableUnits).toHaveBeenCalledWith("self01", expect.anything(), {
+      allCores: false,
+    });
     expect(mockNotFound).not.toHaveBeenCalled();
   });
 

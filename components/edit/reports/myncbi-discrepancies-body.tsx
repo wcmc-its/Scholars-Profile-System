@@ -1,8 +1,9 @@
 /**
  * Report 16 — NIH bibliography discrepancies body. One block per scholar, most
- * missing first: the MyNCBI PMIDs SPS has not confirmed for them (linked to PubMed,
- * with a Publication Manager link to curate), then — behind a disclosure, as weaker
- * evidence — what their profile has that the list does not. Plain GET
+ * missing first: the MyNCBI PMIDs naming them that SPS has not confirmed (linked to
+ * PubMed, with a Publication Manager link to curate), then — behind disclosures —
+ * listed papers by other people (grant-linked, not gaps) and what their profile has
+ * that the list does not. Plain GET
  * `AutoSubmitForm` rail: search, what to show, the shared person facets. Loader:
  * `lib/edit/myncbi-discrepancy-report.ts`. Superusers only.
  */
@@ -99,6 +100,14 @@ function ScholarBlock({ s, curateBase }: { s: MyncbiDiscrepancyScholar; curateBa
           <Citations items={s.missing} />
         </details>
       )}
+      {s.notAuthored.length > 0 && (
+        <details className="mt-2">
+          <summary className="text-muted-foreground cursor-pointer text-[13px] hover:underline">
+            On the list, by other authors ({fmt(s.notAuthored.length)})
+          </summary>
+          <Citations items={s.notAuthored} />
+        </details>
+      )}
       {s.extraCount > 0 && (
         <details className="mt-2">
           <summary className="text-muted-foreground cursor-pointer text-[13px] hover:underline">
@@ -182,6 +191,7 @@ export async function renderMyncbiDiscrepanciesReport({
               { value: fmt(r.totals.matched), label: "confirmed on profiles" },
               { value: fmt(r.totals.missing), label: "missing from profiles" },
               { value: fmt(r.totals.withMissing), label: "scholars missing any" },
+              { value: fmt(r.totals.notAuthored), label: "listed papers by other authors" },
               { value: fmt(r.totals.suspect), label: "lists that may be someone else's" },
             ]}
           />
@@ -199,7 +209,9 @@ export async function renderMyncbiDiscrepanciesReport({
             </p>
           )}
           <p className="text-muted-foreground mt-4 text-[12px]">
-            Citations without a PMID are not compared. A list with under{" "}
+            Citations without a PMID are not compared. A listed paper whose authors do not include the
+            scholar&apos;s surname is shown under &ldquo;by other authors&rdquo; and not counted as missing: PIs link
+            trainees&apos; and members&apos; papers to their grants in MyNCBI. A list with under{" "}
             {Math.round(100 * MYNCBI_SUSPECT_OVERLAP)}% of its PubMed citations on the profile is set aside as possibly
             someone else&apos;s and left out of the missing totals. &ldquo;On the profile, not on the list&rdquo; is weaker evidence:
             many people do not keep their MyNCBI list current. Up to {MYNCBI_EXTRA_TITLE_CAP} are titled per scholar.
