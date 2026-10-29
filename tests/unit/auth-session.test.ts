@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi, afterAll } from "vitest";
 import { sealData } from "iron-session";
 import {
