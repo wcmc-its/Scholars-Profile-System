@@ -156,7 +156,10 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // page parity with `/edit/core` and `/edit/core/[coreId]`'s own gates).
   // Owner-scoped Cores index is still a deliberately deferred gap,
   // self-documented in `app/edit/core/page.tsx`'s own comment.
-  cores: (s) => (s.isSuperuser || s.isCommsSteward) && isCorePagesEnabled(),
+  // A Cores director owns every core (`core_director` functional role), so the
+  // index of every core is theirs too.
+  cores: (s) =>
+    (s.isSuperuser || s.isCommsSteward || s.isCoreDirector === true) && isCorePagesEnabled(),
 
   // Gap 1: the curator signal now lives in the one gate that matters — no
   // separate `app/edit/page.tsx` `showConsoleNav` check to forget it in.
@@ -253,7 +256,7 @@ export const loadConsoleGrants = cache(
   async (session: EditSession, db: PrismaClient): Promise<ConsoleGrants> => {
     const [ownerScope, units, reportable, usage, reportAccess, dashboards] = await Promise.all([
       session.isSuperuser ? Promise.resolve([]) : loadOwnerManagedUnitScope(session, db),
-      loadManageableUnits(session.cwid, db),
+      loadManageableUnits(session.cwid, db, { allCores: session.isCoreDirector === true }),
       loadReportableUnitsForActor(session, db, REPORTABLE_KINDS),
       canViewUsage(session, db),
       hasAnyReportAccess(session.cwid),

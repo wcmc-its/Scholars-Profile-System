@@ -50,8 +50,10 @@ import {
   FUNCTIONAL_ROLES,
   gateHolderNeed,
   isImportedSource,
+  isScopelessRole,
   parityGaps,
   scopeLabel,
+  SCOPELESS_ROLE_SCOPE_TEXT,
   type FunctionalRole,
   type FunctionalRoleRow,
   type FunctionalRoleScopeOptions,
@@ -233,7 +235,9 @@ export function AssignFunctionalRoleDialog({
     }
   }, [open, scopeOptions]);
 
-  const canSubmit = grantee !== null && scopes.length > 0 && !sending;
+  // A scope-less role (Cores director) is the whole grant: nothing to pick.
+  const canSubmit =
+    grantee !== null && (isScopelessRole(role) || scopes.length > 0) && !sending;
 
   async function submit() {
     if (!grantee || !canSubmit) return;
@@ -379,10 +383,13 @@ export function FunctionalRolesPanel({
   const [scopeDraft, setScopeDraft] = React.useState<string[]>([]);
   const [savingScope, setSavingScope] = React.useState(false);
 
-  // External Affairs is institution-wide whatever its functions; only
+  // External Affairs is institution-wide whatever its functions, and a
+  // scope-less role (Cores director) covers everything it is about; only
   // Reporting can be narrowed to specific reports.
   const scopeKind = (r: FunctionalRoleRow) =>
-    r.role === "external_affairs" || r.scopes.includes(ALL_SCOPE) ? "all" : "some";
+    r.role === "external_affairs" || isScopelessRole(r.role) || r.scopes.includes(ALL_SCOPE)
+      ? "all"
+      : "some";
   // Recomputed from the live rows, so an import or an assignment updates it.
   const gaps = gateHolders ? parityGaps(gateHolders, rows) : null;
   const note = functionalRolesNote(authzEnabled);
@@ -800,6 +807,11 @@ export function FunctionalRolesPanel({
                         className="flex flex-wrap gap-1.5"
                         data-testid={`functional-role-scopes-${key}`}
                       >
+                        {isScopelessRole(r.role) && SCOPELESS_ROLE_SCOPE_TEXT[r.role] && (
+                          <span className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full border px-2.5 py-0.5 text-[12.5px] font-medium whitespace-nowrap">
+                            {SCOPELESS_ROLE_SCOPE_TEXT[r.role]}
+                          </span>
+                        )}
                         {r.scopes.map((s) => (
                           <span
                             key={s}

@@ -20,6 +20,7 @@ import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDeveloper } from "@/lib/auth/development";
 import { isContentEditor } from "@/lib/auth/content-editor";
+import { isCoreDirector } from "@/lib/auth/core-director";
 import { isObserver } from "@/lib/auth/observer";
 import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { GLOBAL_ROLE_HOME, resolveGlobalRole } from "@/lib/auth/global-roles";
@@ -184,7 +185,11 @@ export default async function EditSelfPage({
     // `/edit/units` index that exists for exactly them). Without this they
     // signed in and hit a 404. Checked before `report_access`: the unit is the
     // primary job, and its "View reports" link still reaches the reports.
-    const units = await loadManageableUnits(editCwid, db.read);
+    // A Cores director owns every core (effective cwid, so "View as" reflects
+    // the target), so they land on the cores they own like a per-core Owner.
+    const units = await loadManageableUnits(editCwid, db.read, {
+      allCores: await isCoreDirector(editCwid),
+    });
     if (units.total > 0) {
       const all = [
         ...units.departments,
@@ -339,10 +344,15 @@ export default async function EditSelfPage({
     // through `getEffectiveEditSession`. Effective for the same reason as above.
     observer,
     contentEditor,
+    // The EFFECTIVE viewer's Cores director verdict (Owner of every core):
+    // drives the Cores tab and the unit counts the console strip reads.
+    coreDirector,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
-    loadManageableUnits(editCwid, db.read),
+    isCoreDirector(editCwid).then((cd) =>
+      loadManageableUnits(editCwid, db.read, { allCores: cd }),
+    ),
     db.read.scholarProxy.findMany({
       where: { scholarCwid: editCwid },
       select: { proxyCwid: true, grantedBy: true, createdAt: true },
@@ -354,6 +364,7 @@ export default async function EditSelfPage({
     isDeveloper(editCwid).catch(() => false),
     isObserver(editCwid).catch(() => false),
     isContentEditor(editCwid).catch(() => false),
+    isCoreDirector(editCwid),
   ]);
 
   const manageableUnits = [
@@ -400,6 +411,7 @@ export default async function EditSelfPage({
         isCommsSteward: commsSteward,
         isHonorsCurator: honorsCurator,
         isDeveloper: developer,
+        isCoreDirector: coreDirector,
       },
       contentEditor,
     ),

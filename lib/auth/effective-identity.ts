@@ -25,6 +25,7 @@
  */
 import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isContentEditor } from "@/lib/auth/content-editor";
+import { isCoreDirector } from "@/lib/auth/core-director";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
@@ -89,7 +90,7 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
   const cwid = getEffectiveCwid(session);
   // #1514 — same concurrent resolve as getEditSession: independent fail-closed
   // checks, one directory round-trip of wall-clock instead of five.
-  const [su, cs, dev, hc, dsv, obs, ce] = await Promise.all([
+  const [su, cs, dev, hc, dsv, obs, ce, cd] = await Promise.all([
     isSuperuser(cwid),
     isCommsSteward(cwid),
     isDeveloper(cwid),
@@ -97,6 +98,9 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
     isDataSharingViewer(cwid),
     isObserver(cwid),
     isContentEditor(cwid),
+    // The TARGET's Cores director verdict under "View as", never the real
+    // user's: impersonating a non-director strips it, as for every role here.
+    isCoreDirector(cwid),
   ]);
   // Same order as getEditSession: content editor first, then observer.
   return withObserverView(
@@ -108,6 +112,7 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
         isDeveloper: dev,
         isHonorsCurator: hc,
         isDataSharingViewer: dsv,
+        isCoreDirector: cd,
       },
       ce,
     ),

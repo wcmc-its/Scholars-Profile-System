@@ -8,7 +8,9 @@
  * Audience: superuser or comms_steward (2026-08-26 policy widening, decision
  * #6 — full curator-parity on cores, `comms-steward-profile-editing-spec.md`
  * §11) — the admin-toolbar tab is the entry point and is gated the same way
- * (`TAB_PREDICATES.cores`). A non-superuser, non-steward core owner/curator
+ * (`TAB_PREDICATES.cores`). A Cores director (`core_director` functional
+ * role) owns every core and sees the whole index too. A non-superuser,
+ * non-steward, non-director core owner/curator
  * still reaches THEIR queue via the per-core deep link (`/edit/core/[coreId]`,
  * auth-gated on `getCoreOwnerRole`); an owner-scoped index is a future add
  * (the account-menu entry point). `force-dynamic` + `noindex`, mirroring the
@@ -39,7 +41,7 @@ export default async function EditCoresIndexPage() {
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/core");
   }
-  if (!session.isSuperuser && !session.isCommsSteward) {
+  if (!session.isSuperuser && !session.isCommsSteward && session.isCoreDirector !== true) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "core",

@@ -6,7 +6,7 @@
  * `"use client"` component. The DB side is `functional-roles.server.ts`; the
  * gate-side reads are `lib/auth/functional-role-authz.ts`.
  *
- * Two roles:
+ * Three roles:
  *   - External Affairs (`external_affairs`): ONE operational unit. Its
  *     functions, Communications and Development, are recorded on the grant
  *     as its scopes (`communications`, `development`). A person who works in
@@ -17,18 +17,26 @@
  *     The wildcard `"*"` admits every REPORT and no dashboard: dashboards are
  *     always picked one by one, so an existing "All reports" grant never
  *     widens and a dashboard added later is never granted silently.
+ *   - Cores director (`core_director`): Owner of EVERY core facility, current
+ *     and future, with no per-core `unit_admin` grant, plus the all-cores
+ *     report roll-up. Scope-less: the grant carries `scopes: []`. Resolved
+ *     once per request onto `EditSession.isCoreDirector`
+ *     (`lib/auth/core-director.ts`); `getFlatUnitRole` then answers "owner"
+ *     for any core and `canViewAllCores` admits the holder.
  *
  * Authorization: while `FUNCTIONAL_ROLES_AUTHZ` is not "on" (the default in
  * every env), no gate reads `functional_role_grant` and the table is a
  * registry only. When it is "on", a manual grant ADDS access: External Affairs with
  * Communications admits `isCommsSteward`, with Development admits
- * `isDeveloper`, and a Reporting grant admits the report gate per scope. The
+ * `isDeveloper`, a Reporting grant admits the report gate per scope, and a
+ * Cores director grant admits `isCoreDirector` (there is no other source for
+ * that role: with the flag off, nobody is a Cores director). The
  * existing sources (ED groups, allowlists, `report_access`) keep working
  * either way. Imported rows (`report_access`, `allowlist`) never admit: they
  * only mirror a source that already does, and would outlive a revoke there.
  */
 
-export const FUNCTIONAL_ROLES = ["external_affairs", "reporting"] as const;
+export const FUNCTIONAL_ROLES = ["external_affairs", "reporting", "core_director"] as const;
 export type FunctionalRole = (typeof FUNCTIONAL_ROLES)[number];
 
 export function isFunctionalRole(value: unknown): value is FunctionalRole {
@@ -38,6 +46,7 @@ export function isFunctionalRole(value: unknown): value is FunctionalRole {
 export const FUNCTIONAL_ROLE_LABEL: Record<FunctionalRole, string> = {
   external_affairs: "External Affairs",
   reporting: "Reporting",
+  core_director: "Cores director",
 };
 
 /** One line under the role name: what the role is for. */
@@ -45,6 +54,7 @@ export const FUNCTIONAL_ROLE_DESCRIPTION: Record<FunctionalRole, string> = {
   external_affairs:
     "Communications edits overviews, headshots and Spotlight; Development gets prospect-research tools",
   reporting: "Reports and Insights for the scopes shown",
+  core_director: "Owner of every core facility, current and future, plus the all-cores reports",
 };
 
 /** What a role's scope keys are called in the UI: External Affairs records
@@ -52,6 +62,21 @@ export const FUNCTIONAL_ROLE_DESCRIPTION: Record<FunctionalRole, string> = {
 export const FUNCTIONAL_ROLE_SCOPE_NOUN: Record<FunctionalRole, string> = {
   external_affairs: "Functions",
   reporting: "Scope",
+  core_director: "Scope",
+};
+
+/** Roles whose grant carries no scopes (`scopes: []`): the role itself is
+ *  the whole grant. The Assign dialog shows no picker for them and the route
+ *  accepts only an absent or empty `scopes`. */
+const SCOPELESS_ROLES: ReadonlySet<FunctionalRole> = new Set<FunctionalRole>(["core_director"]);
+
+export function isScopelessRole(role: FunctionalRole): boolean {
+  return SCOPELESS_ROLES.has(role);
+}
+
+/** What a scope-less role's row shows in place of scope chips. */
+export const SCOPELESS_ROLE_SCOPE_TEXT: Partial<Record<FunctionalRole, string>> = {
+  core_director: "All cores",
 };
 
 /** External Affairs functions: the scope keys an `external_affairs` grant
@@ -140,6 +165,9 @@ export type FunctionalRoleScopeOptions = Record<
   FunctionalRole,
   ReadonlyArray<FunctionalRoleScopeOption>
 >;
+
+/** A scope-less role offers no scope options. */
+export const NO_SCOPE_OPTIONS: ReadonlyArray<FunctionalRoleScopeOption> = [];
 
 /** External Affairs has no wildcard: each function is chosen explicitly. */
 export const EXTERNAL_AFFAIRS_SCOPE_OPTIONS: ReadonlyArray<FunctionalRoleScopeOption> =
