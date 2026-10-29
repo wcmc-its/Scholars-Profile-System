@@ -12,6 +12,10 @@
  *              call (`lib/edit/pub-relevance-generator.ts`).
  *   4. WRITE   Each row as it lands, so a crash keeps what it paid for. A
  *              failed call writes nothing; the next run retries it.
+ *   5. AFFIL   For relevant rows with no `externalAuthor` yet, read every
+ *              author's affiliation from PubMed (`lib/edit/pubmed-affiliations.ts`)
+ *              for the matrix's inter-institutional column. A PubMed failure
+ *              is logged and retried next run; it never fails the step.
  *
  * Usage: `npm run etl:center-pub-relevance [-- --year 2025 | --since 2025]`.
  * Default window: last calendar year onward.
@@ -23,10 +27,13 @@ import {
   pubRelevanceInputHash,
   type PubRelevanceInput,
 } from "@/lib/edit/pub-relevance-generator";
+import { fetchExternalAuthorFlags } from "@/lib/edit/pubmed-affiliations";
 
 const CONCURRENCY = 4;
 /** ponytail: per-run cost ceiling; a bigger backfill finishes on the next run. */
 const MAX_SCORED_PER_RUN = 5000;
+/** 25 EFetch calls at most; a larger backfill finishes on later runs. */
+const MAX_AFFILIATION_LOOKUPS = 5000;
 
 function yearWindow(argv: string[]): { gte: number; lte?: number } {
   const arg = (name: string) => {
@@ -45,6 +52,34 @@ function meshLabels(json: unknown): string[] {
   return json
     .map((m) => (m && typeof m === "object" ? (m as { label?: unknown }).label : null))
     .filter((l): l is string => typeof l === "string");
+}
+
+/** Step 5. Rows PubMed gives no affiliations for stay null and are asked again next run. */
+async function markExternalAuthors(): Promise<void> {
+  const rows = await db.read.centerPublicationRelevance.findMany({
+    where: { relevant: true, externalAuthor: null },
+    distinct: ["pmid"],
+    select: { pmid: true },
+    take: MAX_AFFILIATION_LOOKUPS,
+  });
+  if (rows.length === 0) return;
+  let flags: Map<string, boolean | null>;
+  try {
+    flags = await fetchExternalAuthorFlags(rows.map((r) => r.pmid));
+  } catch (err) {
+    console.warn(`PubMed affiliations failed; retrying next run: ${(err as Error).message}`);
+    return;
+  }
+  let set = 0;
+  for (const [pmid, externalAuthor] of flags) {
+    if (externalAuthor === null) continue;
+    await db.write.centerPublicationRelevance.updateMany({
+      where: { pmid },
+      data: { externalAuthor },
+    });
+    set++;
+  }
+  console.log(`Affiliations: looked up ${rows.length}, set ${set}.`);
 }
 
 async function main(): Promise<number> {
@@ -130,6 +165,7 @@ async function main(): Promise<number> {
   );
 
   console.log(`Decided ${written}, failed ${failed}.`);
+  await markExternalAuthors();
   // Some failures retry next run; ALL failing is an outage (IAM, Bedrock) worth an alarm.
   if (failed > 0 && written === 0) throw new Error(`all ${failed} relevance calls failed`);
   return written;

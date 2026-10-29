@@ -98,6 +98,7 @@ describe("unitKindsFor", () => {
       "16": [],
       // Center-only review queue.
       "17": ["center"],
+      "19": ["center"],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);
