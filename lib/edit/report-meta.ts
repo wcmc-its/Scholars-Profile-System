@@ -71,6 +71,7 @@ export const REPORT_KEYS = [
   "15",
   "16",
   "17",
+  "18",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -225,6 +226,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Publication cancer relevance",
     summary:
       "Is each research member's publication cancer relevant? MCC rule for reviews, preprints and errata, an AI call for the rest; confirm or flip it here.",
+    descriptionHtml: null,
+  },
+  "18": {
+    slug: "publication-citation-report",
+    name: "Publication citation report",
+    summary:
+      "The center's publications in a period, each WCM author with their program on the publication date, and the cancer relevance answer. Downloads as EVAL's .xlsx.",
     descriptionHtml: null,
   },
 };

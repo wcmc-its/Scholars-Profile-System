@@ -433,7 +433,7 @@ export async function loadReportableUnitsForActor(
     }));
 }
 
-export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13 | 17;
+export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13 | 17 | 18;
 
 /**
  * Which numbered reports apply to a unit of this kind — the single source of
@@ -450,8 +450,9 @@ export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13 | 17;
  * has no membership table at all.
  */
 export const REPORT_NUMBERS_BY_KIND: Record<ReportableUnitKind, readonly ReportNumber[]> = {
-  // 17 Publication cancer relevance: center-only, reads research members.
-  center: [1, 2, 3, 4, 5, 6, 17],
+  // 17 Publication cancer relevance and 18 Publication citation report:
+  // center-only, read research members.
+  center: [1, 2, 3, 4, 5, 6, 17, 18],
   department: [3, 6],
   division: [3, 6],
   // 11 Core users, 12 Output over time, 13 Grants citing the core: core-only,
@@ -459,7 +460,7 @@ export const REPORT_NUMBERS_BY_KIND: Record<ReportableUnitKind, readonly ReportN
   core: [3, 6, 11, 12, 13],
 };
 
-/** Size of the full (center) report catalog — seven numbered reports. Kept as a
+/** Size of the full (center) report catalog — eight numbered reports. Kept as a
  *  named export since `app/edit/reports/page.tsx` still needs a default
  *  `totalCount` fallback; department/division totals are 2, not this. */
 export const REPORT_CATALOG_SIZE = REPORT_NUMBERS_BY_KIND.center.length;
@@ -689,7 +690,7 @@ export async function loadReportLiveness(
           reportingCycle: funding?.latestCycle ?? null,
           toReview: funding?.toReview ?? 0,
         };
-      // 3, 4, 5, 6, 17 — proxied by active-membership existence (center/dept/div)
+      // 3, 4, 5, 6, 17, 18 — proxied by active-membership existence (center/dept/div)
       // or by real confirmed-usage presence (core). 11–13 are core-only and
       // read that same confirmed-usage set, so the same bit is exact for them
       // (13 a proxy like 6: a core with no grant-linked paper renders empty).
