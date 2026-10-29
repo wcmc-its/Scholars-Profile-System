@@ -232,7 +232,7 @@ export function RosterFacet({
                   aria-hidden="true"
                   className="mt-[3px] accent-[var(--color-primary-cornell-red)]"
                 />
-                <span className="min-w-0 flex-1 break-words">{o.label}</span>
+                <span className="min-w-0 flex-1 break-words">{o.label}</span>{" "}
                 <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[var(--color-text-tertiary)]">
                   {o.count.toLocaleString()}
                 </span>

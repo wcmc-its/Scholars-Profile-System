@@ -534,12 +534,16 @@ function ModalContent({
                   >
                     {t.label}
                     {t.count ? (
-                      <span className="text-muted-foreground text-[12.5px] font-normal tabular-nums">
+                      <>
                         {/* Separator so the accessible name reads "Cited by
-                            1,500", not "Cited by1,500". */}
-                        <span className="sr-only"> </span>
-                        {t.count}
-                      </span>
+                            1,500", not "Cited by1,500". A bare text node, not a
+                            space inside the count span: accname trims a child
+                            element's text. Trailing whitespace in the label's
+                            flex item collapses, so it adds no visible gap. */}{" "}
+                        <span className="text-muted-foreground text-[12.5px] font-normal tabular-nums">
+                          {t.count}
+                        </span>
+                      </>
                     ) : null}
                   </button>
                 );

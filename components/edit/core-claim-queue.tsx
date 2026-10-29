@@ -3618,8 +3618,8 @@ export function CoreClaimQueue({
                         ? "Confirming…"
                         : selectedPmids.length > 0
                           ? `Confirm ${selectedPmids.length}`
-                          : "Confirm"}
-                      <span className="sr-only"> selected</span>
+                          : "Confirm"}{" "}
+                      <span className="sr-only">selected</span>
                     </button>
                     <button
                       type="button"
@@ -3631,8 +3631,8 @@ export function CoreClaimQueue({
                         ? "Rejecting…"
                         : selectedPmids.length > 0
                           ? `Reject ${selectedPmids.length}`
-                          : "Reject"}
-                      <span className="sr-only"> selected</span>
+                          : "Reject"}{" "}
+                      <span className="sr-only">selected</span>
                     </button>
                     {selectedPmids.length === 0 && armed === null && openShown.length > 0 ? (
                       <button
@@ -4074,8 +4074,8 @@ function HistorySelectionBar({
           ? `${tab === "confirmed" ? "Revoking" : "Restoring"}…`
           : selectedCount > 0
             ? `${verb} ${selectedCount}`
-            : verb}
-        <span className="sr-only"> selected</span>
+            : verb}{" "}
+        <span className="sr-only">selected</span>
       </button>
     </div>
   );
@@ -4176,7 +4176,7 @@ function ViewTabs({
                   : "text-muted-foreground hover:text-foreground border border-transparent"
               }`}
             >
-              {t.label}
+              {t.label}{" "}
               {active ? (
                 <span className="bg-apollo-maroon inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-px text-[11px] tabular-nums text-white">
                   {t.count}
