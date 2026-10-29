@@ -5,7 +5,7 @@
  *
  *   1. SCOPE   Per center, every publication with ≥1 confirmed author who holds
  *              a research or clinical membership (`CenterMembership.membershipType`), in the
- *              year window.
+ *              year window by `publicationDate` (`lib/edit/center-pub-attribution.ts`).
  *   2. SKIP    A row a reviewer set (`source: "human"`), and a row whose input
  *              hash still matches (nothing about the publication changed),
  *              unless it is a rule row its type no longer earns (a review
@@ -24,6 +24,7 @@
  */
 import { db, disconnect } from "../../lib/db";
 import { withEtlRun } from "@/lib/etl-run";
+import { publicationInPeriod, publicationPeriodWhere } from "@/lib/edit/center-pub-attribution";
 import {
   inferPubRelevance,
   pubRelevanceNeedsDecision,
@@ -37,7 +38,8 @@ const MAX_SCORED_PER_RUN = 5000;
 /** 25 EFetch calls at most; a larger backfill finishes on later runs. */
 const MAX_AFFILIATION_LOOKUPS = 5000;
 
-function yearWindow(argv: string[]): { gte: number; lte?: number } {
+/** The year window as inclusive ISO dates, tested on `publicationDate`. */
+function yearWindow(argv: string[]): { from: string; to?: string } {
   const arg = (name: string) => {
     const i = argv.indexOf(name);
     const v = i >= 0 ? Number(argv[i + 1]) : NaN;
@@ -45,8 +47,8 @@ function yearWindow(argv: string[]): { gte: number; lte?: number } {
     return i >= 0 ? v : null;
   };
   const year = arg("--year");
-  if (year != null) return { gte: year, lte: year };
-  return { gte: arg("--since") ?? new Date().getUTCFullYear() - 1 };
+  if (year != null) return { from: `${year}-01-01`, to: `${year}-12-31` };
+  return { from: `${arg("--since") ?? new Date().getUTCFullYear() - 1}-01-01` };
 }
 
 function meshLabels(json: unknown): string[] {
@@ -85,7 +87,7 @@ async function markExternalAuthors(): Promise<void> {
 }
 
 async function main(): Promise<number> {
-  const year = yearWindow(process.argv.slice(2));
+  const { from, to } = yearWindow(process.argv.slice(2));
   const members = await db.read.centerMembership.findMany({
     // research AND clinical: reports 18/19 filter by either type, and a
     // pub with no row reads as "Not scored", an undercount.
@@ -98,16 +100,28 @@ async function main(): Promise<number> {
 
   const todo: Array<{ centerCode: string; pmid: string; input: PubRelevanceInput }> = [];
   for (const [centerCode, cwids] of cwidsByCenter) {
-    const [pubs, existing] = await Promise.all([
+    const [found, existing] = await Promise.all([
       db.read.publication.findMany({
-        where: { year, authors: { some: { isConfirmed: true, cwid: { in: cwids } } } },
-        select: { pmid: true, title: true, abstract: true, meshTerms: true, publicationType: true },
+        where: {
+          ...publicationPeriodWhere(from, to),
+          authors: { some: { isConfirmed: true, cwid: { in: cwids } } },
+        },
+        select: {
+          pmid: true,
+          title: true,
+          abstract: true,
+          meshTerms: true,
+          publicationType: true,
+          year: true,
+          dateAddedToEntrez: true,
+        },
       }),
       db.read.centerPublicationRelevance.findMany({
         where: { centerCode },
-        select: { pmid: true, source: true, inputHash: true },
+        select: { pmid: true, source: true, inputHash: true, promptHash: true },
       }),
     ]);
+    const pubs = found.filter((p) => publicationInPeriod(p, from, to));
     const prior = new Map(existing.map((e) => [e.pmid, e]));
     for (const p of pubs) {
       const input = {
