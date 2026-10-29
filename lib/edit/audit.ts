@@ -349,7 +349,14 @@ export type AuditAction =
    *  email as VERIFIED (`ORCID_EMAIL_AUTOCONFIRM`). Actor `"ETL"`,
    *  `targetEntityType='scholar'`, `targetEntityId` the cwid; before/after
    *  carry `{ orcid }`. ENUM extended in scripts/sql/audit-log.sql. */
-  | "orcid_email_autoconfirm";
+  | "orcid_email_autoconfirm"
+  /** A core owner (or Superuser/comms_steward, on their OWN roles) copied the
+   *  email addresses of report 11's filtered core users for an Outlook Bcc
+   *  (`POST /api/edit/reports/core-users/contacts`, decision of 2026-10-29).
+   *  `targetEntityType='core'`, `targetEntityId` the core id; before is null,
+   *  after carries `{ recipients, filters }` — never an address. Requires the
+   *  `scholars_audit` action ENUM be extended — see scripts/sql/audit-log.sql. */
+  | "core_users_contact_copy";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
