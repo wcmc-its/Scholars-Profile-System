@@ -192,9 +192,9 @@ export async function renderPubCitationReport({
                 ` ${unknownTenure.toLocaleString()} are included only through members with no known WCM start date.`}
             </li>
             <li>
-              Investigators: every confirmed WCM author, with the program a credited member is in on{" "}
-              {longDate(params.asOf)}.
+              Investigators: every confirmed WCM author, with a credited member&rsquo;s program.
             </li>
+            <li>Program: each member&rsquo;s current program.</li>
             <li>
               Reviews are a separate marker from cancer relevance. Only cancer-relevant non-reviews
               feed the collaborative publication matrix.

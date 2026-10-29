@@ -6,9 +6,10 @@
  * investigator line and the workbook; the loader is
  * `pub-citation-report.server.ts`. DB-free.
  *
- * Which publications, members and programs are in scope is the shared
- * attribution (`center-pub-attribution.ts`): members active on the as-of
- * date, their program on that date, publications only from their WCM tenure.
+ * Which publications and members are in scope is the shared attribution
+ * (`center-pub-attribution.ts`): members active on the as-of date, each with
+ * their current program (SPS keeps no program history), publications only
+ * from their WCM tenure.
  *
  * Exempt from SCHOLAR_EXPORT_CAP (approved 2026-10-29) on the condition that
  * the export carries NO CWID column: publication-grain citation data with
@@ -26,7 +27,7 @@ export type PubCitationParams = {
   /** `YYYY-MM-DD`, both ends inclusive. */
   start: string;
   end: string;
-  /** The reporting date members and programs are read on, `YYYY-MM-DD`. */
+  /** The reporting date members are read on, `YYYY-MM-DD`. */
   asOf: string;
   membership: PubCitationMembershipType;
   relevance: PubCitationRelevance;
@@ -116,7 +117,8 @@ const relevantLabel = (r: boolean | null) => (r === null ? "" : r ? "Yes" : "No"
 export function pubCitationCriteria(p: PubCitationParams): Array<[string, string]> {
   return [
     ["Period", `${p.start} to ${p.end} (date added to PubMed, else 1 January of the year)`],
-    ["Members and programs as of", p.asOf],
+    ["Members as of", p.asOf],
+    ["Program", "Each member's current program"],
     [
       "Membership type",
       p.membership === "all"

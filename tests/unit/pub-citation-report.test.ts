@@ -23,7 +23,7 @@ vi.mock("@/lib/edit/center-pub-attribution.server", () => ({
   loadCenterPubAttribution: h.attribution,
 }));
 
-import type { AttributedPublication } from "@/lib/edit/center-pub-attribution";
+import { type AttributedPublication, UNKNOWN_AUTHOR_NAME } from "@/lib/edit/center-pub-attribution";
 import {
   buildPubCitationWorkbook,
   investigatorLine,
@@ -255,6 +255,40 @@ describe("loadPubCitationReport", () => {
     ]);
   });
 
+  it("a credited member with no scholar row puts no CWID in any export cell", async () => {
+    h.attribution.mockResolvedValue(
+      attribution([
+        {
+          ...attributed("600", "2025-06-01", true, false, [
+            ["aaa1001", "CB"],
+            ["mmm0001", "CT"],
+          ]),
+          members: [
+            { cwid: "aaa1001", name: "Ann First", programCode: "CB", tenureUnknown: false },
+            // The base's placeholder: no scholar row → "Unknown author", never the cwid.
+            { cwid: "mmm0001", name: UNKNOWN_AUTHOR_NAME, programCode: "CT", tenureUnknown: false },
+          ],
+        },
+      ]),
+    );
+    h.pubs.mockResolvedValue([
+      {
+        pmid: "600",
+        authors: [
+          author("aaa1001", "Ann First", 1, { isFirst: true }),
+          { ...author("mmm0001", "", 2), scholar: null },
+        ],
+      },
+    ]);
+    const { rows } = await loadPubCitationReport("ctr", P);
+    expect(rows[0].investigators.map((i) => i.line)).toEqual(["First, Ann - CB"]);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildPubCitationWorkbook(rows, P, NOW)) as unknown as ExcelJS.Buffer);
+    const cells: string[] = [];
+    wb.eachSheet((ws) => ws.eachRow((r) => r.eachCell((c) => void cells.push(String(c.value)))));
+    expect(cells.some((c) => /aaa1001|mmm0001/.test(c))).toBe(false);
+  });
+
   it("nothing kept → no detail query, no rows", async () => {
     h.attribution.mockResolvedValue(attribution([]));
     expect(await loadPubCitationReport("ctr", P)).toEqual({ rows: [], unknownTenure: 0 });
@@ -326,7 +360,8 @@ describe("buildPubCitationWorkbook", () => {
     wb.getWorksheet("Criteria")!.eachRow((r) =>
       criteria.set(String(r.getCell(1).value), String(r.getCell(2).value)),
     );
-    expect(criteria.get("Members and programs as of")).toBe("2026-08-12");
+    expect(criteria.get("Members as of")).toBe("2026-08-12");
+    expect(criteria.get("Program")).toBe("Each member's current program");
     expect(criteria.get("Publications included")).toBe("All");
     expect(criteria.get("Included on unknown WCM tenure")).toBe("2");
   });

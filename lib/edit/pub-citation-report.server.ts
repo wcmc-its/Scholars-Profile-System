@@ -1,8 +1,8 @@
 /**
  * Report 18 loader: the center's publications in the period, attributed by
  * the shared rules (`loadCenterPubAttribution`: members of the chosen type
- * active on the as-of date, their program on that date, publications only
- * from their WCM tenure), filtered on relevance and the review marker, each
+ * active on the as-of date, their current program, publications only from
+ * their WCM tenure), filtered on relevance and the review marker, each
  * with its `center_publication_relevance` reason and every confirmed WCM
  * author in byline order. The caller has passed the unit gate. Server-only
  * (reads `@/lib/db`).
@@ -93,7 +93,7 @@ export async function loadPubCitationReport(
       relevant: p.relevant,
       reason: reasonOf.get(p.pmid) ?? null,
       // Names only, never a CWID: an author without a scholar row is left out.
-      // The program is the credited member's on the as-of date.
+      // The program is the credited member's current one.
       investigators: authors
         .filter((a) => a.scholar)
         .sort((a, b) => rank(a) - rank(b))
