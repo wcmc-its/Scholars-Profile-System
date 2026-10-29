@@ -40,7 +40,7 @@ core_claim              HUMAN decision — ETL-immune, never touched by the nigh
   revokedBy, revokedAt        soft-revoke; NULL = active
 ```
 
-`core` has **no DynamoDB catalog record** (unlike `topic`, seeded from `TAXONOMY#`). It's seeded from a version-controlled constant, `CORE_CATALOG` (`etl/dynamodb/core-catalog.ts`), a thin mirror of ReciterAI's `config/core_dictionary.yaml`. All 13 dictionary cores are mirrored today; 4 (Institutional Biorepository, Metabolic Phenotyping, Microbiome, Human Immune Monitoring) have a catalog row but currently project zero usage rows — an empty page, not an error, until the upstream feed surfaces their staff.
+`core` has **no DynamoDB catalog record** (unlike `topic`, seeded from `TAXONOMY#`). It's seeded from a version-controlled constant, `CORE_CATALOG` (`etl/dynamodb/core-catalog.ts`), a thin mirror of ReciterAI's `config/core_dictionary.yaml`. It holds 19 cores (ids 1-21; 9 and 12 were removed in 2026-10 because neither facility exists, and their ids are not reused). The 12 dictionary-backed cores are mirrored; 15-21 are catalog-only until their dictionary entries land, and project zero usage rows until then. Of the dictionary cores, 4 (Institutional Biorepository, Metabolic Phenotyping, Microbiome, Human Immune Monitoring) have a catalog row but currently project zero usage rows — an empty page, not an error, until the upstream feed surfaces their staff.
 
 `core_claim` carries **no foreign key** to `publication_core`/`core`/`publication` — deliberately, the same ETL-immunity ADR-005 uses elsewhere: a claim can precede the engine's projection (or outlive a `publication_core` delete) and still be the durable record.
 
@@ -367,7 +367,7 @@ The index (`app/edit/core/page.tsx` → `loadCoreConsoleIndex()`) only ever enum
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Empty state (a real, reachable case — 4 of the 13 catalog cores currently have zero projected rows): "No confirmed publications yet." under the facility header.
+Empty state (a real, reachable case — several catalog cores currently have zero projected rows): "No confirmed publications yet." under the facility header.
 
 ## Public index — `/cores`
 
