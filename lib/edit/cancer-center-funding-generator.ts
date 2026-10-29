@@ -32,7 +32,7 @@
  *
  * MCC'S RUBRIC (10-01): bands of 100 / 50 / 25 / 0, read from the title,
  * abstract and Public Health Relevance statement. The cases MCC says are
- * ALWAYS 100 (an NCI award, Lynch syndrome) are decided by the import before
+ * ALWAYS 100 (an NCI award, Lynch syndrome, HPV) are decided by the import before
  * any call here (`cancerRelevanceRule` in the import script, `source: "rule"`).
  * The schema admits only the four bands: an off-band answer fails the call
  * and the row stays "not yet inferred", never quietly rounded.

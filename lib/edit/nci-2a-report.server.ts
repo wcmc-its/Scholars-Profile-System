@@ -132,6 +132,7 @@ export async function loadNci2aReport(
       cancerRelevantModel: a.cancerRelevantModel,
       cancerRelevantRationale: a.cancerRelevantRationale,
       reviewerNote: a.reviewerNote,
+      traineeSlots: a.traineeSlots,
       cancerRelevantAnnualProjectDc: relevantRaw != null ? round2(relevantRaw) : null,
       isPeerReviewed: a.isPeerReviewed,
       grantCwid: a.grantCwid,

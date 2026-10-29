@@ -59,6 +59,8 @@ import {
   applyPlan,
   carriedHumanNote,
   carriedHumanPercent,
+  cancerRelevanceRule,
+  isUsNciSponsor,
   CENTER_CODE,
   type ImportOptions,
   type ImportRow,
@@ -369,6 +371,46 @@ describe("planRow", () => {
     expect(mockInfer).not.toHaveBeenCalled();
     expect(plan.cancerRelevantPercent).toBe(100);
     expect(plan.provenance.cancerRelevantModel).toBe("rule:lynch");
+  });
+
+  it("HPV or papillomavirus in the title, abstract or PHR gets 100 by rule", async () => {
+    const byTitle = await planRow({ ...LLM_ROW, projectTitle: "HPV vaccine uptake in adolescents" }, new Map(), new Map());
+    expect(byTitle.cancerRelevantPercent).toBe(100);
+    expect(byTitle.cancerRelevantRationale).toBe("HPV: 100% under MCC's rubric.");
+    expect(byTitle.provenance.cancerRelevantModel).toBe("rule:hpv");
+    for (const phrText of ["Human papillomavirus infection.", "Human papilloma virus infection."]) {
+      const textIndex = buildGrantTextIndex([
+        { awardNumber: "5 R01 GM059736-01", cwid: "abc1234", abstract: null, phrText },
+      ]);
+      expect((await planRow(LLM_ROW, new Map(), new Map(), textIndex)).provenance.cancerRelevantModel).toBe("rule:hpv");
+    }
+    expect(mockInfer).not.toHaveBeenCalled();
+    // A word merely containing the letters is not HPV.
+    expect(cancerRelevanceRule({ ...LLM_ROW, projectTitle: "SHPV2 kinase" }, { abstract: null, phrText: null })).toBeNull();
+  });
+
+  it("an incoming subaward whose prime sponsor is NCI gets 100 by the NCI rule", async () => {
+    const sub = { ...LLM_ROW, specificFundingSource: "Some University", originatingSponsor: "National Cancer Institute" };
+    const plan = await planRow(sub, new Map(), new Map());
+    expect(mockInfer).not.toHaveBeenCalled();
+    expect(plan.provenance.cancerRelevantModel).toBe("rule:nci");
+    // A file built before the column existed, or another prime, is no NCI rule.
+    expect(cancerRelevanceRule({ ...sub, originatingSponsor: undefined }, { abstract: null, phrText: null })).toBeNull();
+    expect(cancerRelevanceRule({ ...sub, originatingSponsor: "Department of Defense" }, { abstract: null, phrText: null })).toBeNull();
+  });
+
+  it("a non-US National Cancer Institute is not an NCI award", () => {
+    for (const name of [
+      "National Cancer Institute of Canada",
+      "Italian National Cancer Institute",
+      "National Cancer Institute at Some Hospital",
+    ]) {
+      expect(isUsNciSponsor(name)).toBe(false);
+      expect(cancerRelevanceRule({ ...LLM_ROW, specificFundingSource: name }, { abstract: null, phrText: null })).toBeNull();
+    }
+    for (const name of ["National Cancer Institute", "NIH/National Cancer Institute", "US National Cancer Institute (NCI)"]) {
+      expect(isUsNciSponsor(name)).toBe(true);
+    }
   });
 
   it("sends the Grant abstract and PHR to Bedrock when present, and carries its provenance", async () => {
