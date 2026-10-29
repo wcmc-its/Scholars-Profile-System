@@ -129,8 +129,7 @@ describe("assertCutoverGate", () => {
 // Both envs share the shared VPC + subnets, but carry their OWN per-env SG ids
 // (isolation is by per-env security group, never network — plan §4.5): staging
 // overrides SHARED_VPC's empty SG fields via a spread, prod stays on the bare
-// const until its cutover. The ED-export VPC is a separate, untouched field
-// used only by the email-visibility bridge.
+// const until its cutover.
 describe("sharedVpc descriptor", () => {
   for (const env of ["staging", "prod"] as const) {
     it(`${env}: ships the expected useSharedVpc flag and a populated sharedVpc`, () => {
@@ -140,8 +139,6 @@ describe("sharedVpc descriptor", () => {
       expect(cfg.sharedVpc.vpcId).toMatch(/^vpc-/);
       expect(cfg.sharedVpc.appSubnetIds.length).toBeGreaterThan(0);
       expect(cfg.sharedVpc.dataSubnetIds.length).toBeGreaterThan(0);
-      // The shared VPC is NOT the ED-export VPC (independently flippable).
-      expect(cfg.sharedVpc.vpcId).not.toBe(cfg.edExportVpc.vpcId);
     });
   }
 

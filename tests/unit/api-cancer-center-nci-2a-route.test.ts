@@ -389,6 +389,21 @@ describe("PATCH /api/edit/center/[code]/nci-2a/[awardId]", () => {
     expect(mockTxAwardUpdate).not.toHaveBeenCalled();
   });
 
+  it("saves trainee slots alone, audited; null clears; a non-integer or out-of-range value 400s", async () => {
+    mockAwardFindUnique.mockResolvedValue({ ...EXISTING, traineeSlots: null });
+    const res = await PATCH(patch({ traineeSlots: 6 }), { params: params() });
+    expect(res.status).toBe(200);
+    expect(mockTxAwardUpdate.mock.calls[0][0].data).toEqual({ traineeSlots: 6 });
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toMatchObject({ fieldsChanged: ["traineeSlots"] });
+    await PATCH(patch({ traineeSlots: null }), { params: params() });
+    expect(mockTxAwardUpdate.mock.calls[1][0].data).toEqual({ traineeSlots: null });
+    for (const bad of [2.5, -1, 1000, "6"]) {
+      expect((await PATCH(patch({ traineeSlots: bad }), { params: params() })).status).toBe(400);
+    }
+    expect(mockTxAwardUpdate).toHaveBeenCalledTimes(2);
+  });
+
   it("saves a percent and a note together", async () => {
     const res = await PATCH(patch({ cancerRelevantPercent: 60, reviewerNote: "Aim 2 only" }), { params: params() });
     expect(res.status).toBe(200);

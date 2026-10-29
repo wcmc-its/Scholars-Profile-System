@@ -735,8 +735,7 @@ export function AdministratorsRoster({
           className="text-muted-foreground text-[12.5px] whitespace-nowrap"
           data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
         >
-          Read-only
-          <span className="sr-only"> — {ED_LOCKED_NOTE}</span>
+          Read-only <span className="sr-only">— {ED_LOCKED_NOTE}</span>
         </span>
       );
     }

@@ -295,34 +295,16 @@ export interface SpsEnvConfig {
    */
   readonly grantMatcherSubtopicGrain: boolean;
   /**
-   * The externally-created, TGW-attached VPC that on-prem-reachable ETL tasks
-   * run in — specifically the ED LDAP → S3 email-visibility export (#443).
-   * Created out-of-band by WCM networking (NOT by our CDK): staging →
-   * `scholars-dev`, prod → `scholars-prod`. Its private `app` subnets route
-   * 140.251/16 + 157.139/16 + 10/8 to the on-prem Transit Gateway and forward
-   * weill.cornell.edu DNS to the on-prem resolvers, so a Fargate task placed
-   * there reaches `edprovider.weill.cornell.edu:636` — which the Sps app VPC
-   * cannot (it is not TGW-attached). Only the private app subnets are listed
-   * (they carry the TGW + NAT routes; the public dmz subnets do not). Imported
-   * by attributes (no context lookup) so synth stays deterministic without
-   * account creds. Used only when {@link edEmailVisibilityBridgeEnabled} is true.
-   */
-  readonly edExportVpc: {
-    readonly vpcId: string;
-    readonly availabilityZones: readonly string[];
-    readonly appSubnetIds: readonly string[];
-  };
-  /**
    * Whether the weekly ED email-visibility bridge is created + scheduled: a
    * two-step Step Functions chain that runs `etl:ed:export-email-visibility`
-   * (LDAP→S3) in {@link edExportVpc}, then `etl:ed:import-email-visibility`
-   * (S3→RDS) in the Sps VPC — replacing the manual WCM-side export the #443
+   * (LDAP→S3), then `etl:ed:import-email-visibility` (S3→RDS), both in the ETL
+   * subnets of the shared VPC — replacing the manual WCM-side export the #443
    * on-prem-routing gap forced. A DEDICATED, creation-gating flag (like
    * {@link curationBackupScheduleEnabled}): `true` in staging (the on-prem TGW
    * path is proven there — verified 2026-06-18 with a real in-VPC LDAPS bind),
    * `false` in prod until scholars-prod is verified end-to-end and the runbook
    * is reviewed. Gating CREATION (not just the rule's Enabled flag) keeps the
-   * imported-VPC security group, the state machine, and the ed/* PutObject
+   * state machine and the ed/* PutObject
    * grant out of prod entirely until the flag flips. See
    * docs/onprem-ed-export-runbook.md.
    */
@@ -690,14 +672,6 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // grant→researcher matcher: subtopic-grain path ON in staging (corpus
     // backfilled + reprojected). Self-gates on per-opportunity match_dsl.
     grantMatcherSubtopicGrain: true,
-    // #443 — staging runs the ED email-visibility bridge in scholars-dev, whose
-    // on-prem LDAP reach is proven (2026-06-18: in-VPC LDAPS bind + 2440-unit
-    // search). Only the two private `app` subnets (TGW + NAT routes) are listed.
-    edExportVpc: {
-      vpcId: "vpc-02c4dd698f3e3869c",
-      availabilityZones: ["us-east-1a", "us-east-1b"],
-      appSubnetIds: ["subnet-08cab06d3084fba41", "subnet-07ffed73356c01f6c"],
-    },
     edEmailVisibilityBridgeEnabled: true,
     // Estate consolidation (docs/sps-vpc-consolidation-plan.md): ON — item-3
     // staging cutover 2026-07-02. Every stack now imports the shared its-reciter-
@@ -860,15 +834,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // grant→researcher matcher: subtopic-grain path OFF in prod until the prod
     // corpus carries match_dsl/match_query and staging soaks clean.
     grantMatcherSubtopicGrain: false,
-    // #443 — prod's on-prem-reachable VPC is scholars-prod. Wired but NOT yet
-    // activated: edEmailVisibilityBridgeEnabled stays false until the
-    // scholars-prod path is verified end-to-end (the same in-VPC bind probe as
-    // staging) and the runbook is reviewed; flipping it then creates the bridge.
-    edExportVpc: {
-      vpcId: "vpc-0b8006fee120df6bc",
-      availabilityZones: ["us-east-1a", "us-east-1b"],
-      appSubnetIds: ["subnet-069dc77801ee2d8f3", "subnet-0ceec7bb2f059e162"],
-    },
+    // #443 — not yet activated in prod; flipping it creates the bridge in the
+    // ETL subnets, where TaskEd already binds the same LDAP host nightly.
     edEmailVisibilityBridgeEnabled: false,
     // Estate consolidation (docs/sps-vpc-consolidation-plan.md): ON — item-3 prod
     // cutover 2026-07-05 (staging soaked clean 07-04/07-05). Every stack imports

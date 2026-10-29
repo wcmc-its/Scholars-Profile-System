@@ -5,8 +5,12 @@
  * (`publication_author.is_confirmed`). Superusers only (the registry's "superuser" gate).
  *
  * Per scholar:
- *  - `missing` — PMIDs on their MyNCBI list SPS has not confirmed for them. The
- *    actionable direction: they claimed the paper to NIH.
+ *  - `missing` — PMIDs on their MyNCBI list, naming them as an author, that SPS has
+ *    not confirmed for them. The actionable direction: they claimed the paper to NIH.
+ *  - `notAuthored` — PMIDs on the list whose authors do not include the scholar's
+ *    surname. MyNCBI is also where PIs link papers to awards for NIH reporting, so a
+ *    lab head's or training-grant PI's list carries trainees' and members' papers.
+ *    Not a gap; shown apart and left out of the totals.
  *  - `extra` — confirmed in SPS, absent from the list. Weaker: many people never
  *    curate their MyNCBI list.
  * Citations without a PMID (books, reports) are not compared.
@@ -65,7 +69,48 @@ export function parseMyncbiDiscrepancyParams(
   };
 }
 
-export type CitationItem = { pmid: string; title: string; source: string | null; year: number | null };
+export type CitationItem = {
+  pmid: string;
+  title: string;
+  source: string | null;
+  year: number | null;
+  /** MyNCBI's author list; absent on profile-side items and on rows fetched before it was stored. */
+  authors?: string | null;
+};
+
+const SUFFIX = new Set(["jr", "sr", "ii", "iii", "iv", "md", "phd"]);
+const fold = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+
+/** Pure: surname parts to look for, from the last word of each name ("Alia-Klein" → alia, klein). */
+export function surnameKeys(...names: (string | null | undefined)[]): string[] {
+  const keys = new Set<string>();
+  for (const n of names) {
+    const words = (n ?? "").split(/\s+/).map((w) => w.replace(/[.,]/g, "")).filter((w) => w && !SUFFIX.has(fold(w)));
+    for (const part of (words.at(-1) ?? "").split("-")) if (fold(part).length > 1) keys.add(fold(part));
+  }
+  return [...keys];
+}
+
+/**
+ * Pure: whether a MyNCBI author list ("Ceceli AO, Alia-Klein N, Goldstein RZ")
+ * names someone with one of these surnames. Unknown authors count as authored, so a
+ * row fetched before authors were stored stays a gap rather than vanishing.
+ * ponytail: surname only; a changed name or a same-surname coauthor misclassifies.
+ */
+export function authoredBy(authors: string | null | undefined, keys: readonly string[]): boolean {
+  if (!authors || keys.length === 0) return true;
+  return authors.split(",").some((a) => {
+    const words = a.trim().split(/\s+/);
+    // Drop the trailing initials ("RZ"); keep a one-word collective name whole.
+    const surname = words.length > 1 && /^[A-Z]{1,4}$/.test(words.at(-1)!) ? words.slice(0, -1) : words;
+    return surname.flatMap((w) => w.split("-")).some((w) => keys.includes(fold(w)));
+  });
+}
 
 export type MyncbiDiscrepancyScholar = {
   cwid: string;
@@ -79,6 +124,8 @@ export type MyncbiDiscrepancyScholar = {
   /** Too little of the list is on the profile to trust it as theirs. */
   suspect: boolean;
   missing: CitationItem[];
+  /** On the list without the scholar among the authors (grant-linked papers). */
+  notAuthored: CitationItem[];
   extraCount: number;
   /** Newest first, at most MYNCBI_EXTRA_TITLE_CAP; filled for listed scholars only. */
   extra: CitationItem[];
@@ -92,6 +139,7 @@ export type MyncbiDiscrepancyReport = {
     matched: number;
     missing: number;
     withMissing: number;
+    notAuthored: number;
     suspect: number;
     extra: number;
   };
@@ -104,20 +152,30 @@ export type MyncbiDiscrepancyReport = {
 export const isSuspectList = (listed: number, matched: number, confirmed: number) =>
   listed >= MYNCBI_SUSPECT_MIN && confirmed >= MYNCBI_SUSPECT_MIN && matched / listed < MYNCBI_SUSPECT_OVERLAP;
 
-/** Pure: one scholar's list vs their confirmed PMIDs. Missing sorted newest first. */
+/** Pure: one scholar's list vs their confirmed PMIDs. Missing and notAuthored sorted newest first. */
 export function compareBibliography(
   list: readonly CitationItem[],
   confirmed: ReadonlySet<string>,
-): { listed: number; matched: number; confirmed: number; missing: CitationItem[]; extraPmids: string[] } {
+  surnames: readonly string[] = [],
+): {
+  listed: number;
+  matched: number;
+  confirmed: number;
+  missing: CitationItem[];
+  notAuthored: CitationItem[];
+  extraPmids: string[];
+} {
   const byPmid = new Map(list.map((c) => [c.pmid, c]));
-  const missing = [...byPmid.values()]
+  const unconfirmed = [...byPmid.values()]
     .filter((c) => !confirmed.has(c.pmid))
     .sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+  const missing = unconfirmed.filter((c) => authoredBy(c.authors, surnames));
   return {
     listed: byPmid.size,
-    matched: byPmid.size - missing.length,
+    matched: byPmid.size - unconfirmed.length,
     confirmed: confirmed.size,
     missing,
+    notAuthored: unconfirmed.filter((c) => !missing.includes(c)),
     // Keeps `confirmed`'s order (the loader passes it newest first).
     extraPmids: [...confirmed].filter((p) => !byPmid.has(p)),
   };
@@ -141,14 +199,14 @@ export async function loadMyncbiDiscrepancyReport(
       cwid: true,
       url: true,
       fetchedAt: true,
-      scholar: { select: { preferredName: true, primaryDepartment: true } },
+      scholar: { select: { preferredName: true, fullName: true, primaryDepartment: true } },
     },
   });
   const cwids = bibs.map((b) => b.cwid);
   const [citations, confirmedRows] = await Promise.all([
     client.myncbiCitation.findMany({
       where: { cwid: { in: cwids }, pmid: { not: null } },
-      select: { cwid: true, pmid: true, title: true, source: true, year: true },
+      select: { cwid: true, pmid: true, authors: true, title: true, source: true, year: true },
     }),
     client.publicationAuthor.findMany({
       where: { cwid: { in: cwids }, isConfirmed: true },
@@ -158,7 +216,7 @@ export async function loadMyncbiDiscrepancyReport(
   const listOf = new Map<string, CitationItem[]>();
   for (const c of citations) {
     const l = listOf.get(c.cwid) ?? listOf.set(c.cwid, []).get(c.cwid)!;
-    l.push({ pmid: c.pmid!, title: c.title, source: c.source, year: c.year });
+    l.push({ pmid: c.pmid!, title: c.title, source: c.source, year: c.year, authors: c.authors });
   }
   // Newest first, so the "not on list" side can be cut before its titles are read.
   confirmedRows.sort((a, b) => (b.publication.year ?? 0) - (a.publication.year ?? 0));
@@ -168,7 +226,11 @@ export async function loadMyncbiDiscrepancyReport(
   }
 
   const all = bibs.map((b) => {
-    const cmp = compareBibliography(listOf.get(b.cwid) ?? [], confirmedOf.get(b.cwid) ?? new Set());
+    const cmp = compareBibliography(
+      listOf.get(b.cwid) ?? [],
+      confirmedOf.get(b.cwid) ?? new Set(),
+      surnameKeys(b.scholar.fullName, b.scholar.preferredName),
+    );
     return {
       cwid: b.cwid,
       name: b.scholar.preferredName,
@@ -179,6 +241,7 @@ export async function loadMyncbiDiscrepancyReport(
       matched: cmp.matched,
       suspect: isSuspectList(cmp.listed, cmp.matched, cmp.confirmed),
       missing: cmp.missing,
+      notAuthored: cmp.notAuthored,
       extraCount: cmp.extraPmids.length,
       extraPmids: cmp.extraPmids,
     };
@@ -208,6 +271,7 @@ export async function loadMyncbiDiscrepancyReport(
       matched: all.reduce((n, s) => n + s.matched, 0),
       missing: trusted.reduce((n, s) => n + s.missing.length, 0),
       withMissing: trusted.filter((s) => s.missing.length > 0).length,
+      notAuthored: trusted.reduce((n, s) => n + s.notAuthored.length, 0),
       suspect: all.length - trusted.length,
       extra: all.reduce((n, s) => n + s.extraCount, 0),
     },

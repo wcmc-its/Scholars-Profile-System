@@ -13,6 +13,9 @@
  *     `lib/edit/report-access.ts`) also admits a `reporting` grant, per scope;
  *   - each `/edit` dashboard's gate also admits a `reporting` grant carrying
  *     its `dash:` scope (`registryAdmitsDashboard`).
+ *   - `isCoreDirector` (`lib/auth/core-director.ts`) is a `core_director`
+ *     grant and nothing else (`registryAdmitsCoreDirector`). It has no
+ *     pre-registry source, so here "additive" means: flag off, nobody holds it.
  * Only `source = "manual"` rows count (rows granted on the Administrators
  * page). An imported row (`report_access`, `allowlist`) mirrors a source that
  * already grants the same access through its own path, so it adds nothing
@@ -137,4 +140,17 @@ export async function registryDashboards(cwid: string): Promise<Set<Dashboard>> 
 /** Whether the registry gives `cwid` the dashboard `d`. */
 export async function registryAdmitsDashboard(cwid: string, d: Dashboard): Promise<boolean> {
   return (await registryDashboards(cwid)).has(d);
+}
+
+/** Whether the registry gives `cwid` a Cores director grant (scope-less: any
+ *  manual `core_director` row). False when the flag is off, the cwid is
+ *  empty, or the read fails. */
+export async function registryAdmitsCoreDirector(cwid: string): Promise<boolean> {
+  if (!isFunctionalRolesAuthzEnabled() || !cwid) return false;
+  try {
+    return (await registryScopes("core_director", cwid)).length > 0;
+  } catch (err) {
+    logReadFailed("core_director", err);
+    return false;
+  }
 }

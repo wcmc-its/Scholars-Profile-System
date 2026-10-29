@@ -10,7 +10,7 @@
 # Pinned by digest (the multi-arch index, not a per-arch manifest) so a rebuild
 # of the same commit gets the same base layers. The tag is kept for
 # readability; Dependabot's docker ecosystem bumps the digest with a PR.
-FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS base
+FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS base
 WORKDIR /app
 
 # ---- Dependencies -----------------------------------------------------------

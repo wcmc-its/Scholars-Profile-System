@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 
 // Mock the SAML library boundary: the route logic is exercised without a real

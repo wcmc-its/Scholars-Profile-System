@@ -54,7 +54,9 @@ export default async function EditUnitsPage({
   }
   const kind = parseUnitKindParam((await searchParams).kind);
 
-  const allUnits = await loadManageableUnits(session.cwid, db.read);
+  const allUnits = await loadManageableUnits(session.cwid, db.read, {
+    allCores: session.isCoreDirector === true,
+  });
   const units = kind ? filterManageableUnitsByKind(allUnits, kind) : allUnits;
   // A superuser AND a comms_steward (a global unit-content editor, comms-steward-
   // profile-editing-spec.md §3b) both get the complete org-unit directory (#971)

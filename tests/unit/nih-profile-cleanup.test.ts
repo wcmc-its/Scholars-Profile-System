@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: { write: {} } }));
 
-import { classifyLink, promotionAfterDelete } from "@/etl/nih-profile/cleanup-misattributed";
+import {
+  classifyLink,
+  evidenceVerdict,
+  promotionAfterDelete,
+  type ScoredAward,
+} from "@/etl/nih-profile/cleanup-misattributed";
 
 describe("classifyLink", () => {
   it("is ok when RePORTER's name matches the full name", () => {
@@ -75,5 +80,58 @@ describe("promotionAfterDelete", () => {
       { nihProfileId: 3, isPreferred: false, lastVerified: at("2026-09-01") },
     ];
     expect(promotionAfterDelete(rows, new Set([1, 2]))).toBe(3);
+  });
+});
+
+describe("evidenceVerdict", () => {
+  const award = (
+    score: number,
+    cues: ScoredAward["cues"],
+    curator: ScoredAward["curator"] = null,
+  ) => ({
+    score,
+    cues,
+    curator,
+  });
+  const veto = { id: "middle_initial_conflict", weight: -4 };
+
+  it("is against when every award carries a veto cue and none is supported", () => {
+    expect(
+      evidenceVerdict([award(-6, [veto]), award(-7, [veto, { id: "name_common", weight: -1 }])]),
+    ).toBe("against");
+  });
+
+  it("counts a curator's rejection as ruling an award out", () => {
+    expect(evidenceVerdict([award(-6, [veto]), award(-2, [], "rejected")])).toBe("against");
+  });
+
+  it("is not against with no scored awards", () => {
+    expect(evidenceVerdict([])).toBe("not_against");
+  });
+
+  it("is not against when one award is supported", () => {
+    expect(evidenceVerdict([award(-6, [veto]), award(3, [{ id: "pub_linked", weight: 5 }])])).toBe(
+      "not_against",
+    );
+  });
+
+  it("is not against when a curator confirmed one award", () => {
+    expect(evidenceVerdict([award(-6, [veto]), award(-6, [veto], "confirmed")])).toBe(
+      "not_against",
+    );
+  });
+
+  it("is not against when an award has no evidence at all", () => {
+    expect(evidenceVerdict([award(-6, [veto]), award(-2, [])])).toBe("not_against");
+  });
+
+  it("does not count a weak cue against: a common name is not another person", () => {
+    expect(evidenceVerdict([award(-3, [{ id: "name_common", weight: -1 }])])).toBe("not_against");
+  });
+
+  it("counts the named InfoEd cue at any weight", () => {
+    expect(evidenceVerdict([award(-2, [{ id: "infoed_other_wcm_pi_named", weight: 0 }])])).toBe(
+      "against",
+    );
   });
 });

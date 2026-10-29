@@ -28,6 +28,7 @@ const SCOPES: FunctionalRoleScopeOptions = {
     { key: "mentored-publications", label: "Mentored publications" },
     { key: "mentored-publications:md", label: "Mentored publications · MD" },
   ],
+  core_director: [],
 };
 
 const row = (over: Partial<FunctionalRoleRow>): FunctionalRoleRow => ({

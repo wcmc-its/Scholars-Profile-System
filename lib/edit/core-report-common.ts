@@ -16,8 +16,9 @@
  *
  * "All cores" (core reports index picker plan, PR 2, 2026-09-28):
  * `center=all&kind=core` (`ALL_CORES`) addresses the roll-up of every catalog
- * core, SUPERUSER ONLY — not comms_steward, not an owner of several cores
- * (`canViewAllCores`). Only reports 11, 12 and 13 support it
+ * core, for a superuser or a Cores director (the `core_director` functional
+ * role, Owner of every core, 2026-10-29) — not comms_steward, not an owner of
+ * several cores (`canViewAllCores`). Only reports 11, 12 and 13 support it
  * (`ALL_CORES_REPORTS`); 3 and 6 are hidden under it. Its publication set is
  * the deduped UNION of every core's confirmed set (`loadCoreScope`), so a
  * publication confirmed for two cores counts once.
@@ -72,10 +73,13 @@ export function isAllCores(coreId: string | null | undefined): boolean {
   return coreId === ALL_CORES;
 }
 
-/** Who may open the all-cores roll-up: a superuser, nobody else (decided
- *  2026-09-28 — not comms_steward, not a multi-core owner). */
-export function canViewAllCores(session: Pick<EditSession, "isSuperuser">): boolean {
-  return session.isSuperuser === true;
+/** Who may open the all-cores roll-up: a superuser (decided 2026-09-28 — not
+ *  comms_steward, not a multi-core owner) or a Cores director, who owns every
+ *  core by role (decided 2026-10-29). */
+export function canViewAllCores(
+  session: Pick<EditSession, "isSuperuser" | "isCoreDirector">,
+): boolean {
+  return session.isSuperuser === true || session.isCoreDirector === true;
 }
 
 /** The roll-up's stand-in for the single-core `ReportsContext`. */
@@ -125,7 +129,8 @@ export function chunk<T>(xs: readonly T[], size = 1000): T[][] {
 
 /** The download routes' gate: a session, a `center` (the core id), and the
  *  page's own core gate. Returns the core or a ready error response.
- *  `center=all` is the all-cores roll-up: a superuser only, anyone else 403s. */
+ *  `center=all` is the all-cores roll-up: a superuser or a Cores director
+ *  (`canViewAllCores`), anyone else 403s. */
 export async function gateCoreReportDownload(
   sp: URLSearchParams,
 ): Promise<
