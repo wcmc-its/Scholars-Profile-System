@@ -84,6 +84,17 @@ function Row({ row, save }: { row: PubRelevanceRow; save: Save }) {
         >
           {row.title}
         </a>
+        {row.isReview && (
+          <span
+            className={cn(
+              "ml-1.5 inline-block rounded border px-1.5 py-px align-middle text-[11px] font-semibold whitespace-nowrap",
+              SLATE,
+            )}
+            data-testid="pub-relevance-review"
+          >
+            Review
+          </span>
+        )}
         <div className="text-muted-foreground mt-0.5 text-xs">
           {[row.journal, row.year, row.publicationType, `PMID ${row.pmid}`]
             .filter(Boolean)

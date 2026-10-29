@@ -38,7 +38,7 @@ export async function renderPubRelevanceReport({
     for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) sp.append(k, x);
   const params = parsePubRelevanceParams(sp);
   const all = await loadPubRelevanceReport(code, params.year);
-  const { rows, counts } = filterPubRelevance(all, params.status);
+  const { rows, counts } = filterPubRelevance(all, params.status, params.kind);
   const unitQuery = nci2aUnitQuery(code, kind);
   const statusHref = (s: PubRelevanceStatusFilter) =>
     nci2aHref(
@@ -46,6 +46,7 @@ export async function renderPubRelevanceReport({
       unitQuery,
       new URLSearchParams({
         year: String(params.year),
+        ...(params.kind === "all" ? {} : { kind: params.kind }),
         ...(s === "all" ? {} : { status: s }),
       }).toString(),
     );
@@ -77,6 +78,16 @@ export async function renderPubRelevanceReport({
                     {y}
                   </option>
                 ))}
+              </select>
+              <select
+                name="kind"
+                defaultValue={params.kind}
+                aria-label="Reviews"
+                className="border-apollo-border-strong bg-apollo-surface h-[34px] rounded-md border px-2 text-sm"
+              >
+                <option value="all">Reviews and non-reviews</option>
+                <option value="non-review">Non-reviews</option>
+                <option value="review">Reviews</option>
               </select>
               <button
                 type="submit"
@@ -114,7 +125,7 @@ export async function renderPubRelevanceReport({
           <PubRelevanceTable
             centerCode={code}
             rows={rows}
-            resetKey={`${params.year}:${params.status}`}
+            resetKey={`${params.year}:${params.kind}:${params.status}`}
           />
         </section>
         <ReportCard>
@@ -127,8 +138,13 @@ export async function renderPubRelevanceReport({
               research member of this center.
             </li>
             <li>
-              MCC rule: a review, preprint, erratum, letter, comment, editorial or retraction (by
-              PubMed publication type) is not cancer relevant. These are final and need no review.
+              MCC rule: a preprint, erratum, letter, comment, editorial or retraction (by PubMed
+              publication type) is not cancer relevant. These are final and need no review.
+            </li>
+            <li>
+              Review: marked separately from cancer relevance (systematic reviews and meta-analyses
+              included). A review is judged on its topic like any article; the reports choose
+              whether to count reviews.
             </li>
             <li>
               AI: Sonnet read the title, abstract and MeSH terms under MCC&apos;s rubric. Confirm

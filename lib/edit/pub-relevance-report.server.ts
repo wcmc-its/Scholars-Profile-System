@@ -5,7 +5,11 @@
  * the unit gate. Server-only (reads `@/lib/db`).
  */
 import { db } from "@/lib/db";
-import type { PubRelevanceRow, PubRelevanceSource } from "@/lib/edit/pub-relevance-report";
+import {
+  isReviewPublicationType,
+  type PubRelevanceRow,
+  type PubRelevanceSource,
+} from "@/lib/edit/pub-relevance-report";
 
 export async function loadPubRelevanceReport(
   centerCode: string,
@@ -50,6 +54,7 @@ export async function loadPubRelevanceReport(
       journal: p.journal,
       year: p.year,
       publicationType: p.publicationType,
+      isReview: isReviewPublicationType(p.publicationType),
       members: p.authors.map((a) => ({
         cwid: a.cwid as string,
         name: a.scholar?.preferredName ?? (a.cwid as string),
