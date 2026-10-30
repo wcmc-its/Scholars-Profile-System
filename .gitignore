@@ -88,15 +88,10 @@ seed-output/
 # crawl bio-metadata snapshots. Public faculty data only (cwid/name/title/metrics,
 # no scraped bio prose); regenerable via the SQL + scripts in the same folder.
 !docs/overview-coverage/*.csv
-# Exception: B14 legacy-VIVO redirect set, generated from ED by
-# scripts/etl/generate-vivo-redirect-set.ts. Since #1940 proxy.ts no longer
-# reads it (every /display/cwid-* redirects to the by-cwid resolver); kept
-# as a reference snapshot of ED's labeledURI;vivo set.
 !data/
 data/*
-!data/vivo-redirects.json
 # Exception: hand-built VIVO org-unit redirect crosswalk (runbook D-10..D-13).
-# Reviewed by PR like data/vivo-redirects.json; consumed by etl:vivo-redirect.
+# Reviewed by PR; consumed by etl:vivo-redirect.
 !data/vivo-org-redirects.json
 # Exception: curated homepage suggested-search chip master (the lay-term list
 # behind lib/hero-search-suggestions.ts). Committed so chip edits flow through
