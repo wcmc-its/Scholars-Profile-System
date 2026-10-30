@@ -144,6 +144,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         "DistributionConfig": {
           "Aliases": [
             "scholars.weill.cornell.edu",
+            "vivo.weill.cornell.edu",
           ],
           "CacheBehaviors": [
             {
@@ -154,6 +155,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "PathPattern": "/_next/static/*",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
@@ -168,6 +180,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "PathPattern": "/_sps-errors/*",
               "ResponseHeadersPolicyId": {
                 "Ref": "HtmlHeadersD748949D",
@@ -213,6 +236,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/edit*",
               "ResponseHeadersPolicyId": {
@@ -233,6 +267,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/impersonation*",
               "ResponseHeadersPolicyId": {
@@ -249,6 +294,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/edit*",
               "ResponseHeadersPolicyId": {
@@ -269,6 +325,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/auth/*",
               "ResponseHeadersPolicyId": {
@@ -289,6 +356,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/revalidate*",
               "ResponseHeadersPolicyId": {
@@ -305,6 +383,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/health/*",
               "ResponseHeadersPolicyId": {
@@ -325,6 +414,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/analytics",
               "ResponseHeadersPolicyId": {
@@ -345,6 +445,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": {
                 "Ref": "InternalViewerOrp246E9A2E",
               },
@@ -367,6 +478,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/csp-report",
               "ResponseHeadersPolicyId": {
@@ -387,6 +509,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/nih-resolve",
               "ResponseHeadersPolicyId": {
@@ -407,6 +540,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/feedback/submit",
               "ResponseHeadersPolicyId": {
@@ -425,6 +569,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "SearchApiNoStoreCompressible179C8AE1",
               },
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/search*",
               "ResponseHeadersPolicyId": {
@@ -441,6 +596,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/search*",
               "ResponseHeadersPolicyId": {
@@ -457,6 +623,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/directory/people",
               "ResponseHeadersPolicyId": {
@@ -473,6 +650,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/nih-portfolio",
               "ResponseHeadersPolicyId": {
@@ -491,6 +679,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "PopoverContextCache904BCEC1",
               },
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholars/*/popover-context",
               "ResponseHeadersPolicyId": {
@@ -507,6 +706,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholar/*/method-exemplar",
               "ResponseHeadersPolicyId": {
@@ -523,6 +733,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholar/*/grants",
               "ResponseHeadersPolicyId": {
@@ -539,6 +760,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/topics/*/publications",
               "ResponseHeadersPolicyId": {
@@ -555,6 +787,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/topics/*/activity",
               "ResponseHeadersPolicyId": {
@@ -571,6 +814,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/methods/*/*/publications",
               "ResponseHeadersPolicyId": {
@@ -587,6 +841,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/units/*/*/members",
               "ResponseHeadersPolicyId": {
@@ -603,6 +868,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": {
                 "Ref": "InternalViewerOrp246E9A2E",
               },
@@ -621,6 +897,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/about/feedback",
               "ResponseHeadersPolicyId": {
@@ -637,6 +924,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/scholars/*/co-pubs/export",
               "ResponseHeadersPolicyId": {
@@ -653,6 +951,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/scholars/*/co-pubs/*/export",
               "ResponseHeadersPolicyId": {
@@ -669,6 +978,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholars/*/opportunities",
               "ResponseHeadersPolicyId": {
@@ -685,6 +1005,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/opportunities/*/researchers",
               "ResponseHeadersPolicyId": {
@@ -701,6 +1032,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/opportunities",
               "ResponseHeadersPolicyId": {
@@ -719,6 +1061,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "QueryKeyedCacheF5F61D4E",
               },
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "PathPattern": "/scholars/*",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
@@ -736,6 +1089,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "QueryKeyedCacheF5F61D4E",
               },
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "PathPattern": "/departments/*",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
@@ -753,6 +1117,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "QueryKeyedCacheF5F61D4E",
               },
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "PathPattern": "/centers/*",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
@@ -770,6 +1145,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "QueryKeyedCacheF5F61D4E",
               },
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "PathPattern": "/topics/*/scholars",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
@@ -787,6 +1173,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "Ref": "QueryKeyedCacheF5F61D4E",
               },
               "Compress": true,
+              "FunctionAssociations": [
+                {
+                  "EventType": "viewer-request",
+                  "FunctionARN": {
+                    "Fn::GetAtt": [
+                      "EdgeLegacyHostRedirect8D93D330",
+                      "FunctionARN",
+                    ],
+                  },
+                },
+              ],
               "PathPattern": "/methods/*/*/scholars",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
@@ -834,6 +1231,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "Ref": "DefaultRscCacheCFC4DDE6",
             },
             "Compress": true,
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "EdgeLegacyHostRedirect8D93D330",
+                    "FunctionARN",
+                  ],
+                },
+              },
+            ],
             "ResponseHeadersPolicyId": {
               "Ref": "HtmlHeadersD748949D",
             },
@@ -937,7 +1345,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           ],
           "PriceClass": "PriceClass_100",
           "ViewerCertificate": {
-            "AcmCertificateArn": "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
+            "AcmCertificateArn": "arn:aws:acm:us-east-1:665083158573:certificate/c39a27d7-00ad-4714-8f1d-c948b61904e4",
             "MinimumProtocolVersion": "TLSv1.2_2021",
             "SslSupportMethod": "sni-only",
           },
@@ -1002,6 +1410,34 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           "Runtime": "cloudfront-js-2.0",
         },
         "Name": "sps-edge-ip-prod",
+      },
+      "Type": "AWS::CloudFront::Function",
+    },
+    "EdgeLegacyHostRedirect8D93D330": {
+      "Properties": {
+        "AutoPublish": true,
+        "FunctionCode": "var ALIASES = ["vivo.weill.cornell.edu"];
+var CANONICAL = "https://scholars.weill.cornell.edu";
+var VIVO_PROFILE = /^\\/(?:display|individual|profile)\\/cwid-([A-Za-z0-9._\\-]+)\\/?$/;
+function handler(event) {
+  var request = event.request;
+  var host = request.headers.host ? request.headers.host.value.toLowerCase() : "";
+  if (ALIASES.indexOf(host) === -1) return request;
+  var m = request.uri.match(VIVO_PROFILE);
+  return {
+    statusCode: 301,
+    statusDescription: "Moved Permanently",
+    headers: {
+      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : "/") },
+      "cache-control": { value: "max-age=86400" },
+    },
+  };
+}",
+        "FunctionConfig": {
+          "Comment": "SPS legacy-host 301 to scholars.weill.cornell.edu (prod).",
+          "Runtime": "cloudfront-js-2.0",
+        },
+        "Name": "sps-edge-legacy-host-prod",
       },
       "Type": "AWS::CloudFront::Function",
     },
