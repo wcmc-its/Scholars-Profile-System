@@ -91,3 +91,56 @@ export async function syncRejectedPmids(cwids: readonly string[]): Promise<void>
       `(${add.length} added, ${remove.length} removed).`,
   );
 }
+
+/**
+ * Mirror the ReCiter candidates still awaiting a decision into
+ * `reciter_pending_pmid`, for PMIDs on scholars' own MyNCBI lists only (the
+ * bibliography-discrepancy report's "accept it in Publication Manager" group).
+ * No volume guard on purpose: a curation session legitimately drains it to
+ * zero, and the only reader is that report, where a stale or empty mirror just
+ * shows a pending paper as "not a candidate" until the next night.
+ */
+export async function syncPendingMyncbiPmids(): Promise<void> {
+  const listed = await db.write.myncbiCitation.findMany({
+    where: { pmid: { not: null } },
+    select: { cwid: true, pmid: true },
+  });
+  const pmidsOf = new Map<string, Set<string>>();
+  for (const c of listed) (pmidsOf.get(c.cwid) ?? pmidsOf.set(c.cwid, new Set()).get(c.cwid)!).add(c.pmid!);
+
+  const incoming: Array<{ cwid: string; pmid: string }> = [];
+  for (const batch of chunks([...pmidsOf.keys()], 50)) {
+    const pmids = [...new Set(batch.flatMap((c) => [...pmidsOf.get(c)!].map(Number)))].filter(
+      (n) => Number.isFinite(n) && n > 0,
+    );
+    if (pmids.length === 0) continue;
+    await withReciterConnection(async (conn) => {
+      const rows = (await conn.query(
+        `SELECT personIdentifier, pmid
+         FROM person_article
+         WHERE personIdentifier IN (?) AND pmid IN (?)
+           AND (userAssertion IS NULL OR userAssertion NOT IN ('ACCEPTED', 'REJECTED'))`,
+        [batch, pmids],
+      )) as Array<{ personIdentifier: string; pmid: number | string | null }>;
+      for (const r of rows) {
+        const pmid = String(Number(r.pmid));
+        if (pmidsOf.get(r.personIdentifier)?.has(pmid)) incoming.push({ cwid: r.personIdentifier, pmid });
+      }
+    });
+  }
+
+  const existing = await db.write.reciterPendingPmid.findMany({ select: { cwid: true, pmid: true } });
+  const { add, remove } = diffRejectedPairs(existing, incoming);
+  for (const batch of chunks(add, WRITE_BATCH)) {
+    await db.write.reciterPendingPmid.createMany({ data: batch, skipDuplicates: true });
+  }
+  for (const batch of chunks(remove, WRITE_BATCH)) {
+    await db.write.reciterPendingPmid.deleteMany({
+      where: { OR: batch.map((p) => ({ cwid: p.cwid, pmid: p.pmid })) },
+    });
+  }
+  console.log(
+    `[pending-pmids] ${incoming.length} pending ReCiter candidates on MyNCBI lists mirrored ` +
+      `(${add.length} added, ${remove.length} removed).`,
+  );
+}

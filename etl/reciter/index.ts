@@ -52,7 +52,7 @@ import {
 } from "./change-detection";
 import { buildMenteeSuggestions } from "./mentee-suggestions";
 import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
-import { syncRejectedPmids } from "./rejected-pmids";
+import { syncPendingMyncbiPmids, syncRejectedPmids } from "./rejected-pmids";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {
@@ -1090,6 +1090,15 @@ async function main() {
     } catch (err) {
       console.error(
         "[rejected-pmids] failed (non-fatal):",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    // Best-effort: only the MyNCBI discrepancy report reads this mirror.
+    try {
+      await syncPendingMyncbiPmids();
+    } catch (err) {
+      console.error(
+        "[pending-pmids] failed (non-fatal):",
         err instanceof Error ? err.message : err,
       );
     }
