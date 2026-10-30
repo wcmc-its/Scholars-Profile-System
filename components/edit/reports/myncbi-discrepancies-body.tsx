@@ -53,7 +53,8 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" });
 
-function Citations({ items }: { items: CitationItem[] }) {
+/** `curate` (with `cwid`) adds a per-paper link to the PubMed Add tab in Publication Manager. */
+function Citations({ items, curate }: { items: CitationItem[]; curate?: { base: string; cwid: string } }) {
   return (
     <ul className="m-0 mt-2 flex list-none flex-col gap-1.5 p-0">
       {items.map((c) => (
@@ -64,6 +65,19 @@ function Citations({ items }: { items: CitationItem[] }) {
           <PubTitle value={c.title} />
           {(c.source || c.year) && (
             <span className="text-muted-foreground"> · {[c.source, c.year].filter(Boolean).join(", ")}</span>
+          )}
+          {curate && (
+            <>
+              {" "}
+              <a
+                href={pmCurateHref(curate.base, curate.cwid, { pmid: c.pmid }) ?? undefined}
+                target="_blank"
+                rel="noreferrer"
+                className={`${LINK} text-[12px] whitespace-nowrap`}
+              >
+                Accept or reject in Publication Manager
+              </a>
+            </>
           )}
         </li>
       ))}
@@ -112,7 +126,7 @@ function ScholarBlock({ s, curateBase }: { s: MyncbiDiscrepancyScholar; curateBa
                   <p className="text-muted-foreground m-0 text-[13px] font-semibold">
                     {label} ({fmt(items.length)})
                   </p>
-                  <Citations items={items} />
+                  <Citations items={items} curate={curate ? { base: curateBase, cwid: s.cwid } : undefined} />
                 </div>
               )
             );

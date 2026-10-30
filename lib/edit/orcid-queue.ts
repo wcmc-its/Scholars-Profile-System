@@ -289,19 +289,23 @@ export function publicationManagerBaseUrl(): string {
 }
 
 /** A scholar's Publication Manager curate page, or with `doi` its Add tab
- *  with that DOI filled in (`/curate/<uid>?add=external&doi=<doi>`, PM #1047).
+ *  with that DOI filled in (`/curate/<uid>?add=external&doi=<doi>`, PM #1047),
+ *  or with `pmid` its PubMed Add tab with that PMID searched
+ *  (`/curate/<uid>?add=pubmed&pmid=<pmid>`, PM #1059).
  *  Null unless `base` is https. The uid and the DOI are URL-encoded. Pure. */
 export function pmCurateHref(
   base: string | null | undefined,
   cwid: string,
-  opts: { doi?: string | null } = {},
+  opts: { doi?: string | null; pmid?: string | null } = {},
 ): string | null {
   const b = httpsBase(base);
   const uid = cwid.trim();
   if (!b || !uid) return null;
   const href = `${b}/curate/${encodeURIComponent(uid)}`;
   const doi = opts.doi?.trim();
-  return doi ? `${href}?add=external&doi=${encodeURIComponent(doi)}` : href;
+  if (doi) return `${href}?add=external&doi=${encodeURIComponent(doi)}`;
+  const pmid = opts.pmid?.trim();
+  return pmid && /^\d+$/.test(pmid) ? `${href}?add=pubmed&pmid=${pmid}` : href;
 }
 
 /** The queue's filter (v2 item 6/7): person type (`role_category`), unit

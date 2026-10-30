@@ -903,6 +903,15 @@ describe("filter and link helpers", () => {
     );
   });
 
+  it("pmCurateHref: a pmid opens the PubMed Add tab; a non-numeric one is dropped; a DOI wins", () => {
+    const base = "https://pm.example.org";
+    expect(pmCurateHref(base, "jd0001", { pmid: "41032574" })).toBe(
+      "https://pm.example.org/curate/jd0001?add=pubmed&pmid=41032574",
+    );
+    expect(pmCurateHref(base, "jd0001", { pmid: "1&x=2" })).toBe("https://pm.example.org/curate/jd0001");
+    expect(pmCurateHref(base, "jd0001", { doi: "10.9/a", pmid: "5" })).toContain("add=external");
+  });
+
   it("pmCurateHref: https base only, uid and DOI URL-encoded", () => {
     const base = "https://pm.example.org";
     expect(pmCurateHref(base, "jd0001")).toBe("https://pm.example.org/curate/jd0001");
