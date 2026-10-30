@@ -1027,7 +1027,8 @@ describe("MatchaPanel", () => {
     // The raw ED code is never shown — `full_time_faculty` is not a label.
     expect(screen.queryByText(/full_time_faculty/)).toBeNull();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /Full-time faculty/ }));
+    // Full-time faculty is the sponsor-path DEFAULT: selected on arrival.
+    expect((screen.getByRole("checkbox", { name: /Full-time faculty/ }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
     // The roleless candidate fails the filter — she cannot be SHOWN to satisfy it.
@@ -1035,6 +1036,23 @@ describe("MatchaPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getByText("Carol Gamma")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Postdoc/ }));
+    expect(screen.getByText("Bob Beta")).toBeTruthy();
+    expect(screen.queryByText("Alice Alpha")).toBeNull();
+  });
+
+  it("applies no person-type default when the run has no full-time faculty (it would hide every row)", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.5, measures: { roleCategory: "postdoc" } }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    expect(await screen.findByText("Bob Beta")).toBeTruthy();
   });
 
   // ── Paste read-back (§6a) ──────────────────────────────────────────────────

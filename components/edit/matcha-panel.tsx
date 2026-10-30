@@ -315,6 +315,9 @@ function toggled(set: ReadonlySet<string>, value: string): Set<string> {
 /** The sponsor console's default researcher-type selection: everyone but "Clinician". CTL's
  *  usual ask is a lab to partner with; the clinicians stay one click away (consultant or
  *  patient-data asks). "Unclassified" stays in, since it holds scientists funded outside NIH. */
+/** The sponsor console's default person-type selection (a `roleCategoryLabel` value). */
+const DEFAULT_PERSON_TYPE = roleCategoryLabel("full_time_faculty");
+
 const DEFAULT_RESEARCHER_TYPES: ReadonlySet<string> = new Set(
   RESEARCHER_TYPE_ORDER.filter((t) => t !== "clinician").map((t) => RESEARCHER_TYPE_LABEL[t]),
 );
@@ -542,7 +545,8 @@ export function MatchaPanel({
   // re-query (the Matcha invariant). The ESI boost is soft and hides nobody.
   const [stageGateOn, setStageGateOn] = useState(true);
   const [esiBoostOn, setEsiBoostOn] = useState(true);
-  const [roleSel, setRoleSel] = useState<ReadonlySet<string>>(new Set());
+  // Person type. `null` = untouched ⇒ the sponsor-path default (see `roleSelEffective`).
+  const [roleSel, setRoleSel] = useState<ReadonlySet<string> | null>(null);
   const [sort, setSort] = useState<SortKey>("fit");
   // D8 — density, remembered across visits. Warm-palette redesign flipped the DEFAULT to compact:
   // officers land on the scannable list, and a compact row expands to its full card in place, so
@@ -770,7 +774,8 @@ export function MatchaPanel({
         const data = (await r.json()) as Partial<MatchaResponse>;
         setGrantCandidates([]); // toggling back to people clears any prior grant results
         clearFilters(); // stale facet selections must not silently hide fresh results
-        setTypeSel(null); // ...except researcher type, which returns to its default
+        setTypeSel(null); // ...except researcher type and person type, which return to their defaults
+        setRoleSel(null);
         setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
         setShortlist(new Set()); // the shortlist is per-ask: last sponsor's picks are not this one's
         void loadHistory(); // the row the server just retained
@@ -1129,6 +1134,14 @@ export function MatchaPanel({
     }
     return [...counts].sort((a, b) => b[1] - a[1]);
   }, [ranked]);
+  // Sponsor-path default: full-time faculty only, the people who can take on an industry
+  // collaboration. Applied only when the run actually has some (else it would hide every row),
+  // and never on Grant Matcha, whose opportunities can target postdocs and trainees.
+  const hasFullTimeFaculty = roleFacet.some(([l]) => l === DEFAULT_PERSON_TYPE);
+  const roleSelEffective = useMemo<ReadonlySet<string>>(
+    () => roleSel ?? (!grantPath && hasFullTimeFaculty ? new Set([DEFAULT_PERSON_TYPE]) : new Set()),
+    [roleSel, grantPath, hasFullTimeFaculty],
+  );
 
   const hasFilters =
     deptSel.size > 0 ||
@@ -1136,7 +1149,7 @@ export function MatchaPanel({
     ctlOnly ||
     stageSel.size > 0 ||
     typeSelEffective.size > 0 ||
-    roleSel.size > 0;
+    roleSelEffective.size > 0;
 
   // Active filters, as removable chips above the results (mockup) — the rail's checkboxes are how
   // you SET a filter; the chips are what is currently ON, one click to drop. Keyed and labelled by
@@ -1157,10 +1170,10 @@ export function MatchaPanel({
       label: v,
       onRemove: () => setStageSel(toggled(stageSel, v)),
     })),
-    ...[...roleSel].map((v) => ({
+    ...[...roleSelEffective].map((v) => ({
       key: `role:${v}`,
       label: v,
-      onRemove: () => setRoleSel(toggled(roleSel, v)),
+      onRemove: () => setRoleSel(toggled(roleSelEffective, v)),
     })),
     ...(typeSelEffective.size > 0
       ? [
@@ -1210,9 +1223,10 @@ export function MatchaPanel({
           (typeSelEffective.size === 0 ||
             (c.measures?.researcherType != null &&
               typeSelEffective.has(RESEARCHER_TYPE_LABEL[c.measures.researcherType]))) &&
-          (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
+          (roleSelEffective.size === 0 ||
+            roleSelEffective.has(roleCategoryLabel(c.measures?.roleCategory))),
       ),
-    [rankedRows, deptSel, conceptSel, ctlOnly, stageSel, typeSelEffective, roleSel],
+    [rankedRows, deptSel, conceptSel, ctlOnly, stageSel, typeSelEffective, roleSelEffective],
   );
 
   // Grant Matcha — the HARD eligibility gate, applied CLIENT-SIDE over already-fetched
@@ -2336,8 +2350,8 @@ export function MatchaPanel({
                     <FacetGroup
                       label="Person type"
                       options={roleFacet}
-                      selected={roleSel}
-                      onToggle={(v) => setRoleSel(toggled(roleSel, v))}
+                      selected={roleSelEffective}
+                      onToggle={(v) => setRoleSel(toggled(roleSelEffective, v))}
                       title="The Enterprise Directory's person type — faculty, postdoc, doctoral student, and so on."
                     />
                   ) : null}
