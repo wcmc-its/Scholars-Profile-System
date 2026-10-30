@@ -30,6 +30,7 @@ import {
   parseMyncbiDiscrepancyParams,
   type CitationItem,
   type MyncbiDiscrepancyScholar,
+  type ReciterState,
 } from "@/lib/edit/myncbi-discrepancy-report";
 import { pmCurateHref, publicationManagerBaseUrl } from "@/lib/edit/orcid-queue";
 import type { ReportRender, SuperuserReportProps } from "@/lib/edit/report-registry";
@@ -42,6 +43,12 @@ const LINK = "hover:underline";
 const FLAG = "bg-apollo-surface-2 border-apollo-border-strong rounded-full border px-2 py-0.5 text-[12px]";
 /** A missing list this short renders open; longer ones start collapsed. */
 const OPEN_MAX = 10;
+/** Missing papers grouped by what the curator does in Publication Manager. */
+const RECITER_GROUPS: { state: ReciterState; label: string }[] = [
+  { state: "pending", label: "Pending in ReCiter: accept" },
+  { state: "rejected", label: "Rejected in ReCiter: review" },
+  { state: "none", label: "Not a ReCiter candidate: add" },
+];
 const fmt = (n: number) => n.toLocaleString("en-US");
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" });
@@ -97,7 +104,19 @@ function ScholarBlock({ s, curateBase }: { s: MyncbiDiscrepancyScholar; curateBa
           <summary className="cursor-pointer text-xs font-semibold tracking-[0.08em] uppercase hover:underline">
             On the list, not confirmed on the profile ({fmt(s.missing.length)})
           </summary>
-          <Citations items={s.missing} />
+          {RECITER_GROUPS.map(({ state, label }) => {
+            const items = s.missing.filter((c) => c.reciter === state);
+            return (
+              items.length > 0 && (
+                <div key={state} className="mt-2" data-testid={`myncbi-missing-${state}`}>
+                  <p className="text-muted-foreground m-0 text-[13px] font-semibold">
+                    {label} ({fmt(items.length)})
+                  </p>
+                  <Citations items={items} />
+                </div>
+              )
+            );
+          })}
         </details>
       )}
       {s.notAuthored.length > 0 && (
@@ -190,6 +209,9 @@ export async function renderMyncbiDiscrepanciesReport({
               { value: fmt(r.totals.listed), label: "PubMed citations listed" },
               { value: fmt(r.totals.matched), label: "confirmed on profiles" },
               { value: fmt(r.totals.missing), label: "missing from profiles" },
+              { value: fmt(r.totals.byReciter.pending), label: "pending in ReCiter (accept)" },
+              { value: fmt(r.totals.byReciter.rejected), label: "rejected in ReCiter (review)" },
+              { value: fmt(r.totals.byReciter.none), label: "not ReCiter candidates (add)" },
               { value: fmt(r.totals.withMissing), label: "scholars missing any" },
               { value: fmt(r.totals.notAuthored), label: "listed papers by other authors" },
               { value: fmt(r.totals.suspect), label: "lists that may be someone else's" },
@@ -209,7 +231,9 @@ export async function renderMyncbiDiscrepanciesReport({
             </p>
           )}
           <p className="text-muted-foreground mt-4 text-[12px]">
-            Citations without a PMID are not compared. A listed paper whose authors do not include the
+            Citations without a PMID are not compared. Missing papers are grouped by their ReCiter state as of last
+            night: pending candidates to accept, papers someone rejected as &ldquo;not mine&rdquo; though the scholar lists
+            them with NIH, and papers ReCiter never proposed, to add by PMID. A listed paper whose authors do not include the
             scholar&apos;s surname is shown under &ldquo;by other authors&rdquo; and not counted as missing: PIs link
             trainees&apos; and members&apos; papers to their grants in MyNCBI. A list with under{" "}
             {Math.round(100 * MYNCBI_SUSPECT_OVERLAP)}% of its PubMed citations on the profile is set aside as possibly

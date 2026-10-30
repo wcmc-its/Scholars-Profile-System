@@ -3,8 +3,10 @@ import {
   authoredBy,
   compareBibliography,
   isSuspectList,
+  pairSet,
   parseMyncbiDiscrepancyParams,
   surnameKeys,
+  withReciterState,
   type CitationItem,
 } from "@/lib/edit/myncbi-discrepancy-report";
 
@@ -61,6 +63,23 @@ describe("surnameKeys / authoredBy", () => {
     expect(r.missing.map((m) => m.pmid)).toEqual(["1", "3"]);
     expect(r.notAuthored.map((m) => m.pmid)).toEqual(["2"]);
     expect(r.matched).toBe(1); // a confirmed paper is matched whoever the authors are
+  });
+});
+
+describe("withReciterState", () => {
+  it("tags pending, rejected (winning over pending) and never-proposed papers, per scholar", () => {
+    const pending = pairSet([
+      { cwid: "t1", pmid: "1" },
+      { cwid: "t1", pmid: "2" },
+      { cwid: "t2", pmid: "3" },
+    ]);
+    const rejected = pairSet([{ cwid: "t1", pmid: "2" }]);
+    const r = withReciterState("t1", [c("1"), c("2"), c("3")], pending, rejected);
+    expect(r.map((x) => [x.pmid, x.reciter])).toEqual([
+      ["1", "pending"],
+      ["2", "rejected"],
+      ["3", "none"], // pending for another scholar only
+    ]);
   });
 });
 

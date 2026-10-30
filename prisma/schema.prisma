@@ -1373,6 +1373,20 @@ model ReciterRejectedPmid {
   @@map("reciter_rejected_pmid")
 }
 
+/// (cwid, pmid) pairs still pending in ReCiter (a candidate nobody accepted or
+/// rejected), mirrored nightly by `etl/reciter` from reciterdb `person_article`.
+/// Scoped to PMIDs on the scholar's own MyNCBI list (`myncbi_citation`), so the
+/// bibliography-discrepancy report can tell "accept it in Publication Manager"
+/// from "add it there". No FK, like `reciter_rejected_pmid`.
+model ReciterPendingPmid {
+  cwid     String   @db.VarChar(32)
+  pmid     String   @db.VarChar(32)
+  syncedAt DateTime @default(now()) @map("synced_at")
+
+  @@id([cwid, pmid])
+  @@map("reciter_pending_pmid")
+}
+
 /// A clinical trial, deduplicated to one row per institutional protocol.
 ///
 /// Spine: `reciterdb.clinical_trials` (institutional CTMS export — carries the

@@ -15,6 +15,12 @@
  *    curate their MyNCBI list.
  * Citations without a PMID (books, reports) are not compared.
  *
+ * Each missing item carries its ReCiter state (`reciter`), which is what the
+ * curator does about it in Publication Manager: `pending` → accept it, `rejected`
+ * → someone said "not mine" though the scholar claims it to NIH, so review it,
+ * `none` → not a ReCiter candidate, so add it. Read from the nightly mirrors
+ * `reciter_pending_pmid` / `reciter_rejected_pmid`.
+ *
  * A list that barely overlaps the profile (`suspect`) is most likely someone
  * else's — a co-investigator's link picked up with the biosketch. Those sit in
  * their own view and stay out of the missing totals.
@@ -32,6 +38,8 @@ import {
 type Client = Pick<
   PrismaClient,
   "myncbiBibliography" | "myncbiCitation" | "publicationAuthor" | "publication" | "scholar" | "division" | "divisionMembership"
+  | "reciterPendingPmid"
+  | "reciterRejectedPmid"
 >;
 
 /** Scholars listed at most; the totals always count everyone. */
@@ -76,7 +84,30 @@ export type CitationItem = {
   year: number | null;
   /** MyNCBI's author list; absent on profile-side items and on rows fetched before it was stored. */
   authors?: string | null;
+  /** Missing items only: where the paper stands in ReCiter. */
+  reciter?: ReciterState;
 };
+
+export type ReciterState = "pending" | "rejected" | "none";
+
+const pairKey = (cwid: string, pmid: string) => `${cwid}\t${pmid}`;
+
+/** Pure: a `(cwid, pmid)` set from mirror rows, for `withReciterState`. */
+export const pairSet = (rows: readonly { cwid: string; pmid: string }[]) =>
+  new Set(rows.map((r) => pairKey(r.cwid, r.pmid)));
+
+/** Pure: tag one scholar's missing items with their ReCiter state. A rejection wins over a stale pending row. */
+export function withReciterState(
+  cwid: string,
+  items: readonly CitationItem[],
+  pending: ReadonlySet<string>,
+  rejected: ReadonlySet<string>,
+): CitationItem[] {
+  return items.map((c) => {
+    const k = pairKey(cwid, c.pmid);
+    return { ...c, reciter: rejected.has(k) ? "rejected" : pending.has(k) ? "pending" : "none" };
+  });
+}
 
 const SUFFIX = new Set(["jr", "sr", "ii", "iii", "iv", "md", "phd"]);
 const fold = (s: string) =>
@@ -139,6 +170,8 @@ export type MyncbiDiscrepancyReport = {
     matched: number;
     missing: number;
     withMissing: number;
+    /** `missing` split by ReCiter state. */
+    byReciter: Record<ReciterState, number>;
     notAuthored: number;
     suspect: number;
     extra: number;
@@ -203,7 +236,7 @@ export async function loadMyncbiDiscrepancyReport(
     },
   });
   const cwids = bibs.map((b) => b.cwid);
-  const [citations, confirmedRows] = await Promise.all([
+  const [citations, confirmedRows, pendingRows, rejectedRows] = await Promise.all([
     client.myncbiCitation.findMany({
       where: { cwid: { in: cwids }, pmid: { not: null } },
       select: { cwid: true, pmid: true, authors: true, title: true, source: true, year: true },
@@ -212,7 +245,11 @@ export async function loadMyncbiDiscrepancyReport(
       where: { cwid: { in: cwids }, isConfirmed: true },
       select: { cwid: true, pmid: true, publication: { select: { year: true } } },
     }),
+    client.reciterPendingPmid.findMany({ where: { cwid: { in: cwids } }, select: { cwid: true, pmid: true } }),
+    client.reciterRejectedPmid.findMany({ where: { cwid: { in: cwids } }, select: { cwid: true, pmid: true } }),
   ]);
+  const pending = pairSet(pendingRows);
+  const rejected = pairSet(rejectedRows);
   const listOf = new Map<string, CitationItem[]>();
   for (const c of citations) {
     const l = listOf.get(c.cwid) ?? listOf.set(c.cwid, []).get(c.cwid)!;
@@ -240,7 +277,7 @@ export async function loadMyncbiDiscrepancyReport(
       listed: cmp.listed,
       matched: cmp.matched,
       suspect: isSuspectList(cmp.listed, cmp.matched, cmp.confirmed),
-      missing: cmp.missing,
+      missing: withReciterState(b.cwid, cmp.missing, pending, rejected),
       notAuthored: cmp.notAuthored,
       extraCount: cmp.extraPmids.length,
       extraPmids: cmp.extraPmids,
@@ -271,6 +308,10 @@ export async function loadMyncbiDiscrepancyReport(
       matched: all.reduce((n, s) => n + s.matched, 0),
       missing: trusted.reduce((n, s) => n + s.missing.length, 0),
       withMissing: trusted.filter((s) => s.missing.length > 0).length,
+      byReciter: (["pending", "rejected", "none"] as const).reduce(
+        (o, r) => ({ ...o, [r]: trusted.reduce((n, s) => n + s.missing.filter((c) => c.reciter === r).length, 0) }),
+        {} as Record<ReciterState, number>,
+      ),
       notAuthored: trusted.reduce((n, s) => n + s.notAuthored.length, 0),
       suspect: all.length - trusted.length,
       extra: all.reduce((n, s) => n + s.extraCount, 0),
