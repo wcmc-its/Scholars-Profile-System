@@ -5,18 +5,39 @@
  * (the `CORE#{coreId}` / `CLIENTS` key, NOT `CORE#{coreId}`), and the
  * best-effort error swallow.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { CoreClaimDdbClient } from "@/lib/cores/claim-writeback";
 import { writeBackCoreClients } from "@/lib/cores/client-writeback";
 
 const ORIGINAL = process.env.CORE_CLAIM_WRITEBACK;
+const ORIGINAL_ENV = process.env.SPS_ENV;
+beforeEach(() => {
+  process.env.SPS_ENV = "prod";
+});
 afterEach(() => {
+  if (ORIGINAL_ENV === undefined) delete process.env.SPS_ENV;
+  else process.env.SPS_ENV = ORIGINAL_ENV;
   if (ORIGINAL === undefined) delete process.env.CORE_CLAIM_WRITEBACK;
   else process.env.CORE_CLAIM_WRITEBACK = ORIGINAL;
 });
 
 describe("writeBackCoreClients", () => {
+  it("skips off prod: staging shares the reciterai table and would overwrite prod's list", async () => {
+    process.env.CORE_CLAIM_WRITEBACK = "on";
+    process.env.SPS_ENV = "staging";
+    let called = false;
+    const ddb: CoreClaimDdbClient = {
+      send: async () => {
+        called = true;
+        return {};
+      },
+    };
+    const r = await writeBackCoreClients({ coreId: "2", cwids: ["abc1234"] }, { ddb });
+    expect(r).toEqual({ ok: false, skipped: true, reason: "not_prod" });
+    expect(called).toBe(false);
+  });
+
   it("skips (no DynamoDB write) when the flag is off", async () => {
     delete process.env.CORE_CLAIM_WRITEBACK;
     let called = false;
