@@ -30,6 +30,7 @@ import {
   rareTerms,
   rerankCandidates,
   askTitleFrom,
+  researcherTypeFrom,
   assessMatchSignal,
   sanitizeIncludeTerms,
   INCLUDE_MAX,
@@ -877,5 +878,50 @@ describe("sanitizeIncludeTerms (#1780 Phase 2 — the include[] trust boundary)"
   it("caps the array at INCLUDE_MAX", () => {
     const many = Array.from({ length: INCLUDE_MAX + 5 }, (_, i) => `t${String(i).padStart(3, "0")}`);
     expect(sanitizeIncludeTerms(many)).toHaveLength(INCLUDE_MAX);
+  });
+});
+
+describe("researcherTypeFrom", () => {
+  const NOW = new Date(Date.UTC(2026, 9, 30));
+  const g = (mechanism: string | null, role: string, endYear: number) => ({
+    mechanism,
+    role,
+    endDate: new Date(Date.UTC(endYear, 5, 30)),
+  });
+
+  it("splits the four types on clinical profile × NIH research PI", () => {
+    const r01 = [g("R01", "PI", 2028)];
+    expect(researcherTypeFrom({ hasClinicalProfile: false, grants: r01 }, NOW).type).toBe("basic_scientist");
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: r01 }, NOW).type).toBe("physician_scientist");
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [] }, NOW).type).toBe("clinician");
+    expect(researcherTypeFrom({ hasClinicalProfile: false, grants: [] }, NOW).type).toBe("unclassified");
+  });
+
+  it("counts PI and MPI roles only: a Co-I on a trial is still a clinician", () => {
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("U01", "Co-I", 2028)] }, NOW).type).toBe("clinician");
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("U01", "Co-PI", 2028)] }, NOW).type).toBe("physician_scientist");
+  });
+
+  it("counts mentored K awards (the clinician-scientist's first lab) but not training, conference or education awards", () => {
+    const md = (mech: string) =>
+      researcherTypeFrom({ hasClinicalProfile: true, grants: [g(mech, "PI", 2028)] }, NOW).type;
+    expect(md("K08")).toBe("physician_scientist");
+    expect(md("K23")).toBe("physician_scientist");
+    for (const mech of ["T32", "F32", "L30", "S10", "R13", "R25", "K12", "KL2"]) expect(md(mech)).toBe("clinician");
+  });
+
+  it("ignores non-NIH (no mechanism) awards and awards that ended more than 5 years ago", () => {
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g(null, "PI", 2028)] }, NOW).type).toBe("clinician");
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("R01", "PI", 2020)] }, NOW).type).toBe("clinician");
+    // The window edge: ended in 2021 = within 5 years of 2026.
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("R01", "PI", 2021)] }, NOW).type).toBe("physician_scientist");
+  });
+
+  it("returns the latest-ending qualifying award as the reason", () => {
+    const r = researcherTypeFrom(
+      { hasClinicalProfile: false, grants: [g("R21", "PI", 2024), g("r01", "PI", 2029), g("T32", "PI", 2030)] },
+      NOW,
+    );
+    expect(r.award).toEqual({ mechanism: "R01", endYear: 2029 });
   });
 });

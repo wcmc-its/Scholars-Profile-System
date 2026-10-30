@@ -108,6 +108,10 @@ import {
   type MatchaResponse,
   type MatchaPreference,
   type MatchSignal,
+  type MatchaMeasures,
+  RESEARCHER_TYPE_LABEL,
+  RESEARCHER_TYPE_ORDER,
+  RESEARCH_ACTIVE_YEARS,
   type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
@@ -308,6 +312,58 @@ function toggled(set: ReadonlySet<string>, value: string): Set<string> {
   return next;
 }
 
+/** The sponsor console's default researcher-type selection: everyone but "Clinician". CTL's
+ *  usual ask is a lab to partner with; the clinicians stay one click away (consultant or
+ *  patient-data asks). "Unclassified" stays in, since it holds scientists funded outside NIH. */
+const DEFAULT_RESEARCHER_TYPES: ReadonlySet<string> = new Set(
+  RESEARCHER_TYPE_ORDER.filter((t) => t !== "clinician").map((t) => RESEARCHER_TYPE_LABEL[t]),
+);
+
+/** Why this scholar got their researcher type, the pill's hover. */
+function researcherTypeReason(m: MatchaMeasures): string {
+  const inWindow = `in the last ${RESEARCH_ACTIVE_YEARS} years`;
+  const award = m.researchAward
+    ? `PI on an NIH ${m.researchAward.mechanism} award, ${
+        m.researchAward.endYear >= new Date().getFullYear() ? "active through" : "ended"
+      } ${m.researchAward.endYear}`
+    : `PI on an NIH research award ${inWindow}`;
+  switch (m.researcherType) {
+    case "physician_scientist":
+      return `${award}, and has a clinical profile.`;
+    case "basic_scientist":
+      return `${award}, no clinical profile.`;
+    case "clinician":
+      return `Has a clinical profile, but no NIH research award as PI ${inWindow}.`;
+    case "unclassified":
+      return `No clinical profile and no NIH research award as PI ${inWindow}. Often a scientist funded from other sources.`;
+    default:
+      return "";
+  }
+}
+
+/** The active-filter chip, phrased by whichever side is shorter: the default reads
+ *  "all but Clinician", not a list of three. */
+function researcherTypeChip(selected: ReadonlySet<string>, present: readonly string[]): string {
+  const on = present.filter((l) => selected.has(l));
+  const off = present.filter((l) => !selected.has(l));
+  if (on.length === 0) return `Researcher type: hiding all ${off.join(", ")}`;
+  return off.length > 0 && off.length < on.length
+    ? `Researcher type: all but ${off.join(", ")}`
+    : `Researcher type: ${on.join(", ")}`;
+}
+
+function ResearcherTypePill({ measures }: { measures?: MatchaMeasures }) {
+  const type = measures?.researcherType;
+  if (!type) return null;
+  return (
+    <HoverTooltip wide text={researcherTypeReason(measures)}>
+      <span className="border-border text-muted-foreground inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs">
+        {RESEARCHER_TYPE_LABEL[type]}
+      </span>
+    </HoverTooltip>
+  );
+}
+
 /**
  * A–Z by SURNAME — the only order an officer scanning for a name expects, and the one this sort
  * did not have: it compared `name`, so "Name" meant by FIRST name.
@@ -477,7 +533,9 @@ export function MatchaPanel({
   // #1654 — selection is keyed by the DISPLAY label (what FacetGroup renders and toggles),
   // so the filter compares labels too. One vocabulary, no id↔label map to drift.
   const [stageSel, setStageSel] = useState<ReadonlySet<string>>(new Set());
-  const [clinicianOnly, setClinicianOnly] = useState(false);
+  // Researcher type. `null` = untouched, which means the DEFAULT selection on the sponsor path
+  // (see `typeSelEffective`); an explicit empty set means "show everyone".
+  const [typeSel, setTypeSel] = useState<ReadonlySet<string> | null>(null);
   // Grant Matcha — the officer owns the predicate. The hard career-stage axis defaults ON (it IS
   // the opportunity's own rule); unchecking RELAXES it, interleaving the dropped people back into
   // the ranking by fit, badged — a client-side toggle over already-fetched candidates, never a
@@ -616,7 +674,7 @@ export function MatchaPanel({
     setConceptSel(new Set());
     setCtlOnly(false);
     setStageSel(new Set());
-    setClinicianOnly(false);
+    setTypeSel(new Set());
     setRoleSel(new Set());
   }
 
@@ -712,6 +770,7 @@ export function MatchaPanel({
         const data = (await r.json()) as Partial<MatchaResponse>;
         setGrantCandidates([]); // toggling back to people clears any prior grant results
         clearFilters(); // stale facet selections must not silently hide fresh results
+        setTypeSel(null); // ...except researcher type, which returns to its default
         setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
         setShortlist(new Set()); // the shortlist is per-ask: last sponsor's picks are not this one's
         void loadHistory(); // the row the server just retained
@@ -1040,9 +1099,23 @@ export function MatchaPanel({
     );
   }, [ranked]);
 
-  const clinicianCount = useMemo(
-    () => ranked.filter((c) => c.measures?.isClinician === true).length,
-    [ranked],
+  // Researcher type. Counts only rows that CARRY the measure, like the groups above.
+  const typeFacet = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of ranked) {
+      const t = c.measures?.researcherType;
+      if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return RESEARCHER_TYPE_ORDER.filter((t) => counts.has(t)).map(
+      (t) => [RESEARCHER_TYPE_LABEL[t], counts.get(t)!] as const,
+    );
+  }, [ranked]);
+  // The default applies only on the sponsor path and only when the run carries the measure:
+  // a stored run from before this field existed has no types, and a default there would hide
+  // every row. Grant Matcha states its own eligibility, so it starts unfiltered.
+  const typeSelEffective = useMemo<ReadonlySet<string>>(
+    () => typeSel ?? (!grantPath && typeFacet.length > 0 ? DEFAULT_RESEARCHER_TYPES : new Set()),
+    [typeSel, grantPath, typeFacet.length],
   );
 
   // Person type. Same discipline as the two above: only rows that CARRY a role are counted, so
@@ -1062,7 +1135,7 @@ export function MatchaPanel({
     conceptSel.size > 0 ||
     ctlOnly ||
     stageSel.size > 0 ||
-    clinicianOnly ||
+    typeSelEffective.size > 0 ||
     roleSel.size > 0;
 
   // Active filters, as removable chips above the results (mockup) — the rail's checkboxes are how
@@ -1089,8 +1162,14 @@ export function MatchaPanel({
       label: v,
       onRemove: () => setRoleSel(toggled(roleSel, v)),
     })),
-    ...(clinicianOnly
-      ? [{ key: "clinician", label: "Practicing clinician", onRemove: () => setClinicianOnly(false) }]
+    ...(typeSelEffective.size > 0
+      ? [
+          {
+            key: "researcherType",
+            label: researcherTypeChip(typeSelEffective, typeFacet.map(([l]) => l)),
+            onRemove: () => setTypeSel(new Set()),
+          },
+        ]
       : []),
     ...(ctlOnly
       ? [{ key: "ctl", label: "Holds CTL technology", onRemove: () => setCtlOnly(false) }]
@@ -1128,10 +1207,12 @@ export function MatchaPanel({
           (stageSel.size === 0 ||
             (c.measures?.careerStage != null &&
               stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
-          (!clinicianOnly || c.measures?.isClinician === true) &&
+          (typeSelEffective.size === 0 ||
+            (c.measures?.researcherType != null &&
+              typeSelEffective.has(RESEARCHER_TYPE_LABEL[c.measures.researcherType]))) &&
           (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
       ),
-    [rankedRows, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel],
+    [rankedRows, deptSel, conceptSel, ctlOnly, stageSel, typeSelEffective, roleSel],
   );
 
   // Grant Matcha — the HARD eligibility gate, applied CLIENT-SIDE over already-fetched
@@ -1236,6 +1317,9 @@ export function MatchaPanel({
         clinician:
           c.measures?.isClinician === undefined ? "" : c.measures.isClinician ? "Yes" : "No",
         personType: roleCategoryLabel(c.measures?.roleCategory),
+        researcherType: c.measures?.researcherType
+          ? RESEARCHER_TYPE_LABEL[c.measures.researcherType]
+          : "",
         technologyCount: c.technologyCount,
         profileUrl: new URL(
           profilePath(c.profileSlug),
@@ -2257,13 +2341,13 @@ export function MatchaPanel({
                       title="The Enterprise Directory's person type — faculty, postdoc, doctoral student, and so on."
                     />
                   ) : null}
-                  {clinicianCount > 0 ? (
+                  {typeFacet.length > 0 ? (
                     <FacetGroup
-                      label="Clinician"
-                      options={[["Practicing clinician", clinicianCount]]}
-                      selected={clinicianOnly ? new Set(["Practicing clinician"]) : new Set()}
-                      onToggle={() => setClinicianOnly(!clinicianOnly)}
-                      title="Carries a clinical or NYP-credentialed signal in the Enterprise Directory."
+                      label="Researcher type"
+                      options={typeFacet}
+                      selected={typeSelEffective}
+                      onToggle={(v) => setTypeSel(toggled(typeSelEffective, v))}
+                      title={`Research-active = PI on an NIH research award (R, U, P, K, DP) in the last ${RESEARCH_ACTIVE_YEARS} years. Physician-scientists and clinicians also have a clinical profile in the Enterprise Directory. Clinicians are hidden by default.`}
                     />
                   ) : null}
                   <FacetGroup
@@ -3370,6 +3454,16 @@ function CompactRow({
         </span>
         {/* Grant Matcha — the eligibility pill sits INLINE beside the fit tier (mockup §9). */}
         {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
+        {/* Native `title`, not HoverTooltip: this row is one big button, and a tooltip trigger
+            nested inside it would be a second interactive element. */}
+        {candidate.measures?.researcherType ? (
+          <span
+            title={researcherTypeReason(candidate.measures)}
+            className="border-border text-muted-foreground hidden shrink-0 rounded-full border px-2 py-0.5 text-[11px] sm:inline-flex"
+          >
+            {RESEARCHER_TYPE_LABEL[candidate.measures.researcherType]}
+          </span>
+        ) : null}
         {/* Short tier word here (mockup's dense list), not the detailed card's "Strong fit". */}
         <span
           className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${TIER_CLASS[tier]}`}
@@ -3662,6 +3756,7 @@ function ResearcherRow({
           </span>
           {/* Grant Matcha — the eligibility pill sits INLINE beside the fit tier (mockup §9). */}
           {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
+          <ResearcherTypePill measures={candidate.measures} />
           <ContactButton cwid={candidate.cwid} />
           {/* The way back. `↑` is this file's existing word for "collapse" — the relevance floor's
               toggle already reads "Hide ↑" — rather than a third glyph for a second idea; the

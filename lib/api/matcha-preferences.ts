@@ -9,7 +9,7 @@
  * DETERMINISTIC, NOT LLM, on purpose:
  *
  *  1. The vocabulary is CLOSED. A preference is only actionable if some `MatchaMeasures`
- *     field can answer it, and there are exactly two: career stage and clinician status.
+ *     field can answer it: career stage, clinician status and researcher type.
  *     An open-ended LLM extraction would happily return "prefers collaborative teams" —
  *     which we cannot score, so it would render as a nudge that nudges nothing.
  *  2. The concept extractor's prompt was tuned against the ranking eval (nDCG@20 0.610).
@@ -47,11 +47,16 @@ const SENIOR_PHRASES = [
   "senior scientist",
 ];
 
-const CLINICIAN_PHRASES = [
+/** A physician who runs research. Scored on `researcherType`, not the clinician flag, which
+ *  would reward every clinician whether or not they run a lab. */
+const PHYSICIAN_SCIENTIST_PHRASES = [
   "physician-scientist",
   "physician scientist",
   "clinician-scientist",
   "clinician scientist",
+];
+
+const CLINICIAN_PHRASES = [
   "clinical investigator",
   "practicing physician",
   "practicing clinician",
@@ -184,11 +189,22 @@ export function extractMatchaPreferences(paste: string): MatchaPreference[] {
     });
   }
 
+  const physicianScientist = findPhrase(hay, PHYSICIAN_SCIENTIST_PHRASES);
+  if (physicianScientist) {
+    out.push({
+      measure: "researcherType",
+      types: ["physician_scientist"],
+      label: "Physician-scientist",
+      evidence: quote(paste, physicianScientist.at, physicianScientist.len),
+      importance: DETECTED_IMPORTANCE,
+    });
+  }
+
   const clinician = findPhrase(hay, CLINICIAN_PHRASES);
   if (clinician) {
     out.push({
       measure: "isClinician",
-      label: "Physician-scientist",
+      label: "Practicing clinician",
       evidence: quote(paste, clinician.at, clinician.len),
       importance: DETECTED_IMPORTANCE,
     });

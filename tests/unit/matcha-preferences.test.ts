@@ -53,6 +53,16 @@ describe("extractMatchaPreferences", () => {
     // The chip has to be able to show WHY it fired — an unexplained nudge is not auditable.
     expect(prefs[0].evidence).toContain("early-career");
     expect(prefs[0]).toMatchObject({ measure: "careerStage", stages: ["early"] });
+    // Physician-scientist is a RESEARCHER TYPE, not the clinician flag: the flag alone
+    // rewarded every clinician, lab or no lab.
+    expect(prefs[1]).toMatchObject({ measure: "researcherType", types: ["physician_scientist"] });
+  });
+
+  it("keeps a practising-clinician ask on the clinician flag, under its own label", () => {
+    const prefs = extractMatchaPreferences("We are looking for practicing physicians to advise us.");
+    expect(prefs).toEqual([
+      expect.objectContaining({ measure: "isClinician", label: "Practicing clinician" }),
+    ]);
   });
 
   it("returns [] for a purely topical paste — the nudge stays inert, as before", () => {
@@ -117,6 +127,20 @@ describe("preferenceBoost", () => {
     // Same arithmetic as "fails the preference", a different claim. She is not penalised for
     // being a non-clinician; she is simply never shown to be one.
     expect(preferenceBoost(cand({ cwid: "ghost" }), [EARLY, CLINICIAN])).toBe(0);
+  });
+
+  it("a physician-scientist preference rewards a lab-running clinician, NOT every clinician", () => {
+    const pref: MatchaPreference = {
+      measure: "researcherType",
+      types: ["physician_scientist"],
+      label: "Physician-scientist",
+      evidence: "…physician-scientist…",
+      importance: 1,
+    };
+    const lab = cand({ cwid: "lab", measures: { isClinician: true, researcherType: "physician_scientist" } });
+    const clinic = cand({ cwid: "clinic", measures: { isClinician: true, researcherType: "clinician" } });
+    expect(preferenceBoost(lab, [pref])).toBe(1);
+    expect(preferenceBoost(clinic, [pref])).toBe(0);
   });
 
   it("is 0 when there are no active preferences (the officer unchecked them all)", () => {

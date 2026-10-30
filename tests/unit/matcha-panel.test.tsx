@@ -892,7 +892,7 @@ describe("MatchaPanel", () => {
       expect(parts).toHaveLength(1);
       const csv = parts[0];
       expect(csv.split("\r\n")[0]).toBe(
-        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,CTL technologies,Profile URL",
+        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,CTL technologies,Profile URL",
       );
       expect(csv).toContain("Alice Alpha");
       expect(csv).toContain("Strong fit");
@@ -911,7 +911,7 @@ describe("MatchaPanel", () => {
     // Absent != zero. A filter that cannot filter, or one that reads as "nobody here is a
     // clinician" when the truth is "we don't know", is worse than no filter at all.
     expect(screen.queryByText("Career stage")).toBeNull();
-    expect(screen.queryByText("Clinician")).toBeNull();
+    expect(screen.queryByText("Researcher type")).toBeNull();
   });
 
   it("renders both facets once the measures are produced, and filters on them", async () => {
@@ -922,13 +922,13 @@ describe("MatchaPanel", () => {
           cwid: "a",
           name: "Alice Alpha",
           fusedScore: 0.9,
-          measures: { careerStage: "early", isClinician: true },
+          measures: { careerStage: "early", isClinician: true, researcherType: "physician_scientist" },
         }),
         candidate({
           cwid: "b",
           name: "Bob Beta",
           fusedScore: 0.5,
-          measures: { careerStage: "senior", isClinician: false },
+          measures: { careerStage: "senior", isClinician: false, researcherType: "basic_scientist" },
         }),
       ],
     });
@@ -939,19 +939,55 @@ describe("MatchaPanel", () => {
 
     // Both groups appear, in career-ladder order (not count order).
     expect(screen.getByText("Career stage")).toBeTruthy();
-    expect(screen.getByText("Clinician")).toBeTruthy();
+    expect(screen.getByText("Researcher type")).toBeTruthy();
 
     // Filtering by stage keeps only the early-career candidate.
     fireEvent.click(screen.getByRole("checkbox", { name: /Early career/ }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
 
-    // Clearing restores both; the clinician facet then narrows to the one clinician.
+    // Clearing restores both; the researcher-type facet then narrows to the physician-scientist.
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getByText("Bob Beta")).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: /Practicing clinician/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Physician-scientist/ }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
+  });
+
+  // ── Researcher type default ────────────────────────────────────────────────
+  it("hides clinicians by default, one click away, and Clear filters shows everyone", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9, measures: { researcherType: "clinician" } }),
+        candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.85, measures: { researcherType: "basic_scientist" } }),
+        // Non-NIH-funded scientists land here; they must NOT be hidden by default.
+        candidate({ cwid: "c", name: "Carol Gamma", fusedScore: 0.8, measures: { researcherType: "unclassified" } }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Bob Beta");
+
+    expect(screen.queryByText("Alice Alpha")).toBeNull();
+    expect(screen.getByText("Carol Gamma")).toBeTruthy();
+    // The default is visible as a removable chip, so the hidden clinicians are never a mystery.
+    expect(screen.getByText("Researcher type: all but Clinician")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Clinician/ }));
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Clinician/ }));
+    expect(screen.queryByText("Alice Alpha")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+  });
+
+  it("applies no researcher-type default to a run that carries no types (an old stored run)", async () => {
+    await renderAndSearch(); // THREE — no `measures`
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+    expect(screen.queryByText(/Researcher type:/)).toBeNull();
   });
 
   // ── Person type facet (§2) ─────────────────────────────────────────────────

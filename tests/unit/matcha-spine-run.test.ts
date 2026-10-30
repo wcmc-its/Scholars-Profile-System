@@ -42,6 +42,8 @@ const {
   mockMeshDescriptorFindMany,
   mockTechnologyGroupBy,
   mockScholarFindMany,
+  mockFieldOverrideFindMany,
+  mockSuppressionFindMany,
   mockSearchPeople,
   mockMatchQueryToTaxonomy,
   mockExtractSponsorConcepts,
@@ -51,6 +53,8 @@ const {
   mockMeshDescriptorFindMany: vi.fn(),
   mockTechnologyGroupBy: vi.fn(),
   mockScholarFindMany: vi.fn(),
+  mockFieldOverrideFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
   mockSearchPeople: vi.fn(),
   mockMatchQueryToTaxonomy: vi.fn(),
   mockExtractSponsorConcepts: vi.fn(),
@@ -65,6 +69,9 @@ vi.mock("@/lib/db", () => ({
       scholarTechnology: { groupBy: mockTechnologyGroupBy },
       // #1654 — the measures hydration read (career stage + clinician).
       scholar: { findMany: mockScholarFindMany },
+      // Researcher type: the hideFunding override and the grant suppressions.
+      fieldOverride: { findMany: mockFieldOverrideFindMany },
+      suppression: { findMany: mockSuppressionFindMany },
     },
   },
 }));
@@ -320,6 +327,8 @@ beforeEach(() => {
   // Default: no Scholar rows ⇒ candidates carry NO measures, which is the contract's
   // "absent, not zero". Individual tests override to assert the produced values.
   mockScholarFindMany.mockResolvedValue([]);
+  mockFieldOverrideFindMany.mockResolvedValue([]);
+  mockSuppressionFindMany.mockResolvedValue([]);
   mockMatchQueryToTaxonomy.mockResolvedValue({ state: "none", meshResolution: null });
   mockSearchPeople.mockResolvedValue(people([]));
   // Default: LLM extractor yields nothing → the spine falls back to the dictionary
@@ -861,6 +870,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         appointments: [],
         // A 2020 MD ⇒ inside the early-career window.
         educations: [{ year: 2020, degree: "MD" }],
+        grants: [],
       },
     ]);
 
@@ -875,6 +885,8 @@ describe("rankResearchersForDescriptionSpine", () => {
       careerStage: "early",
       isClinician: true,
       roleCategory: "full_time_faculty",
+      // Clinical profile, no NIH PI award ⇒ a clinician.
+      researcherType: "clinician",
     });
 
     const ghost = candidates.find((c) => c.cwid === "ghost");
@@ -883,21 +895,23 @@ describe("rankResearchersForDescriptionSpine", () => {
   });
 
   // ── Grant Matcha ESI hydration (§3) ────────────────────────────────────────
-  it("hydrates measures.esiEligible ONLY when eligibilitySignals is set — /edit/matcha byte-unchanged", async () => {
+  it("hydrates measures.esiEligible ONLY when eligibilitySignals is set, off the ONE measures read", async () => {
     const thisYear = new Date().getFullYear();
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
     mockSearchPeople.mockResolvedValue(people(["early", "senior"]));
-    // Two Scholar reads fire on the grant-matcha path: the measures read (no `grants` in the
-    // select) and the gated grants read. Distinguish them by whether the select asks for `grants`.
-    const measureRows = [
+    // Grants ride the measures read (researcher type needs them on every path), so ESI no
+    // longer needs a second Scholar query.
+    mockScholarFindMany.mockResolvedValue([
       {
         cwid: "early",
         roleCategory: "full_time_faculty",
         primaryTitle: "Assistant Professor",
         hasClinicalProfile: false,
         appointments: [],
+        // Recent PhD, no major PI award ⇒ inside the ESI window.
         educations: [{ year: thisYear - 2, degree: "PhD" }],
+        grants: [],
       },
       {
         cwid: "senior",
@@ -905,43 +919,87 @@ describe("rankResearchersForDescriptionSpine", () => {
         primaryTitle: "Professor",
         hasClinicalProfile: false,
         appointments: [],
+        // PhD 30y ago ⇒ past the window.
         educations: [{ year: thisYear - 30, degree: "PhD" }],
+        grants: [],
       },
-    ];
-    const grantRows = [
-      // early: recent PhD, no major PI award ⇒ inside the ESI window.
-      { cwid: "early", grants: [], educations: [{ year: thisYear - 2, degree: "PhD" }] },
-      // senior: PhD 30y ago ⇒ past the window.
-      { cwid: "senior", grants: [], educations: [{ year: thisYear - 30, degree: "PhD" }] },
-    ];
-    mockScholarFindMany.mockImplementation(async (args: { select?: { grants?: unknown } }) =>
-      args.select?.grants ? grantRows : measureRows,
-    );
+    ]);
 
-    // WITH signals → esiEligible present and correct; the gated grants read fired.
     const withSig = await rankResearchersForDescriptionSpine("cancer", {
       eligibilitySignals: true,
     });
     expect(withSig.candidates.find((c) => c.cwid === "early")?.measures?.esiEligible).toBe(true);
     expect(withSig.candidates.find((c) => c.cwid === "senior")?.measures?.esiEligible).toBe(false);
-    expect(
-      mockScholarFindMany.mock.calls.some(
-        (c) => (c[0] as { select?: { grants?: unknown } }).select?.grants,
-      ),
-    ).toBe(true);
 
-    // WITHOUT signals → esiEligible ABSENT, the rest of measures unchanged, and NO grants read at
-    // all: the plain `/edit/matcha` path never touches the new query.
+    // WITHOUT signals → esiEligible ABSENT, the rest of measures unchanged.
     mockScholarFindMany.mockClear();
     const noSig = await rankResearchersForDescriptionSpine("cancer");
     const early = noSig.candidates.find((c) => c.cwid === "early");
     expect(early?.measures?.esiEligible).toBeUndefined();
     expect(early?.measures).toMatchObject({ careerStage: "early", roleCategory: "full_time_faculty" });
-    expect(
-      mockScholarFindMany.mock.calls.every(
-        (c) => !(c[0] as { select?: { grants?: unknown } }).select?.grants,
-      ),
-    ).toBe(true);
+    expect(mockScholarFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Researcher type ────────────────────────────────────────────────────────
+  describe("researcher type", () => {
+    const thisYear = new Date().getFullYear();
+    const r01 = (externalId: string) => ({
+      externalId,
+      endDate: new Date(Date.UTC(thisYear + 2, 5, 30)),
+      role: "PI",
+      mechanism: "R01",
+    });
+    function scholarRow(cwid: string, hasClinicalProfile: boolean, grants: unknown[]) {
+      return {
+        cwid,
+        roleCategory: "full_time_faculty",
+        primaryTitle: "Professor",
+        hasClinicalProfile,
+        appointments: [],
+        educations: [],
+        grants,
+      };
+    }
+    beforeEach(() => {
+      mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+      mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    });
+
+    it("classifies each candidate and names the award behind it", async () => {
+      mockSearchPeople.mockResolvedValue(people(["lab", "md"]));
+      mockScholarFindMany.mockResolvedValue([
+        scholarRow("lab", true, [r01("g1")]),
+        scholarRow("md", true, []),
+      ]);
+      const { candidates } = await rankResearchersForDescriptionSpine("cancer");
+      expect(candidates.find((c) => c.cwid === "lab")?.measures).toMatchObject({
+        researcherType: "physician_scientist",
+        researchAward: { mechanism: "R01", endYear: thisYear + 2 },
+      });
+      expect(candidates.find((c) => c.cwid === "md")?.measures?.researcherType).toBe("clinician");
+    });
+
+    it("ignores a SUPPRESSED grant: a curator's 'not this person's' cannot make them research-active", async () => {
+      mockSearchPeople.mockResolvedValue(people(["md"]));
+      mockScholarFindMany.mockResolvedValue([scholarRow("md", true, [r01("wrong-person")])]);
+      mockSuppressionFindMany.mockResolvedValue([{ entityId: "wrong-person" }]);
+      const { candidates } = await rankResearchersForDescriptionSpine("cancer");
+      expect(candidates[0].measures?.researcherType).toBe("clinician");
+      // The suppression read asked about exactly the grants it was given.
+      expect(mockSuppressionFindMany.mock.calls[0][0].where).toMatchObject({
+        entityType: "grant",
+        entityId: { in: ["wrong-person"] },
+      });
+    });
+
+    it("hideFunding: still classifies, but never names the award the profile hides", async () => {
+      mockSearchPeople.mockResolvedValue(people(["private"]));
+      mockScholarFindMany.mockResolvedValue([scholarRow("private", false, [r01("g1")])]);
+      mockFieldOverrideFindMany.mockResolvedValue([{ entityId: "private" }]);
+      const { candidates } = await rankResearchersForDescriptionSpine("cancer");
+      expect(candidates[0].measures?.researcherType).toBe("basic_scientist");
+      expect(candidates[0].measures?.researchAward).toBeUndefined();
+    });
   });
 
   it("retrieves each cluster's pool in ONE size-TERM_DEPTH request, in rank order (no paging)", async () => {
