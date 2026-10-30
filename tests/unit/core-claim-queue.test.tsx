@@ -3868,7 +3868,7 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(toggle);
 
-    const textarea = screen.getByLabelText("Paste CWIDs");
+    const textarea = screen.getByLabelText("Or paste CWIDs");
     expect(textarea).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("dialog")).toBeTruthy();
@@ -3887,13 +3887,13 @@ describe("CoreClaimQueue — Known clients toolbar wiring", () => {
     render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
     const toggle = screen.getByRole("button", { name: /Known clients/ });
     fireEvent.click(toggle);
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     // The footer button, not Radix's own sr-only close icon — both say "Close".
     const footer = document.querySelector('[data-slot="dialog-footer"]') as HTMLElement;
     fireEvent.click(within(footer).getByRole("button", { name: "Close" }));
     expect(screen.queryByLabelText("Paste CWIDs")).toBeNull();
     fireEvent.click(toggle);
-    expect((screen.getByLabelText("Paste CWIDs") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByLabelText("Or paste CWIDs") as HTMLTextAreaElement).value).toBe("");
   });
 });
 

@@ -40,11 +40,14 @@ import { mapStartError } from "@/components/edit/view-as-button";
  * the dialog POSTs `/api/impersonation { targetCwid }` and reloads so the whole
  * app re-renders through the effective seam and the banner appears.
  *
- * **Exact-CWID fallback.** The global roles (`honors_curator`,
- * `data_sharing_viewer`, `development`, `content_editor`,
- * `lib/auth/global-roles.ts`) are valid "View as" targets but never appear in
- * the search results above, which come from our own tables, not ED groups. When a
- * single-token query has zero matches, the empty state offers "View as this
+ * **Global roles.** The global roles (`lib/auth/global-roles.ts`) are valid
+ * "View as" targets. Their LDAP groups cannot be enumerated, so the route finds
+ * a profile-less holder by searching the directory by NAME and checking each
+ * hit's role (see the candidates route); such a row reads `cwid · Honors
+ * Curator` etc.
+ *
+ * **Exact-CWID fallback.** If the directory is unreachable, or the query is a
+ * CWID, a single-token query with zero matches still offers "View as this
  * exact CWID" — it reuses the same confirm dialog and `startImpersonation`, just
  * with a synthetic candidate built from the typed text instead of a search row;
  * the POST route is the real authority either way and re-validates the target
@@ -54,7 +57,16 @@ import { mapStartError } from "@/components/edit/view-as-button";
  * popover with only `onPick` threaded through.
  */
 
-type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward";
+/** The global roles mirror `GlobalRole` in `lib/auth/global-roles.ts`, which is
+ *  Node-only and so not imported into this client component. */
+type GlobalRoleKey =
+  | "honors_curator"
+  | "data_sharing_viewer"
+  | "development"
+  | "content_editor"
+  | "core_director"
+  | "observer";
+type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward" | GlobalRoleKey;
 type UnitKind = "department" | "division" | "center" | "core" | "institution";
 
 /** A row from `/api/impersonation/candidates` (§7). */
@@ -81,6 +93,13 @@ const ROLE_LABEL: Record<CandidateRole, string> = {
   curator: "Curator",
   scholar: "Scholar",
   comms_steward: "Communications Steward",
+  // Same strings as `GLOBAL_ROLE_LABEL` (lib/auth/global-roles.ts).
+  honors_curator: "Honors Curator",
+  data_sharing_viewer: "Data Sharing Viewer",
+  development: "Development",
+  content_editor: "Content Editor",
+  core_director: "Cores director",
+  observer: "Observer",
 };
 
 const KIND_SHORT: Record<UnitKind, string> = {
@@ -91,10 +110,10 @@ const KIND_SHORT: Record<UnitKind, string> = {
   institution: "Institution",
 };
 
-/** `Owner · Cardiology (Dept)` for a unit role; plain `Scholar` or
- *  `Communications Steward` for the unit-less roles. */
+/** `Owner · Cardiology (Dept)` for a unit role; the plain role label
+ *  (`Scholar`, `Communications Steward`, `Honors Curator`, …) otherwise. */
 function describe(c: Candidate): string {
-  if (c.role === "scholar" || c.role === "comms_steward") return ROLE_LABEL[c.role];
+  if (c.role !== "owner" && c.role !== "curator") return ROLE_LABEL[c.role];
   const unit = c.unit ? ` · ${c.unit}` : "";
   const kind = c.unitKind ? ` (${KIND_SHORT[c.unitKind]})` : "";
   return `${ROLE_LABEL[c.role]}${unit}${kind}`;
@@ -239,8 +258,8 @@ export function ImpersonationSwitcher({ onPick }: { onPick: (c: Candidate) => vo
                 className="mt-1 text-left font-medium text-primary hover:underline"
                 data-testid="impersonation-view-as-exact-cwid"
               >
-                View as “{exactCwidCandidate.cwid}” by exact CWID — some roles (CV Generator, Honors
-                Curator, Data Sharing Viewer, Development, Content Editor) can’t be searched.
+                View as “{exactCwidCandidate.cwid}” by exact CWID — for someone the name search
+                can’t find (e.g. when the directory is unavailable).
               </button>
             )}
           </div>

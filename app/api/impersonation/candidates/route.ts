@@ -25,6 +25,21 @@
  * department for context). The query is bounded (≤50 rows, `q`-filtered) so the
  * per-candidate superuser pre-filter and the unit-name lookups stay small.
  *
+ * **Directory name search (global roles).** A global-role holder
+ * (`lib/auth/global-roles.ts`: honors_curator, data_sharing_viewer,
+ * development, content_editor, core_director, observer) usually has no Scholar
+ * row, and the LDAP groups behind those roles cannot be enumerated, so none of
+ * the table-backed passes can surface them. For a NAME query (`q` of 2+ chars
+ * with no digit) the route also searches ED by name
+ * (`searchDirectoryPeopleByName`, the same app-runtime LDAP read that backs
+ * `GET /api/directory/people`), capped at {@link ED_SEARCH_LIMIT} hits, and
+ * checks each hit with the existing predicates: a unit-admin grant (fed into
+ * the unit-admin pass), the steward allowlist (fed into the steward pass), or
+ * `resolveGlobalRole` (the global-role pass, `all` view only). The `POST`
+ * target check stays the authority; this only decides what is OFFERED. Every
+ * directory step is fail-soft and time-boxed ({@link ED_TIMEOUT_MS}): an
+ * unreachable or slow directory returns exactly the table-backed results.
+ *
  * Node runtime by construction: `isSuperuser` (`lib/auth/superuser.ts`) runs a
  * live LDAPS query and Prisma is server-only.
  */
@@ -34,6 +49,9 @@ import { getSession } from "@/lib/auth/session-server";
 import { canImpersonate } from "@/lib/auth/effective-identity";
 import { superusersAmong } from "@/lib/auth/superuser";
 import { listCommsStewardCwids } from "@/lib/auth/comms-steward";
+import { resolveGlobalRole, type GlobalRole } from "@/lib/auth/global-roles";
+import { directoryDisplayName } from "@/lib/edit/directory-names";
+import { searchDirectoryPeopleByName, type DirectoryPerson } from "@/lib/sources/ldap";
 import {
   pickDisplayGrant,
   summarizeUnitAdminGrants,
@@ -48,6 +66,36 @@ export const dynamic = "force-dynamic";
 /** Max rows returned — keeps the per-candidate superuser pre-filter bounded. */
 const CANDIDATE_LIMIT = 50;
 
+/** ED name-search hits checked per request. Each unmatched hit costs one
+ *  `resolveGlobalRole` (a handful of parallel LDAP compares), so keep it small. */
+const ED_SEARCH_LIMIT = 6;
+
+/** Budget for each directory step (the search, then the role checks). */
+const ED_TIMEOUT_MS = 2_500;
+
+/** A name query (vs. a CWID): 2+ chars and no digit. A digit-free CWID still
+ *  works — ED's name filter also matches an exact CWID. */
+function isNameQuery(q: string): boolean {
+  return q.length >= 2 && !/\d/.test(q);
+}
+
+/** Resolve `promise`, or `fallback` after `ms` / on rejection. Never throws. */
+function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
+
 /** The unit-kind filter (spec §8). `unit` = any org-unit owner/curator — the
  *  switcher's "Org unit roles" tab; the per-kind values stay accepted. */
 type KindFilter = ImpersonationUnitKind | "unit" | "scholar" | "all";
@@ -59,8 +107,9 @@ interface Candidate {
   /** `null` for a comms_steward with no Scholar profile of their own (dwd2001). */
   slug: string | null;
   /** Most-privileged `UnitAdmin` role (owner > curator), else `scholar`; or
-   *  `comms_steward` for a Method-Family steward with no scholar/unit role. */
-  role: "owner" | "curator" | "scholar" | "comms_steward";
+   *  `comms_steward` for a Method-Family steward with no scholar/unit role; or
+   *  a global role for a profile-less holder found by directory name search. */
+  role: "owner" | "curator" | "scholar" | "comms_steward" | GlobalRole;
   /** The administered unit's kind, or `null` for a plain scholar / steward. */
   unitKind: ImpersonationUnitKind | null;
   /** Administered unit display name (owner/curator) or home unit (scholar). */
@@ -114,6 +163,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = request.nextUrl;
   const q = (searchParams.get("q") ?? "").trim();
   const kindFilter = parseKind(searchParams.get("kind"));
+
+  // Directory name search — started now so it overlaps the table queries below.
+  // Fail-soft + time-boxed: no directory means no extra hits, never an error.
+  const edSearch: Promise<DirectoryPerson[]> = isNameQuery(q)
+    ? within(searchDirectoryPeopleByName(q, ED_SEARCH_LIMIT), ED_TIMEOUT_MS, [])
+    : Promise.resolve([]);
 
   // A unit filter ("Org unit roles", or one kind) narrows the scholar page to
   // grant holders IN the query, before `take`. Filtering only in memory after a
@@ -288,6 +343,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // here. Only under the `all` view — a steward is not a department/division/
   // center/scholar, so the unit-kind chips correctly exclude them. Each still
   // passes the R2 down-only guard (superusers dropped) and the `q` filter.
+  // ED hits keyed by lowercased CWID → display name. Lets the steward and
+  // unit-admin passes match a person by their directory name when our own
+  // tables only hold the bare CWID.
+  const edHits = await edSearch;
+  const edNameByCwid = new Map<string, string>();
+  for (const p of edHits) {
+    edNameByCwid.set(p.cwid.toLowerCase(), directoryDisplayName(p) ?? p.name);
+  }
+
   if (kindFilter === "all") {
     const emitted = new Set(candidates.map((c) => c.cwid.toLowerCase()));
     const stewardCwids = listCommsStewardCwids().filter((c) => !emitted.has(c));
@@ -318,10 +382,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       stewardCwids.forEach((cwid) => {
         if (stewardSuperusers.has(cwid)) return; // R2 — not assumable
         const profile = profileByCwid.get(cwid);
-        const preferredName = profile?.preferredName ?? nameByCwid.get(cwid) ?? cwid;
+        const preferredName =
+          profile?.preferredName ?? nameByCwid.get(cwid) ?? edNameByCwid.get(cwid) ?? cwid;
         // `q` matches the CWID or the resolved name (the scholar pass already
-        // applied `q` server-side; mirror it for the steward set in memory).
-        if (qLower && !cwid.includes(qLower) && !preferredName.toLowerCase().includes(qLower)) {
+        // applied `q` server-side; mirror it for the steward set in memory), or
+        // the directory name search returned them.
+        if (
+          qLower &&
+          !cwid.includes(qLower) &&
+          !preferredName.toLowerCase().includes(qLower) &&
+          !edNameByCwid.has(cwid)
+        ) {
           return;
         }
         candidates.push({
@@ -364,7 +435,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       role: "owner" | "curator";
     }> = await db.read.unitAdmin
       .findMany({
-        where: q ? { OR: [{ cwid: { contains: q } }, { granteeName: { contains: q } }] } : {},
+        where: q
+          ? {
+              OR: [
+                { cwid: { contains: q } },
+                { granteeName: { contains: q } },
+                // A grant whose `granteeName` was never filled (#443) is still
+                // found by the holder's directory name.
+                ...(edNameByCwid.size > 0 ? [{ cwid: { in: [...edNameByCwid.keys()] } }] : []),
+              ],
+            }
+          : {},
         select: { cwid: true, granteeName: true, entityType: true, entityId: true, role: true },
         take: CANDIDATE_LIMIT * 4,
       })
@@ -457,13 +538,61 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           // `granteeName` is populated by the ed-admins pull (the app runtime
           // cannot reach LDAP, #443); a grant predating that shows the bare CWID,
           // which the `q` filter still matches — degraded, never missing.
-          preferredName: profile?.preferredName ?? s.granteeName ?? s.cwid,
+          preferredName:
+            profile?.preferredName ??
+            s.granteeName ??
+            edNameByCwid.get(s.cwid.toLowerCase()) ??
+            s.cwid,
           slug: profile?.slug ?? null,
           role: top.role,
           unitKind: top.entityType,
           unit: nameMaps[top.entityType].get(top.entityId) ?? null,
         });
       });
+    }
+  }
+
+  // Global-role holders found by directory name (see the module docblock). Only
+  // under `all` — a global role has no unit kind. Only directory hits nothing
+  // above emitted and with no Scholar row (a scholar is already assumable and
+  // found by the scholar pass), so the per-CWID role checks stay few.
+  if (kindFilter === "all" && edNameByCwid.size > 0) {
+    const emitted = new Set(candidates.map((c) => c.cwid.toLowerCase()));
+    const pending = [...edNameByCwid.keys()].filter((c) => !emitted.has(c));
+    if (pending.length > 0) {
+      const withProfile = await db.read.scholar
+        .findMany({
+          where: { cwid: { in: pending }, deletedAt: null },
+          select: { cwid: true },
+        })
+        .then((rows) => new Set(rows.map((r) => r.cwid.toLowerCase())))
+        // Unknown profile state: treat as profile-less and let the role check decide.
+        .catch(() => new Set<string>());
+      const profileless = pending.filter((c) => !withProfile.has(c));
+      const [roles, globalSuperusers] = await Promise.all([
+        within(
+          Promise.all(profileless.map((c) => resolveGlobalRole(c).catch(() => null))),
+          ED_TIMEOUT_MS,
+          profileless.map(() => null),
+        ),
+        // R2 — same superuser pre-filter as every pass above.
+        within(superusersAmong(profileless), ED_TIMEOUT_MS, null),
+      ]);
+      // An unanswered superuser check fails closed: offer nobody.
+      if (globalSuperusers) {
+        profileless.forEach((cwid, i) => {
+          const role = roles[i];
+          if (!role || globalSuperusers.has(cwid)) return;
+          candidates.push({
+            cwid,
+            preferredName: edNameByCwid.get(cwid) ?? cwid,
+            slug: null,
+            role,
+            unitKind: null,
+            unit: null,
+          });
+        });
+      }
     }
   }
 

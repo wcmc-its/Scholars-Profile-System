@@ -3,14 +3,19 @@
  * (`news-approval-queue.tsx`) and `/edit/media-highlights-queue`
  * (`media-highlights-queue.tsx`). Both POST to the same routes, so the error
  * copy, the match-basis wording, the snippet highlight, the decision / undo
- * calls, the "Wrong person?" CWID override and the status bar live here once.
+ * calls, the "Wrong person?" override and the status bar live here once.
  *
- * Client-safe: imports only `lib/cwid` (pure) and UI primitives.
+ * Client-safe: imports only `lib/cwid` (pure), UI primitives and the client-only
+ * `DirectoryPeopleTypeahead`.
  */
 "use client";
 
 import { useState, type ReactNode } from "react";
 
+import {
+  DirectoryPeopleTypeahead,
+  type DirectoryValue,
+} from "@/components/edit/directory-people-typeahead";
 import { Button } from "@/components/ui/button";
 import { isCwid } from "@/lib/cwid";
 import { cn } from "@/lib/utils";
@@ -302,18 +307,19 @@ export function OverridePill({ was }: { was: string | null }) {
 }
 
 /**
- * "Wrong person? Enter CWID" — the reviewer names the scholar the story is
- * really about. Apply checks the shape, then the directory (the /edit scholar
- * card); a CWID the directory does not know is refused here, and the decision
- * route re-checks on save. Applying only stages the override: Approve / Hide
- * then credit that scholar.
+ * "Wrong person? Reassign" — the reviewer names the scholar the story is
+ * really about, by searching the directory by name (scholars only, the same
+ * pick-then-verify as the media-highlights "Reassign") or by typing a CWID.
+ * Either path checks the scholar table (the /edit scholar card); a person with
+ * no profile is refused here, and the decision route re-checks on save.
+ * Applying only stages the override: Approve / Hide then credit that scholar.
  */
 export function WrongPersonControl({
   override,
   disabled,
   onApply,
   onClear,
-  linkLabel = "Wrong person? Enter CWID",
+  linkLabel = "Wrong person? Reassign",
   testId,
 }: {
   override: ScholarOverride | null;
@@ -326,6 +332,7 @@ export function WrongPersonControl({
   const [draft, setDraft] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [notFound, setNotFound] = useState<string | null>(null);
+  const [pickProblem, setPickProblem] = useState<string | null>(null);
 
   const value = (draft ?? "").trim().toLowerCase();
   const valid = isCwid(value);
@@ -344,13 +351,32 @@ export function WrongPersonControl({
     setDraft(null);
   }
 
+  /** A name-search pick: verify the scholar row, then stage it. */
+  async function pick(v: DirectoryValue | null) {
+    if (!v || checking) return;
+    setChecking(true);
+    setNotFound(null);
+    setPickProblem(null);
+    const hit = await lookupScholar(v.cwid);
+    setChecking(false);
+    if (!hit.found) {
+      setPickProblem(`${v.name} has no scholar profile, so the story can't be credited to them.`);
+      return;
+    }
+    onApply({ cwid: v.cwid, name: hit.name ?? v.name });
+    setDraft(null);
+  }
+
   if (draft === null) {
     return (
       <div className="mt-0.5 flex flex-wrap gap-3 text-[12.5px]">
         <button
           type="button"
           disabled={disabled}
-          onClick={() => setDraft("")}
+          onClick={() => {
+            setDraft("");
+            setPickProblem(null);
+          }}
           className="text-apollo-slate hover:underline disabled:opacity-60"
           data-testid={`${testId}-open`}
         >
@@ -371,24 +397,41 @@ export function WrongPersonControl({
     );
   }
 
-  const message =
-    notFound && notFound === value
+  const message = pickProblem
+    ? pickProblem
+    : notFound && notFound === value
       ? `No scholar with CWID ${notFound} is in the directory.`
       : !value
-        ? "Enter the CWID of the scholar this story is actually about."
+        ? "Search by name, or enter the CWID of the scholar this story is actually about."
         : !valid
           ? "That doesn't look like a CWID."
           : checking
             ? "Checking the directory…"
             : "Press Apply to check it against the directory.";
-  const bad = (value.length > 0 && !valid) || (notFound !== null && notFound === value);
+  const bad =
+    pickProblem !== null ||
+    (value.length > 0 && !valid) ||
+    (notFound !== null && notFound === value);
 
   return (
     <div className="mt-1 flex flex-col gap-1" data-testid={testId}>
+      <div className="max-w-[360px]">
+        <DirectoryPeopleTypeahead
+          value={null}
+          onChange={(v) => void pick(v)}
+          placeholder="Search scholar name…"
+          disabled={checking}
+          idPrefix={`${testId}-search`}
+          scholarsOnly
+        />
+      </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <input
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setPickProblem(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -399,7 +442,6 @@ export function WrongPersonControl({
           placeholder="e.g. abc1234"
           aria-label="Replacement scholar CWID"
           aria-invalid={bad}
-          autoFocus
           className={cn(
             "bg-apollo-surface h-[30px] w-[130px] rounded-md border px-2 font-mono text-[13px] outline-none",
             bad ? "border-destructive" : "border-apollo-border-strong",
@@ -421,6 +463,7 @@ export function WrongPersonControl({
           onClick={() => {
             setDraft(null);
             setNotFound(null);
+            setPickProblem(null);
           }}
           className="text-muted-foreground hover:text-foreground text-[12.5px]"
         >

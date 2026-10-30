@@ -128,6 +128,17 @@ describe("ImpersonationSwitcher exact-CWID fallback", () => {
     );
   });
 
+  it("labels a global-role holder found by directory name with the role", async () => {
+    stubFetches([
+      { cwid: "glb0001", preferredName: "Pat Curatorson", slug: null, role: "honors_curator", unitKind: null, unit: null },
+    ]);
+    render(<Harness />);
+
+    expect((await screen.findByText("Pat Curatorson")).nextElementSibling?.textContent).toBe(
+      "glb0001 · Honors Curator",
+    );
+  });
+
   it("confirm dialog: target's first name, the TTL in minutes, maroon primary", async () => {
     stubFetches([
       { cwid: "tew2004", preferredName: "Terrie Rose Wheeler", slug: "t", role: "curator", unitKind: "department", unit: "Library" },

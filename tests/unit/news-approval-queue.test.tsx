@@ -4,13 +4,37 @@
  * contested name blocks Approve / Hide until a scholar is picked, then posts the
  * picked row; Hide posts `approve_hidden`; the filter rail and search narrow the
  * list; the contested banner's "Show only these"; the status bar's Undo; and the
- * "Wrong person? Enter CWID" override. All people are invented.
+ * "Wrong person? Reassign" override (by name search or CWID). All people are
+ * invented.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+
+// The directory typeahead is mocked to a button that picks one invented person,
+// so the name-search path is deterministic (no debounce, no directory fetch).
+vi.mock("@/components/edit/directory-people-typeahead", () => ({
+  DirectoryPeopleTypeahead: ({
+    onChange,
+    idPrefix,
+    scholarsOnly,
+  }: {
+    onChange: (v: { cwid: string; name: string; title: string | null }) => void;
+    idPrefix: string;
+    scholarsOnly?: boolean;
+  }) => (
+    <button
+      type="button"
+      data-testid={`${idPrefix}-pick`}
+      data-scholars-only={scholarsOnly ? "1" : "0"}
+      onClick={() => onChange({ cwid: "zzz9009", name: "Quinn Directory", title: null })}
+    >
+      pick
+    </button>
+  ),
+}));
 
 import { buildStories, NewsApprovalQueue } from "@/components/edit/news-approval-queue";
 import type { NewsQueueGroup, NewsQueueRow } from "@/lib/edit/news-queue";
@@ -284,7 +308,7 @@ describe("NewsApprovalQueue", () => {
     });
   });
 
-  describe("Wrong person? Enter CWID", () => {
+  describe("Wrong person? Reassign", () => {
     function directory(found: boolean) {
       fetchMock.mockImplementation(async (url: string) => {
         if (url.startsWith("/api/edit/scholar-card/")) {
@@ -322,6 +346,31 @@ describe("NewsApprovalQueue", () => {
       expect((await screen.findByTestId("news-queue-toast")).textContent).toContain(
         "for Quinn Fictional, not Ivy Invented",
       );
+    });
+
+    it("a name-search pick (scholars only) is verified against the scholar card, then staged", async () => {
+      directory(true);
+      render(<NewsApprovalQueue pending={[lab1]} approved={[]} rejected={[]} counts={COUNTS} />);
+      fireEvent.click(screen.getByTestId("news-queue-override-a-open"));
+      const pick = screen.getByTestId("news-queue-override-a-search-pick");
+      expect(pick.getAttribute("data-scholars-only")).toBe("1");
+      fireEvent.click(pick);
+      const pill = await screen.findByTestId("news-override-pill");
+      expect(pill.textContent).toBe("Override · was zzz1001");
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/scholar-card/zzz9009");
+      // The scholar card's name wins over the directory's.
+      expect(within(screen.getByTestId("news-queue-group-a")).getByText("Quinn Fictional")).toBeTruthy();
+    });
+
+    it("a name-search pick with no scholar profile is refused, and stages nothing", async () => {
+      directory(false);
+      render(<NewsApprovalQueue pending={[lab1]} approved={[]} rejected={[]} counts={COUNTS} />);
+      fireEvent.click(screen.getByTestId("news-queue-override-a-open"));
+      fireEvent.click(screen.getByTestId("news-queue-override-a-search-pick"));
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Quinn Directory has no scholar profile",
+      );
+      expect(screen.queryByTestId("news-override-pill")).toBeNull();
     });
 
     it("refuses a CWID the directory does not know, and stages nothing", async () => {

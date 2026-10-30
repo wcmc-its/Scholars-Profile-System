@@ -289,7 +289,7 @@ function CoreStaffSection({
         description="People who run the core’s services. They’re used as likely co-authors when matching publications to this core. Not shown publicly."
       />
       <p className="text-muted-foreground text-[13px]" data-testid="core-staff-feed-note">
-        Changes feed publication matching the next night.
+        Changes are used the next time this core’s publications are matched.
       </p>
       <CoreStaffPanel coreId={coreId} staff={rows} />
       <p className="text-muted-foreground text-[13px]">

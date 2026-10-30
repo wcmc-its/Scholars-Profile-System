@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * The editable body of the Staff section on `/edit/core/[coreId]`: paste CWIDs
- * to add staff, remove them one by one. The twin of the "Known clients" dialog
+ * The editable body of the Staff section on `/edit/core/[coreId]`: find staff
+ * by name in the WCM directory (or paste CWIDs in bulk) to add them, remove
+ * them one by one. The twin of the "Known clients" dialog
  * (`core-clients-panel.tsx`): the same paste-CWIDs picker and the same
  * one-source-of-truth rule. The list it shows is the `staff` PROP, and every
  * write ends in `router.refresh()`, which re-renders the server page with a
@@ -14,6 +15,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  DirectoryPeopleTypeahead,
+  type DirectoryValue,
+} from "@/components/edit/directory-people-typeahead";
 import type { CoreStaffRow } from "@/lib/api/core-staff";
 import { parseCwidBlock } from "@/lib/cores/cwid-block";
 import { stripUnitDisambiguation } from "@/lib/name-sort";
@@ -59,6 +64,18 @@ export function CoreStaffPanel({ coreId, staff }: CoreStaffPanelProps) {
       );
       return;
     }
+    if (await postCwids(cwids, invalid)) setText("");
+  }
+
+  /** A directory pick adds that one person through the same route as a paste.
+   *  Not scholars-only: core staff often have no Scholar profile. */
+  async function pickPerson(v: DirectoryValue | null) {
+    if (!v) return;
+    await postCwids([v.cwid], []);
+  }
+
+  /** POSTs to `/api/edit/core-staff` and reports the outcome; true on success. */
+  async function postCwids(cwids: string[], invalid: string[]): Promise<boolean> {
     setPending(true);
     setAddResult(null);
     const res = await fetch("/api/edit/core-staff", {
@@ -69,7 +86,7 @@ export function CoreStaffPanel({ coreId, staff }: CoreStaffPanelProps) {
     setPending(false);
     if (!res?.ok) {
       setAddResult("Could not save — try again.");
-      return;
+      return false;
     }
     const data = (await res.json().catch(() => ({}))) as {
       added?: string[];
@@ -83,7 +100,6 @@ export function CoreStaffPanel({ coreId, staff }: CoreStaffPanelProps) {
     if (alreadyPresent.length > 0) parts.push(`Already listed: ${alreadyPresent.join(", ")}.`);
     if (allInvalid.length > 0) parts.push(`Not a CWID: ${allInvalid.join(", ")}.`);
     setAddResult(parts.join(" "));
-    setText("");
     // A re-added CWID comes back under the same key a remove parked in
     // `removing`; drop it so its Remove button is live again.
     if (added.length > 0) {
@@ -94,6 +110,7 @@ export function CoreStaffPanel({ coreId, staff }: CoreStaffPanelProps) {
       });
     }
     if (added.length > 0 || alreadyPresent.length > 0) router.refresh();
+    return true;
   }
 
   async function remove(row: CoreStaffRow) {
@@ -124,11 +141,25 @@ export function CoreStaffPanel({ coreId, staff }: CoreStaffPanelProps) {
   return (
     <div className="flex flex-col gap-4" data-slot="core-staff-panel">
       <div>
+        <p className="text-foreground mb-2 block text-sm font-medium">
+          Add staff by name
+        </p>
+        <div>
+          <DirectoryPeopleTypeahead
+            value={null}
+            onChange={(v) => void pickPerson(v)}
+            placeholder="Search the WCM directory…"
+            disabled={pending}
+            idPrefix="core-staff-person"
+          />
+        </div>
+      </div>
+      <div>
         <label
           htmlFor="core-staff-cwids"
           className="text-foreground mb-2 block text-sm font-medium"
         >
-          Add staff by CWID
+          Or paste CWIDs
         </label>
         <textarea
           id="core-staff-cwids"
