@@ -2,7 +2,7 @@
 gated by Data-Availability-section membership and deposit-vs-use context. Fixes v1 substring false positives
 (liproxstatin!=iProX, CNGB3!=CNGB, journal-code!=cncb) and adds non-omic sensitive repos.
 ponytail: window context (+-160 chars) instead of a fragile sentence splitter on messy JATS text."""
-import os, re, urllib.request, urllib.parse
+import os, re, threading, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
@@ -81,14 +81,47 @@ def _fetch_live(pid):
     d={"db":"pmc","id":re.sub(r"\D","",pid),"rettype":"xml"};  d.update({"api_key":API} if API else {})
     try: return urllib.request.urlopen(urllib.request.Request(EFETCH,data=urllib.parse.urlencode(d).encode()),timeout=60).read()
     except Exception: return None
-def ft(pmcid):
+# Optional shared full-text store, same layout ReciterAI pipeline_cores writes:
+#   fulltext/pmc/{PMCID}.xml = raw XML, fulltext/pmid/{pmid} = PMCID (text/plain).
+# ponytail: best-effort read-through/write-through; unset FULLTEXT_S3_BUCKET = disk-only, and any
+# S3 error prints one warning and falls back. scan2 only sees rows WITH a pmcid, so it never writes
+# the `NO_PMC <date>` sentinel - that's ReciterAI's job.
+S3_BUCKET=os.environ.get("FULLTEXT_S3_BUCKET","")
+_s3=None; _s3_lock=threading.Lock()
+def _s3c():
+    global _s3
+    with _s3_lock:
+        if _s3 is None:
+            import boto3
+            _s3=boto3.client("s3")
+    return _s3
+def _s3_get(key):
+    try: return _s3c().get_object(Bucket=S3_BUCKET,Key=key)["Body"].read()
+    except Exception as e:
+        code=str(getattr(e,"response",{}).get("Error",{}).get("Code",""))
+        if code not in ("404","NoSuchKey","NotFound"): print(f"  S3 full-text read failed {key}: {e!r}", flush=True)
+        return None
+def _s3_put(key,body,ctype):
+    try: _s3c().put_object(Bucket=S3_BUCKET,Key=key,Body=body,ContentType=ctype)
+    except Exception as e: print(f"  S3 full-text write failed {key}: {e!r}", flush=True)
+def ft(pmcid, pmid=None):
     pid=pmcid if pmcid.upper().startswith("PMC") else "PMC"+pmcid
+    pid="PMC"+pid[3:]
     cache_path=os.path.join(OUT,"xml_cache",f"{pid}.xml")
     if os.path.exists(cache_path):
         with open(cache_path,"rb") as f: return f.read()
+    xml=_s3_get(f"fulltext/pmc/{pid}.xml") if S3_BUCKET else None
+    if xml:
+        with open(cache_path,"wb") as f: f.write(xml)
+        return xml
     xml=_fetch_live(pid)
     if xml:
         with open(cache_path,"wb") as f: f.write(xml)
+        if S3_BUCKET:
+            _s3_put(f"fulltext/pmc/{pid}.xml",xml,"application/xml")
+            try: pm=int(pmid) if pmid is not None else None
+            except (TypeError,ValueError): pm=None  # NaN/garbage pmid: skip the map object, keep the XML
+            if pm is not None: _s3_put(f"fulltext/pmid/{pm}",pid.encode("utf-8"),"text/plain")
     return xml
 def das_text(root):
     out=[]
@@ -100,7 +133,7 @@ def das_text(root):
     return " ".join(out)
 
 def scan(row):
-    xml=ft(row['pmcid'])
+    xml=ft(row['pmcid'],row['pmid'])
     if not xml: return (row['pmid'],row['year'],row['pmcid'],0,0,[])
     try: root=ET.fromstring(xml)
     except Exception: return (row['pmid'],row['year'],row['pmcid'],1,0,[])
