@@ -3374,6 +3374,7 @@ model Core {
 
   publications PublicationCore[]
   leaders      CoreLeader[]
+  staff        CoreStaff[]
 
   @@map("core")
 }
@@ -3559,6 +3560,29 @@ model CoreClient {
   @@unique([coreId, cwid]) // one current row per (core, cwid) pair
   @@index([coreId]) // per-core client list
   @@map("core_client")
+}
+
+/// SPS-curated core STAFF: the people who run a core's services, maintained by
+/// the core's owner (or a Superuser / comms_steward / core_director) in the
+/// Staff section of `/edit/core/[coreId]`. The full list mirrors to the shared
+/// ReciterAI DynamoDB table at `(CORE#{coreId}, STAFF)` / `staff_cwids`
+/// (`lib/cores/staff-writeback.ts`), which the engine reads nightly as likely
+/// co-authors when matching publications to the core (ReciterAI
+/// `pipeline_cores/persist.py` `get_curated_staff`). Hard delete, unlike
+/// `CoreClient`: the add/remove history lives in the audit log
+/// (`core_staff_add` / `core_staff_remove`). `cwid` is stored lowercased.
+model CoreStaff {
+  coreId    String   @map("core_id") @db.VarChar(32)
+  cwid      String   @db.VarChar(32)
+  /// EFFECTIVE actor cwid, same convention as CoreClient.addedBy.
+  addedBy   String   @map("added_by") @db.VarChar(32)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  core Core @relation(fields: [coreId], references: [id], onDelete: Cascade)
+
+  @@id([coreId, cwid])
+  @@index([coreId])
+  @@map("core_staff")
 }
 
 /// ReCiterAI publication scores per scholar+pmid pair (Q6 minimal projection).

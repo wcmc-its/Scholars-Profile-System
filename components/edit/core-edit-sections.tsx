@@ -20,9 +20,11 @@ import { ArrowRight } from "lucide-react";
 
 import { CoreBasicsSection } from "@/components/edit/core-basics-section";
 import { CoreLeaderCard, type CoreLeaderState } from "@/components/edit/core-leader-card";
+import { CoreStaffPanel } from "@/components/edit/core-staff-panel";
 import { UnitAccessCard, type UnitAccessCardProps } from "@/components/edit/unit-access-card";
 import { SectionHeader } from "@/components/edit/unit-basics-section";
 import { UnitEditSections, type UnitEditSection } from "@/components/edit/unit-edit-sections";
+import type { CoreStaffRow } from "@/lib/api/core-staff";
 import type { UnitActorRole } from "@/lib/api/unit-edit-context";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +48,8 @@ export type CoreEditSectionsProps = {
     staffTrackedCount: number | null;
   };
   leaders: ReadonlyArray<CoreLeaderState>;
+  /** The core's SPS-curated staff (`core_staff`), names resolved. */
+  staff: CoreStaffRow[];
   roleLabels: Record<string, string>;
   /** Null when the viewer can't manage access — the section is omitted. */
   access: UnitAccessCardProps["access"];
@@ -65,6 +69,7 @@ export type CoreEditSectionsProps = {
 export function CoreEditSections({
   core,
   leaders,
+  staff: staffRows,
   roleLabels,
   access,
   accessReadOnly = false,
@@ -107,9 +112,12 @@ export function CoreEditSections({
     {
       id: "staff",
       label: "Staff",
-      stat: staff.stat,
-      warn: staff.warn,
-      content: <CoreStaffSummary {...staff} />,
+      // The curated list is what the owner manages here, so it leads the rail
+      // once it has anyone; until then the dictionary counts (and their amber
+      // states) still say whether the co-author signal can fire at all.
+      stat: staffRows.length > 0 ? String(staffRows.length) : staff.stat,
+      warn: staffRows.length > 0 ? false : staff.warn,
+      content: <CoreStaffSection coreId={core.id} rows={staffRows} {...staff} />,
     },
   ];
   if (access !== null) {
@@ -224,8 +232,9 @@ type StaffStatus = { stat: string; warn: boolean; summary: string; note: string 
 
 /** The rail stat + summary for the staff counts, with the same states the
  *  `/edit/core` index's Staff cell uses (`staffCell`, core-facilities-index.tsx
- *  — a client module, so it can't be called from here). SPS stores counts
- *  only, never a roster (`Core.staffCount`). */
+ *  — a client module, so it can't be called from here). These are the
+ *  dictionary's COUNTS (`Core.staffCount`); the curated roster SPS owns is
+ *  `core_staff`, edited in the same section. */
 function staffStatus(listed: number | null, tracked: number | null): StaffStatus {
   if (listed === null) {
     return {
@@ -258,12 +267,20 @@ function staffStatus(listed: number | null, tracked: number | null): StaffStatus
     summary: `${listed} listed · ${t} tracked`,
     note:
       t < listed
-        ? `${listed - t} untracked. Add their CWIDs to the dictionary so the co-author signal can match them.`
+        ? `${listed - t} untracked. Add their CWIDs above so the co-author signal can match them.`
         : null,
   };
 }
 
-function CoreStaffSummary({ summary, note, warn }: StaffStatus) {
+/** The Staff section: the owner's editable curated list first, then the
+ *  facility dictionary's listed/tracked counts as secondary information. */
+function CoreStaffSection({
+  coreId,
+  rows,
+  summary,
+  note,
+  warn,
+}: StaffStatus & { coreId: string; rows: CoreStaffRow[] }) {
   return (
     <div className="flex flex-col gap-3" data-testid="core-staff-summary">
       <SectionHeader
@@ -271,11 +288,18 @@ function CoreStaffSummary({ summary, note, warn }: StaffStatus) {
         title="Staff"
         description="People who run the core’s services. They’re used as likely co-authors when matching publications to this core. Not shown publicly."
       />
-      <p
-        className={cn("text-sm font-medium tabular-nums", warn && "text-apollo-amber")}
-        data-testid="core-staff-counts"
-      >
-        {summary}
+      <p className="text-muted-foreground text-[13px]" data-testid="core-staff-feed-note">
+        Changes feed publication matching the next night.
+      </p>
+      <CoreStaffPanel coreId={coreId} staff={rows} />
+      <p className="text-muted-foreground text-[13px]">
+        Facility dictionary:{" "}
+        <span
+          className={cn("font-medium tabular-nums", warn && "text-apollo-amber")}
+          data-testid="core-staff-counts"
+        >
+          {summary}
+        </span>
       </p>
       {note && (
         <p

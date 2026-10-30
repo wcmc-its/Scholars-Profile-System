@@ -145,6 +145,8 @@ const CATEGORIES: ReadonlyArray<{ key: string; label: string; actions?: Readonly
       "core_claim",
       "core_client_add",
       "core_client_remove",
+      "core_staff_add",
+      "core_staff_remove",
     ]),
   },
   { key: "news", label: "News mentions", actions: new Set(["news_mention_update"]) },
