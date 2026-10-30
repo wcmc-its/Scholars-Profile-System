@@ -61,6 +61,7 @@ import {
   type MatchaSearchEvidence,
 } from "@/lib/api/matcha-contract";
 import { deriveGrantSignals } from "@/lib/api/match-researchers";
+import { loadEntitySuppressions } from "@/lib/api/manual-layer";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
@@ -950,9 +951,12 @@ export async function rankResearchersForDescriptionSpine(
   // (no shared helper on master — three intentional copies).
   const cwids = fused.map((f) => f.cwid);
   // #1654 — the measures read. `searchPeople`'s fast headless shape carries no career
-  // stage and no clinician flag, so hydrate both from Scholar for the (bounded) fused
-  // candidate list, alongside the technology count this already fetched.
-  const [grouped, measureRows] = await Promise.all([
+  // stage, clinician flag or grants, so hydrate them from Scholar for the (bounded) fused
+  // candidate list, alongside the technology count this already fetched. Grants feed both
+  // `researcherType` (every path) and `esiEligible` (grant-matcha path only), off ONE read.
+  // Grants are UNFILTERED by source: a prior-institution RePORTER award still makes someone
+  // research-active, and still forfeits ESI (see `loadEsiEligibilityByCwid`).
+  const [grouped, measureRows, hideFundingRows] = await Promise.all([
     db.read.scholarTechnology.groupBy({
       by: ["cwid"],
       where: { cwid: { in: cwids } },
@@ -967,38 +971,42 @@ export async function rankResearchersForDescriptionSpine(
         hasClinicalProfile: true,
         appointments: { select: { startDate: true } },
         educations: { select: { year: true, degree: true } },
+        grants: { select: { externalId: true, endDate: true, role: true, mechanism: true } },
       },
     }),
+    db.read.fieldOverride.findMany({
+      where: { entityType: "scholar", fieldName: "hideFunding", value: "true", entityId: { in: cwids } },
+      select: { entityId: true },
+    }),
   ]);
+  // A suppressed grant is a curator's "not this person's", so it must not make them
+  // research-active. Same suppression set the profile's Funding list applies.
+  const suppressedGrantIds = await loadEntitySuppressions(
+    "grant",
+    measureRows.flatMap((s) => s.grants.map((g) => g.externalId)),
+    db.read,
+  );
+  const hideFunding = new Set(hideFundingRows.map((r) => r.entityId));
   const techByCwid = new Map(grouped.map((g) => [g.cwid, g._count._all]));
   const now = new Date();
-  // Grant Matcha (§3) — hydrate `esiEligible` ONLY on the grant-matcha path (`eligibilitySignals`),
-  // via a SEPARATE gated query so `/edit/matcha` keeps its exact select and stays byte-unchanged.
-  // `fused` already bounds the cwid list, so this is one extra bounded read, off unless requested.
-  const esiByCwid = new Map<string, boolean>();
-  if (opts.eligibilitySignals) {
-    const grantRows = await db.read.scholar.findMany({
-      where: { cwid: { in: cwids } },
-      select: {
-        cwid: true,
-        grants: { select: { endDate: true, role: true, mechanism: true } },
-        educations: { select: { year: true, degree: true } },
-      },
-    });
-    for (const s of grantRows) {
-      esiByCwid.set(
-        s.cwid,
-        deriveGrantSignals({ grants: s.grants, educations: s.educations }, now).esiEligible,
-      );
-    }
-  }
   const measuresByCwid = new Map(
     measureRows.map((s) => {
-      const base = matchaMeasuresFrom(s, now);
-      // Merge only when requested — otherwise the measures object is byte-identical to today's.
+      const grants = s.grants.filter((g) => !suppressedGrantIds.has(g.externalId));
+      const base = matchaMeasuresFrom(
+        { ...s, grants, hideFunding: hideFunding.has(s.cwid) },
+        now,
+      );
+      // Grant Matcha (§3) — `esiEligible` only when requested. ESI reads the FULL history
+      // (pre-suppression), exactly as `loadEsiEligibilityByCwid` does.
       return [
         s.cwid,
-        opts.eligibilitySignals ? { ...base, esiEligible: esiByCwid.get(s.cwid) ?? false } : base,
+        opts.eligibilitySignals
+          ? {
+              ...base,
+              esiEligible: deriveGrantSignals({ grants: s.grants, educations: s.educations }, now)
+                .esiEligible,
+            }
+          : base,
       ] as const;
     }),
   );

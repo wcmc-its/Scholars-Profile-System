@@ -47,6 +47,8 @@ export type MatchaCsvRow = {
   clinician: string;
   /** ED person type as its display label ("Postdoc"), or "" when absent. Blank is unknown. */
   personType: string;
+  /** Researcher type label ("Physician-scientist"), or "" when absent. Blank is unknown. */
+  researcherType: string;
   /** Absolute profile URL, so the cell is clickable when pasted anywhere. */
   profileUrl: string;
   /** Grant Matcha — "Yes"/"No" against the opportunity's STATED career-stage rule, the same
@@ -68,6 +70,7 @@ const HEADERS = [
   "Person type",
   "Career stage",
   "Clinician",
+  "Researcher type",
   "CTL technologies",
   "Profile URL",
 ] as const;
@@ -91,6 +94,7 @@ export function buildMatchaCsv(
       r.personType,
       r.careerStage,
       r.clinician,
+      r.researcherType,
       r.technologyCount,
       r.profileUrl,
       ...(opts.eligibility ? [r.eligible ?? ""] : []),

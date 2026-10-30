@@ -88,6 +88,7 @@
  */
 import { taggedPubCount, type ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
+import { isPiRole } from "@/lib/funding-roles";
 // Type-only — erased at compile time, so this does NOT pull `search-taxonomy.ts` (which imports
 // `@/lib/db`) into any client bundle that imports this contract (`matcha-panel.tsx` is
 // `"use client"`). Reused rather than redefined so the two stay structurally identical by
@@ -453,7 +454,91 @@ export type MatchaMeasures = {
    *  spine's grant-matcha path (`eligibilitySignals`); absent on `/edit/matcha` and the bespoke
    *  engine. Absent ≠ ineligible: it means the signal was not computed for this candidate. */
   esiEligible?: boolean;
+  /** Researcher type, the officer's "lab PI or practising clinician?" lever. See
+   *  `researcherTypeFrom`. Absent when the caller did not read grants. */
+  researcherType?: ResearcherType;
+  /** The award that made this scholar research-active: the hover reason on the badge.
+   *  Absent when there is none, AND when the scholar hides their Funding section: the type
+   *  still counts the award, but the console must not name a grant the profile hides. */
+  researchAward?: { mechanism: string; endYear: number };
 };
+
+/**
+ * Researcher type: who runs research vs who practises medicine. CTL's sponsor ask is
+ * usually "who has a lab I can partner with", and topical fit alone ranks a clinician who
+ * co-authors many large trials alongside a lab PI.
+ *
+ * NIH PI standing is the research-active signal, per CTL's own screen: clinicians who do
+ * not run labs do not hold NIH research awards as PI. `hasClinicalProfile` is the
+ * clinician signal. "unclassified" is a non-clinician with no qualifying award. That is
+ * NOT "not a researcher" (HHMI, foundation and between-grants scientists land here),
+ * which is why the console keeps it visible by default and hides only "clinician".
+ */
+export type ResearcherType = "basic_scientist" | "physician_scientist" | "clinician" | "unclassified";
+
+export const RESEARCHER_TYPE_ORDER: readonly ResearcherType[] = [
+  "basic_scientist",
+  "physician_scientist",
+  "clinician",
+  "unclassified",
+];
+
+export const RESEARCHER_TYPE_LABEL: Record<ResearcherType, string> = {
+  basic_scientist: "Basic scientist",
+  physician_scientist: "Physician-scientist",
+  clinician: "Clinician",
+  unclassified: "Unclassified",
+};
+
+/** An award counts if it ended no more than this many years ago (or is still running). */
+export const RESEARCH_ACTIVE_YEARS = 5;
+
+/** NIH activity codes that fund running research: R, U, P, K, DP, SC series. K (career
+ *  development) counts because mentored K08/K23 awards are how clinician-scientists start
+ *  a lab. T, F, L, S10, C06 and others are training, loan repayment or infrastructure,
+ *  and are excluded by omission. Deliberately NOT `isTrainingOnlyGrant`: the PI search
+ *  facet treats mentored K awards as training, but here they are the point. */
+const RESEARCH_MECHANISM = /^(R|U|P|K|DP|SC)/;
+/** Exceptions inside those series: conference (R13/U13), research-education (R25) and
+ *  institutional career-development (K12/KL2) awards, whose PI runs a program, not a lab. */
+const NON_RESEARCH_MECHANISM = /^(R13|U13|R25|K12|KL2)/;
+
+export type ResearcherGrantRow = {
+  endDate: Date | null;
+  role: string | null;
+  mechanism: string | null;
+};
+
+/** Classify one scholar. The returned award is the latest-ending qualifying one. */
+export function researcherTypeFrom(
+  row: { hasClinicalProfile: boolean; grants: readonly ResearcherGrantRow[] },
+  now: Date = new Date(),
+): { type: ResearcherType; award?: { mechanism: string; endYear: number } } {
+  const floorYear = now.getFullYear() - RESEARCH_ACTIVE_YEARS;
+  let award: { mechanism: string; endYear: number } | undefined;
+  for (const g of row.grants) {
+    const mech = (g.mechanism ?? "").trim().toUpperCase();
+    const endYear = g.endDate?.getFullYear();
+    if (
+      endYear == null ||
+      endYear < floorYear ||
+      g.role == null ||
+      !isPiRole(g.role) ||
+      !RESEARCH_MECHANISM.test(mech) ||
+      NON_RESEARCH_MECHANISM.test(mech)
+    )
+      continue;
+    if (!award || endYear > award.endYear) award = { mechanism: mech, endYear };
+  }
+  const type: ResearcherType = row.hasClinicalProfile
+    ? award
+      ? "physician_scientist"
+      : "clinician"
+    : award
+      ? "basic_scientist"
+      : "unclassified";
+  return award ? { type, award } : { type };
+}
 
 /** The scholar columns `matchaMeasuresFrom` needs. Both engines already read Scholar for
  *  the candidate cwids, so this is extra COLUMNS on an existing query, not an extra query. */
@@ -463,6 +548,11 @@ export type MatchaMeasuresRow = {
   hasClinicalProfile: boolean;
   appointments: { startDate: Date | null }[];
   educations: { year: number | null; degree: string | null }[];
+  /** Optional: absent ⇒ no `researcherType` (absent ≠ none). Pass the scholar's grants
+   *  already filtered of suppressed (misattributed) rows. */
+  grants?: readonly ResearcherGrantRow[];
+  /** The scholar hides their Funding section: classify, but never name the award. */
+  hideFunding?: boolean;
 };
 
 /**
@@ -485,7 +575,22 @@ export function matchaMeasuresFrom(row: MatchaMeasuresRow, now: Date = new Date(
     ),
     isClinician: row.hasClinicalProfile,
     roleCategory: row.roleCategory,
+    ...researcherMeasures(row, now),
   };
+}
+
+function researcherMeasures(
+  row: MatchaMeasuresRow,
+  now: Date,
+): Pick<MatchaMeasures, "researcherType" | "researchAward"> {
+  if (!row.grants) return {};
+  const { type, award } = researcherTypeFrom(
+    { hasClinicalProfile: row.hasClinicalProfile, grants: row.grants },
+    now,
+  );
+  return award && !row.hideFunding
+    ? { researcherType: type, researchAward: award }
+    : { researcherType: type };
 }
 
 /**
@@ -692,6 +797,9 @@ export type MatchaPreference = {
 } & (
   | { measure: "careerStage"; stages: CareerStage[] }
   | { measure: "isClinician" }
+  /** "physician-scientist" in the paste. Reads `researcherType`, NOT `isClinician`: the
+   *  clinician flag alone rewarded every clinician, lab or no lab. */
+  | { measure: "researcherType"; types: ResearcherType[] }
   /** Grant Matcha — the opportunity is ESI-targeted. SOFT by design: the extractor's
    *  `esi_targeted` is a PRIORITY, not a gate, so this demotes non-ESI candidates and hides
    *  nobody. Only the grant-matcha surface produces it; `extractMatchaPreferences` never does,
@@ -749,6 +857,9 @@ export function preferenceBoost(
         break;
       case "isClinician":
         hit = m.isClinician === true;
+        break;
+      case "researcherType":
+        hit = m.researcherType != null && p.types.includes(m.researcherType);
         break;
       case "esiEligible":
         // ABSENT IS NOT ZERO holds here too: a candidate whose signal was never hydrated

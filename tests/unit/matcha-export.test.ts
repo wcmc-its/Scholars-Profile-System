@@ -21,19 +21,20 @@ const ROW: MatchaCsvRow = {
   personType: "Full-time faculty",
   careerStage: "Senior",
   clinician: "Yes",
+  researcherType: "Physician-scientist",
   technologyCount: 2,
   profileUrl: "https://example.org/alice-alpha",
 };
 
 const HEADER =
-  "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,CTL technologies,Profile URL";
+  "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,CTL technologies,Profile URL";
 
 describe("buildMatchaCsv", () => {
   it("writes the header row and one row per researcher", () => {
     const lines = buildMatchaCsv([ROW]).split("\r\n");
     expect(lines[0]).toBe(HEADER);
     expect(lines[1]).toBe(
-      '1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,2,https://example.org/alice-alpha',
+      '1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,2,https://example.org/alice-alpha',
     );
   });
 
@@ -46,7 +47,7 @@ describe("buildMatchaCsv", () => {
     const csv = buildMatchaCsv([{ ...ROW, title: null, department: null }]);
     expect(csv).not.toContain("null");
     expect(csv.split("\r\n")[1]).toBe(
-      '1,aaa1001,Alice Alpha,,,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,2,https://example.org/alice-alpha',
+      '1,aaa1001,Alice Alpha,,,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,2,https://example.org/alice-alpha',
     );
   });
 
@@ -81,9 +82,10 @@ describe("buildMatchaCsv", () => {
       personType: "",
       careerStage: "",
       clinician: "",
+      researcherType: "",
     };
     const cells = buildMatchaCsv([unknown]).split("\r\n")[1];
-    expect(cells).toContain("systemic sclerosis; pulmonary fibrosis,,,,2,");
+    expect(cells).toContain("systemic sclerosis; pulmonary fibrosis,,,,,2,");
     expect(cells).not.toMatch(/,No,/);
   });
 
@@ -105,7 +107,7 @@ describe("buildMatchaCsv", () => {
     ).split("\r\n");
     expect(lines[0]).toBe(`${HEADER},Eligible`);
     expect(lines[1]).toBe(
-      "1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,2,https://example.org/alice-alpha,Yes",
+      "1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,2,https://example.org/alice-alpha,Yes",
     );
     expect(lines[2].endsWith(",No")).toBe(true);
   });
@@ -115,9 +117,9 @@ describe("buildMatchaCsv", () => {
   });
 
   it("without the option the file is unchanged — `/edit/matcha` states no rule, so no column", () => {
-    // A stray `eligible` value must not smuggle a 13th cell into a 12-column file either.
+    // A stray `eligible` value must not smuggle a 14th cell into a 13-column file either.
     const lines = buildMatchaCsv([{ ...ROW, eligible: "Yes" }]).split("\r\n");
     expect(lines[0]).toBe(HEADER);
-    expect(lines[1].split(",")).toHaveLength(12);
+    expect(lines[1].split(",")).toHaveLength(13);
   });
 });
