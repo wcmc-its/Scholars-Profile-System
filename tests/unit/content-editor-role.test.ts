@@ -221,6 +221,8 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "core-claim": "allow",
   "core-client": "allow",
   "core-queue-add": "allow",
+  // Same `authorizeCoreClaim` gate as core-client.
+  "core-staff": "allow",
   core: "allow",
   cv: "allow",
   field: "allow",

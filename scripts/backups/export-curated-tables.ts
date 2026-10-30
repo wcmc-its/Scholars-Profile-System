@@ -116,6 +116,10 @@ export const CURATED_TABLES: readonly string[] = [
   // by hand ("Add PMIDs → Send to review"). User-entered, ETL-immune, and
   // nothing upstream can regenerate it, so it belongs with `core_client`.
   "core_queue_add",
+  // The core owner's curated staff list (Staff section of /edit/core/[coreId]).
+  // User-entered and mirrored OUT to ReciterAI, never back in, so nothing
+  // upstream can regenerate it.
+  "core_staff",
 ];
 
 interface ColumnMeta {

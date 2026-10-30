@@ -362,7 +362,16 @@ export type AuditAction =
    *  `targetEntityType='center_publication_relevance'`, `targetEntityId`
    *  `"{centerCode}:{pmid}"`; before/after carry `{ relevant, reason, source }`.
    *  ENUM extended in scripts/sql/audit-log.sql. */
-  | "pub_relevance_review";
+  | "pub_relevance_review"
+  /** A core owner (or Superuser / comms_steward / core_director) added a CWID
+   *  to a core's curated staff list in the Staff section of
+   *  `/edit/core/[coreId]`. `targetEntityType='core'`, `targetEntityId` the
+   *  `"{coreId}:{cwid}"` pair; before/after carry `{ active: boolean }`.
+   *  ENUM extended in scripts/sql/audit-log.sql. */
+  | "core_staff_add"
+  /** The inverse of `core_staff_add`: a CWID removed from a core's curated
+   *  staff list. Same target shape. ENUM extended in scripts/sql/audit-log.sql. */
+  | "core_staff_remove";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =

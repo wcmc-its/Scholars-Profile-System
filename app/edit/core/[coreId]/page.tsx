@@ -37,6 +37,7 @@ import type { CoreLeaderState } from "@/components/edit/core-leader-card";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { countHighConfidence, countReviewSuggestions } from "@/lib/api/core-console-index";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
+import { loadCoreStaff } from "@/lib/api/core-staff";
 import { corePath } from "@/lib/core-url";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -100,7 +101,7 @@ export default async function EditCorePage({
   // `EffectiveUnitRole` it expects, so this is the same check
   // `unit-edit-context.ts`'s local now also delegates to.
   const canManageAccess = canManageAccessPredicate(session, coreRole).ok;
-  const [core, leaderRows, coreRoleRows, accessRows, queue, consoleTabs] = await Promise.all([
+  const [core, leaderRows, coreRoleRows, accessRows, queue, consoleTabs, staff] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
       select: {
@@ -145,6 +146,8 @@ export default async function EditCorePage({
     // Drives the "Cores" breadcrumb link — the same cores-tab predicate the
     // `/edit/core` index's nav entry gates on, not a bespoke check.
     loadConsoleTabs(session, db.read),
+    // The Staff section's curated list (Scholar, then ED, names).
+    loadCoreStaff(coreId),
   ]);
   if (!core) notFound();
   const candidates = queue?.candidates ?? [];
@@ -215,6 +218,7 @@ export default async function EditCorePage({
     <CoreEditSections
       core={{ id: coreId, ...core }}
       leaders={leaders}
+      staff={staff}
       roleLabels={roleLabels}
       access={access}
       accessReadOnly={session.isContentEditor === true}

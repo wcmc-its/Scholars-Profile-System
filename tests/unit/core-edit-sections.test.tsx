@@ -57,6 +57,7 @@ function props(over: Partial<CoreEditSectionsProps> = {}): CoreEditSectionsProps
       staffTrackedCount: 3,
     },
     leaders: [LEADER],
+    staff: [],
     roleLabels: { director: "Director" },
     access: [],
     actorCwid: "fak0002",
@@ -246,5 +247,36 @@ describe("CoreEditSections — Staff summary", () => {
   it("fully tracked has no note", () => {
     const { section } = staff(3, 3);
     expect(section.queryByTestId("core-staff-note")).toBeNull();
+  });
+
+  it("renders the editable staff panel with the next-night note", () => {
+    const { section } = staff(4, 3);
+    expect(section.getByText("Changes feed publication matching the next night.")).toBeTruthy();
+    expect(section.getByRole("button", { name: "Add staff" })).toBeTruthy();
+    expect(section.getByTestId("core-staff-empty").textContent).toBe("No staff added yet.");
+  });
+
+  it("curated staff lead the rail stat and clear the dictionary's amber", () => {
+    const view = renderSections({
+      core: { ...props().core, staffCount: null, staffTrackedCount: null },
+      staff: [
+        {
+          cwid: "abc1234",
+          name: "Test Staffer",
+          slug: null,
+          affiliation: null,
+          addedAt: new Date("2026-10-01T00:00:00Z"),
+          addedBy: "fak0002",
+          addedByName: null,
+        },
+      ],
+    });
+    expect(navStat(view, "staff")?.textContent).toBe("1");
+    expect(navStat(view, "staff")?.className).not.toContain("text-apollo-amber");
+    const section = within(view.getByTestId("unit-section-staff"));
+    expect(section.getByText("Test Staffer")).toBeTruthy();
+    expect(section.getByRole("button", { name: "Remove Test Staffer" })).toBeTruthy();
+    // The dictionary line stays, as secondary info.
+    expect(section.getByTestId("core-staff-counts").textContent).toBe("Not listed");
   });
 });

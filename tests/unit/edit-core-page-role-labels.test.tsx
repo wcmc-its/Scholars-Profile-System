@@ -66,6 +66,7 @@ vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFou
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/auth/authz-events", () => ({ logAuthzDenied: mockLogAuthzDenied }));
 vi.mock("@/lib/api/core-queue", () => ({ loadCoreReviewQueue: mockLoadQueue }));
+vi.mock("@/lib/api/core-staff", () => ({ loadCoreStaff: vi.fn().mockResolvedValue([]) }));
 vi.mock("@/lib/edit/console-tabs.server", () => ({ loadConsoleTabs: mockLoadConsoleTabs }));
 vi.mock("@/lib/edit/directory-names", () => ({ resolveDirectoryNames: mockResolveDirectoryNames }));
 vi.mock("@/lib/db", () => ({
