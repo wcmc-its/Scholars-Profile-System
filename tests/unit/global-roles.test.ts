@@ -11,11 +11,14 @@ vi.mock("@/lib/auth/honors-curator", () => ({ isHonorsCurator: vi.fn(async () =>
 vi.mock("@/lib/auth/data-sharing-viewer", () => ({ isDataSharingViewer: vi.fn(async () => false) }));
 vi.mock("@/lib/auth/development", () => ({ isDeveloper: vi.fn(async () => false) }));
 vi.mock("@/lib/auth/observer", () => ({ isObserver: vi.fn(async () => false) }));
+vi.mock("@/lib/auth/content-editor", () => ({ isContentEditor: vi.fn(async () => false) }));
+vi.mock("@/lib/auth/core-director", () => ({ isCoreDirector: vi.fn(async () => false) }));
 
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isObserver } from "@/lib/auth/observer";
+import { isCoreDirector } from "@/lib/auth/core-director";
 import { resolveGlobalRole } from "@/lib/auth/global-roles";
 
 describe("resolveGlobalRole", () => {
@@ -24,6 +27,12 @@ describe("resolveGlobalRole", () => {
     vi.mocked(isDataSharingViewer).mockClear().mockResolvedValue(false);
     vi.mocked(isDeveloper).mockClear().mockResolvedValue(false);
     vi.mocked(isObserver).mockClear().mockResolvedValue(false);
+    vi.mocked(isCoreDirector).mockClear().mockResolvedValue(false);
+  });
+
+  it("resolves core_director (functional role grant, no LDAP group)", async () => {
+    vi.mocked(isCoreDirector).mockResolvedValueOnce(true);
+    expect(await resolveGlobalRole("cd001")).toBe("core_director");
   });
 
   it("returns null when no predicate matches", async () => {
