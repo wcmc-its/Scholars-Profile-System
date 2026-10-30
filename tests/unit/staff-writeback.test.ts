@@ -4,15 +4,21 @@
  * clients writeback; the item is `CORE#{coreId}` / `STAFF` with `staff_cwids`,
  * the key ReciterAI's `get_curated_staff` reads.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { CoreClaimDdbClient } from "@/lib/cores/claim-writeback";
 import { writeBackCoreStaff } from "@/lib/cores/staff-writeback";
 
 const ORIGINAL = process.env.CORE_CLAIM_WRITEBACK;
+const ORIGINAL_ENV = process.env.SPS_ENV;
+beforeEach(() => {
+  process.env.SPS_ENV = "prod";
+});
 afterEach(() => {
   if (ORIGINAL === undefined) delete process.env.CORE_CLAIM_WRITEBACK;
   else process.env.CORE_CLAIM_WRITEBACK = ORIGINAL;
+  if (ORIGINAL_ENV === undefined) delete process.env.SPS_ENV;
+  else process.env.SPS_ENV = ORIGINAL_ENV;
 });
 
 function capture() {
@@ -32,6 +38,15 @@ describe("writeBackCoreStaff", () => {
     const { sent, ddb } = capture();
     const r = await writeBackCoreStaff({ coreId: "2", cwids: ["abc1234"] }, { ddb });
     expect(r).toEqual({ ok: false, skipped: true, reason: "disabled" });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("skips off prod: staging shares the reciterai table and would overwrite prod's list", async () => {
+    process.env.CORE_CLAIM_WRITEBACK = "on";
+    process.env.SPS_ENV = "staging";
+    const { sent, ddb } = capture();
+    const r = await writeBackCoreStaff({ coreId: "2", cwids: ["abc1234"] }, { ddb });
+    expect(r).toEqual({ ok: false, skipped: true, reason: "not_prod" });
     expect(sent).toHaveLength(0);
   });
 

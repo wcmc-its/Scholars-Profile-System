@@ -34,7 +34,7 @@ const WRITEBACK_TIMEOUT_MS = 5_000;
 
 export type CoreStaffWritebackResult =
   | { ok: true; skipped: false }
-  | { ok: false; skipped: true; reason: "disabled" }
+  | { ok: false; skipped: true; reason: "disabled" | "not_prod" }
   | { ok: false; skipped: false };
 
 export interface CoreStaffWriteback {
@@ -60,10 +60,16 @@ function defaultDdb(): CoreClaimDdbClient {
  */
 export async function writeBackCoreStaff(
   input: CoreStaffWriteback,
-  opts: { ddb?: CoreClaimDdbClient } = {},
+  opts: { ddb?: CoreClaimDdbClient; env?: Record<string, string | undefined> } = {},
 ): Promise<CoreStaffWritebackResult> {
   if (!isCoreClaimWritebackEnabled()) {
     return { ok: false, skipped: true, reason: "disabled" };
+  }
+  // Staging and prod share ONE `reciterai` table and this item is a full-list
+  // replace, so a staging edit would overwrite prod's staff list in the engine.
+  // Only prod feeds it; staging edits stay in staging's `core_staff`.
+  if ((opts.env ?? process.env).SPS_ENV !== "prod") {
+    return { ok: false, skipped: true, reason: "not_prod" };
   }
   const ddb = opts.ddb ?? defaultDdb();
   const sortedCwids = [...new Set(input.cwids.map((c) => c.toLowerCase()))].sort();
