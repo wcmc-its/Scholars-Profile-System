@@ -75,3 +75,19 @@ export function bedrockCallOptions(
   if (!opts.effort || !modelAcceptsEffort(modelId)) return {};
   return { providerOptions: { bedrock: { reasoningConfig: { maxReasoningEffort: opts.effort } } } };
 }
+
+/**
+ * `experimental_repairText` for `generateObject`. In prompt-injected JSON mode
+ * Sonnet 5.5 sometimes closes a string with a curly quote (`…samples”}`), which
+ * is an unterminated string to JSON.parse. Swap a curly quote that sits where a
+ * closing quote must (before `,` `}` `]` or the end) and keep it only if it parses.
+ */
+export async function repairCurlyQuoteJson({ text }: { text: string }): Promise<string | null> {
+  const fixed = text.replace(/[“”](?=\s*(?:[,}\]]|$))/g, '"');
+  try {
+    JSON.parse(fixed);
+    return fixed;
+  } catch {
+    return null;
+  }
+}

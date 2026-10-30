@@ -11,6 +11,7 @@ import {
   bedrockCallOptions,
   modelAcceptsEffort,
   modelAcceptsTemperature,
+  repairCurlyQuoteJson,
 } from "@/lib/llm/models";
 
 const OPUS_48 = "us.anthropic.claude-opus-4-8";
@@ -72,5 +73,19 @@ describe("bedrockCallOptions", () => {
 
   it("sends nothing when no effort is asked for", () => {
     expect(bedrockCallOptions(DEFAULT_EXTRACT_MODEL, {})).toEqual({});
+  });
+});
+
+describe("repairCurlyQuoteJson", () => {
+  it("fixes a string closed with a curly quote (prod 2A failure, 10-29)", async () => {
+    const text = '{"cancerRelevantPercent":50,"cancerRelevantRationale":"the PHR cites \\"brain and cancer samples\\".”}';
+    expect(JSON.parse((await repairCurlyQuoteJson({ text }))!)).toEqual({
+      cancerRelevantPercent: 50,
+      cancerRelevantRationale: 'the PHR cites "brain and cancer samples".',
+    });
+  });
+
+  it("returns null when the swap still doesn't parse", async () => {
+    expect(await repairCurlyQuoteJson({ text: '{"a":"said “hi”, then"}' })).toBeNull();
   });
 });

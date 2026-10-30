@@ -50,6 +50,7 @@ import { bedrockClient } from "@/lib/llm/client";
 import {
   DEFAULT_EXTRACT_MODEL,
   bedrockCallOptions,
+  repairCurlyQuoteJson,
   modelAcceptsTemperature,
 } from "@/lib/llm/models";
 
@@ -183,6 +184,7 @@ export async function inferCancerFundingJudgments(
       maxOutputTokens: FUNDING_MAX_TOKENS,
       abortSignal: AbortSignal.timeout(FUNDING_TIMEOUT_MS),
       ...(modelAcceptsTemperature(modelId) ? { temperature: FUNDING_TEMPERATURE } : {}),
+      experimental_repairText: repairCurlyQuoteJson,
       ...bedrockCallOptions(modelId, { effort: "low" }),
     });
     const clean = sanitize(object);

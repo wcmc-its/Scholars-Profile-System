@@ -37,6 +37,7 @@ import { bedrockClient } from "@/lib/llm/client";
 import {
   DEFAULT_EXTRACT_MODEL,
   bedrockCallOptions,
+  repairCurlyQuoteJson,
   modelAcceptsTemperature,
 } from "@/lib/llm/models";
 
@@ -224,6 +225,7 @@ export async function inferPubRelevance(
       maxOutputTokens: RELEVANCE_MAX_TOKENS,
       abortSignal: AbortSignal.timeout(RELEVANCE_TIMEOUT_MS),
       ...(modelAcceptsTemperature(modelId) ? { temperature: RELEVANCE_TEMPERATURE } : {}),
+      experimental_repairText: repairCurlyQuoteJson,
       ...bedrockCallOptions(modelId, { effort: "low" }),
     });
     const clean = parsePubRelevanceOutput(object);
