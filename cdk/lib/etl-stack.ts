@@ -1928,6 +1928,12 @@ export class EtlStack extends Stack {
       // over NAT egress, no credential, SPS-DB only. Placed BEFORE
       // SearchIndexNightly so the people index (which carries hasHeadshot) and
       // the revalidated pages pick up a flipped verdict the same night.
+      // Center publication cancer relevance (etl/center-pub-relevance): scores new or
+      // changed member pubs (default window: last calendar year onward; decided rows
+      // are skipped by input hash) via rules + Sonnet 5.5, then fills PubMed author
+      // affiliations for the collab matrix. Aurora + Bedrock + public EFetch, so
+      // external:false. After Reciter (the pub load); `continue` keeps prior rows.
+      { id: "CenterPubRelevanceNightly", npmScript: "etl:center-pub-relevance", external: false, tier: "continue" },
       { id: "HeadshotMissingNightly", npmScript: "etl:headshot:missing", external: false, tier: "continue" },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
