@@ -29,7 +29,7 @@ Standard library: `urllib`, `xml.etree`, `concurrent.futures`, `re`, `json`.
 - **Funding, abstract, MeSH:** PubMed `efetch` (`GrantList`, `Abstract`, `MeshHeading`).
 - **DOI resource typing** (S-Index only): DataCite REST API (`datacite.py`).
 
-Full-text XML is fetched live per run and **not cached** — see Limitations.
+Full-text XML is cached on disk, with an optional shared S3 tier; it is only fetched live on a cache miss — see Limitations.
 
 ## Pipeline (run order)
 
@@ -99,7 +99,7 @@ only want the self-check.
 
 **PubMed Central coverage**
 - Only the **PMC Open Access subset** has machine-readable full text. Of the since-2020 corpus, ~63% are in PMC and ~98% of those returned full text — so **~37% of the corpus (not in PMC) is scanned only via the sparse structured `<DataBankList>`**, undercounting deposition by non-PMC pubs.
-- **Implemented:** full-text XML is cached on disk at `~/Dropbox/Projects/Bulk Data Rule/data/xml_cache/`, keyed by PMCID, never-expiring. Delete the directory (or individual files) to force a re-fetch of specific articles.
+- **Implemented:** full-text XML is cached on disk at `~/Dropbox/Projects/Bulk Data Rule/data/xml_cache/`, keyed by PMCID, never-expiring. Delete the directory (or individual files) to force a re-fetch of specific articles. When `FULLTEXT_S3_BUCKET` is set (the ECS task sets it), `scan2.py` also reads through and writes through the shared store at `s3://wcmc-reciterai-artifacts/fulltext/` (`pmc/{PMCID}.xml` plus a `pmid/{pmid}` → PMCID map), shared with ReciterAI cores; order is disk → S3 → live. S3 is best-effort: an error prints `S3 full-text read/write failed` and falls back. Unset (the analyst-local default) = disk only. Self-check: `python3 test_ft_s3.py`.
 
 **Extraction**
 - Data Availability statements are found by section-heading heuristics; non-standard headings are missed.

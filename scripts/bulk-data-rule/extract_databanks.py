@@ -115,7 +115,7 @@ def context_for(row):
     if not pmcid or not isinstance(val, str):
         return 'unclear'  # nothing to check against; not auto-dropped, just not auto-shippable
     if pmcid not in _fulltext_cache:
-        _fulltext_cache[pmcid] = scan2.ft(pmcid)
+        _fulltext_cache[pmcid] = scan2.ft(pmcid, row['pmid'])
     xml = _fulltext_cache[pmcid]
     if not xml:
         return 'unclear'

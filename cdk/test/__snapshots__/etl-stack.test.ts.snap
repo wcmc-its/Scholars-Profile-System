@@ -601,6 +601,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "CURATION_BACKUP_PREFIX",
                 "Value": "bulk-data-rule",
               },
+              {
+                "Name": "FULLTEXT_S3_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -885,7 +889,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS bulk-data-rule ECS task role (prod). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), nothing else.",
+        "Description": "SPS bulk-data-rule ECS task role (prod). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), plus read/write on the shared full-text store (wcmc-reciterai-artifacts/fulltext/).",
         "RoleName": "sps-bulk-data-rule-task-prod",
       },
       "Type": "AWS::IAM::Role",
@@ -935,6 +939,26 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   "Arn",
                 ],
               },
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::wcmc-reciterai-artifacts/fulltext/*",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "fulltext/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::wcmc-reciterai-artifacts",
             },
           ],
           "Version": "2012-10-17",
@@ -11618,6 +11642,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "CURATION_BACKUP_PREFIX",
                 "Value": "bulk-data-rule",
               },
+              {
+                "Name": "FULLTEXT_S3_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -11902,7 +11930,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS bulk-data-rule ECS task role (staging). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), nothing else.",
+        "Description": "SPS bulk-data-rule ECS task role (staging). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), plus read/write on the shared full-text store (wcmc-reciterai-artifacts/fulltext/).",
         "RoleName": "sps-bulk-data-rule-task-staging",
       },
       "Type": "AWS::IAM::Role",
@@ -11952,6 +11980,26 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   "Arn",
                 ],
               },
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::wcmc-reciterai-artifacts/fulltext/*",
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "fulltext/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::wcmc-reciterai-artifacts",
             },
           ],
           "Version": "2012-10-17",

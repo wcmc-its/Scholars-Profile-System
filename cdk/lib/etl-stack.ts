@@ -1210,7 +1210,7 @@ export class EtlStack extends Stack {
     const bulkDataRuleTaskRole = new iam.Role(this, "BulkDataRuleTaskRole", {
       roleName: `sps-bulk-data-rule-task-${env}`,
       assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-      description: `SPS bulk-data-rule ECS task role (${env}). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), nothing else.`,
+      description: `SPS bulk-data-rule ECS task role (${env}). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), plus read/write on the shared full-text store (wcmc-reciterai-artifacts/fulltext/).`,
     });
     // Provenance sync target (design decision #1): the entrypoint `aws s3
     // sync`s its working dir (intermediate CSVs + a run-manifest: image
@@ -1232,6 +1232,27 @@ export class EtlStack extends Stack {
         actions: ["s3:ListBucket"],
         resources: [curationBackupBucket.bucketArn],
         conditions: { StringLike: { "s3:prefix": ["bulk-data-rule/*"] } },
+      }),
+    );
+    // Shared full-text store with ReciterAI pipeline_cores: scan2.py's ft() reads through
+    // `fulltext/pmc/{PMCID}.xml` before fetching Europe PMC / NCBI, and writes back the XML plus
+    // the `fulltext/pmid/{pmid}` -> PMCID map on a live fetch, so neither pipeline re-fetches what
+    // the other already has. Best-effort in the script (a denial just falls back to live), so a
+    // broken grant degrades silently -- check the run log for `S3 full-text read failed`.
+    // ListBucket (prefix-scoped) is what turns a missing key into 404 instead of 403.
+    bulkDataRuleTaskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:GetObject", "s3:PutObject"],
+        resources: ["arn:aws:s3:::wcmc-reciterai-artifacts/fulltext/*"],
+      }),
+    );
+    bulkDataRuleTaskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:ListBucket"],
+        resources: ["arn:aws:s3:::wcmc-reciterai-artifacts"],
+        conditions: { StringLike: { "s3:prefix": ["fulltext/*"] } },
       }),
     );
 
@@ -1259,6 +1280,8 @@ export class EtlStack extends Stack {
       environment: {
         CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
         CURATION_BACKUP_PREFIX: "bulk-data-rule",
+        // Enables scan2.py's shared S3 full-text tier (grant above); unset = disk-only.
+        FULLTEXT_S3_BUCKET: "wcmc-reciterai-artifacts",
       },
       secrets: {
         DB_HOST: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_HOST"),
