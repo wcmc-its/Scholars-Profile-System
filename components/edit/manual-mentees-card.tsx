@@ -23,6 +23,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  DirectoryPeopleTypeahead,
+  type DirectoryValue,
+} from "@/components/edit/directory-people-typeahead";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -308,11 +312,31 @@ export function MenteeForm({
       Number(draft.year) <= new Date().getUTCFullYear() + 1);
   const canSubmit = nameOk && cwidOk && yearOk && !busy;
 
+  /** A directory pick fills BOTH the CWID and the name; either stays editable,
+   *  and someone not in the directory is still entered by hand below. */
+  function pickPerson(v: DirectoryValue | null) {
+    if (!v) return;
+    setDraft((d) => ({ ...d, cwid: v.cwid, name: v.name }));
+  }
+
   return (
     <div
       className="border-apollo-border flex flex-col gap-3 rounded-md border p-4"
       data-testid={`manual-mentee-form-${idPrefix}`}
     >
+      <div className="flex flex-col gap-1 text-sm">
+        <span className="font-medium">Find in the WCM directory</span>
+        <DirectoryPeopleTypeahead
+          value={null}
+          onChange={pickPerson}
+          placeholder="Search by name…"
+          disabled={busy}
+          idPrefix={`manual-mentee-search-${idPrefix}`}
+        />
+        <span className="text-muted-foreground text-xs">
+          Picking someone fills in their CWID and name. Not in the directory? Type the name below.
+        </span>
+      </div>
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium">WCM CWID (optional)</span>
         <Input

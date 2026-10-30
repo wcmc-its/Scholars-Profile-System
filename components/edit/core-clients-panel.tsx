@@ -17,7 +17,8 @@
  * candidates/confirmed/rejected already use.
  *
  * Three things happen in here, in the order the reviewer meets them:
- *   1. paste CWIDs -> "Add clients" resolves them against Scholars, then the
+ *   1. find a person by name in the WCM directory (not scholars-only: a client
+ *      need not have a profile), or paste CWIDs -> "Add clients" resolves them against Scholars, then the
  *      enterprise directory, AND writes the roster rows in ONE round-trip, then
  *      lists who was recorded. This was
  *      two steps until HANDOFF-11 #2 — a "Look up CWIDs" preview, then a commit
@@ -42,6 +43,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  DirectoryPeopleTypeahead,
+  type DirectoryValue,
+} from "@/components/edit/directory-people-typeahead";
 import type { CoreClientRow } from "@/lib/api/core-clients";
 import { parseCwidBlock } from "@/lib/cores/cwid-block";
 import { stripUnitDisambiguation } from "@/lib/name-sort";
@@ -176,6 +181,18 @@ export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClient
       );
       return;
     }
+    if (await postCwids(cwids, invalid)) setText("");
+  }
+
+  /** A directory pick adds that one person's real CWID through the same
+   *  one-round-trip POST as a paste. */
+  async function pickPerson(v: DirectoryValue | null) {
+    if (!v) return;
+    await postCwids([v.cwid], []);
+  }
+
+  /** POSTs the CWIDs (no `mode`) and reports what was written; true on success. */
+  async function postCwids(cwids: string[], invalid: string[]): Promise<boolean> {
     setPending(true);
     setAddResult(null);
     const res = await fetch("/api/edit/core-client", {
@@ -186,7 +203,7 @@ export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClient
     setPending(false);
     if (!res?.ok) {
       setAddResult("Could not save — try again.");
-      return;
+      return false;
     }
     const data = (await res.json().catch(() => ({}))) as {
       added?: AddedPerson[];
@@ -203,7 +220,6 @@ export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClient
     if (allInvalid.length > 0) parts.push(`Not a CWID: ${allInvalid.join(", ")}.`);
     setAddResult(parts.join(" "));
     setAdded(addedRows);
-    setText("");
     // Re-adding a client REVIVES the row it had before (the route upserts on
     // (coreId, cwid) and clears `removedAt`), so it comes back under the very id
     // a remove earlier in this session parked in `removing` — and would come
@@ -223,6 +239,7 @@ export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClient
     // roster with no jx2001 in it. A route that reported neither has told us
     // nothing new about the server, so it earns nothing.
     if (addedRows.length > 0 || alreadyPresent.length > 0) router.refresh();
+    return true;
   }
 
   async function submitName() {
@@ -317,13 +334,21 @@ export function CoreClientsDialog({ coreId, open, clients, onClose }: CoreClient
           </DialogDescription>
         </DialogHeader>
 
-        {/* --- 1. paste + add --- */}
+        {/* --- 1. find by name, or paste + add --- */}
         <div className="border-apollo-border border-b px-6 py-5">
+          <p className="text-foreground mb-2 text-sm font-medium">Add a client by name</p>
+          <DirectoryPeopleTypeahead
+            value={null}
+            onChange={(v) => void pickPerson(v)}
+            placeholder="Search the WCM directory…"
+            disabled={pending}
+            idPrefix="core-clients-person"
+          />
           <label
             htmlFor="core-clients-cwids"
-            className="text-foreground mb-2 block text-sm font-medium"
+            className="text-foreground mt-4 mb-2 block text-sm font-medium"
           >
-            Paste CWIDs
+            Or paste CWIDs
           </label>
           <textarea
             id="core-clients-cwids"

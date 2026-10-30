@@ -18,9 +18,10 @@
  * per-CWID (`isGroupMember`'s LDAP `compare`, `lib/auth/ldap-group.ts`) — the
  * read-only bind account can compare `member` but cannot READ the list, so
  * there is no way to enumerate who holds a role. "View as" can start a
- * session for any of these roles once you know the CWID; it can never offer
- * them as browsable search results. Any future role added to the table below
- * inherits the same ceiling.
+ * session for any of these roles once you know the CWID, and its candidates
+ * route finds a holder by name only by searching the directory first and then
+ * asking {@link resolveGlobalRole} about each hit — never by listing a group.
+ * Any future role added to the table below inherits the same ceiling.
  *
  * Node-runtime only (every predicate here reuses `lib/sources/ldap.ts`) —
  * never pull this into the Edge middleware bundle or a client component.

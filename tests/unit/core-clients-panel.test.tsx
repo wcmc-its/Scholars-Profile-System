@@ -17,10 +17,29 @@
  * is why one test asserts that only ONE "Add clients" button exists.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
+
+// The directory typeahead is mocked to a button that picks one fake person.
+vi.mock("@/components/edit/directory-people-typeahead", () => ({
+  DirectoryPeopleTypeahead: ({
+    onChange,
+    scholarsOnly,
+  }: {
+    onChange: (v: { cwid: string; name: string; title: string | null }) => void;
+    scholarsOnly?: boolean;
+  }) => (
+    <button
+      type="button"
+      data-scholars-only={scholarsOnly ? "1" : "0"}
+      onClick={() => onChange({ cwid: "pck0001", name: "Picked Person", title: null })}
+    >
+      pick person
+    </button>
+  ),
+}));
 
 import { CoreClaimQueue } from "@/components/edit/core-claim-queue";
 import { CoreClientsDialog } from "@/components/edit/core-clients-panel";
@@ -54,7 +73,7 @@ function footerClose(): HTMLElement {
 /** The band holding the textarea, the "Add clients" button and that add's
  *  outcome — an add that writes nothing must still report INSIDE it. */
 function pasteBand(): HTMLElement {
-  return screen.getByLabelText("Paste CWIDs").parentElement as HTMLElement;
+  return screen.getByLabelText("Or paste CWIDs").parentElement as HTMLElement;
 }
 
 /** "On the roster now" — the server's active list, and the ONLY thing that
@@ -169,7 +188,7 @@ describe("CoreClientsDialog", () => {
     ]);
     vi.stubGlobal("fetch", fetchMock);
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), {
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), {
       target: { value: "JX2001, ab1234" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
@@ -184,6 +203,25 @@ describe("CoreClientsDialog", () => {
     expect(screen.getByText("added — not found, recorded anyway")).toBeTruthy();
   });
 
+  it("a directory pick POSTs that person's cwid (not scholars-only) and lists what was written", async () => {
+    const fetchMock = addResponse([
+      { id: "row-11", cwid: "pck0001", name: "Picked Person", slug: null, affiliation: null, source: "directory" },
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+    open();
+    expect(screen.getByText("Add a client by name")).toBeTruthy();
+    const pick = screen.getByRole("button", { name: "pick person" });
+    expect(pick.getAttribute("data-scholars-only")).toBe("0");
+    fireEvent.click(pick);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method: string; body: string }];
+    expect(url).toBe("/api/edit/core-client");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ coreId: "2", cwids: ["pck0001"] });
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    expect(within(pasteBand()).getByRole("status").textContent).toBe("Added 1.");
+  });
+
   it("offers exactly ONE 'Add clients' button, gated only on the paste", () => {
     vi.stubGlobal("fetch", vi.fn());
     open();
@@ -191,7 +229,7 @@ describe("CoreClientsDialog", () => {
     const buttons = screen.getAllByRole("button", { name: "Add clients" }) as HTMLButtonElement[];
     expect(buttons).toHaveLength(1);
     expect(buttons[0].disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     // Nothing else to confirm: the paste alone enables the write.
     expect(buttons[0].disabled).toBe(false);
   });
@@ -200,7 +238,7 @@ describe("CoreClientsDialog", () => {
     const fetchMock = addResponse([], ["djb2001"]);
     vi.stubGlobal("fetch", fetchMock);
     open({ clients: [client()] });
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "djb2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "djb2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     const status = await screen.findByRole("status");
     expect(status.textContent).toMatch(/Already listed: djb2001/);
@@ -224,13 +262,13 @@ describe("CoreClientsDialog", () => {
       vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }),
     );
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     const status = await screen.findByRole("status");
     expect(status.textContent).toMatch(/Could not save/);
     expect(pasteBand().contains(status)).toBe(true);
     // The paste survives a failure — it is what the retry needs.
-    expect((screen.getByLabelText("Paste CWIDs") as HTMLTextAreaElement).value).toBe("jx2001");
+    expect((screen.getByLabelText("Or paste CWIDs") as HTMLTextAreaElement).value).toBe("jx2001");
   });
 
   it("sends the WHOLE parsed block and leaves the roster to the refreshed payload", async () => {
@@ -250,7 +288,7 @@ describe("CoreClientsDialog", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     open({ clients: [client()] });
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), {
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), {
       target: { value: "jx2001 djb2001" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
@@ -278,7 +316,7 @@ describe("CoreClientsDialog", () => {
     const fetchMock = addResponse([{ cwid: "jx2001", name: null }]);
     vi.stubGlobal("fetch", fetchMock);
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     await waitFor(() =>
       expect(document.querySelector('[data-slot="core-clients-added"] li')).toBeTruthy(),
@@ -290,7 +328,7 @@ describe("CoreClientsDialog", () => {
   it("reports an unparseable token as 'No valid CWIDs found' without calling fetch", () => {
     vi.stubGlobal("fetch", vi.fn());
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "not-a-cwid" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "not-a-cwid" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     expect(screen.getByText(/No valid CWIDs found/)).toBeTruthy();
     expect(fetch).not.toHaveBeenCalled();
@@ -302,7 +340,7 @@ describe("CoreClientsDialog", () => {
     ]);
     vi.stubGlobal("fetch", fetchMock);
     open();
-    const paste = screen.getByLabelText("Paste CWIDs");
+    const paste = screen.getByLabelText("Or paste CWIDs");
     fireEvent.change(paste, { target: { value: "jx2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     expect(await screen.findByText("Jenny Xiang")).toBeTruthy();
@@ -436,7 +474,7 @@ describe("CoreClientsDialog — gaps found in adversarial review", () => {
     ]);
     vi.stubGlobal("fetch", fetchMock);
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), {
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), {
       target: { value: "jx2001 ab1234 zz9999" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
@@ -470,7 +508,7 @@ describe("CoreClientsDialog — gaps found in adversarial review", () => {
     ]);
     vi.stubGlobal("fetch", fetchMock);
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "ab1234" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "ab1234" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     // Scoped to the receipt list: a document-wide text query also matches the
     // paste textarea itself.
@@ -488,7 +526,7 @@ describe("CoreClientsDialog — gaps found in adversarial review", () => {
     ]);
     vi.stubGlobal("fetch", fetchMock);
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "zz9999" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "zz9999" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     await waitFor(() =>
       expect(document.querySelector('[data-slot="core-clients-added"] li')).toBeTruthy(),
@@ -504,7 +542,7 @@ describe("CoreClientsDialog — gaps found in adversarial review", () => {
     const fetchMock = addResponse([], []);
     vi.stubGlobal("fetch", fetchMock);
     open();
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     await screen.findByRole("status");
     expect(mockRefresh).not.toHaveBeenCalled();
@@ -534,7 +572,7 @@ describe("CoreClientsDialog — gaps found in adversarial review", () => {
     vi.stubGlobal("fetch", fetchMock);
     const props = { coreId: "2", clients: [] as CoreClientRow[], onClose: vi.fn() };
     const { rerender } = render(<CoreClientsDialog {...props} open />);
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     expect(await screen.findByText("Jenny Xiang")).toBeTruthy();
     // The SERVER owns the list, so feed the written row in as the prop the
@@ -585,7 +623,7 @@ describe("CoreClientsDialog — gaps found in adversarial review", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     expect(await screen.findByRole("button", { name: "Removed" })).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "djb2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "djb2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const button = (await screen.findByRole("button", { name: "Remove" })) as HTMLButtonElement;
@@ -633,7 +671,7 @@ describe("CoreClientsDialog — gaps found in adversarial review", () => {
     vi.stubGlobal("fetch", fetchMock);
     const props = { coreId: "2", clients: [] as CoreClientRow[], onClose: vi.fn() };
     const { rerender } = render(<CoreClientsDialog {...props} open />);
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     expect(await screen.findByText("Jenny Xiang")).toBeTruthy();
     fireEvent.click(footerClose());
@@ -703,7 +741,7 @@ describe("CoreClaimQueue — the roster follows the refreshed payload, not a cac
     expect(dialog().textContent).toContain("No known clients yet.");
     expect(toolbarCount()).toBe("Known clients (0)");
 
-    fireEvent.change(screen.getByLabelText("Paste CWIDs"), { target: { value: "jx2001" } });
+    fireEvent.change(screen.getByLabelText("Or paste CWIDs"), { target: { value: "jx2001" } });
     fireEvent.click(screen.getByRole("button", { name: "Add clients" }));
     const status = await screen.findByRole("status");
     expect(status.textContent).toMatch(/Already listed: jx2001/);

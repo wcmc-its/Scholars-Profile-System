@@ -15,6 +15,24 @@ import { ManualMenteesCard } from "@/components/edit/manual-mentees-card";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+// The directory typeahead is mocked to a button that picks one synthetic person.
+vi.mock("@/components/edit/directory-people-typeahead", () => ({
+  DirectoryPeopleTypeahead: ({
+    onChange,
+    idPrefix,
+  }: {
+    onChange: (v: { cwid: string; name: string; title: string | null }) => void;
+    idPrefix: string;
+  }) => (
+    <button
+      type="button"
+      data-testid={`${idPrefix}-pick`}
+      onClick={() => onChange({ cwid: "pkd3003", name: "Pat Directory", title: null })}
+    >
+      pick
+    </button>
+  ),
+}));
 
 function mockPost(body: object = { ok: true }, ok = true) {
   const fetchMock = vi.fn(async () => ({ ok, json: async () => body }) as unknown as Response);
@@ -120,6 +138,24 @@ describe("ManualMenteesCard", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(postedValue(fetchMock)).toEqual([{ name: "Rowan Ellis", cwid: "rel2002" }]);
+  });
+
+  it("a directory pick fills both the CWID and the name, which then save", async () => {
+    const fetchMock = mockPost();
+    renderCard([]);
+
+    fireEvent.click(screen.getByTestId("manual-mentee-add"));
+    fireEvent.click(screen.getByTestId("manual-mentee-search-add-pick"));
+    expect((screen.getByTestId("manual-mentee-cwid-add") as HTMLInputElement).value).toBe(
+      "pkd3003",
+    );
+    expect((screen.getByTestId("manual-mentee-name-add") as HTMLInputElement).value).toBe(
+      "Pat Directory",
+    );
+    fireEvent.click(screen.getByTestId("manual-mentee-submit-add"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(postedValue(fetchMock)).toEqual([{ name: "Pat Directory", cwid: "pkd3003" }]);
   });
 
   it("POSTs the array minus the removed row", async () => {

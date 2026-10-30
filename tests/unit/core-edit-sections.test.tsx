@@ -251,7 +251,7 @@ describe("CoreEditSections — Staff summary", () => {
 
   it("renders the editable staff panel with the next-night note", () => {
     const { section } = staff(4, 3);
-    expect(section.getByText("Changes feed publication matching the next night.")).toBeTruthy();
+    expect(section.getByText("Changes are used the next time this core’s publications are matched.")).toBeTruthy();
     expect(section.getByRole("button", { name: "Add staff" })).toBeTruthy();
     expect(section.getByTestId("core-staff-empty").textContent).toBe("No staff added yet.");
   });

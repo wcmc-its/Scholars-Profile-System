@@ -25,7 +25,7 @@
  *   - A contested name is ONE row with a radio pick; Approve / Hide stay disabled
  *     until a scholar is picked.
  *   - An amber banner counts the contested names, with a "Show only these".
- *   - "Wrong person? Enter CWID" on a pending row stages a replacement scholar
+ *   - "Wrong person? Reassign" (name search or CWID) on a pending row stages a replacement scholar
  *     (checked against the directory); Approve / Hide then send it as `cwid` and
  *     the route credits that scholar instead (see the decision route's WRONG
  *     PERSON note).
