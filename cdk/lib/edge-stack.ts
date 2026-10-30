@@ -31,6 +31,38 @@ import { type SpsEnvConfig } from "./config";
 const EDGE_IP_PATH = "/edge-ip";
 
 /**
+ * Viewer-request CloudFront Function source for the legacy-host redirect
+ * (#945). On an alias host it 301s to the canonical host: a legacy VIVO
+ * profile path (same shapes as `VIVO_PATH_RE` in proxy.ts) goes straight to
+ * `/scholars/by-cwid/{cwid}`, anything else to the home page. Any other host
+ * passes through untouched. Answering at the POP means the alias never reaches
+ * the origin, so it can't serve Scholars pages under the VIVO name or share a
+ * cache entry with the canonical host (the default cache key omits Host).
+ */
+export function legacyHostRedirectCode(
+  canonicalHost: string,
+  aliasHosts: readonly string[],
+): string {
+  return `var ALIASES = ${JSON.stringify(aliasHosts)};
+var CANONICAL = ${JSON.stringify(`https://${canonicalHost}`)};
+var VIVO_PROFILE = /^\\/(?:display|individual|profile)\\/cwid-([A-Za-z0-9._\\-]+)\\/?$/;
+function handler(event) {
+  var request = event.request;
+  var host = request.headers.host ? request.headers.host.value.toLowerCase() : "";
+  if (ALIASES.indexOf(host) === -1) return request;
+  var m = request.uri.match(VIVO_PROFILE);
+  return {
+    statusCode: 301,
+    statusDescription: "Moved Permanently",
+    headers: {
+      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : "/") },
+      "cache-control": { value: "max-age=86400" },
+    },
+  };
+}`;
+}
+
+/**
  * Body served by the `block-non-wcm` WAF rule instead of AWS's stock
  * "The request could not be satisfied / Request blocked" 403.
  *
@@ -611,6 +643,9 @@ export class EdgeStack extends Stack {
       customDomain && certArn
         ? acm.Certificate.fromCertificateArn(this, "ViewerCert", certArn)
         : undefined;
+    // Extra hosts that only ever 301 to `customDomain` (#945). Attached only
+    // alongside a real alias + cert, since the cert must cover them.
+    const aliasDomains = viewerCert ? (envConfig.edgeAliasDomains ?? []) : [];
 
     // ------------------------------------------------------------------
     // Cache + origin request policies (plan D5).
@@ -1494,9 +1529,35 @@ export class EdgeStack extends Stack {
     //   nothing on this behavior needs the header any more. `viewerHostOrp`
     //   was removed (#1944) once #1935 was confirmed running in both envs.
     // ------------------------------------------------------------------
+    // #945 -- legacy-host redirect on every behavior that has no viewer-request
+    // function of its own (only `/edge-ip` does; an alias hitting it just gets
+    // its IP echoed). CloudFront allows one function per event type.
+    const legacyHostRedirect: cloudfront.FunctionAssociation[] = [];
+    if (customDomain && aliasDomains.length > 0) {
+      legacyHostRedirect.push({
+        function: new cloudfront.Function(this, "EdgeLegacyHostRedirect", {
+          functionName: `sps-edge-legacy-host-${env}`,
+          comment: `SPS legacy-host 301 to ${customDomain} (${env}).`,
+          runtime: cloudfront.FunctionRuntime.JS_2_0,
+          code: cloudfront.FunctionCode.fromInline(
+            legacyHostRedirectCode(customDomain, aliasDomains),
+          ),
+        }),
+        eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+      });
+      for (const [pattern, behavior] of Object.entries(additionalBehaviors)) {
+        if (!behavior.functionAssociations) {
+          additionalBehaviors[pattern] = {
+            ...behavior,
+            functionAssociations: legacyHostRedirect,
+          };
+        }
+      }
+    }
+
     this.distribution = new cloudfront.Distribution(this, "Distribution", {
       comment: `SPS edge -- ${env}`,
-      domainNames: customDomain ? [customDomain] : undefined,
+      domainNames: customDomain ? [customDomain, ...aliasDomains] : undefined,
       certificate: viewerCert,
       // WCM-only allowlist (#461/#1506); always attached now (see WAF block).
       webAclId: webAclArn,
@@ -1511,6 +1572,7 @@ export class EdgeStack extends Stack {
         responseHeadersPolicy: htmlHeaders,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         compress: true,
+        functionAssociations: legacyHostRedirect.length ? legacyHostRedirect : undefined,
       },
       additionalBehaviors,
       // ------------------------------------------------------------------

@@ -441,6 +441,15 @@ export interface SpsEnvConfig {
    */
   readonly edgeCertArn: string;
   /**
+   * Extra hostnames attached to the distribution beside {@link edgeCustomDomain}
+   * that are NEVER served as themselves: a viewer-request CloudFront Function
+   * 301s every request on them to the canonical domain (legacy VIVO profile
+   * paths to `/scholars/by-cwid/{cwid}`, everything else to `/`). The cert at
+   * {@link edgeCertArn} must cover each one. Prod only: `vivo.weill.cornell.edu`
+   * moves here at the VIVO cutover (#945).
+   */
+  readonly edgeAliasDomains?: readonly string[];
+  /**
    * CloudFront standard-access-log S3 bucket name (EdgeStack-owned; raw logs at
    * `cf/<env>/`). Referenced by NAME (s3.Bucket.fromBucketName) by AnalyticsStack
    * for the same Edge-decoupling reason as {@link cloudFrontDistributionId}.
@@ -875,8 +884,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
     // stripping them (#1506). Live values read from the distribution config.
     edgeCustomDomain: "scholars.weill.cornell.edu",
+    // Covers scholars + vivo (SAN). Replaced 95f77e69-... (scholars only) for
+    // the VIVO hostname cutover (#945).
     edgeCertArn:
-      "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
+      "arn:aws:acm:us-east-1:665083158573:certificate/c39a27d7-00ad-4714-8f1d-c948b61904e4",
+    edgeAliasDomains: ["vivo.weill.cornell.edu"],
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
     // #1507 -- HTTPS origin leg, two gates. Seeded for the NetScaler front
     // (mirrors staging): CloudFront dials the NetScaler VIP over HTTPS (carrying

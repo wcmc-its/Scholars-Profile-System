@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
-import { EdgeStack } from "../lib/edge-stack";
+import { EdgeStack, legacyHostRedirectCode } from "../lib/edge-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { type SpsEnvConfig } from "../lib/config";
 import { makeFixture } from "./test-utils";
@@ -1390,10 +1390,13 @@ describe("EdgeStack", () => {
         )[0]?.Properties as Record<string, unknown> | undefined;
         const dc = props?.DistributionConfig as Record<string, unknown>;
         // No context flags passed -- these resolve from config.prod.
-        expect(dc.Aliases).toEqual(["scholars.weill.cornell.edu"]);
+        expect(dc.Aliases).toEqual([
+          "scholars.weill.cornell.edu",
+          "vivo.weill.cornell.edu",
+        ]);
         const cert = dc.ViewerCertificate as Record<string, unknown>;
         expect(cert.AcmCertificateArn).toBe(
-          "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
+          "arn:aws:acm:us-east-1:665083158573:certificate/c39a27d7-00ad-4714-8f1d-c948b61904e4",
         );
         expect(cert.SslSupportMethod).toBe("sni-only");
       });
@@ -1456,6 +1459,84 @@ describe("EdgeStack", () => {
       const cert = dc.ViewerCertificate as Record<string, unknown>;
       expect(cert.AcmCertificateArn).toBe(STUB_CERT);
       expect(cert.SslSupportMethod).toBe("sni-only");
+    });
+  });
+
+  describe("legacy VIVO host alias (#945)", () => {
+    it("prod attaches vivo.weill.cornell.edu beside the canonical alias", () => {
+      const { template } = buildEdgeStack("prod");
+      template.hasResourceProperties("AWS::CloudFront::Distribution", {
+        DistributionConfig: Match.objectLike({
+          Aliases: ["scholars.weill.cornell.edu", "vivo.weill.cornell.edu"],
+        }),
+      });
+    });
+
+    it("prod runs the redirect on every behavior without its own viewer-request function", () => {
+      const { template } = buildEdgeStack("prod");
+      const fns = template.findResources("AWS::CloudFront::Function");
+      const redirectId = Object.keys(fns).find((id) =>
+        id.startsWith("EdgeLegacyHostRedirect"),
+      );
+      expect(redirectId).toBeDefined();
+      const dc = (
+        Object.values(template.findResources("AWS::CloudFront::Distribution"))[0]
+          .Properties as Record<string, Record<string, unknown>>
+      ).DistributionConfig;
+      const behaviors = [
+        dc.DefaultCacheBehavior,
+        ...(dc.CacheBehaviors as Record<string, unknown>[]),
+      ] as Record<string, unknown>[];
+      for (const b of behaviors) {
+        const assoc = b.FunctionAssociations as
+          | { EventType: string; FunctionARN: { "Fn::GetAtt": string[] } }[]
+          | undefined;
+        expect(assoc).toHaveLength(1);
+        if (b.PathPattern !== "/edge-ip") {
+          expect(assoc![0].FunctionARN["Fn::GetAtt"][0]).toBe(redirectId);
+        }
+      }
+    });
+
+    it("staging has no alias host and no redirect function", () => {
+      const { template } = buildEdgeStack("staging");
+      template.hasResourceProperties("AWS::CloudFront::Distribution", {
+        DistributionConfig: Match.objectLike({
+          Aliases: ["scholars-staging.weill.cornell.edu"],
+        }),
+      });
+      template.resourceCountIs("AWS::CloudFront::Function", 1); // edge-ip only
+    });
+
+    describe("redirect handler", () => {
+      const handler = new Function(
+        `${legacyHostRedirectCode("scholars.weill.cornell.edu", ["vivo.weill.cornell.edu"])}; return handler;`,
+      )() as (e: unknown) => {
+        statusCode?: number;
+        headers: Record<string, { value: string }>;
+      };
+      const run = (host: string, uri: string) =>
+        handler({ request: { uri, headers: { host: { value: host } } } });
+
+      it.each([
+        ["/display/cwid-aer2006", "/scholars/by-cwid/aer2006"],
+        ["/individual/cwid-abc2001/", "/scholars/by-cwid/abc2001"],
+        ["/profile/cwid-x.y-z_1", "/scholars/by-cwid/x.y-z_1"],
+        ["/", "/"],
+        ["/vivosearch", "/"],
+        ["/display/cwid-aer2006/extra", "/"],
+      ])("vivo host %s -> 301 %s", (uri, path) => {
+        const res = run("VIVO.weill.cornell.edu", uri);
+        expect(res.statusCode).toBe(301);
+        expect(res.headers.location.value).toBe(
+          `https://scholars.weill.cornell.edu${path}`,
+        );
+      });
+
+      it("passes the canonical host through untouched", () => {
+        const res = run("scholars.weill.cornell.edu", "/display/cwid-aer2006");
+        expect(res.statusCode).toBeUndefined();
+      });
     });
   });
 
