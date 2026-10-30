@@ -561,24 +561,11 @@ GET /profile/cwid-abc1234     -> 301 -> /scholars/by-cwid/abc1234
 
 The `/scholars/by-cwid/[cwid]` page then chains a second 301 to the current canonical slug via `resolveByCwidOrAlias` (`lib/url-resolver.ts`). The chained pattern keeps slug currency / aliasing in one place rather than baking a slug snapshot into the redirect map.
 
-**Redirect set provenance.** The CWID corpus is generated from WCM Enterprise Directory:
-
-```
-filter: (&(objectClass=weillCornellEduPerson)(weillCornellEduPersonTypeCode=academic-faculty))
-attrs:  ["uid", "labeledURI;vivo"]   # minimal -- never include DOB or other PII
-```
-
-The generator script `scripts/etl/generate-vivo-redirect-set.ts` parses each `labeledURI;vivo` value (e.g. `http://vivo.med.cornell.edu/display/cwid-abc1234`), de-dupes, sorts, and writes `data/vivo-redirects.json`. Run locally before each prod deploy; the JSON is checked in and consumed by middleware as a static import (Set-backed O(1) lookup). CI builds consume the committed JSON -- the script never runs in CI.
-
-```
-npx tsx scripts/etl/generate-vivo-redirect-set.ts
-# Add --filter-loose if the resulting count is suspiciously low
-# (broadens to weillCornellEduPersonTypeCode=academic-faculty*).
-```
+**No redirect set.** Since #1940 every syntactically valid legacy CWID path redirects, and the by-cwid resolver decides between a 301 to the canonical slug and a 404. The ED-generated CWID list that used to gate this (`data/vivo-redirects.json` and its generator) was unused after #1940 and has been removed: this repo is public and the list was a roster of real CWIDs.
 
 **Why middleware, not CloudFront Function.** Three reasons: (a) the CF Function code limit is 10 KB; a 3-4 k entry CWID -> slug object is ~100 KB. (b) Middleware already gates `/edit/*` and `/api/edit/*`; adding three matcher prefixes is a one-line diff. (c) The chained-301 design keeps the redirect map a flat CWID list with no slug snapshot to drift.
 
-**Out of corpus -> 404, not 410.** Retired academics whose CWID is no longer in the academic-faculty set fall through to the existing 404 handler. The spec allows 410 "where no equivalent exists" but Google treats 404 and 410 equivalently after a few crawls. An explicit 410 list lives in a future `data/vivo-retired.json` if signal-from-crawlers demands it; out of scope for B14 v1.
+**No public profile -> 404, not 410.** A legacy CWID with no active, publicly displayed scholar row (e.g. a retiree) 404s from the by-cwid resolver. The spec allows 410 "where no equivalent exists" but Google treats 404 and 410 equivalently after a few crawls. An explicit 410 list lives in a future `data/vivo-retired.json` if signal-from-crawlers demands it; out of scope for B14 v1.
 
 ### Verification (acceptance #15 + B14-6)
 
@@ -586,16 +573,16 @@ Two post-deploy spot checks live here so the manual runbook for the cutover land
 
 1. **Cache-key smoke test (B07 acceptance #15).** From the CloudFront console: Distribution -> Behaviors -> Default -> Cache Policy -> "Test cache policy." Submit the same path with two different `Cookie:` header values; the inspector must produce the same cache key. The header is excluded from the key by design -- a fragmented cache here means a configuration drift and silently leaks one user's cached HTML to another.
 
-2. **Legacy URL crawler check (B14-6).** After the WCM ITS CNAME cutover, sample 20 CWIDs from `data/vivo-redirects.json`:
+2. **Legacy URL crawler check (B14-6).** After the WCM ITS CNAME cutover, sample 20 CWIDs from a local list of `/display/cwid-*` URLs (e.g. VIVO's sitemap). Keep the list out of the repo -- it is public:
 
    ```
-   shuf -n 20 <(jq -r '.[]' data/vivo-redirects.json) | while read cwid; do
+   shuf -n 20 cwids.txt | while read cwid; do
      curl -sIL "https://scholars.weill.cornell.edu/display/cwid-${cwid}" | \
        awk 'BEGIN{c=0} /^HTTP/{c++; print c": "$0}'
    done
    ```
 
-   Each sampled CWID should produce two `HTTP/2 301` (legacy -> by-cwid, by-cwid -> slug) followed by `HTTP/2 200`. If the chain stops at a single 301 with `Location: /scholars/by-cwid/*` and then a 404, the CWID is in the redirect set but no longer has an active scholar row -- expected for retirees, treat as out-of-corpus signal rather than a regression.
+   Each sampled CWID should produce two `HTTP/2 301` (legacy -> by-cwid, by-cwid -> slug) followed by `HTTP/2 200`. If the chain stops at a single 301 with `Location: /scholars/by-cwid/*` and then a 404, the CWID no longer has an active, publicly displayed scholar row -- expected for retirees, treat as out-of-corpus signal rather than a regression.
 
 ### Outputs surfaced for downstream stacks
 
