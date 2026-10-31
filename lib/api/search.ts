@@ -118,6 +118,7 @@ import {
   resolveSearchPeopleConceptHint,
   resolveSearchPeopleEsiFacet,
   resolveSearchPeopleInstitutionFacet,
+  resolveSearchPeopleResearchTypeFacet,
   resolveSearchPubInstitutionFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
@@ -267,6 +268,9 @@ export type PeopleFilters = {
    * no-op (no clause, no facet) while it's off / pre-reindex.
    */
   institution?: string[];
+  /** Research type facet — "lab" / "clinical" (lib/research-type.ts), multi-select
+   *  "any of". No-op while `SEARCH_PEOPLE_RESEARCH_TYPE_FACET` is off. */
+  researchType?: string[];
   /** Issue #233 — Principal Investigator facet. Absent = "no filter". */
   pi?: PiFilter;
   /** Issue #233 — threshold for `pi=multi`. Clamped to [PI_MIN_FLOOR,
@@ -1117,6 +1121,9 @@ export type PeopleSearchResult = {
      * (or pre-reindex) — never omitted.
      */
     institutions: SearchFacetBucket[];
+    /** Research type facet buckets ("lab" / "clinical"). Empty while
+     *  `SEARCH_PEOPLE_RESEARCH_TYPE_FACET` is off (or pre-reindex). */
+    researchTypes: SearchFacetBucket[];
   };
 };
 
@@ -2176,6 +2183,7 @@ async function searchPeopleCore(opts: {
           professorialRank: [],
           earlyStageInvestigator: { true: 0, false: 0 },
           institutions: [],
+          researchTypes: [],
         },
       };
     }
@@ -2575,6 +2583,11 @@ async function searchPeopleCore(opts: {
     institutionFacetOn && filters.institution && filters.institution.length > 0
       ? { terms: { primaryOrgCode: filters.institution } }
       : null;
+  const researchTypeFacetOn = resolveSearchPeopleResearchTypeFacet();
+  const researchTypeClause =
+    researchTypeFacetOn && filters.researchType && filters.researchType.length > 0
+      ? { terms: { researchType: filters.researchType } }
+      : null;
   const sparseClause = applySparseFilter ? { term: { isComplete: true } } : null;
   const topicClause = topicCwidFilter && topicCwidFilter.length > 0
     ? { terms: { cwid: topicCwidFilter } }
@@ -2895,6 +2908,7 @@ async function searchPeopleCore(opts: {
         professorialRank: [],
         earlyStageInvestigator: { true: 0, false: 0 },
         institutions: [],
+        researchTypes: [],
       },
     };
   }
@@ -2908,6 +2922,7 @@ async function searchPeopleCore(opts: {
   if (professorialRankClause) userAxisFilters.push(professorialRankClause);
   if (earlyStageInvestigatorClause) userAxisFilters.push(earlyStageInvestigatorClause);
   if (institutionClause) userAxisFilters.push(institutionClause);
+  if (researchTypeClause) userAxisFilters.push(researchTypeClause);
 
   // Helper: user-axis filters with one axis omitted, for that axis's
   // excluding-self aggregation. Always-on filters are inherited from the
@@ -2921,7 +2936,8 @@ async function searchPeopleCore(opts: {
       | "isClinical"
       | "professorialRank"
       | "earlyStageInvestigator"
-      | "institution",
+      | "institution"
+      | "researchType",
   ) => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "deptDiv" && deptDivClause) out.push(deptDivClause);
@@ -2933,6 +2949,7 @@ async function searchPeopleCore(opts: {
     if (axis !== "earlyStageInvestigator" && earlyStageInvestigatorClause)
       out.push(earlyStageInvestigatorClause);
     if (axis !== "institution" && institutionClause) out.push(institutionClause);
+    if (axis !== "researchType" && researchTypeClause) out.push(researchTypeClause);
     return out;
   };
 
@@ -3091,6 +3108,14 @@ async function searchPeopleCore(opts: {
           institutions: {
             filter: { bool: { filter: filtersExcept("institution") } },
             aggs: { keys: { terms: { field: "primaryOrgCode", size: 50 } } },
+          },
+        }
+      : {}),
+    ...(researchTypeFacetOn
+      ? {
+          researchTypes: {
+            filter: { bool: { filter: filtersExcept("researchType") } },
+            aggs: { keys: { terms: { field: "researchType", size: 10 } } },
           },
         }
       : {}),
@@ -3770,6 +3795,8 @@ async function searchPeopleCore(opts: {
       earlyStageInvestigatorFalse?: { doc_count: number };
       // Present only when SEARCH_PEOPLE_INSTITUTION_FACET is on.
       institutions?: { keys: { buckets: Bucket[] } };
+      // Present only when SEARCH_PEOPLE_RESEARCH_TYPE_FACET is on.
+      researchTypes?: { keys: { buckets: Bucket[] } };
       attributionMatch?: { doc_count: number };
     };
   };
@@ -4731,6 +4758,10 @@ async function searchPeopleCore(opts: {
       // Institution facet — `[]` (never omitted) while
       // SEARCH_PEOPLE_INSTITUTION_FACET is off / pre-reindex (agg absent).
       institutions: (r.aggregations?.institutions?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
+      researchTypes: (r.aggregations?.researchTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
       })),

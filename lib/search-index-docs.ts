@@ -60,6 +60,7 @@ import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { publicRoleWhere } from "@/lib/eligibility";
+import { researchTypesFrom } from "@/lib/research-type";
 import {
   DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
@@ -693,6 +694,9 @@ export const PEOPLE_INDEX_SELECT = {
   // facet. Both are direct copies onto the doc in `buildPeopleDoc` below.
   hasClinicalProfile: true,
   professorialRank: true,
+  // Research type facet (lib/research-type.ts).
+  labPubs5y: true,
+  clinicalPubs5y: true,
   // Institution facet — `Scholar.primaryOrgCode` (ED
   // `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, ...).
   // Plain scalar, direct copy onto the doc in `buildPeopleDoc` below.
@@ -1410,6 +1414,7 @@ export async function buildPeopleDoc(
   // a scholar who cleared their bio via override still had a non-empty ETL
   // column, so the sparse-profile gate never noticed the clearing.
   const isComplete = !!effectiveOverview && kept >= 3 && hasActiveGrants ? true : false;
+  const researchTypes = researchTypesFrom(s.labPubs5y, s.clinicalPubs5y);
   // Phase 2 — sourced from ED ETL derivation (lib/eligibility.ts RoleCategory).
   // "unknown" only fires for scholars whose ED ETL has not yet backfilled
   // role_category (transitional state during the first refresh after migration).
@@ -1834,6 +1839,8 @@ export async function buildPeopleDoc(
     // carries no faculty-tagged value for — OMIT-on-empty (same as
     // `professorialRank` above), so a null row simply has no facet bucket.
     ...(s.primaryOrgCode ? { primaryOrgCode: s.primaryOrgCode } : {}),
+    // Research type facet — omit-on-empty, like `professorialRank`.
+    ...(researchTypes.length > 0 ? { researchType: researchTypes } : {}),
     // #2300 — "Early Stage Investigator" in every human-facing surface (facet
     // label / chip / tooltip); `esiEligible` is the pre-existing internal
     // code name (`lib/api/match-researchers.ts`) and is kept as-is here. See

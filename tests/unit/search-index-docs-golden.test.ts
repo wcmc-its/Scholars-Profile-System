@@ -276,6 +276,9 @@ describe("buildPeopleDoc — golden snapshots", () => {
       professorialRank: "Associate Professor",
       // Institution facet — direct-copy scalar, exercises the populated branch.
       primaryOrgCode: "WCMC",
+      // Research type facet — 4 lab papers clears the threshold, 1 clinical does not.
+      labPubs5y: 4,
+      clinicalPubs5y: 1,
       // Avatar gate — direct-copy scalar (lib/headshot.ts headshotUrl).
       hasHeadshot: true,
       deptCode: "MED",
@@ -356,6 +359,7 @@ describe("buildPeopleDoc — golden snapshots", () => {
       ),
       NO_SUP,
     );
+    expect((doc as { researchType?: string[] }).researchType).toEqual(["lab"]);
     expect(doc).toMatchSnapshot();
   });
 
@@ -374,6 +378,9 @@ describe("buildPeopleDoc — golden snapshots", () => {
       // (OMIT-on-empty for professorialRank — see the "no rank" branch).
       hasClinicalProfile: false,
       professorialRank: null,
+      // Research type counts not computed yet ⇒ no `researchType` on the doc.
+      labPubs5y: null,
+      clinicalPubs5y: null,
       hasHeadshot: false,
       deptCode: null,
       divCode: null,
@@ -404,6 +411,7 @@ describe("buildPeopleDoc — golden snapshots", () => {
       mockPeopleClient([null]),
       NO_SUP,
     );
+    expect(doc).not.toHaveProperty("researchType");
     expect(doc).toMatchSnapshot();
   });
 

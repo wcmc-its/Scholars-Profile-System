@@ -111,6 +111,7 @@ import { prisma } from "@/lib/db";
 import { logSearchDegraded } from "@/lib/analytics/errors";
 import { formatRoleCategory } from "@/lib/role-display";
 import { institutionDisplayName } from "@/lib/institutions";
+import { researchTypeLabel } from "@/lib/research-type";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -370,6 +371,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // `institution`); accepted regardless of the per-tab
   // SEARCH_*_INSTITUTION_FACET flags (each search no-ops it while off).
   const institution = parseList(sp.institution);
+  // Research type facet ("lab" / "clinical"); no-op while
+  // SEARCH_PEOPLE_RESEARCH_TYPE_FACET is off.
+  const researchType = parseList(sp.researchType);
 
   // Issue #233 — Principal Investigator facet. Single-select; `none` and
   // unset both mean "no filter" (URL contract). `pi_min` is meaningful only
@@ -543,6 +547,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
             earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
             institution: institution.length > 0 ? institution : undefined,
+            researchType: researchType.length > 0 ? researchType : undefined,
           },
           relevanceMode: peopleRelevanceMode,
           shape: peopleQueryShape,
@@ -736,6 +741,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
         earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
         institution: institution.length > 0 ? institution : undefined,
+        researchType: researchType.length > 0 ? researchType : undefined,
       },
       // PR-5: route the §6.1 shape templates on the SSR path too.
       relevanceMode: peopleRelevanceMode,
@@ -1010,6 +1016,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 professorialRank={professorialRank}
                 earlyStageInvestigator={earlyStageInvestigator}
                 institution={institution}
+                researchType={researchType}
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
@@ -1295,6 +1302,7 @@ async function PeopleResults({
   professorialRank,
   earlyStageInvestigator,
   institution,
+  researchType,
   scope,
   concept,
   scopeHrefs,
@@ -1326,6 +1334,8 @@ async function PeopleResults({
   /** Active `institution` multi-select filter (`Scholar.primaryOrgCode` codes),
    *  same shape as `professorialRank`. */
   institution: string[];
+  /** Active research-type multi-select filter ("lab" / "clinical"). */
+  researchType: string[];
   scope: Scope;
   concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
@@ -1378,6 +1388,7 @@ async function PeopleResults({
     for (const v of professorialRank) sp.append("professorialRank", v);
     if (earlyStageInvestigator) sp.set("earlyStageInvestigator", "true");
     for (const v of institution) sp.append("institution", v);
+    for (const v of researchType) sp.append("researchType", v);
     if (pi) sp.set("pi", pi);
     // `pi_min` is only meaningful for pi=multi; default value is dropped
     // from the URL to keep saved bookmarks tidy.
@@ -1502,6 +1513,12 @@ async function PeopleResults({
       removeHref: removeHref("institution", v),
     });
   }
+  for (const v of researchType) {
+    chips.push({
+      label: researchTypeLabel(v),
+      removeHref: removeHref("researchType", v),
+    });
+  }
   if (pi) {
     chips.push({
       label:
@@ -1564,6 +1581,7 @@ async function PeopleResults({
         professorialRanks={result.facets.professorialRank}
         earlyStageInvestigatorFacet={result.facets.earlyStageInvestigator}
         institutions={result.facets.institutions}
+        researchTypes={result.facets.researchTypes}
         activeDeptDiv={deptDiv}
         activePersonType={personType}
         activeActivity={activity}
@@ -1573,6 +1591,7 @@ async function PeopleResults({
         activeProfessorialRank={professorialRank}
         activeEarlyStageInvestigator={earlyStageInvestigator}
         activeInstitution={institution}
+        activeResearchType={researchType}
         toggleHref={toggleHref}
         toggleBooleanHref={toggleBooleanHref}
         setPiHref={setPiHref}
@@ -3112,6 +3131,7 @@ function FacetSidebar({
   professorialRanks,
   earlyStageInvestigatorFacet,
   institutions,
+  researchTypes,
   activeDeptDiv,
   activePersonType,
   activeActivity,
@@ -3121,6 +3141,7 @@ function FacetSidebar({
   activeProfessorialRank,
   activeEarlyStageInvestigator,
   activeInstitution,
+  activeResearchType,
   toggleHref,
   toggleBooleanHref,
   setPiHref,
@@ -3158,6 +3179,9 @@ function FacetSidebar({
   activeProfessorialRank: string[];
   activeEarlyStageInvestigator: boolean;
   activeInstitution: string[];
+  /** Research type facet buckets + active values; empty buckets ⇒ no group. */
+  researchTypes: SearchFacetBucket[];
+  activeResearchType: string[];
   toggleHref: (axis: string, value: string) => string;
   /** #2300 / #2306 — single-boolean toggle for `isClinical` /
    *  `earlyStageInvestigator` (set-to-true / delete, not the multi-select
@@ -3206,6 +3230,24 @@ function FacetSidebar({
               count={p.count}
               isActive={activePersonType.includes(p.value)}
               href={toggleHref("personType", p.value)}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      {/* Research type — first/last-author paper volume by NIH iCite category
+          (lib/research-type.ts). Multi-valued: a scholar can be in both.
+          Renders only when the response carries buckets (flag off /
+          pre-reindex ⇒ no group). */}
+      {researchTypes.length > 0 ? (
+        <FacetGroup label="Research type">
+          {sortActiveFirst(researchTypes, (b) => activeResearchType.includes(b.value)).map((b) => (
+            <FacetCheckbox
+              key={b.value}
+              label={researchTypeLabel(b.value)}
+              count={b.count}
+              isActive={activeResearchType.includes(b.value)}
+              href={toggleHref("researchType", b.value)}
             />
           ))}
         </FacetGroup>

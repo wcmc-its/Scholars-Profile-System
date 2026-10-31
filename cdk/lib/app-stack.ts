@@ -2297,6 +2297,12 @@ export class AppStack extends Stack {
         // Prod ON 2026-09-22 after the prod pub + funding alias rebuilds.
         SEARCH_PUB_INSTITUTION_FACET: "on",
         SEARCH_FUNDING_INSTITUTION_FACET: "on",
+        // People-search "Research type" facet (Laboratory / Clinical research from
+        // Scholar.labPubs5y / clinicalPubs5y, lib/research-type.ts). Staging-first:
+        // the doc carries `researchType` only after the reciter ETL fills the counts,
+        // and the nightly alias rebuild after it carries the keyword mapping. Prod
+        // stays off until the facet has been eyeballed on staging.
+        SEARCH_PEOPLE_RESEARCH_TYPE_FACET: env === "staging" ? "on" : "off",
         // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET, SEARCH_RESULT_EVIDENCE,
         // SEARCH_EVIDENCE_ROWS and SEARCH_EVIDENCE_REASON_COUNTS (the #1464
         // evidence bundle) were retired in #1440 -- always on in code, no env key.

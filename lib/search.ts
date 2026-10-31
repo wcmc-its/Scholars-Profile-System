@@ -422,6 +422,11 @@ export const peopleIndexMapping = {
       // `SEARCH_PEOPLE_INSTITUTION_FACET`. OMIT-on-empty in `buildPeopleDoc`.
       // Labels are resolved in the page via `institutionDisplayName`.
       primaryOrgCode: { type: "keyword" },
+      // Research type facet — `researchTypesFrom(Scholar.labPubs5y,
+      // clinicalPubs5y)` (lib/research-type.ts): "lab" / "clinical", multi-valued,
+      // OMIT-on-empty. `keyword` multi-select `terms` filter + agg, behind
+      // `SEARCH_PEOPLE_RESEARCH_TYPE_FACET`.
+      researchType: { type: "keyword" },
     },
   },
 };
