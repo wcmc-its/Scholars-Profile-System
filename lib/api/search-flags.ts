@@ -1447,3 +1447,19 @@ export function resolveSearchTypoFallback(): TypoFallbackMode | false {
   const v = ovr("SEARCH_TYPO_FALLBACK") ?? process.env.SEARCH_TYPO_FALLBACK;
   return v === "on" || v === "names" ? v : false;
 }
+
+/**
+ * Gates the `researchType` People-search facet ("Laboratory research" /
+ * "Clinical research", lib/research-type.ts), multi-valued keyword on the
+ * people doc from `Scholar.labPubs5y` / `clinicalPubs5y`. Same
+ * accept-but-no-op-while-off posture as `resolveSearchPeopleInstitutionFacet`.
+ * The doc only carries the field once the reciter ETL has filled the counts,
+ * and the nightly alias rebuild that follows carries the keyword mapping, so
+ * an /edit single-doc reindex cannot dynamically map it as text first.
+ *
+ * Staging-on / prod-off at merge. Flag-parity: wire
+ * `SEARCH_PEOPLE_RESEARCH_TYPE_FACET` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPeopleResearchTypeFacet(): boolean {
+  return process.env.SEARCH_PEOPLE_RESEARCH_TYPE_FACET === "on";
+}

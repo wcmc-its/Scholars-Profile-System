@@ -22,7 +22,10 @@ export const RESEARCH_TYPE_LABELS = {
   clinical: "Clinical research",
 } as const;
 export type ResearchType = keyof typeof RESEARCH_TYPE_LABELS;
-export const RESEARCH_TYPES = Object.keys(RESEARCH_TYPE_LABELS) as ResearchType[];
+/** Display label for a facet value; unknown values pass through. */
+export function researchTypeLabel(v: string): string {
+  return RESEARCH_TYPE_LABELS[v as ResearchType] ?? v;
+}
 
 /** The `analysis_nih` columns this needs (mariadb returns the flags as 'True'/'False'). */
 export type NihTriangleRow = {

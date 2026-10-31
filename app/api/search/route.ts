@@ -593,6 +593,9 @@ async function handleSearch(request: NextRequest) {
   // the bare acronym. Parsed regardless of `SEARCH_PEOPLE_ESI_FACET`, same
   // no-op-while-off posture as `isClinical`.
   const earlyStageInvestigator = params.get("earlyStageInvestigator") === "true";
+  // Research type facet ("lab" / "clinical"), repeated multi-select; no-op while
+  // SEARCH_PEOPLE_RESEARCH_TYPE_FACET is off.
+  const researchType = params.getAll("researchType");
   // URL contract: `?includeIncomplete=false` opts INTO the sparse-profile
   // cull (only scholars with overview + ≥3 pubs + active grant). Any other
   // value — including the param being absent — leaves the filter unset so
@@ -697,6 +700,7 @@ async function handleSearch(request: NextRequest) {
       professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
       earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
       institution: institution.length > 0 ? institution : undefined,
+      researchType: researchType.length > 0 ? researchType : undefined,
     },
     topic,
     // Issue #309 / SPEC §6.1.2 — hand the already-computed relevance mode and
