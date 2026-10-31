@@ -969,9 +969,21 @@ export async function rankResearchersForDescriptionSpine(
         roleCategory: true,
         primaryTitle: true,
         hasClinicalProfile: true,
+        labPubs5y: true,
+        clinicalPubs5y: true,
         appointments: { select: { startDate: true } },
         educations: { select: { year: true, degree: true } },
-        grants: { select: { externalId: true, endDate: true, role: true, mechanism: true } },
+        grants: {
+          select: {
+            externalId: true,
+            endDate: true,
+            role: true,
+            mechanism: true,
+            programType: true,
+            intakeType: true,
+            primeSponsor: true,
+          },
+        },
       },
     }),
     db.read.fieldOverride.findMany({

@@ -106,6 +106,11 @@ model Scholar {
   popsSpecialties         Json?     @map("pops_specialties") // string[] — board-cert ∪ primary, deduped
   popsExpertise           Json?     @map("pops_expertise") // string[] — problem_procedure
   popsRefreshedAt         DateTime? @map("pops_refreshed_at")
+  /// Research type (lib/research-type.ts) — first/last-author research articles
+  /// in the last 5 years by NIH iCite triangle, from the reciter ETL. NULL = not
+  /// computed yet (≠ 0). The facet threshold is applied at index time.
+  labPubs5y               Int?      @map("lab_pubs_5y")
+  clinicalPubs5y          Int?      @map("clinical_pubs_5y")
   /// Issue #5 — postdoc mentor (manager) CWID, populated only when
   /// roleCategory === 'postdoc'. Sourced from the `manager` attribute on
   /// the scholar's ou=employees,ou=sors entry (parsed by parseManagerCwid).

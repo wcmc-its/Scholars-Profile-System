@@ -974,7 +974,7 @@ describe("rankResearchersForDescriptionSpine", () => {
       const { candidates } = await rankResearchersForDescriptionSpine("cancer");
       expect(candidates.find((c) => c.cwid === "lab")?.measures).toMatchObject({
         researcherType: "physician_scientist",
-        researchAward: { mechanism: "R01", endYear: thisYear + 2 },
+        researchAward: { label: "NIH R01", endYear: thisYear + 2 },
       });
       expect(candidates.find((c) => c.cwid === "md")?.measures?.researcherType).toBe("clinician");
     });
@@ -999,6 +999,20 @@ describe("rankResearchersForDescriptionSpine", () => {
       const { candidates } = await rankResearchersForDescriptionSpine("cancer");
       expect(candidates[0].measures?.researcherType).toBe("basic_scientist");
       expect(candidates[0].measures?.researchAward).toBeUndefined();
+    });
+
+    it("lab-paper volume on Scholar makes an unfunded candidate research-active and rides on measures", async () => {
+      mockSearchPeople.mockResolvedValue(people(["newlab"]));
+      mockScholarFindMany.mockResolvedValue([
+        { ...scholarRow("newlab", true, []), labPubs5y: 4, clinicalPubs5y: 1 },
+      ]);
+      const { candidates } = await rankResearchersForDescriptionSpine("cancer");
+      expect(candidates[0].measures).toMatchObject({
+        researcherType: "physician_scientist",
+        labPubs5y: 4,
+        clinicalPubs5y: 1,
+      });
+      expect(mockScholarFindMany.mock.calls[0][0].select).toMatchObject({ labPubs5y: true, clinicalPubs5y: true });
     });
   });
 
