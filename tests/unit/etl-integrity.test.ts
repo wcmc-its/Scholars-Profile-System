@@ -149,6 +149,14 @@ describe("findVolumeRegressions — change-count sources (#2200)", () => {
     expect(out).toHaveLength(0);
   });
 
+  it("exempts CenterPubRelevance, which counts only rows it decided this run", () => {
+    const out = findVolumeRegressions(
+      [{ source: "CenterPubRelevance", latest: 6, previous: 3683, latestAt: hoursAgo(1) }],
+      { now: NOW },
+    );
+    expect(out).toHaveLength(0);
+  });
+
   it("exempts by exact source name, so a lookalike is still graded", () => {
     expect(CHANGE_COUNT_SOURCES.has("News")).toBe(true);
     const out = findVolumeRegressions(

@@ -140,12 +140,17 @@ export function staleSources(
 // ORCID-push returns pushed + cleared (etl/orcid-push): Identity rows that
 // differed from scholar.orcid. 125 newly confirmed iDs pushed once on 2026-10-25,
 // then 1 the next night with 142 equal. A dead ReCiter API throws on its own.
+// CenterPubRelevance (etl/center-pub-relevance) returns rows DECIDED this run;
+// rows whose input hash still matches are skipped. Staging 2026-10-31: the
+// 3,683-row backfill, then 6 on the first nightly, which failed this guard. All
+// calls failing throws on its own.
 export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "News",
   "NewsClips",
   "FundingDigest",
   "ReciterAI-area-signals",
   "ORCID-push",
+  "CenterPubRelevance",
 ]);
 
 /**
