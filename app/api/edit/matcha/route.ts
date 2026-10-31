@@ -166,10 +166,21 @@ function sponsorInputHash(engineInput: string): string {
   return createHash("sha256").update(engineInput, "utf8").digest("hex");
 }
 
+/**
+ * Version of the stored result's SHAPE. Bump it whenever a change adds or alters a field the
+ * console reads off a candidate (e.g. a new `measures` field). Persisted answers never
+ * expire, so without a bump every saved search keeps replaying the old shape: the new field
+ * is silently absent until an officer happens to click Re-run. A bump makes each saved
+ * search miss once, run fresh, and persist under the new key.
+ *
+ * v2: `measures.researcherType` / `researchAward` (#3235).
+ */
+const MATCHA_RESULT_VERSION = 2;
+
 /** The cache key. Shares its digest with `SponsorMatchSubmission.descriptionHash`, so a
  *  retained row and the cached result for that same search are joinable on one value. */
 function sponsorCacheKey(inputHash: string, engine: "spine" | "bespoke"): string {
-  return `sponsor:${engine}:${inputHash}`;
+  return `sponsor:${engine}:v${MATCHA_RESULT_VERSION}:${inputHash}`;
 }
 
 /** What is safe to memoise: the expensive, derived half of the answer. NOT `preferences` —

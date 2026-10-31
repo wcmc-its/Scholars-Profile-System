@@ -634,7 +634,7 @@ describe("POST /api/edit/matcha (route)", () => {
       });
       // The SAME key the in-RAM cache used — include/eligibility variants stay distinct.
       expect(data.resultKey).toBe(String(mockCachedReasonAgg.mock.calls[0][0]));
-      expect(data.resultKey).toMatch(/^sponsor:spine:[0-9a-f]{64}:inc:[0-9a-f]{64}$/);
+      expect(data.resultKey).toMatch(/^sponsor:spine:v\d+:[0-9a-f]{64}:inc:[0-9a-f]{64}$/);
       // The lookup that preceded it asked for exactly that key on this paste's hash.
       expect(mockSubmissionFindFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -702,6 +702,15 @@ describe("POST /api/edit/matcha (route)", () => {
       expect(mockRankSpine).toHaveBeenCalledTimes(1);
       expect(body.asOf).toBeUndefined();
       expect(mockSubmissionCreate.mock.calls[0][0].data.resultKey).toMatch(/^sponsor:spine:/);
+    });
+
+    it("looks stored answers up under a VERSIONED key, so a result-shape change retires old rows", async () => {
+      // Persisted answers never expire. Without the version segment, a saved search would keep
+      // replaying a result missing whatever field the console now reads (#3235's researcher type).
+      mockSubmissionFindFirst.mockResolvedValue(null);
+      await POST(postRequest(developerCtx, { description: "x" }));
+      const key = mockSubmissionFindFirst.mock.calls[0][0].where.resultKey as string;
+      expect(key).toMatch(/^sponsor:spine:v\d+:[0-9a-f]{64}$/);
     });
 
     it("a failed lookup is a cold run, not an error", async () => {
