@@ -115,6 +115,7 @@ import {
   type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
+import { RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
 import { buildMatchaCsv } from "@/lib/edit/matcha-export";
 import type { EligibilityRequirements } from "@/lib/funding/screening";
 import {
@@ -325,20 +326,32 @@ const DEFAULT_RESEARCHER_TYPES: ReadonlySet<string> = new Set(
 /** Why this scholar got their researcher type, the pill's hover. */
 function researcherTypeReason(m: MatchaMeasures): string {
   const inWindow = `in the last ${RESEARCH_ACTIVE_YEARS} years`;
+  const lab = m.labPubs5y ?? 0;
+  const clinical = m.clinicalPubs5y ?? 0;
   const award = m.researchAward
-    ? `PI on an NIH ${m.researchAward.mechanism} award, ${
+    ? `PI on ${m.researchAward.label} funding, ${
         m.researchAward.endYear >= new Date().getFullYear() ? "active through" : "ended"
       } ${m.researchAward.endYear}`
-    : `PI on an NIH research award ${inWindow}`;
+    : null;
+  const labText =
+    lab >= RESEARCH_TYPE_MIN_PUBS ? `${lab} first/last-author lab research papers ${inWindow}` : null;
+  const clinicalText =
+    clinical >= RESEARCH_TYPE_MIN_PUBS ? ` ${clinical} first/last-author clinical research papers.` : "";
+  // Funded but the award is withheld (hidden Funding section) and no lab volume.
+  const evidence = [award, labText].filter(Boolean).join("; ") || `PI on a research award ${inWindow}`;
   switch (m.researcherType) {
     case "physician_scientist":
-      return `${award}, and has a clinical profile.`;
+      return `${evidence}. Has a clinical profile.${clinicalText}`;
     case "basic_scientist":
-      return `${award}, no clinical profile.`;
+      return `${evidence}. No clinical profile.${clinicalText}`;
     case "clinician":
-      return `Has a clinical profile, but no NIH research award as PI ${inWindow}.`;
+      return `Has a clinical profile, but no research award as PI and under ${RESEARCH_TYPE_MIN_PUBS} lab papers ${inWindow}.${clinicalText}`;
     case "unclassified":
-      return `No clinical profile and no NIH research award as PI ${inWindow}. Often a scientist funded from other sources.`;
+      return `No research award as PI and under ${RESEARCH_TYPE_MIN_PUBS} first/last-author lab papers ${inWindow}.${clinicalText}${
+        m.roleCategory === "part_time_faculty" || m.roleCategory === "affiliated_faculty"
+          ? " Part-time and affiliated faculty often hold awards and see patients elsewhere, so this is unknown, not no."
+          : ""
+      }`;
     default:
       return "";
   }
@@ -2361,7 +2374,7 @@ export function MatchaPanel({
                       options={typeFacet}
                       selected={typeSelEffective}
                       onToggle={(v) => setTypeSel(toggled(typeSelEffective, v))}
-                      title={`Research-active = PI on an NIH research award (R, U, P, K, DP) in the last ${RESEARCH_ACTIVE_YEARS} years. Physician-scientists and clinicians also have a clinical profile in the Enterprise Directory. Clinicians are hidden by default.`}
+                      title={`Research-active = PI on a research award from any sponsor, or ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author lab research papers, in the last ${RESEARCH_ACTIVE_YEARS} years. Physician-scientists and clinicians also have a clinical profile in the Enterprise Directory. Clinicians are hidden by default.`}
                     />
                   ) : null}
                   <FacetGroup

@@ -54,6 +54,11 @@ import { buildMenteeSuggestions } from "./mentee-suggestions";
 import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
 import { syncPendingMyncbiPmids, syncRejectedPmids } from "./rejected-pmids";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import {
+  RESEARCH_TYPE_YEARS,
+  researchVolumeByCwid,
+  type NihTriangleRow,
+} from "@/lib/research-type";
 
 type AuthorRow = {
   personIdentifier: string;
@@ -116,7 +121,7 @@ type EcommonsRow = { pmid: number; ecommonslink: string | null };
  *  `relative_citation_ratio` is the field- and time-normalized influence figure used by
  *  the NIH-biosketch impact grounding; `nih_percentile` and the iCite `citation_count`
  *  pair with it. Columns confirmed via `DESCRIBE analysis_nih`. */
-type NihRow = {
+type NihRow = NihTriangleRow & {
   pmid: number;
   relative_citation_ratio: number | null;
   nih_percentile: number | null;
@@ -487,7 +492,8 @@ async function main() {
       try {
         await withReciterConnection(async (conn) => {
           const rows = (await conn.query(
-            `SELECT pmid, relative_citation_ratio, nih_percentile, citation_count
+            `SELECT pmid, relative_citation_ratio, nih_percentile, citation_count,
+                    year, is_research_article, is_clinical, human, animal, molecular_cellular
              FROM analysis_nih
              WHERE pmid IN (?)`,
             [batch],
@@ -1026,6 +1032,34 @@ async function main() {
       `WCM authorships: ${authCreated} created, ${authUpdated} updated, ` +
         `${authDeleted} deleted, ${authUnchanged} unchanged.`,
     );
+
+    // Research type (lib/research-type.ts): per-scholar lab / clinical paper
+    // counts from the iCite triangle over first/last authorships. Diff-written so a
+    // steady-state night touches no rows. Rides the assertSourceVolume guard on
+    // nihByPmid above, so a truncated analysis_nih read aborts before this.
+    const volume = researchVolumeByCwid(
+      authorshipRows,
+      nihByPmid,
+      ourCwidSet,
+      new Date().getFullYear() - RESEARCH_TYPE_YEARS,
+    );
+    let volumeUpdated = 0;
+    for (const batch of chunks([...volume.keys()], IN_BATCH)) {
+      const current = await db.write.scholar.findMany({
+        where: { cwid: { in: batch } },
+        select: { cwid: true, labPubs5y: true, clinicalPubs5y: true },
+      });
+      for (const c of current) {
+        const v = volume.get(c.cwid)!;
+        if (c.labPubs5y === v.lab && c.clinicalPubs5y === v.clinical) continue;
+        await db.write.scholar.update({
+          where: { cwid: c.cwid },
+          data: { labPubs5y: v.lab, clinicalPubs5y: v.clinical },
+        });
+        volumeUpdated++;
+      }
+    }
+    console.log(`Research volume: ${volumeUpdated} scholar(s) updated of ${volume.size}.`);
 
     // 7. Orphan cleanup — delete publications whose pmid is no longer in the
     //    ReCiter source. Cascade to publication_topic / publication_author /

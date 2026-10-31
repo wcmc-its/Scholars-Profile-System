@@ -889,7 +889,7 @@ describe("researcherTypeFrom", () => {
     endDate: new Date(Date.UTC(endYear, 5, 30)),
   });
 
-  it("splits the four types on clinical profile × NIH research PI", () => {
+  it("splits the four types on clinical profile × research PI", () => {
     const r01 = [g("R01", "PI", 2028)];
     expect(researcherTypeFrom({ hasClinicalProfile: false, grants: r01 }, NOW).type).toBe("basic_scientist");
     expect(researcherTypeFrom({ hasClinicalProfile: true, grants: r01 }, NOW).type).toBe("physician_scientist");
@@ -910,8 +910,43 @@ describe("researcherTypeFrom", () => {
     for (const mech of ["T32", "F32", "L30", "S10", "R13", "R25", "K12", "KL2"]) expect(md(mech)).toBe("clinician");
   });
 
-  it("ignores non-NIH (no mechanism) awards and awards that ended more than 5 years ago", () => {
-    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g(null, "PI", 2028)] }, NOW).type).toBe("clinician");
+  it("counts non-NIH research awards from any sponsor, but not service, MTA, trial or training rows", () => {
+    const other = (o: Record<string, string>) =>
+      researcherTypeFrom({ hasClinicalProfile: true, grants: [{ ...g(null, "PI", 2028), ...o }] }, NOW).type;
+    expect(other({ programType: "Grant", intakeType: "Grant", primeSponsor: "DOD" })).toBe("physician_scientist");
+    expect(other({ programType: "Contract with funding", intakeType: "Sponsored Research Agreement" })).toBe("physician_scientist");
+    expect(other({ programType: "BioPharma Alliance Agreement", intakeType: "BioPharma" })).toBe("physician_scientist");
+    expect(other({ programType: "Contract with funding", intakeType: "Service Agreement (WCM)" })).toBe("clinician");
+    expect(other({ programType: "Grant", intakeType: "Incoming Material Transfer Agreement" })).toBe("clinician");
+    expect(other({ programType: "Grant", intakeType: "Clinical Trial Agreement" })).toBe("clinician");
+    expect(other({ programType: "Fellowship", intakeType: "Grant" })).toBe("clinician");
+  });
+
+  it("labels the award by NIH mechanism, else sponsor", () => {
+    const r = researcherTypeFrom(
+      { hasClinicalProfile: false, grants: [{ ...g(null, "PI", 2027), programType: "Grant", primeSponsor: "NSF" }] },
+      NOW,
+    );
+    expect(r.award).toEqual({ label: "NSF", endYear: 2027 });
+  });
+
+  it("lab-paper volume makes an unfunded scholar research-active", () => {
+    const t = (labPubs5y: number, hasClinicalProfile: boolean) =>
+      researcherTypeFrom({ hasClinicalProfile, grants: [], labPubs5y }, NOW).type;
+    expect(t(3, false)).toBe("basic_scientist");
+    expect(t(3, true)).toBe("physician_scientist");
+    expect(t(2, true)).toBe("clinician");
+    // Clinical-paper volume alone is not lab research.
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [], clinicalPubs5y: 40 }, NOW).type).toBe("clinician");
+  });
+
+  it("never calls part-time or affiliated faculty 'clinician' on missing evidence (unknown ≠ no)", () => {
+    for (const roleCategory of ["part_time_faculty", "affiliated_faculty"])
+      expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [], roleCategory }, NOW).type).toBe("unclassified");
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [], roleCategory: "full_time_faculty" }, NOW).type).toBe("clinician");
+  });
+
+  it("ignores awards that ended more than 5 years ago", () => {
     expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("R01", "PI", 2020)] }, NOW).type).toBe("clinician");
     // The window edge: ended in 2021 = within 5 years of 2026.
     expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("R01", "PI", 2021)] }, NOW).type).toBe("physician_scientist");
@@ -922,6 +957,6 @@ describe("researcherTypeFrom", () => {
       { hasClinicalProfile: false, grants: [g("R21", "PI", 2024), g("r01", "PI", 2029), g("T32", "PI", 2030)] },
       NOW,
     );
-    expect(r.award).toEqual({ mechanism: "R01", endYear: 2029 });
+    expect(r.award).toEqual({ label: "NIH R01", endYear: 2029 });
   });
 });

@@ -89,6 +89,7 @@
 import { taggedPubCount, type ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 import { isPiRole } from "@/lib/funding-roles";
+import { researchTypesFrom } from "@/lib/research-type";
 // Type-only — erased at compile time, so this does NOT pull `search-taxonomy.ts` (which imports
 // `@/lib/db`) into any client bundle that imports this contract (`matcha-panel.tsx` is
 // `"use client"`). Reused rather than redefined so the two stay structurally identical by
@@ -460,7 +461,11 @@ export type MatchaMeasures = {
   /** The award that made this scholar research-active: the hover reason on the badge.
    *  Absent when there is none, AND when the scholar hides their Funding section: the type
    *  still counts the award, but the console must not name a grant the profile hides. */
-  researchAward?: { mechanism: string; endYear: number };
+  researchAward?: ResearchAward;
+  /** First/last-author lab / clinical research papers in the last 5 years
+   *  (`Scholar.labPubs5y` / `clinicalPubs5y`). Absent when not computed yet. */
+  labPubs5y?: number;
+  clinicalPubs5y?: number;
 };
 
 /**
@@ -468,11 +473,16 @@ export type MatchaMeasures = {
  * usually "who has a lab I can partner with", and topical fit alone ranks a clinician who
  * co-authors many large trials alongside a lab PI.
  *
- * NIH PI standing is the research-active signal, per CTL's own screen: clinicians who do
- * not run labs do not hold NIH research awards as PI. `hasClinicalProfile` is the
- * clinician signal. "unclassified" is a non-clinician with no qualifying award. That is
- * NOT "not a researcher" (HHMI, foundation and between-grants scientists land here),
- * which is why the console keeps it visible by default and hides only "clinician".
+ * Research-active = EITHER funded PI (a research award as PI from ANY sponsor in the last
+ * `RESEARCH_ACTIVE_YEARS`: NIH research mechanisms, foundations, DoD/NSF, industry sponsored
+ * research) OR laboratory-research paper volume (`researchTypesFrom` — first/last-author
+ * lab papers, which catches the unfunded early-career PI and funding outside InfoEd).
+ * `hasClinicalProfile` is the clinician signal.
+ *
+ * Unknown is not "no": part-time and affiliated faculty hold awards and see patients at
+ * other institutions SPS cannot see, so missing evidence never makes them "clinician" (the
+ * one type hidden by default). They land in "unclassified" unless papers or awards say more.
+ * "unclassified" is NOT "not a researcher", which is why the console keeps it visible.
  */
 export type ResearcherType = "basic_scientist" | "physician_scientist" | "clinician" | "unclassified";
 
@@ -502,40 +512,70 @@ const RESEARCH_MECHANISM = /^(R|U|P|K|DP|SC)/;
 /** Exceptions inside those series: conference (R13/U13), research-education (R25) and
  *  institutional career-development (K12/KL2) awards, whose PI runs a program, not a lab. */
 const NON_RESEARCH_MECHANISM = /^(R13|U13|R25|K12|KL2)/;
+/** Non-NIH (no mechanism) rows: InfoEd program types that are training, not research. */
+const NON_RESEARCH_PROGRAM_TYPE = new Set(["Career", "Fellowship", "Training"]);
+/** InfoEd intake types that move no research money: service work, material transfer, and
+ *  clinical-trial agreements (clinical research, not lab funding). Profiled on staging
+ *  10-31: Grant, Sponsored Research Agreement and BioPharma intakes are the research ones. */
+const NON_RESEARCH_INTAKE = /service agreement|material transfer|clinical trial/i;
+
+/** Roles whose awards and clinical work often sit at another institution: absent evidence
+ *  is unknown for them, never "no". */
+const UNKNOWN_EVIDENCE_ROLES = new Set(["part_time_faculty", "affiliated_faculty"]);
 
 export type ResearcherGrantRow = {
   endDate: Date | null;
   role: string | null;
   mechanism: string | null;
+  /** InfoEd program type ("Grant", "Career", …). Absent on older callers ⇒ treated as "Grant". */
+  programType?: string | null;
+  intakeType?: string | null;
+  primeSponsor?: string | null;
 };
+
+export type ResearchAward = { label: string; endYear: number };
+
+/** Exported for tests. NIH-coded rows keep the mechanism rule; the rest go by InfoEd category. */
+export function isResearchAward(g: ResearcherGrantRow): boolean {
+  const mech = (g.mechanism ?? "").trim().toUpperCase();
+  if (mech) return RESEARCH_MECHANISM.test(mech) && !NON_RESEARCH_MECHANISM.test(mech);
+  if (g.programType && NON_RESEARCH_PROGRAM_TYPE.has(g.programType)) return false;
+  return !NON_RESEARCH_INTAKE.test(g.intakeType ?? "");
+}
+
+function awardLabel(g: ResearcherGrantRow): string {
+  const mech = (g.mechanism ?? "").trim().toUpperCase();
+  if (mech) return `NIH ${mech}`;
+  return g.primeSponsor || g.intakeType || g.programType || "research";
+}
 
 /** Classify one scholar. The returned award is the latest-ending qualifying one. */
 export function researcherTypeFrom(
-  row: { hasClinicalProfile: boolean; grants: readonly ResearcherGrantRow[] },
+  row: {
+    hasClinicalProfile: boolean;
+    grants: readonly ResearcherGrantRow[];
+    roleCategory?: string | null;
+    labPubs5y?: number | null;
+    clinicalPubs5y?: number | null;
+  },
   now: Date = new Date(),
-): { type: ResearcherType; award?: { mechanism: string; endYear: number } } {
+): { type: ResearcherType; award?: ResearchAward } {
   const floorYear = now.getFullYear() - RESEARCH_ACTIVE_YEARS;
-  let award: { mechanism: string; endYear: number } | undefined;
+  let award: ResearchAward | undefined;
   for (const g of row.grants) {
-    const mech = (g.mechanism ?? "").trim().toUpperCase();
     const endYear = g.endDate?.getFullYear();
-    if (
-      endYear == null ||
-      endYear < floorYear ||
-      g.role == null ||
-      !isPiRole(g.role) ||
-      !RESEARCH_MECHANISM.test(mech) ||
-      NON_RESEARCH_MECHANISM.test(mech)
-    )
-      continue;
-    if (!award || endYear > award.endYear) award = { mechanism: mech, endYear };
+    if (endYear == null || endYear < floorYear || g.role == null || !isPiRole(g.role)) continue;
+    if (!isResearchAward(g)) continue;
+    if (!award || endYear > award.endYear) award = { label: awardLabel(g), endYear };
   }
-  const type: ResearcherType = row.hasClinicalProfile
-    ? award
+  const lab = researchTypesFrom(row.labPubs5y, row.clinicalPubs5y).includes("lab");
+  const active = award != null || lab;
+  const type: ResearcherType = active
+    ? row.hasClinicalProfile
       ? "physician_scientist"
-      : "clinician"
-    : award
-      ? "basic_scientist"
+      : "basic_scientist"
+    : row.hasClinicalProfile && !UNKNOWN_EVIDENCE_ROLES.has(row.roleCategory ?? "")
+      ? "clinician"
       : "unclassified";
   return award ? { type, award } : { type };
 }
@@ -553,6 +593,8 @@ export type MatchaMeasuresRow = {
   grants?: readonly ResearcherGrantRow[];
   /** The scholar hides their Funding section: classify, but never name the award. */
   hideFunding?: boolean;
+  labPubs5y?: number | null;
+  clinicalPubs5y?: number | null;
 };
 
 /**
@@ -582,15 +624,15 @@ export function matchaMeasuresFrom(row: MatchaMeasuresRow, now: Date = new Date(
 function researcherMeasures(
   row: MatchaMeasuresRow,
   now: Date,
-): Pick<MatchaMeasures, "researcherType" | "researchAward"> {
+): Pick<MatchaMeasures, "researcherType" | "researchAward" | "labPubs5y" | "clinicalPubs5y"> {
   if (!row.grants) return {};
-  const { type, award } = researcherTypeFrom(
-    { hasClinicalProfile: row.hasClinicalProfile, grants: row.grants },
-    now,
-  );
-  return award && !row.hideFunding
-    ? { researcherType: type, researchAward: award }
-    : { researcherType: type };
+  const { type, award } = researcherTypeFrom({ ...row, grants: row.grants }, now);
+  return {
+    researcherType: type,
+    ...(award && !row.hideFunding ? { researchAward: award } : {}),
+    ...(row.labPubs5y != null ? { labPubs5y: row.labPubs5y } : {}),
+    ...(row.clinicalPubs5y != null ? { clinicalPubs5y: row.clinicalPubs5y } : {}),
+  };
 }
 
 /**
