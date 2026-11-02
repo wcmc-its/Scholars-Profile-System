@@ -1302,6 +1302,8 @@ export class EtlStack extends Stack {
       "etl:reciter",
       "etl:reciter:coi-statements",
       "etl:orcid-candidates",
+      // Reads reciterdb authorship_review + external_article (OpenAlex-lane attribution).
+      "etl:fundable-work",
       // Writes reciterdb `scholar_active` (prod only; dry run elsewhere).
       "etl:scholar-active-export",
       // ORCID queue v2.1: reads reciterdb person_article (each candidate work's
@@ -2134,8 +2136,9 @@ export class EtlStack extends Stack {
       { id: "FundingDigestWeekly", npmScript: "etl:funding-digest", external: false, tier: "continue" },
       // Fundable work (etl/fundable-work) — OpenAlex WCM conference abstracts + preprints,
       // Sonnet 5.5-scored for private-funding potential -> fundable_work. Public API + Bedrock,
-      // external:false; continue-tier (a miss only delays new scores a week).
-      { id: "FundableWorkWeekly", npmScript: "etl:fundable-work", external: false, tier: "continue" },
+      // plus reciterdb for author attribution, so external:true (the Reciter secret);
+      // continue-tier (a miss only delays new scores a week).
+      { id: "FundableWorkWeekly", npmScript: "etl:fundable-work", external: true, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.

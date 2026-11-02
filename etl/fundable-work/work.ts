@@ -62,6 +62,52 @@ export function matchFacultyAuthors(
   return [...out].map(([cwid, position]) => ({ cwid, position }));
 }
 
+/** A reciterdb `authorship_review` row from the OpenAlex lane (one per WCM authorship). */
+export type ReviewRow = {
+  status: "open" | "assigned" | "accepted" | "rejected" | "dismissed" | "snoozed";
+  top_cwid: string | null;
+  resolution_cwid: string | null;
+  author_position: number | null;
+  author_position_label: string | null;
+};
+
+/**
+ * A work's authors from reciterdb, or null when reciterdb has nothing on it.
+ *
+ * Review rows, when present, are the whole answer: the OpenAlex lane writes one per WCM
+ * authorship, and a curator's verdict beats the name matcher. Accepted and assigned rows
+ * resolve to `resolution_cwid` (PM writes the chosen person there on both); open, snoozed
+ * and dismissed rows to the matcher's `top_cwid`; rejected rows to no one. Dismissed is not
+ * a wrong-person verdict: the lane's own dedup sweeps (preprint published in PubMed, DOI held
+ * by the Scopus lane) and a curator's plain skip both land there; only reject says "not them".
+ * Curator-added `external_article` uids join either way. With no review rows (the lane
+ * covers ~365 days and skips works with a PMID), they join the name matcher's authors
+ * instead of replacing them, since a manual add speaks for one person, not the byline.
+ * External uids carry no position: the matcher's position for that cwid, else "middle".
+ */
+export function reciterAuthors(
+  reviews: ReviewRow[],
+  externalUids: string[],
+  matched: Array<{ cwid: string; position: string }>,
+): Array<{ cwid: string; position: string }> | null {
+  if (reviews.length === 0 && externalUids.length === 0) return null;
+  const out = new Map<string, string>();
+  if (reviews.length === 0) for (const m of matched) out.set(m.cwid, m.position);
+  const byPosition = [...reviews].sort((a, b) => (a.author_position ?? 0) - (b.author_position ?? 0));
+  for (const r of byPosition) {
+    const cwid =
+      r.status === "accepted" || r.status === "assigned"
+        ? (r.resolution_cwid ?? r.top_cwid)
+        : r.status === "rejected"
+          ? null
+          : r.top_cwid;
+    if (cwid && !out.has(cwid)) out.set(cwid, r.author_position_label ?? "middle");
+  }
+  const matchedPosition = new Map(matched.map((m) => [m.cwid, m.position]));
+  for (const uid of externalUids) if (!out.has(uid)) out.set(uid, matchedPosition.get(uid) ?? "middle");
+  return [...out].map(([cwid, position]) => ({ cwid, position }));
+}
+
 export const ScoreSchema = z.object({
   score: z.number().int().min(1).max(5),
   stage: z.enum(["discovery", "preclinical", "clinical", "population", "methods"]),
