@@ -12020,7 +12020,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- cadence missed (no execution started in 180 min = 3 missed 60 min fires). Next: confirm the rate(60 min) rule is enabled and the state-machine IAM is intact.",
         "AlarmName": "sps-cdn-reconcile-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -12034,7 +12034,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "EvaluationPeriods": 1,
         "MetricName": "ExecutionsStarted",
         "Namespace": "AWS/States",
-        "Period": 900,
+        "Period": 10800,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
@@ -12052,9 +12052,9 @@ exports[`EtlStack staging matches the snapshot 1`] = `
     },
     "CdnReconcileScheduleRule5A707152": {
       "Properties": {
-        "Description": "SPS CloudFront-invalidation reconciler -- 5 min cadence (staging). #353.",
+        "Description": "SPS CloudFront-invalidation reconciler -- 60 min cadence (staging). #353.",
         "Name": "sps-cdn-reconcile-staging",
-        "ScheduleExpression": "rate(5 minutes)",
+        "ScheduleExpression": "rate(1 hour)",
         "State": "ENABLED",
         "Targets": [
           {
@@ -12466,7 +12466,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "MetricName": "ExecutionsFailed",
                 "Namespace": "AWS/States",
               },
-              "Period": 900,
+              "Period": 3600,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -12486,7 +12486,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "MetricName": "ExecutionsTimedOut",
                 "Namespace": "AWS/States",
               },
-              "Period": 900,
+              "Period": 3600,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -12506,7 +12506,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "MetricName": "ExecutionsAborted",
                 "Namespace": "AWS/States",
               },
-              "Period": 900,
+              "Period": 3600,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -21285,7 +21285,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (staging) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
+        "AlarmDescription": "SPS reconciler (staging) -- cadence missed (no execution started in 180 min = 3 missed 60 min fires). Next: confirm the rate(60 min) rule is enabled and the state-machine IAM is intact.",
         "AlarmName": "sps-reconcile-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -21299,7 +21299,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "EvaluationPeriods": 1,
         "MetricName": "ExecutionsStarted",
         "Namespace": "AWS/States",
-        "Period": 900,
+        "Period": 10800,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
@@ -21317,9 +21317,9 @@ exports[`EtlStack staging matches the snapshot 1`] = `
     },
     "ReconcileScheduleRule268EEED3": {
       "Properties": {
-        "Description": "SPS suppression search-index reconciler -- 5 min cadence (staging). #393.",
+        "Description": "SPS suppression search-index reconciler -- 60 min cadence (staging). #393.",
         "Name": "sps-reconcile-staging",
-        "ScheduleExpression": "rate(5 minutes)",
+        "ScheduleExpression": "rate(1 hour)",
         "State": "ENABLED",
         "Targets": [
           {
@@ -21731,7 +21731,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "MetricName": "ExecutionsFailed",
                 "Namespace": "AWS/States",
               },
-              "Period": 900,
+              "Period": 3600,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -21751,7 +21751,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "MetricName": "ExecutionsTimedOut",
                 "Namespace": "AWS/States",
               },
-              "Period": 900,
+              "Period": 3600,
               "Stat": "Sum",
             },
             "ReturnData": false,
@@ -21771,7 +21771,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "MetricName": "ExecutionsAborted",
                 "Namespace": "AWS/States",
               },
-              "Period": 900,
+              "Period": 3600,
               "Stat": "Sum",
             },
             "ReturnData": false,
