@@ -757,6 +757,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "MATCHA_BRIEF",
+                "Value": "off",
+              },
+              {
                 "Name": "FUNDABLE_WORK",
                 "Value": "on",
               },
@@ -5795,6 +5799,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "MATCHA_ADMIN",
+                "Value": "on",
+              },
+              {
+                "Name": "MATCHA_BRIEF",
                 "Value": "on",
               },
               {

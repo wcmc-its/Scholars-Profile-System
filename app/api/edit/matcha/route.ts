@@ -113,6 +113,7 @@ import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isObserver } from "@/lib/auth/observer";
 import type { EditSession } from "@/lib/auth/superuser";
+import { matchaSubmissionScope } from "@/lib/api/matcha-brief";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
@@ -441,12 +442,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // FAIL-SOFT, and that is the whole design. A retention write must never cost the officer
     // their answer — the ranking is the product, the archive is a by-product. A DB blip logs
     // and is swallowed; the results still ship.
+    // A Rename applies to the PASTE, so every new run of it inherits the officer's name for it —
+    // otherwise the next replay's fresh row would surface the generated title again in Recent.
+    // Scoped to the caller's OWN runs, matching what their PATCH may write: one officer's rename
+    // must not spread into a colleague's runs. Fail-soft: a read blip costs the label, never the answer.
+    const titleOverride =
+      (
+        await db.read.sponsorMatchSubmission
+          .findFirst({
+            where: {
+              descriptionHash: engineInputHash,
+              titleOverride: { not: null },
+              submittedBy: session.cwid,
+            },
+            orderBy: { createdAt: "desc" },
+            select: { titleOverride: true },
+          })
+          .catch((err: unknown) => {
+            logEditFailure(`${PATH}#titleOverride`, err);
+            return null;
+          })
+      )?.titleOverride ?? null;
+    let submissionId: string | null = null;
     try {
-      await db.write.sponsorMatchSubmission.create({
+      const created = await db.write.sponsorMatchSubmission.create({
         data: {
           description,
           descriptionHash: engineInputHash,
           title: ask?.title ?? null,
+          titleOverride,
           engine,
           candidateCount: candidates.length,
           submittedBy: session.cwid,
@@ -456,7 +480,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             ? { result: JSON.parse(JSON.stringify(engineResult)), resultKey: cacheKey }
             : {}),
         },
+        select: { id: true },
       });
+      submissionId = created.id;
     } catch (err) {
       logEditFailure(`${PATH}#retain`, err);
     }
@@ -468,6 +494,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ask,
       titleSummary,
       culled,
+      // Matcha briefs + Rename key off this row (null only when the retention write failed).
+      submissionId,
+      titleOverride,
       // Labelled from the same predicate that skipped the engine — never from the row alone.
       ...(storedResult && stored ? { asOf: stored.createdAt.toISOString() } : {}),
     });
@@ -528,9 +557,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  * Superuser or developer ⇒ no filter (everyone's). Anyone else — INCLUDING an observer — ⇒ their own. The
  * TRUE leg is the privileged one so an absent flag fails closed. See GET's doc-comment.
  */
-function submissionScope(session: Pick<EditSession, "cwid" | "isSuperuser" | "isDeveloper">) {
-  return session.isSuperuser || session.isDeveloper === true ? undefined : { submittedBy: session.cwid };
-}
+const submissionScope = matchaSubmissionScope;
 
 export async function GET(): Promise<NextResponse> {
   if (!isMatchaEnabled()) return new NextResponse(null, { status: 404 });
@@ -549,6 +576,7 @@ export async function GET(): Promise<NextResponse> {
         description: true,
         descriptionHash: true,
         title: true,
+        titleOverride: true,
         engine: true,
         candidateCount: true,
         submittedBy: true,
@@ -573,7 +601,7 @@ export async function GET(): Promise<NextResponse> {
     const submissions = shipped.map((row) => ({
       id: row.id,
       description: row.description,
-      title: row.title,
+      title: row.titleOverride ?? row.title,
       engine: row.engine,
       candidateCount: row.candidateCount,
       // The label the drawer renders, and the ONLY submitter field on the wire. ALWAYS
@@ -659,14 +687,83 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     // Out of scope is indistinguishable from gone: same 404, nothing erased.
     if (!row) return editError(404, "not_found");
 
-    // deleteMany, not delete: `where` is the hash, which matches one row or many.
-    const { count } = await db.write.sponsorMatchSubmission.deleteMany({
-      where: { descriptionHash: row.descriptionHash, ...scope },
+    // ONE writer transaction: deleteMany, not delete (`where` is the hash, one row or many), then
+    // the paste's Matcha briefs — keyed on the PASTE and shared by every officer who ran it — go
+    // only when the LAST run does, so a scoped officer erasing their own runs doesn't take a
+    // colleague's briefs (and notes). The count must see the delete: never ask the replica.
+    const count = await db.write.$transaction(async (tx) => {
+      const { count: deleted } = await tx.sponsorMatchSubmission.deleteMany({
+        where: { descriptionHash: row.descriptionHash, ...scope },
+      });
+      if (deleted > 0) {
+        const remaining = await tx.sponsorMatchSubmission.count({
+          where: { descriptionHash: row.descriptionHash },
+        });
+        if (remaining === 0) {
+          await tx.matchaBrief.deleteMany({ where: { descriptionHash: row.descriptionHash } });
+        }
+      }
+      return deleted;
     });
     if (count === 0) return editError(404, "not_found");
     return editOk({ deleted: submissionId, count });
   } catch (err) {
     logEditFailure(`${PATH}#delete`, err);
+    return editError(500, "submissions_unavailable");
+  }
+}
+
+/** The officer's own name for a search, at most this long (`title_override` VARCHAR(120)).
+ *  Not exported: a Next.js route module may export only its handlers. */
+const TITLE_OVERRIDE_MAX = 120;
+
+/**
+ * PATCH `{ submissionId, title }` — rename a retained search (Matcha Phase 3).
+ *
+ * Writes `titleOverride` on every run of the clicked row's paste within the caller's scope (the
+ * same `submissionScope` as GET/DELETE), because Recent shows one entry per paste. POST copies
+ * the latest override onto each new run, so a replay keeps the name. `title` is trimmed; empty
+ * (or whitespace) clears the override and the generated title shows again. Not audited.
+ */
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  if (!isMatchaEnabled()) return new NextResponse(null, { status: 404 });
+  const req = await readEditRequest(request);
+  if (!req.ok) return req.response;
+  const { session, realCwid, body } = req.ctx;
+
+  if (!(await canUseMatchaForWrite(session))) {
+    logEditDenial({
+      actorCwid: realCwid,
+      targetCwid: "sponsor-match",
+      path: PATH,
+      reason: "not_developer_rename",
+    });
+    return editError(403, "not_developer_rename");
+  }
+
+  const { submissionId, title } = body;
+  if (typeof submissionId !== "string" || submissionId.length === 0 || submissionId.length > 64) {
+    return editError(400, "invalid_submission_id", "submissionId");
+  }
+  if (typeof title !== "string" || title.trim().length > TITLE_OVERRIDE_MAX) {
+    return editError(400, "invalid_title", "title");
+  }
+  const titleOverride = title.trim() || null;
+
+  try {
+    const scope = submissionScope(session);
+    const row = await db.read.sponsorMatchSubmission.findUnique({
+      where: { id: submissionId, ...scope },
+      select: { descriptionHash: true, title: true },
+    });
+    if (!row) return editError(404, "not_found");
+    await db.write.sponsorMatchSubmission.updateMany({
+      where: { descriptionHash: row.descriptionHash, ...scope },
+      data: { titleOverride },
+    });
+    return editOk({ submissionId, title: titleOverride ?? row.title, titleOverride });
+  } catch (err) {
+    logEditFailure(`${PATH}#rename`, err);
     return editError(500, "submissions_unavailable");
   }
 }

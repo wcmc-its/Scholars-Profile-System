@@ -371,7 +371,12 @@ export type AuditAction =
   | "core_staff_add"
   /** The inverse of `core_staff_add`: a CWID removed from a core's curated
    *  staff list. Same target shape. ENUM extended in scripts/sql/audit-log.sql. */
-  | "core_staff_remove";
+  | "core_staff_remove"
+  /** Matcha Phase 3: briefs drafted for PIs on one ask (`/api/edit/matcha/brief` POST).
+   *  `targetEntityType='matcha_ask'`, `targetEntityId` = the paste's `descriptionHash`;
+   *  `afterValues` = `{ cwids, drafted, failed, model }`. Edits are not audited.
+   *  ENUM extended in scripts/sql/audit-log.sql. */
+  | "matcha_brief_generate";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -482,7 +487,10 @@ export type AuditEntityType =
    *  `"{centerCode}:{pmid}"`. Only `pub_relevance_review` uses it. Requires the
    *  `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
-  | "center_publication_relevance";
+  | "center_publication_relevance"
+  /** one Matcha ask (a pasted description); `targetEntityId` is its `descriptionHash`.
+   *  ENUM extended in scripts/sql/audit-log.sql. */
+  | "matcha_ask";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

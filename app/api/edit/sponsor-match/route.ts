@@ -14,4 +14,4 @@
  * ⚠ TEMPORARY. Delete this file once no client is plausibly still on the old bundle. It is
  * deliberately the whole file, so deleting it is `rm`, not surgery.
  */
-export { POST, GET, DELETE } from "../matcha/route";
+export { POST, GET, DELETE, PATCH } from "../matcha/route";

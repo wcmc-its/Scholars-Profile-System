@@ -37,7 +37,13 @@ const {
   mockGetEffectiveEditSession,
   mockIsObserver,
   mockCachedReasonAgg,
+  mockSubmissionCount,
+  mockSubmissionUpdateMany,
+  mockBriefDeleteMany,
 } = vi.hoisted(() => ({
+  mockSubmissionCount: vi.fn(),
+  mockSubmissionUpdateMany: vi.fn(),
+  mockBriefDeleteMany: vi.fn(),
   mockRelevanceScoresForQuery: vi.fn(),
   mockPublicationTopicFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -65,28 +71,36 @@ const {
 vi.mock("@/lib/api/search", () => ({
   relevanceScoresForQuery: mockRelevanceScoresForQuery,
 }));
-vi.mock("@/lib/db", () => ({
-  db: {
-    read: {
-      publicationTopic: { findMany: mockPublicationTopicFindMany },
-      scholar: { findMany: mockScholarFindMany },
-      scholarTechnology: { groupBy: mockTechnologyGroupBy },
-      publication: { findMany: mockPublicationFindMany },
-      topic: { findMany: mockTopicFindMany },
-      sponsorMatchSubmission: {
-        findMany: mockSubmissionFindMany,
-        findUnique: mockSubmissionFindUnique,
-        findFirst: mockSubmissionFindFirst,
-      },
+vi.mock("@/lib/db", () => {
+  const write = {
+    sponsorMatchSubmission: {
+      create: mockSubmissionCreate,
+      deleteMany: mockSubmissionDeleteMany,
+      updateMany: mockSubmissionUpdateMany,
+      count: mockSubmissionCount,
     },
-    write: {
-      sponsorMatchSubmission: {
-        create: mockSubmissionCreate,
-        deleteMany: mockSubmissionDeleteMany,
+    matchaBrief: { deleteMany: mockBriefDeleteMany },
+    // The interactive transaction runs against the same write client (tx === write here).
+    $transaction: async (fn: (tx: unknown) => unknown) => fn(write),
+  };
+  return {
+    db: {
+      read: {
+        publicationTopic: { findMany: mockPublicationTopicFindMany },
+        scholar: { findMany: mockScholarFindMany },
+        scholarTechnology: { groupBy: mockTechnologyGroupBy },
+        publication: { findMany: mockPublicationFindMany },
+        topic: { findMany: mockTopicFindMany },
+        sponsorMatchSubmission: {
+          findMany: mockSubmissionFindMany,
+          findUnique: mockSubmissionFindUnique,
+          findFirst: mockSubmissionFindFirst,
+        },
       },
+      write,
     },
-  },
-}));
+  };
+});
 vi.mock("@/lib/edit/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/request")>()),
   readEditRequest: mockReadEditRequest,
@@ -111,7 +125,7 @@ vi.mock("@/lib/api/reason-agg-cache", () => ({
   cachedReasonAgg: mockCachedReasonAgg,
 }));
 
-import { DELETE, GET, POST } from "@/app/api/edit/matcha/route";
+import { DELETE, GET, PATCH, POST } from "@/app/api/edit/matcha/route";
 
 const { rankResearchersForDescription } =
   await vi.importActual<typeof import("@/lib/api/matcha")>("@/lib/api/matcha");
@@ -148,6 +162,10 @@ beforeEach(() => {
   mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
   mockSubmissionFindFirst.mockResolvedValue(null); // no persisted answer unless a test plants one
   mockIsObserver.mockResolvedValue(false);
+  mockSubmissionCreate.mockResolvedValue({ id: "sub-new" });
+  mockSubmissionCount.mockResolvedValue(0);
+  mockSubmissionUpdateMany.mockResolvedValue({ count: 1 });
+  mockBriefDeleteMany.mockResolvedValue({ count: 0 });
 });
 
 describe("rankResearchersForDescription (engine)", () => {
@@ -351,6 +369,8 @@ describe("POST /api/edit/matcha (route)", () => {
     const resp = await POST(postRequest(developerCtx, { description: "gene therapy" }));
     expect(resp.status).toBe(200);
     expect(await resp.json()).toEqual({
+      submissionId: "sub-new",
+      titleOverride: null,
       ok: true,
       concepts: [],
       candidates: [
@@ -481,6 +501,8 @@ describe("POST /api/edit/matcha (route)", () => {
       // `askTitleFrom`. It names the search after its top concepts so the officer (and, later,
       // a submissions list) has a handle that costs no Bedrock tokens and cannot fail.
       expect(await resp.json()).toEqual({
+        submissionId: "sub-new",
+        titleOverride: null,
         ok: true,
         concepts,
         candidates,
@@ -698,7 +720,10 @@ describe("POST /api/edit/matcha (route)", () => {
       });
       const resp = await POST(postRequest(developerCtx, { description: "x", fresh: true }));
       const body = await resp.json();
-      expect(mockSubmissionFindFirst).not.toHaveBeenCalled();
+      // The STORED-ANSWER lookup (keyed on `resultKey`) is skipped; the Rename inheritance read
+      // (keyed on `titleOverride`) still runs, and is not a stored answer.
+      const storedLookups = mockSubmissionFindFirst.mock.calls.filter((c) => "resultKey" in c[0].where);
+      expect(storedLookups).toHaveLength(0);
       expect(mockRankSpine).toHaveBeenCalledTimes(1);
       expect(body.asOf).toBeUndefined();
       expect(mockSubmissionCreate.mock.calls[0][0].data.resultKey).toMatch(/^sponsor:spine:/);
@@ -723,6 +748,79 @@ describe("POST /api/edit/matcha (route)", () => {
   });
 
   // ── Retention (#6d) ───────────────────────────────────────────────────────
+  describe("Matcha Phase 3: submissionId, Rename, briefs on DELETE", () => {
+    it("POST returns the retained row's id (briefs and Rename key off it)", async () => {
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(await resp.json()).toMatchObject({ submissionId: "sub-new", titleOverride: null });
+    });
+
+    it("POST inherits the paste's Rename onto the new run, so a replay keeps the name", async () => {
+      mockSubmissionFindFirst.mockImplementation(async (args: { where: Record<string, unknown> }) =>
+        "titleOverride" in args.where && args.where.submittedBy === "dev1"
+          ? { titleOverride: "Wave 1 scouting" }
+          : null,
+      );
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(mockSubmissionCreate.mock.calls[0][0].data.titleOverride).toBe("Wave 1 scouting");
+      expect(await resp.json()).toMatchObject({ titleOverride: "Wave 1 scouting" });
+    });
+
+    it("DELETE removes the paste's briefs only when NO run of it remains", async () => {
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-abc" });
+      mockSubmissionDeleteMany.mockResolvedValue({ count: 1 });
+
+      // A colleague still has runs of this paste: their briefs (and notes) survive.
+      mockSubmissionCount.mockResolvedValue(2);
+      mockIsObserver.mockResolvedValue(true);
+      expect((await DELETE(postRequest(observerCtx, { submissionId: "s1" }))).status).toBe(200);
+      expect(mockSubmissionCount).toHaveBeenCalledWith({ where: { descriptionHash: "h-abc" } });
+      expect(mockBriefDeleteMany).not.toHaveBeenCalled();
+
+      // The last run goes: so do the briefs.
+      mockSubmissionCount.mockResolvedValue(0);
+      expect((await DELETE(postRequest(observerCtx, { submissionId: "s1" }))).status).toBe(200);
+      expect(mockBriefDeleteMany).toHaveBeenCalledWith({ where: { descriptionHash: "h-abc" } });
+    });
+
+    it("PATCH renames every run of the paste in the caller's scope; empty clears it", async () => {
+      mockIsObserver.mockResolvedValue(true);
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-abc", title: "generated" });
+
+      const renamed = await PATCH(postRequest(observerCtx, { submissionId: "s1", title: "  Wave 1  " }));
+      expect(renamed.status).toBe(200);
+      expect(await renamed.json()).toMatchObject({ title: "Wave 1", titleOverride: "Wave 1" });
+      expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({ id: "s1", submittedBy: "obs1" });
+      expect(mockSubmissionUpdateMany).toHaveBeenCalledWith({
+        where: { descriptionHash: "h-abc", submittedBy: "obs1" },
+        data: { titleOverride: "Wave 1" },
+      });
+
+      const cleared = await PATCH(postRequest(observerCtx, { submissionId: "s1", title: "   " }));
+      expect(await cleared.json()).toMatchObject({ title: "generated", titleOverride: null });
+      expect(mockSubmissionUpdateMany).toHaveBeenLastCalledWith({
+        where: { descriptionHash: "h-abc", submittedBy: "obs1" },
+        data: { titleOverride: null },
+      });
+    });
+
+    it("PATCH rename: 400 on a non-string or >120-char title, 404 out of scope, 403 without Matcha", async () => {
+      expect((await PATCH(postRequest(developerCtx, { submissionId: "s1", title: 5 }))).status).toBe(400);
+      expect(
+        (await PATCH(postRequest(developerCtx, { submissionId: "s1", title: "x".repeat(121) }))).status,
+      ).toBe(400);
+      mockSubmissionFindUnique.mockResolvedValue(null);
+      expect((await PATCH(postRequest(developerCtx, { submissionId: "s1", title: "y" }))).status).toBe(404);
+      expect(mockSubmissionUpdateMany).not.toHaveBeenCalled();
+      const outsider = {
+        ...developerCtx,
+        session: { cwid: "x1", isSuperuser: false, isDeveloper: false },
+        effective: { cwid: "x1", isSuperuser: false, isDeveloper: false },
+        realCwid: "x1",
+      };
+      expect((await PATCH(postRequest(outsider, { submissionId: "s1", title: "y" }))).status).toBe(403);
+    });
+  });
+
   describe("retained searches", () => {
     it("retains the search — the paste IN FULL, its handle, engine, count and actor", async () => {
       process.env.MATCHA_SPINE = "on";
