@@ -60,6 +60,7 @@ export type ProfileRowPublication = Pick<
   | "title"
   | "journal"
   | "year"
+  | "publicationType"
   | "citationCount"
   | "doi"
   | "pmcid"

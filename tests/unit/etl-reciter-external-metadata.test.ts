@@ -18,7 +18,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { composeAuthorStringFromReviewJson } from "@/etl/reciter/index";
+import {
+  composeAuthorStringFromReviewJson,
+  REVIEW_BYLINE_SOURCES,
+  reviewBareIdsForSource,
+} from "@/etl/reciter/index";
 import { isAbsentValue } from "@/lib/citation";
 
 describe("composeAuthorStringFromReviewJson (#2581)", () => {
@@ -75,6 +79,41 @@ describe("composeAuthorStringFromReviewJson (#2581)", () => {
   it("returns null for a decoded value that is not an array", () => {
     expect(composeAuthorStringFromReviewJson({ surname: "Lovelace" })).toBeNull();
     expect(composeAuthorStringFromReviewJson(42)).toBeNull();
+  });
+});
+
+describe("reviewBareIdsForSource (#2581)", () => {
+  const articleIdByPmid = new Map<number, string>([
+    [900001, "SCOPUS:105037533819"],
+    [900002, "OPENALEX:W4401234567"],
+    [900003, "WOS:000123456700001"],
+  ]);
+
+  it("strips only its own prefix, so a bare id is looked up under one source", () => {
+    expect(reviewBareIdsForSource(articleIdByPmid, "SCOPUS:")).toEqual(
+      new Map([["105037533819", 900001]]),
+    );
+    expect(reviewBareIdsForSource(articleIdByPmid, "OPENALEX:")).toEqual(
+      new Map([["W4401234567", 900002]]),
+    );
+  });
+
+  it("pins each prefix to its authorship_review source", () => {
+    expect(REVIEW_BYLINE_SOURCES).toEqual([
+      { prefix: "SCOPUS:", source: "scopus" },
+      { prefix: "OPENALEX:", source: "openalex" },
+    ]);
+  });
+
+  it("composes the openalex lane's authors_json (nullable given/surname)", () => {
+    // aar_universe_openalex._authors_json: {given, surname} split from the raw
+    // byline string; a name that can't be split yields nulls.
+    const json = JSON.stringify([
+      { given: "Gerald J.", surname: "Waliany" },
+      { given: null, surname: "Consortium" },
+      { given: null, surname: null },
+    ]);
+    expect(composeAuthorStringFromReviewJson(json)).toBe("Waliany GJ, Consortium");
   });
 });
 

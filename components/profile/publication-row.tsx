@@ -11,6 +11,18 @@ import {
 import type { ProfileRowPublication } from "@/lib/profile/client-publication";
 import { sanitizePubTitle } from "@/lib/utils";
 
+/** OpenAlex-lane publication types (accepted from the AAR openalex queue) that
+ *  get a type label on the row, since the venue line alone doesn't say the work
+ *  isn't a peer-reviewed article. Every other type renders no label. */
+const PUBLICATION_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "conference-abstract": "Conference abstract",
+  preprint: "Preprint",
+};
+
+export function publicationTypeLabel(publicationType: string | null | undefined): string | null {
+  return publicationType ? (PUBLICATION_TYPE_LABELS[publicationType] ?? null) : null;
+}
+
 /**
  * Render a single profile publication row. Client component because the
  * title is a modal trigger (#288 PR-B). The embedded `<AuthorChipRow>`
@@ -37,6 +49,7 @@ export function PublicationRow({
   // filter (#72) and the per-row badge agree. Co-first / co-last detection
   // (#18) compares the full WCM author list against authorship flags.
   const role = deriveAuthorPositionRole(pub.authorship, pub.wcmAuthors);
+  const typeLabel = publicationTypeLabel(pub.publicationType);
   const titleHtml = sanitizePubTitle(pub.title);
   const { open } = usePublicationModal();
   return (
@@ -76,7 +89,18 @@ export function PublicationRow({
       />
       <PublicationMeta
         citationCount={pub.citationCount}
-        role={role ? <AuthorPositionBadge role={role} /> : null}
+        role={
+          role || typeLabel ? (
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              {typeLabel ? (
+                <span className="author-position-badge bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                  {typeLabel}
+                </span>
+              ) : null}
+              <AuthorPositionBadge role={role} />
+            </span>
+          ) : null
+        }
         pmid={pub.pmid}
         pmcid={pub.pmcid}
         doi={pub.doi}
