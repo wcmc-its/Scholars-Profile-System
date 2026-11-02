@@ -1396,7 +1396,7 @@ describe("EdgeStack", () => {
         ]);
         const cert = dc.ViewerCertificate as Record<string, unknown>;
         expect(cert.AcmCertificateArn).toBe(
-          "arn:aws:acm:us-east-1:665083158573:certificate/c39a27d7-00ad-4714-8f1d-c948b61904e4",
+          "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
         );
         expect(cert.SslSupportMethod).toBe("sni-only");
       });
