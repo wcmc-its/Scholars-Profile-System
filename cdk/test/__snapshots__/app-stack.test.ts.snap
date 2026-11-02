@@ -5819,7 +5819,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_CONNECT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORCID_CONNECT_BASE",
@@ -6768,6 +6768,51 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "ORCID_CONNECT_CLIENT_ID",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/orcid-api:ORCID_CONNECT_CLIENT_ID::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "ORCID_CONNECT_CLIENT_SECRET",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/orcid-api:ORCID_CONNECT_CLIENT_SECRET::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "ORCID_CONNECT_TOKEN_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/orcid-api:ORCID_CONNECT_TOKEN_KEY::",
                     ],
                   ],
                 },
@@ -9304,6 +9349,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/orcid-api",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -9611,6 +9668,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/orcid-api-??????",
                   ],
                 ],
               },

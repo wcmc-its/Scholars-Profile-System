@@ -409,6 +409,21 @@ export class AppStack extends Stack {
       "CornellLdapSecret",
       `scholars/${env}/directory/cornell-ithaca-ldap`,
     );
+    // ORCID member-API client for "Connect your ORCID iD" (#3115): keys
+    // ORCID_CONNECT_CLIENT_ID / _CLIENT_SECRET / _TOKEN_KEY (the AES-256 key for
+    // the stored access token). STAGING ONLY: the sandbox client exists, while
+    // the prod client follows ORCID's demo review -- and a reference to a secret
+    // that does not exist breaks task start. Created out-of-band, like
+    // cornellLdapSecret above. The "-api" tail is clear of the random-suffix
+    // gotcha.
+    const orcidConnectSecret =
+      env === "staging"
+        ? secretsmanager.Secret.fromSecretNameV2(
+            this,
+            "OrcidConnectSecret",
+            `scholars/${env}/orcid-api`,
+          )
+        : undefined;
 
     // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
     //
@@ -449,6 +464,8 @@ export class AppStack extends Stack {
       // SCHOLARS_CORNELL_LDAP_* into the app container. Same ADR-009 class
       // as edSecret above -- no migrate, no bootstrap.
       cornellLdapSecret.secretArn,
+      // ORCID Connect client (#3115), staging only -- see orcidConnectSecret.
+      ...(orcidConnectSecret ? [orcidConnectSecret.secretArn] : []),
     ];
     // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
     // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
@@ -1768,10 +1785,10 @@ export class AppStack extends Stack {
         SELF_EDIT_ORCID_SUGGESTION: "on",
         // ORCID_CONNECT (#3115) — "Connect your ORCID iD" (ORCID sign-in,
         // `/authenticate` only) on the scholar's own Identifiers & Profiles card,
-        // and `GET /api/edit/orcid/connect` + `/callback`. OFF both envs: the
-        // client credentials (scholars/<env>/orcid-api) are not wired yet, and
-        // prod needs ORCID's demo review first. Staging runs against the sandbox.
-        ORCID_CONNECT: "off",
+        // and `GET /api/edit/orcid/connect` + `/callback`. ON in staging, against
+        // the ORCID sandbox client (scholars/staging/orcid-api). OFF in prod: no
+        // prod client until ORCID's demo review, and no prod secret is wired.
+        ORCID_CONNECT: envConfig.envName === "staging" ? "on" : "off",
         ORCID_CONNECT_BASE:
           envConfig.envName === "prod" ? "https://orcid.org" : "https://sandbox.orcid.org",
         // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
@@ -3280,6 +3297,23 @@ export class AppStack extends Stack {
           cornellLdapSecret,
           "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
         ),
+        // ORCID Connect client (#3115), staging only; env-var name == JSON key.
+        ...(orcidConnectSecret
+          ? {
+              ORCID_CONNECT_CLIENT_ID: ecs.Secret.fromSecretsManager(
+                orcidConnectSecret,
+                "ORCID_CONNECT_CLIENT_ID",
+              ),
+              ORCID_CONNECT_CLIENT_SECRET: ecs.Secret.fromSecretsManager(
+                orcidConnectSecret,
+                "ORCID_CONNECT_CLIENT_SECRET",
+              ),
+              ORCID_CONNECT_TOKEN_KEY: ecs.Secret.fromSecretsManager(
+                orcidConnectSecret,
+                "ORCID_CONNECT_TOKEN_KEY",
+              ),
+            }
+          : {}),
       },
     });
 

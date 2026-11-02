@@ -2790,6 +2790,42 @@ describe("AppStack", () => {
 // #2343 -- a manual `cdk deploy Sps-App-<env>` must be able to keep the
 // pipeline's digest pin instead of re-registering the family on :latest.
 describe("AppStack public ALB hardening (#1942)", () => {
+  // #3115 -- the ORCID Connect client secret is wired in staging only (sandbox
+  // client); prod has no secret, and a ref to a missing secret breaks task start.
+  describe("ORCID Connect client secret (#3115)", () => {
+    const orcidKeys = [
+      "ORCID_CONNECT_CLIENT_ID",
+      "ORCID_CONNECT_CLIENT_SECRET",
+      "ORCID_CONNECT_TOKEN_KEY",
+    ];
+    function appSecrets(envName: "staging" | "prod"): string[] {
+      const taskDefs = buildAppStack(envName).template.findResources(
+        "AWS::ECS::TaskDefinition",
+      );
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === `sps-app-${envName}`,
+      );
+      const app = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Secrets?: Array<{ Name?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      return (app?.Secrets ?? []).map((x) => x.Name as string);
+    }
+
+    it("staging injects the three ORCID_CONNECT_* keys", () => {
+      expect(appSecrets("staging")).toEqual(expect.arrayContaining(orcidKeys));
+    });
+
+    it("prod injects none of them and never references scholars/prod/orcid-api", () => {
+      const secrets = appSecrets("prod");
+      for (const k of orcidKeys) expect(secrets).not.toContain(k);
+      expect(JSON.stringify(buildAppStack("prod").template.toJSON())).not.toContain(
+        "orcid-api",
+      );
+    });
+  });
+
   describe.each(["staging", "prod"] as const)("%s", (envName) => {
     const { template } = buildAppStack(envName);
 
