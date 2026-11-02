@@ -71,31 +71,36 @@ const {
 vi.mock("@/lib/api/search", () => ({
   relevanceScoresForQuery: mockRelevanceScoresForQuery,
 }));
-vi.mock("@/lib/db", () => ({
-  db: {
-    read: {
-      publicationTopic: { findMany: mockPublicationTopicFindMany },
-      scholar: { findMany: mockScholarFindMany },
-      scholarTechnology: { groupBy: mockTechnologyGroupBy },
-      publication: { findMany: mockPublicationFindMany },
-      topic: { findMany: mockTopicFindMany },
-      sponsorMatchSubmission: {
-        findMany: mockSubmissionFindMany,
-        findUnique: mockSubmissionFindUnique,
-        findFirst: mockSubmissionFindFirst,
-        count: mockSubmissionCount,
-      },
+vi.mock("@/lib/db", () => {
+  const write = {
+    sponsorMatchSubmission: {
+      create: mockSubmissionCreate,
+      deleteMany: mockSubmissionDeleteMany,
+      updateMany: mockSubmissionUpdateMany,
+      count: mockSubmissionCount,
     },
-    write: {
-      sponsorMatchSubmission: {
-        create: mockSubmissionCreate,
-        deleteMany: mockSubmissionDeleteMany,
-        updateMany: mockSubmissionUpdateMany,
+    matchaBrief: { deleteMany: mockBriefDeleteMany },
+    // The interactive transaction runs against the same write client (tx === write here).
+    $transaction: async (fn: (tx: unknown) => unknown) => fn(write),
+  };
+  return {
+    db: {
+      read: {
+        publicationTopic: { findMany: mockPublicationTopicFindMany },
+        scholar: { findMany: mockScholarFindMany },
+        scholarTechnology: { groupBy: mockTechnologyGroupBy },
+        publication: { findMany: mockPublicationFindMany },
+        topic: { findMany: mockTopicFindMany },
+        sponsorMatchSubmission: {
+          findMany: mockSubmissionFindMany,
+          findUnique: mockSubmissionFindUnique,
+          findFirst: mockSubmissionFindFirst,
+        },
       },
-      matchaBrief: { deleteMany: mockBriefDeleteMany },
+      write,
     },
-  },
-}));
+  };
+});
 vi.mock("@/lib/edit/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/request")>()),
   readEditRequest: mockReadEditRequest,
@@ -751,7 +756,9 @@ describe("POST /api/edit/matcha (route)", () => {
 
     it("POST inherits the paste's Rename onto the new run, so a replay keeps the name", async () => {
       mockSubmissionFindFirst.mockImplementation(async (args: { where: Record<string, unknown> }) =>
-        "titleOverride" in args.where ? { titleOverride: "Wave 1 scouting" } : null,
+        "titleOverride" in args.where && args.where.submittedBy === "dev1"
+          ? { titleOverride: "Wave 1 scouting" }
+          : null,
       );
       const resp = await POST(postRequest(developerCtx, { description: "x" }));
       expect(mockSubmissionCreate.mock.calls[0][0].data.titleOverride).toBe("Wave 1 scouting");

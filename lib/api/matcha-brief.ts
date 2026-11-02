@@ -153,18 +153,18 @@ export async function loadBriefRecords(cwids: readonly string[]): Promise<Map<st
     db.read.appointment.findMany({
       where: { cwid: { in: ids }, isPrimary: false, endDate: null, showOnProfile: true },
       orderBy: { title: "asc" },
-      select: { cwid: true, title: true, organization: true },
+      select: { cwid: true, title: true, organization: true, externalId: true },
     }),
     db.read.fieldOverride.findMany({
       where: { entityType: "scholar", fieldName: "hideFunding", value: "true", entityId: { in: ids } },
       select: { entityId: true },
     }),
   ]);
-  const suppressed = await loadEntitySuppressions(
-    "grant",
-    grants.map((g) => g.externalId),
-    db.read,
-  );
+  // Curator suppressions apply to both, exactly as on the profile.
+  const [suppressed, suppressedAppointments] = await Promise.all([
+    loadEntitySuppressions("grant", grants.map((g) => g.externalId), db.read),
+    loadEntitySuppressions("appointment", appointments.map((a) => a.externalId), db.read),
+  ]);
   const hidden = new Set(hideRows.map((r) => r.entityId));
   for (const cwid of ids) {
     out.set(cwid, { funding: [], translation: [], secondaryAppointments: [], centers: [] });
@@ -188,6 +188,7 @@ export async function loadBriefRecords(cwids: readonly string[]): Promise<Map<st
     if (!centers.includes(m.center.name)) centers.push(m.center.name);
   }
   for (const a of appointments) {
+    if (suppressedAppointments.has(a.externalId)) continue;
     out.get(a.cwid)!.secondaryAppointments.push({ title: a.title, organization: a.organization });
   }
   return out;
@@ -391,6 +392,9 @@ export function postCheckBrief(
   }
   const why = raw.why
     .replace(/\(?\bPMID:?\s*\d+\)?/gi, "")
+    // Source keys belong in `topics[].sources`, never in prose: strip a bracketed citation like
+    // "(P1, G2)" or "[P1]". NOT a bare "P1"/"G1": that would eat real terms ("G1 phase", "P53").
+    .replace(/\s*[([]\s*[PG]\d+(?:\s*[,;]\s*[PG]\d+)*\s*[)\]]/g, "")
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([.,;])/g, "$1")
     .trim();
@@ -404,8 +408,15 @@ export function partitionUngrounded(
   topics: readonly BriefTopic[],
   ungrounded: readonly UngroundedSpan[],
 ): { whySpans: UngroundedSpan[]; keptTopics: BriefTopic[] } {
-  const whySpans = ungrounded.filter((u) => u.span && why.includes(u.span));
-  const keptTopics = topics.filter((t) => !ungrounded.some((u) => u.span && t.text.includes(u.span)));
+  // The verifier saw topics as "- <text>" lines, so a span may carry the bullet prefix, or
+  // cover a whole bullet; strip the prefix and test containment both ways.
+  const spans = ungrounded
+    .map((u) => ({ ...u, span: u.span.trim().replace(/^[-*•]\s+/, "") }))
+    .filter((u) => u.span.length > 0);
+  const whySpans = spans.filter((u) => why.includes(u.span));
+  const keptTopics = topics.filter(
+    (t) => !spans.some((u) => t.text.includes(u.span) || u.span.includes(t.text)),
+  );
   return { whySpans, keptTopics };
 }
 
@@ -418,6 +429,19 @@ export function topicsFromTexts(texts: readonly string[], generated: readonly Br
     .map((t) => t.trim())
     .filter(Boolean)
     .map((text) => generated.find((g) => g.text === text) ?? { concept: "", text, sources: [] });
+}
+
+/** Drop grant sources no longer in the PI's live records (suppressed, hidden, or ended since the
+ *  draft). Publications stay. A topic keeps its text even if it loses every source. */
+export function withLiveSources(topics: readonly BriefTopic[], records: BriefRecords): BriefTopic[] {
+  const live = (s: BriefSource) =>
+    s.kind !== "grant" ||
+    records.funding.some((g) =>
+      s.applId != null
+        ? g.applId === s.applId
+        : g.funder === s.funder && g.mechanism === s.mechanism && g.endYear === s.endYear,
+    );
+  return topics.map((t) => ({ ...t, sources: t.sources.filter(live) }));
 }
 
 // ── Generation ───────────────────────────────────────────────────────────────
@@ -469,10 +493,15 @@ export async function generateBrief(
 
   const first = postCheckBrief(object, matched, sources);
   const combined = [first.why, ...first.topics.map((t) => `- ${t.text}`)].join("\n");
+  // Two different permissions: NAMING any ask concept as what the partner wants is fine; saying
+  // the researcher's work MEETS a concept is allowed only for the concepts they actually matched.
   const extraReference = [
-    "THE ASK'S CONCEPTS — naming any of these as what the partner's ask is about, or saying the",
-    "researcher's work meets one of them, is allowed:",
+    "THE ASK'S CONCEPTS: naming any of these as what the partner's ask is about is allowed:",
     ...input.concepts.map((c) => `- ${c.term}`),
+    "",
+    "THE RESEARCHER'S MATCHED CONCEPTS: saying the researcher's work meets or relates to a concept",
+    "is allowed ONLY for these (any other concept is unsupported):",
+    ...matched.map((m) => `- ${m.term}`),
   ].join("\n");
   const ungrounded = await verifyDraftGrounding(facts, combined, { model: modelId, extraReference });
   const { whySpans, keptTopics } = partitionUngrounded(first.why, first.topics, ungrounded);

@@ -72,6 +72,7 @@ import {
   partitionUngrounded,
   postCheckBrief,
   topicsFromTexts,
+  withLiveSources,
   type BriefMatchedConcept,
   type BriefRecords,
   type BriefTopic,
@@ -231,6 +232,15 @@ describe("postCheckBrief", () => {
     expect(r.topics).toHaveLength(BRIEF_MAX_TOPICS);
   });
 
+  it("strips bracketed source keys from `why` but never real terms like G1 phase", () => {
+    const r = postCheckBrief(
+      { why: "Studies G1 phase arrest (P1, G1) and P53 loss [P2].", topics: [] },
+      matched,
+      sources,
+    );
+    expect(r.why).toBe("Studies G1 phase arrest and P53 loss.");
+  });
+
   it("strips PMIDs from `why`", () => {
     const r = postCheckBrief({ why: "Shows barrier repair (PMID: 12345). Also PMID 6789 here.", topics: [] }, matched, sources);
     expect(r.why).toBe("Shows barrier repair. Also here.");
@@ -249,6 +259,35 @@ describe("partitionUngrounded", () => {
     ]);
     expect(r.whySpans.map((u) => u.span)).toEqual(["Leads a clinical trial."]);
     expect(r.keptTopics.map((t) => t.text)).toEqual(["S1P signaling"]);
+  });
+  it("matches a span carrying the verifier's bullet prefix, or covering the whole bullet", () => {
+    const r = partitionUngrounded("Runs a lab.", topics, [
+      { span: "- S1P signaling", category: "x", reason: "y" },
+      { span: "beige fat and blood pressure\n- S1P", category: "x", reason: "y" },
+      { span: "   ", category: "x", reason: "y" },
+    ]);
+    expect(r.keptTopics).toEqual([]);
+    expect(r.whySpans).toEqual([]);
+  });
+});
+
+describe("withLiveSources", () => {
+  it("drops grant sources no longer in live records; keeps pubs and the topic", () => {
+    const live: BriefRecords = { ...records };
+    const topic: BriefTopic = {
+      concept: "obesity",
+      text: "t",
+      sources: [
+        { kind: "grant", mechanism: "R01", funder: "NIH", endYear: 2028, applId: 9876 },
+        { kind: "grant", mechanism: "R21", funder: "NIH", endYear: 2027, applId: 5555 },
+        { kind: "grant", mechanism: null, funder: "AHA", endYear: 2026, applId: null },
+        { kind: "pub", pmid: "111", year: 2024, title: "x" },
+      ],
+    };
+    expect(withLiveSources([topic], live)[0].sources.map((s) => (s.kind === "pub" ? s.pmid : s.applId))).toEqual([
+      9876,
+      "111",
+    ]);
   });
 });
 
@@ -297,14 +336,19 @@ describe("loadBriefRecords", () => {
       { cwid: "a", externalId: "g-supp", role: "PI", funder: "NIH", title: "Suppressed", mechanism: "R21", endDate: future, applId: 3 },
       { cwid: "b", externalId: "g-hidden", role: "PI", funder: "AHA", title: "Hidden", mechanism: null, endDate: future, applId: null },
     ]);
-    mockSuppressionFindMany.mockResolvedValue([{ entityId: "g-supp" }]);
+    mockSuppressionFindMany.mockImplementation(async (args: { where: { entityType: string } }) =>
+      args.where.entityType === "grant" ? [{ entityId: "g-supp" }] : [{ entityId: "ap-supp" }],
+    );
     mockOverrideFindMany.mockResolvedValue([{ entityId: "b" }]);
     mockTechFindMany.mockResolvedValue([{ cwid: "a", title: "Modulator", patentStatus: "Filed", url: "https://ctl.example/t" }]);
     mockMembershipFindMany.mockResolvedValue([
       { cwid: "a", center: { name: "Cardiovascular Research Institute" } },
       { cwid: "a", center: { name: "Cardiovascular Research Institute" } },
     ]);
-    mockAppointmentFindMany.mockResolvedValue([{ cwid: "a", title: "Professor", organization: "Physiology" }]);
+    mockAppointmentFindMany.mockResolvedValue([
+      { cwid: "a", title: "Professor", organization: "Physiology", externalId: "ap-1" },
+      { cwid: "a", title: "Adjunct", organization: "Hidden by curator", externalId: "ap-supp" },
+    ]);
   });
 
   it("keeps only active PI awards, minus suppressed grants and hideFunding scholars", async () => {
@@ -367,7 +411,11 @@ describe("generateBrief", () => {
     // The shared ask block carries the cache point and the saved concepts.
     expect(call.messages[0].content).toContain("vascular inflammation");
     // The fact-check sees the ask's concepts as allowed.
-    expect(mockVerify.mock.calls[0][2].extraReference).toContain("obesity");
+    const extra = mockVerify.mock.calls[0][2].extraReference as string;
+    const [askPart, matchedPart] = extra.split("THE RESEARCHER'S MATCHED CONCEPTS");
+    expect(askPart).toContain("sarcopenia"); // naming any ask concept is allowed...
+    expect(matchedPart).toContain("vascular inflammation");
+    expect(matchedPart).not.toContain("sarcopenia"); // ...claiming the PI meets it is not
     // Only `why`'s span is sent for revision.
     expect(mockRevise.mock.calls[0][1].map((u: { span: string }) => u.span)).toEqual(["Leads a clinical trial."]);
   });

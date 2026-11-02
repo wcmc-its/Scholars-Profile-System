@@ -31,13 +31,20 @@ import {
   type BriefGenerated,
   type BriefRecords,
   topicsFromTexts,
+  withLiveSources,
 } from "@/lib/api/matcha-brief";
 import type { MatchaCandidate, MatchaConcept } from "@/lib/api/matcha-contract";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
-import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import {
+  editError,
+  editOk,
+  editOkStream,
+  logEditFailure,
+  readEditRequest,
+} from "@/lib/edit/request";
 
 const PATH = "/api/edit/matcha/brief";
 /** Parallel Bedrock drafts per request. */
@@ -73,16 +80,32 @@ async function resolveSubmission(
   });
 }
 
-/** The paste's newest stored PEOPLE answer (the grant-matcha `:elig` variant is never one). */
-async function loadStoredResult(descriptionHash: string): Promise<StoredResult | null> {
+/**
+ * The paste's newest stored PEOPLE answer that contains every requested PI (the grant-matcha
+ * `:elig` variant is never one). A paste can hold several stored answers (base, include-chip
+ * variants, older result versions); preferring the newest that has ALL the cwids means a PI the
+ * officer can see on an include variant is not refused just because the base run lacks them.
+ * ponytail: submission rows written on a cache hit carry no `resultKey`, so the exact run the
+ * officer is looking at can't be pinned; the newest answer containing the PI is the proxy.
+ */
+async function loadStoredResult(
+  descriptionHash: string,
+  cwids: readonly string[],
+): Promise<StoredResult | null> {
   const rows = await db.read.sponsorMatchSubmission.findMany({
     where: { descriptionHash, resultKey: { not: null } },
     orderBy: { createdAt: "desc" },
     take: 10,
     select: { result: true, resultKey: true },
   });
-  const row = rows.find((r) => r.result && !r.resultKey!.endsWith(":elig"));
-  return (row?.result as StoredResult | undefined) ?? null;
+  const answers = rows
+    .filter((r) => r.result && !r.resultKey!.endsWith(":elig"))
+    .map((r) => r.result as unknown as StoredResult);
+  const has = (a: StoredResult) => {
+    const ids = new Set(a.candidates.map((c) => c.cwid));
+    return cwids.every((c) => ids.has(c));
+  };
+  return answers.find(has) ?? answers[0] ?? null;
 }
 
 type BriefRow = {
@@ -95,11 +118,18 @@ type BriefRow = {
   updatedAt: Date;
 };
 
-function toWire(row: BriefRow) {
+function toWire(row: BriefRow, records?: BriefRecords) {
+  const generated = row.generated as BriefGenerated;
+  const edited = (row.edited ?? null) as BriefEdited | null;
   return {
     cwid: row.cwid,
-    generated: row.generated as BriefGenerated,
-    edited: (row.edited ?? null) as BriefEdited | null,
+    generated: records
+      ? { ...generated, topics: withLiveSources(generated.topics, records) }
+      : generated,
+    edited:
+      records && edited?.topics
+        ? { ...edited, topics: withLiveSources(edited.topics, records) }
+        : edited,
     note: row.note,
     model: row.model,
     draftedAt: row.createdAt.toISOString(),
@@ -142,7 +172,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
     const records = await loadBriefRecords(rows.map((r) => r.cwid));
     return editOk({
-      briefs: rows.map(toWire),
+      // Sources re-checked against TODAY's records: an award suppressed (or hideFunding set)
+      // after drafting must not keep riding on the wire as a brief's source.
+      briefs: rows.map((r) => toWire(r, records.get(r.cwid))),
       records: recordsObject(records),
       canEdit: canWriteBriefs(session),
     });
@@ -155,7 +187,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // ── POST (draft) ─────────────────────────────────────────────────────────────
 
 /** Run `fn` over `items` with at most `limit` in flight; results in input order. */
-async function pool<T, R>(items: readonly T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+async function pool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
   const worker = async () => {
@@ -175,7 +211,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { session, realCwid, impersonatedCwid, requestId, body } = req.ctx;
 
   if (!canWriteBriefs(session)) {
-    logEditDenial({ actorCwid: realCwid, targetCwid: "sponsor-match", path: PATH, reason: "not_developer_brief" });
+    logEditDenial({
+      actorCwid: realCwid,
+      targetCwid: "sponsor-match",
+      path: PATH,
+      reason: "not_developer_brief",
+    });
     return editError(403, "not_developer_brief");
   }
 
@@ -195,69 +236,64 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let sub: Awaited<ReturnType<typeof resolveSubmission>>;
   let stored: StoredResult | null;
+  let records: Map<string, BriefRecords>;
   try {
     sub = await resolveSubmission(submissionId, session);
     if (!sub) return editError(404, "not_found");
-    stored = await loadStoredResult(sub.descriptionHash);
+    stored = await loadStoredResult(sub.descriptionHash, wanted);
+    // No stored answer = nothing to re-derive the evidence from. Never fall back to the client.
+    if (!stored) return editError(409, "no_stored_result");
+    if (!wanted.every((c) => stored!.candidates.some((k) => k.cwid === c))) {
+      return editError(400, "cwid_not_in_results", "cwids");
+    }
+    records = await loadBriefRecords(wanted);
   } catch (err) {
     logEditFailure(`${PATH}#resolve`, err);
     return editError(500, "briefs_unavailable");
   }
-  // No stored answer = nothing to re-derive the evidence from. Never fall back to the client.
-  if (!stored) return editError(409, "no_stored_result");
-  const byCwid = new Map(stored.candidates.map((c) => [c.cwid, c]));
-  const unknown = wanted.filter((c) => !byCwid.has(c));
-  if (unknown.length > 0) return editError(400, "cwid_not_in_results", "cwids");
+  const answer = stored;
+  const byCwid = new Map(answer.candidates.map((c) => [c.cwid, c]));
+  const hash = sub.descriptionHash;
+  // The GENERATED title, never the officer's Rename: the prompt must not carry free text a
+  // (possibly different, possibly observer) officer typed, and two officers' renames of the same
+  // paste must not draft different briefs.
+  const askTitle = answer.titleSummary ?? sub.title ?? null;
 
-  const askTitle = sub.titleOverride ?? stored.titleSummary ?? sub.title ?? null;
-  let records: Map<string, BriefRecords>;
-  try {
-    records = await loadBriefRecords(wanted);
-  } catch (err) {
-    logEditFailure(`${PATH}#records`, err);
-    return editError(500, "briefs_unavailable");
-  }
-
-  const outcomes = await pool(wanted, CONCURRENCY, async (cwid) => {
+  /** Draft one PI, then persist its row + audit entry in ONE transaction. Never throws. */
+  const draftOne = async (cwid: string) => {
+    let drafted: Awaited<ReturnType<typeof generateBrief>>;
     try {
-      const { generated, model } = await generateBrief({
+      drafted = await generateBrief({
         cwid,
         askTitle,
-        concepts: stored!.concepts,
+        concepts: answer.concepts,
         candidate: byCwid.get(cwid)!,
         records: records.get(cwid)!,
       });
-      return { cwid, ok: true as const, generated, model };
     } catch (err) {
       logEditFailure(`${PATH}#generate`, err);
       return { cwid, ok: false as const };
     }
-  });
-  const drafted = outcomes.flatMap((o) => (o.ok ? [o] : []));
-  const failed = outcomes.flatMap((o) => (o.ok ? [] : [o.cwid]));
-
-  try {
-    const hash = sub.descriptionHash;
-    const rows = await db.write.$transaction(async (tx) => {
-      const written: BriefRow[] = [];
-      for (const o of drafted) {
+    try {
+      const row = await db.write.$transaction(async (tx) => {
         // A redraft replaces only `generated`; the officer's edits and note survive it.
-        written.push(
-          await tx.matchaBrief.upsert({
-            where: { descriptionHash_cwid: { descriptionHash: hash, cwid: o.cwid } },
-            create: {
-              descriptionHash: hash,
-              cwid: o.cwid,
-              generated: o.generated,
-              model: o.model,
-              createdBy: session.cwid,
-            },
-            update: { generated: o.generated, model: o.model, createdBy: session.cwid, createdAt: new Date() },
-            select: BRIEF_SELECT,
-          }),
-        );
-      }
-      if (drafted.length > 0) {
+        const written = await tx.matchaBrief.upsert({
+          where: { descriptionHash_cwid: { descriptionHash: hash, cwid } },
+          create: {
+            descriptionHash: hash,
+            cwid,
+            generated: drafted.generated,
+            model: drafted.model,
+            createdBy: session.cwid,
+          },
+          update: {
+            generated: drafted.generated,
+            model: drafted.model,
+            createdBy: session.cwid,
+            createdAt: new Date(),
+          },
+          select: BRIEF_SELECT,
+        });
         await appendAuditRow(tx, {
           actorCwid: realCwid,
           impersonatedCwid,
@@ -266,27 +302,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           action: "matcha_brief_generate",
           fieldsChanged: ["generated"],
           beforeValues: null,
-          afterValues: {
-            cwids: drafted.map((o) => o.cwid),
-            drafted: drafted.length,
-            failed: failed.length,
-            model: drafted[0].model,
-          },
+          afterValues: { cwid, model: drafted.model, removedCount: drafted.generated.removedCount },
           ts: new Date(),
           requestId,
         });
-      }
-      return written;
-    });
-    return editOk({
-      briefs: rows.map(toWire),
-      records: recordsObject(new Map(drafted.map((o) => [o.cwid, records.get(o.cwid)!]))),
-      failed,
-    });
-  } catch (err) {
-    logEditFailure(`${PATH}#write`, err);
-    return editError(500, "briefs_unavailable");
-  }
+        return written;
+      });
+      return { cwid, ok: true as const, brief: toWire(row), records: records.get(cwid)! };
+    } catch (err) {
+      logEditFailure(`${PATH}#write`, err);
+      return { cwid, ok: false as const };
+    }
+  };
+
+  // STREAMED (NDJSON + the padded heartbeat): draft + fact-check + revise for one PI can pass
+  // CloudFront's 30s origin-read timeout on /api/edit*, and a silent response is reset at 30s.
+  // Each PI's line is emitted as it lands, so the console fills rows as they arrive.
+  return editOkStream(
+    async (emit) => {
+      const outcomes = await pool(wanted, CONCURRENCY, async (cwid) => {
+        const o = await draftOne(cwid);
+        emit(o.ok ? { cwid, ok: true, brief: o.brief, records: o.records } : { cwid, ok: false });
+        return o;
+      });
+      return {
+        briefs: outcomes.flatMap((o) => (o.ok ? [o.brief] : [])),
+        records: Object.fromEntries(outcomes.flatMap((o) => (o.ok ? [[o.cwid, o.records]] : []))),
+        failed: outcomes.flatMap((o) => (o.ok ? [] : [o.cwid])),
+      };
+    },
+    (err) => {
+      logEditFailure(`${PATH}#stream`, err);
+      return { error: "briefs_unavailable" };
+    },
+  ) as NextResponse;
 }
 
 // ── PATCH (edit) ─────────────────────────────────────────────────────────────
@@ -298,7 +347,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { session, realCwid, body } = req.ctx;
 
   if (!canWriteBriefs(session)) {
-    logEditDenial({ actorCwid: realCwid, targetCwid: "sponsor-match", path: PATH, reason: "not_developer_brief" });
+    logEditDenial({
+      actorCwid: realCwid,
+      targetCwid: "sponsor-match",
+      path: PATH,
+      reason: "not_developer_brief",
+    });
     return editError(403, "not_developer_brief");
   }
 
@@ -310,7 +364,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return editError(400, "invalid_cwid", "cwid");
   }
   // undefined = leave as is; null = revert to generated (why/topics) or clear (note).
-  if (why !== undefined && why !== null && (typeof why !== "string" || why.length > MAX_WHY_CHARS)) {
+  if (
+    why !== undefined &&
+    why !== null &&
+    (typeof why !== "string" || why.length > MAX_WHY_CHARS)
+  ) {
     return editError(400, "invalid_why", "why");
   }
   if (
@@ -322,7 +380,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   ) {
     return editError(400, "invalid_topics", "topics");
   }
-  if (note !== undefined && note !== null && (typeof note !== "string" || note.length > MAX_NOTE_CHARS)) {
+  if (
+    note !== undefined &&
+    note !== null &&
+    (typeof note !== "string" || note.length > MAX_NOTE_CHARS)
+  ) {
     return editError(400, "invalid_note", "note");
   }
 
@@ -330,35 +392,43 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const sub = await resolveSubmission(submissionId, session);
     if (!sub) return editError(404, "not_found");
     const key = { descriptionHash_cwid: { descriptionHash: sub.descriptionHash, cwid } };
-    const existing = await db.read.matchaBrief.findUnique({ where: key, select: BRIEF_SELECT });
-    if (!existing) return editError(404, "brief_not_found");
+    // Read-modify-write of `edited` on the WRITER, in one transaction: a replica read could miss a
+    // just-drafted row (false 404) or a just-saved edit (the next save would overwrite it).
+    const row = await db.write.$transaction(async (tx) => {
+      const existing = await tx.matchaBrief.findUnique({ where: key, select: BRIEF_SELECT });
+      if (!existing) return null;
 
-    const generated = existing.generated as BriefGenerated;
-    const edited: BriefEdited = { ...((existing.edited ?? {}) as BriefEdited) };
-    if (why === null) delete edited.why;
-    else if (typeof why === "string") {
-      // Saving the generated text unchanged is a revert, not an edit.
-      if (why.trim() === generated.why) delete edited.why;
-      else edited.why = why.trim();
-    }
-    if (topics === null) delete edited.topics;
-    else if (Array.isArray(topics)) {
-      const next = topicsFromTexts(topics as string[], generated.topics);
-      const same =
-        next.length === generated.topics.length && next.every((t, i) => t === generated.topics[i]);
-      if (same) delete edited.topics;
-      else edited.topics = next;
-    }
-    const hasEdits = edited.why !== undefined || edited.topics !== undefined;
+      const generated = existing.generated as BriefGenerated;
+      const edited: BriefEdited = { ...((existing.edited ?? {}) as BriefEdited) };
+      if (why === null) delete edited.why;
+      else if (typeof why === "string") {
+        // Saving the generated text unchanged is a revert, not an edit.
+        if (why.trim() === generated.why) delete edited.why;
+        else edited.why = why.trim();
+      }
+      if (topics === null) delete edited.topics;
+      else if (Array.isArray(topics)) {
+        const next = topicsFromTexts(topics as string[], generated.topics);
+        const same =
+          next.length === generated.topics.length &&
+          next.every((t, i) => t === generated.topics[i]);
+        if (same) delete edited.topics;
+        else edited.topics = next;
+      }
+      const hasEdits = edited.why !== undefined || edited.topics !== undefined;
 
-    const row = await db.write.matchaBrief.update({
-      where: key,
-      data: {
-        edited: hasEdits ? edited : Prisma.DbNull,
-        ...(note === undefined ? {} : { note: typeof note === "string" && note.trim() ? note : null }),
-      },
-      select: BRIEF_SELECT,
+      return tx.matchaBrief.update({
+        where: key,
+        data: {
+          edited: hasEdits ? edited : Prisma.DbNull,
+          ...(note === undefined
+            ? {}
+            : { note: typeof note === "string" && note.trim() ? note : null }),
+        },
+        select: BRIEF_SELECT,
+      });
     });
+    if (!row) return editError(404, "brief_not_found");
     return editOk({ brief: toWire(row) });
   } catch (err) {
     logEditFailure(`${PATH}#patch`, err);

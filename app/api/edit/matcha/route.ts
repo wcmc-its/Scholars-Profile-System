@@ -444,12 +444,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // and is swallowed; the results still ship.
     // A Rename applies to the PASTE, so every new run of it inherits the officer's name for it —
     // otherwise the next replay's fresh row would surface the generated title again in Recent.
-    // Fail-soft like the write below: a read blip costs the label, never the answer.
+    // Scoped to the caller's OWN runs, matching what their PATCH may write: one officer's rename
+    // must not spread into a colleague's runs. Fail-soft: a read blip costs the label, never the answer.
     const titleOverride =
       (
         await db.read.sponsorMatchSubmission
           .findFirst({
-            where: { descriptionHash: engineInputHash, titleOverride: { not: null } },
+            where: {
+              descriptionHash: engineInputHash,
+              titleOverride: { not: null },
+              submittedBy: session.cwid,
+            },
             orderBy: { createdAt: "desc" },
             select: { titleOverride: true },
           })
@@ -682,20 +687,25 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     // Out of scope is indistinguishable from gone: same 404, nothing erased.
     if (!row) return editError(404, "not_found");
 
-    // deleteMany, not delete: `where` is the hash, which matches one row or many.
-    const { count } = await db.write.sponsorMatchSubmission.deleteMany({
-      where: { descriptionHash: row.descriptionHash, ...scope },
+    // ONE writer transaction: deleteMany, not delete (`where` is the hash, one row or many), then
+    // the paste's Matcha briefs — keyed on the PASTE and shared by every officer who ran it — go
+    // only when the LAST run does, so a scoped officer erasing their own runs doesn't take a
+    // colleague's briefs (and notes). The count must see the delete: never ask the replica.
+    const count = await db.write.$transaction(async (tx) => {
+      const { count: deleted } = await tx.sponsorMatchSubmission.deleteMany({
+        where: { descriptionHash: row.descriptionHash, ...scope },
+      });
+      if (deleted > 0) {
+        const remaining = await tx.sponsorMatchSubmission.count({
+          where: { descriptionHash: row.descriptionHash },
+        });
+        if (remaining === 0) {
+          await tx.matchaBrief.deleteMany({ where: { descriptionHash: row.descriptionHash } });
+        }
+      }
+      return deleted;
     });
     if (count === 0) return editError(404, "not_found");
-    // Matcha briefs are keyed on the PASTE and shared by every officer who ran it, so they go
-    // only when the LAST run of the paste does — a scoped officer erasing their own runs must not
-    // take a colleague's briefs (and notes) with them.
-    const remaining = await db.read.sponsorMatchSubmission.count({
-      where: { descriptionHash: row.descriptionHash },
-    });
-    if (remaining === 0) {
-      await db.write.matchaBrief.deleteMany({ where: { descriptionHash: row.descriptionHash } });
-    }
     return editOk({ deleted: submissionId, count });
   } catch (err) {
     logEditFailure(`${PATH}#delete`, err);
