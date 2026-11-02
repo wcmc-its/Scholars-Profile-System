@@ -5,10 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import {
-  buildMatchaCsv,
-  type MatchaCsvRow,
-} from "@/lib/edit/matcha-export";
+import { briefCsvFields, buildMatchaCsv, type MatchaCsvRow } from "@/lib/edit/matcha-export";
 
 const ROW: MatchaCsvRow = {
   rank: 1,
@@ -121,5 +118,60 @@ describe("buildMatchaCsv", () => {
     const lines = buildMatchaCsv([{ ...ROW, eligible: "Yes" }]).split("\r\n");
     expect(lines[0]).toBe(HEADER);
     expect(lines[1].split(",")).toHaveLength(13);
+  });
+});
+
+describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
+  const BRIEF = {
+    generated: {
+      why: "Generated why.",
+      topics: [
+        {
+          concept: "x",
+          text: "Generated topic",
+          sources: [{ kind: "pub" as const, pmid: "1", year: 2024, title: "Short paper title" }],
+        },
+      ],
+      removedCount: 0,
+    },
+    edited: {
+      why: "Edited why.",
+      topics: [{ concept: "", text: "My own topic", sources: [] }],
+    },
+    note: "CONFIDENTIAL-NOTE-TEXT",
+  };
+
+  it("omits the brief columns unless asked (flag off ⇒ master's file)", () => {
+    expect(buildMatchaCsv([ROW]).split("\r\n")[0]).toBe(HEADER);
+  });
+
+  it("writes the EDITED why and topics when present", () => {
+    const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields(BRIEF) }], { brief: true });
+    const [head, line] = csv.split("\r\n");
+    expect(head).toBe(`${HEADER},Why this PI,Discussion topics`);
+    expect(line).toContain("Edited why.");
+    expect(line).toContain("My own topic [unsourced]");
+    expect(line).not.toContain("Generated why.");
+  });
+
+  it("falls back to the generated text, with source labels", () => {
+    const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields({ ...BRIEF, edited: null }) }], {
+      brief: true,
+    });
+    expect(csv).toContain("Generated why.");
+    expect(csv).toContain("Generated topic [2024 · Short paper title]");
+  });
+
+  it("NEVER includes the note", () => {
+    const fields = briefCsvFields(BRIEF);
+    expect(JSON.stringify(fields)).not.toContain("CONFIDENTIAL-NOTE-TEXT");
+    const csv = buildMatchaCsv([{ ...ROW, ...fields }], { brief: true });
+    expect(csv).not.toContain("CONFIDENTIAL-NOTE-TEXT");
+    expect(csv.split("\r\n")[0]).not.toMatch(/note/i);
+  });
+
+  it("writes blanks for a row with no brief", () => {
+    const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields(undefined) }], { brief: true });
+    expect(csv.split("\r\n")[1].endsWith("https://example.org/alice-alpha,,")).toBe(true);
   });
 });

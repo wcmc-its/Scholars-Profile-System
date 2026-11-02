@@ -41,6 +41,13 @@ import {
   type MatchaCandidate,
   type MatchaConcept,
 } from "@/lib/api/matcha-contract";
+import type {
+  BriefEdited,
+  BriefGenerated,
+  BriefRecords,
+  BriefSource,
+  BriefTopic,
+} from "@/lib/edit/matcha-brief-types";
 
 /** Dark by default; staging on first (see `cdk/lib/app-stack.ts`). Inert unless `MATCHA` is on. */
 export function isMatchaBriefEnabled(): boolean {
@@ -72,42 +79,9 @@ export function briefModelId(): string {
 
 // ── Shapes (persisted in `MatchaBrief.generated` / `.edited`) ────────────────
 
-/** A topic's supporting fact, resolved from the model's key — never model-written. */
-export type BriefSource =
-  | { kind: "pub"; pmid: string; year: number | null; title: string }
-  | { kind: "grant"; mechanism: string | null; funder: string; endYear: number; applId: number | null };
-
-export type BriefTopic = {
-  /** One of the candidate's matched concept terms, verbatim from the saved search. */
-  concept: string;
-  text: string;
-  /** Empty on a topic the officer edited (it is then their own, unsourced). */
-  sources: BriefSource[];
-};
-
-export type BriefGenerated = {
-  why: string;
-  topics: BriefTopic[];
-  /** How many unsupported statements the fact-check removed. A count only — never the claim. */
-  removedCount: number;
-};
-
-/** The officer's version. A field present here wins over `generated`; absent = not edited. */
-export type BriefEdited = { why?: string; topics?: BriefTopic[] };
-
-export type BriefRecords = {
-  funding: {
-    mechanism: string | null;
-    funder: string;
-    title: string;
-    endYear: number;
-    applId: number | null;
-    roleLabel: string;
-  }[];
-  translation: { title: string; patentStatus: string | null; url: string }[];
-  secondaryAppointments: { title: string; organization: string }[];
-  centers: string[];
-};
+// The persisted shapes live in a CLIENT-SAFE module (`lib/edit/matcha-brief-types.ts`) so the
+// console panel can type against them without importing this file, which pulls in `@/lib/db`.
+export type { BriefEdited, BriefGenerated, BriefRecords, BriefSource, BriefTopic };
 
 // ── Records (deterministic) ──────────────────────────────────────────────────
 
