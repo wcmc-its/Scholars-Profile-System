@@ -84,7 +84,7 @@ describe("reciterAuthors", () => {
     expect(reciterAuthors([], [], matched)).toBeNull();
   });
 
-  it("resolves accepted/assigned to resolution_cwid, open/snoozed to top_cwid, drops rejected/dismissed", () => {
+  it("resolves accepted/assigned to resolution_cwid, open/snoozed/dismissed to top_cwid, drops rejected", () => {
     const reviews = [
       row("accepted", "xxx0000", "aaa1001", 1, "first"),
       row("assigned", "yyy0000", "bbb2002", 2, "middle"),
@@ -98,6 +98,7 @@ describe("reciterAuthors", () => {
       { cwid: "bbb2002", position: "middle" },
       { cwid: "ccc3003", position: "middle" },
       { cwid: "ddd4004", position: "middle" },
+      { cwid: "fff6006", position: "last" },
     ]);
   });
 

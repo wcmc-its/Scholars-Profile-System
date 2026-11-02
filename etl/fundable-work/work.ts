@@ -76,8 +76,10 @@ export type ReviewRow = {
  *
  * Review rows, when present, are the whole answer: the OpenAlex lane writes one per WCM
  * authorship, and a curator's verdict beats the name matcher. Accepted and assigned rows
- * resolve to `resolution_cwid` (PM writes the chosen person there on both); open and
- * snoozed rows to the matcher's `top_cwid`; rejected and dismissed rows to no one.
+ * resolve to `resolution_cwid` (PM writes the chosen person there on both); open, snoozed
+ * and dismissed rows to the matcher's `top_cwid`; rejected rows to no one. Dismissed is not
+ * a wrong-person verdict: the lane's own dedup sweeps (preprint published in PubMed, DOI held
+ * by the Scopus lane) and a curator's plain skip both land there; only reject says "not them".
  * Curator-added `external_article` uids join either way. With no review rows (the lane
  * covers ~365 days and skips works with a PMID), they join the name matcher's authors
  * instead of replacing them, since a manual add speaks for one person, not the byline.
@@ -96,9 +98,9 @@ export function reciterAuthors(
     const cwid =
       r.status === "accepted" || r.status === "assigned"
         ? (r.resolution_cwid ?? r.top_cwid)
-        : r.status === "open" || r.status === "snoozed"
-          ? r.top_cwid
-          : null;
+        : r.status === "rejected"
+          ? null
+          : r.top_cwid;
     if (cwid && !out.has(cwid)) out.set(cwid, r.author_position_label ?? "middle");
   }
   const matchedPosition = new Map(matched.map((m) => [m.cwid, m.position]));
