@@ -887,7 +887,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Covers scholars + vivo (SAN). Replaced 95f77e69-... (scholars only) for
     // the VIVO hostname cutover (#945).
     edgeCertArn:
-      "arn:aws:acm:us-east-1:665083158573:certificate/c39a27d7-00ad-4714-8f1d-c948b61904e4",
+      "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
     edgeAliasDomains: ["vivo.weill.cornell.edu"],
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
     // #1507 -- HTTPS origin leg, two gates. Seeded for the NetScaler front
