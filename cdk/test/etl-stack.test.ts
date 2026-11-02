@@ -306,6 +306,28 @@ function isTask(s: Record<string, unknown>, kind: string): boolean {
 }
 
 describe("EtlStack", () => {
+  // Staging reconcilers run hourly (no ADR-005 lag contract); prod stays at
+  // 5 min. Alarm windows scale with the cadence.
+  it("staging reconcilers fire hourly with cadence alarms over 3 fires", () => {
+    const { template: t } = buildEtlStack("staging");
+    for (const name of ["sps-reconcile-staging", "sps-cdn-reconcile-staging"]) {
+      t.hasResourceProperties("AWS::Events::Rule", {
+        Name: name,
+        ScheduleExpression: "rate(1 hour)",
+      });
+      t.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: name.replace("reconcile", "reconcile-cadence"),
+        Period: 10800,
+      });
+      // Status alarm is a math expression: the period lives on each MetricStat.
+      const status = Object.values(t.findResources("AWS::CloudWatch::Alarm")).find(
+        (a) => a.Properties?.AlarmName === name.replace("reconcile", "reconcile-status"),
+      );
+      expect(JSON.stringify(status)).toContain('"Period":3600');
+      expect(JSON.stringify(status)).not.toContain('"Period":900');
+    }
+  });
+
   // Cutover de-coupling (§8.4): both the ETL container and the reconcile task
   // move OPENSEARCH_NODE off the Data→Etl cross-stack export onto the opensearch
   // secret's `node` key, so the OpenSearch-domain replace at cutover isn't
@@ -2210,7 +2232,7 @@ describe("EtlStack", () => {
       expect(td?.Properties?.Memory).toBe("512");
       template.hasResourceProperties("AWS::Events::Rule", {
         Name: "sps-reconcile-staging",
-        ScheduleExpression: "rate(5 minutes)",
+        ScheduleExpression: "rate(1 hour)",
         State: "ENABLED",
       });
     });
@@ -2225,7 +2247,7 @@ describe("EtlStack", () => {
       expect(td?.Properties?.Memory).toBe("512");
       template.hasResourceProperties("AWS::Events::Rule", {
         Name: "sps-cdn-reconcile-staging",
-        ScheduleExpression: "rate(5 minutes)",
+        ScheduleExpression: "rate(1 hour)",
         State: "ENABLED",
       });
     });

@@ -2597,6 +2597,13 @@ export class EtlStack extends Stack {
     });
     opportunityFreshnessAlarm.addAlarmAction(alarmAction);
 
+    // Both reconcilers share one cadence (config `reconcileCadenceMinutes`).
+    // Alarm windows scale with it: the status window must hold >=1 fire, and
+    // the cadence alarm trips after 3 missed fires (15 min at 5 min).
+    const cadenceMin = envConfig.reconcileCadenceMinutes;
+    const reconcileStatusWindow = Duration.minutes(Math.max(15, cadenceMin));
+    const reconcileCadenceWindow = Duration.minutes(3 * cadenceMin);
+
     // ------------------------------------------------------------------
     // #393 PR-2 -- suppression search-index reconciler (ADR-005 layer 3).
     //
@@ -2810,8 +2817,8 @@ export class EtlStack extends Stack {
     // DLQ is wanted.
     const reconcileRule = new events.Rule(this, "ReconcileScheduleRule", {
       ruleName: `sps-reconcile-${env}`,
-      description: `SPS suppression search-index reconciler -- 5 min cadence (${env}). #393.`,
-      schedule: events.Schedule.rate(Duration.minutes(5)),
+      description: `SPS suppression search-index reconciler -- ${cadenceMin} min cadence (${env}). #393.`,
+      schedule: events.Schedule.rate(Duration.minutes(cadenceMin)),
       enabled: envConfig.reconcileScheduleEnabled,
     });
     reconcileRule.addTarget(
@@ -2831,7 +2838,7 @@ export class EtlStack extends Stack {
     const reconcileStatusAlarm = new cloudwatch.Alarm(this, "ReconcileStatusAlarm", {
       alarmName: `sps-reconcile-status-${env}`,
       alarmDescription: `SPS reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 hidden scholar or publication may still be showing in search results. Next: open the Step Functions execution for scholars-reconcile-${env} and read the failing row's logs. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.`,
-      metric: unsuccessfulMetric(reconcileDimensions, Duration.minutes(15)),
+      metric: unsuccessfulMetric(reconcileDimensions, reconcileStatusWindow),
       // Require ~30 min of sustained failure (2 consecutive 15 min windows)
       // before alerting. The reconciler runs every 5 min and is idempotent,
       // so a single failed run self-heals on the next fire and is not worth a
@@ -2850,12 +2857,12 @@ export class EtlStack extends Stack {
 
     const reconcileCadenceAlarm = new cloudwatch.Alarm(this, "ReconcileCadenceAlarm", {
       alarmName: `sps-reconcile-cadence-${env}`,
-      alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
+      alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in ${3 * cadenceMin} min = 3 missed ${cadenceMin} min fires). Next: confirm the rate(${cadenceMin} min) rule is enabled and the state-machine IAM is intact.`,
       metric: new cloudwatch.Metric({
         namespace: "AWS/States",
         metricName: "ExecutionsStarted",
         statistic: cloudwatch.Stats.SUM,
-        period: Duration.minutes(15),
+        period: reconcileCadenceWindow,
         dimensionsMap: reconcileDimensions,
       }),
       evaluationPeriods: 1,
@@ -3083,8 +3090,8 @@ export class EtlStack extends Stack {
     // DLQ is wanted.
     const cdnReconcileRule = new events.Rule(this, "CdnReconcileScheduleRule", {
       ruleName: `sps-cdn-reconcile-${env}`,
-      description: `SPS CloudFront-invalidation reconciler -- 5 min cadence (${env}). #353.`,
-      schedule: events.Schedule.rate(Duration.minutes(5)),
+      description: `SPS CloudFront-invalidation reconciler -- ${cadenceMin} min cadence (${env}). #353.`,
+      schedule: events.Schedule.rate(Duration.minutes(cadenceMin)),
       enabled: envConfig.cdnReconcileScheduleEnabled,
     });
     cdnReconcileRule.addTarget(
@@ -3103,7 +3110,7 @@ export class EtlStack extends Stack {
     const cdnReconcileStatusAlarm = new cloudwatch.Alarm(this, "CdnReconcileStatusAlarm", {
       alarmName: `sps-cdn-reconcile-status-${env}`,
       alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 edited page may still be serving its old cached version to the public. Next: open the Step Functions execution for scholars-cdn-reconcile-${env} and read the failing purge's logs. It replays on the next run once CloudFront accepts it.`,
-      metric: unsuccessfulMetric(cdnReconcileDimensions, Duration.minutes(15)),
+      metric: unsuccessfulMetric(cdnReconcileDimensions, reconcileStatusWindow),
       // Require ~30 min of sustained failure (2 consecutive 15 min windows)
       // before alerting. The reconciler runs every 5 min and is idempotent,
       // so a single failed run self-heals on the next fire and is not worth a
@@ -3121,12 +3128,12 @@ export class EtlStack extends Stack {
 
     const cdnReconcileCadenceAlarm = new cloudwatch.Alarm(this, "CdnReconcileCadenceAlarm", {
       alarmName: `sps-cdn-reconcile-cadence-${env}`,
-      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
+      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in ${3 * cadenceMin} min = 3 missed ${cadenceMin} min fires). Next: confirm the rate(${cadenceMin} min) rule is enabled and the state-machine IAM is intact.`,
       metric: new cloudwatch.Metric({
         namespace: "AWS/States",
         metricName: "ExecutionsStarted",
         statistic: cloudwatch.Stats.SUM,
-        period: Duration.minutes(15),
+        period: reconcileCadenceWindow,
         dimensionsMap: cdnReconcileDimensions,
       }),
       evaluationPeriods: 1,

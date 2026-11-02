@@ -223,6 +223,14 @@ export interface SpsEnvConfig {
    */
   readonly cdnReconcileScheduleEnabled: boolean;
   /**
+   * Minutes between fires of both reconcilers (#393 + #353). Prod holds the
+   * ADR-005 v1 contract (<= 5 min reconciliation lag). Staging has no such
+   * contract and runs hourly: every fire is a Fargate task, and the ENI churn
+   * from ~1,150 tasks/day across both envs was most of the account's AWS
+   * Config bill. Alarm windows in etl-stack scale with this value.
+   */
+  readonly reconcileCadenceMinutes: number;
+  /**
    * Whether the EventBridge rule that fires the daily curated-tables logical
    * backup (`backup:curated`, #1032 — a read-only mysqldump-equivalent of the
    * hand-curated org-unit + methods/tools-overlay tables to the curation backup
@@ -656,6 +664,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #353 -- continuous CloudFront-invalidation reconciler backstop; enabled
     // both envs (empty-queue-safe pre-launch). See flag JSDoc.
     cdnReconcileScheduleEnabled: true,
+    // Hourly: no ADR-005 lag contract in staging. See JSDoc.
+    reconcileCadenceMinutes: 60,
     // #1032 — daily curated-tables logical backup; enabled in staging (the
     // backup is live + verified here). Read-only + tiny, so safe from launch.
     curationBackupScheduleEnabled: true,
@@ -823,6 +833,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // launch too (empty-queue-safe; no-ops until SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID
     // is set). See flag JSDoc.
     cdnReconcileScheduleEnabled: true,
+    // ADR-005 v1: <= 5 min reconciliation lag. See JSDoc.
+    reconcileCadenceMinutes: 5,
     // #1032 — curated-tables backup NOT YET ACTIVATED on prod. Ships disabled:
     // the prod bucket/grant/env don't exist until `cdk deploy Sps-Etl-prod`, so
     // the rule would target a task def without CURATION_BACKUP_BUCKET. Activate
