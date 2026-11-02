@@ -144,6 +144,9 @@ export function staleSources(
 // rows whose input hash still matches are skipped. Staging 2026-10-31: the
 // 3,683-row backfill, then 6 on the first nightly, which failed this guard. All
 // calls failing throws on its own.
+// FundableWork (etl/fundable-work) scores each work once and skips any already in
+// `fundable_work`, so it returns NEWLY scored rows. Staging 2026-11-02: the
+// 1,402-row backfill, then 71 on a normal night, which failed this guard.
 export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "News",
   "NewsClips",
@@ -151,6 +154,7 @@ export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "ReciterAI-area-signals",
   "ORCID-push",
   "CenterPubRelevance",
+  "FundableWork",
 ]);
 
 /**

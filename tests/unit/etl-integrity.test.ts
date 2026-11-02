@@ -157,6 +157,14 @@ describe("findVolumeRegressions — change-count sources (#2200)", () => {
     expect(out).toHaveLength(0);
   });
 
+  it("exempts FundableWork, which counts only newly scored works", () => {
+    const out = findVolumeRegressions(
+      [{ source: "FundableWork", latest: 71, previous: 1402, latestAt: hoursAgo(1) }],
+      { now: NOW },
+    );
+    expect(out).toHaveLength(0);
+  });
+
   it("exempts by exact source name, so a lookalike is still graded", () => {
     expect(CHANGE_COUNT_SOURCES.has("News")).toBe(true);
     const out = findVolumeRegressions(
