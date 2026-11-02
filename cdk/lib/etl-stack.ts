@@ -2603,7 +2603,10 @@ export class EtlStack extends Stack {
     //
     // The container wraps the unchanged one-shot worker in a shell loop, so
     // each pass is still its own process (withEtlRun / processStartedAt
-    // semantics hold) and its exit code still means pass/fail. Sleeping 240s
+    // semantics hold) and its exit code still means pass/fail. As under Step
+    // Functions, each attempt is capped at 4 min (`timeout 240`, so a hung
+    // worker can't stall the loop for good) and a failed attempt is retried
+    // once after 30s before the pass counts as failed. Sleeping 240s
     // after a pass keeps the start-to-start gap under the ADR-005 v1 5 min lag
     // contract. The trap + backgrounded sleep let SIGTERM end the loop between
     // passes; a pass in flight finishes first (stopTimeout below).
@@ -2615,7 +2618,9 @@ export class EtlStack extends Stack {
     const reconcileLoopCommand = (job: string, npmScript: string): string[] => [
       "sh",
       "-c",
-      `trap 'exit 0' TERM; while :; do npm run --silent ${npmScript}; ` +
+      `trap 'exit 0' TERM; while :; do ` +
+        `timeout 240 npm run --silent ${npmScript} || ` +
+        `{ sleep 30; timeout 240 npm run --silent ${npmScript}; }; ` +
         `echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"${job}\\",\\"exitCode\\":$?}"; ` +
         `sleep 240 & wait $!; done`,
     ];

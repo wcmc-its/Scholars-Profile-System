@@ -979,7 +979,10 @@ describe("EtlStack", () => {
           td?.Properties?.ContainerDefinitions as Array<{ Command?: string[] }>
         )[0].Command;
         expect(command?.slice(0, 2)).toEqual(["sh", "-c"]);
-        expect(command?.[2]).toContain("npm run --silent search:reconcile;");
+        // 4 min cap per attempt, one retry, as the old Step Functions task had.
+    expect(command?.[2]).toContain(
+      "timeout 240 npm run --silent search:reconcile || { sleep 30; timeout 240 npm run --silent search:reconcile; };",
+    );
         expect(command?.[2]).toContain('\\"event\\":\\"reconcile_pass\\"');
         expect(command?.[2]).toContain("sleep 240 & wait $!");
         expect(command?.[2]).toContain("trap 'exit 0' TERM");
@@ -1152,7 +1155,10 @@ describe("EtlStack", () => {
           td?.Properties?.ContainerDefinitions as Array<{ Command?: string[] }>
         )[0].Command;
         expect(command?.slice(0, 2)).toEqual(["sh", "-c"]);
-        expect(command?.[2]).toContain("npm run --silent cdn:reconcile;");
+        // 4 min cap per attempt, one retry, as the old Step Functions task had.
+    expect(command?.[2]).toContain(
+      "timeout 240 npm run --silent cdn:reconcile || { sleep 30; timeout 240 npm run --silent cdn:reconcile; };",
+    );
         expect(command?.[2]).toContain('\\"event\\":\\"reconcile_pass\\"');
         expect(command?.[2]).toContain("sleep 240 & wait $!");
         expect(command?.[2]).toContain("trap 'exit 0' TERM");

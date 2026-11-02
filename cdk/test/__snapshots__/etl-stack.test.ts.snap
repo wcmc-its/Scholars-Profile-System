@@ -1115,7 +1115,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Command": [
               "sh",
               "-c",
-              "trap 'exit 0' TERM; while :; do npm run --silent cdn:reconcile; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"cdn\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent cdn:reconcile || { sleep 30; timeout 240 npm run --silent cdn:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"cdn\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
             ],
             "Environment": [
               {
@@ -8867,7 +8867,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Command": [
               "sh",
               "-c",
-              "trap 'exit 0' TERM; while :; do npm run --silent search:reconcile; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"search\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent search:reconcile || { sleep 30; timeout 240 npm run --silent search:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"search\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
             ],
             "Environment": [
               {
@@ -11425,7 +11425,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Command": [
               "sh",
               "-c",
-              "trap 'exit 0' TERM; while :; do npm run --silent cdn:reconcile; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"cdn\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent cdn:reconcile || { sleep 30; timeout 240 npm run --silent cdn:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"cdn\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
             ],
             "Environment": [
               {
@@ -20321,7 +20321,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Command": [
               "sh",
               "-c",
-              "trap 'exit 0' TERM; while :; do npm run --silent search:reconcile; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"search\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent search:reconcile || { sleep 30; timeout 240 npm run --silent search:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"search\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
             ],
             "Environment": [
               {

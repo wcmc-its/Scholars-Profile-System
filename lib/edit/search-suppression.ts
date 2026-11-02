@@ -133,7 +133,7 @@ export type ReflectSearchSuppressionArgs = {
  *
  * The reconciler now counts `ok && !stamped` as a FAILED row, so a
  * non-advancing sentinel exits the worker non-zero and reaches the existing
- * `sps-reconcile-status-<env>` ExecutionsFailed alarm. That is the alarm
+ * `sps-reconcile-status-<env>` failed-pass alarm. That is the alarm
  * inversion #2204 asks for: it pages when the sentinel stops advancing, for
  * ANY cause, rather than on an error string.
  */
