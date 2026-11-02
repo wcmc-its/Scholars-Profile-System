@@ -241,6 +241,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "honor/tier": "deny",
   "honor/verify": "deny",
   matcha: "deny",
+  "matcha/brief": "deny",
   "mentee-suggestions/[id]/dismiss": "deny",
   "mentee-suggestions/[id]/restore": "deny",
   "methods/families/review": "allow",

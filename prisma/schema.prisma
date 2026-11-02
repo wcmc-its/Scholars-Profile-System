@@ -4903,6 +4903,11 @@ model SponsorMatchSubmission {
   /// string would read as a title rather than the absence of one.
   title String? @db.VarChar(512)
 
+  /// The officer's own name for the search (Rename), shown in place of `title`. Kept separate so
+  /// the generated `title` is never overwritten and clearing the rename restores it. Applied to
+  /// every row of a `descriptionHash`, like DELETE, because Recent shows one entry per paste.
+  titleOverride String? @map("title_override") @db.VarChar(120)
+
   /// Which engine answered — spine or bespoke. A submission's results are not interpretable
   /// without it.
   engine String @db.VarChar(16)
@@ -4937,6 +4942,32 @@ model SponsorMatchSubmission {
   @@index([submittedBy])
   @@index([descriptionHash])
   @@map("sponsor_match_submission")
+}
+
+/// Matcha Phase 3 — one PI's brief for one ASK (`lib/api/matcha-brief.ts`).
+///
+/// Keyed on the PASTE (`descriptionHash`, the same digest as `SponsorMatchSubmission`), not on a
+/// submission row: every replay or Re-run writes a new submission row, and a brief the officer
+/// edited must survive both. No FK for the same reason (the hash is not unique there); DELETE of
+/// a paste removes its briefs explicitly, alongside its submission rows.
+model MatchaBrief {
+  id              String   @id @default(uuid()) @db.VarChar(64)
+  descriptionHash String   @map("description_hash") @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  /// `BriefGenerated`: the model's `why` + anchored `topics`, after fact-check and post-check.
+  generated       Json
+  /// `BriefEdited`: the officer's version of any section; a present field wins. NULL = unedited.
+  edited          Json?
+  /// Free-text note. Never generated, never exported.
+  note            String?  @db.Text
+  model           String   @db.VarChar(64)
+  /// EFFECTIVE actor cwid of the last draft.
+  createdBy       String   @map("created_by") @db.VarChar(32)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([descriptionHash, cwid])
+  @@map("matcha_brief")
 }
 
 

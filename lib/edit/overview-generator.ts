@@ -1245,6 +1245,9 @@ export async function verifyDraftGrounding(
     permitSignificance?: boolean;
     permitBibliometrics?: boolean;
     productRefs?: readonly BiosketchProductRef[];
+    /** Extra ALLOWED_FACTS lines appended after the facts reference (Matcha brief: the ask's
+     *  concept list, so "meets the ask's X concept" is not flagged). Absent ⇒ byte-identical. */
+    extraReference?: string;
   },
 ): Promise<UngroundedSpan[]> {
   const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_GENERATE_MODEL;
@@ -1264,6 +1267,7 @@ export async function verifyDraftGrounding(
     "",
     "<ALLOWED_FACTS>",
     buildGroundingReference(facts, { permitSynopsisFindings, permitSignificance, permitBibliometrics, productRefs }),
+    ...(opts?.extraReference ? ["", opts.extraReference] : []),
     "</ALLOWED_FACTS>",
   ].join("\n");
   const draft = ["Here is the DRAFT to fact-check:", "", "<DRAFT>", prose, "</DRAFT>"].join("\n");

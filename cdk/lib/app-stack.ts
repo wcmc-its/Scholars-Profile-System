@@ -1729,6 +1729,12 @@ export class AppStack extends Stack {
         // columns), so flag-off leaves any already-suppressed rows suppressed in reads — the
         // flag gates the WRITE surface, not the read filters.
         MATCHA_ADMIN: env === "staging" ? "on" : "off",
+        // MATCHA_BRIEF — Matcha Phase 3 per-PI briefs on /edit/matcha (`/api/edit/matcha/brief`,
+        // `lib/api/matcha-brief.ts`): a Sonnet-drafted, fact-checked "why this PI" + discussion
+        // topics, drafted on demand by a superuser/developer. Read via isMatchaBriefEnabled()
+        // (=== "on"); the route 404s while off. DEPENDS ON MATCHA (on in both envs). ON in staging;
+        // OFF in prod until the staging eyeball. Flag-off hides the surface; stored briefs remain.
+        MATCHA_BRIEF: env === "staging" ? "on" : "off",
         // FUNDABLE_WORK — /edit/fundable-work: WCM conference abstracts + preprints scored for
         // private-funding potential (etl/fundable-work, weekly). Read via isFundableWorkEnabled();
         // the page notFound()s while off. ON in BOTH envs since 2026-10-28 — CTL (Bellush) reviews
