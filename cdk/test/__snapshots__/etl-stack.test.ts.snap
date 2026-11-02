@@ -13,10 +13,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Description": "SPS bulk-data-rule pipeline Fargate task family — manually triggered via run-task, no cadence step launches it.",
       "Value": "sps-bulk-data-rule-prod",
     },
-    "CdnReconcileStateMachineArn": {
-      "Description": "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
+    "CdnReconcileServiceName": {
+      "Description": "SPS CloudFront-invalidation reconciler ECS service (#353).",
       "Value": {
-        "Ref": "CdnReconcileStateMachine10F988AB",
+        "Fn::GetAtt": [
+          "CdnReconcileServiceDA36AAF5",
+          "Name",
+        ],
       },
     },
     "CurationBackupBucketName": {
@@ -65,10 +68,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Ref": "NightlyStateMachineFAE492F4",
       },
     },
-    "ReconcileStateMachineArn": {
-      "Description": "SPS suppression search-index reconciler state machine ARN (#393).",
+    "ReconcileServiceName": {
+      "Description": "SPS suppression search-index reconciler ECS service (#393).",
       "Value": {
-        "Ref": "ReconcileStateMachine012717A8",
+        "Fn::GetAtt": [
+          "ReconcileService1E1E61B7",
+          "Name",
+        ],
       },
     },
     "WeeklyStateMachineArn": {
@@ -979,26 +985,34 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- cadence missed (no pass logged in 15 min, ~3 missed passes). Next: check the sps-cdn-reconcile-prod ECS service has a running task and read its logs.",
         "AlarmName": "sps-cdn-reconcile-cadence-prod",
         "ComparisonOperator": "LessThanThreshold",
-        "Dimensions": [
-          {
-            "Name": "StateMachineArn",
-            "Value": {
-              "Ref": "CdnReconcileStateMachine10F988AB",
-            },
-          },
-        ],
         "EvaluationPeriods": 1,
-        "MetricName": "ExecutionsStarted",
-        "Namespace": "AWS/States",
+        "MetricName": "CdnPasses",
+        "Namespace": "SPS/Reconcile/prod",
         "Period": 900,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "CdnReconcileFailuresFilter42267BCC": {
+      "Properties": {
+        "FilterPattern": "{ $.event = "reconcile_pass" && $.exitCode != 0 }",
+        "LogGroupName": {
+          "Ref": "CdnReconcileLogGroup13EF4727",
+        },
+        "MetricTransformations": [
+          {
+            "MetricName": "CdnFailures",
+            "MetricNamespace": "SPS/Reconcile/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "CdnReconcileLogGroup13EF4727": {
       "DeletionPolicy": "Retain",
@@ -1009,388 +1023,69 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
     },
-    "CdnReconcileScheduleRule5A707152": {
+    "CdnReconcilePassesFilter4D9A78DE": {
       "Properties": {
-        "Description": "SPS CloudFront-invalidation reconciler -- 5 min cadence (prod). #353.",
-        "Name": "sps-cdn-reconcile-prod",
-        "ScheduleExpression": "rate(5 minutes)",
-        "State": "ENABLED",
-        "Targets": [
+        "FilterPattern": "{ $.event = "reconcile_pass" }",
+        "LogGroupName": {
+          "Ref": "CdnReconcileLogGroup13EF4727",
+        },
+        "MetricTransformations": [
           {
-            "Arn": {
-              "Ref": "CdnReconcileStateMachine10F988AB",
-            },
-            "Id": "Target0",
-            "Input": "{}",
-            "RetryPolicy": {
-              "MaximumRetryAttempts": 0,
-            },
-            "RoleArn": {
-              "Fn::GetAtt": [
-                "CdnReconcileStateMachineEventsRole39C5BDD1",
-                "Arn",
-              ],
-            },
+            "MetricName": "CdnPasses",
+            "MetricNamespace": "SPS/Reconcile/prod",
+            "MetricValue": "1",
           },
         ],
       },
-      "Type": "AWS::Events::Rule",
+      "Type": "AWS::Logs::MetricFilter",
     },
-    "CdnReconcileSmLogGroup6C334FF5": {
-      "DeletionPolicy": "Retain",
-      "Properties": {
-        "LogGroupName": "/aws/states/cdn-reconcile-prod",
-        "RetentionInDays": 90,
-      },
-      "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Retain",
-    },
-    "CdnReconcileStateMachine10F988AB": {
-      "DeletionPolicy": "Delete",
+    "CdnReconcileServiceDA36AAF5": {
       "DependsOn": [
-        "CdnReconcileStateMachineRoleDefaultPolicy6CCB940C",
-        "CdnReconcileStateMachineRoleCE4985A9",
+        "CdnReconcileTaskRoleDefaultPolicy54D071DB",
+        "CdnReconcileTaskRole86EE566B",
       ],
       "Properties": {
-        "DefinitionString": {
-          "Fn::Join": [
-            "",
-            [
-              "{"StartAt":"TaskCdnReconcile","States":{"TaskCdnReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCdnReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
-              {
-                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
-              },
-              "","TaskDefinition":"sps-cdn-reconcile-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"cdn-reconcile","Command":["npm","run","cdn:reconcile"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCdnReconcile":{"Next":"FailCdnReconcile","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-              "","Message":{"env":"prod","step":"CdnReconcile","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS CloudFront-invalidation reconciler prod -- run failed"}},"FailCdnReconcile":{"Type":"Fail","Cause":"cdn reconcile run failed"}},"TimeoutSeconds":900}",
+        "Cluster": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcsCluster97242B84553A5D8F",
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false,
+          },
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true,
+          },
+          "MaximumPercent": 100,
+          "MinimumHealthyPercent": 0,
+        },
+        "DeploymentController": {
+          "Type": "ECS",
+        },
+        "DesiredCount": 1,
+        "EnableECSManagedTags": false,
+        "LaunchType": "FARGATE",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "SecurityGroups": [
+              "sg-03babbb300ddb3b95",
             ],
-          ],
-        },
-        "LoggingConfiguration": {
-          "Destinations": [
-            {
-              "CloudWatchLogsLogGroup": {
-                "LogGroupArn": {
-                  "Fn::GetAtt": [
-                    "CdnReconcileSmLogGroup6C334FF5",
-                    "Arn",
-                  ],
-                },
-              },
-            },
-          ],
-          "IncludeExecutionData": false,
-          "Level": "ERROR",
-        },
-        "RoleArn": {
-          "Fn::GetAtt": [
-            "CdnReconcileStateMachineRoleCE4985A9",
-            "Arn",
-          ],
-        },
-        "StateMachineName": "scholars-cdn-reconcile-prod",
-        "StateMachineType": "STANDARD",
-        "TracingConfiguration": {
-          "Enabled": true,
-        },
-      },
-      "Type": "AWS::StepFunctions::StateMachine",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "CdnReconcileStateMachineEventsRole39C5BDD1": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "events.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "CdnReconcileStateMachineEventsRoleDefaultPolicy4E15E4D2": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "states:StartExecution",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "CdnReconcileStateMachine10F988AB",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "CdnReconcileStateMachineEventsRoleDefaultPolicy4E15E4D2",
-        "Roles": [
-          {
-            "Ref": "CdnReconcileStateMachineEventsRole39C5BDD1",
+            "Subnets": [
+              "subnet-0c6593fb9c9a165c3",
+              "subnet-070cbc242efbddc3c",
+            ],
           },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
-    },
-    "CdnReconcileStateMachineRoleCE4985A9": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Condition": {
-                "ArnLike": {
-                  "aws:SourceArn": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":states:us-east-1:123456789012:stateMachine:*",
-                      ],
-                    ],
-                  },
-                },
-                "StringEquals": {
-                  "aws:SourceAccount": "123456789012",
-                },
-              },
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "states.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
+        },
+        "PlatformVersion": "LATEST",
+        "ServiceName": "sps-cdn-reconcile-prod",
+        "TaskDefinition": {
+          "Ref": "CdnReconcileTaskDefinitionCCC71823",
         },
       },
-      "Type": "AWS::IAM::Role",
-    },
-    "CdnReconcileStateMachineRoleDefaultPolicy6CCB940C": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "ecs:RunTask",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        2,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        3,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        4,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        0,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    "/",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":*",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "ecs:StopTask",
-                "ecs:DescribeTasks",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": "iam:PassRole",
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "CdnReconcileTaskRole86EE566B",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "CdnReconcileTaskExecutionRole3C7609C6",
-                    "Arn",
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "events:PutTargets",
-                "events:PutRule",
-                "events:DescribeRule",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogDelivery",
-                "logs:GetLogDelivery",
-                "logs:UpdateLogDelivery",
-                "logs:DeleteLogDelivery",
-                "logs:ListLogDeliveries",
-                "logs:PutResourcePolicy",
-                "logs:DescribeResourcePolicies",
-                "logs:DescribeLogGroups",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": [
-                "xray:PutTraceSegments",
-                "xray:PutTelemetryRecords",
-                "xray:GetSamplingRules",
-                "xray:GetSamplingTargets",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "CdnReconcileStateMachineRoleDefaultPolicy6CCB940C",
-        "Roles": [
-          {
-            "Ref": "CdnReconcileStateMachineRoleCE4985A9",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::ECS::Service",
     },
     "CdnReconcileStatusAlarmF51DE961": {
       "Properties": {
@@ -1399,78 +1094,15 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 edited page may still be serving its old cached version to the public. Next: open the Step Functions execution for scholars-cdn-reconcile-prod and read the failing purge's logs. It replays on the next run once CloudFront accepts it.",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- passes have failed for ~30 min, so >=1 edited page may still be serving its old cached version to the public. Next: read the failing pass in /aws/ecs/sps-cdn-reconcile-prod. It replays on the next run once CloudFront accepts it.",
         "AlarmName": "sps-cdn-reconcile-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
         "EvaluationPeriods": 2,
-        "Metrics": [
-          {
-            "Expression": "failed + timedOut + aborted",
-            "Id": "expr_1",
-            "ReturnData": true,
-          },
-          {
-            "Id": "failed",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "CdnReconcileStateMachine10F988AB",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsFailed",
-                "Namespace": "AWS/States",
-              },
-              "Period": 900,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "timedOut",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "CdnReconcileStateMachine10F988AB",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsTimedOut",
-                "Namespace": "AWS/States",
-              },
-              "Period": 900,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "aborted",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "CdnReconcileStateMachine10F988AB",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsAborted",
-                "Namespace": "AWS/States",
-              },
-              "Period": 900,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-        ],
+        "MetricName": "CdnFailures",
+        "Namespace": "SPS/Reconcile/prod",
+        "Period": 900,
+        "Statistic": "Sum",
         "Threshold": 0,
         "TreatMissingData": "notBreaching",
       },
@@ -1480,6 +1112,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Properties": {
         "ContainerDefinitions": [
           {
+            "Command": [
+              "sh",
+              "-c",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent cdn:reconcile || { sleep 30; timeout 240 npm run --silent cdn:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"cdn\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+            ],
             "Environment": [
               {
                 "Name": "NODE_ENV",
@@ -1562,6 +1199,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
             ],
+            "StopTimeout": 120,
           },
         ],
         "Cpu": "256",
@@ -9100,26 +8738,34 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (prod) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
+        "AlarmDescription": "SPS reconciler (prod) -- cadence missed (no pass logged in 15 min, ~3 missed passes). Next: check the sps-reconcile-prod ECS service has a running task and read its logs.",
         "AlarmName": "sps-reconcile-cadence-prod",
         "ComparisonOperator": "LessThanThreshold",
-        "Dimensions": [
-          {
-            "Name": "StateMachineArn",
-            "Value": {
-              "Ref": "ReconcileStateMachine012717A8",
-            },
-          },
-        ],
         "EvaluationPeriods": 1,
-        "MetricName": "ExecutionsStarted",
-        "Namespace": "AWS/States",
+        "MetricName": "SearchPasses",
+        "Namespace": "SPS/Reconcile/prod",
         "Period": 900,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "ReconcileFailuresFilterB6319390": {
+      "Properties": {
+        "FilterPattern": "{ $.event = "reconcile_pass" && $.exitCode != 0 }",
+        "LogGroupName": {
+          "Ref": "ReconcileLogGroup1B0AF242",
+        },
+        "MetricTransformations": [
+          {
+            "MetricName": "SearchFailures",
+            "MetricNamespace": "SPS/Reconcile/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "ReconcileLogGroup1B0AF242": {
       "DeletionPolicy": "Retain",
@@ -9130,388 +8776,68 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
     },
-    "ReconcileScheduleRule268EEED3": {
+    "ReconcilePassesFilter0EE2E2E6": {
       "Properties": {
-        "Description": "SPS suppression search-index reconciler -- 5 min cadence (prod). #393.",
-        "Name": "sps-reconcile-prod",
-        "ScheduleExpression": "rate(5 minutes)",
-        "State": "ENABLED",
-        "Targets": [
+        "FilterPattern": "{ $.event = "reconcile_pass" }",
+        "LogGroupName": {
+          "Ref": "ReconcileLogGroup1B0AF242",
+        },
+        "MetricTransformations": [
           {
-            "Arn": {
-              "Ref": "ReconcileStateMachine012717A8",
-            },
-            "Id": "Target0",
-            "Input": "{}",
-            "RetryPolicy": {
-              "MaximumRetryAttempts": 0,
-            },
-            "RoleArn": {
-              "Fn::GetAtt": [
-                "ReconcileStateMachineEventsRoleA465C65B",
-                "Arn",
-              ],
-            },
+            "MetricName": "SearchPasses",
+            "MetricNamespace": "SPS/Reconcile/prod",
+            "MetricValue": "1",
           },
         ],
       },
-      "Type": "AWS::Events::Rule",
+      "Type": "AWS::Logs::MetricFilter",
     },
-    "ReconcileSmLogGroup3EB36094": {
-      "DeletionPolicy": "Retain",
-      "Properties": {
-        "LogGroupName": "/aws/states/reconcile-prod",
-        "RetentionInDays": 90,
-      },
-      "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Retain",
-    },
-    "ReconcileStateMachine012717A8": {
-      "DeletionPolicy": "Delete",
+    "ReconcileService1E1E61B7": {
       "DependsOn": [
-        "ReconcileStateMachineRoleDefaultPolicy14E214DB",
-        "ReconcileStateMachineRole84BCD2EF",
+        "ReconcileTaskRoleAF128E4E",
       ],
       "Properties": {
-        "DefinitionString": {
-          "Fn::Join": [
-            "",
-            [
-              "{"StartAt":"TaskReconcile","States":{"TaskReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
-              {
-                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
-              },
-              "","TaskDefinition":"sps-reconcile-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"reconcile","Command":["npm","run","search:reconcile"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReconcile":{"Next":"FailReconcile","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-              "","Message":{"env":"prod","step":"Reconcile","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS reconciler prod -- run failed"}},"FailReconcile":{"Type":"Fail","Cause":"reconcile run failed"}},"TimeoutSeconds":900}",
+        "Cluster": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcsCluster97242B84553A5D8F",
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false,
+          },
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true,
+          },
+          "MaximumPercent": 100,
+          "MinimumHealthyPercent": 0,
+        },
+        "DeploymentController": {
+          "Type": "ECS",
+        },
+        "DesiredCount": 1,
+        "EnableECSManagedTags": false,
+        "LaunchType": "FARGATE",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "SecurityGroups": [
+              "sg-03babbb300ddb3b95",
             ],
-          ],
-        },
-        "LoggingConfiguration": {
-          "Destinations": [
-            {
-              "CloudWatchLogsLogGroup": {
-                "LogGroupArn": {
-                  "Fn::GetAtt": [
-                    "ReconcileSmLogGroup3EB36094",
-                    "Arn",
-                  ],
-                },
-              },
-            },
-          ],
-          "IncludeExecutionData": false,
-          "Level": "ERROR",
-        },
-        "RoleArn": {
-          "Fn::GetAtt": [
-            "ReconcileStateMachineRole84BCD2EF",
-            "Arn",
-          ],
-        },
-        "StateMachineName": "scholars-reconcile-prod",
-        "StateMachineType": "STANDARD",
-        "TracingConfiguration": {
-          "Enabled": true,
-        },
-      },
-      "Type": "AWS::StepFunctions::StateMachine",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "ReconcileStateMachineEventsRoleA465C65B": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "events.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "ReconcileStateMachineEventsRoleDefaultPolicy8C721BA3": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "states:StartExecution",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "ReconcileStateMachine012717A8",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "ReconcileStateMachineEventsRoleDefaultPolicy8C721BA3",
-        "Roles": [
-          {
-            "Ref": "ReconcileStateMachineEventsRoleA465C65B",
+            "Subnets": [
+              "subnet-0c6593fb9c9a165c3",
+              "subnet-070cbc242efbddc3c",
+            ],
           },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
-    },
-    "ReconcileStateMachineRole84BCD2EF": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Condition": {
-                "ArnLike": {
-                  "aws:SourceArn": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":states:us-east-1:123456789012:stateMachine:*",
-                      ],
-                    ],
-                  },
-                },
-                "StringEquals": {
-                  "aws:SourceAccount": "123456789012",
-                },
-              },
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "states.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
+        },
+        "PlatformVersion": "LATEST",
+        "ServiceName": "sps-reconcile-prod",
+        "TaskDefinition": {
+          "Ref": "ReconcileTaskDefinitionDBA0B2ED",
         },
       },
-      "Type": "AWS::IAM::Role",
-    },
-    "ReconcileStateMachineRoleDefaultPolicy14E214DB": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "ecs:RunTask",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        2,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        3,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        4,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        0,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    "/",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":*",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "ecs:StopTask",
-                "ecs:DescribeTasks",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": "iam:PassRole",
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "ReconcileTaskRoleAF128E4E",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "ReconcileTaskExecutionRole623CD9F3",
-                    "Arn",
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "events:PutTargets",
-                "events:PutRule",
-                "events:DescribeRule",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogDelivery",
-                "logs:GetLogDelivery",
-                "logs:UpdateLogDelivery",
-                "logs:DeleteLogDelivery",
-                "logs:ListLogDeliveries",
-                "logs:PutResourcePolicy",
-                "logs:DescribeResourcePolicies",
-                "logs:DescribeLogGroups",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": [
-                "xray:PutTraceSegments",
-                "xray:PutTelemetryRecords",
-                "xray:GetSamplingRules",
-                "xray:GetSamplingTargets",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "ReconcileStateMachineRoleDefaultPolicy14E214DB",
-        "Roles": [
-          {
-            "Ref": "ReconcileStateMachineRole84BCD2EF",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::ECS::Service",
     },
     "ReconcileStatusAlarm49C1513A": {
       "Properties": {
@@ -9520,78 +8846,15 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (prod) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 hidden scholar or publication may still be showing in search results. Next: open the Step Functions execution for scholars-reconcile-prod and read the failing row's logs. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.",
+        "AlarmDescription": "SPS reconciler (prod) -- passes have failed for ~30 min, so >=1 hidden scholar or publication may still be showing in search results. Next: read the failing pass in /aws/ecs/sps-reconcile-prod. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.",
         "AlarmName": "sps-reconcile-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
         "EvaluationPeriods": 2,
-        "Metrics": [
-          {
-            "Expression": "failed + timedOut + aborted",
-            "Id": "expr_1",
-            "ReturnData": true,
-          },
-          {
-            "Id": "failed",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "ReconcileStateMachine012717A8",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsFailed",
-                "Namespace": "AWS/States",
-              },
-              "Period": 900,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "timedOut",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "ReconcileStateMachine012717A8",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsTimedOut",
-                "Namespace": "AWS/States",
-              },
-              "Period": 900,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "aborted",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "ReconcileStateMachine012717A8",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsAborted",
-                "Namespace": "AWS/States",
-              },
-              "Period": 900,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-        ],
+        "MetricName": "SearchFailures",
+        "Namespace": "SPS/Reconcile/prod",
+        "Period": 900,
+        "Statistic": "Sum",
         "Threshold": 0,
         "TreatMissingData": "notBreaching",
       },
@@ -9601,6 +8864,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Properties": {
         "ContainerDefinitions": [
           {
+            "Command": [
+              "sh",
+              "-c",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent search:reconcile || { sleep 30; timeout 240 npm run --silent search:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"search\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+            ],
             "Environment": [
               {
                 "Name": "NODE_ENV",
@@ -9724,6 +8992,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
             ],
+            "StopTimeout": 120,
           },
         ],
         "Cpu": "256",
@@ -11048,10 +10317,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Description": "SPS bulk-data-rule pipeline Fargate task family — manually triggered via run-task, no cadence step launches it.",
       "Value": "sps-bulk-data-rule-staging",
     },
-    "CdnReconcileStateMachineArn": {
-      "Description": "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
+    "CdnReconcileServiceName": {
+      "Description": "SPS CloudFront-invalidation reconciler ECS service (#353).",
       "Value": {
-        "Ref": "CdnReconcileStateMachine10F988AB",
+        "Fn::GetAtt": [
+          "CdnReconcileServiceDA36AAF5",
+          "Name",
+        ],
       },
     },
     "CurationBackupBucketName": {
@@ -11106,10 +10378,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "Ref": "NightlyStateMachineFAE492F4",
       },
     },
-    "ReconcileStateMachineArn": {
-      "Description": "SPS suppression search-index reconciler state machine ARN (#393).",
+    "ReconcileServiceName": {
+      "Description": "SPS suppression search-index reconciler ECS service (#393).",
       "Value": {
-        "Ref": "ReconcileStateMachine012717A8",
+        "Fn::GetAtt": [
+          "ReconcileService1E1E61B7",
+          "Name",
+        ],
       },
     },
     "WeeklyStateMachineArn": {
@@ -12020,26 +11295,34 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- cadence missed (no execution started in 180 min = 3 missed 60 min fires). Next: confirm the rate(60 min) rule is enabled and the state-machine IAM is intact.",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- cadence missed (no pass logged in 15 min, ~3 missed passes). Next: check the sps-cdn-reconcile-staging ECS service has a running task and read its logs.",
         "AlarmName": "sps-cdn-reconcile-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
-        "Dimensions": [
-          {
-            "Name": "StateMachineArn",
-            "Value": {
-              "Ref": "CdnReconcileStateMachine10F988AB",
-            },
-          },
-        ],
         "EvaluationPeriods": 1,
-        "MetricName": "ExecutionsStarted",
-        "Namespace": "AWS/States",
-        "Period": 10800,
+        "MetricName": "CdnPasses",
+        "Namespace": "SPS/Reconcile/staging",
+        "Period": 900,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "CdnReconcileFailuresFilter42267BCC": {
+      "Properties": {
+        "FilterPattern": "{ $.event = "reconcile_pass" && $.exitCode != 0 }",
+        "LogGroupName": {
+          "Ref": "CdnReconcileLogGroup13EF4727",
+        },
+        "MetricTransformations": [
+          {
+            "MetricName": "CdnFailures",
+            "MetricNamespace": "SPS/Reconcile/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "CdnReconcileLogGroup13EF4727": {
       "DeletionPolicy": "Retain",
@@ -12050,388 +11333,69 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
     },
-    "CdnReconcileScheduleRule5A707152": {
+    "CdnReconcilePassesFilter4D9A78DE": {
       "Properties": {
-        "Description": "SPS CloudFront-invalidation reconciler -- 60 min cadence (staging). #353.",
-        "Name": "sps-cdn-reconcile-staging",
-        "ScheduleExpression": "rate(1 hour)",
-        "State": "ENABLED",
-        "Targets": [
+        "FilterPattern": "{ $.event = "reconcile_pass" }",
+        "LogGroupName": {
+          "Ref": "CdnReconcileLogGroup13EF4727",
+        },
+        "MetricTransformations": [
           {
-            "Arn": {
-              "Ref": "CdnReconcileStateMachine10F988AB",
-            },
-            "Id": "Target0",
-            "Input": "{}",
-            "RetryPolicy": {
-              "MaximumRetryAttempts": 0,
-            },
-            "RoleArn": {
-              "Fn::GetAtt": [
-                "CdnReconcileStateMachineEventsRole39C5BDD1",
-                "Arn",
-              ],
-            },
+            "MetricName": "CdnPasses",
+            "MetricNamespace": "SPS/Reconcile/staging",
+            "MetricValue": "1",
           },
         ],
       },
-      "Type": "AWS::Events::Rule",
+      "Type": "AWS::Logs::MetricFilter",
     },
-    "CdnReconcileSmLogGroup6C334FF5": {
-      "DeletionPolicy": "Retain",
-      "Properties": {
-        "LogGroupName": "/aws/states/cdn-reconcile-staging",
-        "RetentionInDays": 30,
-      },
-      "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Retain",
-    },
-    "CdnReconcileStateMachine10F988AB": {
-      "DeletionPolicy": "Delete",
+    "CdnReconcileServiceDA36AAF5": {
       "DependsOn": [
-        "CdnReconcileStateMachineRoleDefaultPolicy6CCB940C",
-        "CdnReconcileStateMachineRoleCE4985A9",
+        "CdnReconcileTaskRoleDefaultPolicy54D071DB",
+        "CdnReconcileTaskRole86EE566B",
       ],
       "Properties": {
-        "DefinitionString": {
-          "Fn::Join": [
-            "",
-            [
-              "{"StartAt":"TaskCdnReconcile","States":{"TaskCdnReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCdnReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
-              {
-                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
-              },
-              "","TaskDefinition":"sps-cdn-reconcile-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"cdn-reconcile","Command":["npm","run","cdn:reconcile"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCdnReconcile":{"Next":"FailCdnReconcile","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-              "","Message":{"env":"staging","step":"CdnReconcile","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS CloudFront-invalidation reconciler staging -- run failed"}},"FailCdnReconcile":{"Type":"Fail","Cause":"cdn reconcile run failed"}},"TimeoutSeconds":900}",
+        "Cluster": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcsCluster97242B84553A5D8F",
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false,
+          },
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true,
+          },
+          "MaximumPercent": 100,
+          "MinimumHealthyPercent": 0,
+        },
+        "DeploymentController": {
+          "Type": "ECS",
+        },
+        "DesiredCount": 1,
+        "EnableECSManagedTags": false,
+        "LaunchType": "FARGATE",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "SecurityGroups": [
+              "sg-016b62e11314e7050",
             ],
-          ],
-        },
-        "LoggingConfiguration": {
-          "Destinations": [
-            {
-              "CloudWatchLogsLogGroup": {
-                "LogGroupArn": {
-                  "Fn::GetAtt": [
-                    "CdnReconcileSmLogGroup6C334FF5",
-                    "Arn",
-                  ],
-                },
-              },
-            },
-          ],
-          "IncludeExecutionData": false,
-          "Level": "ERROR",
-        },
-        "RoleArn": {
-          "Fn::GetAtt": [
-            "CdnReconcileStateMachineRoleCE4985A9",
-            "Arn",
-          ],
-        },
-        "StateMachineName": "scholars-cdn-reconcile-staging",
-        "StateMachineType": "STANDARD",
-        "TracingConfiguration": {
-          "Enabled": true,
-        },
-      },
-      "Type": "AWS::StepFunctions::StateMachine",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "CdnReconcileStateMachineEventsRole39C5BDD1": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "events.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "CdnReconcileStateMachineEventsRoleDefaultPolicy4E15E4D2": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "states:StartExecution",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "CdnReconcileStateMachine10F988AB",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "CdnReconcileStateMachineEventsRoleDefaultPolicy4E15E4D2",
-        "Roles": [
-          {
-            "Ref": "CdnReconcileStateMachineEventsRole39C5BDD1",
+            "Subnets": [
+              "subnet-0c6593fb9c9a165c3",
+              "subnet-070cbc242efbddc3c",
+            ],
           },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
-    },
-    "CdnReconcileStateMachineRoleCE4985A9": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Condition": {
-                "ArnLike": {
-                  "aws:SourceArn": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":states:us-east-1:123456789012:stateMachine:*",
-                      ],
-                    ],
-                  },
-                },
-                "StringEquals": {
-                  "aws:SourceAccount": "123456789012",
-                },
-              },
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "states.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
+        },
+        "PlatformVersion": "LATEST",
+        "ServiceName": "sps-cdn-reconcile-staging",
+        "TaskDefinition": {
+          "Ref": "CdnReconcileTaskDefinitionCCC71823",
         },
       },
-      "Type": "AWS::IAM::Role",
-    },
-    "CdnReconcileStateMachineRoleDefaultPolicy6CCB940C": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "ecs:RunTask",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        2,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        3,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        4,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        0,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    "/",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "CdnReconcileTaskDefinitionCCC71823",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":*",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "ecs:StopTask",
-                "ecs:DescribeTasks",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": "iam:PassRole",
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "CdnReconcileTaskRole86EE566B",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "CdnReconcileTaskExecutionRole3C7609C6",
-                    "Arn",
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "events:PutTargets",
-                "events:PutRule",
-                "events:DescribeRule",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogDelivery",
-                "logs:GetLogDelivery",
-                "logs:UpdateLogDelivery",
-                "logs:DeleteLogDelivery",
-                "logs:ListLogDeliveries",
-                "logs:PutResourcePolicy",
-                "logs:DescribeResourcePolicies",
-                "logs:DescribeLogGroups",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": [
-                "xray:PutTraceSegments",
-                "xray:PutTelemetryRecords",
-                "xray:GetSamplingRules",
-                "xray:GetSamplingTargets",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "CdnReconcileStateMachineRoleDefaultPolicy6CCB940C",
-        "Roles": [
-          {
-            "Ref": "CdnReconcileStateMachineRoleCE4985A9",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::ECS::Service",
     },
     "CdnReconcileStatusAlarmF51DE961": {
       "Properties": {
@@ -12440,78 +11404,15 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 edited page may still be serving its old cached version to the public. Next: open the Step Functions execution for scholars-cdn-reconcile-staging and read the failing purge's logs. It replays on the next run once CloudFront accepts it.",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- passes have failed for ~30 min, so >=1 edited page may still be serving its old cached version to the public. Next: read the failing pass in /aws/ecs/sps-cdn-reconcile-staging. It replays on the next run once CloudFront accepts it.",
         "AlarmName": "sps-cdn-reconcile-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
         "EvaluationPeriods": 2,
-        "Metrics": [
-          {
-            "Expression": "failed + timedOut + aborted",
-            "Id": "expr_1",
-            "ReturnData": true,
-          },
-          {
-            "Id": "failed",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "CdnReconcileStateMachine10F988AB",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsFailed",
-                "Namespace": "AWS/States",
-              },
-              "Period": 3600,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "timedOut",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "CdnReconcileStateMachine10F988AB",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsTimedOut",
-                "Namespace": "AWS/States",
-              },
-              "Period": 3600,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "aborted",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "CdnReconcileStateMachine10F988AB",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsAborted",
-                "Namespace": "AWS/States",
-              },
-              "Period": 3600,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-        ],
+        "MetricName": "CdnFailures",
+        "Namespace": "SPS/Reconcile/staging",
+        "Period": 900,
+        "Statistic": "Sum",
         "Threshold": 0,
         "TreatMissingData": "notBreaching",
       },
@@ -12521,6 +11422,11 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Properties": {
         "ContainerDefinitions": [
           {
+            "Command": [
+              "sh",
+              "-c",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent cdn:reconcile || { sleep 30; timeout 240 npm run --silent cdn:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"cdn\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+            ],
             "Environment": [
               {
                 "Name": "NODE_ENV",
@@ -12603,6 +11509,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
             ],
+            "StopTimeout": 120,
           },
         ],
         "Cpu": "256",
@@ -21285,26 +20192,34 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (staging) -- cadence missed (no execution started in 180 min = 3 missed 60 min fires). Next: confirm the rate(60 min) rule is enabled and the state-machine IAM is intact.",
+        "AlarmDescription": "SPS reconciler (staging) -- cadence missed (no pass logged in 15 min, ~3 missed passes). Next: check the sps-reconcile-staging ECS service has a running task and read its logs.",
         "AlarmName": "sps-reconcile-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
-        "Dimensions": [
-          {
-            "Name": "StateMachineArn",
-            "Value": {
-              "Ref": "ReconcileStateMachine012717A8",
-            },
-          },
-        ],
         "EvaluationPeriods": 1,
-        "MetricName": "ExecutionsStarted",
-        "Namespace": "AWS/States",
-        "Period": 10800,
+        "MetricName": "SearchPasses",
+        "Namespace": "SPS/Reconcile/staging",
+        "Period": 900,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "ReconcileFailuresFilterB6319390": {
+      "Properties": {
+        "FilterPattern": "{ $.event = "reconcile_pass" && $.exitCode != 0 }",
+        "LogGroupName": {
+          "Ref": "ReconcileLogGroup1B0AF242",
+        },
+        "MetricTransformations": [
+          {
+            "MetricName": "SearchFailures",
+            "MetricNamespace": "SPS/Reconcile/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "ReconcileLogGroup1B0AF242": {
       "DeletionPolicy": "Retain",
@@ -21315,388 +20230,68 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
     },
-    "ReconcileScheduleRule268EEED3": {
+    "ReconcilePassesFilter0EE2E2E6": {
       "Properties": {
-        "Description": "SPS suppression search-index reconciler -- 60 min cadence (staging). #393.",
-        "Name": "sps-reconcile-staging",
-        "ScheduleExpression": "rate(1 hour)",
-        "State": "ENABLED",
-        "Targets": [
+        "FilterPattern": "{ $.event = "reconcile_pass" }",
+        "LogGroupName": {
+          "Ref": "ReconcileLogGroup1B0AF242",
+        },
+        "MetricTransformations": [
           {
-            "Arn": {
-              "Ref": "ReconcileStateMachine012717A8",
-            },
-            "Id": "Target0",
-            "Input": "{}",
-            "RetryPolicy": {
-              "MaximumRetryAttempts": 0,
-            },
-            "RoleArn": {
-              "Fn::GetAtt": [
-                "ReconcileStateMachineEventsRoleA465C65B",
-                "Arn",
-              ],
-            },
+            "MetricName": "SearchPasses",
+            "MetricNamespace": "SPS/Reconcile/staging",
+            "MetricValue": "1",
           },
         ],
       },
-      "Type": "AWS::Events::Rule",
+      "Type": "AWS::Logs::MetricFilter",
     },
-    "ReconcileSmLogGroup3EB36094": {
-      "DeletionPolicy": "Retain",
-      "Properties": {
-        "LogGroupName": "/aws/states/reconcile-staging",
-        "RetentionInDays": 30,
-      },
-      "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Retain",
-    },
-    "ReconcileStateMachine012717A8": {
-      "DeletionPolicy": "Delete",
+    "ReconcileService1E1E61B7": {
       "DependsOn": [
-        "ReconcileStateMachineRoleDefaultPolicy14E214DB",
-        "ReconcileStateMachineRole84BCD2EF",
+        "ReconcileTaskRoleAF128E4E",
       ],
       "Properties": {
-        "DefinitionString": {
-          "Fn::Join": [
-            "",
-            [
-              "{"StartAt":"TaskReconcile","States":{"TaskReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
-              {
-                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
-              },
-              "","TaskDefinition":"sps-reconcile-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"reconcile","Command":["npm","run","search:reconcile"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReconcile":{"Next":"FailReconcile","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-              "","Message":{"env":"staging","step":"Reconcile","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS reconciler staging -- run failed"}},"FailReconcile":{"Type":"Fail","Cause":"reconcile run failed"}},"TimeoutSeconds":900}",
+        "Cluster": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcsCluster97242B84553A5D8F",
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false,
+          },
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true,
+          },
+          "MaximumPercent": 100,
+          "MinimumHealthyPercent": 0,
+        },
+        "DeploymentController": {
+          "Type": "ECS",
+        },
+        "DesiredCount": 1,
+        "EnableECSManagedTags": false,
+        "LaunchType": "FARGATE",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "SecurityGroups": [
+              "sg-016b62e11314e7050",
             ],
-          ],
-        },
-        "LoggingConfiguration": {
-          "Destinations": [
-            {
-              "CloudWatchLogsLogGroup": {
-                "LogGroupArn": {
-                  "Fn::GetAtt": [
-                    "ReconcileSmLogGroup3EB36094",
-                    "Arn",
-                  ],
-                },
-              },
-            },
-          ],
-          "IncludeExecutionData": false,
-          "Level": "ERROR",
-        },
-        "RoleArn": {
-          "Fn::GetAtt": [
-            "ReconcileStateMachineRole84BCD2EF",
-            "Arn",
-          ],
-        },
-        "StateMachineName": "scholars-reconcile-staging",
-        "StateMachineType": "STANDARD",
-        "TracingConfiguration": {
-          "Enabled": true,
-        },
-      },
-      "Type": "AWS::StepFunctions::StateMachine",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "ReconcileStateMachineEventsRoleA465C65B": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "events.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "ReconcileStateMachineEventsRoleDefaultPolicy8C721BA3": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "states:StartExecution",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "ReconcileStateMachine012717A8",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "ReconcileStateMachineEventsRoleDefaultPolicy8C721BA3",
-        "Roles": [
-          {
-            "Ref": "ReconcileStateMachineEventsRoleA465C65B",
+            "Subnets": [
+              "subnet-0c6593fb9c9a165c3",
+              "subnet-070cbc242efbddc3c",
+            ],
           },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
-    },
-    "ReconcileStateMachineRole84BCD2EF": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Condition": {
-                "ArnLike": {
-                  "aws:SourceArn": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":states:us-east-1:123456789012:stateMachine:*",
-                      ],
-                    ],
-                  },
-                },
-                "StringEquals": {
-                  "aws:SourceAccount": "123456789012",
-                },
-              },
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "states.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
+        },
+        "PlatformVersion": "LATEST",
+        "ServiceName": "sps-reconcile-staging",
+        "TaskDefinition": {
+          "Ref": "ReconcileTaskDefinitionDBA0B2ED",
         },
       },
-      "Type": "AWS::IAM::Role",
-    },
-    "ReconcileStateMachineRoleDefaultPolicy14E214DB": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "ecs:RunTask",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        2,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        3,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        4,
-                        {
-                          "Fn::Split": [
-                            ":",
-                            {
-                              "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":",
-                    {
-                      "Fn::Select": [
-                        0,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    "/",
-                    {
-                      "Fn::Select": [
-                        1,
-                        {
-                          "Fn::Split": [
-                            "/",
-                            {
-                              "Fn::Select": [
-                                5,
-                                {
-                                  "Fn::Split": [
-                                    ":",
-                                    {
-                                      "Ref": "ReconcileTaskDefinitionDBA0B2ED",
-                                    },
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    ":*",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "ecs:StopTask",
-                "ecs:DescribeTasks",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": "iam:PassRole",
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "ReconcileTaskRoleAF128E4E",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "ReconcileTaskExecutionRole623CD9F3",
-                    "Arn",
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "events:PutTargets",
-                "events:PutRule",
-                "events:DescribeRule",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogDelivery",
-                "logs:GetLogDelivery",
-                "logs:UpdateLogDelivery",
-                "logs:DeleteLogDelivery",
-                "logs:ListLogDeliveries",
-                "logs:PutResourcePolicy",
-                "logs:DescribeResourcePolicies",
-                "logs:DescribeLogGroups",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": [
-                "xray:PutTraceSegments",
-                "xray:PutTelemetryRecords",
-                "xray:GetSamplingRules",
-                "xray:GetSamplingTargets",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "ReconcileStateMachineRoleDefaultPolicy14E214DB",
-        "Roles": [
-          {
-            "Ref": "ReconcileStateMachineRole84BCD2EF",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::ECS::Service",
     },
     "ReconcileStatusAlarm49C1513A": {
       "Properties": {
@@ -21705,78 +20300,15 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (staging) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 hidden scholar or publication may still be showing in search results. Next: open the Step Functions execution for scholars-reconcile-staging and read the failing row's logs. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.",
+        "AlarmDescription": "SPS reconciler (staging) -- passes have failed for ~30 min, so >=1 hidden scholar or publication may still be showing in search results. Next: read the failing pass in /aws/ecs/sps-reconcile-staging. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.",
         "AlarmName": "sps-reconcile-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
         "EvaluationPeriods": 2,
-        "Metrics": [
-          {
-            "Expression": "failed + timedOut + aborted",
-            "Id": "expr_1",
-            "ReturnData": true,
-          },
-          {
-            "Id": "failed",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "ReconcileStateMachine012717A8",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsFailed",
-                "Namespace": "AWS/States",
-              },
-              "Period": 3600,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "timedOut",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "ReconcileStateMachine012717A8",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsTimedOut",
-                "Namespace": "AWS/States",
-              },
-              "Period": 3600,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-          {
-            "Id": "aborted",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "StateMachineArn",
-                    "Value": {
-                      "Ref": "ReconcileStateMachine012717A8",
-                    },
-                  },
-                ],
-                "MetricName": "ExecutionsAborted",
-                "Namespace": "AWS/States",
-              },
-              "Period": 3600,
-              "Stat": "Sum",
-            },
-            "ReturnData": false,
-          },
-        ],
+        "MetricName": "SearchFailures",
+        "Namespace": "SPS/Reconcile/staging",
+        "Period": 900,
+        "Statistic": "Sum",
         "Threshold": 0,
         "TreatMissingData": "notBreaching",
       },
@@ -21786,6 +20318,11 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Properties": {
         "ContainerDefinitions": [
           {
+            "Command": [
+              "sh",
+              "-c",
+              "trap 'exit 0' TERM; while :; do timeout 240 npm run --silent search:reconcile || { sleep 30; timeout 240 npm run --silent search:reconcile; }; echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"search\\",\\"exitCode\\":$?}"; sleep 240 & wait $!; done",
+            ],
             "Environment": [
               {
                 "Name": "NODE_ENV",
@@ -21909,6 +20446,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
             ],
+            "StopTimeout": 120,
           },
         ],
         "Cpu": "256",

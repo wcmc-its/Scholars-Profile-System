@@ -306,28 +306,6 @@ function isTask(s: Record<string, unknown>, kind: string): boolean {
 }
 
 describe("EtlStack", () => {
-  // Staging reconcilers run hourly (no ADR-005 lag contract); prod stays at
-  // 5 min. Alarm windows scale with the cadence.
-  it("staging reconcilers fire hourly with cadence alarms over 3 fires", () => {
-    const { template: t } = buildEtlStack("staging");
-    for (const name of ["sps-reconcile-staging", "sps-cdn-reconcile-staging"]) {
-      t.hasResourceProperties("AWS::Events::Rule", {
-        Name: name,
-        ScheduleExpression: "rate(1 hour)",
-      });
-      t.hasResourceProperties("AWS::CloudWatch::Alarm", {
-        AlarmName: name.replace("reconcile", "reconcile-cadence"),
-        Period: 10800,
-      });
-      // Status alarm is a math expression: the period lives on each MetricStat.
-      const status = Object.values(t.findResources("AWS::CloudWatch::Alarm")).find(
-        (a) => a.Properties?.AlarmName === name.replace("reconcile", "reconcile-status"),
-      );
-      expect(JSON.stringify(status)).toContain('"Period":3600');
-      expect(JSON.stringify(status)).not.toContain('"Period":900');
-    }
-  });
-
   // Cutover de-coupling (§8.4): both the ETL container and the reconcile task
   // move OPENSEARCH_NODE off the Data→Etl cross-stack export onto the opensearch
   // secret's `node` key, so the OpenSearch-domain replace at cutover isn't
@@ -378,14 +356,14 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates nine state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler + grants export + honors lists + funding digest), nine EventBridge rules, two SNS topics", () => {
-        // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
-        // the #353 cdn reconciler (PR-2) + the grants-export machine, now
+      it("creates seven state machines (3 cadence + #595 heartbeat + grants export + honors lists + funding digest), seven EventBridge rules, two SNS topics", () => {
+        // 3 cadence machines + the #595 heartbeat + the grants-export machine, now
         // that grantsExportScheduleEnabled is true in prod too, + the
         // honors-list scraper (weekly + the console's Run now) + the funding
         // digest import, started by its email landing in the inbound bucket.
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 9);
-        template.resourceCountIs("AWS::Events::Rule", 9);
+        // The #393/#353 reconcilers are ECS services now, not state machines.
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 7);
+        template.resourceCountIs("AWS::Events::Rule", 7);
         // The heartbeat + both reconcilers + grants export reuse the cadence
         // failure topic; PR-7 adds the etl-page P1 topic, so two total:
         // etl-failures + etl-page.
@@ -745,11 +723,10 @@ describe("EtlStack", () => {
         }
       });
 
-      it("the #393 reconciler schedule ships ENABLED in prod (continuous backstop, not runbook-gated)", () => {
-        template.hasResourceProperties("AWS::Events::Rule", {
-          Name: "sps-reconcile-prod",
-          ScheduleExpression: "rate(5 minutes)",
-          State: "ENABLED",
+      it("the #393 reconciler service runs in prod (continuous backstop, not runbook-gated)", () => {
+        template.hasResourceProperties("AWS::ECS::Service", {
+          ServiceName: "sps-reconcile-prod",
+          DesiredCount: 1,
         });
       });
     });
@@ -980,22 +957,35 @@ describe("EtlStack", () => {
     });
 
     describe("#393 reconciler (PR-2 -- schedule + lean task + alarms)", () => {
-      it("fires the reconciler on a rate(5 minutes) EventBridge rule", () => {
-        template.hasResourceProperties("AWS::Events::Rule", {
-          Name: "sps-reconcile-prod",
-          ScheduleExpression: "rate(5 minutes)",
+      it("runs the reconciler as an always-on single-task Fargate service (one ENI, no per-run churn)", () => {
+        template.hasResourceProperties("AWS::ECS::Service", {
+          ServiceName: "sps-reconcile-prod",
+          DesiredCount: 1,
+          LaunchType: "FARGATE",
+          DeploymentConfiguration: Match.objectLike({
+            MaximumPercent: 100,
+            MinimumHealthyPercent: 0,
+          }),
+          NetworkConfiguration: {
+            AwsvpcConfiguration: Match.objectLike({ AssignPublicIp: "DISABLED" }),
+          },
         });
       });
 
-      it("the reconcile state machine runs `npm run search:reconcile`", () => {
-        const text = getStateMachineDefinitionText(
-          template,
-          "scholars-reconcile-prod",
-        );
-        expect(text).toMatch(/"search:reconcile"/);
-        // Single-step machine: no $.startFrom Choice, no cadence steps.
-        expect(text).not.toMatch(/"etl:ed"/);
-        expect(text).not.toMatch(/search:index/);
+      it("the container loops `npm run search:reconcile` with a JSON pass line, under 5 min start-to-start", () => {
+        const tds = template.findResources("AWS::ECS::TaskDefinition");
+        const td = Object.values(tds).find((t) => t.Properties?.Family === "sps-reconcile-prod");
+        const command = (
+          td?.Properties?.ContainerDefinitions as Array<{ Command?: string[] }>
+        )[0].Command;
+        expect(command?.slice(0, 2)).toEqual(["sh", "-c"]);
+        // 4 min cap per attempt, one retry, as the old Step Functions task had.
+    expect(command?.[2]).toContain(
+      "timeout 240 npm run --silent search:reconcile || { sleep 30; timeout 240 npm run --silent search:reconcile; };",
+    );
+        expect(command?.[2]).toContain('\\"event\\":\\"reconcile_pass\\"');
+        expect(command?.[2]).toContain("sleep 240 & wait $!");
+        expect(command?.[2]).toContain("trap 'exit 0' TERM");
       });
 
       function reconcileTaskDef() {
@@ -1101,58 +1091,77 @@ describe("EtlStack", () => {
         }
       });
 
-      it("the status alarm watches failed + timed-out + aborted sum > 0 (idle window not breaching)", () => {
+      it("the status alarm fires on failed passes in two consecutive 15 min windows (idle window not breaching)", () => {
         template.hasResourceProperties("AWS::CloudWatch::Alarm", {
           AlarmName: "sps-reconcile-status-prod",
+          Namespace: "SPS/Reconcile/prod",
+          MetricName: "SearchFailures",
+          Statistic: "Sum",
+          Period: 900,
+          EvaluationPeriods: 2,
+          DatapointsToAlarm: 2,
           ComparisonOperator: "GreaterThanThreshold",
           Threshold: 0,
           TreatMissingData: "notBreaching",
         });
-        // The timeout arm matters most on THIS machine: its per-task retry
-        // budget (3 attempts x 14 min + backoff) outlives the 15 min machine
-        // timeout, so a hung run is killed as TIMED_OUT mid-retry -- no Catch,
-        // no SNS publish, and ExecutionsFailed never moves.
-        const alarm = Object.values(template.findResources("AWS::CloudWatch::Alarm")).find(
-          (a) => a.Properties?.AlarmName === "sps-reconcile-status-prod",
-        );
-        const shape = alarmMetricShape(alarm?.Properties);
-        expect(shape.names).toEqual([...UNSUCCESSFUL_METRICS]);
-        expect(shape.stats).toEqual(["Sum", "Sum", "Sum"]);
-        expect(shape.periods).toEqual([900, 900, 900]);
+        template.hasResourceProperties("AWS::Logs::MetricFilter", {
+          FilterPattern: '{ $.event = "reconcile_pass" && $.exitCode != 0 }',
+          MetricTransformations: [
+            Match.objectLike({ MetricNamespace: "SPS/Reconcile/prod", MetricName: "SearchFailures" }),
+          ],
+        });
       });
 
-      it("the cadence alarm watches ExecutionsStarted sum < 1 with treatMissingData=breaching (silent schedule death)", () => {
+      it("the cadence alarm fires when no pass is logged in 15 min, treatMissingData=breaching (dead loop)", () => {
         template.hasResourceProperties("AWS::CloudWatch::Alarm", {
           AlarmName: "sps-reconcile-cadence-prod",
-          MetricName: "ExecutionsStarted",
+          Namespace: "SPS/Reconcile/prod",
+          MetricName: "SearchPasses",
           Statistic: "Sum",
+          Period: 900,
           ComparisonOperator: "LessThanThreshold",
           Threshold: 1,
           TreatMissingData: "breaching",
-          Period: 900,
+        });
+        template.hasResourceProperties("AWS::Logs::MetricFilter", {
+          FilterPattern: '{ $.event = "reconcile_pass" }',
+          MetricTransformations: [
+            Match.objectLike({ MetricNamespace: "SPS/Reconcile/prod", MetricName: "SearchPasses" }),
+          ],
         });
       });
     });
 
     describe("#353 cdn reconciler (PR-2 -- schedule + lean task + alarms)", () => {
-      it("fires the cdn reconciler on a rate(5 minutes) EventBridge rule, ENABLED in prod (continuous backstop, not runbook-gated)", () => {
-        template.hasResourceProperties("AWS::Events::Rule", {
-          Name: "sps-cdn-reconcile-prod",
-          ScheduleExpression: "rate(5 minutes)",
-          State: "ENABLED",
+      it("runs the cdn reconciler as an always-on single-task Fargate service (one ENI, no per-run churn)", () => {
+        template.hasResourceProperties("AWS::ECS::Service", {
+          ServiceName: "sps-cdn-reconcile-prod",
+          DesiredCount: 1,
+          LaunchType: "FARGATE",
+          DeploymentConfiguration: Match.objectLike({
+            MaximumPercent: 100,
+            MinimumHealthyPercent: 0,
+          }),
+          NetworkConfiguration: {
+            AwsvpcConfiguration: Match.objectLike({ AssignPublicIp: "DISABLED" }),
+          },
         });
       });
 
-      it("the cdn reconcile state machine runs `npm run cdn:reconcile` (single-step, no cadence/search steps)", () => {
-        const text = getStateMachineDefinitionText(
-          template,
-          "scholars-cdn-reconcile-prod",
-        );
-        expect(text).toMatch(/"cdn:reconcile"/);
-        // Single-step machine: no $.startFrom Choice, no cadence/search steps.
-        expect(text).not.toMatch(/"etl:ed"/);
-        expect(text).not.toMatch(/search:index/);
-        expect(text).not.toMatch(/"search:reconcile"/);
+      it("the container loops `npm run cdn:reconcile` with a JSON pass line, under 5 min start-to-start", () => {
+        const tds = template.findResources("AWS::ECS::TaskDefinition");
+        const td = Object.values(tds).find((t) => t.Properties?.Family === "sps-cdn-reconcile-prod");
+        const command = (
+          td?.Properties?.ContainerDefinitions as Array<{ Command?: string[] }>
+        )[0].Command;
+        expect(command?.slice(0, 2)).toEqual(["sh", "-c"]);
+        // 4 min cap per attempt, one retry, as the old Step Functions task had.
+    expect(command?.[2]).toContain(
+      "timeout 240 npm run --silent cdn:reconcile || { sleep 30; timeout 240 npm run --silent cdn:reconcile; };",
+    );
+        expect(command?.[2]).toContain('\\"event\\":\\"reconcile_pass\\"');
+        expect(command?.[2]).toContain("sleep 240 & wait $!");
+        expect(command?.[2]).toContain("trap 'exit 0' TERM");
       });
 
       function cdnReconcileTaskDef() {
@@ -1269,33 +1278,43 @@ describe("EtlStack", () => {
         expect(serialized).not.toMatch(/secretsmanager:/);
       });
 
-      it("the status alarm watches failed + timed-out + aborted sum > 0 (idle window not breaching)", () => {
+      it("the status alarm fires on failed passes in two consecutive 15 min windows (idle window not breaching)", () => {
         template.hasResourceProperties("AWS::CloudWatch::Alarm", {
           AlarmName: "sps-cdn-reconcile-status-prod",
+          Namespace: "SPS/Reconcile/prod",
+          MetricName: "CdnFailures",
+          Statistic: "Sum",
+          Period: 900,
+          EvaluationPeriods: 2,
+          DatapointsToAlarm: 2,
           ComparisonOperator: "GreaterThanThreshold",
           Threshold: 0,
           TreatMissingData: "notBreaching",
         });
-        // Same retry-budget-outlives-machine-timeout shape as the #393
-        // reconciler above: 3 x 14 min of attempts under a 15 min cap.
-        const alarm = Object.values(template.findResources("AWS::CloudWatch::Alarm")).find(
-          (a) => a.Properties?.AlarmName === "sps-cdn-reconcile-status-prod",
-        );
-        const shape = alarmMetricShape(alarm?.Properties);
-        expect(shape.names).toEqual([...UNSUCCESSFUL_METRICS]);
-        expect(shape.stats).toEqual(["Sum", "Sum", "Sum"]);
-        expect(shape.periods).toEqual([900, 900, 900]);
+        template.hasResourceProperties("AWS::Logs::MetricFilter", {
+          FilterPattern: '{ $.event = "reconcile_pass" && $.exitCode != 0 }',
+          MetricTransformations: [
+            Match.objectLike({ MetricNamespace: "SPS/Reconcile/prod", MetricName: "CdnFailures" }),
+          ],
+        });
       });
 
-      it("the cadence alarm watches ExecutionsStarted sum < 1 with treatMissingData=breaching (silent schedule death)", () => {
+      it("the cadence alarm fires when no pass is logged in 15 min, treatMissingData=breaching (dead loop)", () => {
         template.hasResourceProperties("AWS::CloudWatch::Alarm", {
           AlarmName: "sps-cdn-reconcile-cadence-prod",
-          MetricName: "ExecutionsStarted",
+          Namespace: "SPS/Reconcile/prod",
+          MetricName: "CdnPasses",
           Statistic: "Sum",
+          Period: 900,
           ComparisonOperator: "LessThanThreshold",
           Threshold: 1,
           TreatMissingData: "breaching",
-          Period: 900,
+        });
+        template.hasResourceProperties("AWS::Logs::MetricFilter", {
+          FilterPattern: '{ $.event = "reconcile_pass" }',
+          MetricTransformations: [
+            Match.objectLike({ MetricNamespace: "SPS/Reconcile/prod", MetricName: "CdnPasses" }),
+          ],
         });
       });
     });
@@ -1989,7 +2008,8 @@ describe("EtlStack", () => {
       // 2026-07-20 (the nightly now covers the work); the honors-list scraper's
       // weekly rule brings it to 10 (enabled after staging's clean supervised
       // first run on 2026-09-25); the funding digest arrival rule makes 11.
-      expect(Object.keys(rules)).toHaveLength(11);
+      // The #393/#353 reconcilers are ECS services, not rules, so 9.
+      expect(Object.keys(rules)).toHaveLength(9);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -2222,7 +2242,7 @@ describe("EtlStack", () => {
       expect(td?.Properties?.Memory).toBe("8192");
     });
 
-    it("staging lean reconcile task definition uses 256 cpu / 512 MiB and ships its rule enabled", () => {
+    it("staging lean reconcile task definition uses 256 cpu / 512 MiB and its service runs", () => {
       const tds = template.findResources("AWS::ECS::TaskDefinition");
       const td = Object.values(tds).find(
         (t) => t.Properties?.Family === "sps-reconcile-staging",
@@ -2230,14 +2250,13 @@ describe("EtlStack", () => {
       expect(td).toBeDefined();
       expect(td?.Properties?.Cpu).toBe("256");
       expect(td?.Properties?.Memory).toBe("512");
-      template.hasResourceProperties("AWS::Events::Rule", {
-        Name: "sps-reconcile-staging",
-        ScheduleExpression: "rate(1 hour)",
-        State: "ENABLED",
+      template.hasResourceProperties("AWS::ECS::Service", {
+        ServiceName: "sps-reconcile-staging",
+        DesiredCount: 1,
       });
     });
 
-    it("staging lean cdn reconcile task definition uses 256 cpu / 512 MiB and ships its rule enabled", () => {
+    it("staging lean cdn reconcile task definition uses 256 cpu / 512 MiB and its service runs", () => {
       const tds = template.findResources("AWS::ECS::TaskDefinition");
       const td = Object.values(tds).find(
         (t) => t.Properties?.Family === "sps-cdn-reconcile-staging",
@@ -2245,10 +2264,9 @@ describe("EtlStack", () => {
       expect(td).toBeDefined();
       expect(td?.Properties?.Cpu).toBe("256");
       expect(td?.Properties?.Memory).toBe("512");
-      template.hasResourceProperties("AWS::Events::Rule", {
-        Name: "sps-cdn-reconcile-staging",
-        ScheduleExpression: "rate(1 hour)",
-        State: "ENABLED",
+      template.hasResourceProperties("AWS::ECS::Service", {
+        ServiceName: "sps-cdn-reconcile-staging",
+        DesiredCount: 1,
       });
     });
 

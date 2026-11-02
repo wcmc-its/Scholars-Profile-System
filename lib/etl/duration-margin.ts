@@ -25,7 +25,7 @@ import { HOUR_MS, SLA_HOURS, type Cadence } from "@/lib/etl/freshness-policy";
 
 /** `buildStep` taskTimeout — every nightly/weekly/annual cadence step (etl-stack.ts). */
 export const CADENCE_STEP_TIMEOUT_SECONDS = 4 * 60 * 60;
-/** `search:reconcile` / `cdn:reconcile` taskTimeout (etl-stack.ts). */
+/** `search:reconcile` / `cdn:reconcile` per-attempt `timeout 240` in the reconciler loop (etl-stack.ts). */
 export const RECONCILER_TASK_TIMEOUT_SECONDS = 4 * 60;
 /** `etl:honors` taskTimeout on `scholars-honors-<env>` (etl-stack.ts). */
 export const HONORS_TASK_TIMEOUT_SECONDS = 45 * 60;
@@ -178,7 +178,7 @@ export const RETRY_WINDOW_HOURS: Readonly<Partial<Record<Cadence, number>>> = {
 
 /**
  * Sources that legitimately run many times per window: the reconcilers fire
- * every 5 minutes (`rate(5 minutes)` in etl-stack.ts), so one transient failure
+ * every <=5 minutes (the always-on reconciler loop in etl-stack.ts), so one transient failure
  * among ~288 runs is not a storm, and each has its own status alarm.
  */
 const RETRY_EXEMPT: ReadonlySet<string> = new Set(["SearchReconcile", "CdnReconcile"]);

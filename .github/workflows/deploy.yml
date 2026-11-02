@@ -299,6 +299,7 @@ jobs:
           # until the next run of this workflow.
           if [ -n "$etl_image" ]; then
             env_name="${{ steps.target.outputs.env }}"
+            cluster="${{ steps.outputs.outputs.cluster }}"
             for pair in \
               "sps-etl-$env_name:etl" \
               "sps-etl-sources-$env_name:etl" \
@@ -316,6 +317,22 @@ jobs:
               fi
               td=$(register_pinned "$family" "$container" "$etl_image")
               echo "Pinned $family -> $td"
+              # The ADR-005 reconcilers run as always-on ECS services named
+              # after their family, not Step Functions steps, so a new revision
+              # only takes effect once the service points at it.
+              case "$family" in
+                sps-reconcile-*|sps-cdn-reconcile-*)
+                  active=$(aws ecs describe-services --cluster "$cluster" --services "$family" \
+                    --query 'length(services[?status==`ACTIVE`])' --output text)
+                  if [ "$active" = "1" ]; then
+                    aws ecs update-service --cluster "$cluster" --service "$family" \
+                      --task-definition "$td" > /dev/null
+                    echo "Rolled service $family -> $td"
+                  else
+                    echo "::warning::Reconciler service $family not found. Run 'cdk deploy Sps-Etl-$env_name' to create it."
+                  fi
+                  ;;
+              esac
             done
           else
             echo "::warning::No ETL image digest this run. Step Functions ETL families NOT pinned (#2144); they keep their current revisions."

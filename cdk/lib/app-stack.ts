@@ -4058,7 +4058,20 @@ export class AppStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["ecs:UpdateService", "ecs:DescribeServices"],
-        resources: [this.ecsService.serviceArn],
+        resources: [
+          this.ecsService.serviceArn,
+          // deploy.yml rolls the always-on ADR-005 reconciler services
+          // (cdk/lib/etl-stack.ts) onto each deploy's pinned revision. By
+          // fixed name, like the role list below, so AppStack keeps no
+          // dependency on EtlStack.
+          ...[`sps-reconcile-${env}`, `sps-cdn-reconcile-${env}`].map((name) =>
+            Stack.of(this).formatArn({
+              service: "ecs",
+              resource: "service",
+              resourceName: `${this.ecsCluster.clusterName}/${name}`,
+            }),
+          ),
+        ],
       }),
     );
     // #2121 -- the deploy workflow clones each family's current active

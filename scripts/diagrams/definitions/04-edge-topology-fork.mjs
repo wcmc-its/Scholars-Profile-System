@@ -54,7 +54,7 @@ const nodes = {
   purge: { x: 760, y: 432, w: 580, h: 86, kind: "app", title: "Edge cache purge — wired in both envs",
            sub: ["App task role holds only cloudfront:CreateInvalidation.",
                  "Suppress / rename / revoke writes purge inline after commit (#353/#828).",
-                 "The scholars-cdn-reconcile-<env> ETL task retries any pending purges."] },
+                 "The sps-cdn-reconcile-<env> ECS service retries any pending purges."] },
 };
 
 const groups = [

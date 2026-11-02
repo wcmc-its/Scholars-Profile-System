@@ -2517,9 +2517,43 @@ service:
                 "ecs:DescribeServices",
               ],
               "Effect": "Allow",
-              "Resource": {
-                "Ref": "EcsService81FC6EF6",
-              },
+              "Resource": [
+                {
+                  "Ref": "EcsService81FC6EF6",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:service/",
+                      {
+                        "Ref": "EcsCluster97242B84",
+                      },
+                      "/sps-reconcile-prod",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:service/",
+                      {
+                        "Ref": "EcsCluster97242B84",
+                      },
+                      "/sps-cdn-reconcile-prod",
+                    ],
+                  ],
+                },
+              ],
             },
             {
               "Action": [
@@ -7591,9 +7625,43 @@ service:
                 "ecs:DescribeServices",
               ],
               "Effect": "Allow",
-              "Resource": {
-                "Ref": "EcsService81FC6EF6",
-              },
+              "Resource": [
+                {
+                  "Ref": "EcsService81FC6EF6",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:service/",
+                      {
+                        "Ref": "EcsCluster97242B84",
+                      },
+                      "/sps-reconcile-staging",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:service/",
+                      {
+                        "Ref": "EcsCluster97242B84",
+                      },
+                      "/sps-cdn-reconcile-staging",
+                    ],
+                  ],
+                },
+              ],
             },
             {
               "Action": [

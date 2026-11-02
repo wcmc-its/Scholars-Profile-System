@@ -44,7 +44,7 @@
  * The signal is now the sentinel itself. A row only counts as `reflected` when
  * its stamp LANDED; an unstamped row is `failed` (and broken out as `stalled`),
  * so the worker exits non-zero and the existing
- * `sps-reconcile-status-<env>` ExecutionsFailed alarm fires. That means the
+ * `sps-reconcile-status-<env>` failed-pass alarm fires. That means the
  * page happens when `searchReflectedAt` stops advancing — whatever the cause —
  * rather than when a particular error string appears. No new alarm, no metric
  * filter over log text.
@@ -166,7 +166,7 @@ export async function reconcileSearchSuppressions(
       // #2204 signature — 200 rows "reflected" against 317/317 NULL, run after
       // run, with `failed: 0`. Counting it as FAILED is the alarm inversion:
       // the worker now exits non-zero, which reaches the existing
-      // `sps-reconcile-status-<env>` ExecutionsFailed alarm. No new metric
+      // `sps-reconcile-status-<env>` failed-pass alarm. No new metric
       // filter, and it fires for any cause of a stalled sentinel, not just a
       // recognised error string.
       failed += 1;
