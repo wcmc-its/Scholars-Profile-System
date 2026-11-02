@@ -227,12 +227,10 @@ describe("mirrored timeouts match their source of truth", () => {
     expect(taskTimeoutAfter("const buildStep = (")).toBe(CADENCE_STEP_TIMEOUT_SECONDS);
   });
   it("search:reconcile and cdn:reconcile", () => {
-    expect(taskTimeoutAfter('command: ["npm", "run", "search:reconcile"]')).toBe(
-      RECONCILER_TASK_TIMEOUT_SECONDS,
-    );
-    expect(taskTimeoutAfter('command: ["npm", "run", "cdn:reconcile"]')).toBe(
-      RECONCILER_TASK_TIMEOUT_SECONDS,
-    );
+    // Both reconcilers share one loop command (reconcileLoopCommand), which
+    // caps the attempt and its one retry with `timeout <seconds>`.
+    const cap = `timeout ${RECONCILER_TASK_TIMEOUT_SECONDS} npm run --silent \${npmScript}`;
+    expect(stack.split(cap).length - 1).toBe(2);
   });
   it("etl:honors", () => {
     expect(taskTimeoutAfter('command: ["npm", "run", "etl:honors"]')).toBe(
