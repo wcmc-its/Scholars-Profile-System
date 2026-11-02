@@ -372,9 +372,9 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   //   - `Spotlight` (here): did OUR weekly loader run — anchored on completedAt,
   //     not manifestGeneratedAt, so an unchanged artifact is not an alarm.
   Spotlight: { cadence: "weekly", anchorOnRun: true },
-  // #2293 — durable reconcilers (ADR-005 layer 3), each its own `rate(5 min)`
-  // state machine outside the nightly/weekly chains, not deployed steps within
-  // them. Both got a CDK status + cadence alarm at 15 min resolution when they
+  // #2293 — durable reconcilers (ADR-005 layer 3), each an always-on ECS
+  // service looping every <=5 min outside the nightly/weekly chains (state
+  // machines until the ENI-churn fix), not deployed steps within them. Both got a CDK status + cadence alarm at 15 min resolution when they
   // shipped (#353/#393) -- THAT is what catches a wedged run or a disabled
   // schedule in real time. This entry adds none of that; it exists so the two
   // show up on `/edit/etl-status` at all (TRACKED x etl_run is what the page

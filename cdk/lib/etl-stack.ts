@@ -187,10 +187,6 @@ export class EtlStack extends Stack {
   public readonly annualStateMachine: sfn.StateMachine;
   /** #595 data-freshness heartbeat — daily etl_run staleness check. */
   public readonly heartbeatStateMachine: sfn.StateMachine;
-  /** #393 suppression search-index reconciler (ADR-005 layer 3), ~5 min cadence. */
-  public readonly reconcileStateMachine: sfn.StateMachine;
-  /** #353 durable CloudFront-invalidation reconciler (ADR-005 layer 3), ~5 min cadence. */
-  public readonly cdnReconcileStateMachine: sfn.StateMachine;
   /** Honors-list scraper, `scholars-honors-<env>`: weekly + the console's Run now. */
   public readonly honorsStateMachine: sfn.StateMachine;
   /** Funding digest import, started when a digest email lands in the inbound mail bucket. */
@@ -2597,12 +2593,100 @@ export class EtlStack extends Stack {
     });
     opportunityFreshnessAlarm.addAlarmAction(alarmAction);
 
-    // Both reconcilers share one cadence (config `reconcileCadenceMinutes`).
-    // Alarm windows scale with it: the status window must hold >=1 fire, and
-    // the cadence alarm trips after 3 missed fires (15 min at 5 min).
-    const cadenceMin = envConfig.reconcileCadenceMinutes;
-    const reconcileStatusWindow = Duration.minutes(Math.max(15, cadenceMin));
-    const reconcileCadenceWindow = Duration.minutes(3 * cadenceMin);
+    // ------------------------------------------------------------------
+    // ADR-005 layer-3 reconcilers (#393 search index, #353 CDN) run as
+    // always-on single-task ECS services, not a rate(5 min) Step Functions
+    // RunTask each (#3248 follow-up). Every RunTask created and deleted an ENI,
+    // which AWS Config recorded along with its subnet / SG / VPC: ~1,150
+    // short-lived tasks a day across both envs were most of the account's
+    // Config bill. A service keeps one ENI for its lifetime.
+    //
+    // The container wraps the unchanged one-shot worker in a shell loop, so
+    // each pass is still its own process (withEtlRun / processStartedAt
+    // semantics hold) and its exit code still means pass/fail. Sleeping 240s
+    // after a pass keeps the start-to-start gap under the ADR-005 v1 5 min lag
+    // contract. The trap + backgrounded sleep let SIGTERM end the loop between
+    // passes; a pass in flight finishes first (stopTimeout below).
+    //
+    // Alarms come from metric filters on the JSON pass line, same names and
+    // semantics as the Step Functions alarms they replace: cadence = no pass
+    // logged in 15 min (missing data breaches); status = a failed pass in two
+    // consecutive 15 min windows.
+    const reconcileLoopCommand = (job: string, npmScript: string): string[] => [
+      "sh",
+      "-c",
+      `trap 'exit 0' TERM; while :; do npm run --silent ${npmScript}; ` +
+        `echo "{\\"event\\":\\"reconcile_pass\\",\\"job\\":\\"${job}\\",\\"exitCode\\":$?}"; ` +
+        `sleep 240 & wait $!; done`,
+    ];
+    const reconcileNamespace = `SPS/Reconcile/${env}`;
+    const wireReconcileService = (o: {
+      id: string;
+      job: string;
+      label: string;
+      serviceName: string;
+      enabled: boolean;
+      taskDefinition: ecs.FargateTaskDefinition;
+      logGroup: logs.ILogGroup;
+      statusAlarmName: string;
+      cadenceAlarmName: string;
+      statusAlarmDescription: string;
+    }): ecs.FargateService => {
+      const service = new ecs.FargateService(this, `${o.id}Service`, {
+        serviceName: o.serviceName,
+        cluster: ecsCluster,
+        taskDefinition: o.taskDefinition,
+        desiredCount: o.enabled ? 1 : 0,
+        // Never two loops at once during a deploy (overlap is harmless, the
+        // workers are idempotent, but pointless).
+        minHealthyPercent: 0,
+        maxHealthyPercent: 100,
+        vpcSubnets: etlTaskSubnets,
+        securityGroups: [etlSecurityGroup],
+        assignPublicIp: false,
+        platformVersion: ecs.FargatePlatformVersion.LATEST,
+        circuitBreaker: { rollback: true },
+      });
+      const passMetric = (suffix: string, pattern: string): cloudwatch.Metric =>
+        new logs.MetricFilter(this, `${o.id}${suffix}Filter`, {
+          logGroup: o.logGroup,
+          metricNamespace: reconcileNamespace,
+          metricName: `${o.job}${suffix}`,
+          filterPattern: logs.FilterPattern.literal(pattern),
+          metricValue: "1",
+        }).metric({ statistic: cloudwatch.Stats.SUM, period: Duration.minutes(15) });
+      const passes = passMetric("Passes", '{ $.event = "reconcile_pass" }');
+      const failures = passMetric(
+        "Failures",
+        '{ $.event = "reconcile_pass" && $.exitCode != 0 }',
+      );
+      const statusAlarm = new cloudwatch.Alarm(this, `${o.id}StatusAlarm`, {
+        alarmName: o.statusAlarmName,
+        alarmDescription: o.statusAlarmDescription,
+        metric: failures,
+        // ~30 min of sustained failure (2 consecutive 15 min windows): a
+        // single failed pass self-heals on the next one.
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        // No failed pass in a window is not a failure; the cadence alarm owns absence.
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      statusAlarm.addAlarmAction(alarmAction);
+      const cadenceAlarm = new cloudwatch.Alarm(this, `${o.id}CadenceAlarm`, {
+        alarmName: o.cadenceAlarmName,
+        alarmDescription: `${o.label} (${env}) -- cadence missed (no pass logged in 15 min, ~3 missed passes). Next: check the ${o.serviceName} ECS service has a running task and read its logs.`,
+        metric: passes,
+        evaluationPeriods: 1,
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        // Total metric absence => the loop is dead => breach.
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      });
+      cadenceAlarm.addAlarmAction(alarmAction);
+      return service;
+    };
 
     // ------------------------------------------------------------------
     // #393 PR-2 -- suppression search-index reconciler (ADR-005 layer 3).
@@ -2702,12 +2786,15 @@ export class EtlStack extends Stack {
       executionRole: reconcileExecutionRole,
       taskRole: reconcileTaskRole,
     });
-    const reconcileContainer = reconcileTaskDefinition.addContainer("reconcile", {
+    reconcileTaskDefinition.addContainer("reconcile", {
       image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
       // Container name `reconcile` (not `etl`) keeps the two task defs'
       // containers unambiguous for the tests.
       containerName: "reconcile",
       essential: true,
+      command: reconcileLoopCommand("search", "search:reconcile"),
+      // Let an in-flight pass finish on stop (Fargate max).
+      stopTimeout: Duration.seconds(120),
       logging: ecs.LogDriver.awsLogs({
         logGroup: reconcileLogGroup,
         streamPrefix: "reconcile",
@@ -2740,138 +2827,19 @@ export class EtlStack extends Stack {
       },
     });
 
-    const reconcileTask = new tasks.EcsRunTask(this, "TaskReconcile", {
-      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
-      cluster: ecsCluster,
-      taskDefinition: reconcileTaskDefinition,
-      launchTarget: new tasks.EcsFargateLaunchTarget({
-        platformVersion: ecs.FargatePlatformVersion.LATEST,
-      }),
-      assignPublicIp: false,
-      subnets: etlTaskSubnets,
-      securityGroups: [etlSecurityGroup],
-      containerOverrides: [
-        {
-          containerDefinition: reconcileContainer,
-          command: ["npm", "run", "search:reconcile"],
-        },
-      ],
-      // #2286 -- 4 min per attempt, not 14: the worker is bounded to <=200
-      // rows (seconds of real work), and the OLD 14 min figure combined with
-      // the retry below to a 2610s worst-case retry budget against this
-      // machine's 900s timeout -- a hung task hit TIMED_OUT before the
-      // retries exhausted, and TIMED_OUT runs no Catch, so the failure that
-      // would have notified never did. 2 attempts * 4 min + 30s interval =
-      // 510s, comfortably under the 900s machine timeout below.
-      taskTimeout: sfn.Timeout.duration(Duration.minutes(4)),
-    });
-    reconcileTask.addRetry({
-      errors: ["States.TaskFailed", "States.Timeout"],
-      // #2286 -- 1, not 2: this reconciler self-heals on the next 5 min
-      // fire regardless, so a second retry buys little against the risk of
-      // outrunning the machine timeout again.
-      maxAttempts: 1,
-      backoffRate: 2,
-      interval: Duration.seconds(30),
-    });
-    reconcileTask.addCatch(
-      new tasks.SnsPublish(this, "NotifyReconcile", {
-        topic: this.failureTopic,
-        subject: `SPS reconciler ${env} -- run failed`,
-        message: sfn.TaskInput.fromObject({
-          env,
-          step: "Reconcile",
-          stateMachine: sfn.JsonPath.stateMachineName,
-          execution: sfn.JsonPath.executionName,
-          error: sfn.JsonPath.stringAt("$.error"),
-        }),
-      }).next(new sfn.Fail(this, "FailReconcile", { cause: "reconcile run failed" })),
-      { errors: ["States.ALL"], resultPath: "$.error" },
-    );
 
-    const reconcileSmLogGroup = new logs.LogGroup(this, "ReconcileSmLogGroup", {
-      logGroupName: `/aws/states/reconcile-${env}`,
-      retention: logRetention,
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
-    this.reconcileStateMachine = new sfn.StateMachine(this, "ReconcileStateMachine", {
-      stateMachineName: `scholars-reconcile-${env}`,
-      stateMachineType: sfn.StateMachineType.STANDARD,
-      definitionBody: sfn.DefinitionBody.fromChainable(reconcileTask),
-      // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
-      // <=200 rows, so a longer-running execution is wedged and must not
-      // pile up at the 5 min cadence.
-      timeout: Duration.minutes(15),
-      logs: {
-        destination: reconcileSmLogGroup,
-        level: sfn.LogLevel.ERROR,
-        includeExecutionData: false,
-      },
-      tracingEnabled: true,
-    });
-
-    // EventBridge rate(5 min) schedule. `reconcileScheduleEnabled` is true in
-    // both envs (continuous backstop -- see config flag JSDoc). retryAttempts: 0
-    // -- a missed fire is recovered by the next 5 min fire and the idempotent
-    // worker makes an overlapping run benign, so neither a delivery retry nor a
-    // DLQ is wanted.
-    const reconcileRule = new events.Rule(this, "ReconcileScheduleRule", {
-      ruleName: `sps-reconcile-${env}`,
-      description: `SPS suppression search-index reconciler -- ${cadenceMin} min cadence (${env}). #393.`,
-      schedule: events.Schedule.rate(Duration.minutes(cadenceMin)),
+    const reconcileService = wireReconcileService({
+      id: "Reconcile",
+      job: "Search",
+      label: "SPS reconciler",
+      serviceName: `sps-reconcile-${env}`,
       enabled: envConfig.reconcileScheduleEnabled,
+      taskDefinition: reconcileTaskDefinition,
+      logGroup: reconcileLogGroup,
+      statusAlarmName: `sps-reconcile-status-${env}`,
+      cadenceAlarmName: `sps-reconcile-cadence-${env}`,
+      statusAlarmDescription: `SPS reconciler (${env}) -- passes have failed for ~30 min, so >=1 hidden scholar or publication may still be showing in search results. Next: read the failing pass in /aws/ecs/sps-reconcile-${env}. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.`,
     });
-    reconcileRule.addTarget(
-      new eventsTargets.SfnStateMachine(this.reconcileStateMachine, {
-        input: events.RuleTargetInput.fromObject({}),
-        retryAttempts: 0,
-      }),
-    );
-
-    // Alarms. The cadence alarm is the load-bearing one: silent schedule death
-    // (rule disabled, IAM gap) is the failure mode that actually hurts a
-    // backstop, more than any single run failing. Both periods are 15 min
-    // (< 1h) so the <=604800s evaluation-window cap above does not apply.
-    const reconcileDimensions = {
-      StateMachineArn: this.reconcileStateMachine.stateMachineArn,
-    };
-    const reconcileStatusAlarm = new cloudwatch.Alarm(this, "ReconcileStatusAlarm", {
-      alarmName: `sps-reconcile-status-${env}`,
-      alarmDescription: `SPS reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 hidden scholar or publication may still be showing in search results. Next: open the Step Functions execution for scholars-reconcile-${env} and read the failing row's logs. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.`,
-      metric: unsuccessfulMetric(reconcileDimensions, reconcileStatusWindow),
-      // Require ~30 min of sustained failure (2 consecutive 15 min windows)
-      // before alerting. The reconciler runs every 5 min and is idempotent,
-      // so a single failed run self-heals on the next fire and is not worth a
-      // notification; two windows = a persistent failure (e.g. a row that
-      // keeps failing to reflect), which is. The cadence alarm below still
-      // alerts immediately on schedule death.
-      evaluationPeriods: 2,
-      datapointsToAlarm: 2,
-      threshold: 0,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-      // An idle 15 min window (no executions) is not a failure -- the cadence
-      // alarm below owns absence.
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
-    reconcileStatusAlarm.addAlarmAction(alarmAction);
-
-    const reconcileCadenceAlarm = new cloudwatch.Alarm(this, "ReconcileCadenceAlarm", {
-      alarmName: `sps-reconcile-cadence-${env}`,
-      alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in ${3 * cadenceMin} min = 3 missed ${cadenceMin} min fires). Next: confirm the rate(${cadenceMin} min) rule is enabled and the state-machine IAM is intact.`,
-      metric: new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsStarted",
-        statistic: cloudwatch.Stats.SUM,
-        period: reconcileCadenceWindow,
-        dimensionsMap: reconcileDimensions,
-      }),
-      evaluationPeriods: 1,
-      threshold: 1,
-      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-      // Total metric absence => the schedule is dead => breach.
-      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-    });
-    reconcileCadenceAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
     // #353 PR-2 -- durable CloudFront-invalidation reconciler (ADR-005 layer 3).
@@ -2988,12 +2956,15 @@ export class EtlStack extends Stack {
         taskRole: cdnReconcileTaskRole,
       },
     );
-    const cdnReconcileContainer = cdnReconcileTaskDefinition.addContainer("cdn-reconcile", {
+    cdnReconcileTaskDefinition.addContainer("cdn-reconcile", {
       image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
       // Container name `cdn-reconcile` (not `etl` / `reconcile`) keeps the
       // three task defs' containers unambiguous for the tests.
       containerName: "cdn-reconcile",
       essential: true,
+      command: reconcileLoopCommand("cdn", "cdn:reconcile"),
+      // Let an in-flight pass finish on stop (Fargate max).
+      stopTimeout: Duration.seconds(120),
       logging: ecs.LogDriver.awsLogs({
         logGroup: cdnReconcileLogGroup,
         streamPrefix: "cdn-reconcile",
@@ -3013,136 +2984,19 @@ export class EtlStack extends Stack {
       },
     });
 
-    const cdnReconcileTask = new tasks.EcsRunTask(this, "TaskCdnReconcile", {
-      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
-      cluster: ecsCluster,
-      taskDefinition: cdnReconcileTaskDefinition,
-      launchTarget: new tasks.EcsFargateLaunchTarget({
-        platformVersion: ecs.FargatePlatformVersion.LATEST,
-      }),
-      assignPublicIp: false,
-      subnets: etlTaskSubnets,
-      securityGroups: [etlSecurityGroup],
-      containerOverrides: [
-        {
-          containerDefinition: cdnReconcileContainer,
-          command: ["npm", "run", "cdn:reconcile"],
-        },
-      ],
-      // #2286 -- 4 min per attempt, not 14: see the identical comment on the
-      // #393 reconciler's taskTimeout above -- same defect, same fix, same
-      // math (2 attempts * 4 min + 30s = 510s under this machine's 900s cap).
-      taskTimeout: sfn.Timeout.duration(Duration.minutes(4)),
-    });
-    cdnReconcileTask.addRetry({
-      errors: ["States.TaskFailed", "States.Timeout"],
-      // #2286 -- 1, not 2: this reconciler self-heals on the next 5 min
-      // fire regardless, so a second retry buys little against the risk of
-      // outrunning the machine timeout again.
-      maxAttempts: 1,
-      backoffRate: 2,
-      interval: Duration.seconds(30),
-    });
-    cdnReconcileTask.addCatch(
-      new tasks.SnsPublish(this, "NotifyCdnReconcile", {
-        topic: this.failureTopic,
-        subject: `SPS CloudFront-invalidation reconciler ${env} -- run failed`,
-        message: sfn.TaskInput.fromObject({
-          env,
-          step: "CdnReconcile",
-          stateMachine: sfn.JsonPath.stateMachineName,
-          execution: sfn.JsonPath.executionName,
-          error: sfn.JsonPath.stringAt("$.error"),
-        }),
-      }).next(
-        new sfn.Fail(this, "FailCdnReconcile", {
-          cause: "cdn reconcile run failed",
-        }),
-      ),
-      { errors: ["States.ALL"], resultPath: "$.error" },
-    );
-
-    const cdnReconcileSmLogGroup = new logs.LogGroup(this, "CdnReconcileSmLogGroup", {
-      logGroupName: `/aws/states/cdn-reconcile-${env}`,
-      retention: logRetention,
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
-    this.cdnReconcileStateMachine = new sfn.StateMachine(this, "CdnReconcileStateMachine", {
-      stateMachineName: `scholars-cdn-reconcile-${env}`,
-      stateMachineType: sfn.StateMachineType.STANDARD,
-      definitionBody: sfn.DefinitionBody.fromChainable(cdnReconcileTask),
-      // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
-      // <=200 rows, so a longer-running execution is wedged and must not
-      // pile up at the 5 min cadence.
-      timeout: Duration.minutes(15),
-      logs: {
-        destination: cdnReconcileSmLogGroup,
-        level: sfn.LogLevel.ERROR,
-        includeExecutionData: false,
-      },
-      tracingEnabled: true,
-    });
-
-    // EventBridge rate(5 min) schedule. `cdnReconcileScheduleEnabled` is true in
-    // both envs (continuous backstop -- see config flag JSDoc). retryAttempts: 0
-    // -- a missed fire is recovered by the next 5 min fire and the idempotent
-    // worker makes an overlapping run benign, so neither a delivery retry nor a
-    // DLQ is wanted.
-    const cdnReconcileRule = new events.Rule(this, "CdnReconcileScheduleRule", {
-      ruleName: `sps-cdn-reconcile-${env}`,
-      description: `SPS CloudFront-invalidation reconciler -- ${cadenceMin} min cadence (${env}). #353.`,
-      schedule: events.Schedule.rate(Duration.minutes(cadenceMin)),
+    const cdnReconcileService = wireReconcileService({
+      id: "CdnReconcile",
+      job: "Cdn",
+      label: "SPS CloudFront-invalidation reconciler",
+      serviceName: `sps-cdn-reconcile-${env}`,
       enabled: envConfig.cdnReconcileScheduleEnabled,
+      taskDefinition: cdnReconcileTaskDefinition,
+      logGroup: cdnReconcileLogGroup,
+      statusAlarmName: `sps-cdn-reconcile-status-${env}`,
+      cadenceAlarmName: `sps-cdn-reconcile-cadence-${env}`,
+      statusAlarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- passes have failed for ~30 min, so >=1 edited page may still be serving its old cached version to the public. Next: read the failing pass in /aws/ecs/sps-cdn-reconcile-${env}. It replays on the next run once CloudFront accepts it.`,
     });
-    cdnReconcileRule.addTarget(
-      new eventsTargets.SfnStateMachine(this.cdnReconcileStateMachine, {
-        input: events.RuleTargetInput.fromObject({}),
-        retryAttempts: 0,
-      }),
-    );
 
-    // Alarms. The cadence alarm is the load-bearing one: silent schedule death
-    // (rule disabled, IAM gap) is the failure mode that actually hurts a
-    // backstop, more than any single run failing. Both periods are 15 min.
-    const cdnReconcileDimensions = {
-      StateMachineArn: this.cdnReconcileStateMachine.stateMachineArn,
-    };
-    const cdnReconcileStatusAlarm = new cloudwatch.Alarm(this, "CdnReconcileStatusAlarm", {
-      alarmName: `sps-cdn-reconcile-status-${env}`,
-      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 edited page may still be serving its old cached version to the public. Next: open the Step Functions execution for scholars-cdn-reconcile-${env} and read the failing purge's logs. It replays on the next run once CloudFront accepts it.`,
-      metric: unsuccessfulMetric(cdnReconcileDimensions, reconcileStatusWindow),
-      // Require ~30 min of sustained failure (2 consecutive 15 min windows)
-      // before alerting. The reconciler runs every 5 min and is idempotent,
-      // so a single failed run self-heals on the next fire and is not worth a
-      // notification; two windows = a persistent failure, which is. The
-      // cadence alarm below still alerts immediately on schedule death.
-      evaluationPeriods: 2,
-      datapointsToAlarm: 2,
-      threshold: 0,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-      // An idle 15 min window (no executions) is not a failure -- the cadence
-      // alarm below owns absence.
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    });
-    cdnReconcileStatusAlarm.addAlarmAction(alarmAction);
-
-    const cdnReconcileCadenceAlarm = new cloudwatch.Alarm(this, "CdnReconcileCadenceAlarm", {
-      alarmName: `sps-cdn-reconcile-cadence-${env}`,
-      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in ${3 * cadenceMin} min = 3 missed ${cadenceMin} min fires). Next: confirm the rate(${cadenceMin} min) rule is enabled and the state-machine IAM is intact.`,
-      metric: new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsStarted",
-        statistic: cloudwatch.Stats.SUM,
-        period: reconcileCadenceWindow,
-        dimensionsMap: cdnReconcileDimensions,
-      }),
-      evaluationPeriods: 1,
-      threshold: 1,
-      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-      // Total metric absence => the schedule is dead => breach.
-      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-    });
-    cdnReconcileCadenceAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
     // Curated-tables logical backup schedule (#1032).
@@ -4158,13 +4012,13 @@ export class EtlStack extends Stack {
       value: this.heartbeatStateMachine.stateMachineArn,
       description: "SPS data-freshness heartbeat state machine ARN (#595).",
     });
-    new CfnOutput(this, "ReconcileStateMachineArn", {
-      value: this.reconcileStateMachine.stateMachineArn,
-      description: "SPS suppression search-index reconciler state machine ARN (#393).",
+    new CfnOutput(this, "ReconcileServiceName", {
+      value: reconcileService.serviceName,
+      description: "SPS suppression search-index reconciler ECS service (#393).",
     });
-    new CfnOutput(this, "CdnReconcileStateMachineArn", {
-      value: this.cdnReconcileStateMachine.stateMachineArn,
-      description: "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
+    new CfnOutput(this, "CdnReconcileServiceName", {
+      value: cdnReconcileService.serviceName,
+      description: "SPS CloudFront-invalidation reconciler ECS service (#353).",
     });
   }
 }
