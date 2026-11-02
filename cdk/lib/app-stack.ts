@@ -2300,9 +2300,10 @@ export class AppStack extends Stack {
         // People-search "Research type" facet (Laboratory / Clinical research from
         // Scholar.labPubs5y / clinicalPubs5y, lib/research-type.ts). Staging-first:
         // the doc carries `researchType` only after the reciter ETL fills the counts,
-        // and the nightly alias rebuild after it carries the keyword mapping. Prod
-        // stays off until the facet has been eyeballed on staging.
-        SEARCH_PEOPLE_RESEARCH_TYPE_FACET: env === "staging" ? "on" : "off",
+        // and the nightly alias rebuild after it carries the keyword mapping.
+        // Prod ON 2026-11-02 after staging verified (1,631 people tagged; q=Obesity
+        // facet Clinical 320 / Laboratory 103, filter count matches its bucket).
+        SEARCH_PEOPLE_RESEARCH_TYPE_FACET: "on",
         // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET, SEARCH_RESULT_EVIDENCE,
         // SEARCH_EVIDENCE_ROWS and SEARCH_EVIDENCE_REASON_COUNTS (the #1464
         // evidence bundle) were retired in #1440 -- always on in code, no env key.
