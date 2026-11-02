@@ -18,7 +18,10 @@
  *    missed week inside the window loses nothing.
  *  - `--backfill`: each InfoEd person's BACKFILL_PER_PERSON newest documents (~9.4k docs,
  *    ~4h on 2026-10-25). Run once by hand on the sources family; too long for the
- *    weekly step's 4h task timeout.
+ *    weekly step's 4h task timeout. Recorded as `InfoEd-Biosketch-backfill`, so the
+ *    weekly run is never graded against it: the integrity volume guard compares each
+ *    source with its previous run, and 8,920 backfill rows then 1,095 weekly ones
+ *    failed it on 2026-11-01 with nothing wrong.
  *
  * Usage: npm run etl:infoed-biosketch [-- --backfill]
  */
@@ -173,7 +176,10 @@ async function main(): Promise<number> {
 }
 
 if (!process.env.VITEST) {
-  withEtlRun("InfoEd-Biosketch", main)
+  withEtlRun(
+    process.argv.includes("--backfill") ? "InfoEd-Biosketch-backfill" : "InfoEd-Biosketch",
+    main,
+  )
     .catch((err) => {
       console.error(err);
       process.exit(1);
