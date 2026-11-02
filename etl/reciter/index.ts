@@ -203,6 +203,30 @@ export function composeAuthorStringFromReviewJson(authorsJson: unknown): string 
   return tokens.length > 0 ? tokens.join(", ") : null;
 }
 
+/** #2581 — the external sources whose bylines come from `authorship_review`:
+ *  the `analysis_summary_article.article_id` prefix and the `source` value the
+ *  bare `external_id` is stored under. Each prefix is only ever looked up under
+ *  its own source. */
+export const REVIEW_BYLINE_SOURCES = [
+  { prefix: "SCOPUS:", source: "scopus" },
+  { prefix: "OPENALEX:", source: "openalex" },
+] as const;
+
+/** #2581 — bare external_id → synthetic pmid, for the article_ids carrying
+ *  `prefix` only. An id under any other prefix (or none) is left out, so a bare
+ *  OpenAlex id never reaches the `source = 'scopus'` query or vice versa. */
+export function reviewBareIdsForSource(
+  articleIdByPmid: ReadonlyMap<number, string>,
+  prefix: string,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [pmid, articleId] of articleIdByPmid) {
+    if (!articleId.startsWith(prefix)) continue;
+    out.set(articleId.slice(prefix.length), pmid);
+  }
+  return out;
+}
+
 const IN_BATCH = 500; // batch size for IN (...) clauses
 const INSERT_BATCH = 1000;
 
@@ -627,8 +651,13 @@ async function main() {
     // source-PREFIXED ("SCOPUS:105037533819") while `authorship_review.external_id`
     // is BARE numeric ("105037533819") — all 10,527 scopus rows are bare, and
     // `LIKE 'SCOPUS:%'` matches none of them, so a raw join returns zero rows.
-    // Only `SCOPUS:` ids are stripped and the query is pinned to
-    // `source = 'scopus'`: an OPENALEX: id could strip to a colliding bare value.
+    // Each prefix is stripped only for its own source and the query is pinned to
+    // that source: a bare id from one source could collide with another's.
+    //
+    // OpenAlex works (conference abstracts, preprints) accepted from the
+    // AAR openalex lane arrive as "OPENALEX:W4401234567" with a bare "W4401234567"
+    // external_id, and the producer (aar_universe_openalex.py) writes authors_json
+    // in the same `{ given, surname }` shape as the Scopus lane.
     //
     // Best-effort per batch, matching the analysis_nih and ecommons_pmid_link
     // reads above. `authorship_review` is curator state owned by the AAR
@@ -636,60 +665,61 @@ async function main() {
     // an ungranted SELECT or a rename upstream must degrade to "no byline"
     // rather than throw out of main() and take down the publication upsert this
     // block sits in front of. A byline is cosmetic; the corpus is not.
-    const scopusPmidByBareId = new Map<string, number>();
-    for (const [pmid, articleId] of articleIdByPmid) {
-      if (!articleId.startsWith("SCOPUS:")) continue;
-      scopusPmidByBareId.set(articleId.slice("SCOPUS:".length), pmid);
-    }
-    const scopusAuthorsByPmid = new Map<number, string>();
-    for (const batch of chunks(Array.from(scopusPmidByBareId.keys()), IN_BATCH)) {
-      try {
-        await withReciterConnection(async (conn) => {
-          const rows = (await conn.query(
-            `SELECT external_id, authors_json
-               FROM authorship_review
-              WHERE source = 'scopus' AND external_id IN (?)
-                    AND authors_json IS NOT NULL AND authors_json <> ''`,
-            [batch],
-          )) as AuthorshipReviewRow[];
-          for (const r of rows) {
-            // One row per author-under-review, so one article matches several
-            // rows (40 sampled articles → 50 rows). A probe found ZERO articles
-            // whose rows disagree on authors_json, so the first sighting wins —
-            // do not concatenate. `status` describes the review, not the byline,
-            // so it is deliberately not filtered on.
-            const pmid = scopusPmidByBareId.get(String(r.external_id));
-            if (pmid === undefined || scopusAuthorsByPmid.has(pmid)) continue;
-            const composed = composeAuthorStringFromReviewJson(r.authors_json);
-            if (composed) scopusAuthorsByPmid.set(pmid, composed);
-          }
-        });
-      } catch (err) {
-        console.warn(
-          `authorship_review fetch failed for a batch (continuing without a Scopus byline for it): ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
+    const reviewAuthorsByPmid = new Map<number, string>();
+    for (const { prefix, source } of REVIEW_BYLINE_SOURCES) {
+      const pmidByBareId = reviewBareIdsForSource(articleIdByPmid, prefix);
+      const authorsByPmid = new Map<number, string>();
+      for (const batch of chunks(Array.from(pmidByBareId.keys()), IN_BATCH)) {
+        try {
+          await withReciterConnection(async (conn) => {
+            const rows = (await conn.query(
+              `SELECT external_id, authors_json
+                 FROM authorship_review
+                WHERE source = ? AND external_id IN (?)
+                      AND authors_json IS NOT NULL AND authors_json <> ''`,
+              [source, batch],
+            )) as AuthorshipReviewRow[];
+            for (const r of rows) {
+              // One row per author-under-review, so one article matches several
+              // rows (40 sampled articles → 50 rows). A probe found ZERO articles
+              // whose rows disagree on authors_json, so the first sighting wins —
+              // do not concatenate. `status` describes the review, not the byline,
+              // so it is deliberately not filtered on.
+              const pmid = pmidByBareId.get(String(r.external_id));
+              if (pmid === undefined || authorsByPmid.has(pmid)) continue;
+              const composed = composeAuthorStringFromReviewJson(r.authors_json);
+              if (composed) authorsByPmid.set(pmid, composed);
+            }
+          });
+        } catch (err) {
+          console.warn(
+            `authorship_review fetch failed for a ${source} batch (continuing without a byline for it): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       }
-    }
-    console.log(`Got ${scopusAuthorsByPmid.size} Scopus review bylines.`);
+      console.log(`Got ${authorsByPmid.size} ${source} review bylines.`);
 
-    // The per-batch catch above, plus an emptied or rebuilt authorship_review,
-    // both arrive here as a near-empty map — and this map is NOT write-safe just
-    // because it is read behind a `??`. `publicationSignature` hashes both
-    // authorsString and fullAuthorsString, and the upsert below writes every
-    // changed row unconditionally, so a byline this ETL stored last night is
-    // overwritten with NULL tonight the moment the map loses its entry. That is
-    // exactly the wipe every assertSourceVolume above prevents. `existing`
-    // counts only the rows this read owns — the external SCOPUS: pmids — so a
-    // healthy PubMed corpus cannot mask a total loss of the Scopus source.
-    assertSourceVolume("reciter:scopus-review-bylines", {
-      incoming: scopusAuthorsByPmid.size,
-      existing: await db.write.publication.count({
-        where: { pmid: { startsWith: "SCOPUS:" }, authorsString: { not: null } },
-      }),
-      maxDropPct: 30,
-    });
+      // The per-batch catch above, plus an emptied or rebuilt authorship_review,
+      // both arrive here as a near-empty map — and this map is NOT write-safe just
+      // because it is read behind a `??`. `publicationSignature` hashes both
+      // authorsString and fullAuthorsString, and the upsert below writes every
+      // changed row unconditionally, so a byline this ETL stored last night is
+      // overwritten with NULL tonight the moment the map loses its entry. That is
+      // exactly the wipe every assertSourceVolume above prevents. `existing`
+      // counts only the rows this source owns — its prefixed pmids — so neither a
+      // healthy PubMed corpus nor the other review source can mask a total loss
+      // of this one. Guarded per source, before the merge, for the same reason.
+      assertSourceVolume(`reciter:${source}-review-bylines`, {
+        incoming: authorsByPmid.size,
+        existing: await db.write.publication.count({
+          where: { pmid: { startsWith: prefix }, authorsString: { not: null } },
+        }),
+        maxDropPct: 30,
+      });
+      for (const [pmid, byline] of authorsByPmid) reviewAuthorsByPmid.set(pmid, byline);
+    }
 
     // Issue #89 — NLM journal abbreviation. person_article carries the
     // ISO abbreviation per pmid (despite the name, it's the NLM-style
@@ -792,9 +822,9 @@ async function main() {
       // under STRICT_TRANS_TABLES and fails the nightly deterministically, every
       // night, until someone edits the row by hand. Widen the column if a
       // mid-name cut ever matters; the untruncated list is in fullAuthorsString.
-      const scopusByline = scopusAuthorsByPmid.get(Number(a.pmid)) ?? null;
+      const reviewByline = reviewAuthorsByPmid.get(Number(a.pmid)) ?? null;
       const authorsString =
-        authorsStringByPmid.get(Number(a.pmid)) ?? scopusByline?.slice(0, 2000) ?? null;
+        authorsStringByPmid.get(Number(a.pmid)) ?? reviewByline?.slice(0, 2000) ?? null;
       const nih = nihByPmid.get(Number(a.pmid));
       return {
         pmid: pubKey(Number(a.pmid)),
@@ -815,7 +845,7 @@ async function main() {
             : (recoveredTitles.get(Number(a.pmid)) ?? `(untitled, pmid ${a.pmid})`),
         ),
         authorsString,
-        fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? scopusByline,
+        fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? reviewByline,
         journal: a.journalTitleVerbose,
         year: a.articleYear,
         publicationType: a.publicationTypeCanonical,
