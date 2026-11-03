@@ -1,0 +1,45 @@
+# Checkov config for .github/workflows/security-scan.yml (passed with
+# --config-file to both the CloudFormation and the Dockerfile run).
+#
+# Only rules whose every finding is won't-fix or a false positive are skipped
+# here. Checkov cannot skip a rule for one resource from config, and the
+# templates are synthesized, so rules that mix real fixes with accepted
+# findings (CKV_AWS_2, CKV_AWS_103, CKV_AWS_260, CKV_AWS_91, CKV_AWS_131) stay
+# active, as do the rules tracking real fixes (CKV_AWS_84, CKV_AWS_118).
+skip-check:
+  # Secrets read only by same-account, IAM-scoped roles; the aws/secretsmanager key is sufficient and a CMK adds key-policy upkeep with no access change.
+  - CKV_AWS_149
+  # CloudWatch Logs encrypts at rest by default and IAM controls access; a CMK per log group (CDK-made ones included) is not warranted.
+  - CKV_AWS_158
+  # Low-volume scheduled, relay and custom-resource Lambdas; reserved concurrency would only take account capacity and add throttling risk.
+  - CKV_AWS_115
+  # These Lambdas call public endpoints or AWS APIs only; the one that touches the database (DB bootstrap) is already in the VPC.
+  - CKV_AWS_117
+  # Custom-resource handlers are synchronous so a DLQ never fires; scheduled functions have error alarms; the relay that matters already has a DLQ.
+  - CKV_AWS_116
+  # CDK-generated Step Functions policy; the vended-log-delivery and X-Ray actions require Resource "*" and CDK merges them into one statement.
+  - CKV_AWS_111
+  # CDK's built-in OIDC-provider custom-resource role; actions limited to iam *OpenIDConnectProvider* APIs and not configurable.
+  - CKV_AWS_109
+  # Private buckets with Block Public Access and IAM/OAC-only access; log sinks or regenerable/short-lived data, so access logs add cost without a reviewer.
+  - CKV_AWS_18
+  # Regenerable or expiring data (ISR cache, build assets, log sinks, derived exports, 90-day mail); the curation backup bucket is already versioned.
+  - CKV_AWS_21
+  # Alarm and notification topics; CloudWatch alarms and SES cannot publish with aws/sns, and payloads are alert metadata only.
+  - CKV_AWS_26
+  # False positive: env vars hold only ARNs, names and hostnames, never secret values; Lambda encrypts env vars at rest by default.
+  - CKV_AWS_173
+  # The moving :latest tag is intentional; task definitions are pinned by image digest.
+  - CKV_AWS_51
+  # ECR default AES-256 encryption; images are built from this public repo and contain no secrets.
+  - CKV_AWS_136
+  # Recovery points keep the source cluster's encryption; the default AWS Backup vault key is accepted (a CMK would also need DR-region replication).
+  - CKV_AWS_166
+  # OpenSearch holds derived search data rebuilt from Aurora by the ETL, with two service users; audit-log volume and cost are not justified.
+  - CKV_AWS_317
+  # False positive: the queue sets SqsManagedSseEnabled (SSE-SQS); Checkov only recognises the KMS form.
+  - CKV_AWS_27
+  # IAM DB auth deliberately off: Secrets Manager credentials plus server-required TLS; IAM auth would add token refresh and a connection-rate ceiling.
+  - CKV_AWS_162
+  # Dockerfile: ALB target-group health check covers liveness.
+  - CKV_DOCKER_2
