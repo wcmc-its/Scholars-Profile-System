@@ -926,3 +926,50 @@ describe("getCitingPublicationsForCsv", () => {
     await expect(getCitingPublicationsForCsv("12345")).rejects.toThrow();
   });
 });
+
+describe("getPublicationDetail — external-source pubs (#3259)", () => {
+  function externalPub(pmid: string) {
+    return {
+      pmid,
+      title: "Ziftomenib conference abstract",
+      journal: "Blood",
+      year: 2026,
+      volume: null,
+      issue: null,
+      pages: null,
+      fullAuthorsString: "Roboz G, Wang E",
+      abstract: "Background text",
+      impactScore: null,
+      impactJustification: null,
+      citationCount: 0,
+      pmcid: null,
+      doi: "10.1182/blood-2025-1",
+      pubmedUrl: null,
+      meshTerms: [],
+      publicationTopics: [],
+    };
+  }
+
+  it.each(["OPENALEX:W7162546682", "OPENALEX%3AW7162546682", "SCOPUS:86000793624"])(
+    "loads %s by its prefixed key without touching reciterdb",
+    async (id) => {
+      const key = decodeURIComponent(id);
+      mocks.publicationFindUnique.mockResolvedValueOnce(externalPub(key));
+      const r = await getPublicationDetail(id);
+      expect(mocks.publicationFindUnique.mock.calls[0][0].where).toEqual({ pmid: key });
+      expect(r?.pub.abstract).toBe("Background text");
+      expect(r?.pub.fullAuthorsString).toBe("Roboz G, Wang E");
+      expect(r?.citingPubs).toEqual([]);
+      expect(r?.citingPubsTotal).toBe(0);
+      expect(mocks.withReciterConnection).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["OPENALEX:123", "SCOPUS:W1", "PUBMED:1", "OPENALEX:W1;drop", "%E0%A4%A"])(
+    "rejects malformed id %s",
+    async (id) => {
+      expect(await getPublicationDetail(id)).toBeNull();
+      expect(mocks.publicationFindUnique).not.toHaveBeenCalled();
+    },
+  );
+});
