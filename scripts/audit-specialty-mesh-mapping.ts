@@ -36,6 +36,7 @@
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import { createConnection, type Connection } from "mariadb";
+import { connectionOptionsFromDsn } from "@/lib/db-tls";
 
 const ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi";
 const NCBI_TOOL = "wcm-sps-specialty-audit";
@@ -81,14 +82,8 @@ function parseArgs(argv: string[]) {
 function dbConfig() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL not set");
-  const u = new URL(url);
-  return {
-    host: u.hostname,
-    port: u.port ? parseInt(u.port, 10) : 3306,
-    database: u.pathname.replace(/^\//, ""),
-    user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password),
-  };
+  // DB_TLS=on adds verified TLS (lib/db-tls.ts).
+  return connectionOptionsFromDsn(url);
 }
 
 type Specialty = { name: string; count: number; kinds: Set<string> };

@@ -28,6 +28,7 @@
  */
 import "dotenv/config";
 import { createConnection, type Connection } from "mariadb";
+import { connectionOptionsFromDsn } from "@/lib/db-tls";
 
 /** Pure set-difference so the "don't touch curator decisions" rule is
  *  testable without a database. */
@@ -42,14 +43,8 @@ async function connect(url: string | undefined, label: string): Promise<Connecti
     console.error(`${label} not set. Copy .env.example to .env.local and set it.`);
     process.exit(1);
   }
-  const u = new URL(url);
-  return createConnection({
-    host: u.hostname,
-    port: u.port ? Number(u.port) : 3306,
-    user: decodeURIComponent(u.username),
-    password: u.password ? decodeURIComponent(u.password) : undefined,
-    database: u.pathname.slice(1),
-  });
+  // DB_TLS=on adds verified TLS (lib/db-tls.ts).
+  return createConnection(connectionOptionsFromDsn(url));
 }
 
 async function main(): Promise<void> {

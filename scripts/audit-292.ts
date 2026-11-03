@@ -4,6 +4,7 @@
  */
 import "dotenv/config";
 import { createConnection } from "mariadb";
+import { connectionOptionsFromDsn } from "@/lib/db-tls";
 
 function parseUrl(url: string) {
   const u = new URL(url);
@@ -20,13 +21,8 @@ async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL not set");
   const cfg = parseUrl(url);
-  const conn = await createConnection({
-    host: cfg.host,
-    port: cfg.port,
-    user: cfg.user,
-    password: cfg.password,
-    database: cfg.database,
-  });
+  // DB_TLS=on adds verified TLS (lib/db-tls.ts).
+  const conn = await createConnection(connectionOptionsFromDsn(url));
 
   console.log(`Connected to ${cfg.host}:${cfg.port}/${cfg.database}\n`);
 

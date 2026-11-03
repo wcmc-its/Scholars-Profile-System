@@ -16,6 +16,7 @@
  */
 import "dotenv/config";
 import { createConnection } from "mariadb";
+import { connectionOptionsFromDsn } from "@/lib/db-tls";
 
 type VersionRow = { version: string };
 type CountRow = { c: number };
@@ -45,14 +46,8 @@ async function main() {
   console.log(`  user     ${parsed.user}`);
   console.log();
 
-  const conn = await createConnection({
-    host: parsed.host,
-    port: parsed.port,
-    database: parsed.database,
-    user: parsed.user,
-    password: new URL(url).password ? decodeURIComponent(new URL(url).password) : undefined,
-    bigIntAsNumber: true,
-  });
+  // DB_TLS=on adds verified TLS (lib/db-tls.ts).
+  const conn = await createConnection({ ...connectionOptionsFromDsn(url), bigIntAsNumber: true });
 
   try {
     const [versionRow] = (await conn.query("SELECT VERSION() AS version")) as VersionRow[];

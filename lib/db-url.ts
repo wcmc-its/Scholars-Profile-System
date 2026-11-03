@@ -31,6 +31,10 @@
  * still wins. The adapter rewrites the `mysql:` scheme to `mariadb:` and keeps
  * the query string, so these survive to `mariadb.createPool`.
  */
+import type { PoolConfig } from "mariadb";
+
+import { dbSslOptions } from "@/lib/db-tls";
+
 export const MARIADB_POOL_PARAMS: Readonly<Record<string, string>> = {
   connectTimeout: "5000",
   connectionLimit: "15",
@@ -55,4 +59,40 @@ export function withMariadbPoolParams(rawUrl: string): string {
   } catch {
     return rawUrl;
   }
+}
+
+/**
+ * What `lib/db.ts` hands to `PrismaMariaDb` for one pool.
+ *
+ * `DB_TLS` off: the URL string, unchanged (the pre-flag behaviour).
+ * `DB_TLS` on: a mariadb PoolConfig object carrying the verified `ssl` settings
+ * from `lib/db-tls.ts`. A CA bundle cannot travel in a URL (the driver only
+ * reads `ssl=true`, which verifies against Node's default trust store and so
+ * rejects the RDS certificate), so the URL is unpacked into an object here.
+ * Query params keep the meaning the driver's own URL parser gives them:
+ * "true"/"false" become booleans and integers become numbers.
+ */
+export function mariadbPoolConfig(
+  rawUrl: string,
+  env: Record<string, string | undefined> = process.env,
+  caFile?: string,
+): string | PoolConfig {
+  const ssl = dbSslOptions(env, caFile);
+  if (!ssl) return rawUrl;
+  const url = new URL(rawUrl);
+  const config: Record<string, unknown> = {
+    host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
+    port: url.port ? parseInt(url.port, 10) : 3306,
+    user: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+    database: decodeURIComponent(url.pathname.replace(/^\//, "")) || undefined,
+  };
+  for (const [key, value] of url.searchParams) {
+    if (value === "true" || value === "false") config[key] = value === "true";
+    else if (/^-?\d+$/.test(value)) config[key] = parseInt(value, 10);
+    else config[key] = value;
+  }
+  // Last, so a stray `?ssl=true` on a DSN cannot swap in unverified-CA trust.
+  config.ssl = ssl;
+  return config as PoolConfig;
 }

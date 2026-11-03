@@ -268,6 +268,14 @@ export class EtlStack extends Stack {
       "EtlDbSecret",
       `scholars/${env}/db/etl`,
     );
+    // DB_TLS -- verified TLS from every ETL task to Aurora (lib/db-tls.ts): the
+    // mariadb pools in lib/db.ts require TLS and verify the server cert against
+    // the RDS CA bundle in the image (certs/). Same per-env value as AppStack's
+    // `dbTls`: ON in staging, OFF in prod until the staging probe shows a
+    // non-empty Ssl_version. Set on every task def holding an Aurora DSN (the
+    // base/fan-out defs via baseEnvironment, plus both reconcilers); NOT on
+    // bulk-data-rule, whose DB is reciterdb. Rollback = "off" + cdk deploy.
+    const dbTls = env === "staging" ? "on" : "off";
     // Dedicated reciterdb credential for scripts/bulk-data-rule/ (containerization
     // design, 2026-08-14). Deliberately its own secret, not a share of the
     // per-source EtlReciter secret below (SOURCES_SECRET_IDS) -- that secret's
@@ -892,6 +900,8 @@ export class EtlStack extends Stack {
     //   hierarchy -> ReciterAI hierarchy bucket
     const baseEnvironment: { [k: string]: string } = {
       NODE_ENV: "production",
+      // Verified TLS to Aurora (see `dbTls` above).
+      DB_TLS: dbTls,
       // Deployment env name for steps whose behavior is env-scoped —
       // etl:freshness skips SLA entries for sources a given env's cadence
       // deliberately omits (none today; InfoEd was the last, until #2906).
@@ -2809,6 +2819,8 @@ export class EtlStack extends Stack {
       }),
       environment: {
         NODE_ENV: "production",
+        // Verified TLS to Aurora (see `dbTls` above).
+        DB_TLS: dbTls,
         // searchClient() reads OPENSEARCH_NODE; OPENSEARCH_USER/PASS arrive
         // as secrets below. Same de-coupling as the ETL container (§8.4):
         // export-baked env by default, secret `node` key when flag on.
@@ -2979,6 +2991,8 @@ export class EtlStack extends Stack {
       }),
       environment: {
         NODE_ENV: "production",
+        // Verified TLS to Aurora (see `dbTls` above).
+        DB_TLS: dbTls,
         // #353 enable -- wire the EdgeStack distribution id so the reconciler
         // drains the cdn_invalidation outbox. envConfig.cloudFrontDistributionId
         // is populated in both envs; this was omitted while the path was

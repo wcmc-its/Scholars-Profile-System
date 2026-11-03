@@ -264,6 +264,16 @@ export class AppStack extends Stack {
       "MigrateSecret",
       `scholars/${env}/db/migrate`,
     );
+    // DB_TLS -- verified TLS from every SPS client to Aurora (lib/db-tls.ts):
+    // "on" makes the mariadb pools, the db-bootstrap / verify-grants runners and
+    // the migrate task's Prisma schema engine require TLS and verify the server
+    // cert against the RDS CA bundle baked into the image (certs/). Set on every
+    // task def here that holds an Aurora DSN (app, migrate, db-bootstrap,
+    // verify-grants); EtlStack and the DataStack seeder Lambda carry the same
+    // ternary. Stage 2 of 3: ON in staging, OFF in prod until the staging probe
+    // shows a non-empty Ssl_version; stage 3 sets require_secure_transport=ON.
+    // Rollback = "off" + cdk deploy (the DSN secrets carry no TLS params).
+    const dbTls = envConfig.envName === "staging" ? "on" : "off";
     const opensearchAppSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
       "OpensearchAppSecret",
@@ -1368,6 +1378,8 @@ export class AppStack extends Stack {
       environment: {
         NODE_ENV: "production",
         PORT: "3000",
+        // Verified TLS to Aurora for db.write / db.read (see `dbTls` above).
+        DB_TLS: dbTls,
         // Next standalone server.js reads this into server.keepAliveTimeout.
         // Node's 5s default is shorter than the ALB idle timeout (60s), so the
         // ALB occasionally reuses a socket Node just closed -> sporadic ELB 502
@@ -3385,6 +3397,11 @@ export class AppStack extends Stack {
       containerName: "migrate",
       essential: true,
       entryPoint: ["npx", "prisma", "migrate", "deploy"],
+      // prisma.config.ts adds the schema engine's TLS params (sslcert = the RDS
+      // CA bundle, sslaccept=strict) when this is "on" (see `dbTls` above).
+      environment: {
+        DB_TLS: dbTls,
+      },
       logging: ecs.LogDriver.awsLogs({
         logGroup: migrationLogGroup,
         streamPrefix: "migrate",
@@ -3436,6 +3453,8 @@ export class AppStack extends Stack {
         // `10.20.%`, prod is `%`). db-bootstrap grants the audit INSERT to
         // `'app_rw'@'<this>'`; a wrong value 1410s at the GRANT (#493 staging).
         GRANTEE_HOST: envConfig.appRwGranteeHost,
+        // Verified TLS to Aurora (see `dbTls` above).
+        DB_TLS: dbTls,
       },
       logging: ecs.LogDriver.awsLogs({
         logGroup: dbBootstrapLogGroup,
@@ -3489,6 +3508,8 @@ export class AppStack extends Stack {
       entryPoint: ["npx", "tsx", "scripts/verify-db-grants.ts"],
       environment: {
         VERIFY_ROLES: "app-ro,app-rw,sps_migrate,sps_bootstrap",
+        // Verified TLS to Aurora (see `dbTls` above).
+        DB_TLS: dbTls,
       },
       logging: ecs.LogDriver.awsLogs({
         logGroup: verifyGrantsLogGroup,
