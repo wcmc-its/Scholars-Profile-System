@@ -20,6 +20,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { isMatchaBriefEnabled } from "@/lib/api/matcha-brief";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -69,7 +70,8 @@ export default async function MatchaPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <MatchaPanel />
+      {/* MATCHA_BRIEF — per-PI briefs + search Rename; the brief route re-checks the flag. */}
+      <MatchaPanel matchaBrief={isMatchaBriefEnabled()} />
     </ConsoleShell>
   );
 }

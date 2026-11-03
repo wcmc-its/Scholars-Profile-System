@@ -70,7 +70,9 @@ import { EvidenceLine } from "@/components/search/evidence-line";
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetClose,
@@ -116,7 +118,19 @@ import {
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
 import { RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
-import { buildMatchaCsv } from "@/lib/edit/matcha-export";
+import { briefCsvFields, buildMatchaCsv } from "@/lib/edit/matcha-export";
+import {
+  briefSourceLabel,
+  briefSourceUrl,
+  briefTopics,
+  briefWhy,
+  firstSentence,
+  reporterUrl,
+  UNSOURCED_LABEL,
+  type BriefRecords,
+  type BriefWire,
+} from "@/lib/edit/matcha-brief-types";
+import { readOverviewStream } from "@/lib/edit/overview-stream";
 import type { EligibilityRequirements } from "@/lib/funding/screening";
 import {
   careerStageLabel,
@@ -490,6 +504,7 @@ export function MatchaPanel({
   eligibility,
   allowEditPaste = true,
   sourceUrl,
+  matchaBrief = false,
 }: {
   /** Grant Matcha — seed the ask from an opportunity's title + synopsis so the officer lands on
    *  the extracted concepts + ranked researchers instead of a blank textarea. */
@@ -515,6 +530,9 @@ export function MatchaPanel({
    *  NIGMS RM1 case), where the FOA's full text is the recovery path and this is the link to
    *  it. Absent — the email path, or an opportunity without one — renders exactly as before. */
   sourceUrl?: string | null;
+  /** Matcha Phase 3 — per-PI briefs + search Rename. Server-computed from `MATCHA_BRIEF` (the
+   *  brief route re-checks it). Off ⇒ the panel renders exactly as before. */
+  matchaBrief?: boolean;
 } = {}) {
   const [description, setDescription] = useState(initialDescription ?? "");
   // Grant Matcha — which corpus this ask searches. "grants" POSTs `{ target: "grants" }` and
@@ -626,6 +644,28 @@ export function MatchaPanel({
   // history list's replay button does exactly this) is still a new run whose blocks must re-fetch
   // from a clean slate, and `matchedText` cannot see that: it would be unchanged.
   const [runId, setRunId] = useState(0);
+
+  // ── Matcha Phase 3: briefs + Rename (MATCHA_BRIEF) ──
+  // The retained row this run wrote (null: grant path, or the retention write failed). Briefs and
+  // the Rename key off it; the server re-resolves everything else from the saved search.
+  const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [titleOverride, setTitleOverride] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [renameError, setRenameError] = useState(false);
+  const [briefMap, setBriefMap] = useState<ReadonlyMap<string, BriefWire>>(new Map());
+  const [briefRecords, setBriefRecords] = useState<Readonly<Record<string, BriefRecords>>>({});
+  const [briefDrafting, setBriefDrafting] = useState<ReadonlySet<string>>(new Set());
+  const [briefFailed, setBriefFailed] = useState<ReadonlySet<string>>(new Set());
+  // Fail closed: no Draft/Edit controls until the GET says this viewer may write.
+  const [briefCanEdit, setBriefCanEdit] = useState(false);
+  /** The oldest saved brief's date when briefs were LOADED (a replay), else null. */
+  const [briefsSavedAt, setBriefsSavedAt] = useState<string | null>(null);
+  // The submission a draft belongs to — a result landing after a new search is dropped.
+  const briefSubRef = useRef<string | null>(null);
+  const briefQueueRef = useRef<{ cwid: string; sid: string }[]>([]);
+  const briefActiveRef = useRef(0);
+  const briefInflightRef = useRef<Set<string>>(new Set());
   const pending = status.kind === "loading";
   // What this ask ranks — drives the submit/loading/empty copy so grant mode never says "researchers".
   const targetNoun = target === "grants" ? "opportunities" : "researchers";
@@ -683,6 +723,166 @@ export function MatchaPanel({
       if (r.ok) setHistory((prev) => prev.filter((h) => h.id !== id));
     } catch {
       /* ignore — the row stays listed, and the next load will show the truth. */
+    }
+  }
+
+  /** A new run: forget the last run's briefs and drafts, then (flag on) load the paste's saved
+   *  briefs — a replay from Recent shows them with no click. Briefs are keyed on the PASTE, so
+   *  a fresh paste simply comes back empty. */
+  function startBriefsFor(sid: string | null) {
+    briefSubRef.current = sid;
+    briefQueueRef.current = [];
+    setBriefMap(new Map());
+    setBriefRecords({});
+    setBriefDrafting(new Set());
+    setBriefFailed(new Set());
+    setBriefCanEdit(false);
+    setBriefsSavedAt(null);
+    setRenaming(false);
+    if (matchaBrief && sid) void loadBriefs(sid);
+  }
+
+  async function loadBriefs(sid: string) {
+    try {
+      const r = await fetch(`/api/edit/matcha/brief?submissionId=${encodeURIComponent(sid)}`, {
+        credentials: "same-origin",
+      });
+      if (!r.ok || briefSubRef.current !== sid) return;
+      const data = (await r.json()) as {
+        briefs?: BriefWire[];
+        records?: Record<string, BriefRecords>;
+        canEdit?: boolean;
+      };
+      if (briefSubRef.current !== sid) return;
+      const list = data.briefs ?? [];
+      // Merge, never replace: a draft the officer started before this GET returned must survive it.
+      setBriefMap((prev) => {
+        const next = new Map(list.map((b) => [b.cwid, b] as const));
+        for (const [k, v] of prev) next.set(k, v);
+        return next;
+      });
+      setBriefRecords((prev) => ({ ...(data.records ?? {}), ...prev }));
+      setBriefCanEdit(data.canEdit === true);
+      setBriefsSavedAt(
+        list.length > 0 ? list.map((b) => b.draftedAt).reduce((a, b) => (a < b ? a : b)) : null,
+      );
+    } catch {
+      /* the briefs are an add-on; a failed load leaves the results untouched */
+    }
+  }
+
+  /** Queue PIs for drafting. One POST per PI, `BRIEF_CONCURRENCY` in flight across every caller
+   *  (toolbar and per-card), each row filling in as its own stream's result lands. */
+  function enqueueBriefs(cwids: readonly string[]) {
+    const sid = submissionId;
+    if (!sid || !briefCanEdit) return;
+    const queued = new Set(briefQueueRef.current.map((j) => j.cwid));
+    const fresh = cwids.filter((c) => !briefInflightRef.current.has(c) && !queued.has(c));
+    if (fresh.length === 0) return;
+    setBriefDrafting((prev) => new Set([...prev, ...fresh]));
+    setBriefFailed((prev) => new Set([...prev].filter((c) => !fresh.includes(c))));
+    briefQueueRef.current.push(...fresh.map((cwid) => ({ cwid, sid })));
+    pumpBriefs();
+  }
+
+  function pumpBriefs() {
+    while (briefActiveRef.current < BRIEF_CONCURRENCY && briefQueueRef.current.length > 0) {
+      const job = briefQueueRef.current.shift()!;
+      briefActiveRef.current += 1;
+      briefInflightRef.current.add(job.cwid);
+      void draftOneBrief(job).finally(() => {
+        briefActiveRef.current -= 1;
+        briefInflightRef.current.delete(job.cwid);
+        pumpBriefs();
+      });
+    }
+  }
+
+  async function draftOneBrief({ cwid, sid }: { cwid: string; sid: string }) {
+    let ok = false;
+    try {
+      const r = await fetch("/api/edit/matcha/brief", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ submissionId: sid, cwids: [cwid] }),
+      });
+      if (r.ok) {
+        // NDJSON (`editOkStream`): progress lines, padded heartbeats, then one result line. The
+        // overview generator's reader skips blanks and returns the result line.
+        const result = await readOverviewStream(r, () => {});
+        if (result?.ok && briefSubRef.current === sid) {
+          const brief = (result.briefs as BriefWire[] | undefined)?.find((b) => b.cwid === cwid);
+          const records = (result.records as Record<string, BriefRecords> | undefined)?.[cwid];
+          if (brief) {
+            ok = true;
+            setBriefMap((prev) => new Map(prev).set(cwid, brief));
+            if (records) setBriefRecords((prev) => ({ ...prev, [cwid]: records }));
+          }
+        }
+      }
+    } catch {
+      /* reported as failed below */
+    }
+    if (briefSubRef.current !== sid) return;
+    setBriefDrafting((prev) => {
+      const next = new Set(prev);
+      next.delete(cwid);
+      return next;
+    });
+    if (!ok) setBriefFailed((prev) => new Set(prev).add(cwid));
+  }
+
+  async function patchBrief(cwid: string, patch: BriefPatch): Promise<boolean> {
+    const sid = submissionId;
+    if (!sid) return false;
+    try {
+      const r = await fetch("/api/edit/matcha/brief", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ submissionId: sid, cwid, ...patch }),
+      });
+      if (!r.ok) return false;
+      const data = (await r.json()) as { brief?: BriefWire };
+      if (!data.brief || briefSubRef.current !== sid) return false;
+      const brief = data.brief;
+      setBriefMap((prev) => new Map(prev).set(cwid, brief));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Rename the search (PATCH /api/edit/matcha). Empty reverts to the generated title. */
+  async function saveTitle(generated: string) {
+    const sid = submissionId;
+    if (!sid) return;
+    const trimmed = titleDraft.trim();
+    const title = trimmed === generated ? "" : trimmed;
+    setRenameError(false);
+    try {
+      const r = await fetch("/api/edit/matcha", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ submissionId: sid, title }),
+      });
+      if (!r.ok) {
+        setRenameError(true);
+        return;
+      }
+      const data = (await r.json()) as { title?: string | null; titleOverride?: string | null };
+      setTitleOverride(data.titleOverride ?? null);
+      setRenaming(false);
+      // Recent lists one entry per paste; relabel the one this run belongs to.
+      setHistory((prev) =>
+        prev.map((h) =>
+          h.id === sid || h.description === matchedText ? { ...h, title: data.title ?? null } : h,
+        ),
+      );
+    } catch {
+      setRenameError(true);
     }
   }
 
@@ -778,13 +978,22 @@ export function MatchaPanel({
           setRunId((n) => n + 1);
           setPreferences([]); // grant path ships none — never surface stale people prefs in the ask
           setActivePrefs(new Set());
+          if (matchaBrief) {
+            setSubmissionId(null); // the grant branch retains nothing to brief or rename
+            setTitleOverride(null);
+            startBriefsFor(null);
+          }
           setStatus({ kind: "ok" });
           return;
         }
         // Typed as the CONTRACT's response, not an anonymous shape. The contract's headline
         // promise is that a drift between ranker and panel is a compile error; an inline
         // `{candidates?; concepts?}` opted the envelope out of exactly that.
-        const data = (await r.json()) as Partial<MatchaResponse>;
+        const data = (await r.json()) as Partial<MatchaResponse> & {
+          /** Matcha Phase 3 — the retained row (null if the retention write failed). */
+          submissionId?: string | null;
+          titleOverride?: string | null;
+        };
         setGrantCandidates([]); // toggling back to people clears any prior grant results
         clearFilters(); // stale facet selections must not silently hide fresh results
         setTypeSel(null); // ...except researcher type and person type, which return to their defaults
@@ -811,6 +1020,11 @@ export function MatchaPanel({
         const prefs = data.preferences ?? [];
         setPreferences(prefs);
         setActivePrefs(new Set(prefs.map((p) => p.label)));
+        if (matchaBrief) {
+          setSubmissionId(data.submissionId ?? null);
+          setTitleOverride(data.titleOverride ?? null);
+          startBriefsFor(data.submissionId ?? null);
+        }
         setStatus({ kind: "ok" });
         return;
       }
@@ -1327,6 +1541,58 @@ export function MatchaPanel({
     [rankedRows, shortlist],
   );
 
+  // ── Matcha Phase 3: briefs ──
+  // On only for the email path's people results with a retained run to key on. Off ⇒ every row is
+  // handed no brief props and the toolbar/title render exactly as master.
+  const briefsOn = matchaBrief && !grantPath && target === "people" && submissionId != null;
+
+  /** What "Draft briefs" drafts: the CURRENT view (sliders + filters applied), rows without a
+   *  brief and not already drafting. Ticked rows win (the shortlist, capped at the server's 20);
+   *  otherwise the top 10 of the filtered, fit-ordered view. */
+  const briefTargets = useMemo(() => {
+    const lacks = (cwid: string) => !briefMap.has(cwid) && !briefDrafting.has(cwid);
+    if (shortlistRows.length > 0) {
+      return shortlistRows
+        .map(({ c }) => c.cwid)
+        .filter(lacks)
+        .slice(0, BRIEF_SHORTLIST_MAX);
+    }
+    return eligibleRows
+      .slice(0, BRIEF_TOP_N)
+      .map(({ c }) => c.cwid)
+      .filter(lacks);
+  }, [shortlistRows, eligibleRows, briefMap, briefDrafting]);
+
+  function briefStateFor(cwid: string): BriefState {
+    if (briefDrafting.has(cwid)) return { kind: "drafting" };
+    const brief = briefMap.get(cwid);
+    if (brief) return { kind: "ready", brief };
+    if (briefFailed.has(cwid)) return { kind: "failed" };
+    return { kind: "none" };
+  }
+
+  function briefPropsFor(cwid: string): BriefRowProps {
+    return {
+      state: briefStateFor(cwid),
+      records: briefRecords[cwid],
+      canEdit: briefCanEdit,
+      onDraft: () => enqueueBriefs([cwid]),
+      onPatch: (patch) => patchBrief(cwid, patch),
+    };
+  }
+
+  function compactBriefLineFor(cwid: string): CompactBriefLine | undefined {
+    const state = briefStateFor(cwid);
+    if (state.kind === "drafting") return { kind: "drafting" };
+    if (state.kind === "failed") return { kind: "failed" };
+    if (state.kind === "ready") return { kind: "text", text: firstSentence(briefWhy(state.brief)) };
+    return undefined;
+  }
+
+  const briefFailedCount = [...briefFailed].filter(
+    (c) => !briefMap.has(c) && !briefDrafting.has(c),
+  ).length;
+
   /** One mapping, both exports. Two copies of it would drift, and the CSV would then depend on
    *  which button the officer pressed — the rows are the same rows either way. */
   function exportCsv(rows: readonly { c: MatchaCandidate; rank: number }[], filename: string) {
@@ -1357,8 +1623,10 @@ export function MatchaPanel({
         // predicate the gate and the badges use — the stated rule, not the toggle — and it is
         // null on `/edit/matcha`, where the column (see the option below) does not exist.
         ...(meetsStageRule ? { eligible: meetsStageRule(c) ? "Yes" : "No" } : {}),
+        // Matcha Phase 3 — the brief's why + topics (edited text when present). Never the note.
+        ...(briefsOn ? briefCsvFields(briefMap.get(c.cwid)) : {}),
       })),
-      { eligibility: meetsStageRule != null },
+      { eligibility: meetsStageRule != null, brief: briefsOn },
     );
     downloadCsv(filename, csv);
   }
@@ -1595,6 +1863,7 @@ export function MatchaPanel({
         selected={shortlist.has(c.cwid)}
         onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
         {...(badge ? { eligBadge: badge } : {})}
+        {...(briefsOn ? { brief: briefPropsFor(c.cwid) } : {})}
       />
     ) : (
       <CompactRow
@@ -1608,6 +1877,7 @@ export function MatchaPanel({
         onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
         table={grantTable}
         {...(badge ? { eligBadge: badge } : {})}
+        {...(briefsOn ? { briefsOn: true, briefLine: compactBriefLineFor(c.cwid) } : {})}
       />
     );
   };
@@ -1846,6 +2116,71 @@ export function MatchaPanel({
                         })()}
                       </h2>
                     ) : null
+                  ) : matchaBrief && submissionId && (titleOverride ?? ask?.title) ? (
+                    // Matcha Phase 3 — the officer can rename the search (an industry ask's
+                    // generated handle can be wrong, or a wave name is wanted). The generated
+                    // title is never overwritten; display = override ?? generated.
+                    renaming ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Input
+                          value={titleDraft}
+                          maxLength={120}
+                          aria-label="Search title"
+                          onChange={(e) => setTitleDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void saveTitle(ask?.title ?? "");
+                            if (e.key === "Escape") setRenaming(false);
+                          }}
+                          className="bg-apollo-surface min-w-0 flex-[1_1_320px] text-base font-semibold"
+                        />
+                        <Button
+                          type="button"
+                          variant="apollo"
+                          size="sm"
+                          onClick={() => void saveTitle(ask?.title ?? "")}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setRenaming(false)}
+                        >
+                          Cancel
+                        </Button>
+                        {renameError ? (
+                          <span className="text-destructive w-full text-xs">
+                            Couldn&apos;t rename. Please try again.
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                        <h2 data-slot="matcha-ask" className="text-base font-medium">
+                          {titleOverride ?? ask?.title}
+                        </h2>
+                        <span
+                          data-slot="matcha-title-tag"
+                          className="text-muted-foreground text-xs"
+                        >
+                          {titleOverride ? "Renamed by you" : "Generated title"}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          aria-label="Rename this search"
+                          onClick={() => {
+                            setTitleDraft(titleOverride ?? ask?.title ?? "");
+                            setRenameError(false);
+                            setRenaming(true);
+                          }}
+                        >
+                          Rename
+                        </Button>
+                      </div>
+                    )
                   ) : ask ? (
                     <h2
                       data-slot="matcha-ask"
@@ -2563,6 +2898,39 @@ export function MatchaPanel({
                         one has to say out loud that it is the wider list. An officer who ticks
                         three rows and presses a button still labelled "Export (400)" gets 400
                         rows — and would have no reason to look at the filename to find out. */}
+                    {briefsOn ? (
+                      <div
+                        data-slot="matcha-brief-toolbar"
+                        className="flex flex-wrap items-center gap-2"
+                      >
+                        <span className="text-muted-foreground text-[12.5px]">
+                          <b className="text-foreground font-semibold">Briefs</b>{" "}
+                          {briefMap.size} drafted
+                          {briefDrafting.size > 0 ? ` · ${briefDrafting.size} drafting` : ""}
+                          {briefFailedCount > 0 ? ` · ${briefFailedCount} failed` : ""}
+                          {briefsSavedAt
+                            ? ` · drafted ${formatBriefDate(briefsSavedAt, true)}` +
+                              " · records may have changed"
+                            : ""}
+                        </span>
+                        {briefCanEdit ? (
+                          <Button
+                            type="button"
+                            variant="apollo"
+                            size="sm"
+                            disabled={briefTargets.length === 0}
+                            onClick={() => enqueueBriefs(briefTargets)}
+                          >
+                            {shortlistRows.length > 0
+                              ? `Draft briefs (${Math.min(
+                                  shortlistRows.length,
+                                  BRIEF_SHORTLIST_MAX,
+                                )} shortlisted)`
+                              : `Draft briefs (top ${BRIEF_TOP_N})`}
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <Button
                       type="button"
                       variant="outline"
@@ -3302,11 +3670,17 @@ function CompactRow({
   onSelect,
   table = false,
   eligBadge,
+  briefsOn = false,
+  briefLine,
 }: {
   candidate: MatchaCandidate;
   rank: number;
   concepts: MatchaConcept[];
   topScore: number;
+  /** Matcha Phase 3 — the brief feature is live on this surface (phone layout rules apply). */
+  briefsOn?: boolean;
+  /** Matcha Phase 3 — the muted line under the name. Absent ⇒ no brief ⇒ nothing extra. */
+  briefLine?: CompactBriefLine;
   /** D8 — flag the year below this; `null` ⇒ unflagged (see `staleBefore`). */
   staleYear: number | null;
   onExpand: () => void;
@@ -3473,12 +3847,24 @@ function CompactRow({
         <span className="text-muted-foreground w-6 shrink-0 text-right text-xs tabular-nums">
           {rank}
         </span>
-        <span className="min-w-0 flex-1 truncate">
-          <span className="text-sm font-medium">{candidate.name}</span>
-          {candidate.title ? (
-            <span className="text-muted-foreground ml-1.5 text-xs">{candidate.title}</span>
-          ) : null}
-        </span>
+        {briefLine ? (
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate">
+              <span className="text-sm font-medium">{candidate.name}</span>
+              {candidate.title ? (
+                <span className="text-muted-foreground ml-1.5 text-xs">{candidate.title}</span>
+              ) : null}
+            </span>
+            <CompactBriefLineView line={briefLine} />
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">
+            <span className="text-sm font-medium">{candidate.name}</span>
+            {candidate.title ? (
+              <span className="text-muted-foreground ml-1.5 text-xs">{candidate.title}</span>
+            ) : null}
+          </span>
+        )}
         {/* Grant Matcha — the eligibility pill sits INLINE beside the fit tier (mockup §9). */}
         {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
         {/* Native `title`, not HoverTooltip: this row is one big button, and a tooltip trigger
@@ -3497,7 +3883,14 @@ function CompactRow({
         >
           {tier}
         </span>
-        <CoverageStrip coverage={coverage} inline />
+        {briefsOn ? (
+          // Phone (<480px, layout v3): the strip yields its width to the name + brief line.
+          <span className="contents max-[480px]:hidden">
+            <CoverageStrip coverage={coverage} inline />
+          </span>
+        ) : (
+          <CoverageStrip coverage={coverage} inline />
+        )}
         {/* The mockup heads this column "ASKS", but a compact row has no header to hang that on,
             so a bare "3/8" has to say what it counts itself — it is the strip's number, and the
             strip's own legend is one hover away on the bars beside it. */}
@@ -3618,11 +4011,14 @@ function ResearcherRow({
   selected,
   onSelect,
   eligBadge,
+  brief,
 }: {
   candidate: MatchaCandidate;
   rank: number;
   concepts: MatchaConcept[];
   topScore: number;
+  /** Matcha Phase 3 (MATCHA_BRIEF) — the brief panel + note. Absent ⇒ master's card, untouched. */
+  brief?: BriefRowProps;
   /** #1696 — the current ranking run. See `claimedPmids` below: this row can OUTLIVE a run. */
   runId: number;
   /** Put this card back to its compact row. OPTIONAL, and the option is the point: under Detailed
@@ -3734,7 +4130,9 @@ function ResearcherRow({
     <div
       ref={rowRef}
       data-slot="matcha-row"
-      className="border-apollo-border bg-apollo-surface mb-4 flex gap-3 rounded-xl border p-5 shadow-[var(--apollo-shadow-card)]"
+      className={`border-apollo-border bg-apollo-surface mb-4 flex gap-3 rounded-xl border p-5 shadow-[var(--apollo-shadow-card)] ${
+        brief ? "max-[480px]:gap-2 max-[480px]:p-3.5" : ""
+      }`}
     >
       {/* Rank over checkbox, sharing the compact row's left margin so the tick column runs straight
           down the list whichever density you are in. Same markup as the compact row's — one
@@ -3754,12 +4152,24 @@ function ResearcherRow({
           name-gradient with initials when the directory has no photo (the endpoint is requested
           with `returnGenericOn404=false`), so the no-photo case still looks like what this card
           rendered before, and an absent `identityImageEndpoint` lands in the same place. */}
-      <HeadshotAvatar
-        size="md"
-        cwid={candidate.cwid}
-        preferredName={name}
-        identityImageEndpoint={candidate.identityImageEndpoint ?? ""}
-      />
+      {brief ? (
+        // Phone (<480px, layout v3): the avatar yields its width to the brief.
+        <div className="shrink-0 max-[480px]:hidden">
+          <HeadshotAvatar
+            size="md"
+            cwid={candidate.cwid}
+            preferredName={name}
+            identityImageEndpoint={candidate.identityImageEndpoint ?? ""}
+          />
+        </div>
+      ) : (
+        <HeadshotAvatar
+          size="md"
+          cwid={candidate.cwid}
+          preferredName={name}
+          identityImageEndpoint={candidate.identityImageEndpoint ?? ""}
+        />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           {/* `profilePath`, not a hand-built path — the CSV export builds its URL column from
@@ -3804,6 +4214,7 @@ function ResearcherRow({
         {candidate.department ? (
           <div className="text-muted-foreground text-sm">{candidate.department}</div>
         ) : null}
+        {brief ? <BriefPanel name={name} brief={brief} /> : null}
         <CoverageStrip coverage={coverage} />
         {/* The matched-concept CHIPS used to live here. Deleted: every concept they named is now
             named by something that also says something — the strip (with its weight), the block
@@ -4020,7 +4431,548 @@ function ResearcherRow({
             </span>
           </div>
         ) : null}
+        {brief ? <BriefNote name={name} brief={brief} /> : null}
       </div>
+    </div>
+  );
+}
+
+// ── Matcha Phase 3: per-PI briefs (MATCHA_BRIEF) ─────────────────────────────
+//
+// Layout v3.1 (`Matcha Brief Layout v3.dc.html`): the brief lives INSIDE the existing card. The
+// model writes only Why this PI + Discussion topics; Funding / Translation / Appointments render
+// from Scholars records and are never editable. Every control below is absent while the flag is
+// off — the rows are handed no `brief` prop, so master's markup renders untouched.
+
+/** Where one PI's brief stands, derived by the panel from its brief map + in-flight sets. */
+type BriefState =
+  | { kind: "none" }
+  | { kind: "drafting" }
+  | { kind: "failed" }
+  | { kind: "ready"; brief: BriefWire };
+
+type BriefPatch = { why?: string | null; topics?: string[] | null; note?: string | null };
+
+/** What a row needs to render its brief. Absent ⇒ the flag is off (or there is no saved run). */
+type BriefRowProps = {
+  state: BriefState;
+  records: BriefRecords | undefined;
+  /** False for an observer (GET `canEdit:false`): read-only, no draft/edit/revert/retry/note. */
+  canEdit: boolean;
+  onDraft: () => void;
+  onPatch: (patch: BriefPatch) => Promise<boolean>;
+};
+
+/** The compact row's single muted line. Absent ⇒ no brief ⇒ nothing extra on the row. */
+type CompactBriefLine = { kind: "text"; text: string } | { kind: "drafting" } | { kind: "failed" };
+
+/** Draft requests in flight at once (one POST per PI, rows fill in as each lands). */
+const BRIEF_CONCURRENCY = 4;
+const BRIEF_TOP_N = 10;
+/** The server's per-request cap, which the shortlisted draft also honours. */
+const BRIEF_SHORTLIST_MAX = 20;
+
+/** The mockup's `.cap` eyebrow: 10.5px / 600 / .08em uppercase, muted. */
+const BRIEF_CAP =
+  "text-muted-foreground text-[10.5px] font-semibold tracking-[0.08em] whitespace-nowrap uppercase";
+
+function formatBriefDate(iso: string, withYear = false): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(withYear ? { year: "numeric" } : {}),
+  });
+}
+
+function briefMeta(brief: BriefWire): string {
+  const whyEdited = brief.edited?.why !== undefined;
+  const edits = (whyEdited ? 1 : 0) + (brief.edited?.topics !== undefined ? 1 : 0);
+  const removed = brief.generated.removedCount;
+  // The removed count describes the GENERATED why; once the officer has rewritten it the count
+  // no longer describes what is on screen (mockup: hidden when Why is edited).
+  return (
+    `Drafted ${formatBriefDate(brief.draftedAt)} · fact-checked` +
+    (removed > 0 && !whyEdited
+      ? ` (${removed} unsupported statement${removed === 1 ? "" : "s"} removed)`
+      : "") +
+    (edits > 0 ? ` · ${edits} edited` : "")
+  );
+}
+
+function CompactBriefLineView({ line }: { line: CompactBriefLine }) {
+  if (line.kind === "drafting") {
+    return <Skeleton data-slot="matcha-brief-line" className="mt-1 h-2.5 w-3/5" />;
+  }
+  if (line.kind === "failed") {
+    return (
+      <span data-slot="matcha-brief-line" className="text-destructive text-[12.5px]">
+        Brief failed · open to retry
+      </span>
+    );
+  }
+  return (
+    <span
+      data-slot="matcha-brief-line"
+      className="text-muted-foreground block truncate text-[12.5px]"
+    >
+      {line.text}
+    </span>
+  );
+}
+
+/** One generated, editable section's header: label, Generated / Edited by you, Revert, Edit. */
+function BriefSectionHeader({
+  label,
+  edited,
+  editing,
+  canEdit,
+  name,
+  onEdit,
+  onRevert,
+}: {
+  label: string;
+  edited: boolean;
+  editing: boolean;
+  canEdit: boolean;
+  name: string;
+  onEdit: () => void;
+  onRevert: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[13px] font-semibold">{label}</span>
+      <span
+        className={`text-[11.5px] ${edited ? "text-apollo-green-foreground" : "text-muted-foreground"}`}
+      >
+        {edited ? "Edited by you" : "Generated"}
+      </span>
+      <span className="flex-1" />
+      {canEdit && edited && !editing ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          aria-label={`Revert ${label} for ${name}`}
+          onClick={onRevert}
+        >
+          Revert
+        </Button>
+      ) : null}
+      {canEdit && !editing ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          aria-label={`Edit ${label} for ${name}`}
+          onClick={onEdit}
+        >
+          Edit
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function BriefEditor({
+  value,
+  rows,
+  label,
+  hint,
+  placeholder,
+  saving,
+  error,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  value: string;
+  rows: number;
+  label: string;
+  hint?: string;
+  placeholder?: string;
+  saving: boolean;
+  error: boolean;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Textarea
+        value={value}
+        rows={rows}
+        aria-label={label}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-apollo-surface min-h-0 text-[14px]"
+      />
+      {hint ? <div className="text-muted-foreground text-xs">{hint}</div> : null}
+      {error ? (
+        <div className="text-destructive text-xs">Couldn&apos;t save. Please try again.</div>
+      ) : null}
+      <div className="flex gap-1.5">
+        <Button type="button" variant="apollo" size="xs" disabled={saving} onClick={onSave}>
+          Save
+        </Button>
+        <Button type="button" variant="ghost" size="xs" disabled={saving} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function BriefRecordsBlock({ records }: { records: BriefRecords | undefined }) {
+  const funding = records?.funding ?? [];
+  const translation = records?.translation ?? [];
+  const secondary = [...new Set((records?.secondaryAppointments ?? []).map((a) => a.organization))];
+  const centers = records?.centers ?? [];
+  const appointments = [
+    ...(secondary.length > 0 ? [`Secondary: ${secondary.join("; ")}`] : []),
+    ...(centers.length > 0 ? [`Centers: ${centers.join("; ")}`] : []),
+  ].join(" · ");
+  const none = (
+    <span className="text-muted-foreground italic">Not evident from Scholars records.</span>
+  );
+  const linkClass = "text-apollo-slate whitespace-nowrap underline-offset-4 hover:underline";
+  const capClass = `${BRIEF_CAP} pt-0.5 max-[480px]:mt-1.5`;
+  return (
+    <div
+      data-slot="matcha-brief-records"
+      className="border-apollo-border-strong flex flex-col gap-2 border-t pt-2.5"
+    >
+      <div className="text-muted-foreground flex items-center gap-1.5 text-[11.5px]">
+        <Lock className="size-2.5" aria-hidden />
+        From Scholars records, not generated
+      </div>
+      <dl className="grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[13px] max-[480px]:grid-cols-1 max-[480px]:gap-y-0.5">
+        <dt className={capClass}>Funding</dt>
+        <dd className="flex flex-col gap-0.5">
+          {funding.length > 0
+            ? funding.map((f, i) => (
+                <div key={`${f.applId ?? f.title}:${i}`}>
+                  {[f.funder, f.mechanism].filter(Boolean).join(" ")} · {f.title} ·{" "}
+                  <span className="whitespace-nowrap">through {f.endYear}</span>
+                  {f.applId != null ? (
+                    <>
+                      {" · "}
+                      <a
+                        href={reporterUrl(f.applId)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={linkClass}
+                      >
+                        RePORTER ↗
+                      </a>
+                    </>
+                  ) : null}
+                </div>
+              ))
+            : none}
+        </dd>
+        <dt className={capClass}>Translation</dt>
+        <dd className="flex flex-col gap-0.5">
+          {translation.length > 0
+            ? translation.map((t, i) => (
+                <div key={`${t.url}:${i}`}>
+                  {t.title}
+                  {t.patentStatus ? ` · ${t.patentStatus}` : ""} ·{" "}
+                  <a href={t.url} target="_blank" rel="noreferrer" className={linkClass}>
+                    CTL ↗
+                  </a>
+                </div>
+              ))
+            : none}
+        </dd>
+        <dt className={capClass}>Appointments</dt>
+        <dd>{appointments ? <span>{appointments}</span> : none}</dd>
+      </dl>
+    </div>
+  );
+}
+
+/** The tinted brief panel inside the Detailed card (after the department line, above the strip). */
+function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
+  const { state, records, canEdit, onDraft, onPatch } = brief;
+  const [editing, setEditing] = useState<null | "why" | "topics">(null);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+
+  async function save(patch: BriefPatch) {
+    setSaving(true);
+    setSaveError(false);
+    const ok = await onPatch(patch);
+    setSaving(false);
+    if (ok) setEditing(null);
+    else setSaveError(true);
+  }
+
+  let body: React.ReactNode;
+  if (state.kind === "drafting") {
+    body = (
+      <div className="flex flex-col gap-2">
+        <span className={BRIEF_CAP}>Drafting brief…</span>
+        <Skeleton className="h-2.5 w-[92%]" />
+        <Skeleton className="h-2.5 w-[70%]" />
+      </div>
+    );
+  } else if (state.kind === "failed") {
+    body = (
+      <div className="text-destructive flex flex-wrap items-center gap-2 text-[13px]">
+        <span>Brief couldn&apos;t be drafted.</span>
+        {canEdit ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label={`Retry brief for ${name}`}
+            onClick={onDraft}
+          >
+            Retry
+          </Button>
+        ) : null}
+      </div>
+    );
+  } else if (state.kind === "none") {
+    body = (
+      <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-[13px]">
+        <span>No brief yet.</span>
+        {canEdit ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label={`Draft brief for ${name}`}
+            onClick={onDraft}
+          >
+            Draft brief
+          </Button>
+        ) : null}
+      </div>
+    );
+  } else {
+    const b = state.brief;
+    const why = briefWhy(b);
+    const topics = briefTopics(b);
+    const whyEdited = b.edited?.why !== undefined;
+    const topicsEdited = b.edited?.topics !== undefined;
+    body = (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <span className={`${BRIEF_CAP} text-foreground`}>Brief</span>
+          <span className="text-muted-foreground text-xs" data-slot="matcha-brief-meta">
+            {briefMeta(b)}
+          </span>
+          <span className="flex-1" />
+          {canEdit ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              aria-label={`Redraft brief for ${name}`}
+              onClick={onDraft}
+            >
+              Redraft
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <BriefSectionHeader
+            label="Why this PI"
+            edited={whyEdited}
+            editing={editing === "why"}
+            canEdit={canEdit}
+            name={name}
+            onEdit={() => {
+              setDraft(why);
+              setSaveError(false);
+              setEditing("why");
+            }}
+            onRevert={() => void save({ why: null })}
+          />
+          {editing === "why" ? (
+            <BriefEditor
+              value={draft}
+              rows={4}
+              label={`Why this PI for ${name}`}
+              saving={saving}
+              error={saveError}
+              onChange={setDraft}
+              onSave={() => void save({ why: draft.trim() ? draft : null })}
+              onCancel={() => setEditing(null)}
+            />
+          ) : (
+            <p className="text-[14px] text-pretty">{why}</p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <BriefSectionHeader
+            label="Discussion topics"
+            edited={topicsEdited}
+            editing={editing === "topics"}
+            canEdit={canEdit}
+            name={name}
+            onEdit={() => {
+              setDraft(topics.map((t) => t.text).join("\n"));
+              setSaveError(false);
+              setEditing("topics");
+            }}
+            onRevert={() => void save({ topics: null })}
+          />
+          {editing === "topics" ? (
+            <BriefEditor
+              value={draft}
+              rows={3}
+              label={`Discussion topics for ${name}`}
+              hint="One topic per line. A line you change loses its source."
+              saving={saving}
+              error={saveError}
+              onChange={setDraft}
+              onSave={() =>
+                void save({
+                  topics: draft
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean),
+                })
+              }
+              onCancel={() => setEditing(null)}
+            />
+          ) : (
+            <ul className="flex list-disc flex-col gap-[3px] pl-[18px] text-[14px]">
+              {topics.map((t, i) => (
+                <li key={`${i}:${t.text}`}>
+                  {t.text}{" "}
+                  <span className="text-muted-foreground text-xs">
+                    ·{" "}
+                    {t.sources.length > 0
+                      ? t.sources.map((s, j) => {
+                          const url = briefSourceUrl(s);
+                          const label = briefSourceLabel(s);
+                          return (
+                            <span key={j}>
+                              {j > 0 ? "; " : ""}
+                              {url ? (
+                                <a
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="underline-offset-4 hover:underline"
+                                >
+                                  {label}
+                                </a>
+                              ) : (
+                                label
+                              )}
+                            </span>
+                          );
+                        })
+                      : UNSOURCED_LABEL}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <BriefRecordsBlock records={records} />
+      </div>
+    );
+  }
+
+  return (
+    <section
+      aria-label={`Brief for ${name}`}
+      data-slot="matcha-brief"
+      className="border-apollo-border bg-apollo-surface-2 my-2.5 flex flex-col gap-3 rounded-lg border px-3.5 py-3 text-[14px]"
+    >
+      {body}
+    </section>
+  );
+}
+
+/** The shared note at the card's foot. Collapsed until used; NEVER exported (see
+ *  `briefCsvFields`). Shared by everyone who opens the paste, which is what the label says. */
+function BriefNote({ name, brief }: { name: string; brief: BriefRowProps }) {
+  const { state, canEdit, onPatch } = brief;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  if (state.kind !== "ready") return null;
+  const note = state.brief.note;
+  if (!note && !canEdit) return null;
+
+  async function save(value: string | null) {
+    setSaving(true);
+    setSaveError(false);
+    const ok = await onPatch({ note: value });
+    setSaving(false);
+    if (ok) setEditing(false);
+    else setSaveError(true);
+  }
+
+  const lock = <Lock className="size-3" aria-hidden />;
+  return (
+    <div data-slot="matcha-brief-note" className="border-apollo-border mt-3 border-t pt-2.5">
+      {editing || note ? (
+        <div className="bg-apollo-lock-bg flex flex-col gap-1.5 rounded-lg px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+            {lock}
+            <span className="font-semibold">Note</span>
+            <span className="text-muted-foreground text-xs">
+              Never exported · visible to anyone who opens this search
+            </span>
+            <span className="flex-1" />
+            {canEdit && !editing ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                aria-label={`Edit note for ${name}`}
+                onClick={() => {
+                  setDraft(note ?? "");
+                  setSaveError(false);
+                  setEditing(true);
+                }}
+              >
+                Edit
+              </Button>
+            ) : null}
+          </div>
+          {editing ? (
+            <BriefEditor
+              value={draft}
+              rows={2}
+              label={`Note for ${name}`}
+              placeholder="Disclosures, encumbrances, prior conversations…"
+              saving={saving}
+              error={saveError}
+              onChange={setDraft}
+              onSave={() => void save(draft.trim() ? draft : null)}
+              onCancel={() => setEditing(false)}
+            />
+          ) : (
+            <p className="text-[13px] whitespace-pre-wrap">{note}</p>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setDraft("");
+            setSaveError(false);
+            setEditing(true);
+          }}
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-[12.5px]"
+        >
+          <Lock className="size-[11px]" aria-hidden />
+          Add a note (never exported)
+        </button>
+      )}
     </div>
   );
 }

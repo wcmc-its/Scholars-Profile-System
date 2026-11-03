@@ -24,6 +24,12 @@
  * reads as "none of these people are clinicians".
  */
 import { toCsv } from "@/lib/csv";
+import {
+  briefSourceLabel,
+  briefTopics,
+  briefWhy,
+  type BriefWire,
+} from "@/lib/edit/matcha-brief-types";
 
 /** One exported row. Every field is already on the wire or derived client-side from it —
  *  this export adds no new data requirement to the ranker. */
@@ -57,7 +63,34 @@ export type MatchaCsvRow = {
    *  the page that produced it. Only written when `buildMatchaCsv` is asked for the column —
    *  `/edit/matcha` states no rule, and its file must not grow a column of blanks. */
   eligible?: string;
+  /** Matcha Phase 3 — Why this PI (the officer's edit when present). Written only when
+   *  `buildMatchaCsv` is asked for the brief columns; "" when the row has no brief. */
+  briefWhy?: string;
+  /** Matcha Phase 3 — discussion topics with their source labels, edited text when present. */
+  briefTopics?: string;
 };
+
+/**
+ * The brief's two exported cells, from a wire brief. The NOTE IS NEVER READ HERE: it is shared
+ * with anyone who opens the search and is labelled "Never exported" in the UI, so this function
+ * is the one place an export could leak it, and it takes only the fields it writes.
+ */
+export function briefCsvFields(brief: Pick<BriefWire, "generated" | "edited"> | undefined): {
+  briefWhy: string;
+  briefTopics: string;
+} {
+  if (!brief) return { briefWhy: "", briefTopics: "" };
+  return {
+    briefWhy: briefWhy(brief),
+    briefTopics: briefTopics(brief)
+      .map((t) =>
+        t.sources.length > 0
+          ? `${t.text} [${t.sources.map(briefSourceLabel).join("; ")}]`
+          : `${t.text} [unsourced]`,
+      )
+      .join(" | "),
+  };
+}
 
 const HEADERS = [
   "Rank",
@@ -78,11 +111,16 @@ const HEADERS = [
 export function buildMatchaCsv(
   rows: readonly MatchaCsvRow[],
   /** `eligibility: true` (Grant Matcha) appends the `Eligible` column — an OPTION, not inferred
-   *  from the rows, so an empty grant-path export still writes the header the full one would. */
-  opts: { eligibility?: boolean } = {},
+   *  from the rows, so an empty grant-path export still writes the header the full one would.
+   *  `brief: true` (MATCHA_BRIEF) appends the two brief columns, same rule. */
+  opts: { eligibility?: boolean; brief?: boolean } = {},
 ): string {
   return toCsv(
-    opts.eligibility ? [...HEADERS, "Eligible"] : HEADERS,
+    [
+      ...HEADERS,
+      ...(opts.eligibility ? ["Eligible"] : []),
+      ...(opts.brief ? ["Why this PI", "Discussion topics"] : []),
+    ],
     rows.map((r) => [
       r.rank,
       r.cwid,
@@ -98,6 +136,7 @@ export function buildMatchaCsv(
       r.technologyCount,
       r.profileUrl,
       ...(opts.eligibility ? [r.eligible ?? ""] : []),
+      ...(opts.brief ? [r.briefWhy ?? "", r.briefTopics ?? ""] : []),
     ]),
   );
 }
