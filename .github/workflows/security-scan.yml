@@ -10,7 +10,7 @@ name: Security scan
 on:
   push:
     branches: [master]
-    paths: ["cdk/**", "Dockerfile", ".github/workflows/security-scan.yml"]
+    paths: ["cdk/**", "Dockerfile", ".checkov.yaml", ".github/workflows/security-scan.yml"]
   schedule:
     - cron: "17 9 * * 1" # Mondays: new checks land in Checkov between our changes
   workflow_dispatch:
@@ -49,15 +49,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Two runs: Checkov silently ignores -f when -d is also given, so a
+      # combined call never scanned the Dockerfile. Accepted rules and their
+      # reasons are in .checkov.yaml.
       - name: Checkov
         run: |
           pip install --quiet checkov==3.4.3
-          checkov -d synth --framework cloudformation \
-            -f Dockerfile --framework cloudformation dockerfile \
+          checkov -d synth --framework cloudformation --config-file .checkov.yaml \
             --quiet --soft-fail -o sarif --output-file-path checkov-out > /dev/null 2>&1
+          checkov -f Dockerfile --framework dockerfile --config-file .checkov.yaml \
+            --quiet --soft-fail -o sarif --output-file-path checkov-docker > /dev/null 2>&1
           test -s checkov-out/results_sarif.sarif
+          test -s checkov-docker/results_sarif.sarif
 
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: checkov-out/results_sarif.sarif
           category: checkov
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: checkov-docker/results_sarif.sarif
+          category: checkov-dockerfile
