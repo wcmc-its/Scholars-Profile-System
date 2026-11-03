@@ -62,7 +62,7 @@
  * to skew a ranking with no way for the officer to say so.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, ExternalLink, Lock, RefreshCw, Trash2 } from "lucide-react";
+import { Download, ExternalLink, FileText, Lock, RefreshCw, Trash2 } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -73,6 +73,14 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Sheet,
   SheetClose,
@@ -661,6 +669,8 @@ export function MatchaPanel({
   const [briefCanEdit, setBriefCanEdit] = useState(false);
   /** The oldest saved brief's date when briefs were LOADED (a replay), else null. */
   const [briefsSavedAt, setBriefsSavedAt] = useState<string | null>(null);
+  // Matcha Phase 4 — the missing-brief prompt in front of "Report (PDF)". Null = closed.
+  const [reportPrompt, setReportPrompt] = useState<ReportPrompt | null>(null);
   // The submission a draft belongs to — a result landing after a new search is dropped.
   const briefSubRef = useRef<string | null>(null);
   const briefQueueRef = useRef<{ cwid: string; sid: string }[]>([]);
@@ -738,6 +748,7 @@ export function MatchaPanel({
     setBriefFailed(new Set());
     setBriefCanEdit(false);
     setBriefsSavedAt(null);
+    setReportPrompt(null);
     setRenaming(false);
     if (matchaBrief && sid) void loadBriefs(sid);
   }
@@ -1592,6 +1603,74 @@ export function MatchaPanel({
   const briefFailedCount = [...briefFailed].filter(
     (c) => !briefMap.has(c) && !briefDrafting.has(c),
   ).length;
+
+  // ── Matcha Phase 4: the printable report ──
+  /** Who "Report (PDF)" covers: the shortlist when anything is ticked (briefed or not — the
+   *  prompt below says who lacks one), else every PI in the current view that HAS a brief.
+   *  Capped at `REPORT_MAX`, in the view's rank order. */
+  const reportCwids = useMemo(() => {
+    if (!briefsOn) return [];
+    const rows =
+      shortlistRows.length > 0
+        ? shortlistRows
+        : eligibleRows.filter(({ c }) => briefMap.has(c.cwid));
+    return rows.slice(0, REPORT_MAX).map(({ c }) => c.cwid);
+  }, [briefsOn, shortlistRows, eligibleRows, briefMap]);
+
+  /** "Report (PDF)": straight to the new tab when every selected PI has a brief (synchronously,
+   *  inside the click, so no popup blocker objects); otherwise the in-page prompt first. */
+  function openReport() {
+    if (!submissionId || reportCwids.length === 0) return;
+    const missing = reportCwids.filter((c) => !briefMap.has(c));
+    if (missing.length === 0) {
+      window.open(reportHref(submissionId, reportCwids), "_blank", "noopener");
+      return;
+    }
+    setReportPrompt({
+      cwids: reportCwids,
+      missing,
+      noun: shortlistRows.length > 0 ? "shortlisted" : "selected",
+      phase: "ask",
+      blocked: false,
+    });
+  }
+
+  /** "Open report without them": still a click, so the tab opens synchronously. */
+  function openReportAnyway() {
+    if (!submissionId || !reportPrompt) return;
+    window.open(reportHref(submissionId, reportPrompt.cwids), "_blank", "noopener");
+    setReportPrompt(null);
+  }
+
+  /** "Draft N briefs, then open report": the SAME queue as the toolbar (one POST per PI,
+   *  `BRIEF_CONCURRENCY` in flight), for the missing PIs only. */
+  function draftThenReport() {
+    if (!reportPrompt || !briefCanEdit) return;
+    enqueueBriefs(reportPrompt.missing);
+    setReportPrompt({ ...reportPrompt, phase: "drafting" });
+  }
+
+  /** Missing PIs whose draft has landed (brief) or failed. */
+  const reportSettled = reportPrompt
+    ? reportPrompt.missing.filter(
+        (c) => !briefDrafting.has(c) && (briefMap.has(c) || briefFailed.has(c)),
+      )
+    : [];
+  const reportFailed = reportPrompt ? reportSettled.filter((c) => !briefMap.has(c)) : [];
+
+  // Every missing PI settled ⇒ open the report. This runs after an async wait, so a popup blocker
+  // may refuse the tab: then the prompt stays up with an "Open report" link (a click) instead. A
+  // failed PI is listed and still included, records only.
+  useEffect(() => {
+    if (!reportPrompt || reportPrompt.phase !== "drafting" || !submissionId) return;
+    if (reportSettled.length < reportPrompt.missing.length) return;
+    const tab = window.open(reportHref(submissionId, reportPrompt.cwids), "_blank");
+    if (tab) tab.opener = null;
+    if (tab && reportFailed.length === 0) setReportPrompt(null);
+    else setReportPrompt({ ...reportPrompt, phase: "done", blocked: !tab });
+  }, [reportPrompt, reportSettled.length, reportFailed.length, submissionId]);
+
+  const nameOf = (cwid: string) => rankedRows.find(({ c }) => c.cwid === cwid)?.c.name ?? cwid;
 
   /** One mapping, both exports. Two copies of it would drift, and the CSV would then depend on
    *  which button the officer pressed — the rows are the same rows either way. */
@@ -2943,6 +3022,135 @@ export function MatchaPanel({
                         ? `Export all (${filtered.length})`
                         : `Export (${filtered.length})`}
                     </Button>
+                    {/* Matcha Phase 4 — the printable report. Same flag as the briefs. */}
+                    {briefsOn ? (
+                      reportCwids.length > 0 ? (
+                        <Button type="button" variant="outline" size="sm" onClick={openReport}>
+                          <FileText className="size-3.5" />
+                          Report (PDF)
+                        </Button>
+                      ) : (
+                        <HoverTooltip
+                          wide
+                          text="Shortlist researchers, or draft briefs, to build a report."
+                        >
+                          <Button type="button" variant="outline" size="sm" disabled>
+                            <FileText className="size-3.5" />
+                            Report (PDF)
+                          </Button>
+                        </HoverTooltip>
+                      )
+                    ) : null}
+                    {reportPrompt ? (
+                      <Dialog
+                        open
+                        onOpenChange={(open) => {
+                          if (!open) setReportPrompt(null);
+                        }}
+                      >
+                        <DialogContent data-slot="matcha-report-prompt">
+                          <DialogHeader>
+                            <DialogTitle className="leading-snug">
+                              {reportPrompt.missing.length} of {reportPrompt.cwids.length}{" "}
+                              {reportPrompt.noun} researcher
+                              {reportPrompt.cwids.length === 1 ? "" : "s"}{" "}
+                              {reportPrompt.missing.length === 1 ? "has" : "have"} no brief yet.
+                            </DialogTitle>
+                            <DialogDescription>
+                              {
+                                'Their sections will show records only (funding, appointments, key papers), with no "Why this PI" or discussion topics.'
+                              }
+                            </DialogDescription>
+                          </DialogHeader>
+                          {!briefCanEdit ? (
+                            <p className="text-sm">Ask a Scholars admin to draft them.</p>
+                          ) : null}
+                          {reportPrompt.phase === "drafting" ? (
+                            <p className="text-sm" role="status">
+                              Drafting{" "}
+                              {Math.min(reportSettled.length + 1, reportPrompt.missing.length)} of{" "}
+                              {reportPrompt.missing.length}…
+                            </p>
+                          ) : null}
+                          {reportPrompt.phase === "done" && !reportPrompt.blocked ? (
+                            <p className="text-sm" role="status">
+                              The report opened in a new tab.
+                            </p>
+                          ) : null}
+                          {reportFailed.length > 0 && reportPrompt.phase !== "ask" ? (
+                            <p className="text-destructive text-sm">
+                              Could not draft: {reportFailed.map(nameOf).join(", ")}. They stay in
+                              the report, records only.
+                            </p>
+                          ) : null}
+                          <DialogFooter>
+                            {reportPrompt.phase === "ask" ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setReportPrompt(null)}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={openReportAnyway}
+                                >
+                                  Open report without them
+                                </Button>
+                                {briefCanEdit ? (
+                                  <Button
+                                    type="button"
+                                    variant="apollo"
+                                    size="sm"
+                                    onClick={draftThenReport}
+                                  >
+                                    Draft {reportPrompt.missing.length} brief
+                                    {reportPrompt.missing.length === 1 ? "" : "s"}, then open report
+                                  </Button>
+                                ) : null}
+                              </>
+                            ) : reportPrompt.phase === "done" ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setReportPrompt(null)}
+                                >
+                                  Close
+                                </Button>
+                                {reportPrompt.blocked && submissionId ? (
+                                  <Button asChild variant="apollo" size="sm">
+                                    <a
+                                      href={reportHref(submissionId, reportPrompt.cwids)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={() => setReportPrompt(null)}
+                                    >
+                                      Open report
+                                    </a>
+                                  </Button>
+                                ) : null}
+                              </>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setReportPrompt(null)}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    ) : null}
                   </div>
                 </div>
 
@@ -4471,6 +4679,29 @@ const BRIEF_CONCURRENCY = 4;
 const BRIEF_TOP_N = 10;
 /** The server's per-request cap, which the shortlisted draft also honours. */
 const BRIEF_SHORTLIST_MAX = 20;
+/** Matcha Phase 4 — the printable report's selection cap. The page enforces it too
+ *  (`MATCHA_REPORT_CAP`, the scholar-export policy cap); this copy keeps the URL honest. */
+const REPORT_MAX = 50;
+
+/** The report page for `cwids` on this search. Opened in a new tab; printed by the browser. */
+function reportHref(submissionId: string, cwids: readonly string[]): string {
+  return (
+    `/edit/matcha/report?submissionId=${encodeURIComponent(submissionId)}` +
+    `&cwids=${cwids.map(encodeURIComponent).join(",")}`
+  );
+}
+
+/** The missing-brief prompt's state: who the report covers, who lacks a brief, and how far the
+ *  "Draft N briefs, then open report" run has got. */
+type ReportPrompt = {
+  cwids: string[];
+  missing: string[];
+  /** "shortlisted" when the ticked rows are the selection, else "selected". */
+  noun: string;
+  phase: "ask" | "drafting" | "done";
+  /** The tab could not be opened after drafting (popup blocker): offer a link instead. */
+  blocked: boolean;
+};
 
 /** The mockup's `.cap` eyebrow: 10.5px / 600 / .08em uppercase, muted. */
 const BRIEF_CAP =
