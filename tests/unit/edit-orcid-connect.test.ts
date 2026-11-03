@@ -150,7 +150,11 @@ describe("orcid-connect helpers", () => {
     expect(enc).not.toContain("tok-123");
     expect(decryptToken(enc, key)).toBe("tok-123");
     const [iv, tag, ct] = enc.split(".");
-    expect(() => decryptToken([iv, tag, ct.slice(0, -2) + "AA"].join("."), key)).toThrow();
+    // Change the FIRST char, always to a different one: it carries 6 full bits of byte 0.
+    // Overwriting the tail with "AA" was a no-op whenever the random ciphertext already
+    // ended that way (~1 run in 256: the last char of 7 bytes holds only 2 real bits).
+    const tampered = (ct[0] === "A" ? "B" : "A") + ct.slice(1);
+    expect(() => decryptToken([iv, tag, tampered].join("."), key)).toThrow();
   });
 
   it("state must match exactly", () => {
