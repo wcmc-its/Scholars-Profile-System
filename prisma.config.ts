@@ -3,13 +3,19 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+// Relative import (not `@/`): the runtime image runs the Prisma CLI against this
+// file with no tsconfig path aliases. The Dockerfile copies lib/db-tls.ts in.
+import { withSchemaEngineTls } from "./lib/db-tls";
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // DB_TLS=on adds sslcert (RDS CA bundle) + sslaccept=strict for the schema
+    // engine (`prisma migrate deploy` in the sps-migrate task). Off: unchanged.
+    url: withSchemaEngineTls(process.env["DATABASE_URL"]),
     shadowDatabaseUrl: process.env["SHADOW_DATABASE_URL"],
   },
 });

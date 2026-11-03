@@ -425,6 +425,11 @@ export class DataStack extends Stack {
           // tightens to DML-only (`%` prod / `10.20.%` staging). app_rw is
           // host-scoped, unlike the seeder's own `@'%'` roles.
           APP_RW_GRANTEE_HOST: envConfig.appRwGranteeHost,
+          // Verified TLS on the master connection (lambda/db-bootstrap-seed/
+          // tls.ts), same per-env value as AppStack/EtlStack's DB_TLS: ON in
+          // staging, OFF in prod for now. The seeder only runs when the custom
+          // resource's Revision changes, so this takes effect on the next run.
+          DB_TLS: envConfig.envName === "staging" ? "on" : "off",
         },
         bundling: {
           // Emit an ESM bundle. The handler sources are ESM-native (`import`
@@ -443,6 +448,16 @@ export class DataStack extends Stack {
           nodeModules: ["mariadb"],
           sourceMap: false,
           target: "node22",
+          // Ship the repo's RDS CA bundle at the asset root for DB_TLS
+          // (tls.ts reads $LAMBDA_TASK_ROOT/rds-global-bundle.pem). Runs on
+          // the local esbuild path (esbuild is a cdk devDependency).
+          commandHooks: {
+            beforeBundling: () => [],
+            beforeInstall: () => [],
+            afterBundling: (_inputDir: string, outputDir: string) => [
+              `cp "${path.join(__dirname, "../../certs/rds-global-bundle.pem")}" "${outputDir}/rds-global-bundle.pem"`,
+            ],
+          },
         },
       },
     );

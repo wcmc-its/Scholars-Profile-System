@@ -679,7 +679,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "6c8b3763a4daa4e16d39cb2d0277ea3cad9dc49c6215c9a0d293de769f5f0372.zip",
+          "S3Key": "2a96a5f7b4b5713d1c52bb60ee0d9ab74f96e935f41b6b18510aa53fcf507e69.zip",
         },
         "Environment": {
           "Variables": {
@@ -708,6 +708,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
                 "Endpoint.Port",
               ],
             },
+            "DB_TLS": "off",
             "MASTER_SECRET_ARN": {
               "Ref": "AuroraClusterSecretAttachmentDB8032DA",
             },

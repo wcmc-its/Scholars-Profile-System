@@ -1,6 +1,6 @@
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient } from "@/lib/generated/prisma/client";
-import { withMariadbPoolParams } from "@/lib/db-url";
+import { mariadbPoolConfig, withMariadbPoolParams } from "@/lib/db-url";
 
 declare global {
   var __prismaWrite: PrismaClient | undefined;
@@ -17,7 +17,9 @@ declare global {
  * happens when an actual request hits a route that talks to the DB.
  */
 function createPrismaClient(url: string): PrismaClient {
-  const adapter = new PrismaMariaDb(url);
+  // DB_TLS=on swaps the URL for a PoolConfig carrying verified TLS settings
+  // (lib/db-tls.ts); off, the URL passes through unchanged.
+  const adapter = new PrismaMariaDb(mariadbPoolConfig(url));
   return new PrismaClient({ adapter });
 }
 

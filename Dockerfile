@@ -133,6 +133,13 @@ COPY --from=build --chown=node:node /app/.next/static ./.next/static
 # directly from DATABASE_URL -- no JS driver needed.
 COPY --from=build --chown=node:node /app/prisma ./prisma
 COPY --from=build --chown=node:node /app/prisma.config.ts ./prisma.config.ts
+# DB_TLS (verified TLS to Aurora). prisma.config.ts imports lib/db-tls.ts (node
+# builtins only) to add the schema engine's TLS params, and both the app's
+# mariadb pools and the schema engine read the RDS CA bundle from
+# /app/certs/rds-global-bundle.pem. Neither is a traced server import, so copy
+# them explicitly. The ETL stage gets both from its whole-source COPY.
+COPY --from=build --chown=node:node /app/lib/db-tls.ts ./lib/db-tls.ts
+COPY --from=build --chown=node:node /app/certs ./certs
 COPY --from=prismacli --chown=node:node /pris/node_modules ./node_modules
 # .bin/prisma must be a real symlink: Docker COPY dereferences it into a plain
 # file under .bin/, breaking the CLI's __dirname-relative load of

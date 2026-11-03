@@ -43,6 +43,8 @@ import { pathToFileURL } from "node:url";
 
 import { createConnection } from "mariadb";
 
+import { dbSslOptions } from "../lib/db-tls";
+
 // Reuse the single DSN parser the app tooling already uses (relative import so
 // it resolves under tsx at deploy time, not just under vitest's `@/` alias).
 import { parseDsn, type SqlConn } from "./db-bootstrap";
@@ -257,7 +259,9 @@ async function connectAs(dsn: string): Promise<SqlConn> {
     port: parts.port,
     user: parts.user,
     password: parts.password,
-    ssl: parts.ssl || undefined,
+    // DB_TLS=on: verified TLS against the RDS CA (lib/db-tls.ts). Off: the
+    // legacy `?ssl=true` DSN opt-in, else plaintext.
+    ssl: dbSslOptions() ?? (parts.ssl || undefined),
     bigIntAsNumber: true,
     multipleStatements: false,
   })) as unknown as SqlConn;

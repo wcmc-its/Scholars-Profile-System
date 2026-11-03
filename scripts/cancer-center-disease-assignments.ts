@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseCsv, type Row } from "@/lib/csv";
+import { connectionOptionsFromDsn } from "@/lib/db-tls";
 import {
   loadCancerTaxonomy,
   type CancerTaxonomyDescriptorReader,
@@ -621,11 +622,8 @@ export async function runAssignments(
     default?: typeof import("mariadb");
   };
   const mariadb = mod.default ?? mod;
-  const u = new URL(process.env.DATABASE_URL!);
-  const conn = await mariadb.createConnection({
-    host: u.hostname, port: Number(u.port) || 3306, user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password), database: u.pathname.slice(1),
-  });
+  // DB_TLS=on adds verified TLS (lib/db-tls.ts).
+  const conn = await mariadb.createConnection(connectionOptionsFromDsn(process.env.DATABASE_URL!));
   // try/finally, not a bare `await conn.end()` after the last query: the CLI
   // entrypoint's own catch calls `process.exit(1)` on any throw, which used to
   // paper over a leaked connection by killing the process outright. A caller

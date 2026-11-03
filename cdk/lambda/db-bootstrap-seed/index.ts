@@ -28,6 +28,7 @@ import {
   runSeed,
   type RequestType,
 } from "./seed.js";
+import { seederSslOptions } from "./tls.js";
 
 interface OnEventRequest {
   RequestType: RequestType;
@@ -87,6 +88,8 @@ export async function onEvent(event: OnEventRequest): Promise<OnEventResponse> {
     password: master.password,
     // No `database`: CREATE USER / GRANT are server-level.
     connectTimeout: 10000,
+    // DB_TLS=on: verified TLS against the bundled RDS CA (./tls.ts).
+    ssl: seederSslOptions(),
   });
 
   try {

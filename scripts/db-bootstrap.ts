@@ -61,6 +61,8 @@ import { readFileSync } from "node:fs";
 
 import { createConnection } from "mariadb";
 
+import { dbSslOptions } from "../lib/db-tls";
+
 /** The audit database + table the grant is scoped to. */
 const AUDIT_DB = "scholars_audit";
 const AUDIT_TABLE = "manual_edit_audit";
@@ -91,6 +93,8 @@ export function parseDsn(dsn: string): {
     password: u.password ? decodeURIComponent(u.password) : undefined,
     // Aurora does not require TLS by default and this runs inside the VPC on a
     // SG-restricted path; opt in with `?ssl=true` if the cluster enforces it.
+    // Deployed tasks use DB_TLS instead (lib/db-tls.ts), which takes precedence
+    // and verifies the RDS CA; plain `?ssl=true` trusts only Node's defaults.
     ssl: u.searchParams.get("ssl") === "true" || u.searchParams.has("sslmode"),
   };
 }
@@ -343,7 +347,9 @@ async function main(): Promise<void> {
     port: parts.port,
     user: parts.user,
     password: parts.password,
-    ssl: parts.ssl || undefined,
+    // DB_TLS=on: verified TLS against the RDS CA (lib/db-tls.ts). Off: the
+    // legacy `?ssl=true` DSN opt-in, else plaintext.
+    ssl: dbSslOptions() ?? (parts.ssl || undefined),
     // No `database`: this connection creates databases and grants across them.
     bigIntAsNumber: true,
     multipleStatements: false,
@@ -358,7 +364,7 @@ async function main(): Promise<void> {
     port: verifyParts.port,
     user: verifyParts.user,
     password: verifyParts.password,
-    ssl: verifyParts.ssl || undefined,
+    ssl: dbSslOptions() ?? (verifyParts.ssl || undefined),
     bigIntAsNumber: true,
     multipleStatements: false,
   })) as unknown as SqlConn;

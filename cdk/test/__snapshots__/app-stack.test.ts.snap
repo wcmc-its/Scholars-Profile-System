@@ -547,6 +547,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "3000",
               },
               {
+                "Name": "DB_TLS",
+                "Value": "off",
+              },
+              {
                 "Name": "KEEP_ALIVE_TIMEOUT",
                 "Value": "65000",
               },
@@ -1951,6 +1955,10 @@ service:
                 "Name": "GRANTEE_HOST",
                 "Value": "%",
               },
+              {
+                "Name": "DB_TLS",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -3292,6 +3300,12 @@ service:
               "prisma",
               "migrate",
               "deploy",
+            ],
+            "Environment": [
+              {
+                "Name": "DB_TLS",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -4846,6 +4860,10 @@ service:
                 "Name": "VERIFY_ROLES",
                 "Value": "app-ro,app-rw,sps_migrate,sps_bootstrap",
               },
+              {
+                "Name": "DB_TLS",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -5590,6 +5608,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "PORT",
                 "Value": "3000",
+              },
+              {
+                "Name": "DB_TLS",
+                "Value": "on",
               },
               {
                 "Name": "KEEP_ALIVE_TIMEOUT",
@@ -7106,6 +7128,10 @@ service:
                 "Name": "GRANTEE_HOST",
                 "Value": "10.46.160.%",
               },
+              {
+                "Name": "DB_TLS",
+                "Value": "on",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -8551,6 +8577,12 @@ service:
               "prisma",
               "migrate",
               "deploy",
+            ],
+            "Environment": [
+              {
+                "Name": "DB_TLS",
+                "Value": "on",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -10065,6 +10097,10 @@ service:
               {
                 "Name": "VERIFY_ROLES",
                 "Value": "app-ro,app-rw,sps_migrate,sps_bootstrap",
+              },
+              {
+                "Name": "DB_TLS",
+                "Value": "on",
               },
             ],
             "Essential": true,
