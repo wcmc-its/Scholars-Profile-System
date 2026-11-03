@@ -16,6 +16,7 @@ import {
   reporterUrl,
 } from "@/lib/edit/matcha-brief-types";
 import { MatchaPrintButton } from "@/components/edit/matcha-print-button";
+import { PubTitle } from "@/components/publication/pub-html";
 
 export const NOT_EVIDENT = "Not evident from Scholars records.";
 export const NO_BRIEF = "No brief drafted.";
@@ -244,7 +245,7 @@ function EvidenceColumn({ pi }: { pi: ReportPi }) {
             {pi.keyPapers.map((p) => (
               <li key={p.pmid}>
                 {p.year != null ? `${p.year} · ` : ""}
-                {p.title}{" "}
+                <PubTitle value={p.title} />{" "}
                 <span className="text-muted-foreground whitespace-nowrap">
                   <ExtLink href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}>
                     PMID {p.pmid}
