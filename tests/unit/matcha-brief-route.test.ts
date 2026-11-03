@@ -128,8 +128,8 @@ beforeEach(() => {
   process.env.MATCHA_BRIEF = "on";
   mockSubFindUnique.mockResolvedValue({ descriptionHash: "h1", title: "t", titleOverride: null });
   mockSubFindMany.mockResolvedValue([
-    { result: { concepts: [], candidates: [] }, resultKey: "sponsor:spine:v3:h1:elig" },
-    { result: storedResult, resultKey: "sponsor:spine:v3:h1" },
+    { id: "e", result: { concepts: [], candidates: [] }, resultKey: "sponsor:spine:v3:h1:elig" },
+    { id: "b", result: storedResult, resultKey: "sponsor:spine:v3:h1" },
   ]);
   mockLoadRecords.mockImplementation(async (cwids: string[]) => new Map(cwids.map((c) => [c, emptyRecords])));
   mockGenerateBrief.mockResolvedValue({ generated, model: "sonnet" });
@@ -205,11 +205,19 @@ describe("POST (draft)", () => {
     expect(mockGenerateBrief.mock.calls[0][0].askTitle).toBe("generated handle");
   });
 
+  it("never selects the result JSON in the ORDER BY query (MySQL 1038 out of sort memory)", async () => {
+    const resp = await POST(req(devSession, { submissionId: "s1", cwids: ["c"] }));
+    await readStream(resp);
+    const sorted = mockSubFindMany.mock.calls.filter((c) => c[0].orderBy);
+    expect(sorted.length).toBeGreaterThan(0);
+    for (const [args] of sorted) expect(args.select.result).toBeUndefined();
+  });
+
   it("drafts from the newest stored answer that CONTAINS the PI (an include variant)", async () => {
     const variant = { ...storedResult, candidates: [{ ...storedCandidate, cwid: "c" }] };
     mockSubFindMany.mockResolvedValue([
-      { result: storedResult, resultKey: "sponsor:spine:v3:h1" },
-      { result: variant, resultKey: "sponsor:spine:v3:h1:inc:x" },
+      { id: "b", result: storedResult, resultKey: "sponsor:spine:v3:h1" },
+      { id: "v", result: variant, resultKey: "sponsor:spine:v3:h1:inc:x" },
     ]);
     const resp = await POST(req(devSession, { submissionId: "s1", cwids: ["c"] }));
     expect(resp.status).toBe(200);

@@ -92,15 +92,25 @@ async function loadStoredResult(
   descriptionHash: string,
   cwids: readonly string[],
 ): Promise<StoredResult | null> {
-  const rows = await db.read.sponsorMatchSubmission.findMany({
+  // Sort on narrow columns only, then fetch the JSON by id. Selecting `result` in the ORDER BY
+  // query makes MySQL sort the full multi-MB rows and fail with 1038 "Out of sort memory".
+  const keys = await db.read.sponsorMatchSubmission.findMany({
     where: { descriptionHash, resultKey: { not: null } },
     orderBy: { createdAt: "desc" },
     take: 10,
-    select: { result: true, resultKey: true },
+    select: { id: true, resultKey: true },
   });
-  const answers = rows
-    .filter((r) => r.result && !r.resultKey!.endsWith(":elig"))
-    .map((r) => r.result as unknown as StoredResult);
+  const ids = keys.filter((k) => !k.resultKey!.endsWith(":elig")).map((k) => k.id);
+  if (ids.length === 0) return null;
+  const rows = await db.read.sponsorMatchSubmission.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, result: true },
+  });
+  const byId = new Map(rows.map((r) => [r.id, r.result]));
+  const answers = ids
+    .map((id) => byId.get(id))
+    .filter((r) => r != null)
+    .map((r) => r as unknown as StoredResult);
   const has = (a: StoredResult) => {
     const ids = new Set(a.candidates.map((c) => c.cwid));
     return cwids.every((c) => ids.has(c));
