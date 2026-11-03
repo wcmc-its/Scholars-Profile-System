@@ -1,5 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSessionFromRequest } from "@/lib/auth/session";
+import {
+  getSessionFromRequest,
+  refreshSessionCookie,
+  sessionNeedsIdleRefresh,
+  type SessionData,
+} from "@/lib/auth/session";
 import {
   buildCspResponseHeaders,
   resolveCspMode,
@@ -186,6 +191,41 @@ function absoluteLocation(request: NextRequest, pathAndQuery: string): string {
   return `https://${host}${pathAndQuery}`;
 }
 
+/**
+ * Pass an authenticated gated request through, sliding the session's idle
+ * window when it is due (ADR-013 D5).
+ *
+ * This is the one place the idle refresh happens. The proxy is the only code
+ * that sees every authenticated `/edit*`, `/api/edit*` and `/api/impersonation*`
+ * request AND can set a response cookie: Server Components cannot set cookies
+ * in Next 16, and doing it per route handler would miss every page view. A
+ * gated request whose `lastSeen` is past the refresh threshold (or absent, for
+ * a pre-D5 cookie) gets a re-sealed cookie with `lastSeen` = now and the
+ * ORIGINAL `exp`, so activity never extends the 8h absolute cap. The new value
+ * is also written onto the forwarded request, so the downstream handler's own
+ * session read sees the refreshed cookie, not the one that was about to idle out.
+ *
+ * Public pages never reach this (fast path above), so activity there does not
+ * count as `/edit` activity. A re-seal failure is non-fatal: the request is
+ * already authenticated, so it passes through unrefreshed.
+ */
+async function idleRefreshed(
+  request: NextRequest,
+  session: SessionData,
+): Promise<NextResponse> {
+  if (!sessionNeedsIdleRefresh(session)) return NextResponse.next();
+  let cookie;
+  try {
+    cookie = await refreshSessionCookie(session);
+  } catch {
+    return NextResponse.next();
+  }
+  request.cookies.set(cookie.name, cookie.value);
+  const response = NextResponse.next({ request: { headers: request.headers } });
+  response.cookies.set(cookie.name, cookie.value, cookie.options);
+  return response;
+}
+
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   // Public fast path. The broadened matcher (for CSP coverage) runs this on
   // every non-static request, but the SSO gate + legacy redirects apply only to
@@ -237,15 +277,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return new NextResponse(null, { status: 404 });
   }
 
-  let authenticated = false;
+  let session: SessionData | null = null;
   try {
-    authenticated = (await getSessionFromRequest(request)) !== null;
+    session = await getSessionFromRequest(request);
   } catch {
     // Misconfigured (e.g. SESSION_COOKIE_SECRET unset) — fail toward
     // "unauthenticated" so the gate stays closed rather than 500ing the page.
-    authenticated = false;
+    session = null;
   }
-  if (authenticated) return withSecurityHeaders(NextResponse.next());
+  if (session) return withSecurityHeaders(await idleRefreshed(request, session));
 
   // Unauthenticated below this point.
   if (

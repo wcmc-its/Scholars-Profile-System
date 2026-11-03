@@ -49,6 +49,22 @@ function envBool(name: string, fallback: boolean): boolean {
 /** Hard ceiling on session lifetime — #100 AC: "max session lifetime ≤ 8h". */
 export const MAX_SESSION_TTL_SECONDS = 8 * 60 * 60; // 28800
 
+/**
+ * Default idle timeout (ADR-013 D5): a session unused for 2h is rejected even
+ * though its absolute 8h `exp` has not passed. `SESSION_IDLE_TIMEOUT_SECONDS`
+ * overrides it; the value is clamped to [60s, the absolute ttl].
+ */
+export const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 2 * 60 * 60; // 7200
+
+/**
+ * How stale `lastSeen` must be before an authenticated request re-seals the
+ * cookie to slide the idle window. Re-sealing on every request would set a
+ * cookie on every response for no security gain; 5 minutes of slack on a 2h
+ * window is immaterial. Capped at half the idle timeout so a short configured
+ * timeout still slides.
+ */
+export const SESSION_IDLE_REFRESH_THRESHOLD_SECONDS = 5 * 60; // 300
+
 export interface SessionConfig {
   /**
    * Cookie name. `__Host-` prefixed by default (ASVS 5.0 V3.3.3): the browser
@@ -60,6 +76,13 @@ export interface SessionConfig {
   secret: string;
   /** Session lifetime in seconds; capped at {@link MAX_SESSION_TTL_SECONDS}. */
   ttlSeconds: number;
+  /**
+   * Idle timeout in seconds (ADR-013 D5): reject a session whose `lastSeen` is
+   * older than this. Never longer than `ttlSeconds`.
+   */
+  idleTimeoutSeconds: number;
+  /** Re-seal the cookie only when `lastSeen` is at least this old. */
+  idleRefreshThresholdSeconds: number;
   /**
    * Cookie `Domain`. Always undefined for a `__Host-` name (the browser rejects
    * a `__Host-` cookie that carries a Domain); otherwise `SESSION_COOKIE_DOMAIN`.
@@ -83,11 +106,22 @@ export function getSessionConfig(): SessionConfig {
   const ttl = envInt("SESSION_MAX_AGE_SECONDS", MAX_SESSION_TTL_SECONDS);
   const cookieName = optionalEnv("SESSION_COOKIE_NAME") ?? "__Host-sps_session";
   const hostPrefixed = cookieName.startsWith("__Host-");
+  // ≤ 8h hard cap regardless of the env value (#100 AC); never 0 / unbounded.
+  const ttlSeconds = Math.min(Math.max(ttl, 1), MAX_SESSION_TTL_SECONDS);
+  const idle = envInt(
+    "SESSION_IDLE_TIMEOUT_SECONDS",
+    DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS,
+  );
+  const idleTimeoutSeconds = Math.min(Math.max(idle, 60), ttlSeconds);
   return {
     cookieName,
     secret,
-    // ≤ 8h hard cap regardless of the env value (#100 AC); never 0 / unbounded.
-    ttlSeconds: Math.min(Math.max(ttl, 1), MAX_SESSION_TTL_SECONDS),
+    ttlSeconds,
+    idleTimeoutSeconds,
+    idleRefreshThresholdSeconds: Math.min(
+      SESSION_IDLE_REFRESH_THRESHOLD_SECONDS,
+      Math.floor(idleTimeoutSeconds / 2),
+    ),
     cookieDomain: hostPrefixed ? undefined : optionalEnv("SESSION_COOKIE_DOMAIN"),
     cookieSecure: hostPrefixed || envBool("SESSION_COOKIE_SECURE", true),
   };

@@ -25,12 +25,17 @@ ORCID_CLIENT_ID                     # etl/orcid-registry: optional /read-public 
 ORCID_CLIENT_SECRET                 # with ORCID_CLIENT_ID
 SERPAPI_KEY
 
-# --- SAML/session optional overrides (lib/auth/config.ts optionalEnv(), safe code default) ---
-SAML_DEFAULT_RETURN_PATH  # falls back to "/edit"
-SAML_EPPN_ATTRIBUTE       # falls back to the standard eppn OID
-SAML_NAMEID_FORMAT        # unset lets the IdP choose the NameID format
-SESSION_COOKIE_DOMAIN     # unset omits Domain (local dev / same-host default)
-SESSION_COOKIE_NAME       # falls back to "__Host-sps_session"
+# --- SAML/session optional overrides (lib/auth/config.ts optionalEnv()/envInt()/envBool(), safe code default) ---
+SAML_CLOCK_SKEW_MS               # falls back to 5000
+SAML_DEFAULT_RETURN_PATH         # falls back to "/edit"
+SAML_EPPN_ATTRIBUTE              # falls back to the standard eppn OID
+SAML_NAMEID_FORMAT               # unset lets the IdP choose the NameID format
+SAML_WANT_AUTHN_RESPONSE_SIGNED  # falls back to false (the assertion signature is still required)
+SESSION_COOKIE_DOMAIN            # unset omits Domain (local dev / same-host default)
+SESSION_COOKIE_NAME              # falls back to "__Host-sps_session"
+SESSION_COOKIE_SECURE            # falls back to true; forced true for a __Host- name
+SESSION_IDLE_TIMEOUT_SECONDS     # falls back to 7200 (2h idle timeout, ADR-013 D5); same for both envs
+SESSION_MAX_AGE_SECONDS          # falls back to the 8h cap (ADR-013 D3); can only shorten it
 
 # --- code-default tunables: numeric/mode levers with baked-in defaults ---
 BIOSKETCH_GENERATE_MODEL
