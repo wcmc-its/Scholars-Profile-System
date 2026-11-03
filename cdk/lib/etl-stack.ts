@@ -271,11 +271,10 @@ export class EtlStack extends Stack {
     // DB_TLS -- verified TLS from every ETL task to Aurora (lib/db-tls.ts): the
     // mariadb pools in lib/db.ts require TLS and verify the server cert against
     // the RDS CA bundle in the image (certs/). Same per-env value as AppStack's
-    // `dbTls`: ON in staging, OFF in prod until the staging probe shows a
-    // non-empty Ssl_version. Set on every task def holding an Aurora DSN (the
+    // `dbTls`: ON in both envs (staging probe showed TLSv1.3 on 2026-11-03). Set on every task def holding an Aurora DSN (the
     // base/fan-out defs via baseEnvironment, plus both reconcilers); NOT on
     // bulk-data-rule, whose DB is reciterdb. Rollback = "off" + cdk deploy.
-    const dbTls = env === "staging" ? "on" : "off";
+    const dbTls = "on";
     // Dedicated reciterdb credential for scripts/bulk-data-rule/ (containerization
     // design, 2026-08-14). Deliberately its own secret, not a share of the
     // per-source EtlReciter secret below (SOURCES_SECRET_IDS) -- that secret's

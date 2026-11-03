@@ -426,10 +426,10 @@ export class DataStack extends Stack {
           // host-scoped, unlike the seeder's own `@'%'` roles.
           APP_RW_GRANTEE_HOST: envConfig.appRwGranteeHost,
           // Verified TLS on the master connection (lambda/db-bootstrap-seed/
-          // tls.ts), same per-env value as AppStack/EtlStack's DB_TLS: ON in
-          // staging, OFF in prod for now. The seeder only runs when the custom
+          // tls.ts), same value as AppStack/EtlStack's DB_TLS: ON in both envs.
+          // The seeder only runs when the custom
           // resource's Revision changes, so this takes effect on the next run.
-          DB_TLS: envConfig.envName === "staging" ? "on" : "off",
+          DB_TLS: "on",
         },
         bundling: {
           // Emit an ESM bundle. The handler sources are ESM-native (`import`
