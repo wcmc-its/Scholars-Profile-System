@@ -1,6 +1,6 @@
 # docs/ADR-014 — SAML InResponseTo is not validated; single-use, ACS binding and signature checks carry the load
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-03)
 **Date:** 2026-11-03
 **Revision:** 1
 **Authors:** Scholars Profile System development team
