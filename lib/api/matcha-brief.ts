@@ -65,6 +65,51 @@ export function matchaSubmissionScope(
   return session.isSuperuser || session.isDeveloper === true ? undefined : { submittedBy: session.cwid };
 }
 
+/** The engine answer a retained search stored (`SponsorMatchSubmission.result`). */
+export type StoredResult = {
+  concepts: MatchaConcept[];
+  candidates: MatchaCandidate[];
+  titleSummary?: string;
+};
+
+/**
+ * The paste's newest stored PEOPLE answer that contains every requested PI (the grant-matcha
+ * `:elig` variant is never one). A paste can hold several stored answers (base, include-chip
+ * variants, older result versions); preferring the newest that has ALL the cwids means a PI the
+ * officer can see on an include variant is not refused just because the base run lacks them.
+ * ponytail: submission rows written on a cache hit carry no `resultKey`, so the exact run the
+ * officer is looking at can't be pinned; the newest answer containing the PI is the proxy.
+ */
+export async function loadStoredResult(
+  descriptionHash: string,
+  cwids: readonly string[],
+): Promise<StoredResult | null> {
+  // Sort on narrow columns only, then fetch the JSON by id. Selecting `result` in the ORDER BY
+  // query makes MySQL sort the full multi-MB rows and fail with 1038 "Out of sort memory".
+  const keys = await db.read.sponsorMatchSubmission.findMany({
+    where: { descriptionHash, resultKey: { not: null } },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: { id: true, resultKey: true },
+  });
+  const ids = keys.filter((k) => !k.resultKey!.endsWith(":elig")).map((k) => k.id);
+  if (ids.length === 0) return null;
+  const rows = await db.read.sponsorMatchSubmission.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, result: true },
+  });
+  const byId = new Map(rows.map((r) => [r.id, r.result]));
+  const answers = ids
+    .map((id) => byId.get(id))
+    .filter((r) => r != null)
+    .map((r) => r as unknown as StoredResult);
+  const has = (a: StoredResult) => {
+    const ids = new Set(a.candidates.map((c) => c.cwid));
+    return cwids.every((c) => ids.has(c));
+  };
+  return answers.find(has) ?? answers[0] ?? null;
+}
+
 /** One request drafts at most this many PIs (the toolbar's "Draft briefs" cap). */
 export const MAX_BRIEF_CWIDS = 20;
 export const BRIEF_MAX_TOPICS = 3;

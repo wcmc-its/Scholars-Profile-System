@@ -100,6 +100,8 @@ function stub(opts: {
   canEdit?: boolean;
   /** Hold every brief POST until released (to observe concurrency). */
   hold?: boolean;
+  /** cwids whose brief POST fails. */
+  fail?: string[];
 }) {
   const calls: Call[] = [];
   const held: (() => void)[] = [];
@@ -121,6 +123,7 @@ function stub(opts: {
       if (method === "POST") {
         const cwid = (JSON.parse(init!.body!) as { cwids: string[] }).cwids[0];
         if (opts.hold) await new Promise<void>((resolve) => held.push(resolve));
+        if (opts.fail?.includes(cwid)) return { ok: false, json: async () => ({ ok: false }) };
         // NDJSON as `editOkStream` writes it: a progress line, a whitespace heartbeat, the result.
         const text =
           JSON.stringify({ type: "progress", cwid, ok: true }) +
@@ -283,5 +286,117 @@ describe("Matcha brief UI", () => {
     expect(calls.some((c) => c.url.startsWith("/api/edit/matcha/brief"))).toBe(false);
     expect(screen.queryByRole("button", { name: /Draft briefs/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Rename this search" })).toBeNull();
+  });
+});
+
+describe("Matcha report (PDF)", () => {
+  const tick = (i: number) =>
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `Shortlist Person ${String(i).padStart(2, "0")}` }),
+    );
+  const openSpy = () => {
+    const open = vi.fn(() => ({ opener: {} }) as unknown as Window);
+    vi.stubGlobal("open", open);
+    return open;
+  };
+  const reportUrl = (cwids: string[]) =>
+    `/edit/matcha/report?submissionId=sub-1&cwids=${cwids.join(",")}`;
+
+  it("opens the report straight away when every shortlisted PI has a brief", async () => {
+    const open = openSpy();
+    stub({ candidates: pool(5), saved: [brief("p1"), brief("p2")] });
+    await search();
+    await screen.findByText("Generated why for p1.");
+    tick(1);
+    tick(2);
+    fireEvent.click(screen.getByRole("button", { name: "Report (PDF)" }));
+    expect(open).toHaveBeenCalledWith(reportUrl(["p1", "p2"]), "_blank", "noopener");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("with nothing ticked, covers the view's PIs that have a brief; disabled when none do", async () => {
+    const open = openSpy();
+    stub({ candidates: pool(5), saved: [brief("p3")] });
+    await search();
+    await screen.findByText("Generated why for p3.");
+    fireEvent.click(screen.getByRole("button", { name: "Report (PDF)" }));
+    expect(open).toHaveBeenCalledWith(reportUrl(["p3"]), "_blank", "noopener");
+    cleanup();
+
+    stub({ candidates: pool(3) });
+    await search();
+    const button = await screen.findByRole("button", { name: "Report (PDF)" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("prompts only when some selected PIs lack a brief, and drafts only those", async () => {
+    const open = openSpy();
+    const { calls } = stub({ candidates: pool(5), saved: [brief("p1")] });
+    await search();
+    await screen.findByText("Generated why for p1.");
+    tick(1);
+    tick(2);
+    tick(3);
+    fireEvent.click(screen.getByRole("button", { name: "Report (PDF)" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("2 of 3 shortlisted researchers have no brief yet."),
+    ).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Open report without them" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(open).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Draft 2 briefs, then open report" }),
+    );
+    await waitFor(() => expect(open).toHaveBeenCalledWith(reportUrl(["p1", "p2", "p3"]), "_blank"));
+    expect(
+      briefPosts(calls)
+        .map((c) => (c.body as { cwids: string[] }).cwids[0])
+        .sort(),
+    ).toEqual(["p2", "p3"]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("lists a failed draft and offers a link when the tab is blocked", async () => {
+    vi.stubGlobal(
+      "open",
+      vi.fn(() => null),
+    );
+    stub({ candidates: pool(3), fail: ["p2"] });
+    await search();
+    tick(1);
+    tick(2);
+    fireEvent.click(screen.getByRole("button", { name: "Report (PDF)" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Draft 2 briefs, then open report" }),
+    );
+    expect(await within(dialog).findByText(/Could not draft: Person 02/)).toBeTruthy();
+    // The link appears once EVERY draft has settled (p1 may still be in flight here).
+    const link = await within(dialog).findByRole("link", { name: "Open report" });
+    expect(link.getAttribute("href")).toBe(reportUrl(["p1", "p2"]));
+  });
+
+  it("an observer gets no Draft option, only open-anyway and cancel", async () => {
+    const open = openSpy();
+    const { calls } = stub({ candidates: pool(3), canEdit: false, saved: [brief("p1")] });
+    await search();
+    await screen.findByText("Generated why for p1.");
+    tick(1);
+    tick(2);
+    fireEvent.click(screen.getByRole("button", { name: "Report (PDF)" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Ask a Scholars admin to draft them.")).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: /^Draft/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open report without them" }));
+    expect(open).toHaveBeenCalledWith(reportUrl(["p1", "p2"]), "_blank", "noopener");
+    expect(briefPosts(calls)).toHaveLength(0);
+  });
+
+  it("flag off: no Report button", async () => {
+    stub({ candidates: pool(3), saved: [brief("p1")] });
+    await search(false);
+    expect(screen.queryByRole("button", { name: "Report (PDF)" })).toBeNull();
   });
 });
