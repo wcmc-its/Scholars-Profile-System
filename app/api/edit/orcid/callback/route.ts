@@ -29,6 +29,7 @@ import {
   orcidConnectConfig,
   RETURN_PATH,
   STATE_COOKIE,
+  STATE_COOKIE_OPTIONS,
   stateMatches,
 } from "@/lib/edit/orcid-connect";
 import { editError, logEditFailure, resolveEditIdentityForWrite } from "@/lib/edit/request";
@@ -39,7 +40,7 @@ const PATH = "/api/edit/orcid/callback";
 function back(outcome: "connected" | "denied" | "failed", request: NextRequest): NextResponse {
   const origin = process.env.SITE_URL?.replace(/\/+$/, "") ?? request.nextUrl.origin;
   const res = NextResponse.redirect(`${origin}${RETURN_PATH}&orcid=${outcome}`, 302);
-  res.cookies.set(STATE_COOKIE, "", { path: "/api/edit/orcid", maxAge: 0 });
+  res.cookies.set(STATE_COOKIE, "", { ...STATE_COOKIE_OPTIONS, maxAge: 0 });
   return res;
 }
 

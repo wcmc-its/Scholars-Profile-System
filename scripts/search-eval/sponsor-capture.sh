@@ -42,8 +42,8 @@ if [[ -z "${SPONSOR_COOKIE:-}" && -r "$COOKIE_FILE" ]]; then SPONSOR_COOKIE="$(<
 SPONSOR_COOKIE="${SPONSOR_COOKIE//[$'\r\n']/}"
 [[ -n "${SPONSOR_COOKIE//[[:space:]]/}" ]] || {
   echo "no session cookie." >&2
-  echo "  Sign in to $HOST as a developer/superuser, copy the __Secure-sps_session cookie, then:" >&2
-  echo "    umask 077; printf '__Secure-sps_session=%s' '<value>' > $COOKIE_FILE" >&2
+  echo "  Sign in to $HOST as a developer/superuser, copy the __Host-sps_session cookie, then:" >&2
+  echo "    umask 077; printf '__Host-sps_session=%s' '<value>' > $COOKIE_FILE" >&2
   exit 1
 }
 

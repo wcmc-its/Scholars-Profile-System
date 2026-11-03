@@ -20,7 +20,19 @@
  */
 import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from "node:crypto";
 
-export const STATE_COOKIE = "orcid_connect_state";
+/**
+ * `__Host-` prefixed (ASVS 5.0 V3.3.3): Secure, Path=/, no Domain, so no
+ * sibling subdomain can plant a state value. Every set, including the clear,
+ * must use {@link STATE_COOKIE_OPTIONS} or the browser drops it.
+ */
+export const STATE_COOKIE = "__Host-orcid_connect_state";
+export const STATE_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  // Lax, not Strict: the callback is a top-level navigation back from orcid.org.
+  sameSite: "lax",
+  path: "/",
+} as const;
 export const STATE_MAX_AGE_S = 600;
 export const CALLBACK_PATH = "/api/edit/orcid/callback";
 /** Where both routes land the scholar: their own Identifiers & Profiles tab. */

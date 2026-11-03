@@ -16,6 +16,7 @@ What already limits a leaked cookie:
 
 - `httpOnly`, so page script cannot read the cookie, which is the main way cookies get stolen.
 - `secure` and `SameSite=lax`.
+- The `__Host-sps_session` name. The `__Host-` prefix makes the browser require `Secure`, `Path=/` and no `Domain`, so a sibling subdomain cannot set, overwrite or shadow the session cookie (ASVS 5.0 V3.3.3).
 - A hard cap at sealing time: `ttlSeconds = min(SESSION_MAX_AGE_SECONDS, MAX_SESSION_TTL_SECONDS)`, where the cap is 8h (`lib/auth/config.ts`). `readSessionValue` also re-checks the sealed `exp`, so raising the TTL later cannot extend a cookie that has already been issued.
 - `SESSION_MAX_AGE_SECONDS` is not set in the app task definition (`cdk/lib/app-stack.ts`), so prod runs at the 8h cap.
 

@@ -19,7 +19,11 @@ afterAll(() => vi.unstubAllEnvs());
 describe("createSessionCookie / readSessionValue", () => {
   it("round-trips a session for a CWID", async () => {
     const cookie = await createSessionCookie("abc1234");
-    expect(cookie.name).toBe("__Secure-sps_session");
+    expect(cookie.name).toBe("__Host-sps_session");
+    // `__Host-` contract: Secure, Path=/, no Domain.
+    expect(cookie.options.secure).toBe(true);
+    expect(cookie.options.path).toBe("/");
+    expect(cookie.options.domain).toBeUndefined();
     expect(cookie.options.httpOnly).toBe(true);
     expect(cookie.options.sameSite).toBe("lax");
     expect(cookie.options.maxAge).toBeGreaterThan(0);
@@ -28,6 +32,19 @@ describe("createSessionCookie / readSessionValue", () => {
     const session = await readSessionValue(cookie.value);
     expect(session?.cwid).toBe("abc1234");
     expect(session!.exp).toBeGreaterThan(session!.iat);
+  });
+
+  it("a __Host- name ignores SESSION_COOKIE_DOMAIN and SESSION_COOKIE_SECURE=false", async () => {
+    process.env.SESSION_COOKIE_DOMAIN = "example.org";
+    process.env.SESSION_COOKIE_SECURE = "false";
+    try {
+      const cookie = await createSessionCookie("abc1234");
+      expect(cookie.options.domain).toBeUndefined();
+      expect(cookie.options.secure).toBe(true);
+    } finally {
+      delete process.env.SESSION_COOKIE_DOMAIN;
+      delete process.env.SESSION_COOKIE_SECURE;
+    }
   });
 
   it("returns null for an absent cookie value", async () => {
