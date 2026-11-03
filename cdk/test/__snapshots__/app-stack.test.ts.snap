@@ -762,7 +762,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "MATCHA_BRIEF",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "FUNDABLE_WORK",
