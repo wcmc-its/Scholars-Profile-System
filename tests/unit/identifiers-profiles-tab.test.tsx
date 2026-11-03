@@ -339,6 +339,21 @@ describe("OrcidCard — Connect your ORCID iD (#3115)", () => {
     cleanup();
   });
 
+  it("a suggested iD: Connect sits inline with Confirm, its note below the row", () => {
+    render(
+      <OrcidCard
+        {...base}
+        onFile={null}
+        connectEnabled
+        suggested={{ orcid: ID, accepted: 5, evidence: [{ source: "rpm_inferred", accepted: 5, rejected: 0 }] }}
+      />,
+    );
+    const row = screen.getByTestId("orcid-connect").parentElement;
+    expect(row).toBe(screen.getByTestId("orcid-confirm").parentElement);
+    expect(row?.contains(screen.getByTestId("orcid-connect-block"))).toBe(false);
+    cleanup();
+  });
+
   it("an authenticated iD shows the Authenticated pill and no connect link", () => {
     render(<OrcidCard {...base} onFile={ID} authenticated connectEnabled />);
     expect(screen.getByTestId("orcid-on-file-status").textContent).toContain("Authenticated");

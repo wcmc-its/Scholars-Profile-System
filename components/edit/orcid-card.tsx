@@ -292,24 +292,26 @@ export function OrcidCard({
     </form>
   );
 
+  // Sits first in the actions row, inline with Confirm / Remove; its note goes
+  // under the row.
+  const showConnect = connectEnabled && !(authenticated && saved === undefined);
   const connect = (
-    <div className="flex flex-col gap-2" data-testid="orcid-connect-block">
-      {/* A full navigation, not <Link>: a prefetch would start the OAuth flow. */}
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-      <a
-        href="/api/edit/orcid/connect"
-        className="border-apollo-border-strong hover:bg-apollo-surface-2 inline-flex w-fit items-center gap-2 rounded-md border bg-white px-3 py-1.5 text-sm font-semibold text-foreground"
-        data-testid="orcid-connect"
-      >
-        <OrcidIdIcon />
-        {current ? "Connect a different ORCID iD" : "Connect your ORCID iD"}
-      </a>
-      <p className="text-muted-foreground text-xs">
-        You’ll sign in at ORCID to prove the iD is yours. Weill Cornell records your iD and
-        the name on it to match your publications and fill NIH biosketches. We never change
-        your ORCID record.
-      </p>
-    </div>
+    // A full navigation, not <Link>: a prefetch would start the OAuth flow.
+    // eslint-disable-next-line @next/next/no-html-link-for-pages
+    <a
+      href="/api/edit/orcid/connect"
+      className="border-apollo-border-strong hover:bg-apollo-surface-2 text-foreground inline-flex h-8 items-center gap-2 rounded-md border bg-white px-3 text-sm font-semibold"
+      data-testid="orcid-connect"
+    >
+      <OrcidIdIcon />
+      {current ? "Connect a different ORCID iD" : "Connect your ORCID iD"}
+    </a>
+  );
+  const connectNote = (
+    <p className="text-muted-foreground text-xs" data-testid="orcid-connect-block">
+      You’ll sign in at ORCID to prove the iD is yours. Weill Cornell records your iD and the name
+      on it to match your publications and fill NIH biosketches. We never change your ORCID record.
+    </p>
   );
 
   return (
@@ -341,6 +343,7 @@ export function OrcidCard({
         idRow(offer.orcid, offer.evidence ?? [], "suggested", "orcid-suggested")}
       {/* The actions for whichever rows are showing, or the input. */}
       <div className="flex flex-wrap items-center gap-2">
+        {showConnect && connect}
         {current && !editing && competing && (
           <>
             <Button
@@ -430,7 +433,7 @@ export function OrcidCard({
         {/* ORCID's rule: with sign-in available, the scholar never types an iD. */}
         {!connectEnabled && (editing || (!current && !offer)) && form}
       </div>
-      {connectEnabled && !(authenticated && saved === undefined) && connect}
+      {showConnect && connectNote}
       {outcome && (
         <p
           role={CONNECT_OUTCOME[outcome].error ? "alert" : "status"}
