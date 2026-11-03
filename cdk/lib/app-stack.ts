@@ -1761,9 +1761,10 @@ export class AppStack extends Stack {
         // MATCHA_BRIEF — Matcha Phase 3 per-PI briefs on /edit/matcha (`/api/edit/matcha/brief`,
         // `lib/api/matcha-brief.ts`): a Sonnet-drafted, fact-checked "why this PI" + discussion
         // topics, drafted on demand by a superuser/developer. Read via isMatchaBriefEnabled()
-        // (=== "on"); the route 404s while off. DEPENDS ON MATCHA (on in both envs). ON in staging;
-        // OFF in prod until the staging eyeball. Flag-off hides the surface; stored briefs remain.
-        MATCHA_BRIEF: env === "staging" ? "on" : "off",
+        // (=== "on"); the route 404s while off. DEPENDS ON MATCHA (on in both envs). ON in both
+        // envs (prod since 2026-11-03, after the staging eyeball; also gates the printable report
+        // at /edit/matcha/report). Flag-off hides the surface; stored briefs remain.
+        MATCHA_BRIEF: "on",
         // FUNDABLE_WORK — /edit/fundable-work: WCM conference abstracts + preprints scored for
         // private-funding potential (etl/fundable-work, weekly). Read via isFundableWorkEnabled();
         // the page notFound()s while off. ON in BOTH envs since 2026-10-28 — CTL (Bellush) reviews
