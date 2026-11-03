@@ -104,6 +104,26 @@ type AuthorListRow = {
  *  `composeAuthorStringFromReviewJson` accepts both. */
 type AuthorshipReviewRow = { external_id: string; authors_json: unknown };
 
+/** #3259 — a row of `reciterdb.reporting_external_abstracts`. */
+type ExternalAbstractRow = { article_id: string; abstract: string | null };
+
+/** #3259 — add external abstracts to the pmid-keyed map, mapping each source-prefixed
+ *  article_id back to its synthetic pmid. Returns how many were added. */
+export function mergeExternalAbstracts(
+  rows: readonly ExternalAbstractRow[],
+  pmidByArticleId: ReadonlyMap<string, number>,
+  into: Map<number, string>,
+): number {
+  let n = 0;
+  for (const r of rows) {
+    const pmid = pmidByArticleId.get(String(r.article_id));
+    if (pmid === undefined || !r.abstract) continue;
+    into.set(pmid, r.abstract);
+    n++;
+  }
+  return n;
+}
+
 type JournalAbbrevRow = {
   pmid: number;
   journalTitleISOabbreviation: string | null;
@@ -495,6 +515,47 @@ async function main() {
       });
     }
     console.log(`Got ${abstractByPmid.size} abstracts.`);
+
+    // #3259 — external pubs (OPENALEX:, later SCOPUS:) have no reporting_abstracts row;
+    // ReciterDB keeps theirs in reporting_external_abstracts, keyed by article_id.
+    // Best-effort per batch like the review bylines: a missing table or grant degrades
+    // to "no abstract", and the per-source guard below stops a failed read from
+    // nulling abstracts stored on earlier runs.
+    {
+      const pmidByArticleId = new Map<string, number>();
+      for (const [pmid, articleId] of articleIdByPmid) pmidByArticleId.set(articleId, pmid);
+      let externalCount = 0;
+      for (const batch of chunks([...pmidByArticleId.keys()], IN_BATCH)) {
+        try {
+          await withReciterConnection(async (conn) => {
+            const rows = (await conn.query(
+              `SELECT article_id, abstract
+                 FROM reporting_external_abstracts
+                WHERE article_id IN (?) AND abstract IS NOT NULL AND abstract <> ''`,
+              [batch],
+            )) as ExternalAbstractRow[];
+            externalCount += mergeExternalAbstracts(rows, pmidByArticleId, abstractByPmid);
+          });
+        } catch (err) {
+          console.warn(
+            `reporting_external_abstracts fetch failed for a batch (continuing without): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+      console.log(`Got ${externalCount} external abstracts.`);
+      assertSourceVolume("reciter:external-abstracts", {
+        incoming: externalCount,
+        existing: await db.write.publication.count({
+          where: {
+            abstract: { not: null },
+            OR: [{ pmid: { startsWith: "OPENALEX:" } }, { pmid: { startsWith: "SCOPUS:" } }],
+          },
+        }),
+        maxDropPct: 30,
+      });
+    }
 
     // Empty-but-reachable secondary tables would mass-null their enrichment
     // column via the unconditional upsert below (same truncated-read fragility
