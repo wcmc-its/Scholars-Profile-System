@@ -1,0 +1,63 @@
+name: Security scan
+
+# Checkov over the synthesized CloudFormation (both envs) and the Dockerfile.
+# Report-only: findings go to the repo's code-scanning tab, which is not
+# public, and nothing here gates a merge.
+#
+# This repo is PUBLIC and so are its workflow logs. Checkov prints every
+# finding to stdout even with -o sarif, so stdout is discarded below. Keep it
+# that way when editing this file.
+on:
+  push:
+    branches: [master]
+    paths: ["cdk/**", "Dockerfile", ".github/workflows/security-scan.yml"]
+  schedule:
+    - cron: "17 9 * * 1" # Mondays: new checks land in Checkov between our changes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkov:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: cdk/package-lock.json
+
+      - name: Install CDK dependencies
+        run: npm ci
+        working-directory: cdk
+
+      # Same synth invocations as ci.yml's cdk job.
+      - name: Synth
+        working-directory: cdk
+        run: |
+          npx cdk synth -q -c env=staging -o ../synth/staging > /dev/null
+          npx cdk synth -q -c env=prod -c allowLatestAppImage=true -o ../synth/prod > /dev/null
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Checkov
+        run: |
+          pip install --quiet checkov==3.4.3
+          checkov -d synth --framework cloudformation \
+            -f Dockerfile --framework cloudformation dockerfile \
+            --quiet --soft-fail -o sarif --output-file-path checkov-out > /dev/null 2>&1
+          test -s checkov-out/results_sarif.sarif
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: checkov-out/results_sarif.sarif
+          category: checkov
