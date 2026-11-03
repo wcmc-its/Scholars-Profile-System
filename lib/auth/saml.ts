@@ -51,7 +51,8 @@ function ensureSaml(): { saml: SAML; env: SamlEnv } {
     // the Recipient/Destination binding, in `checkResponseBinding`, because
     // node-saml skips time checks when an assertion has no Conditions.
     maxAssertionAgeMs: MAX_ASSERTION_AGE_MS,
-    // InResponseTo is not validated against a stored request id (B01 plan OQ6).
+    // InResponseTo is not validated against a stored request id (B01 plan OQ6;
+    // rationale and compensating controls in docs/ADR-014).
     // node-saml's request-id check is backed by an in-process cache, which does
     // not hold across the 1–2 Fargate tasks staging/prod run: an AuthnRequest
     // minted on one task and a response validated on another would spuriously
