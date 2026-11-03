@@ -16,6 +16,7 @@ import {
   newState,
   orcidConnectConfig,
   STATE_COOKIE,
+  STATE_COOKIE_OPTIONS,
   STATE_MAX_AGE_S,
 } from "@/lib/edit/orcid-connect";
 import { editError, resolveEditIdentityForWrite } from "@/lib/edit/request";
@@ -34,13 +35,6 @@ export async function GET(): Promise<NextResponse> {
 
   const state = newState();
   const res = NextResponse.redirect(authorizeUrl(cfg, state), 302);
-  res.cookies.set(STATE_COOKIE, state, {
-    httpOnly: true,
-    secure: true,
-    // Lax, not Strict: the callback is a top-level navigation back from orcid.org.
-    sameSite: "lax",
-    path: "/api/edit/orcid",
-    maxAge: STATE_MAX_AGE_S,
-  });
+  res.cookies.set(STATE_COOKIE, state, { ...STATE_COOKIE_OPTIONS, maxAge: STATE_MAX_AGE_S });
   return res;
 }

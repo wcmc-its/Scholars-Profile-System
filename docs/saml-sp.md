@@ -25,14 +25,14 @@ Walkthrough (single browser session, incognito so no stale cookie leaks in):
 1. **SP metadata reachable.** `curl -sS https://<staging-host>/api/auth/saml/metadata | head -20` should return an `<EntityDescriptor>` XML document containing the SP entityID and a certificate node. If this 503s, `SAML_SP_*` config is incomplete; stop here.
 2. **Open `/edit` unauthenticated.** Navigate to `https://<staging-host>/edit`. Expected: 302 to `/api/auth/saml/login` and on to the IdP. Verify the URL bar lands on `login-proxy.weill.cornell.edu/...`.
 3. **Sign in at the IdP.** Use the test CWID. Expected: IdP POSTs the SAMLResponse to `https://<staging-host>/api/auth/saml/callback`.
-4. **Cookie minted.** Open DevTools → Application → Cookies. Verify exactly one cookie named `__Secure-sps_session` (or `sps_session` if `SESSION_COOKIE_NAME` is overridden):
+4. **Cookie minted.** Open DevTools → Application → Cookies. Verify exactly one cookie named `__Host-sps_session` (or `sps_session` if `SESSION_COOKIE_NAME` is overridden):
    - `HttpOnly` ✓
    - `Secure` ✓
    - `SameSite=Lax` ✓
-   - `Domain=scholars.weill.cornell.edu` ✓ (in prod; staging will have the staging domain)
+   - No `Domain` attribute and `Path=/` ✓ (`__Host-` prefix requires both; the cookie is host-only)
    - `Max-Age` ≤ 28800
 5. **`/edit` reachable.** The callback should land you on `/edit` (the default return path; or whatever path was in `RelayState`). The page must render without redirecting back through SSO.
-6. **Server-side validation works.** Open a new tab, hit `https://<staging-host>/api/edit/health` (or any `/api/edit*` route that doesn't need a body). Expected 200 (or the route's own success status). Now delete the `__Secure-sps_session` cookie and hit the same URL — expected 401 with no response body leakage.
+6. **Server-side validation works.** Open a new tab, hit `https://<staging-host>/api/edit/health` (or any `/api/edit*` route that doesn't need a body). Expected 200 (or the route's own success status). Now delete the `__Host-sps_session` cookie and hit the same URL — expected 401 with no response body leakage.
 7. **Logout.** Navigate to `https://<staging-host>/api/auth/saml/logout`. Expected: cookie is cleared and the next `/edit` hit re-runs the full SSO round-trip.
 
 If any step fails, do not declare the smoke test passed. Capture the failing step number, the request/response in DevTools Network, and any server logs from the ECS task, and attach them to issue [#100](https://github.com/wcmc-its/Scholars-Profile-System/issues/100) or the active staging-cutover ticket. Common failure modes:

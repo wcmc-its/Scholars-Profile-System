@@ -90,7 +90,7 @@ describe("POST /api/auth/saml/callback", () => {
     mockedValidate.mockResolvedValue({ ok: false, reason: "invalid_saml_response" });
     const res = await callbackPOST(callbackRequest({ SAMLResponse: "garbage" }));
     expect(res.status).toBe(401);
-    expect(res.cookies.get("__Secure-sps_session")).toBeUndefined();
+    expect(res.cookies.get("__Host-sps_session")).toBeUndefined();
   });
 
   it("mints a session cookie and 302s to the RelayState path on success", async () => {
@@ -103,7 +103,7 @@ describe("POST /api/auth/saml/callback", () => {
     // public ACS URL it POSTed to, never the container's internal request.url
     // (ip-...:3000 behind CloudFront -> ALB -> Fargate).
     expect(res.headers.get("location")).toBe("/edit/scholar/abc1234");
-    expect(res.cookies.get("__Secure-sps_session")?.value).toBeTruthy();
+    expect(res.cookies.get("__Host-sps_session")?.value).toBeTruthy();
     // The assertion is recorded single-use before the session is minted (#1439).
     expect(mockedConsume).toHaveBeenCalledWith(ASSERTION);
   });
@@ -118,7 +118,7 @@ describe("POST /api/auth/saml/callback", () => {
       callbackRequest({ SAMLResponse: "valid", RelayState: "/edit/scholar/abc1234" }),
     );
     expect(res.status).toBe(401);
-    expect(res.cookies.get("__Secure-sps_session")).toBeUndefined();
+    expect(res.cookies.get("__Host-sps_session")).toBeUndefined();
   });
 
   it("500s and writes no cookie when the single-use store is unavailable (fail closed)", async () => {
@@ -128,7 +128,7 @@ describe("POST /api/auth/saml/callback", () => {
       callbackRequest({ SAMLResponse: "valid", RelayState: "/edit" }),
     );
     expect(res.status).toBe(500);
-    expect(res.cookies.get("__Secure-sps_session")).toBeUndefined();
+    expect(res.cookies.get("__Host-sps_session")).toBeUndefined();
   });
 
   it("falls back to the default path when RelayState is unsafe", async () => {
@@ -235,8 +235,12 @@ describe("POST /api/auth/logout", () => {
     const res = await logoutPOST();
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/");
-    const cleared = res.cookies.get("__Secure-sps_session");
+    const cleared = res.cookies.get("__Host-sps_session");
     expect(cleared?.value).toBe("");
     expect(cleared?.maxAge).toBe(0);
+    // The pre-rename cookie is expired too, so a rollback can't revive it.
+    const legacy = res.cookies.get("__Secure-sps_session");
+    expect(legacy?.value).toBe("");
+    expect(legacy?.maxAge).toBe(0);
   });
 });

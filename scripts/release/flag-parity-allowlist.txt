@@ -30,7 +30,7 @@ SAML_DEFAULT_RETURN_PATH  # falls back to "/edit"
 SAML_EPPN_ATTRIBUTE       # falls back to the standard eppn OID
 SAML_NAMEID_FORMAT        # unset lets the IdP choose the NameID format
 SESSION_COOKIE_DOMAIN     # unset omits Domain (local dev / same-host default)
-SESSION_COOKIE_NAME       # falls back to "__Secure-sps_session"
+SESSION_COOKIE_NAME       # falls back to "__Host-sps_session"
 
 # --- code-default tunables: numeric/mode levers with baked-in defaults ---
 BIOSKETCH_GENERATE_MODEL

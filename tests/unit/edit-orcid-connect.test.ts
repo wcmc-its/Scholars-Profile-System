@@ -182,6 +182,12 @@ describe("GET /api/edit/orcid/connect", () => {
     const loc = new URL(res.headers.get("location")!);
     expect(loc.host).toBe("sandbox.orcid.org");
     expect(res.cookies.get(STATE_COOKIE)?.value).toBe(loc.searchParams.get("state"));
+    // `__Host-` contract: the browser drops the cookie without Secure + Path=/ + no Domain.
+    const set = res.headers.get("set-cookie")!;
+    expect(set).toMatch(/^__Host-orcid_connect_state=/);
+    expect(set).toMatch(/; Secure/i);
+    expect(set).toMatch(/; Path=\/(;|$)/);
+    expect(set).not.toMatch(/Domain=/i);
   });
 
   it("403 under View as: only the person can prove their iD", async () => {

@@ -21,5 +21,10 @@ export function POST(): NextResponse {
   });
   const cookie = clearedSessionCookie();
   response.cookies.set(cookie.name, cookie.value, cookie.options);
+  // The pre-`__Host-` session cookie (renamed for ASVS 5.0 V3.3.3) is no longer
+  // read, but a browser can still hold an unexpired one (8h cap). Expire it too
+  // so a rollback to an image that reads the old name can't revive a session
+  // the user just ended. Delete this line once the rename has shipped > 8h.
+  response.cookies.set("__Secure-sps_session", "", { ...cookie.options, secure: true });
   return response;
 }

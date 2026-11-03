@@ -66,7 +66,7 @@ describe("resolveViewerContext — SESSION branch", () => {
 
   it("treats a garbage session cookie as no session (falls through to external)", async () => {
     const req = new NextRequest(`${ORIGIN}/methods/x/y`, {
-      headers: { cookie: "__Secure-sps_session=not-a-valid-seal" },
+      headers: { cookie: "__Host-sps_session=not-a-valid-seal" },
     });
     const ctx = await resolveViewerContext(req);
     expect(ctx).toEqual({ internal: false, basis: null });

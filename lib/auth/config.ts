@@ -50,15 +50,22 @@ function envBool(name: string, fallback: boolean): boolean {
 export const MAX_SESSION_TTL_SECONDS = 8 * 60 * 60; // 28800
 
 export interface SessionConfig {
-  /** Cookie name. `__Secure-` prefixed by default; override for local http. */
+  /**
+   * Cookie name. `__Host-` prefixed by default (ASVS 5.0 V3.3.3): the browser
+   * then insists on Secure + Path=/ + no Domain, so no sibling subdomain can
+   * set or shadow it. Override (e.g. `sps_session`) for local http.
+   */
   cookieName: string;
   /** iron-session encryption password; must be ≥ 32 chars. */
   secret: string;
   /** Session lifetime in seconds; capped at {@link MAX_SESSION_TTL_SECONDS}. */
   ttlSeconds: number;
-  /** Cookie `Domain`; omitted in local dev (no `scholars.weill.cornell.edu`). */
+  /**
+   * Cookie `Domain`. Always undefined for a `__Host-` name (the browser rejects
+   * a `__Host-` cookie that carries a Domain); otherwise `SESSION_COOKIE_DOMAIN`.
+   */
   cookieDomain: string | undefined;
-  /** Cookie `Secure`; true in prod, set false for local http. */
+  /** Cookie `Secure`; true in prod (forced for `__Host-`), false for local http. */
   cookieSecure: boolean;
 }
 
@@ -74,13 +81,15 @@ export function getSessionConfig(): SessionConfig {
     );
   }
   const ttl = envInt("SESSION_MAX_AGE_SECONDS", MAX_SESSION_TTL_SECONDS);
+  const cookieName = optionalEnv("SESSION_COOKIE_NAME") ?? "__Host-sps_session";
+  const hostPrefixed = cookieName.startsWith("__Host-");
   return {
-    cookieName: optionalEnv("SESSION_COOKIE_NAME") ?? "__Secure-sps_session",
+    cookieName,
     secret,
     // ≤ 8h hard cap regardless of the env value (#100 AC); never 0 / unbounded.
     ttlSeconds: Math.min(Math.max(ttl, 1), MAX_SESSION_TTL_SECONDS),
-    cookieDomain: optionalEnv("SESSION_COOKIE_DOMAIN"),
-    cookieSecure: envBool("SESSION_COOKIE_SECURE", true),
+    cookieDomain: hostPrefixed ? undefined : optionalEnv("SESSION_COOKIE_DOMAIN"),
+    cookieSecure: hostPrefixed || envBool("SESSION_COOKIE_SECURE", true),
   };
 }
 

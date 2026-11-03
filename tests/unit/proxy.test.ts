@@ -51,7 +51,7 @@ describe("proxy — SSO gate", () => {
   it("treats a garbage session cookie as unauthenticated", async () => {
     const res = await proxy(
       new NextRequest(`${ORIGIN}/edit`, {
-        headers: { cookie: "__Secure-sps_session=not-a-valid-seal" },
+        headers: { cookie: "__Host-sps_session=not-a-valid-seal" },
       }),
     );
     expect(res.status).toBe(302);
