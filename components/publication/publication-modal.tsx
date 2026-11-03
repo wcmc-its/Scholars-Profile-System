@@ -226,7 +226,7 @@ function PublicationModal({
             onClose={onClose}
             titleId={titleId}
             title="Could not load publication"
-            body="Try opening again, or follow the PubMed link from the row."
+            body="Try opening again, or follow the PubMed or DOI link from the row."
           />
         ) : (
           <ModalContent
@@ -567,11 +567,14 @@ function ModalContent({
           meshTerms={pub.meshTerms}
           pmid={pub.pmid}
         />
-        <CitingPubsSection
-          pmid={pub.pmid}
-          citationCount={pub.citationCount}
-          citingPubs={citingPubs}
-        />
+        {/* #3259 — citing pubs are PubMed-keyed; external pubs have no list to show. */}
+        {pubSource(pub.pmid).isPubmed ? (
+          <CitingPubsSection
+            pmid={pub.pmid}
+            citationCount={pub.citationCount}
+            citingPubs={citingPubs}
+          />
+        ) : null}
       </div>
     </>
   );

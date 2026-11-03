@@ -205,6 +205,30 @@ function parsePmid(pmid: string): number | null {
 }
 
 /**
+ * #3259 — `Publication.pmid` keys external-source pubs on their source-prefixed id
+ * (`etl/reciter` pubKey). Only the prefixes that ETL writes are accepted.
+ */
+const EXTERNAL_KEY = /^(SCOPUS:\d{1,20}|OPENALEX:W\d{1,15})$/;
+
+/**
+ * @internal Exported for unit tests. The `Publication.pmid` key for a modal request,
+ * plus the numeric pmid for the PubMed-only citing reads (null for an external pub).
+ * Null when the id is neither.
+ */
+export function parsePublicationKey(input: string): { key: string; pmidInt: number | null } | null {
+  // A route param can arrive still percent-encoded ("OPENALEX%3AW…").
+  let raw: string;
+  try {
+    raw = decodeURIComponent(input);
+  } catch {
+    return null;
+  }
+  const pmidInt = parsePmid(raw);
+  if (pmidInt !== null) return { key: raw, pmidInt };
+  return EXTERNAL_KEY.test(raw) ? { key: raw, pmidInt: null } : null;
+}
+
+/**
  * #917 Phase 2 — resolve a family row's representative tools (+ #1119 snippets)
  * for the modal. `exemplarTools` is the salience-ordered display-name array;
  * `exemplarContexts` is a `{ name: snippet }` object whose KEY ORDER is unreliable
@@ -499,10 +523,11 @@ async function readCitingFromBridge(
 }
 
 export async function getPublicationDetail(
-  pmid: string,
+  rawPmid: string,
 ): Promise<PublicationDetailPayload | null> {
-  const pmidInt = parsePmid(pmid);
-  if (pmidInt === null) return null;
+  const parsed = parsePublicationKey(rawPmid);
+  if (!parsed) return null;
+  const { key: pmid, pmidInt } = parsed;
 
   const pub = await prisma.publication.findUnique({
     where: { pmid },
@@ -650,7 +675,11 @@ export async function getPublicationDetail(
   // than 500ing the whole modal — pub + topics + methods still return.
   let citingPubs: PublicationDetailCitingPub[] | null = null;
   let citingPubsTotal: number | null = null;
-  if (process.env.PUBLICATION_CITING_BRIDGE === "on") {
+  if (pmidInt === null) {
+    // #3259 — the citing tables are keyed by PubMed pmid; an external pub has none.
+    citingPubs = [];
+    citingPubsTotal = 0;
+  } else if (process.env.PUBLICATION_CITING_BRIDGE === "on") {
     const bridged = await readCitingFromBridge(pmidInt);
     citingPubs = bridged.citingPubs;
     citingPubsTotal = bridged.citingPubsTotal;
