@@ -190,6 +190,22 @@ export class DataStack extends Stack {
     // standalone DatabaseCluster below, byte-identical to pre-cutover. The
     // snapshot branch omits credentials/defaultDatabaseName/storageEncrypted —
     // the master username, database, and KMS key are inherited from the snapshot.
+    // Aurora TLS stage 3: the server refuses any connection that is not TLS.
+    // Every client (app, ETL, migrate/bootstrap, seeder Lambda) already sends
+    // verified TLS via DB_TLS=on (stage 2). Swapping the cluster off
+    // default.aurora-mysql8.0 takes effect only after the instances reboot.
+    const clusterParameterGroup = new rds.ParameterGroup(
+      this,
+      "AuroraClusterParameterGroup",
+      {
+        engine: rds.DatabaseClusterEngine.auroraMysql({
+          version: rds.AuroraMysqlEngineVersion.of("8.0.mysql_aurora.3.10.5", "8.0"),
+        }),
+        description: `SPS ${envConfig.envName} Aurora cluster parameters: require TLS`,
+        parameters: { require_secure_transport: "ON" },
+      },
+    );
+
     const snapshotId = envConfig.auroraSnapshotIdentifier;
     let cluster: rds.DatabaseCluster | rds.DatabaseClusterFromSnapshot;
     if (snapshotId) {
@@ -232,6 +248,7 @@ export class DataStack extends Stack {
             publiclyAccessible: false,
           }),
           readers,
+          parameterGroup: clusterParameterGroup,
           serverlessV2MinCapacity: envConfig.auroraMinCapacity,
           serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
           deletionProtection: true,
@@ -267,6 +284,7 @@ export class DataStack extends Stack {
           publiclyAccessible: false,
         }),
         readers,
+        parameterGroup: clusterParameterGroup,
         serverlessV2MinCapacity: envConfig.auroraMinCapacity,
         serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
         storageEncrypted: true,

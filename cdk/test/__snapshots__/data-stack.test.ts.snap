@@ -174,7 +174,9 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "BackupRetentionPeriod": 14,
         "CopyTagsToSnapshot": true,
-        "DBClusterParameterGroupName": "default.aurora-mysql8.0",
+        "DBClusterParameterGroupName": {
+          "Ref": "AuroraClusterParameterGroup22D979D8",
+        },
         "DBSubnetGroupName": {
           "Ref": "AuroraClusterSubnetsF3E9E6AD",
         },
@@ -213,6 +215,16 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::RDS::DBCluster",
       "UpdateReplacePolicy": "Retain",
+    },
+    "AuroraClusterParameterGroup22D979D8": {
+      "Properties": {
+        "Description": "SPS prod Aurora cluster parameters: require TLS",
+        "Family": "aurora-mysql8.0",
+        "Parameters": {
+          "require_secure_transport": "ON",
+        },
+      },
+      "Type": "AWS::RDS::DBClusterParameterGroup",
     },
     "AuroraClusterReader1C65EE150": {
       "DeletionPolicy": "Retain",
