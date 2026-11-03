@@ -3608,7 +3608,14 @@ export class AppStack extends Stack {
       internetFacing: false,
       vpcSubnets: appSubnets,
       securityGroup: internalAlbSecurityGroup,
+      // Checkov CKV_AWS_131: drop headers with invalid names rather than pass
+      // them to the app (mirrors the public ALB).
+      dropInvalidHeaderFields: true,
     });
+    // Checkov CKV_AWS_91: access logs for the internal ALB, same bucket as the
+    // public ALB under its own prefix. logAccessLogs grants ELB delivery on
+    // this prefix in the bucket policy.
+    this.internalAlb.logAccessLogs(albLogsBucket, `internal-alb/${env}`);
 
     // App target groups -- one per ALB. AWS enforces a 1:1 relationship
     // between a target group and a load balancer (the constraint surfaces
@@ -3754,6 +3761,10 @@ export class AppStack extends Stack {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
       defaultTargetGroups: [internalAppTargetGroup],
+      // Ingress is the SG-to-SG rule EtlStack adds (InternalAlbIngressFromEtl).
+      // CDK's default open:true would also add 0.0.0.0/0:80, and the VPC is
+      // shared by staging and prod.
+      open: false,
     });
 
     // ------------------------------------------------------------------

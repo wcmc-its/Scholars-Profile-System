@@ -2864,7 +2864,7 @@ describe("AppStack public ALB hardening (#1942)", () => {
       }
     });
 
-    it("leaves the internal ALB attributes alone (no deletion protection / logs)", () => {
+    it("internal ALB: no deletion protection, drops invalid headers, logs under internal-alb/", () => {
       const albs = template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer", {
         Properties: { Scheme: "internal" },
       });
@@ -2874,7 +2874,29 @@ describe("AppStack public ALB hardening (#1942)", () => {
         Value: unknown;
       }>;
       expect(attrs.find((a) => a.Key === "deletion_protection.enabled")?.Value).not.toBe("true");
-      expect(attrs.some((a) => a.Key === "access_logs.s3.enabled")).toBe(false);
+      expect(attrs).toEqual(
+        expect.arrayContaining([
+          { Key: "routing.http.drop_invalid_header_fields.enabled", Value: "true" },
+          { Key: "access_logs.s3.enabled", Value: "true" },
+          { Key: "access_logs.s3.prefix", Value: `internal-alb/${envName}` },
+        ]),
+      );
+      expect(attrs.find((a) => a.Key === "access_logs.s3.bucket")?.Value).toEqual({
+        Ref: expect.stringMatching(/^AlbLogsBucket[0-9A-F]{8}$/),
+      });
+    });
+
+    it("internal ALB SG has no 0.0.0.0/0 ingress (listener is open:false)", () => {
+      const sgs = template.findResources("AWS::EC2::SecurityGroup");
+      const ids = Object.keys(sgs).filter((id) => /^InternalAlbSecurityGroup[0-9A-F]{8}$/.test(id));
+      expect(ids).toHaveLength(1);
+      expect(sgs[ids[0]!]!.Properties.SecurityGroupIngress ?? []).toEqual([]);
+      const standalone = Object.values(template.findResources("AWS::EC2::SecurityGroupIngress")).filter(
+        (r) =>
+          JSON.stringify(r.Properties.GroupId).includes("InternalAlbSecurityGroup") &&
+          r.Properties.CidrIp === "0.0.0.0/0",
+      );
+      expect(standalone).toHaveLength(0);
     });
 
     it("AlbLogsBucket is SSE-S3, block-public, RETAIN, with a 90-day expiry", () => {
