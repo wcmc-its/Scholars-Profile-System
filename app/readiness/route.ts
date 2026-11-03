@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { searchClient } from "@/lib/search";
+import { PEOPLE_INDEX, searchClient } from "@/lib/search";
 
 // Deep readiness probe. Verifies the process can reach its dependencies
 // (Aurora via Prisma, OpenSearch). Not used by the ALB — see /healthz —
@@ -29,12 +29,26 @@ async function checkDb(): Promise<{ ok: true } | { ok: false; error: string }> {
   }
 }
 
+// Probe what search actually needs: a zero-hit read of the people alias with
+// the same client and credentials the app's search path uses. NOT ping():
+// that is `HEAD /`, which needs the cluster-level `cluster:monitor/main`
+// permission. The app's OpenSearch role (sps_app) is read-only on
+// `scholars-*` and is deliberately not granted cluster_monitor, so ping()
+// 403s (body-less HEAD, surfaced only as "Response Error") while search works.
 async function checkOpenSearch(): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    await withTimeout(searchClient().ping(), TIMEOUT_MS);
+    await withTimeout(
+      searchClient().search({
+        index: PEOPLE_INDEX,
+        body: { size: 0, query: { match_all: {} } },
+      }),
+      TIMEOUT_MS,
+    );
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    const status = (e as { meta?: { statusCode?: unknown } } | null)?.meta?.statusCode;
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: typeof status === "number" ? `${message} (HTTP ${status})` : message };
   }
 }
 
