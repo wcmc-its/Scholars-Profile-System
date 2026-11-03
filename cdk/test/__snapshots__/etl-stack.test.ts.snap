@@ -1124,7 +1124,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
@@ -1493,7 +1493,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_ENV",
@@ -2165,7 +2165,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_ENV",
@@ -2785,7 +2785,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_ENV",
@@ -3336,7 +3336,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_ENV",
@@ -4322,7 +4322,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_ENV",
@@ -8900,7 +8900,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
             ],
             "Essential": true,

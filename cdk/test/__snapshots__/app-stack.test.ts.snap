@@ -548,7 +548,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "KEEP_ALIVE_TIMEOUT",
@@ -1957,7 +1957,7 @@ service:
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
             ],
             "Essential": true,
@@ -3304,7 +3304,7 @@ service:
             "Environment": [
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
             ],
             "Essential": true,
@@ -4862,7 +4862,7 @@ service:
               },
               {
                 "Name": "DB_TLS",
-                "Value": "off",
+                "Value": "on",
               },
             ],
             "Essential": true,

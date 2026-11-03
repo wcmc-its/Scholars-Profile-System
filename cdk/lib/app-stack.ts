@@ -270,10 +270,10 @@ export class AppStack extends Stack {
     // cert against the RDS CA bundle baked into the image (certs/). Set on every
     // task def here that holds an Aurora DSN (app, migrate, db-bootstrap,
     // verify-grants); EtlStack and the DataStack seeder Lambda carry the same
-    // ternary. Stage 2 of 3: ON in staging, OFF in prod until the staging probe
-    // shows a non-empty Ssl_version; stage 3 sets require_secure_transport=ON.
+    // value. Stage 2 of 3: ON in both envs (staging probe showed TLSv1.3 on
+    // 2026-11-03); stage 3 sets require_secure_transport=ON.
     // Rollback = "off" + cdk deploy (the DSN secrets carry no TLS params).
-    const dbTls = envConfig.envName === "staging" ? "on" : "off";
+    const dbTls = "on";
     const opensearchAppSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
       "OpensearchAppSecret",

@@ -708,7 +708,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
                 "Endpoint.Port",
               ],
             },
-            "DB_TLS": "off",
+            "DB_TLS": "on",
             "MASTER_SECRET_ARN": {
               "Ref": "AuroraClusterSecretAttachmentDB8032DA",
             },
