@@ -52,8 +52,6 @@ import {
 } from "./change-detection";
 import { buildMenteeSuggestions } from "./mentee-suggestions";
 import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
-import { fetchOpenAlexAbstracts } from "./openalex-abstracts";
-import { mailtoFromEnv } from "@/lib/seo/openalex";
 import { syncPendingMyncbiPmids, syncRejectedPmids } from "./rejected-pmids";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import {
@@ -497,36 +495,6 @@ async function main() {
       });
     }
     console.log(`Got ${abstractByPmid.size} abstracts.`);
-
-    // #3259 — OpenAlex-lane pubs have no reporting_abstracts row; take the abstract from
-    // OpenAlex. Any id OpenAlex didn't return this run (outage, or no abstract) keeps
-    // whatever this ETL stored last time, so a failed fetch never nulls the column.
-    {
-      const pmidByWorkId = reviewBareIdsForSource(articleIdByPmid, "OPENALEX:");
-      const { abstracts, failedBatches } = await fetchOpenAlexAbstracts(
-        [...pmidByWorkId.keys()],
-        mailtoFromEnv(),
-      );
-      const stored = await db.write.publication.findMany({
-        where: { pmid: { startsWith: "OPENALEX:" }, abstract: { not: null } },
-        select: { pmid: true, abstract: true },
-      });
-      const storedByWorkId = new Map(
-        stored.map((p) => [p.pmid.slice("OPENALEX:".length), p.abstract as string]),
-      );
-      let kept = 0;
-      for (const [workId, pmid] of pmidByWorkId) {
-        const fresh = abstracts.get(workId);
-        const text = fresh ?? storedByWorkId.get(workId);
-        if (!text) continue;
-        if (!fresh) kept++;
-        abstractByPmid.set(pmid, text);
-      }
-      console.log(
-        `Got ${abstracts.size} OpenAlex abstracts for ${pmidByWorkId.size} OpenAlex pubs ` +
-          `(${kept} kept from last run, ${failedBatches} failed batches).`,
-      );
-    }
 
     // Empty-but-reachable secondary tables would mass-null their enrichment
     // column via the unconditional upsert below (same truncated-read fragility
