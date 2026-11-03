@@ -385,10 +385,10 @@ if (process.argv.includes("--selfcheck")) {
 }
 
 // --- consumed keys: process.env.X, resolver-style env.X, and
-// requireEnv("X")/optionalEnv("X") helper reads in code ---
+// requireEnv("X")/optionalEnv("X")/envInt("X")/envBool("X") helper reads in code ---
 const consumed = new Set();
 const READ = /(?:process\.env|(?<![\w.$])env)\.([A-Z][A-Z0-9_]+)/g;
-const HELPER_READ = /\b(?:requireEnv|optionalEnv)\(\s*["']([A-Z][A-Z0-9_]+)["']/g;
+const HELPER_READ = /\b(?:requireEnv|optionalEnv|envInt|envBool)\(\s*["']([A-Z][A-Z0-9_]+)["']/g;
 function walk(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
