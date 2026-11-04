@@ -78,7 +78,7 @@ export type ReportPi = {
 export type MatchaReport = {
   title: string;
   generatedAt: Date;
-  officer: { name: string; email: string | null };
+  officer: { name: string; email: string | null; dept: string | null };
   pis: ReportPi[];
   /** Every concept member, in stored order, de-duplicated: the footer's full search terms. */
   searchTerms: string[];
@@ -107,7 +107,7 @@ export function parseReportCwids(raw: string | null | undefined): string[] {
  */
 export async function loadOfficerContact(
   cwid: string,
-): Promise<{ name: string; email: string | null }> {
+): Promise<{ name: string; email: string | null; dept: string | null }> {
   try {
     const lookup = fetchDirectoryPeopleByCwid([cwid]);
     lookup.catch(() => {});
@@ -118,7 +118,7 @@ export async function loadOfficerContact(
     const p = people?.find((x) => x.cwid.toLowerCase() === cwid.toLowerCase());
     if (p) {
       const name = [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.name?.trim();
-      if (name) return { name, email: p.email ?? null };
+      if (name) return { name, email: p.email ?? null, dept: p.dept?.trim() || null };
     }
   } catch {
     /* fall through to the Scholar row */
@@ -128,11 +128,11 @@ export async function loadOfficerContact(
       where: { cwid },
       select: { preferredName: true, email: true },
     });
-    if (s) return { name: s.preferredName, email: s.email ?? null };
+    if (s) return { name: s.preferredName, email: s.email ?? null, dept: null };
   } catch {
     /* fall through to the cwid */
   }
-  return { name: cwid, email: null };
+  return { name: cwid, email: null, dept: null };
 }
 
 /** Top impact-scored confirmed papers for one PI: the records-only fallback for key papers. */

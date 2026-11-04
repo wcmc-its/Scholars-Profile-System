@@ -195,7 +195,7 @@ beforeEach(() => {
       lastName: "Officer",
       email: OFFICER_EMAIL,
       title: null,
-      dept: null,
+      dept: "Information Technologies & Services",
     },
   ]);
 });
@@ -258,7 +258,9 @@ describe("Matcha report page", () => {
     expect(html).not.toMatch(/removed|fusedScore/i);
     // Header: the search's Rename, the officer's name. The raw paste is gone.
     expect(html).toContain("Industry ask: wave 1");
-    expect(html).toContain("Olive Officer, Center for Technology Licensing");
+    expect(html).toContain("Olive Officer, Information Technologies &amp; Services");
+    // The unit is the officer's own directory department, never a hard-coded CTL.
+    expect(html).not.toContain("Center for Technology Licensing");
     expect(html).not.toContain("We want widget collaborators.");
     expect(html).toContain("Two Weill Cornell investigators whose published work");
   });

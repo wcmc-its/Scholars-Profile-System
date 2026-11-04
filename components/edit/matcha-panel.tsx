@@ -1794,7 +1794,7 @@ export function MatchaPanel({
                       setDescription(h.description);
                       void runSearch(h.description); // D10 — replay opens Full, same as a fresh paste
                     }}
-                    className="text-foreground/90 mt-1 block w-full text-left text-sm font-medium underline-offset-4 hover:underline"
+                    className="text-foreground/90 mt-1 block w-full text-left text-sm font-medium underline-offset-4 first-letter:uppercase hover:underline"
                   >
                     {h.title ?? "Untitled search"}
                   </button>
@@ -1858,7 +1858,7 @@ export function MatchaPanel({
                 className="border-apollo-border hover:bg-apollo-rail block w-full border-b px-5 py-[13px] pr-10 text-left transition-colors last:border-b-0"
               >
                 <div className="flex items-baseline gap-3">
-                  <span className="min-w-0 flex-1 text-[13.5px] font-semibold">
+                  <span className="min-w-0 flex-1 text-[13.5px] font-semibold first-letter:uppercase">
                     {h.title ?? "Untitled search"}
                   </span>
                   <span className="text-muted-foreground shrink-0 text-[12px] whitespace-nowrap">
@@ -2236,7 +2236,7 @@ export function MatchaPanel({
                       </div>
                     ) : (
                       <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                        <h2 data-slot="matcha-ask" className="text-base font-medium">
+                        <h2 data-slot="matcha-ask" className="text-base font-medium first-letter:uppercase">
                           {titleOverride ?? ask?.title}
                         </h2>
                         <span
