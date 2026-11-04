@@ -66,16 +66,22 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
   // "aged &lt;18 … improvement &gt;10%" — into bare < / > that the tag-strip
   // regex then consumed as one giant fake tag, deleting the text between them.
   // Decoded entities are data, never markup, so they decode after the strip.
-  const stripped = sanitizeVIVOHtml(html)
-    // Inline markup → no replacement (preserve `H2O`). `<mark>` (search
-    // highlight pills) and `<u>` are inline too: a space there would make
-    // `(<mark>BRCA1</mark>)` read as `( BRCA1 )` in the aria-label.
-    .replace(/<\/?(?:i|em|b|strong|sup|sub|mark|u)\b[^>]*>/gi, "")
-    // Everything else (block tags, unknown markup) → single space. Only a
-    // TAG-SHAPED `<` (followed by a letter, `/` or `!`) starts markup, so a
-    // bare comparator — "aged <18 years and >65" — survives intact.
-    // `[^<>]` so an orphan "<word" never swallows text up to a later tag.
-    .replace(/<\/?[a-z!][^<>]*>/gi, " ");
+  // Repeat until stable: one pass can reassemble a tag from nested pieces
+  // (`<<i>iframe>` → `<iframe>`), so a single pass is not a complete strip.
+  let stripped = sanitizeVIVOHtml(html);
+  for (let prev = ""; prev !== stripped;) {
+    prev = stripped;
+    stripped = stripped
+      // Inline markup → no replacement (preserve `H2O`). `<mark>` (search
+      // highlight pills) and `<u>` are inline too: a space there would make
+      // `(<mark>BRCA1</mark>)` read as `( BRCA1 )` in the aria-label.
+      .replace(/<\/?(?:i|em|b|strong|sup|sub|mark|u)\b[^>]*>/gi, "")
+      // Everything else (block tags, unknown markup) → single space. Only a
+      // TAG-SHAPED `<` (followed by a letter, `/` or `!`) starts markup, so a
+      // bare comparator — "aged <18 years and >65" — survives intact.
+      // `[^<>]` so an orphan "<word" never swallows text up to a later tag.
+      .replace(/<\/?[a-z!][^<>]*>/gi, " ");
+  }
   const plain = stripped
     .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
@@ -94,7 +100,9 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
 }
 
 function codePointOr(cp: number, fallback: string): string {
-  return cp >= 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : fallback;
+  return cp >= 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff)
+    ? String.fromCodePoint(cp)
+    : fallback;
 }
 
 /**

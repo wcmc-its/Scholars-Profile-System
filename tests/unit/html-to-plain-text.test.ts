@@ -83,6 +83,11 @@ describe("htmlToPlainText", () => {
     expect(htmlToPlainText("&#946;-cell &#x3B1; &amp;lt;tag&amp;gt;")).toBe("β-cell α &lt;tag&gt;");
   });
 
+  it("never reassembles a tag from nested pieces", () => {
+    expect(htmlToPlainText("x<<i>iframe src=y>z")).not.toMatch(/<iframe/i);
+    expect(htmlToPlainText("<<b>script>alert(1)<</b>/script>")).not.toMatch(/<\/?script/i);
+  });
+
   it("keeps the excerpt truncation contract", () => {
     const long = "word ".repeat(60).trim();
     const out = htmlToPlainText(long, 50);
