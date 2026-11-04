@@ -21,6 +21,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { askTitleFrom } from "@/lib/api/matcha-contract";
 import {
   MAX_BRIEF_CWIDS,
   generateBrief,
@@ -224,7 +225,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // The GENERATED title, never the officer's Rename: the prompt must not carry free text a
   // (possibly different, possibly observer) officer typed, and two officers' renames of the same
   // paste must not draft different briefs.
-  const askTitle = answer.titleSummary ?? sub.title ?? null;
+  // The MODEL's requester composes the same way the generated title does ("{requester} — {focus}").
+  const askTitle = answer.titleSummary
+    ? (askTitleFrom([], [], answer.titleSummary, answer.requester)?.title ?? null)
+    : (sub.title ?? null);
 
   /** Draft one PI, then persist its row + audit entry in ONE transaction. Never throws. */
   const draftOne = async (cwid: string) => {

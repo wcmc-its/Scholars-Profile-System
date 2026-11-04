@@ -96,7 +96,12 @@ import type {
   MatchaCandidate,
   MatchaConcept,
 } from "@/lib/api/matcha-contract";
-import { askTitleFrom, sanitizeIncludeTerms } from "@/lib/api/matcha-contract";
+import {
+  askTitleFrom,
+  sanitizeIncludeTerms,
+  stripOrgPrefix,
+  TITLE_ORG_JOIN,
+} from "@/lib/api/matcha-contract";
 import {
   isMatchaEnabled,
   isMatchaSpineEnabled,
@@ -113,7 +118,7 @@ import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isObserver } from "@/lib/auth/observer";
 import type { EditSession } from "@/lib/auth/superuser";
-import { matchaSubmissionScope } from "@/lib/api/matcha-brief";
+import { loadStoredResult, matchaSubmissionScope } from "@/lib/api/matcha-brief";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
@@ -177,8 +182,9 @@ function sponsorInputHash(engineInput: string): string {
  * v2: `measures.researcherType` / `researchAward` (#3235).
  * v3: `researchAward` is `{ label, endYear }`, not `{ mechanism, endYear }`, plus
  *     `measures.labPubs5y` / `clinicalPubs5y` and the any-sponsor type rule (#3239).
+ * v4: `requester` (who is asking) beside a focus-only, sentence-case `titleSummary`.
  */
-const MATCHA_RESULT_VERSION = 3;
+const MATCHA_RESULT_VERSION = 4;
 
 /** The cache key. Shares its digest with `SponsorMatchSubmission.descriptionHash`, so a
  *  retained row and the cached result for that same search are joinable on one value. */
@@ -194,6 +200,9 @@ type MatchaEngineResult = {
   /** The spine's LLM-written search title (absent for the bespoke engine, which has no
    *  extraction). Cached with the rest of the result; prefers over a concept-list title. */
   titleSummary?: string;
+  /** The extractor's asking organization, from the same call. Cached with the rest; the
+   *  officer's correction lives in `SponsorMatchSubmission.requesterOverride`, not here. */
+  requester?: string;
   /** #1780 Phase 2 — the culled tail for the include chips. Cached with the result (it is a
    *  function of description + include, which is exactly the cache key). Absent on bespoke. */
   culled?: CulledConcept[];
@@ -329,15 +338,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // same paste. Hashes the NORMALIZED paste, never the raw text — same #6c invariant as the
       // people key; the cache value holds `{ concepts, candidates }` only, no paste text.
       const grantKey = `grant:${sponsorInputHash(normalizeDescription(description))}`;
-      const { concepts, candidates, titleSummary, culled } =
+      const { concepts, candidates, titleSummary, requester, culled } =
         await cachedReasonAgg<GrantSpineResult>(
           grantKey,
           () => rankGrantsForDescriptionSpine(description),
           // Don't cache a fail-soft empty (a Bedrock/OpenSearch blip): only memoise a real hit.
           (r) => r.candidates.length > 0,
         );
-      const ask = askTitleFrom(concepts, [], titleSummary);
-      return editOk({ target: "grants", concepts, candidates, ask, titleSummary, culled });
+      const ask = askTitleFrom(concepts, [], titleSummary, requester);
+      return editOk({
+        target: "grants",
+        concepts,
+        candidates,
+        ask,
+        titleSummary,
+        requester,
+        culled,
+      });
     } catch (err) {
       logEditFailure(`${PATH}#grants`, err);
       return editError(500, "match_unavailable");
@@ -405,7 +422,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             });
     const storedResult = (stored?.result ?? null) as MatchaEngineResult | null;
 
-    const { concepts, candidates, titleSummary, culled, degraded } =
+    const { concepts, candidates, titleSummary, requester, culled, degraded } =
       storedResult ??
       (await cachedReasonAgg<MatchaEngineResult>(
         cacheKey,
@@ -427,13 +444,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // half: a Bedrock blip can also produce a NON-empty degraded ranking, and with no expiry
     // that would be the stored answer until someone happened to click Re-run. A row written
     // while serving a stored result carries no answer of its own; the older row still holds it.
-    const engineResult: MatchaEngineResult = { concepts, candidates, titleSummary, culled };
+    const engineResult: MatchaEngineResult = {
+      concepts,
+      candidates,
+      titleSummary,
+      requester,
+      culled,
+    };
     const persist = storedResult === null && isCacheableResult(engineResult) && !degraded;
 
-    // The search's handle. The essence + org come from the extractor's `titleSummary` (written
-    // in the SAME extraction call, not a second one); `askTitleFrom` prefers it and falls
-    // back to a derived concept list, then appends the active preference chips.
-    const ask = askTitleFrom(concepts, preferences, titleSummary);
+    // The search's handle. The focus + requester come from the extractor (written in the SAME
+    // extraction call, not a second one); `askTitleFrom` composes "{requester} — {focus}", falls
+    // back to a derived concept list, then appends the active preference chips. This is the
+    // GENERATED title (the model's requester): an officer's requester correction reaches the
+    // visible title through `titleOverride`, which PATCH keeps in step with it.
+    const ask = askTitleFrom(concepts, preferences, titleSummary, requester);
 
     // #6d — retain the search. Recorded even on a CACHE HIT: the row is a record of what an
     // officer asked, not of what the engine computed, and two officers running the same paste
@@ -446,23 +471,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // otherwise the next replay's fresh row would surface the generated title again in Recent.
     // Scoped to the caller's OWN runs, matching what their PATCH may write: one officer's rename
     // must not spread into a colleague's runs. Fail-soft: a read blip costs the label, never the answer.
-    const titleOverride =
-      (
-        await db.read.sponsorMatchSubmission
-          .findFirst({
-            where: {
-              descriptionHash: engineInputHash,
-              titleOverride: { not: null },
-              submittedBy: session.cwid,
-            },
-            orderBy: { createdAt: "desc" },
-            select: { titleOverride: true },
-          })
-          .catch((err: unknown) => {
-            logEditFailure(`${PATH}#titleOverride`, err);
-            return null;
-          })
-      )?.titleOverride ?? null;
+    // The officer's requester correction is inherited the same way, read alongside.
+    const [titleOverride, requesterOverride] = await Promise.all([
+      db.read.sponsorMatchSubmission
+        .findFirst({
+          where: {
+            descriptionHash: engineInputHash,
+            titleOverride: { not: null },
+            submittedBy: session.cwid,
+          },
+          orderBy: { createdAt: "desc" },
+          select: { titleOverride: true },
+        })
+        .then((r) => r?.titleOverride ?? null)
+        .catch((err: unknown) => {
+          logEditFailure(`${PATH}#titleOverride`, err);
+          return null;
+        }),
+      db.read.sponsorMatchSubmission
+        .findFirst({
+          where: {
+            descriptionHash: engineInputHash,
+            requesterOverride: { not: null },
+            submittedBy: session.cwid,
+          },
+          orderBy: { createdAt: "desc" },
+          select: { requesterOverride: true },
+        })
+        .then((r) => r?.requesterOverride ?? null)
+        .catch((err: unknown) => {
+          logEditFailure(`${PATH}#requesterOverride`, err);
+          return null;
+        }),
+    ]);
     let submissionId: string | null = null;
     try {
       const created = await db.write.sponsorMatchSubmission.create({
@@ -471,6 +512,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           descriptionHash: engineInputHash,
           title: ask?.title ?? null,
           titleOverride,
+          requesterOverride,
           engine,
           candidateCount: candidates.length,
           submittedBy: session.cwid,
@@ -493,10 +535,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       preferences,
       ask,
       titleSummary,
+      requester,
       culled,
       // Matcha briefs + Rename key off this row (null only when the retention write failed).
       submissionId,
       titleOverride,
+      requesterOverride,
       // Labelled from the same predicate that skipped the engine — never from the row alone.
       ...(storedResult && stored ? { asOf: stored.createdAt.toISOString() } : {}),
     });
@@ -716,14 +760,56 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
 /** The officer's own name for a search, at most this long (`title_override` VARCHAR(120)).
  *  Not exported: a Next.js route module may export only its handlers. */
 const TITLE_OVERRIDE_MAX = 120;
+/** The officer's requester, at most this long (`requester_override` VARCHAR(120)). */
+const REQUESTER_OVERRIDE_MAX = 120;
+
+/**
+ * The title a requester would give this search, derived from the row's GENERATED `title` (which
+ * the POST composed with the MODEL's requester, or — on a row stored before `requester` existed —
+ * an old title that may carry its org inside it). Strips whatever org prefix that title has and
+ * puts `requester` in its place, so the result never reads "A — B — focus". The model's own
+ * requester yields the generated title unchanged. Capped to fit `title_override`. Null when the
+ * search has no generated title to compose from.
+ */
+function titleForRequester(
+  generated: string | null,
+  modelRequester: string | null,
+  requester: string | null,
+): string | null {
+  if (!generated) return null;
+  if (requester === modelRequester) return generated;
+  const prefix = modelRequester ? `${modelRequester}${TITLE_ORG_JOIN}` : null;
+  const rest =
+    prefix && generated.startsWith(prefix)
+      ? generated.slice(prefix.length)
+      : stripOrgPrefix(generated);
+  const title = requester ? `${requester}${TITLE_ORG_JOIN}${rest}` : rest;
+  return title.length > TITLE_OVERRIDE_MAX ? `${title.slice(0, TITLE_OVERRIDE_MAX - 1)}…` : title;
+}
+
+/** The model's requester for a paste: off its newest stored answer (the extraction is a pure
+ *  function of the paste, so any stored run of it says the same). Null when none was named or
+ *  the paste has no stored answer. */
+async function modelRequesterFor(descriptionHash: string): Promise<string | null> {
+  const stored = await loadStoredResult(descriptionHash, []);
+  return stored?.requester?.trim() || null;
+}
 
 /**
  * PATCH `{ submissionId, title }` — rename a retained search (Matcha Phase 3).
+ * PATCH `{ submissionId, requester }` — correct WHO is asking.
  *
  * Writes `titleOverride` on every run of the clicked row's paste within the caller's scope (the
  * same `submissionScope` as GET/DELETE), because Recent shows one entry per paste. POST copies
  * the latest override onto each new run, so a replay keeps the name. `title` is trimmed; empty
- * (or whitespace) clears the override and the generated title shows again. Not audited.
+ * (or whitespace) clears the override and the generated title shows again — composed with the
+ * officer's requester when they set one. Not audited.
+ *
+ * `requester` writes `requesterOverride` the same way (trimmed; empty or null reverts to the
+ * model's requester; ≤120 chars) and keeps the visible title in step: when the title is NOT a
+ * manual Rename — `titleOverride` is null, or equals what the previous requester composed — it
+ * becomes the new requester's title (cleared when that is just the generated one). A Rename to
+ * something else is the officer's own words and is left alone. Same gate as Rename. Not audited.
  */
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!isMatchaEnabled()) return new NextResponse(null, { status: 404 });
@@ -741,22 +827,35 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return editError(403, "not_developer_rename");
   }
 
-  const { submissionId, title } = body;
+  const { submissionId } = body;
   if (typeof submissionId !== "string" || submissionId.length === 0 || submissionId.length > 64) {
     return editError(400, "invalid_submission_id", "submissionId");
   }
+  if ("requester" in body) return patchRequester(session, submissionId, body.requester);
+
+  const { title } = body;
   if (typeof title !== "string" || title.trim().length > TITLE_OVERRIDE_MAX) {
     return editError(400, "invalid_title", "title");
   }
-  const titleOverride = title.trim() || null;
+  let titleOverride = title.trim() || null;
 
   try {
     const scope = submissionScope(session);
     const row = await db.read.sponsorMatchSubmission.findUnique({
       where: { id: submissionId, ...scope },
-      select: { descriptionHash: true, title: true },
+      select: { descriptionHash: true, title: true, requesterOverride: true },
     });
     if (!row) return editError(404, "not_found");
+    // Clearing a Rename restores the generated title — but with the officer's requester, when
+    // they corrected it, not the model's.
+    if (titleOverride === null && row.requesterOverride) {
+      const composed = titleForRequester(
+        row.title,
+        await modelRequesterFor(row.descriptionHash),
+        row.requesterOverride,
+      );
+      titleOverride = composed === row.title ? null : composed;
+    }
     await db.write.sponsorMatchSubmission.updateMany({
       where: { descriptionHash: row.descriptionHash, ...scope },
       data: { titleOverride },
@@ -764,6 +863,70 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return editOk({ submissionId, title: titleOverride ?? row.title, titleOverride });
   } catch (err) {
     logEditFailure(`${PATH}#rename`, err);
+    return editError(500, "submissions_unavailable");
+  }
+}
+
+async function patchRequester(
+  session: EditSession,
+  submissionId: string,
+  requester: unknown,
+): Promise<NextResponse> {
+  if (
+    requester !== null &&
+    (typeof requester !== "string" || requester.trim().length > REQUESTER_OVERRIDE_MAX)
+  ) {
+    return editError(400, "invalid_requester", "requester");
+  }
+  const typed = typeof requester === "string" ? requester.replace(/\s+/g, " ").trim() : "";
+
+  try {
+    const scope = submissionScope(session);
+    const row = await db.read.sponsorMatchSubmission.findUnique({
+      where: { id: submissionId, ...scope },
+      select: {
+        descriptionHash: true,
+        title: true,
+        titleOverride: true,
+        requesterOverride: true,
+      },
+    });
+    if (!row) return editError(404, "not_found");
+    const modelRequester = await modelRequesterFor(row.descriptionHash);
+    // Typing the model's own requester back is a revert, not an override.
+    const requesterOverride = typed && typed !== modelRequester ? typed : null;
+
+    const prevTitle = titleForRequester(
+      row.title,
+      modelRequester,
+      row.requesterOverride ?? modelRequester,
+    );
+    const nextTitle = titleForRequester(
+      row.title,
+      modelRequester,
+      requesterOverride ?? modelRequester,
+    );
+    // Follow the requester only when the visible title is still a composed one; a Rename stays.
+    const followsRequester = row.titleOverride === null || row.titleOverride === prevTitle;
+    const titleOverride = followsRequester
+      ? nextTitle === row.title
+        ? null
+        : nextTitle
+      : row.titleOverride;
+
+    await db.write.sponsorMatchSubmission.updateMany({
+      where: { descriptionHash: row.descriptionHash, ...scope },
+      data: { requesterOverride, titleOverride },
+    });
+    return editOk({
+      submissionId,
+      title: titleOverride ?? row.title,
+      titleOverride,
+      requester: modelRequester,
+      requesterOverride,
+    });
+  } catch (err) {
+    logEditFailure(`${PATH}#requester`, err);
     return editError(500, "submissions_unavailable");
   }
 }

@@ -371,6 +371,7 @@ describe("POST /api/edit/matcha (route)", () => {
     expect(await resp.json()).toEqual({
       submissionId: "sub-new",
       titleOverride: null,
+      requesterOverride: null,
       ok: true,
       concepts: [],
       candidates: [
@@ -503,11 +504,12 @@ describe("POST /api/edit/matcha (route)", () => {
       expect(await resp.json()).toEqual({
         submissionId: "sub-new",
         titleOverride: null,
+        requesterOverride: null,
         ok: true,
         concepts,
         candidates,
         preferences: [],
-        ask: { title: "cancer metabolism" },
+        ask: { title: "Cancer metabolism" },
       });
     });
   });
@@ -819,6 +821,172 @@ describe("POST /api/edit/matcha (route)", () => {
       };
       expect((await PATCH(postRequest(outsider, { submissionId: "s1", title: "y" }))).status).toBe(403);
     });
+
+    // ── Requester (who is asking) ──
+    const GENERATED = "Northlake Therapeutics — Metabolic disease and obesity · Early career";
+    /** The paste's stored answer, as `loadStoredResult` reads it (keys first, then the JSON). */
+    function storedRequester(requester?: string) {
+      mockSubmissionFindMany.mockImplementation(
+        async (args: { select: Record<string, boolean> }) =>
+          args.select.resultKey
+            ? [{ id: "r1", resultKey: "sponsor:spine:v4:h" }]
+            : [
+                {
+                  id: "r1",
+                  result: { concepts: [], candidates: [], ...(requester ? { requester } : {}) },
+                },
+              ],
+      );
+    }
+    function row(extra: Record<string, unknown> = {}) {
+      mockSubmissionFindUnique.mockResolvedValue({
+        descriptionHash: "h-abc",
+        title: GENERATED,
+        titleOverride: null,
+        requesterOverride: null,
+        ...extra,
+      });
+    }
+
+    it("PATCH requester: sets the override on every run in scope and re-composes an un-renamed title", async () => {
+      mockIsObserver.mockResolvedValue(true);
+      storedRequester("Northlake Therapeutics");
+      row();
+      const resp = await PATCH(
+        postRequest(observerCtx, { submissionId: "s1", requester: "  Quillfin  Bio " }),
+      );
+      expect(resp.status).toBe(200);
+      const want = "Quillfin Bio — Metabolic disease and obesity · Early career";
+      expect(await resp.json()).toMatchObject({
+        title: want,
+        titleOverride: want,
+        requester: "Northlake Therapeutics",
+        requesterOverride: "Quillfin Bio",
+      });
+      expect(mockSubmissionFindUnique.mock.calls[0][0].where).toEqual({
+        id: "s1",
+        submittedBy: "obs1",
+      });
+      expect(mockSubmissionUpdateMany).toHaveBeenCalledWith({
+        where: { descriptionHash: "h-abc", submittedBy: "obs1" },
+        data: { requesterOverride: "Quillfin Bio", titleOverride: want },
+      });
+    });
+
+    it("PATCH requester: empty or null reverts to the model's requester and clears the composed title", async () => {
+      storedRequester("Northlake Therapeutics");
+      for (const requester of ["", null, "Northlake Therapeutics"]) {
+        row({
+          requesterOverride: "Quillfin Bio",
+          titleOverride: "Quillfin Bio — Metabolic disease and obesity · Early career",
+        });
+        const resp = await PATCH(postRequest(developerCtx, { submissionId: "s1", requester }));
+        expect(await resp.json()).toMatchObject({
+          title: GENERATED,
+          titleOverride: null,
+          requester: "Northlake Therapeutics",
+          requesterOverride: null,
+        });
+        expect(mockSubmissionUpdateMany).toHaveBeenLastCalledWith({
+          where: { descriptionHash: "h-abc" },
+          data: { requesterOverride: null, titleOverride: null },
+        });
+      }
+    });
+
+    it("PATCH requester: leaves a manual Rename alone", async () => {
+      storedRequester("Northlake Therapeutics");
+      row({ titleOverride: "Wave 1 scouting" });
+      const resp = await PATCH(
+        postRequest(developerCtx, { submissionId: "s1", requester: "Quillfin Bio" }),
+      );
+      expect(await resp.json()).toMatchObject({
+        title: "Wave 1 scouting",
+        titleOverride: "Wave 1 scouting",
+        requesterOverride: "Quillfin Bio",
+      });
+    });
+
+    it("PATCH requester: an OLD row whose title carries its org is re-prefixed, never double-prefixed", async () => {
+      storedRequester(undefined); // stored before `requester` existed
+      row({ title: "Acme Bio — cardiac fibrosis reversal" });
+      const set = await PATCH(
+        postRequest(developerCtx, { submissionId: "s1", requester: "Quillfin Bio" }),
+      );
+      expect(await set.json()).toMatchObject({
+        title: "Quillfin Bio — cardiac fibrosis reversal",
+        requester: null,
+      });
+      // A run with no stored answer at all composes from the title the same way.
+      mockSubmissionFindMany.mockResolvedValue([]);
+      row({ title: "Cardiac fibrosis" });
+      const fresh = await PATCH(
+        postRequest(developerCtx, { submissionId: "s1", requester: "Quillfin Bio" }),
+      );
+      expect((await fresh.json()).title).toBe("Quillfin Bio — Cardiac fibrosis");
+    });
+
+    it("PATCH requester: 400 on non-string or >120 chars, 404 out of scope, 403 without Matcha", async () => {
+      storedRequester("Northlake Therapeutics");
+      expect(
+        (await PATCH(postRequest(developerCtx, { submissionId: "s1", requester: 5 }))).status,
+      ).toBe(400);
+      expect(
+        (await PATCH(postRequest(developerCtx, { submissionId: "s1", requester: "x".repeat(121) })))
+          .status,
+      ).toBe(400);
+      mockSubmissionFindUnique.mockResolvedValue(null);
+      expect(
+        (await PATCH(postRequest(developerCtx, { submissionId: "s1", requester: "y" }))).status,
+      ).toBe(404);
+      expect(mockSubmissionUpdateMany).not.toHaveBeenCalled();
+      const outsider = {
+        ...developerCtx,
+        session: { cwid: "x1", isSuperuser: false, isDeveloper: false },
+        effective: { cwid: "x1", isSuperuser: false, isDeveloper: false },
+        realCwid: "x1",
+      };
+      expect(
+        (await PATCH(postRequest(outsider, { submissionId: "s1", requester: "y" }))).status,
+      ).toBe(403);
+    });
+
+    it("PATCH rename: clearing it restores the generated title WITH the officer's requester", async () => {
+      storedRequester("Northlake Therapeutics");
+      row({ requesterOverride: "Quillfin Bio", titleOverride: "Wave 1" });
+      const resp = await PATCH(postRequest(developerCtx, { submissionId: "s1", title: "" }));
+      const want = "Quillfin Bio — Metabolic disease and obesity · Early career";
+      expect(await resp.json()).toMatchObject({ title: want, titleOverride: want });
+    });
+
+    it("POST ships the model's requester and inherits the paste's requester override", async () => {
+      process.env.MATCHA_SPINE = "on";
+      mockRankSpine.mockResolvedValue({
+        concepts: [
+          { term: "obesity", kind: "concept", members: [], centrality: 1, weightFactor: 1 },
+        ],
+        candidates: [],
+        titleSummary: "Metabolic disease and obesity",
+        requester: "Northlake Therapeutics",
+      });
+      mockSubmissionFindFirst.mockImplementation(
+        async (args: { where: Record<string, unknown> }) =>
+          "requesterOverride" in args.where && args.where.submittedBy === "dev1"
+            ? { requesterOverride: "Quillfin Bio" }
+            : null,
+      );
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      const body = await resp.json();
+      expect(body).toMatchObject({
+        requester: "Northlake Therapeutics",
+        requesterOverride: "Quillfin Bio",
+        ask: { title: "Northlake Therapeutics — Metabolic disease and obesity" },
+      });
+      const { data } = mockSubmissionCreate.mock.calls[0][0];
+      expect(data.requesterOverride).toBe("Quillfin Bio");
+      // The stored `title` stays the GENERATED one (model's requester): reverting restores it.
+      expect(data.title).toBe("Northlake Therapeutics — Metabolic disease and obesity");
+    });
   });
 
   describe("retained searches", () => {
@@ -851,7 +1019,7 @@ describe("POST /api/edit/matcha (route)", () => {
       // real text is the entire reason this row exists (the λ gold set needs REAL sponsor
       // prose, not our reconstruction of it).
       expect(data.description).toBe("  Cancer metabolism.  ");
-      expect(data.title).toBe("cancer metabolism");
+      expect(data.title).toBe("Cancer metabolism");
       expect(data.engine).toBe("spine");
       expect(data.candidateCount).toBe(1);
       expect(data.submittedBy).toBe("dev1");

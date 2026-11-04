@@ -465,7 +465,7 @@ describe("askTitleFrom", () => {
       concept("cardiac fibrosis", 0.9, 1),
       concept("myofibroblast differentiation", 0.8, 1),
     ]);
-    expect(ask?.title).toBe("cardiac fibrosis, myofibroblast differentiation");
+    expect(ask?.title).toBe("Cardiac fibrosis, myofibroblast differentiation");
   });
 
   it("stops at two concepts — more is a list, not a handle", () => {
@@ -475,12 +475,12 @@ describe("askTitleFrom", () => {
       concept("c", 0.7, 1),
       concept("d", 0.6, 1),
     ]);
-    expect(ask?.title).toBe("a, b");
+    expect(ask?.title).toBe("A, b");
   });
 
   it("appends the non-topical ask when the sponsor stated one", () => {
     const ask = askTitleFrom([concept("cardiac fibrosis", 0.9, 1)], prefs);
-    expect(ask?.title).toBe("cardiac fibrosis · Early career");
+    expect(ask?.title).toBe("Cardiac fibrosis · Early career");
   });
 
   it("is ABSENT when there are no concepts — never an empty-string title", () => {
@@ -506,10 +506,51 @@ describe("askTitleFrom", () => {
   it("falls back to the concept list when titleSummary is blank, and titles even a zero-concept search when the extractor named one", () => {
     // A whitespace-only summary is not a title — derive from concepts instead.
     expect(askTitleFrom([concept("cardiac fibrosis", 0.9, 1)], [], "   ")?.title).toBe(
-      "cardiac fibrosis",
+      "Cardiac fibrosis",
     );
     // The bespoke path has no title; but if a summary is present with no concepts, name it.
     expect(askTitleFrom([], [], "Acme Bio — rare disease")?.title).toBe("Acme Bio — rare disease");
+  });
+
+  it('prefixes the requester as "{requester} — {focus}"', () => {
+    const ask = askTitleFrom(
+      [concept("obesity", 0.9, 1)],
+      prefs,
+      "Metabolic disease and obesity",
+      "Northlake Therapeutics",
+    );
+    expect(ask?.title).toBe(
+      "Northlake Therapeutics — Metabolic disease and obesity · Early career",
+    );
+  });
+
+  it("without a requester the title is the focus alone", () => {
+    expect(askTitleFrom([], [], "CAR-T persistence in solid tumors", null)?.title).toBe(
+      "CAR-T persistence in solid tumors",
+    );
+    expect(askTitleFrom([], [], "CAR-T persistence in solid tumors", "  ")?.title).toBe(
+      "CAR-T persistence in solid tumors",
+    );
+  });
+
+  it("prefixes the requester onto the concept-list fallback; a mixed-case first word (mRNA) is not re-cased", () => {
+    const ask = askTitleFrom(
+      [concept("mRNA vaccines", 0.9, 1), concept("HER2-low breast cancer", 0.8, 1)],
+      [],
+      undefined,
+      "Harborview Foundation",
+    );
+    expect(ask?.title).toBe("Harborview Foundation — mRNA vaccines, HER2-low breast cancer");
+  });
+
+  it("never double-prefixes an OLD stored titleSummary that already carries an org", () => {
+    // Pre-requester results wrote "{Org} — {focus}" into titleSummary. A requester replaces it.
+    expect(askTitleFrom([], [], "Acme Bio — cardiac fibrosis reversal", "Acme Bio")?.title).toBe(
+      "Acme Bio — cardiac fibrosis reversal",
+    );
+    expect(
+      askTitleFrom([], [], "Acme Bio — cardiac fibrosis reversal", "Quillfin Bio")?.title,
+    ).toBe("Quillfin Bio — cardiac fibrosis reversal");
   });
 });
 

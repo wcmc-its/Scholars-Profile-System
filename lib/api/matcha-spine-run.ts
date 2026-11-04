@@ -255,10 +255,13 @@ type SpineCluster = TermCluster & { term: string };
 export type SpineRankResult = {
   concepts: MatchaConcept[];
   candidates: MatchaCandidate[];
-  /** The extractor's short search title (essence + org, written in the SAME extraction call).
+  /** The extractor's short search title (the focus, written in the SAME extraction call).
    *  Rides through to the route, which prefers it over the derived concept-list title. Absent
    *  on the dictionary-fallback path (no LLM ⇒ no title) and on the empty short-circuits. */
   titleSummary?: string;
+  /** The extractor's asking organization (see `MatchaExtraction.requester`); absent on the
+   *  dictionary-fallback path and when the paste has no cue. */
+  requester?: string;
   /** #1780 Phase 2 — the extractor's concepts the cut did NOT search, for the click-to-include
    *  chips. [] on the dictionary-fallback path (no LLM tail) and the empty short-circuits. */
   culled?: CulledConcept[];
@@ -552,6 +555,7 @@ export async function rankResearchersForDescriptionSpine(
   // as before. MAX_TERMS caps either source.
   const extraction = await extractMatchaConcepts(text);
   const titleSummary = extraction.titleSummary; // survives the dictionary fallback below (undefined there)
+  const requester = extraction.requester;
   const include = opts.include ?? [];
 
   // #1838 — CLUSTER BEFORE CAPPING (LLM path). The old order capped `extraction.concepts` to
@@ -944,7 +948,8 @@ export async function rankResearchersForDescriptionSpine(
   const allFused = rrfFuse(rankings, DEFAULT_K, recencyWeightByCwid);
   const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
   const degraded = llmPath ? {} : { degraded: true as const };
-  if (fused.length === 0) return { concepts, candidates: [], titleSummary, culled, ...degraded };
+  if (fused.length === 0)
+    return { concepts, candidates: [], titleSummary, requester, culled, ...degraded };
 
   // technologyCount — CTL officers care whether the researcher already holds CTL IP.
   // Same inline groupBy the bespoke engine and `rankResearchersForOpportunity` use
@@ -1117,5 +1122,5 @@ export async function rankResearchersForDescriptionSpine(
       ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };
   });
-  return { concepts, candidates, titleSummary, culled, ...degraded };
+  return { concepts, candidates, titleSummary, requester, culled, ...degraded };
 }
