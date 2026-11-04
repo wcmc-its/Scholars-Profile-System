@@ -3462,6 +3462,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
+              {
+                "Name": "ASMS_TLS_VERIFY",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -14938,6 +14942,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
+              },
+              {
+                "Name": "ASMS_TLS_VERIFY",
+                "Value": "on",
               },
             ],
             "Essential": true,

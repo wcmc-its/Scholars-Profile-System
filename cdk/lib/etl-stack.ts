@@ -1129,6 +1129,17 @@ export class EtlStack extends Stack {
       container: etlContainer,
     };
     const sourcesUnit = makeEtlTaskUnit("Sources", "sources", SOURCES_SECRET_IDS);
+    // ASMS_TLS_VERIFY -- verify the ASMS SQL Server certificate (Amazon RDS for
+    // SQL Server, chains to the RDS CA bundle in the image) instead of
+    // trustServerCertificate:true (lib/sources/mssql-asms.ts). Only etl:asms
+    // reads it, and it runs on this def. Staging first; prod stays "off" until a
+    // staging nightly Asms step has run green with it on. Rollback = "off" +
+    // cdk deploy. InfoEd, COI/FRT and Jenzabar are NOT covered: those servers
+    // present SQL Server's self-signed fallback cert, nothing to verify against.
+    sourcesUnit.container.addEnvironment(
+      "ASMS_TLS_VERIFY",
+      envConfig.envName === "prod" ? "off" : "on",
+    );
     const ldapUnit = makeEtlTaskUnit("Ldap", "ldap", LDAP_SECRET_IDS);
     // reciter-api def: the ReCiter ADMIN api-key (#746). Two scripts run on it:
     // the operator-run `etl:reciter-refresh` (launched via `run-task
