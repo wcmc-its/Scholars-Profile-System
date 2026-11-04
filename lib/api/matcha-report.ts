@@ -86,6 +86,8 @@ export type MatchaReport = {
   themes: ReportTheme[] | null;
   /** Rows align with `pis`; columns with `themes`. Null exactly when `themes` is. */
   coverage: Coverage | null;
+  /** "Prepared for": the officer's requester correction, else the model's. Null ⇒ no column. */
+  requester: string | null;
 };
 
 /** `a,b,c` → distinct, trimmed, plausible cwids in the order given. Uncapped: the cap applies
@@ -174,7 +176,7 @@ export async function loadMatchaReport(
   const sub = await db.read.sponsorMatchSubmission.findUnique({
     where: { id: submissionId, ...matchaSubmissionScope(session) },
     // NEVER `description`: the raw paste is not part of the report.
-    select: { descriptionHash: true, title: true, titleOverride: true },
+    select: { descriptionHash: true, title: true, titleOverride: true, requesterOverride: true },
   });
   if (!sub) return null;
   const stored = await loadStoredResult(sub.descriptionHash, requested);
@@ -304,5 +306,6 @@ export async function loadMatchaReport(
     searchTerms,
     themes: coverage ? themes : null,
     coverage,
+    requester: sub.requesterOverride?.trim() || stored.requester?.trim() || null,
   };
 }

@@ -76,6 +76,8 @@ export type GrantSpineResult = {
   concepts: MatchaConcept[];
   candidates: GrantCandidate[];
   titleSummary?: string;
+  /** The extractor's asking organization (see `MatchaExtraction.requester`). */
+  requester?: string;
   /** Always [] in v1 (no include-chips UI yet); present for envelope parity with the people spine. */
   culled?: CulledConcept[];
 };
@@ -173,8 +175,8 @@ export async function rankGrantsForDescriptionSpine(
   // Extraction seam — reused verbatim. v1: no dictionary fallback, so an empty extraction (Bedrock
   // outage OR a genuinely conceptless ask) short-circuits to no grants rather than degrading recall.
   const extraction = await extractMatchaConcepts(text);
-  const titleSummary = extraction.titleSummary;
-  if (extraction.concepts.length === 0) return { ...empty, titleSummary };
+  const { titleSummary, requester } = extraction;
+  if (extraction.concepts.length === 0) return { ...empty, titleSummary, requester };
 
   // Resolve → cluster → cap to MAX_TERMS distinct axes (method floor reserved). Identical to the
   // people spine's #1838 order (cluster before capping) — the shared helpers do the work.
@@ -207,7 +209,7 @@ export async function rankGrantsForDescriptionSpine(
     ...c,
     term: c.members[0],
   }));
-  if (allClusters.length === 0) return { ...empty, titleSummary };
+  if (allClusters.length === 0) return { ...empty, titleSummary, requester };
   const clusters = selectWithMethodFloor(allClusters, {
     max: MAX_TERMS,
     methodFloor: METHOD_FLOOR,
@@ -254,7 +256,7 @@ export async function rankGrantsForDescriptionSpine(
   // its output. Here that id IS the opportunityId. No recency map (v1).
   const allFused = rrfFuse(rankings, DEFAULT_K);
   const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
-  if (fused.length === 0) return { concepts, candidates: [], titleSummary, culled: [] };
+  if (fused.length === 0) return { concepts, candidates: [], titleSummary, requester, culled: [] };
 
   const candidates: GrantCandidate[] = fused.map((f) => {
     const hit = hitById.get(f.cwid); // f.cwid is the opaque fused id — the opportunityId here.
@@ -272,5 +274,5 @@ export async function rankGrantsForDescriptionSpine(
       contributions: f.contributions,
     };
   });
-  return { concepts, candidates, titleSummary, culled: [] };
+  return { concepts, candidates, titleSummary, requester, culled: [] };
 }

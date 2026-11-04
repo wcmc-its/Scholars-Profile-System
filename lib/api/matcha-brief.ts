@@ -70,6 +70,9 @@ export type StoredResult = {
   concepts: MatchaConcept[];
   candidates: MatchaCandidate[];
   titleSummary?: string;
+  /** The extractor's asking organization. Absent on results stored before it existed (v<4)
+   *  and when the paste carried no cue. */
+  requester?: string;
 };
 
 /**

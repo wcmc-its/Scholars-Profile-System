@@ -42,7 +42,11 @@ vi.mock("@aws-sdk/credential-providers", () => ({
   fromNodeProviderChain: () => () => ({}),
 }));
 
-import { extractMatchaConcepts } from "@/lib/api/matcha-extract";
+import {
+  EXTRACT_SYSTEM_PROMPT,
+  extractMatchaConcepts,
+  sanitizeRequester,
+} from "@/lib/api/matcha-extract";
 
 /** Shape a mocked generateObject success — it returns `{ object }`. */
 /** `kind` is optional here on purpose: the LLM's zod schema requires it, but
@@ -223,13 +227,13 @@ describe("extractMatchaConcepts", () => {
     mockGenerateObject.mockResolvedValue({
       object: {
         concepts: [{ term: "cystic fibrosis", kind: "concept", centrality: 1 }],
-        titleSummary: "  Vertex —  gene editing\nfor cystic fibrosis.  ",
+        titleSummary: "  Gene editing\nfor cystic fibrosis.  ",
       },
     });
 
     const out = await extractMatchaConcepts("some sponsor prose");
 
-    expect(out.titleSummary).toBe("Vertex — gene editing for cystic fibrosis");
+    expect(out.titleSummary).toBe("Gene editing for cystic fibrosis");
   });
 
   it("drops a titleSummary that is absent or runs to prose (never becomes a header)", async () => {
@@ -243,6 +247,25 @@ describe("extractMatchaConcepts", () => {
 
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
     expect((await extractMatchaConcepts("prose")).titleSummary).toBeUndefined(); // omitted by model
+  });
+
+  it("carries a requester through, cleaned the same way as the title", async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        concepts: [{ term: "cystic fibrosis", kind: "concept", centrality: 1 }],
+        titleSummary: "Gene editing for cystic fibrosis",
+        requester: "  Quillfin\n Bio.  ",
+      },
+    });
+    expect((await extractMatchaConcepts("signed, Quillfin Bio")).requester).toBe("Quillfin Bio");
+
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        concepts: [{ term: "cystic fibrosis", kind: "concept", centrality: 1 }],
+        requester: null, // no cue in the paste
+      },
+    });
+    expect((await extractMatchaConcepts("prose")).requester).toBeUndefined();
   });
 
   // Memoization seam — the Bedrock call is wrapped in cachedReasonAgg so the #1780 Phase-2
@@ -345,5 +368,30 @@ describe("extractMatchaConcepts", () => {
       // Parses to a non-array.
       expect(schema.safeParse({ concepts: JSON.stringify({ term: "als" }) }).success).toBe(false);
     });
+  });
+});
+
+describe("sanitizeRequester", () => {
+  it("trims, collapses whitespace and drops a trailing period", () => {
+    expect(sanitizeRequester("  Northlake\n  Therapeutics. ")).toBe("Northlake Therapeutics");
+  });
+  it("drops empty, non-string, over-long, and spelled-out 'no value' answers", () => {
+    expect(sanitizeRequester("")).toBeUndefined();
+    expect(sanitizeRequester("   ")).toBeUndefined();
+    expect(sanitizeRequester(null)).toBeUndefined();
+    expect(sanitizeRequester(42)).toBeUndefined();
+    expect(sanitizeRequester("x".repeat(61))).toBeUndefined();
+    expect(sanitizeRequester("x".repeat(60))).toBe("x".repeat(60));
+    expect(sanitizeRequester("null")).toBeUndefined();
+    expect(sanitizeRequester("None")).toBeUndefined();
+  });
+});
+
+describe("EXTRACT_SYSTEM_PROMPT title rules", () => {
+  it("asks for a focus-only, sentence-case titleSummary and a grounded requester", () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toContain("Sentence case");
+    expect(EXTRACT_SYSTEM_PROMPT).toContain("`requester`");
+    expect(EXTRACT_SYSTEM_PROMPT).toContain("If there is none, return null");
+    expect(EXTRACT_SYSTEM_PROMPT).not.toMatch(/Lowercase, EXCEPT/);
   });
 });

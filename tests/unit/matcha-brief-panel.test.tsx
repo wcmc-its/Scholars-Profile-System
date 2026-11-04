@@ -102,6 +102,10 @@ function stub(opts: {
   hold?: boolean;
   /** cwids whose brief POST fails. */
   fail?: string[];
+  /** Extra fields on the search POST's response (titleSummary, requester, …). */
+  post?: Record<string, unknown>;
+  /** The PATCH response body. */
+  patch?: Record<string, unknown>;
 }) {
   const calls: Call[] = [];
   const held: (() => void)[] = [];
@@ -146,6 +150,9 @@ function stub(opts: {
     if (method === "GET") {
       return { ok: true, json: async () => ({ ok: true, submissions: [], scope: "own" }) };
     }
+    if (method === "PATCH") {
+      return { ok: true, json: async () => ({ ok: true, ...(opts.patch ?? {}) }) };
+    }
     return {
       ok: true,
       json: async () => ({
@@ -154,6 +161,7 @@ function stub(opts: {
         candidates: opts.candidates,
         submissionId: "sub-1",
         titleOverride: null,
+        ...(opts.post ?? {}),
       }),
     };
   });
@@ -398,5 +406,60 @@ describe("Matcha report (PDF)", () => {
     stub({ candidates: pool(3), saved: [brief("p1")] });
     await search(false);
     expect(screen.queryByRole("button", { name: "Report (PDF)" })).toBeNull();
+  });
+});
+
+describe("Matcha requester (who is asking)", () => {
+  it('titles the search "{requester} — {focus}", and Edit saves the correction into the title', async () => {
+    const want = "Quillfin Bio — CAR-T persistence in solid tumors";
+    const { calls } = stub({
+      candidates: pool(2),
+      post: {
+        titleSummary: "CAR-T persistence in solid tumors",
+        requester: "Northlake Therapeutics",
+      },
+      patch: {
+        title: want,
+        titleOverride: want,
+        requester: "Northlake Therapeutics",
+        requesterOverride: "Quillfin Bio",
+      },
+    });
+    await search();
+    const card = () => screen.getByText((_, el) => el?.getAttribute("data-slot") === "matcha-ask");
+    expect(card().textContent).toBe("Northlake Therapeutics — CAR-T persistence in solid tumors");
+    const line = screen.getByText((_, el) => el?.getAttribute("data-slot") === "matcha-requester");
+    expect(line.textContent).toContain("Requester: Northlake Therapeutics");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit requester" }));
+    const input = screen.getByRole("textbox", { name: "Requester (who is asking)" });
+    expect((input as HTMLInputElement).value).toBe("Northlake Therapeutics");
+    fireEvent.change(input, { target: { value: " Quillfin Bio " } });
+    fireEvent.click(within(line).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(card().textContent).toBe(want));
+    const patch = calls.find((c) => c.method === "PATCH");
+    expect(patch?.body).toEqual({ submissionId: "sub-1", requester: "Quillfin Bio" });
+    // A title composed from the officer's requester is still the generated one, not a Rename.
+    expect(screen.getByText("Generated title")).toBeTruthy();
+    expect(
+      screen.getByText((_, el) => el?.getAttribute("data-slot") === "matcha-requester").textContent,
+    ).toContain("Requester: Quillfin Bio");
+  });
+
+  it("offers Add requester when the model found none; the fallback title is sentence-cased", async () => {
+    stub({ candidates: pool(2), post: { titleSummary: undefined } });
+    await search();
+    expect(
+      screen.getByText((_, el) => el?.getAttribute("data-slot") === "matcha-ask").textContent,
+    ).toBe("Immuno-oncology, Cancer Metabolism");
+    expect(screen.getByRole("button", { name: "Add requester" })).toBeTruthy();
+  });
+
+  it("follows Rename's gate: no requester control with the brief flag off", async () => {
+    stub({ candidates: pool(2), post: { requester: "Northlake Therapeutics" } });
+    await search(false);
+    expect(screen.queryByRole("button", { name: "Edit requester" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add requester" })).toBeNull();
   });
 });

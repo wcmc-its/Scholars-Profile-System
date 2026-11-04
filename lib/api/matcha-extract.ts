@@ -65,10 +65,14 @@ export type ExtractedConcept = {
  *  in the SAME call (not a second one — the contract forbids a separate title call; see
  *  `askTitleFrom`). `titleSummary` is absent when the paste named no concept, the model
  *  omitted it, or it failed the format guard — the caller then derives a concept-list title.
- *  NEVER a guessed sponsor. */
+ *  The asking organization rides separately in `requester` — NEVER a guessed sponsor. */
 export type MatchaExtraction = {
   concepts: ExtractedConcept[];
   titleSummary?: string;
+  /** The organization the paste comes from or is written on behalf of, verbatim, from the SAME
+   *  call. Present only when the text names it or a cue in it points to it (letterhead, signature,
+   *  "we at X", a sender domain); absent when there is no cue. Never guessed from the topic. */
+  requester?: string;
 };
 
 
@@ -165,11 +169,14 @@ const ConceptsSchema = z.preprocess(
         gloss: z.string().nullish(),
       }),
     ),
-    /** A short search handle written in the SAME call as the concepts — the essence of the
-     *  funder's ask, org-prefixed when the paste names one. `nullish` (not required) so a model
+    /** A short search handle written in the SAME call as the concepts — the FOCUS of the
+     *  funder's ask, sentence case, no org prefix (the org rides in `requester`). `nullish` (not required) so a model
      *  that omits it, or a description that names no concept, cleans to `undefined` rather than
      *  failing the whole extraction; `sanitizeTitleSummary` enforces the length/format contract. */
     titleSummary: z.string().nullish(),
+    /** Who is asking, written in the same call. `nullish` for the same reason as `titleSummary`;
+     *  `sanitizeRequester` enforces the length contract. */
+    requester: z.string().nullish(),
   }),
 );
 
@@ -232,29 +239,39 @@ export const EXTRACT_SYSTEM_PROMPT = [
   'or therapeutic modality (how the work is done); "concept" for a disease, mechanism,',
   'biological process or population (what is studied). When in doubt, use "concept".',
   "",
-  "Also write a TITLE for this search as `titleSummary` — a short handle naming what the",
-  "description is after. Follow these rules exactly, so titles read consistently across searches:",
+  "Also write a TITLE for this search as `titleSummary` — a short handle naming the FOCUS of",
+  "what the description is after. Follow these rules exactly, so titles read consistently:",
   "  - Name the PRIMARY target (the concept you scored 1.0). Optionally sharpen it with its",
   '    single strongest means as "X for Y" or "X in Y" — but only when that reads more',
   "    precisely than the target alone.",
-  "  - If the description names the ORGANIZATION behind it (a company, foundation, institute,",
-  '    agency, lab, or center), prefix it VERBATIM and join with " — " (space, em dash, space):',
-  '    "{Organization} — {focus}". If none is named, omit the prefix and the dash. NEVER',
-  "    invent or guess an organization.",
-  "  - At most 8 words in the focus; a noun phrase, no trailing period.",
-  "  - Lowercase, EXCEPT proper nouns and standard acronyms, which keep their case (HER2,",
-  "    CAR-T, mRNA, and any organization name).",
+  "  - Focus ONLY: never put an organization name, a prefix, or a dash in it. The organization",
+  "    goes in `requester`.",
+  "  - At most 8 words; a noun phrase, no trailing period.",
+  "  - Sentence case: capitalize the first letter; everything else lowercase EXCEPT proper",
+  "    nouns and standard acronyms, which keep their case (HER2, CAR-T, mRNA, Alzheimer).",
   "  - Do NOT include award mechanics, dollar amounts, career-stage or eligibility asks, or",
   "    deadlines — those are handled separately.",
   "  Examples (format only — do not reuse their content):",
-  "    Northlake Therapeutics — antibody-drug conjugates for HER2-low breast cancer",
-  "    Vertex — gene editing for cystic fibrosis",
-  "    St. Baldrick's Foundation — pediatric acute myeloid leukemia",
+  "    Antibody-drug conjugates for HER2-low breast cancer",
+  "    Metabolic disease and obesity",
   "    CAR-T persistence in solid tumors",
-  "    remyelination in multiple sclerosis",
+  "    Remyelination in multiple sclerosis",
+  "",
+  "Also return `requester`: the ORGANIZATION the description comes from or is written on",
+  "behalf of (a company, foundation, institute, agency, lab, or center) — who is asking.",
+  "  - Use it when the text NAMES the asking organization, or a cue in the text clearly",
+  '    indicates it: letterhead, a signature block, "our company" next to its name, "we at',
+  '    X", a sender email domain.',
+  "  - It MUST be grounded in such a cue. If there is none, return null. NEVER guess an",
+  "    organization from the topic alone, and never return an organization that is only",
+  "    mentioned (a competitor, a partner, a cited trial sponsor) rather than asking.",
+  "  - Write the name VERBATIM as the text gives it. No commentary, no dash, no focus words.",
+  '  Examples (format only): "Northlake Therapeutics", "Harborview Foundation",',
+  '    "Cedar Ridge Institute"; a paste signed "— Dana, BD lead, Quillfin Bio" ⇒ "Quillfin Bio".',
   "",
   "Return at most 15 concepts, most central first. If the description names no",
-  "research concept, return an empty list and omit titleSummary. Output only the",
+  "research concept, return an empty list and omit titleSummary (requester may still be set",
+  "when a cue names it). Output only the",
   "structured object — no commentary.",
 ].join("\n");
 
@@ -330,7 +347,7 @@ export function sanitizeGloss(raw: unknown): string | undefined {
 }
 
 /** A title is a HANDLE, not a paragraph. Cap it so a model that returns prose here cannot
- *  become the results header — "{org} — {≤8-word focus}" fits comfortably under 90 chars. */
+ *  become the results header — an ≤8-word focus fits comfortably under 90 chars. */
 const MAX_TITLE_CHARS = 90;
 
 /** Clean the LLM's `titleSummary`: trim, collapse internal whitespace/newlines to single
@@ -342,6 +359,21 @@ export function sanitizeTitleSummary(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const s = raw.replace(/\s+/g, " ").trim().replace(/\.$/, "").trim();
   if (s.length === 0 || s.length > MAX_TITLE_CHARS) return undefined;
+  return s;
+}
+
+/** A requester is an organization NAME. Anything longer is prose the model dumped in the field. */
+const MAX_REQUESTER_CHARS = 60;
+
+/** Clean the LLM's `requester` exactly as `sanitizeTitleSummary` cleans a title: trim, collapse
+ *  whitespace, drop a trailing period; empty or over-long ⇒ `undefined`. A literal "null"/"none"
+ *  string is the model saying "no cue" in the wrong type, so it is absent too. Hygiene only:
+ *  the name is kept verbatim, never fabricated. */
+export function sanitizeRequester(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const s = raw.replace(/\s+/g, " ").trim().replace(/\.$/, "").trim();
+  if (s.length === 0 || s.length > MAX_REQUESTER_CHARS) return undefined;
+  if (/^(null|none|n\/a|unknown)$/i.test(s)) return undefined;
   return s;
 }
 
@@ -391,6 +423,7 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
         return {
           concepts: sanitizeConcepts(object.concepts),
           titleSummary: sanitizeTitleSummary(object.titleSummary),
+          requester: sanitizeRequester(object.requester),
         };
       } catch (err) {
         // NEVER throw — degrade to the v1 dictionary extractor (see caller). A Bedrock

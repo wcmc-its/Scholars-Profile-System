@@ -727,6 +727,12 @@ export function MatchaReportView({ report }: { report: MatchaReport }) {
             {reportSubtitle(report.pis.length)}
           </p>
           <div className="border-apollo-border-strong flex flex-wrap gap-x-10 gap-y-3 border-t pt-5 text-[14px]">
+            {report.requester ? (
+              <div data-slot="matcha-report-prepared-for" className="flex flex-col gap-0.5">
+                <span className="text-[12px] text-[var(--evidence-faint)]">Prepared for</span>
+                <span className="font-semibold">{report.requester}</span>
+              </div>
+            ) : null}
             <div className="flex flex-col gap-0.5">
               <span className="text-[12px] text-[var(--evidence-faint)]">Prepared by</span>
               <span className="font-semibold">

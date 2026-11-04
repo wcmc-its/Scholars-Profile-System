@@ -631,6 +631,13 @@ export function MatchaPanel({
   // The extractor's essence title (org + focus). Stable across slider/preference edits — only
   // a new search replaces it — so the header does not churn as the officer tunes the ranking.
   const [titleSummary, setTitleSummary] = useState<string | undefined>(undefined);
+  // Who is asking: the extractor's requester (same call as the title) and the officer's
+  // correction of it (PATCH `{ submissionId, requester }`). The title reads "{requester} — {focus}".
+  const [requester, setRequester] = useState<string | undefined>(undefined);
+  const [requesterOverride, setRequesterOverride] = useState<string | null>(null);
+  const [editingRequester, setEditingRequester] = useState(false);
+  const [requesterDraft, setRequesterDraft] = useState("");
+  const [requesterError, setRequesterError] = useState(false);
   /** When the server answered from a persisted earlier run: that run's ISO timestamp. Undefined
    *  ⇒ computed for this request. Labels the results; Re-run forces a fresh computation. */
   const [asOf, setAsOf] = useState<string | undefined>(undefined);
@@ -865,7 +872,8 @@ export function MatchaPanel({
     }
   }
 
-  /** Rename the search (PATCH /api/edit/matcha). Empty reverts to the generated title. */
+  /** Rename the search (PATCH /api/edit/matcha). Empty reverts to the generated title (with the
+   *  officer's requester, when they set one — the server composes it). */
   async function saveTitle(generated: string) {
     const sid = submissionId;
     if (!sid) return;
@@ -886,14 +894,52 @@ export function MatchaPanel({
       const data = (await r.json()) as { title?: string | null; titleOverride?: string | null };
       setTitleOverride(data.titleOverride ?? null);
       setRenaming(false);
-      // Recent lists one entry per paste; relabel the one this run belongs to.
-      setHistory((prev) =>
-        prev.map((h) =>
-          h.id === sid || h.description === matchedText ? { ...h, title: data.title ?? null } : h,
-        ),
-      );
+      relabelHistory(sid, data.title ?? null);
     } catch {
       setRenameError(true);
+    }
+  }
+
+  /** Recent lists one entry per paste; relabel the one this run belongs to. */
+  function relabelHistory(sid: string, title: string | null) {
+    setHistory((prev) =>
+      prev.map((h) => (h.id === sid || h.description === matchedText ? { ...h, title } : h)),
+    );
+  }
+
+  /** Correct who is asking (PATCH /api/edit/matcha `{ submissionId, requester }`). Empty reverts
+   *  to the model's requester. The server keeps the visible title in step unless it was Renamed. */
+  async function saveRequester() {
+    const sid = submissionId;
+    if (!sid) return;
+    const trimmed = requesterDraft.trim();
+    setRequesterError(false);
+    try {
+      const r = await fetch("/api/edit/matcha", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          submissionId: sid,
+          requester: trimmed === requester ? "" : trimmed,
+        }),
+      });
+      if (!r.ok) {
+        setRequesterError(true);
+        return;
+      }
+      const data = (await r.json()) as {
+        title?: string | null;
+        titleOverride?: string | null;
+        requester?: string | null;
+        requesterOverride?: string | null;
+      };
+      setTitleOverride(data.titleOverride ?? null);
+      setRequesterOverride(data.requesterOverride ?? null);
+      setEditingRequester(false);
+      relabelHistory(sid, data.title ?? null);
+    } catch {
+      setRequesterError(true);
     }
   }
 
@@ -936,6 +982,9 @@ export function MatchaPanel({
       setCulled([]);
       setIncluded([]);
       setTitleSummary(undefined);
+      setRequester(undefined);
+      setRequesterOverride(null);
+      setEditingRequester(false);
       setAsOf(undefined);
       setPreferences([]);
       setActivePrefs(new Set());
@@ -972,6 +1021,7 @@ export function MatchaPanel({
             concepts?: MatchaConcept[];
             candidates?: GrantCandidate[];
             titleSummary?: string;
+            requester?: string;
             culled?: CulledConcept[];
           };
           clearFilters();
@@ -981,6 +1031,8 @@ export function MatchaPanel({
           setCulled(data.culled ?? []);
           if (!opts.include) setIncluded([]);
           setTitleSummary(data.titleSummary);
+          setRequester(data.requester);
+          setRequesterOverride(null); // nothing retained ⇒ nothing to correct
           setAsOf(undefined); // the grant branch never serves a stored run
           setMatchedText(text);
           setEditing(false);
@@ -1004,6 +1056,7 @@ export function MatchaPanel({
           /** Matcha Phase 3 — the retained row (null if the retention write failed). */
           submissionId?: string | null;
           titleOverride?: string | null;
+          requesterOverride?: string | null;
         };
         setGrantCandidates([]); // toggling back to people clears any prior grant results
         clearFilters(); // stale facet selections must not silently hide fresh results
@@ -1019,6 +1072,9 @@ export function MatchaPanel({
         // and the click handler already set `included` to the new set — don't clobber it.
         if (!opts.include) setIncluded([]);
         setTitleSummary(data.titleSummary);
+        setRequester(data.requester);
+        setRequesterOverride(data.requesterOverride ?? null);
+        setEditingRequester(false);
         setAsOf(data.asOf);
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
@@ -1206,14 +1262,30 @@ export function MatchaPanel({
   // never asked for that — the header contradicting the ranking directly beneath it. The
   // server still ships `ask` (it is the canonical handle for a caller that does not re-rank),
   // but the console owns what it displays, exactly as it owns the preference predicate.
+  //
+  // `ask` is what the header shows: composed with the officer's requester when they corrected it.
+  // `generatedAsk` is the model's (what the server stored as `title`): Rename compares against it,
+  // so typing back the generated title clears the override rather than freezing a copy of it.
+  const effectiveRequester = requesterOverride ?? requester;
   const ask = useMemo(
     () =>
       askTitleFrom(
         concepts,
         preferences.filter((p) => activePrefs.has(p.label)),
         titleSummary,
+        effectiveRequester,
       ),
-    [concepts, preferences, activePrefs, titleSummary],
+    [concepts, preferences, activePrefs, titleSummary, effectiveRequester],
+  );
+  const generatedAsk = useMemo(
+    () =>
+      askTitleFrom(
+        concepts,
+        preferences.filter((p) => activePrefs.has(p.label)),
+        titleSummary,
+        requester,
+      ),
+    [concepts, preferences, activePrefs, titleSummary, requester],
   );
 
   // The committed request, with the pulled-out terms marked — the mockup's read-only ask quote.
@@ -2207,7 +2279,7 @@ export function MatchaPanel({
                           aria-label="Search title"
                           onChange={(e) => setTitleDraft(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") void saveTitle(ask?.title ?? "");
+                            if (e.key === "Enter") void saveTitle(generatedAsk?.title ?? "");
                             if (e.key === "Escape") setRenaming(false);
                           }}
                           className="bg-apollo-surface min-w-0 flex-[1_1_320px] text-base font-semibold"
@@ -2216,7 +2288,7 @@ export function MatchaPanel({
                           type="button"
                           variant="apollo"
                           size="sm"
-                          onClick={() => void saveTitle(ask?.title ?? "")}
+                          onClick={() => void saveTitle(generatedAsk?.title ?? "")}
                         >
                           Save
                         </Button>
@@ -2243,7 +2315,11 @@ export function MatchaPanel({
                           data-slot="matcha-title-tag"
                           className="text-muted-foreground text-xs"
                         >
-                          {titleOverride ? "Renamed by you" : "Generated title"}
+                          {/* A title the server composed from the officer's requester is still
+                              the generated one, not a Rename. */}
+                          {titleOverride && titleOverride !== ask?.title
+                            ? "Renamed by you"
+                            : "Generated title"}
                         </span>
                         <Button
                           type="button"
@@ -2258,6 +2334,74 @@ export function MatchaPanel({
                         >
                           Rename
                         </Button>
+                        {/* Who is asking — the model's guess, correctable. Same gate as Rename. */}
+                        <div
+                          data-slot="matcha-requester"
+                          className="text-muted-foreground flex w-full flex-wrap items-center gap-1.5 text-xs"
+                        >
+                          {editingRequester ? (
+                            <>
+                              <Input
+                                value={requesterDraft}
+                                maxLength={120}
+                                aria-label="Requester (who is asking)"
+                                placeholder="Organization asking"
+                                onChange={(e) => setRequesterDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") void saveRequester();
+                                  if (e.key === "Escape") setEditingRequester(false);
+                                }}
+                                className="bg-apollo-surface h-7 min-w-0 flex-[0_1_260px] text-xs"
+                              />
+                              <Button
+                                type="button"
+                                variant="apollo"
+                                size="xs"
+                                onClick={() => void saveRequester()}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="xs"
+                                onClick={() => setEditingRequester(false)}
+                              >
+                                Cancel
+                              </Button>
+                              {requesterError ? (
+                                <span className="text-destructive w-full">
+                                  Couldn&apos;t save the requester. Please try again.
+                                </span>
+                              ) : null}
+                            </>
+                          ) : (
+                            <>
+                              {effectiveRequester ? (
+                                <span>
+                                  Requester:{" "}
+                                  <span className="text-foreground font-medium">
+                                    {effectiveRequester}
+                                  </span>
+                                  {" · "}
+                                </span>
+                              ) : null}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="xs"
+                                aria-label={effectiveRequester ? "Edit requester" : "Add requester"}
+                                onClick={() => {
+                                  setRequesterDraft(effectiveRequester ?? "");
+                                  setRequesterError(false);
+                                  setEditingRequester(true);
+                                }}
+                              >
+                                {effectiveRequester ? "Edit" : "Add requester"}
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     )
                   ) : ask ? (

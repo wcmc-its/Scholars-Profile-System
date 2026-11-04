@@ -113,6 +113,8 @@ function setup(opts: {
   briefs?: Record<string, unknown>[];
   contributions?: Record<string, { term: string; rank: number }[]>;
   themes?: typeof THEMES | null;
+  requester?: string;
+  requesterOverride?: string | null;
 }) {
   mockThemes.mockResolvedValue(opts.themes === undefined ? THEMES : opts.themes);
   mockSubFindUnique.mockResolvedValue({
@@ -120,6 +122,7 @@ function setup(opts: {
     description: "We want widget collaborators.",
     title: "widget · generated",
     titleOverride: "Industry ask: wave 1",
+    requesterOverride: opts.requesterOverride ?? null,
   });
   mockSubFindMany.mockImplementation(async (args: { select: Record<string, boolean> }) =>
     args.select.resultKey
@@ -128,6 +131,7 @@ function setup(opts: {
           {
             id: "r1",
             result: {
+              ...(opts.requester ? { requester: opts.requester } : {}),
               concepts: CONCEPTS,
               candidates: opts.candidates.map((c, i) => ({
                 ...candidate(c, 10 - i),
@@ -347,5 +351,25 @@ describe("Matcha report page", () => {
     setup({ candidates: ["a"] });
     mockSubFindUnique.mockResolvedValue(null);
     await expect(renderPage({ submissionId: "s1", cwids: "a" })).rejects.toThrow("__NOT_FOUND__");
+  });
+
+  it("shows Prepared for only when there is a requester, before Prepared by; the override wins", async () => {
+    setup({ candidates: ["a"] });
+    expect(await renderPage({ submissionId: "s1", cwids: "a" })).not.toContain("Prepared for");
+
+    setup({ candidates: ["a"], requester: "Northlake Therapeutics" });
+    let html = await renderPage({ submissionId: "s1", cwids: "a" });
+    expect(html).toContain("Prepared for");
+    expect(html).toContain("Northlake Therapeutics");
+    expect(html.indexOf("Prepared for")).toBeLessThan(html.indexOf("Prepared by"));
+
+    setup({
+      candidates: ["a"],
+      requester: "Northlake Therapeutics",
+      requesterOverride: "Quillfin Bio",
+    });
+    html = await renderPage({ submissionId: "s1", cwids: "a" });
+    expect(html).toContain("Quillfin Bio");
+    expect(html).not.toContain("Northlake Therapeutics");
   });
 });

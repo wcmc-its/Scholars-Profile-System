@@ -927,10 +927,13 @@ export type MatchaResponse = {
   /** A short handle for this search — see `askTitleFrom`. Absent when the paste yielded
    *  no concepts (⇒ nothing to name it after). */
   ask?: { title: string };
-  /** The extractor's raw title (essence + org, no preference chips), shipped so the console
+  /** The extractor's raw title (the focus, no org, no preference chips), shipped so the console
    *  can re-derive `ask` live as preferences toggle without re-fetching. Absent ⇒ the console
    *  falls back to a concept-list title. See `askTitleFrom`. */
   titleSummary?: string;
+  /** The extractor's asking organization (absent ⇒ no cue in the paste). Shipped with
+   *  `titleSummary` so the console composes "{requester} — {focus}" itself. */
+  requester?: string;
   preferences?: MatchaPreference[];
   /** #1780 Phase 2 — the extractor's concepts that the cut did NOT search, offered as
    *  click-to-include chips. Absent/[] when nothing was culled (few-concept asks) or on the
@@ -952,9 +955,11 @@ export type MatchaResponse = {
  * role's IAM grant (cdk/lib/app-stack.ts, "TaskRoleBedrockPolicy") admits only Opus and Sonnet,
  * Haiku excluded on purpose — would be a SECOND SONNET CALL, roughly doubling per-request LLM
  * spend on a route with no rate limit. When `titleSummary` is absent (dictionary fallback, a
- * paste with no org, or a failed format guard) the handle falls back to the top concepts,
- * DERIVED — costs nothing, cannot fail, cannot time out. Either way the ASSEMBLY here (the
- * preference chips, the ` · ` joins) is deterministic; only the essence rode in on the LLM.
+ * failed format guard) the handle falls back to the top concepts, DERIVED — costs nothing,
+ * cannot fail, cannot time out. `requester` (the asking organization, from the same call or
+ * the officer's override) prefixes it as "{requester} — {focus}" when present. Either way the
+ * ASSEMBLY here (the prefix, the preference chips, the ` · ` joins) is deterministic; only the
+ * focus and the requester rode in on the LLM.
  *
  * It used to also return `quote` — `preferences[0].evidence`, the paste snippet a preference was
  * read from. Nothing ever rendered it, and nothing needed to: the Preferences rail already shows
@@ -966,13 +971,42 @@ export function askTitleFrom(
   concepts: readonly MatchaConcept[],
   preferences: readonly MatchaPreference[] = [],
   titleSummary?: string,
+  requester?: string | null,
 ): { title: string } | undefined {
-  // Prefer the extractor's essence handle; fall back to the top concept terms, joined.
-  const base =
-    titleSummary?.trim() || concepts.slice(0, ASK_TITLE_CONCEPTS).map((c) => c.term).join(", ");
+  // Prefer the extractor's focus handle; fall back to the top concept terms, joined, with the
+  // first letter capitalised (the terms are lowercase MeSH-ish phrases; nothing else is touched).
+  const summary = titleSummary?.trim() ?? "";
+  const org = requester?.trim() ?? "";
+  // A result stored before `requester` existed may carry its org INSIDE the summary
+  // ("Northlake — antibody-drug conjugates"). With a requester to prefix, drop that old prefix
+  // so the title never reads "Acme — Northlake — …"; without one, the old summary stands as is.
+  const focus = org && summary.includes(TITLE_ORG_JOIN) ? stripOrgPrefix(summary) : summary;
+  const fallback = concepts
+    .slice(0, ASK_TITLE_CONCEPTS)
+    .map((c) => c.term)
+    .join(", ");
+  const base = focus || sentenceCase(fallback);
   if (base.length === 0) return undefined;
+  const head = org ? `${org}${TITLE_ORG_JOIN}${base}` : base;
   const prefs = preferences.map((p) => p.label);
-  return { title: [base, ...prefs].join(" · ") };
+  return { title: [head, ...prefs].join(" · ") };
+}
+
+/** "{Requester} — {Focus}": space, em dash, space. */
+export const TITLE_ORG_JOIN = " — ";
+
+/** Everything after the FIRST " — " (the old in-summary org prefix), or the string unchanged. */
+export function stripOrgPrefix(title: string): string {
+  const i = title.indexOf(TITLE_ORG_JOIN);
+  return i < 0 ? title : title.slice(i + TITLE_ORG_JOIN.length).trim();
+}
+
+/** Capitalise the first letter only — never lowercases anything. A first word that already
+ *  has a capital in it (mRNA, siRNA, iPSC) is a deliberate casing and is left alone. */
+function sentenceCase(s: string): string {
+  const first = s.split(/[\s,]/, 1)[0] ?? "";
+  if (s.length === 0 || /[A-Z]/.test(first)) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /** Two concepts name a search; five are a list, not a handle. */
