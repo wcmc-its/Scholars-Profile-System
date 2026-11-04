@@ -69,7 +69,8 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
   // Repeat until stable: one pass can reassemble a tag from nested pieces
   // (`<<i>iframe>` → `<iframe>`), so a single pass is not a complete strip.
   let stripped = sanitizeVIVOHtml(html);
-  for (let prev = ""; prev !== stripped;) {
+  let prev: string;
+  do {
     prev = stripped;
     stripped = stripped
       // Inline markup → no replacement (preserve `H2O`). `<mark>` (search
@@ -81,7 +82,7 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
       // bare comparator — "aged <18 years and >65" — survives intact.
       // `[^<>]` so an orphan "<word" never swallows text up to a later tag.
       .replace(/<\/?[a-z!][^<>]*>/gi, " ");
-  }
+  } while (stripped !== prev);
   const plain = stripped
     .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
