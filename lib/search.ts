@@ -122,6 +122,13 @@ export const peopleIndexMapping = {
         // and "comorbidity" / "comorbidities" are interchangeable. (#20)
         scholar_text: {
           type: "custom" as const,
+          // `publicationTitles` / `publicationAbstracts` are raw PubMed strings
+          // with inline markup (`<i>BRCA1</i>`, `H<sub>2</sub>O`). Without
+          // html_strip the tag names index as words, so "type I" matched every
+          // italicized title and the highlighter wrapped `<<mark>i</mark>>`.
+          // On the shared analyzer (not a per-field one) so cross_fields keeps
+          // grouping these fields together. Offsets still map to the raw text.
+          char_filter: ["html_strip"],
           tokenizer: "standard",
           // `alnum_delimiter` + `flatten_graph` split letter↔digit boundaries
           // (preserving the fused original) so "covid19" and "covid-19" share a
@@ -446,6 +453,9 @@ export const publicationsIndexMapping = {
       analyzer: {
         pub_text: {
           type: "custom" as const,
+          // `title` is the raw PubMed string with inline markup; strip tags so
+          // `i`/`sub`/`sup` never index as tokens (see scholar_text above).
+          char_filter: ["html_strip"],
           tokenizer: "standard",
           filter: ["lowercase", "english_stop", "english_stemmer"],
         },

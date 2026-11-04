@@ -41,6 +41,31 @@ describe("htmlToPlainText", () => {
     expect(htmlToPlainText(title)).toBe("Dosing at <5 mg vs >20 mg in vivo");
   });
 
+  it("keeps bare (unescaped) comparators — only tag-shaped < is markup", () => {
+    expect(
+      htmlToPlainText("Effect in patients aged <18 years and >65", Number.POSITIVE_INFINITY),
+    ).toBe("Effect in patients aged <18 years and >65");
+    expect(htmlToPlainText("p<0.05 vs q>1 outcome")).toBe("p<0.05 vs q>1 outcome");
+    expect(htmlToPlainText("a < b <i>gene</i> > c")).toBe("a < b gene > c");
+  });
+
+  it("still strips non-inline tags, closers, and comments to a space", () => {
+    expect(htmlToPlainText("line<br/>break")).toBe("line break");
+    expect(htmlToPlainText("one<!-- c -->two</div>three")).toBe("one two three");
+  });
+
+  it("a decoded &lt;i&gt; is data: never stripped as a tag", () => {
+    expect(htmlToPlainText("the &lt;i&gt; tag and <i>real</i> italics")).toBe(
+      "the <i> tag and real italics",
+    );
+  });
+
+  it("treats <mark> and <u> as inline (no inserted space)", () => {
+    expect(htmlToPlainText('(<mark class="pill">BRCA1</mark>)')).toBe("(BRCA1)");
+    expect(htmlToPlainText("<mark>COVID</mark>-19")).toBe("COVID-19");
+    expect(htmlToPlainText("pre<u>fix</u>ed")).toBe("prefixed");
+  });
+
   it("keeps the excerpt truncation contract", () => {
     const long = "word ".repeat(60).trim();
     const out = htmlToPlainText(long, 50);

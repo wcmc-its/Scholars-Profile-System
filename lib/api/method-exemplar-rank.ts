@@ -83,10 +83,19 @@ export function markTitleQueryTerms(
   if (tokens.length === 0) return { html: title, matched: false };
   const re = new RegExp(`\\b(${tokens.map(escapeRe).join("|")})\\b`, "gi");
   let matched = false;
-  const html = title.replace(re, (m) => {
-    matched = true;
-    return `<mark>${m}</mark>`;
-  });
+  // Match TEXT only: the title carries PubMed markup, and a token like "sub"
+  // must not wrap the tag name in `H<sub>2</sub>O` (nor count as a match).
+  const html = title
+    .split(/(<\/?[a-z!][^>]*>)/i) // odd indices = the captured tags
+    .map((seg, i) =>
+      i % 2 === 1
+        ? seg
+        : seg.replace(re, (m) => {
+            matched = true;
+            return `<mark>${m}</mark>`;
+          }),
+    )
+    .join("");
   return { html, matched };
 }
 
