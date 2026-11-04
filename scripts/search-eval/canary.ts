@@ -14,15 +14,18 @@
  * GitHub-hosted runners sit off the WCM network and the staging/prod edge
  * WAF is WCM-CIDR-only (#1434), so a plain `curl` from the workflow itself
  * can't reach the deployed app; this script instead runs on an ECS task
- * inside the VPC and hits the PUBLIC ALB's DNS name directly — bypassing
- * CloudFront/the WAF entirely, which the issue calls out as a determinism
- * plus (no CloudFront cache in the way). The ALB's public listener still
+ * inside the VPC and hits the ORIGIN directly — bypassing CloudFront/the WAF
+ * entirely, which the issue calls out as a determinism plus (no CloudFront
+ * cache in the way). That is the NetScaler VIP hostname over HTTPS (the same
+ * target CloudFront and the edge origin probe dial); the ALB's own
+ * `*.elb.amazonaws.com` name can't pass cert verification on :443, and the
+ * ALB no longer listens on plaintext :80. The ALB's public listener still
  * gates on the X-Origin-Verify shared secret (B07); the task definition
  * injects it as CANARY_ORIGIN_VERIFY via its own dedicated, minimally
  * scoped execution role (reads only that one secret — never a DB DSN).
  *
  * Env:
- *   CANARY_HOST            e.g. http://<alb-dns>              (required)
+ *   CANARY_HOST            e.g. https://<origin-hostname>     (required)
  *   CANARY_ORIGIN_VERIFY   X-Origin-Verify header value        (required)
  *   CANARY_MAX_PAGES       pages fetched per query (default 5 = top 100)
  *
