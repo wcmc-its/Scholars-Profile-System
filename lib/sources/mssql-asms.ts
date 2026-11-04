@@ -11,8 +11,29 @@
  * The institutional client uses `asms.dbo.<table>` three-part naming, so the
  * default database can stay `asms`. Override via SCHOLARS_ASMS_DATABASE if
  * needed.
+ *
+ * TLS: ASMS is on Amazon RDS for SQL Server, so its certificate chains to the
+ * Amazon RDS CA (same bundle as Aurora, `certs/rds-global-bundle.pem`), which
+ * Node does not trust by default. `ASMS_TLS_VERIFY=on` verifies the server
+ * certificate and hostname against that bundle; unset or anything else keeps
+ * the old `trustServerCertificate: true` behaviour. The flag is per env on the
+ * sources ETL task def (cdk/lib/etl-stack.ts), so rollback is "off" + deploy.
  */
 import sql from "mssql";
+
+import { loadRdsCa } from "@/lib/db-tls";
+
+type Env = Record<string, string | undefined>;
+
+/** TLS options for the ASMS connection: verified against the RDS CA bundle
+ *  when `ASMS_TLS_VERIFY` is exactly "on", otherwise encrypted but unverified. */
+export function asmsTlsOptions(
+  env: Env = process.env,
+  caFile?: string,
+): Pick<sql.config["options"] & object, "encrypt" | "trustServerCertificate" | "cryptoCredentialsDetails"> {
+  if (env.ASMS_TLS_VERIFY !== "on") return { encrypt: true, trustServerCertificate: true };
+  return { encrypt: true, trustServerCertificate: false, cryptoCredentialsDetails: { ca: loadRdsCa(caFile) } };
+}
 
 let pool: sql.ConnectionPool | null = null;
 
@@ -35,8 +56,7 @@ export async function getAsmsPool(): Promise<sql.ConnectionPool> {
     database,
     pool: { max: 4, min: 0, idleTimeoutMillis: 30_000 },
     options: {
-      encrypt: true,
-      trustServerCertificate: true, // institutional CA, not in macOS default trust
+      ...asmsTlsOptions(),
       enableArithAbort: true,
     },
   });
