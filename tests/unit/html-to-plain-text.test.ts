@@ -41,6 +41,19 @@ describe("htmlToPlainText", () => {
     expect(htmlToPlainText(title)).toBe("Dosing at <5 mg vs >20 mg in vivo");
   });
 
+  it("keeps text around UNESCAPED bare comparators (not tag-shaped)", () => {
+    expect(htmlToPlainText("aged <18 years and >65", Number.POSITIVE_INFINITY)).toBe(
+      "aged <18 years and >65",
+    );
+    expect(htmlToPlainText("p<0.05 in <i>BRCA1</i> carriers, OR>2")).toBe(
+      "p<0.05 in BRCA1 carriers, OR>2",
+    );
+  });
+
+  it("decodes numeric entities and decodes &amp; last (once)", () => {
+    expect(htmlToPlainText("&#946;-cell &#x3B1; &amp;lt;tag&amp;gt;")).toBe("β-cell α &lt;tag&gt;");
+  });
+
   it("keeps the excerpt truncation contract", () => {
     const long = "word ".repeat(60).trim();
     const out = htmlToPlainText(long, 50);
