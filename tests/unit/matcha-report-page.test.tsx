@@ -1,5 +1,5 @@
 /**
- * `/edit/matcha/report` — Matcha Phase 4, the printable scouting report.
+ * `/edit/matcha/report` — Matcha Phase 4, the printable scouting report (v2 coverage layout).
  *
  * Pinned here:
  *  - 404 unless BOTH `MATCHA` and `MATCHA_BRIEF` are on; the Matcha read gate, observers allowed;
@@ -7,6 +7,8 @@
  *  - the rendered HTML never carries a brief note or a researcher email (the officer's own email
  *    on the cover is the only one), nor a score or `removedCount`;
  *  - edited text wins over generated; a PI with no brief renders records only, "No brief drafted."
+ *  - the raw paste is never rendered; themes drive the coverage table, gaps callout and amber
+ *    card, and all three are hidden when grouping fails (themes null).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -21,6 +23,7 @@ const {
   mockPubFindMany,
   mockLoadRecords,
   mockDirectory,
+  mockThemes,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockSubFindUnique: vi.fn(),
@@ -31,6 +34,7 @@ const {
   mockPubFindMany: vi.fn(),
   mockLoadRecords: vi.fn(),
   mockDirectory: vi.fn(),
+  mockThemes: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -57,6 +61,7 @@ vi.mock("@/lib/sources/ldap", () => ({ fetchDirectoryPeopleByCwid: mockDirectory
 vi.mock("@/components/edit/forbidden-edit-page", () => ({
   ForbiddenEditPage: () => <p>__FORBIDDEN__</p>,
 }));
+vi.mock("@/lib/api/matcha-report-themes", () => ({ loadReportThemes: mockThemes }));
 vi.mock("@/lib/api/matcha-brief", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/matcha-brief")>()),
   loadBriefRecords: mockLoadRecords,
@@ -74,9 +79,18 @@ const candidate = (cwid: string, fusedScore = 1) => ({
   title: "Professor",
   department: "Medicine",
   fusedScore,
-  contributions: [{ term: "obesity", rank: 1 }],
+  contributions: [{ term: "widgets", rank: 1 }],
   technologyCount: 0,
 });
+
+const CONCEPTS = [
+  { term: "widgets", kind: "concept", members: ["widgets", "widget assembly"], centrality: 1, weightFactor: 1 },
+  { term: "sprockets", kind: "concept", members: ["sprockets"], centrality: 0.5, weightFactor: 1 },
+];
+const THEMES = [
+  { label: "Widget biology", terms: ["widgets"] },
+  { label: "Sprocket outcomes", terms: ["sprockets"] },
+];
 
 const records = (cwid: string) => ({
   funding: [
@@ -94,11 +108,17 @@ const records = (cwid: string) => ({
   centers: [],
 });
 
-function setup(opts: { candidates: string[]; briefs?: Record<string, unknown>[] }) {
+function setup(opts: {
+  candidates: string[];
+  briefs?: Record<string, unknown>[];
+  contributions?: Record<string, { term: string; rank: number }[]>;
+  themes?: typeof THEMES | null;
+}) {
+  mockThemes.mockResolvedValue(opts.themes === undefined ? THEMES : opts.themes);
   mockSubFindUnique.mockResolvedValue({
     descriptionHash: "h1",
-    description: "We want obesity collaborators.",
-    title: "obesity · generated",
+    description: "We want widget collaborators.",
+    title: "widget · generated",
     titleOverride: "Industry ask: wave 1",
   });
   mockSubFindMany.mockImplementation(async (args: { select: Record<string, boolean> }) =>
@@ -108,8 +128,11 @@ function setup(opts: { candidates: string[]; briefs?: Record<string, unknown>[] 
           {
             id: "r1",
             result: {
-              concepts: [],
-              candidates: opts.candidates.map((c, i) => candidate(c, 10 - i)),
+              concepts: CONCEPTS,
+              candidates: opts.candidates.map((c, i) => ({
+                ...candidate(c, 10 - i),
+                ...(opts.contributions?.[c] ? { contributions: opts.contributions[c] } : {}),
+              })),
             },
           },
         ],
@@ -126,6 +149,7 @@ function setup(opts: { candidates: string[]; briefs?: Record<string, unknown>[] 
       primaryTitle: "Professor of Medicine",
       primaryDepartment: "Medicine",
       slug: `slug-${cwid}`,
+      hasHeadshot: null,
       email: `${cwid}@researcher.example.org`,
     })),
   );
@@ -141,7 +165,7 @@ const brief = (cwid: string, extra: Record<string, unknown> = {}) => ({
     why: `Generated why for ${cwid}. More.`,
     topics: [
       {
-        concept: "obesity",
+        concept: "widgets",
         text: `Generated topic ${cwid}`,
         sources: [{ kind: "pub", pmid: "999", year: 2024, title: "A cited paper" }],
       },
@@ -232,10 +256,11 @@ describe("Matcha report page", () => {
     const emails = html.match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) ?? [];
     expect(new Set(emails)).toEqual(new Set([OFFICER_EMAIL]));
     expect(html).not.toMatch(/removed|fusedScore/i);
-    // Cover: the search's Rename, the officer's name.
+    // Header: the search's Rename, the officer's name. The raw paste is gone.
     expect(html).toContain("Industry ask: wave 1");
-    expect(html).toContain("Olive Officer");
-    expect(html).toContain("We want obesity collaborators.");
+    expect(html).toContain("Olive Officer, Center for Technology Licensing");
+    expect(html).not.toContain("We want widget collaborators.");
+    expect(html).toContain("Two Weill Cornell investigators whose published work");
   });
 
   it("uses edited text over generated, and marks a PI with no brief", async () => {
@@ -259,6 +284,61 @@ describe("Matcha report page", () => {
     expect(html).toContain("Award for b");
     expect(html).toContain("No brief drafted.");
     expect(html).toContain("https://reporter.nih.gov/project-details/111");
+  });
+
+  it("renders the coverage table, totals, gaps callout and amber card from the themes", async () => {
+    setup({
+      candidates: ["a", "b"],
+      briefs: [brief("a")],
+      contributions: {
+        a: [{ term: "widgets", rank: 3 }],
+        b: [
+          { term: "widgets", rank: 25 },
+          { term: "sprockets", rank: 40 },
+        ],
+      },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
+    expect(mockThemes).toHaveBeenCalledWith("h1", CONCEPTS);
+    expect(html).toContain("Coverage of your ask");
+    expect(html).toContain("Your 3 search terms, grouped into two themes.");
+    expect((html.match(/data-report-mark="primary"/g) ?? []).length).toBe(1 + 1); // cell + legend
+    expect((html.match(/data-report-mark="related"/g) ?? []).length).toBe(2 + 1);
+    expect((html.match(/data-report-mark="none"/g) ?? []).length).toBe(1);
+    // Totals row: 2 PIs on widgets, 1 on sprockets.
+    const totals = /data-report-totals[^]*?<\/tr>/.exec(html)?.[0] ?? "";
+    expect(totals).toMatch(/>2<\/td>[^]*>1<\/td>/);
+    // Sprocket outcomes has no primary cell: it is the gap, and b is the closest.
+    expect(html).toContain("data-report-gaps=");
+    expect(html).toContain("works directly on Sprocket outcomes.");
+    expect(html).toContain("Dr b&#x27;s work is the closest match on Sprocket outcomes.");
+    expect(html).toContain("data-report-gaps-card=");
+    expect(html).toContain("area with no strong match yet: Sprocket outcomes");
+    // Footer: every concept member.
+    expect(html).toContain("Full search terms: widgets, widget assembly, sprockets.");
+    // Shortlist: the first sentence of Why, and record chips.
+    expect(html).toContain("Generated why for a.");
+    expect(html).toContain("1 active NIH award");
+  });
+
+  it("hides coverage, gaps and the amber card when themes are null", async () => {
+    setup({ candidates: ["a"], briefs: [brief("a")], themes: null });
+    const html = await renderPage({ submissionId: "s1", cwids: "a" });
+    expect(html).not.toContain("Coverage of your ask");
+    expect(html).not.toContain("data-report-gaps=");
+    expect(html).not.toContain("data-report-gaps-card=");
+    expect(html).toContain("Shortlist");
+    expect(html).toContain("data-report-pi=");
+  });
+
+  it("hides the gaps callout and card when every theme has a primary cell", async () => {
+    setup({
+      candidates: ["a"],
+      contributions: { a: [{ term: "widgets", rank: 1 }, { term: "sprockets", rank: 10 }] },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a" });
+    expect(html).toContain("Coverage of your ask");
+    expect(html).not.toContain("data-report-gaps=");
   });
 
   it("404s a submission outside the caller's scope", async () => {
