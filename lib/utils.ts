@@ -78,16 +78,23 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
     .replace(/<\/?[a-z!][^<>]*>/gi, " ");
   const plain = stripped
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&[a-z]+;/g, " ") // catch remaining named entities
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#x([0-9a-f]{1,6});/gi, (m, hex: string) => codePointOr(parseInt(hex, 16), m))
+    .replace(/&#(\d{1,7});/g, (m, dec: string) => codePointOr(parseInt(dec, 10), m))
+    .replace(/&(?!amp;)[a-z]+;/g, " ") // catch remaining named entities
+    // `&amp;` LAST, so an escaped entity (`&amp;lt;`) decodes once, to `&lt;`.
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
   if (plain.length <= maxLength) return plain;
   return plain.slice(0, maxLength).replace(/\s+\S*$/, "") + "…";
+}
+
+function codePointOr(cp: number, fallback: string): string {
+  return cp >= 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : fallback;
 }
 
 /**

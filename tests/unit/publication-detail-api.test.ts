@@ -877,6 +877,19 @@ describe("serializeCitingPubsCsv", () => {
     expect(lines[3]).toBe("");
   });
 
+  it("writes titles and journals as plain text (no PubMed markup or entities)", () => {
+    const csv = serializeCitingPubsCsv([
+      {
+        pmid: "3",
+        title: "<i>BRCA1</i> and H<sub>2</sub>O in adults aged &lt;18",
+        journal: "J &amp; Clin",
+        year: 2024,
+        publicationDate: null,
+      },
+    ]);
+    expect(csv.split("\r\n")[1]).toBe("3,BRCA1 and H2O in adults aged <18,J & Clin,2024,");
+  });
+
   it("handles an empty row list (header-only export)", () => {
     const csv = serializeCitingPubsCsv([]);
     expect(csv).toBe("PMID,Title,Journal,Year,Publication date\r\n");

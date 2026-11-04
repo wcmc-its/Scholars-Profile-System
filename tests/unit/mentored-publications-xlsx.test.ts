@@ -198,7 +198,8 @@ describe("buildMentoredPublicationsWorkbook", () => {
     const first = rowValues(ws, 2);
     expect(first.slice(0, 16)).toEqual([
       2025, 2021, "MD", "stu0001", "Ada", "Learner", "men0001", "Zed Mentor", "Medicine", "WCM", "MD",
-      "7", "A very long title ".repeat(10), "N Engl J Med", 96.2, 2023,
+      // Title is written as plain text (htmlToPlainText trims trailing space).
+      "7", "A very long title ".repeat(10).trim(), "N Engl J Med", 96.2, 2023,
     ]);
     expect((first[16] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
     expect(first.slice(17)).toEqual([12, 2, 3, "Yes"]);

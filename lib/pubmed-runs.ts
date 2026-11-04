@@ -11,6 +11,10 @@
  *   <sub>               → subScript: true
  *   anything else       → silently dropped (text between tags is kept)
  *
+ * Attribute-bearing whitelist tags (`<i class=x>`) are normalized to bare
+ * tags first, and entities (`&lt;18`, `&amp;`, `&#946;`) are decoded so Word
+ * shows the character rather than the escape (see `lib/pubmed-segments.ts`).
+ *
  * `allowBold` defaults to false so Vancouver bibliography titles stay
  * sentence-case plain (matches NLM style). Abstract callers pass
  * `allowBold: true` so PubMed structured-abstract headers like
@@ -23,8 +27,7 @@
  * should be preserved.
  */
 import { TextRun } from "docx";
-
-type StackTag = "italic" | "bold" | "sup" | "sub";
+import { pubmedSegments } from "@/lib/pubmed-segments";
 
 function normalizeCitationPunctuation(s: string): string {
   return s
@@ -40,47 +43,16 @@ export function buildPubmedRuns(
 ): TextRun[] {
   const allowBold = opts.allowBold === true;
   const normalize = opts.normalize !== false; // default true
-  const runs: TextRun[] = [];
-  // Match opening or closing tags for the inline whitelist plus `<u>`
-  // (legacy — silently dropped because Word underlines look like links).
-  const tokenRe = /<\/?(i|em|b|strong|sup|sub|u)>/gi;
-  let lastIndex = 0;
-  const stack: StackTag[] = [];
-  const flush = (raw: string) => {
-    if (!raw) return;
-    const cleaned = normalize ? normalizeCitationPunctuation(raw) : raw;
-    runs.push(
+  // pubmedSegments normalizes attributed tags, drops non-whitelist tags (incl.
+  // legacy `<u>` — Word underlines look like links) and decodes entities.
+  return pubmedSegments(text).map(
+    (seg) =>
       new TextRun({
-        text: cleaned,
-        ...(stack.includes("italic") ? { italics: true } : {}),
-        ...(allowBold && stack.includes("bold") ? { bold: true } : {}),
-        ...(stack.includes("sup") ? { superScript: true } : {}),
-        ...(stack.includes("sub") ? { subScript: true } : {}),
+        text: normalize ? normalizeCitationPunctuation(seg.text) : seg.text,
+        ...(seg.italic ? { italics: true } : {}),
+        ...(allowBold && seg.bold ? { bold: true } : {}),
+        ...(seg.sup ? { superScript: true } : {}),
+        ...(seg.sub ? { subScript: true } : {}),
       }),
-    );
-  };
-  for (const m of text.matchAll(tokenRe)) {
-    const start = m.index ?? 0;
-    if (start > lastIndex) flush(text.slice(lastIndex, start));
-    const raw = (m[1] ?? "").toLowerCase();
-    const isClose = m[0]!.startsWith("</");
-    let tag: StackTag | null = null;
-    if (raw === "i" || raw === "em") tag = "italic";
-    else if (raw === "b" || raw === "strong") tag = "bold";
-    else if (raw === "sup") tag = "sup";
-    else if (raw === "sub") tag = "sub";
-    if (tag !== null) {
-      if (isClose) {
-        const idx = stack.lastIndexOf(tag);
-        if (idx >= 0) stack.splice(idx, 1);
-      } else {
-        stack.push(tag);
-      }
-    }
-    // <u> tokens are silently dropped.
-    lastIndex = start + m[0]!.length;
-  }
-  if (lastIndex < text.length) flush(text.slice(lastIndex));
-  if (runs.length === 0) flush(text);
-  return runs;
+  );
 }

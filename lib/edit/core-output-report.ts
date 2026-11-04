@@ -45,6 +45,7 @@ import {
   type CriteriaCore,
 } from "@/lib/edit/core-report-common";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
+import { htmlToPlainText } from "@/lib/utils";
 
 export const EVIDENCE_KEYS = ["manual", "ack", "coauthor", "other"] as const;
 export type EvidenceKey = (typeof EVIDENCE_KEYS)[number];
@@ -335,8 +336,8 @@ export async function buildCoreOutputWorkbook(
   for (const pub of r.publications) {
     list.addRow([
       pub.pmid,
-      pub.title,
-      pub.journal,
+      htmlToPlainText(pub.title, Number.POSITIVE_INFINITY),
+      pub.journal ? htmlToPlainText(pub.journal, Number.POSITIVE_INFINITY) : pub.journal,
       pub.year,
       pub.dateAdded,
       EVIDENCE_LABEL[pub.evidence],

@@ -22,6 +22,7 @@ import {
 } from "@/lib/api/methods-overlay";
 import { methodFamilyPath } from "@/lib/method-url";
 import { toCsv } from "@/lib/csv";
+import { htmlToPlainText } from "@/lib/utils";
 import {
   claimKey,
   isEffectiveConfirmed,
@@ -853,6 +854,12 @@ export async function getCitingPublicationsForCsv(
 export function serializeCitingPubsCsv(rows: PublicationDetailCsvRow[]): string {
   return toCsv(
     ["PMID", "Title", "Journal", "Year", "Publication date"],
-    rows.map((r) => [r.pmid, r.title, r.journal, r.year, r.publicationDate]),
+    rows.map((r) => [
+      r.pmid,
+      htmlToPlainText(r.title, Number.POSITIVE_INFINITY),
+      r.journal ? htmlToPlainText(r.journal, Number.POSITIVE_INFINITY) : r.journal,
+      r.year,
+      r.publicationDate,
+    ]),
   );
 }

@@ -118,3 +118,41 @@ describe("buildPubmedRuns — sup/sub/italic/bold (#331)", () => {
     expect(text).toBe("abc");
   });
 });
+
+describe("buildPubmedRuns — entities + tag normalization", () => {
+  it("decodes escaped comparators and other entities (Word shows the character)", () => {
+    const runs = buildPubmedRuns("aged &lt;18 &amp; &gt;10% &quot;x&quot; it&#39;s &#946;&#x3B1;");
+    expect(runs.map(runText).join("")).toBe(`aged <18 & >10% "x" it's βα`);
+  });
+
+  it("decodes &amp; last, so a double-escaped entity decodes once", () => {
+    const runs = buildPubmedRuns("A&amp;lt;B");
+    expect(runs.map(runText).join("")).toBe("A&lt;B");
+  });
+
+  it("decodes entities inside formatted runs", () => {
+    const runs = buildPubmedRuns("p<sub>&lt;0.05</sub>");
+    expect(runText(runs[1]!)).toBe("<0.05");
+    expect(runVertAlign(runs[1]!)).toBe("subscript");
+  });
+
+  it("honors an attribute-bearing whitelist tag as a bare tag", () => {
+    const runs = buildPubmedRuns('a <i class="x">BRCA1</i> b');
+    expect(runs.map(runText).join("")).toBe("a BRCA1 b");
+    expect(runHasItalic(runs[1]!)).toBe(true);
+  });
+
+  it("drops non-whitelist tags but keeps their text", () => {
+    const runs = buildPubmedRuns("x<span>y</span><br/>z<mml:math>m</mml:math>");
+    expect(runs.map(runText).join("")).toBe("xyzm");
+  });
+
+  it("keeps a bare `<` comparator as text", () => {
+    const runs = buildPubmedRuns("p < 0.05 and >10%");
+    expect(runs.map(runText).join("")).toBe("p < 0.05 and >10%");
+  });
+
+  it("an empty string yields no runs", () => {
+    expect(buildPubmedRuns("")).toEqual([]);
+  });
+});
