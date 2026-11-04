@@ -186,6 +186,12 @@ describe("reads beyond the steward view", () => {
     expect(isHonorsQueueReadOnly(READ)).toBe(true);
   });
 
+  it("a comms_steward sees the Honors queue, read-only", () => {
+    const steward = { isSuperuser: false, isCommsSteward: true };
+    expect(canViewHonorsQueue(steward)).toBe(true);
+    expect(isHonorsQueueReadOnly(steward)).toBe(true);
+  });
+
   it("sees Usage / ORCID coverage without a unit grant", async () => {
     const db = { unitAdmin: { findFirst: vi.fn() } } as unknown as UsageAccessClient;
     expect(await canViewUsage(READ, db)).toBe(true);
