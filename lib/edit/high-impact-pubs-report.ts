@@ -33,6 +33,7 @@ import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { formatRoleCategory } from "@/lib/role-display";
+import { htmlToPlainText } from "@/lib/utils";
 
 type JournalFamily = {
   key: string;
@@ -433,8 +434,8 @@ export async function buildHighImpactWorkbook(
     for (const a of list) {
       pubs.addRow([
         a.pmid,
-        a.title,
-        a.journal,
+        htmlToPlainText(a.title, Number.POSITIVE_INFINITY),
+        a.journal ? htmlToPlainText(a.journal, Number.POSITIVE_INFINITY) : a.journal,
         a.jif,
         a.authors.join("; "),
         a.dateAdded,

@@ -18,6 +18,7 @@
 import ExcelJS from "exceljs";
 
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
+import { htmlToPlainText } from "@/lib/utils";
 
 export type PubCitationMembershipType = "research" | "clinical" | "all";
 /** Jackie Q4 (2026-10-29): relevance and review are independent; only "relevant" feeds report 19. */
@@ -155,9 +156,9 @@ export async function buildPubCitationWorkbook(
     boldRow(ws, 1);
     for (const r of group)
       ws.addRow([
-        r.title,
+        htmlToPlainText(r.title, Number.POSITIVE_INFINITY),
         r.investigators.map((i) => i.line).join("\n"),
-        r.journal ?? "",
+        r.journal ? htmlToPlainText(r.journal, Number.POSITIVE_INFINITY) : "",
         new Date(`${r.date}T00:00:00Z`),
         relevantLabel(r.relevant),
         r.pmid,

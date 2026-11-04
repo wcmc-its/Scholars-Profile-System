@@ -14,6 +14,7 @@
  */
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import type { BiosketchParams } from "@/lib/edit/biosketch-params";
+import { htmlToPlainText } from "@/lib/utils";
 
 /** Up to this many products per bucket (NIH "5 + 5"). */
 export const BIOSKETCH_PRODUCTS_PER_BUCKET = 5;
@@ -185,8 +186,8 @@ export function suggestPubsFromStatement(
     .slice(0, Math.max(0, limit))
     .map(({ p, matched }) => ({
       pmid: p.pmid,
-      title: p.title.replace(/<[^>]+>/g, ""),
-      venue: p.venue,
+      title: plainText(p.title),
+      venue: p.venue ? plainText(p.venue) : p.venue,
       year: p.year,
       impact: typeof p.impact === "number" ? p.impact : null,
       overlap: matched.length,
@@ -194,8 +195,13 @@ export function suggestPubsFromStatement(
     }));
 }
 
+/** PubMed markup → plain text: tags stripped, entities (`&lt;18`) decoded. */
+function plainText(s: string): string {
+  return htmlToPlainText(s, Number.POSITIVE_INFINITY);
+}
+
 function toProduct(p: CandidatePub): BiosketchProduct {
-  return { pmid: p.pmid, title: p.title.replace(/<[^>]+>/g, ""), venue: p.venue, year: p.year, contributionIndex: null, why: "" };
+  return { pmid: p.pmid, title: plainText(p.title), venue: p.venue ? plainText(p.venue) : p.venue, year: p.year, contributionIndex: null, why: "" };
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   cvOutline,
   CV_HOME_INSTITUTION,
   OUTLINE_ITEM_CAP,
+  titleRuns,
   type CvInput,
   type PopsEnrichment,
 } from "@/lib/edit/cv-export";
@@ -839,5 +840,48 @@ describe("appointment rows — the institution column (#2582)", () => {
       }),
     );
     expect(text).toContain(`Population Health Sciences, ${CV_HOME_INSTITUTION}`);
+  });
+});
+
+describe("titleRuns — PubMed markup in CV citation titles", () => {
+  it("honors <i>/<sup>/<sub>, decodes entities, and ends with exactly one period", () => {
+    expect(titleRuns("<i>BRCA1</i> and CO<sub>2</sub> in Ca<sup>2+</sup> aged &lt;18.")).toEqual([
+      { text: "BRCA1", italic: true },
+      { text: " and CO" },
+      { text: "2", vertAlign: "subscript" },
+      { text: " in Ca" },
+      { text: "2+", vertAlign: "superscript" },
+      { text: " aged <18" },
+      { text: ". " },
+    ]);
+  });
+
+  it("strips a trailing period that sits inside a closing tag's run", () => {
+    expect(titleRuns("Study of <i>E. coli.</i>")).toEqual([
+      { text: "Study of " },
+      { text: "E. coli", italic: true },
+      { text: ". " },
+    ]);
+  });
+
+  it("a plain title is one run plus the period", () => {
+    expect(titleRuns("Plain title..")).toEqual([{ text: "Plain title" }, { text: ". " }]);
+  });
+});
+
+describe("buildWcmCv — bibliography title markup", () => {
+  it("writes italic/subscript runs and decoded text, never literal tags", async () => {
+    const input: CvInput = {
+      ...researchInput,
+      bibliography: researchInput.bibliography.map((p, i) =>
+        i === 0 ? { ...p, title: "<i>Klotho</i> in H<sub>2</sub>O aged &lt;18" } : p,
+      ),
+    };
+    const xml = await documentXml(input);
+    expect(xml).not.toContain("&lt;i&gt;");
+    expect(xml).not.toContain("&amp;lt;18");
+    expect(xml).toMatch(/<w:i\/><\/w:rPr><w:t[^>]*>Klotho<\/w:t>/);
+    expect(xml).toMatch(/<w:vertAlign w:val="subscript"\/><\/w:rPr><w:t[^>]*>2<\/w:t>/);
+    expect(xml).toContain("aged &lt;18");
   });
 });

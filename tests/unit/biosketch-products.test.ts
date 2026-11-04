@@ -57,6 +57,21 @@ const params = (over: Partial<BiosketchParams> = {}): BiosketchParams => ({
 });
 
 describe("selectBiosketchProducts (#917 v6)", () => {
+  it("product titles/venues are plain text: tags stripped, entities decoded", () => {
+    const out = selectBiosketchProducts(
+      facts([
+        pub({
+          pmid: "m1",
+          title: "<i>BRCA1</i> in adults aged &lt;18 &amp; older",
+          venue: "J &amp; Clin",
+        }),
+      ]),
+      params(),
+    );
+    expect(out.related[0].title).toBe("BRCA1 in adults aged <18 & older");
+    expect(out.related[0].venue).toBe("J & Clin");
+  });
+
   it("returns empty buckets for an empty corpus", () => {
     const out = selectBiosketchProducts(facts([]), params());
     expect(out.related).toEqual([]);
