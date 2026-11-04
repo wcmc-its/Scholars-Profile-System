@@ -157,12 +157,23 @@ docker run --rm -v "$OUT":/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable \
   zap-baseline.py \
     -t https://<staging-host>/ \
     -m 1 \
-    -z "-config spider.thread=1" \
+    -z "-config spider.thread=1 \
+        -config replacer.full_list(0).description=ua \
+        -config replacer.full_list(0).enabled=true \
+        -config replacer.full_list(0).matchtype=REQ_HEADER \
+        -config replacer.full_list(0).matchstr=User-Agent \
+        -config replacer.full_list(0).regex=false \
+        -config replacer.full_list(0).replacement=SPS-security-baseline-ZAP" \
     -r zap-baseline.html \
     -J zap-baseline.json \
     -w zap-baseline.md \
   2>&1 | tee "$OUT/run.log"
 ```
+
+The `replacer` lines force a `User-Agent` header onto every request. Some ZAP requests send none, and the
+edge WAF's `NoUserAgent_HEADER` rule blocks those with a 403. Without the replacer the spider is blocked on
+the home page and the scan covers about 4 URLs instead of a few hundred. If `Total of N URLs` in the
+output is in single digits, the scan did not run properly.
 
 `-m 1` is the spider time in minutes. The exit code is non-zero when ZAP raises warnings or failures;
 that is expected and does not mean the run broke.

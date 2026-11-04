@@ -2066,10 +2066,18 @@ a{color:var(--slate)}
                 "Override": false,
                 "Value": "same-site",
               },
+              {
+                "Header": "Permissions-Policy",
+                "Override": false,
+                "Value": "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+              },
             ],
           },
           "Name": "sps-security-headers-prod",
           "SecurityHeadersConfig": {
+            "ContentTypeOptions": {
+              "Override": false,
+            },
             "StrictTransportSecurity": {
               "AccessControlMaxAgeSec": 63072000,
               "IncludeSubdomains": true,
@@ -3917,10 +3925,18 @@ a{color:var(--slate)}
                 "Override": false,
                 "Value": "same-site",
               },
+              {
+                "Header": "Permissions-Policy",
+                "Override": false,
+                "Value": "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+              },
             ],
           },
           "Name": "sps-security-headers-staging",
           "SecurityHeadersConfig": {
+            "ContentTypeOptions": {
+              "Override": false,
+            },
             "StrictTransportSecurity": {
               "AccessControlMaxAgeSec": 63072000,
               "IncludeSubdomains": true,

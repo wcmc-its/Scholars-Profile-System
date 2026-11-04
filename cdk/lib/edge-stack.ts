@@ -365,6 +365,10 @@ export class EdgeStack extends Stack {
             includeSubdomains: true,
             override: true,
           },
+          // The S3-served `/_next/static/*` assets otherwise carry no nosniff
+          // (ZAP baseline 2026-11-04). `override: false` keeps the app's own
+          // value on Next-served responses.
+          contentTypeOptions: { override: false },
         },
         // #1945: `/_next/static/*` is served from S3 (#700), so it never
         // passes through `withSecurityHeaders()` and carried no
@@ -377,6 +381,12 @@ export class EdgeStack extends Stack {
             {
               header: "Cross-Origin-Resource-Policy",
               value: "same-site",
+              override: false,
+            },
+            // Same value as lib/security-headers.ts, for the S3-served assets.
+            {
+              header: "Permissions-Policy",
+              value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
               override: false,
             },
           ],
