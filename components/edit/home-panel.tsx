@@ -33,6 +33,7 @@ import { PUBLICATION_MANAGER_URL, WEB_DIRECTORY_URL } from "@/lib/edit/request-a
 import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
 import { firstName, type OrcidEvidence } from "@/lib/edit/orcid";
 import { cn } from "@/lib/utils";
+import { PubTitle } from "@/components/publication/pub-html";
 import { useReciterPendingSuggestions } from "@/components/edit/reciter-pending-card";
 import type { ReciterSuggestion } from "@/lib/reciter/client";
 
@@ -665,7 +666,7 @@ function PublicationsSuggestionTeaser({
           <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green inline-flex flex-none items-center rounded-full border px-1.5 py-0.5 text-[0.65rem] font-semibold tabular-nums">
             {hero.score}
           </span>
-          <span className="text-foreground truncate font-medium">{hero.articleTitle}</span>
+          <PubTitle className="text-foreground truncate font-medium" value={hero.articleTitle} />
         </p>
       ) : null}
       <a

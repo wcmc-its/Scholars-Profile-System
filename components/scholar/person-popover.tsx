@@ -36,6 +36,7 @@ import { GrantRolePill } from "@/components/scholar/person-card-grant-role-pill"
 import { profilePath } from "@/lib/profile-url";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { PubJournal } from "@/components/publication/pub-html";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { setScholarFilter, useScholarFilter } from "@/components/taxonomy/scholar-filter";
 
@@ -833,7 +834,7 @@ function TaxonomyCardBody({
                   dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(r.title) }}
                 />
                 <span className="text-muted-foreground text-[12.5px]">
-                  {r.journal ? <em>{r.journal}</em> : null}
+                  <PubJournal value={r.journal} />
                   {r.journal && r.year ? " · " : null}
                   {r.year ?? null}
                 </span>

@@ -25,7 +25,16 @@ export function highlightedTitleHtml(fragment: string): string {
   //    a tag splices its neighbours together (`<<x>script>` → `<script>`), so
   //    the strip alone can mint the markup it just dropped. This runs before
   //    steps 2-3, which only ever see bare `<mark>`/`</mark>`.
+  //    Step 0 repairs a highlighter that matched a TAG NAME: the analyzer
+  //    indexed `<i>BRCA1</i>` as i/brca1/i, so a query with "I" ("type I")
+  //    yields `<<mark>i</mark>>BRCA1</<mark>i</mark>>`. Unwrap a mark that sits
+  //    right after `<` / `</` and ends the tag name, restoring `<i>`/`</i>`;
+  //    otherwise the escape pass below shows the tag as literal text.
   const cleaned = fragment
+    .replace(
+      /<(\/?)<mark\b[^>]*>([a-z][a-z0-9]*)<\/mark>(?=[\s/>])/gi,
+      (_, slash: string, name: string) => `<${slash}${name}`,
+    )
     .replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (_, slash: string, raw: string) => {
       const name = raw.toLowerCase();
       if (!TITLE_TAG_WHITELIST.test(name)) return "";

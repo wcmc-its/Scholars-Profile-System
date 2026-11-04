@@ -62,6 +62,28 @@ describe("PublicationsReportTable — rows", () => {
     expect(screen.queryByTestId("pubs-report-synopsis-2")).toBeNull();
   });
 
+  it("renders PubMed inline markup in the title and synopsis instead of literal tags", () => {
+    render(
+      <PublicationsReportTable
+        rows={[
+          row({
+            pmid: "1",
+            title: "<i>BRCA1</i> loss &amp; H<sub>2</sub>O",
+            synopsis: "Role of <i>TP53</i><script>x</script>",
+          }),
+        ]}
+      />,
+    );
+    const r = screen.getByTestId("pubs-report-row-1");
+    expect(r.querySelector("a i")?.textContent).toBe("BRCA1");
+    expect(r.querySelector("a sub")?.textContent).toBe("2");
+    expect(r.querySelector("a")?.textContent).toBe("BRCA1 loss & H2O");
+    const syn = screen.getByTestId("pubs-report-synopsis-1");
+    expect(syn.querySelector("i")?.textContent).toBe("TP53");
+    expect(syn.querySelector("script")).toBeNull();
+    expect(syn.textContent).not.toContain("<i>");
+  });
+
   it("shows — for a null impact score, and the score itself otherwise", () => {
     render(
       <PublicationsReportTable

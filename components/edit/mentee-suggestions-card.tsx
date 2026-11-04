@@ -37,6 +37,7 @@ import type {
   EditContextMenteeSuggestionEvidence,
 } from "@/lib/api/edit-context";
 import { citationIdentifier } from "@/lib/citation";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
 import {
   DISMISS_REASONS,
@@ -626,7 +627,7 @@ function PubRow({
           className={full ? "" : "line-clamp-2"}
           data-testid={`mentee-suggestion-pub-title-${e.id}`}
         >
-          {title}
+          {e.title ? <PubTitle value={e.title} /> : title}
         </p>
         {clampable && (
           <button
@@ -640,7 +641,12 @@ function PubRow({
           </button>
         )}
         <p className="text-muted-foreground text-xs">
-          {e.journal ? `${e.journal} · ` : ""}
+          {e.journal ? (
+            <>
+              <PubJournal as="span" className="not-italic" value={e.journal} />
+              {" · "}
+            </>
+          ) : null}
           {bylineOf(e, surname, you)} ·{" "}
           {cite.href ? (
             <a

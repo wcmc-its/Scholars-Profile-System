@@ -23,6 +23,7 @@ import {
 } from "@/lib/edit/pub-citation-report";
 import { loadPubCitationReport } from "@/lib/edit/pub-citation-report.server";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 
 const CONTROL =
   "border-apollo-border-strong bg-apollo-surface h-[34px] rounded-md border px-2 text-sm";
@@ -146,7 +147,9 @@ export async function renderPubCitationReport({
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.pmid} className="border-apollo-border border-b align-top">
-                      <td className="py-3 pr-3 pl-5 font-semibold">{r.title}</td>
+                      <td className="py-3 pr-3 pl-5 font-semibold">
+                        <PubTitle value={r.title} />
+                      </td>
                       <td className="p-3">
                         {r.investigators.map((i) => (
                           <div key={i.cwid}>
@@ -156,7 +159,9 @@ export async function renderPubCitationReport({
                           </div>
                         ))}
                       </td>
-                      <td className="p-3">{r.journal}</td>
+                      <td className="p-3">
+                        <PubJournal as="span" className="not-italic" value={r.journal} />
+                      </td>
                       <td className="p-3 whitespace-nowrap">{longDate(r.date)}</td>
                       <td className="p-3">
                         {r.relevant === null ? "" : r.relevant ? "Yes" : "No"}

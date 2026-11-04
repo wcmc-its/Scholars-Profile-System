@@ -193,4 +193,27 @@ describe("queryTitleTokens / markTitleQueryTerms (pure title-relevance helpers)"
   it("empty token set ⇒ unchanged title, matched false", () => {
     expect(markTitleQueryTerms("Anything", [])).toEqual({ html: "Anything", matched: false });
   });
+
+  it("never wraps a tag name inside the title's PubMed markup", () => {
+    expect(markTitleQueryTerms("H<sub>2</sub>O transport", ["sub"])).toEqual({
+      html: "H<sub>2</sub>O transport",
+      matched: false,
+    });
+    expect(markTitleQueryTerms("<i>BRCA1</i> in sub-Saharan cohorts", ["sub", "brca1"])).toEqual({
+      html: "<i><mark>BRCA1</mark></i> in <mark>sub</mark>-Saharan cohorts",
+      matched: true,
+    });
+    // A bare comparator is text, not a tag: matching continues past it.
+    expect(markTitleQueryTerms("aged <18 years with stem cells", ["stem"]).html).toBe(
+      "aged <18 years with <mark>stem</mark> cells",
+    );
+  });
+
+  it("never marks inside an entity (cAMP &amp; PKA)", () => {
+    expect(markTitleQueryTerms("cyclic AMP &amp; PKA", ["amp"])).toEqual({
+      html: "cyclic <mark>AMP</mark> &amp; PKA",
+      matched: true,
+    });
+    expect(markTitleQueryTerms("A &amp; B", ["amp"]).matched).toBe(false);
+  });
 });

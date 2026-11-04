@@ -107,6 +107,26 @@ describe("ReciterPendingCard — dormant-safe pending-suggestions nudge", () => 
     expect(referred.textContent).toContain("Another mid-confidence candidate");
   });
 
+  it("renders PubMed inline markup in hero + referred titles and the journal, not literal tags", () => {
+    const { unmount } = render(
+      <ReciterPendingCard
+        suggestions={[
+          suggestion({ score: 90, articleTitle: "<i>BRCA1</i> &amp; CO<sub>2</sub>", journal: "J &amp; <i>X</i>" }),
+        ]}
+      />,
+    );
+    const hero = screen.getByTestId("reciter-pending-hero");
+    expect(hero.querySelector("i")?.textContent).toBe("BRCA1");
+    expect(hero.textContent).toContain("BRCA1 & CO2");
+    expect(hero.textContent).toContain("J & X");
+    expect(hero.textContent).not.toContain("<i>");
+    unmount();
+    render(<ReciterPendingCard suggestions={[suggestion({ score: 55, articleTitle: "<i>KRAS</i> study" })]} />);
+    const referred = screen.getByTestId("reciter-pending-referred");
+    expect(referred.querySelector("li i")?.textContent).toBe("KRAS");
+    expect(referred.textContent).not.toContain("<i>");
+  });
+
   it("uses the green chip for >=70 and an amber chip for 40–69 (chip only ever shown on the hero)", () => {
     const { rerender } = render(<ReciterPendingCard suggestions={[suggestion({ score: 95 })]} />);
     expect(screen.getByTestId("reciter-pending-score-chip").className).toContain("apollo-green");
