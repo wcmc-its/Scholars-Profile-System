@@ -66,6 +66,10 @@ describe("htmlToPlainText", () => {
     expect(htmlToPlainText("pre<u>fix</u>ed")).toBe("prefixed");
   });
 
+  it("an orphan tag-shaped < never swallows text up to a later tag", () => {
+    expect(htmlToPlainText("x <a few cases<br>BRCA1")).toBe("x <a few cases BRCA1");
+  });
+
   it("keeps the excerpt truncation contract", () => {
     const long = "word ".repeat(60).trim();
     const out = htmlToPlainText(long, 50);

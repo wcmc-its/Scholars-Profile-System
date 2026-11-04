@@ -208,4 +208,12 @@ describe("queryTitleTokens / markTitleQueryTerms (pure title-relevance helpers)"
       "aged <18 years with <mark>stem</mark> cells",
     );
   });
+
+  it("never marks inside an entity (cAMP &amp; PKA)", () => {
+    expect(markTitleQueryTerms("cyclic AMP &amp; PKA", ["amp"])).toEqual({
+      html: "cyclic <mark>AMP</mark> &amp; PKA",
+      matched: true,
+    });
+    expect(markTitleQueryTerms("A &amp; B", ["amp"]).matched).toBe(false);
+  });
 });

@@ -74,7 +74,8 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
     // Everything else (block tags, unknown markup) → single space. Only a
     // TAG-SHAPED `<` (followed by a letter, `/` or `!`) starts markup, so a
     // bare comparator — "aged <18 years and >65" — survives intact.
-    .replace(/<\/?[a-z!][^>]*>/gi, " ");
+    // `[^<>]` so an orphan "<word" never swallows text up to a later tag.
+    .replace(/<\/?[a-z!][^<>]*>/gi, " ");
   const plain = stripped
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")

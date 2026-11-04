@@ -86,7 +86,8 @@ export function markTitleQueryTerms(
   // Match TEXT only: the title carries PubMed markup, and a token like "sub"
   // must not wrap the tag name in `H<sub>2</sub>O` (nor count as a match).
   const html = title
-    .split(/(<\/?[a-z!][^>]*>)/i) // odd indices = the captured tags
+    // Odd indices = captured tags AND entities: "amp" must not split `&amp;`.
+    .split(/(<\/?[a-z!][^<>]*>|&#?[a-z0-9]+;)/i)
     .map((seg, i) =>
       i % 2 === 1
         ? seg
