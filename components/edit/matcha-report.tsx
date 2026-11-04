@@ -730,7 +730,8 @@ export function MatchaReportView({ report }: { report: MatchaReport }) {
             <div className="flex flex-col gap-0.5">
               <span className="text-[12px] text-[var(--evidence-faint)]">Prepared by</span>
               <span className="font-semibold">
-                {report.officer.name}, Center for Technology Licensing
+                {report.officer.name}
+                {report.officer.dept ? `, ${report.officer.dept}` : ""}
               </span>
             </div>
             {report.officer.email ? (
