@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
 import { cn } from "@/lib/utils";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import type { ReciterSuggestion } from "@/lib/reciter/client";
 
 export type ReciterPendingCardProps = {
@@ -206,12 +207,19 @@ function Citation({ suggestion }: { suggestion: ReciterSuggestion }) {
           </React.Fragment>
         ))}
       </p>
-      <p className="text-foreground mt-0.5 text-sm font-medium leading-snug">
-        {suggestion.articleTitle}
-      </p>
+      <PubTitle
+        as="p"
+        className="text-foreground mt-0.5 text-sm font-medium leading-snug"
+        value={suggestion.articleTitle}
+      />
       <p className="text-muted-foreground mt-0.5 text-[0.8rem] leading-snug">
         {suggestion.authors}
-        {suggestion.journal ? <> · {suggestion.journal}</> : null}
+        {suggestion.journal ? (
+          <>
+            {" "}
+            · <PubJournal as="span" className="not-italic" value={suggestion.journal} />
+          </>
+        ) : null}
       </p>
     </div>
   );
@@ -259,7 +267,9 @@ function ReferredList({
       </p>
       <ul className="text-muted-foreground mt-1.5 flex list-disc flex-col gap-1 pl-5 text-[0.8rem] leading-snug">
         {suggestions.map((s) => (
-          <li key={s.pmid}>{s.articleTitle}</li>
+          <li key={s.pmid}>
+            <PubTitle value={s.articleTitle} />
+          </li>
         ))}
       </ul>
     </div>

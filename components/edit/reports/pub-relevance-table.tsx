@@ -28,6 +28,7 @@ import {
   type PubRelevanceRow,
 } from "@/lib/edit/pub-relevance-report";
 import { cn } from "@/lib/utils";
+import { PubTitle } from "@/components/publication/pub-html";
 
 const AMBER = "text-apollo-amber bg-apollo-amber-tint border-apollo-amber-tint-border";
 const SLATE = "text-apollo-slate bg-apollo-slate-tint border-apollo-slate-tint-border";
@@ -82,7 +83,7 @@ function Row({ row, save }: { row: PubRelevanceRow; save: Save }) {
           rel="noopener noreferrer"
           className="leading-snug font-semibold underline-offset-2 hover:underline"
         >
-          {row.title}
+          <PubTitle value={row.title} />
         </a>
         {row.isReview && (
           <span

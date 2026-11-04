@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { PubAbstract, PubTitle } from "@/components/publication/pub-html";
 import { byCareerStage, formatRoleCategory } from "@/lib/role-display";
 import type { PublicationsReportRow } from "@/lib/edit/cancer-center-publications-report";
 
@@ -106,19 +107,17 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
                       rel="noreferrer"
                       className="hover:underline"
                     >
-                      {r.title}
+                      <PubTitle value={r.title} />
                     </a>
                     {r.year === null ? null : (
                       <span className="text-muted-foreground ml-1">({r.year})</span>
                     )}
-                    {r.synopsis ? (
-                      <p
-                        className="text-muted-foreground mt-1 text-xs"
-                        data-testid={`pubs-report-synopsis-${r.pmid}`}
-                      >
-                        {r.synopsis}
-                      </p>
-                    ) : null}
+                    <PubAbstract
+                      as="p"
+                      className="text-muted-foreground mt-1 text-xs"
+                      data-testid={`pubs-report-synopsis-${r.pmid}`}
+                      value={r.synopsis}
+                    />
                   </td>
                   <td className={tdClass}>{r.matchedJournalTitle}</td>
                   <td className={`${tdClass} whitespace-nowrap`}>
