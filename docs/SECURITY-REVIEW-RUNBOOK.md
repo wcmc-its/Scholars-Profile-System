@@ -4,6 +4,9 @@
 > which scanners run on their own, which ones a person runs and how often, and how to triage and close
 > out what they find. It holds no findings. This repo is public, so findings, resource names, account
 > ids and raw scanner output stay in the private working area (`~/Dropbox/Projects/Scholars-Profile-System/`).
+>
+> The public security policy (how to report a vulnerability, remediation targets, key and certificate
+> inventory, data classification) is in [`SECURITY.md`](../SECURITY.md).
 
 ## 1. What runs automatically
 
