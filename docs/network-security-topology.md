@@ -81,7 +81,7 @@ SG-referenced.
 
 | SG | Ingress (who can reach it) | Owned/added by |
 |---|---|---|
-| `alb` (public ALB) | `:80` from `0.0.0.0/0` **but** the listener default action is `403`; a priority-1 rule forwards only when `X-Origin-Verify` matches the CloudFront-injected secret | NetworkStack (SG; flag-off) or `sharedVpc.albSgId` (flag-on) / AppStack + EdgeStack (rule) |
+| `alb` (public ALB) | `:443` from `0.0.0.0/0` (the NetScaler VIP dials it) **but** the listener default action is `403`; a priority-1 rule forwards only when `X-Origin-Verify` matches the CloudFront-injected secret. `:80` is emitted only while an env has not seeded the HTTPS origin leg (`edgeOriginCertArn` + `edgeOriginHostname`), which today means only during an origin backout | NetworkStack (SG; flag-off) or `sharedVpc.albSgId` (flag-on) / AppStack + EdgeStack (rule) |
 | `alb` (internal ALB listener) | `:80` from the `etl` SG only (the `/api/revalidate` path) | EtlStack |
 | `app` (ECS app tasks) | from the `alb` SG only | AppStack |
 | `etl` (ETL tasks) | none inbound (egress only) | NetworkStack (flag-off) or `sharedVpc.etlSgId` (flag-on) |
@@ -135,8 +135,10 @@ two halves:
   prod 2026-07-24): CloudFront reaches the app through the NetScaler VIP — origin leg
   **HTTPS-only** (an HTTP origin behind the VIP's HTTP→HTTPS upgrade loops), NetScaler → ALB on
   **`:443`** forwarding `X-Origin-Verify`; durable in CDK via the `#1507` origin-flip (PR #1852
-  staging, #1926 prod). The `:80` listener still exists in both envs but is not the live path —
-  it carries only internet-scanner noise. (Port corrected 2026-07-25: this paragraph previously
+  staging, #1926 prod). The public `:80` listener and its `0.0.0.0/0` ingress are retired in
+  both envs: an 8-day access-log scan (2026-10-28 to 11-04) found only scanner noise plus the
+  staging search-eval canary, which sent `X-Origin-Verify` in cleartext and now dials the VIP
+  hostname over HTTPS instead. (Port corrected 2026-07-25: this paragraph previously
   said staging rode `:80`; VPC flow logs across all four staging ALB ENIs plus a timed causal
   probe showed otherwise. See #1937, which also closed the `:443` TLS-policy gap — both envs
   now carry the #1929 AEAD-only pin, staging deployed 2026-07-27.) A WCM-only access gate (#461)
@@ -172,16 +174,33 @@ ALB's :443 cert names the public hostname only, with no SAN for the
 `*.elb.amazonaws.com` name. CloudFront checks a custom origin's cert against the origin
 domain name, so that check fails and every dynamic request returns 502. The backout looks
 applied while the site stays down. The CDK path below avoids this because it lands on
-`http-only` :80.
+`http-only` :80, which it first restores on the ALB.
 
 **Procedure** (run from a fresh `origin/master` checkout, per
 [`DEPLOY-RUNBOOK.md` § EdgeStack](./DEPLOY-RUNBOOK.md)):
 
 1. In `cdk/lib/config.ts`, in the affected env's block, set `edgeOriginHostname: ""`.
-   **Leave `edgeOriginCertArn` as it is.** It gates only the ALB :443 listener and its SG
+   **Leave `edgeOriginCertArn` as it is.** It gates the ALB :443 listener and its SG
    ingress (AppStack). Keeping it means the NetScaler path is still there when you roll
-   forward, and `Sps-App-<env>` does not need a deploy.
-2. Diff, then deploy, the Edge stack alone:
+   forward.
+2. Deploy `Sps-App-<env>` FIRST. The public ALB has no :80 listener while the HTTPS origin
+   leg is seeded; an empty `edgeOriginHostname` brings back the :80 listener, its
+   X-Origin-Verify forward rule and the `0.0.0.0/0` :80 ingress. If the Edge stack flips
+   first, CloudFront dials a port nothing listens on.
+
+   ```sh
+   cd cdk
+   npx cdk diff --exclusively Sps-App-<env> -c env=<env> \
+     -c appImageDigest=$(../scripts/release/running-app-digest.sh <env>)
+   # expect ONLY: + PublicHttpListener, + OriginVerifiedForward, + PublicAlbIngressFromInternet,
+   # DependsOn changes on the EcsService and its autoscaling target/policies, the request-
+   # scaling ResourceLabel's listener Ref, and a new canary task-def revision
+   # (CANARY_HOST -> http ALB DNS).
+   npx cdk deploy --require-approval never --exclusively Sps-App-<env> -c env=<env> \
+     -c appImageDigest=$(../scripts/release/running-app-digest.sh <env>)
+   ```
+
+3. Diff, then deploy, the Edge stack alone:
 
    ```sh
    cd cdk
@@ -193,21 +212,25 @@ applied while the site stays down. The CDK path below avoids this because it lan
    ```
 
    CloudFront takes about 5-15 minutes to propagate. Background the deploy.
-3. Check: the edge serves a dynamic page from a WCM network, and the ALB `RequestCount`
+4. Check: the edge serves a dynamic page from a WCM network, and the ALB `RequestCount`
    rises again. The `sps-edge-origin-down-<env>` probe dials the VIP hostname baked into
    its Lambda env at the last `Sps-Observability-<env>` deploy, so it keeps alarming while
    the VIP is down, even after the backout works. Use the ALB metrics to confirm recovery.
    Do not deploy `Sps-Observability-<env>` while backed out: with an empty hostname the
    probe refuses to report and the origin alarm goes blind.
-4. Roll forward once the VIP is healthy again: restore the hostname from git and deploy
-   `Sps-Edge-<env>` the same way.
+5. Roll forward once the VIP is healthy again: restore the hostname from git, deploy
+   `Sps-Edge-<env>` the same way, THEN `Sps-App-<env>` (which removes :80 again). Reverse
+   order of the backout: the ALB must not drop :80 while CloudFront still dials it.
 
-**The ALB :80 listener is load-bearing.** This procedure is the only recovery path, and it
-lands on `HTTP_ONLY` :80 (listener `PublicHttpListener` plus the `0.0.0.0/0` :80 SG
-ingress in `cdk/lib/app-stack.ts`). Do not remove :80 while this is the backout. A
-dedicated ALB hostname with its own ACM cert, pre-staged as an HTTPS failover member of a
-dynamic origin group, would remove both the SPOF and the :80 dependency (#1936, not
-built).
+**The ALB :80 listener exists only during a backout.** This procedure is the only recovery
+path, and it lands on `HTTP_ONLY` :80 (listener `PublicHttpListener` plus the `0.0.0.0/0`
+:80 SG ingress in `cdk/lib/app-stack.ts`, both gated on the same
+`edgeOriginCertArn && edgeOriginHostname` test edge-stack.ts uses). Between backouts :80 is
+absent, so the X-Origin-Verify secret never crosses it in cleartext; the price is the extra
+`Sps-App-<env>` deploy in step 2. The staging rehearsal below predates this and did not
+include that step. A dedicated ALB hostname with its own ACM cert, pre-staged as an HTTPS
+failover member of a dynamic origin group, would remove both the SPOF and the :80
+dependency (#1936, not built).
 
 **Rehearsed on staging 2026-10-07** (VIP -> ALB -> VIP), following the steps above. The backout `cdk diff` matched the expectation exactly (origin only: SSM ALB DNS, `http-only`, :80). With the origin on the ALB, uncached `/api/health` and `/api/search` returned 200 and `/edit` its 302 SSO redirect, with no 502s. The roll-forward from a clean `origin/master` restored `https-only` to the VIP, and the same checks passed. Not yet rehearsed in prod. Plan on 30-60 minutes for a real backout: config edit, diff, deploy, then CloudFront propagation.
 

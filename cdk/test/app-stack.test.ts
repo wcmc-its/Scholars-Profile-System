@@ -56,7 +56,7 @@ describe("AppStack", () => {
   // #1507 -- HTTPS origin leg. Now seeded for both envs (staging + prod on
   // NetScaler), so the default builds carry the :443 origin guard. This block
   // asserts that flag-on shape in isolation via an explicit cert override: a
-  // :443 listener + ingress + forward rule, added WITHOUT removing :80.
+  // :443 listener + ingress + forward rule, and NO public plaintext :80.
   describe("#1507 -- HTTPS origin leg (edgeOriginCertArn seeded)", () => {
     const CERT =
       "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -65,13 +65,19 @@ describe("AppStack", () => {
       edgeOriginHostname: "scholars-origin.weill.cornell.edu",
     });
 
-    it("adds an HTTPS :443 listener (ALB cert) alongside the kept :80 listeners", () => {
+    it("adds an HTTPS :443 listener (ALB cert) and retires the public :80 listener", () => {
       const ports = Object.values(
         template.findResources("AWS::ElasticLoadBalancingV2::Listener"),
       ).map((l) => l.Properties?.Port as number);
       expect(ports).toContain(443);
-      // public :80 + internal :80 are both kept.
-      expect(ports.filter((p) => p === 80).length).toBeGreaterThanOrEqual(2);
+      // Only the INTERNAL ALB keeps :80 (SG-to-SG from the ETL SG, never
+      // internet-facing). The public plaintext listener is gone.
+      expect(ports.filter((p) => p === 80)).toHaveLength(1);
+      expect(
+        Object.keys(template.findResources("AWS::ElasticLoadBalancingV2::Listener")).some((id) =>
+          id.startsWith("PublicAlbPublicHttpListener"),
+        ),
+      ).toBe(false);
       template.hasResourceProperties(
         "AWS::ElasticLoadBalancingV2::Listener",
         {
@@ -99,17 +105,79 @@ describe("AppStack", () => {
               ?.HttpHeaderName === "X-Origin-Verify",
         );
       });
-      // one for :80 (existing), one for :443 (added).
-      expect(originVerifyForwards).toHaveLength(2);
+      // Only the :443 one: the :80 rule (which matched the secret in
+      // cleartext) is retired with its listener.
+      expect(originVerifyForwards).toHaveLength(1);
     });
 
-    it("opens a :443 internet ingress on the public ALB SG", () => {
+    it("opens a :443 internet ingress on the public ALB SG and NO :80 ingress", () => {
       template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
         FromPort: 443,
         ToPort: 443,
         CidrIp: "0.0.0.0/0",
       });
+      const port80 = Object.values(template.findResources("AWS::EC2::SecurityGroupIngress")).filter(
+        (r) => r.Properties?.FromPort === 80 || r.Properties?.ToPort === 80,
+      );
+      expect(port80).toHaveLength(0);
     });
+
+    it("points the search-eval canary at the origin hostname over HTTPS, never the ALB DNS name over HTTP", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const canary = Object.entries(taskDefs).find(([id]) =>
+        id.startsWith("SearchEvalCanaryTaskDefinition"),
+      )?.[1];
+      const env = (
+        canary?.Properties?.ContainerDefinitions as Array<{
+          Environment?: Array<{ Name: string; Value: unknown }>;
+        }>
+      )[0]?.Environment;
+      const host = env?.find((e) => e.Name === "CANARY_HOST")?.Value;
+      expect(host).toBe("https://scholars-origin.weill.cornell.edu");
+    });
+  });
+
+  // An env that has NOT seeded the HTTPS origin leg (cert, or the hostname
+  // CloudFront dials over TLS, still empty) keeps CloudFront on HTTP_ONLY to the
+  // ALB DNS name (edge-stack.ts), so the public :80 listener + ingress must stay
+  // until both are set. Same two-part gate as edge-stack.ts.
+  describe("public :80 kept while the HTTPS origin leg is not seeded", () => {
+    for (const [label, override] of [
+      ["no cert", { edgeOriginCertArn: "", edgeOriginHostname: "" }],
+      [
+        "cert but no origin hostname",
+        {
+          edgeOriginCertArn:
+            "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          edgeOriginHostname: "",
+        },
+      ],
+    ] as const) {
+      it(`${label}: public :80 listener + 0.0.0.0/0 :80 ingress + HTTP canary host`, () => {
+        const { template } = buildAppStack("staging", override);
+        expect(
+          Object.keys(template.findResources("AWS::ElasticLoadBalancingV2::Listener")).some((id) =>
+            id.startsWith("PublicAlbPublicHttpListener"),
+          ),
+        ).toBe(true);
+        template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
+          FromPort: 80,
+          ToPort: 80,
+          CidrIp: "0.0.0.0/0",
+        });
+        const canary = Object.entries(template.findResources("AWS::ECS::TaskDefinition")).find(
+          ([id]) => id.startsWith("SearchEvalCanaryTaskDefinition"),
+        )?.[1];
+        const env = (
+          canary?.Properties?.ContainerDefinitions as Array<{
+            Environment?: Array<{ Name: string; Value: unknown }>;
+          }>
+        )[0]?.Environment;
+        expect(JSON.stringify(env?.find((e) => e.Name === "CANARY_HOST")?.Value)).toContain(
+          "http://",
+        );
+      });
+    }
   });
 
   // Estate consolidation (plan §4.4/§5.5): with useSharedVpc on, compute lands
@@ -253,7 +321,7 @@ describe("AppStack", () => {
         template.resourceCountIs("AWS::ECS::Service", 1);
       });
 
-      it("creates two ALBs (one internet-facing, one internal), two target groups (one per ALB, #431 blocker #6), three listeners (:80 on both ALBs + public :443 origin guard, #1507)", () => {
+      it("creates two ALBs (one internet-facing, one internal), two target groups (one per ALB, #431 blocker #6), two listeners (internal :80 + public :443 origin guard, #1507; public :80 retired)", () => {
         template.resourceCountIs(
           "AWS::ElasticLoadBalancingV2::LoadBalancer",
           2,
@@ -262,7 +330,7 @@ describe("AppStack", () => {
           "AWS::ElasticLoadBalancingV2::TargetGroup",
           2,
         );
-        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 3);
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
 
         const lbs = template.findResources(
           "AWS::ElasticLoadBalancingV2::LoadBalancer",
@@ -595,14 +663,15 @@ describe("AppStack", () => {
         const dependsOn = (services[ids[0]!]?.DependsOn ?? []) as string[];
         // Internal listener (associates TG via DefaultActions).
         expect(dependsOn.some((d) => d.startsWith("InternalAlbInternalHttpListener"))).toBe(true);
-        // Public listener (its child rule below carries the TG association).
-        expect(dependsOn.some((d) => d.startsWith("PublicAlbPublicHttpListener"))).toBe(true);
-        // The priority-1 rule that forwards public :80 traffic to the TG.
-        // Exact-prefix regexes: a bare startsWith("OriginVerifiedForward")
-        // would also match the :443 rule (OriginVerifiedForwardHttps<hash>).
-        expect(dependsOn.some((d) => /^OriginVerifiedForward[0-9A-F]{8}$/.test(d))).toBe(true);
-        // #1938: the :443 listener + its forward rule (edgeOriginCertArn is
-        // seeded for both envs) also bind the TG, so the service waits on them.
+        // The retired public :80 listener + its rule are gone from DependsOn
+        // (both envs seed the HTTPS origin leg). Exact-prefix regex: a bare
+        // startsWith("OriginVerifiedForward") would also match the :443 rule.
+        expect(dependsOn.some((d) => /^PublicAlbPublicHttpListener[0-9A-F]{8}$/.test(d))).toBe(
+          false,
+        );
+        expect(dependsOn.some((d) => /^OriginVerifiedForward[0-9A-F]{8}$/.test(d))).toBe(false);
+        // #1938: the :443 listener + its forward rule are now the ONLY public
+        // TG association, so the service must wait on them.
         expect(dependsOn.some((d) => /^PublicAlbPublicHttpsListener[0-9A-F]{8}$/.test(d))).toBe(
           true,
         );
@@ -1345,22 +1414,22 @@ describe("AppStack", () => {
         }
       });
 
-      it("the public ALB has HTTP :80 + HTTPS :443 (the #1507 NetScaler origin guard); internal ALB stays HTTP :80", () => {
+      it("the public ALB has HTTPS :443 only (the #1507 NetScaler origin guard; :80 retired); internal ALB stays HTTP :80", () => {
         const listeners = template.findResources(
           "AWS::ElasticLoadBalancingV2::Listener",
         );
         const protocols = Object.values(listeners)
           .map((r) => r.Properties?.Protocol as string)
           .sort();
-        expect(protocols).toEqual(["HTTP", "HTTP", "HTTPS"]);
+        expect(protocols).toEqual(["HTTP", "HTTPS"]);
         const ports = Object.values(listeners)
           .map((r) => r.Properties?.Port as number)
           .sort((a, b) => a - b);
-        expect(ports).toEqual([80, 80, 443]);
+        expect(ports).toEqual([80, 443]);
       });
 
       it("the public ALB listener default action is a bare 403 (B07 origin-verify deny-by-default)", () => {
-        // The PublicHttpListener default action is a fixed-response 403:
+        // The public :443 listener default action is a fixed-response 403:
         // requests that arrive without the CloudFront-injected
         // X-Origin-Verify header are rejected at the ALB. The internal
         // listener still default-forwards to the target group (only the
@@ -2207,24 +2276,25 @@ describe("AppStack", () => {
 
       // -- Category 4: standalone CfnSecurityGroupIngress count --
       //
-      // Four SG-to-SG (or CIDR) ingresses are intentionally L1 to keep
+      // Three SG-to-SG (or CIDR) ingresses are intentionally L1 to keep
       // the rules co-located with the listeners they support (see SG
-      // comment in app-stack.ts). The 4th is the #1507 :443 origin-TLS
-      // ingress, seeded with the NetScaler cutover. A future PR that adds
-      // a 5th wildcard ingress (e.g. `0.0.0.0/0` to a workload SG) should
-      // fail this assertion before review.
-      it("emits exactly four standalone AWS::EC2::SecurityGroupIngress resources", () => {
-        template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 4);
+      // comment in app-stack.ts): app :3000 from each ALB SG, plus the
+      // #1507 :443 origin-TLS ingress. The public :80 ingress is retired
+      // once the HTTPS origin leg is seeded. A future PR that adds a
+      // wildcard ingress (e.g. `0.0.0.0/0` to a workload SG) should fail
+      // this assertion before review.
+      it("emits exactly three standalone AWS::EC2::SecurityGroupIngress resources", () => {
+        template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 3);
         const ingress = template.findResources(
           "AWS::EC2::SecurityGroupIngress",
         );
         const cidrIngressCount = Object.values(ingress).filter(
           (r) => r.Properties?.CidrIp === "0.0.0.0/0",
         ).length;
-        // Two rules use 0.0.0.0/0: the public ALB's :80 ingress and the
-        // #1507 :443 origin-TLS ingress. A future addition of a wildcard
-        // rule on a workload SG must come through review.
-        expect(cidrIngressCount).toBe(2);
+        // One rule uses 0.0.0.0/0: the #1507 :443 origin-TLS ingress. A
+        // future addition of a wildcard rule on a workload SG must come
+        // through review.
+        expect(cidrIngressCount).toBe(1);
       });
 
       // -- Category 2 (post-deploy gap): no target group spans more than

@@ -2910,9 +2910,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -2988,9 +2986,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -3038,9 +3034,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -3067,9 +3061,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -3095,7 +3087,7 @@ service:
                         "Fn::Split": [
                           "/",
                           {
-                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                            "Ref": "PublicAlbPublicHttpsListener8840F702",
                           },
                         ],
                       },
@@ -3109,7 +3101,7 @@ service:
                         "Fn::Split": [
                           "/",
                           {
-                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                            "Ref": "PublicAlbPublicHttpsListener8840F702",
                           },
                         ],
                       },
@@ -3123,7 +3115,7 @@ service:
                         "Fn::Split": [
                           "/",
                           {
-                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                            "Ref": "PublicAlbPublicHttpsListener8840F702",
                           },
                         ],
                       },
@@ -3479,34 +3471,6 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
-    "OriginVerifiedForwardC0422D52": {
-      "Properties": {
-        "Actions": [
-          {
-            "TargetGroupArn": {
-              "Ref": "PublicAppTargetGroup68798009",
-            },
-            "Type": "forward",
-          },
-        ],
-        "Conditions": [
-          {
-            "Field": "http-header",
-            "HttpHeaderConfig": {
-              "HttpHeaderName": "X-Origin-Verify",
-              "Values": [
-                "{{resolve:secretsmanager:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
-              ],
-            },
-          },
-        ],
-        "ListenerArn": {
-          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
-        },
-        "Priority": 1,
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
-    },
     "OriginVerifiedForwardHttpsBD6969E0": {
       "Properties": {
         "Actions": [
@@ -3610,19 +3574,6 @@ service:
       },
       "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
     },
-    "PublicAlbIngressFromInternet": {
-      "Properties": {
-        "CidrIp": "0.0.0.0/0",
-        "Description": "Internet to SPS public ALB HTTP (prod) -- HTTPS lands with EdgeStack",
-        "FromPort": 80,
-        "GroupId": {
-          "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-        },
-        "IpProtocol": "tcp",
-        "ToPort": 80,
-      },
-      "Type": "AWS::EC2::SecurityGroupIngress",
-    },
     "PublicAlbIngressFromInternetHttps": {
       "Properties": {
         "CidrIp": "0.0.0.0/0",
@@ -3635,26 +3586,6 @@ service:
         "ToPort": 443,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
-    },
-    "PublicAlbPublicHttpListener8CAA0E91": {
-      "Properties": {
-        "DefaultActions": [
-          {
-            "FixedResponseConfig": {
-              "ContentType": "text/plain",
-              "MessageBody": "Forbidden",
-              "StatusCode": "403",
-            },
-            "Type": "fixed-response",
-          },
-        ],
-        "LoadBalancerArn": {
-          "Ref": "PublicAlb84330974",
-        },
-        "Port": 80,
-        "Protocol": "HTTP",
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::Listener",
     },
     "PublicAlbPublicHttpsListener8840F702": {
       "Properties": {
@@ -3892,20 +3823,7 @@ service:
             "Environment": [
               {
                 "Name": "CANARY_HOST",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "http://",
-                      {
-                        "Fn::GetAtt": [
-                          "PublicAlb84330974",
-                          "DNSName",
-                        ],
-                      },
-                    ],
-                  ],
-                },
+                "Value": "https://cf-ns-scholars.weill.cornell.edu",
               },
             ],
             "Essential": true,
@@ -8254,9 +8172,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -8326,9 +8242,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -8376,9 +8290,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -8405,9 +8317,7 @@ service:
       "DependsOn": [
         "InternalAlbInternalHttpListener9436A291",
         "InternalAppTargetGroup9E028644",
-        "OriginVerifiedForwardC0422D52",
         "OriginVerifiedForwardHttpsBD6969E0",
-        "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAlbPublicHttpsListener8840F702",
         "PublicAppTargetGroup68798009",
         "TaskRoleDefaultPolicy07FC53DE",
@@ -8433,7 +8343,7 @@ service:
                         "Fn::Split": [
                           "/",
                           {
-                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                            "Ref": "PublicAlbPublicHttpsListener8840F702",
                           },
                         ],
                       },
@@ -8447,7 +8357,7 @@ service:
                         "Fn::Split": [
                           "/",
                           {
-                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                            "Ref": "PublicAlbPublicHttpsListener8840F702",
                           },
                         ],
                       },
@@ -8461,7 +8371,7 @@ service:
                         "Fn::Split": [
                           "/",
                           {
-                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                            "Ref": "PublicAlbPublicHttpsListener8840F702",
                           },
                         ],
                       },
@@ -8826,34 +8736,6 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
-    "OriginVerifiedForwardC0422D52": {
-      "Properties": {
-        "Actions": [
-          {
-            "TargetGroupArn": {
-              "Ref": "PublicAppTargetGroup68798009",
-            },
-            "Type": "forward",
-          },
-        ],
-        "Conditions": [
-          {
-            "Field": "http-header",
-            "HttpHeaderConfig": {
-              "HttpHeaderName": "X-Origin-Verify",
-              "Values": [
-                "{{resolve:secretsmanager:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
-              ],
-            },
-          },
-        ],
-        "ListenerArn": {
-          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
-        },
-        "Priority": 1,
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
-    },
     "OriginVerifiedForwardHttpsBD6969E0": {
       "Properties": {
         "Actions": [
@@ -8950,17 +8832,6 @@ service:
       },
       "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
     },
-    "PublicAlbIngressFromInternet": {
-      "Properties": {
-        "CidrIp": "0.0.0.0/0",
-        "Description": "Internet to SPS public ALB HTTP (staging) -- HTTPS lands with EdgeStack",
-        "FromPort": 80,
-        "GroupId": "sg-0ab492e161a9e9976",
-        "IpProtocol": "tcp",
-        "ToPort": 80,
-      },
-      "Type": "AWS::EC2::SecurityGroupIngress",
-    },
     "PublicAlbIngressFromInternetHttps": {
       "Properties": {
         "CidrIp": "0.0.0.0/0",
@@ -8971,26 +8842,6 @@ service:
         "ToPort": 443,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
-    },
-    "PublicAlbPublicHttpListener8CAA0E91": {
-      "Properties": {
-        "DefaultActions": [
-          {
-            "FixedResponseConfig": {
-              "ContentType": "text/plain",
-              "MessageBody": "Forbidden",
-              "StatusCode": "403",
-            },
-            "Type": "fixed-response",
-          },
-        ],
-        "LoadBalancerArn": {
-          "Ref": "PublicAlb84330974",
-        },
-        "Port": 80,
-        "Protocol": "HTTP",
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::Listener",
     },
     "PublicAlbPublicHttpsListener8840F702": {
       "Properties": {
@@ -9196,20 +9047,7 @@ service:
             "Environment": [
               {
                 "Name": "CANARY_HOST",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "http://",
-                      {
-                        "Fn::GetAtt": [
-                          "PublicAlb84330974",
-                          "DNSName",
-                        ],
-                      },
-                    ],
-                  ],
-                },
+                "Value": "https://cf-ns-scholars-staging.weill.cornell.edu",
               },
             ],
             "Essential": true,

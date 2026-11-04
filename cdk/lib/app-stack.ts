@@ -132,10 +132,11 @@ export interface AppStackProps extends StackProps {
  *   PRODUCTION_ADDENDUM § AppStack records the deviation from ADR-008
  *   Table 4.
  *
- * - The public ALB ships HTTP-only :80. The :443 listener + ACM cert +
- *   CloudFront origin-verify header check ship in B07+B14 (EdgeStack).
- *   Documented exposure window: one PR cycle; ALB DNS not published;
- *   SAML cookie's SameSite+Secure prevents it transmitting over HTTP.
+ * - The public ALB serves the origin leg on HTTPS :443 only once the #1507
+ *   origin TLS leg is seeded (edgeOriginCertArn + edgeOriginHostname, both
+ *   envs). The original HTTP :80 listener and its 0.0.0.0/0 ingress are now
+ *   emitted only for an env that has not seeded that leg yet, because every
+ *   forwarded :80 request carried the X-Origin-Verify secret in cleartext.
  *
  * - The GitHub Actions OIDC deploy role is provisioned here even though
  *   the workflow that uses it ships in the B09/B12 follow-on. No cost; no
@@ -1240,7 +1241,10 @@ export class AppStack extends Stack {
     // ------------------------------------------------------------------
     // SG ingress rules that the ALBs need to function.
     //
-    // - Public ALB SG :80 from 0.0.0.0/0 (HTTP-only merge window).
+    // - Public ALB SG :80 from 0.0.0.0/0 -- ONLY while the HTTPS origin leg
+    //   is not seeded (see `originTlsReady` below). Once it is, nothing
+    //   legitimate dials :80 and the rule is not emitted.
+    // - Public ALB SG :443 from 0.0.0.0/0 once the ALB cert is seeded (#1507).
     // - App SG :3000 from the public ALB SG (so target registration works).
     // - App SG :3000 from the internal ALB SG (same, on the internal
     //   listener path).
@@ -1254,14 +1258,28 @@ export class AppStack extends Stack {
     // the cycle and keeping the rules co-located with the listeners
     // they exist to support.
     // ------------------------------------------------------------------
-    new ec2.CfnSecurityGroupIngress(this, "PublicAlbIngressFromInternet", {
-      groupId: albSecurityGroup.securityGroupId,
-      ipProtocol: "tcp",
-      fromPort: 80,
-      toPort: 80,
-      cidrIp: "0.0.0.0/0",
-      description: `Internet to SPS public ALB HTTP (${env}) -- HTTPS lands with EdgeStack`,
-    });
+    // Plaintext :80 on the public ALB is retired once the HTTPS origin leg is
+    // fully seeded: the ALB cert (:443 listener) AND the origin hostname that
+    // CloudFront dials over TLS. That is the same two-part gate edge-stack.ts
+    // uses to flip the CloudFront origin from HTTP_ONLY-on-the-ALB-DNS-name to
+    // HTTPS_ONLY-on-the-hostname, so :80 survives exactly as long as CloudFront
+    // still needs it. With both set, CloudFront -> NetScaler VIP -> ALB :443 is
+    // the only origin path, and the search-eval canary (the last :80 caller,
+    // which sent the X-Origin-Verify secret in plaintext) dials the same
+    // hostname over HTTPS instead. Keeping :80 open after that bought nothing
+    // but a plaintext copy of the origin secret on the wire.
+    const originTlsReady =
+      envConfig.edgeOriginCertArn.length > 0 && envConfig.edgeOriginHostname.length > 0;
+    if (!originTlsReady) {
+      new ec2.CfnSecurityGroupIngress(this, "PublicAlbIngressFromInternet", {
+        groupId: albSecurityGroup.securityGroupId,
+        ipProtocol: "tcp",
+        fromPort: 80,
+        toPort: 80,
+        cidrIp: "0.0.0.0/0",
+        description: `Internet to SPS public ALB HTTP (${env}) -- pre-#1507 HTTP origin leg`,
+      });
+    }
     // #1507 -- :443 ingress for the HTTPS origin leg, added only once the ALB
     // cert is seeded (the :443 listener below is gated the same way).
     if (envConfig.edgeOriginCertArn.length > 0) {
@@ -3664,8 +3682,7 @@ export class AppStack extends Stack {
     // matches the header value -- and only that rule -- forwards to the
     // app target group. Without this split, the public ALB DNS becomes a
     // back-door bypass of every CloudFront cache-behavior decision (and
-    // any future WAF), since CloudFront-to-ALB runs over HTTP today and
-    // the DNS name is trivially discoverable.
+    // the edge WAF), since the DNS name is trivially discoverable.
     //
     // The expected header value is read from SecretsStack at deploy time
     // via a CFN dynamic reference (`{{resolve:secretsmanager:...}}`); the
@@ -3692,37 +3709,50 @@ export class AppStack extends Stack {
     const originSharedSecretValue = SecretValue.secretsManager(
       `scholars/${env}/edge/origin-shared-secret`,
     );
-    const publicListener = this.publicAlb.addListener("PublicHttpListener", {
-      port: 80,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      defaultAction: elbv2.ListenerAction.fixedResponse(403, {
-        contentType: "text/plain",
-        messageBody: "Forbidden",
-      }),
-    });
-    // Constructed as an explicit L1 rule (rather than via the void-returning
-    // `publicListener.addAction(...)`) so we hold a handle and can add it to
-    // the ECS service's DependsOn list below. The TG-to-public-ALB
-    // association lives on this rule (the listener's default action is a
-    // 403, not a forward), so it is the resource that satisfies AWS's
-    // "target group must have an associated load balancer" check on the
-    // public side -- see the EcsService dependency comment further down.
-    const originVerifiedRule = new elbv2.ApplicationListenerRule(this, "OriginVerifiedForward", {
-      listener: publicListener,
-      priority: 1,
-      conditions: [
-        elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
-          originSharedSecretValue.unsafeUnwrap(),
-        ]),
-      ],
-      action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
-    });
-    // #1507 -- HTTPS :443 listener alongside :80 (kept; :80 removal is a
-    // follow-up) so CloudFront's origin leg can run over TLS. Same 403-default
-    // + X-Origin-Verify-forward shape as :80, onto the same target group. Added
-    // only once the ALB-region cert (edgeOriginCertArn) is seeded; ships dark.
+    // Plaintext :80 listener -- emitted ONLY while the HTTPS origin leg is not
+    // seeded (`originTlsReady`, next to the SG ingress above). Every request
+    // that matches the forward rule carries the X-Origin-Verify secret, so on
+    // :80 that secret crossed the internet in cleartext. Both envs run the
+    // HTTPS leg (CloudFront -> NetScaler VIP -> ALB :443), so neither env gets
+    // this listener. It comes back only when an env's CloudFront origin is on
+    // HTTP_ONLY to the ALB DNS name: a fresh env not yet seeded, or the #1936
+    // origin backout (empty edgeOriginHostname; docs/network-security-topology.md).
+    //
+    // The forward rule is constructed as an explicit L1 rule (rather than via
+    // the void-returning `listener.addAction(...)`) so we hold a handle and can
+    // add it to the ECS service's DependsOn list below. The TG-to-public-ALB
+    // association lives on the rule (the listener's default action is a 403,
+    // not a forward), so it is the resource that satisfies AWS's "target group
+    // must have an associated load balancer" check on the public side -- see
+    // the EcsService dependency comment further down.
+    let publicListener: elbv2.ApplicationListener | undefined;
+    let originVerifiedRule: elbv2.ApplicationListenerRule | undefined;
+    if (!originTlsReady) {
+      publicListener = this.publicAlb.addListener("PublicHttpListener", {
+        port: 80,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        defaultAction: elbv2.ListenerAction.fixedResponse(403, {
+          contentType: "text/plain",
+          messageBody: "Forbidden",
+        }),
+      });
+      originVerifiedRule = new elbv2.ApplicationListenerRule(this, "OriginVerifiedForward", {
+        listener: publicListener,
+        priority: 1,
+        conditions: [
+          elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+            originSharedSecretValue.unsafeUnwrap(),
+          ]),
+        ],
+        action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
+      });
+    }
+    // #1507 -- HTTPS :443 listener so CloudFront's origin leg (via the
+    // NetScaler VIP) runs over TLS. Same 403-default + X-Origin-Verify-forward
+    // shape as the legacy :80 listener, onto the same target group. Added once
+    // the ALB-region cert (edgeOriginCertArn) is seeded.
     // #1938: handles for the :443 listener + rule, so the ECS service can
-    // depend on them (below) the same way it depends on the :80 pair.
+    // depend on them (below).
     let publicHttpsListener: elbv2.ApplicationListener | undefined;
     let originVerifiedHttpsRule: elbv2.ApplicationListenerRule | undefined;
     if (envConfig.edgeOriginCertArn.length > 0) {
@@ -3780,16 +3810,21 @@ export class AppStack extends Stack {
     // WCM-CIDR-only (#1434), so `deploy.yml` can't just `curl` the deployed
     // hostname itself. Instead this runs in-VPC -- reusing the app service's
     // network config exactly like migrate/db-bootstrap/verify-grants above --
-    // and hits the PUBLIC ALB's DNS name directly, bypassing CloudFront/the
-    // WAF entirely (issue #1444: skipping CloudFront is a determinism plus,
-    // not a workaround). The ALB's public listener still gates every request
+    // and hits the ORIGIN directly, bypassing CloudFront/the WAF entirely
+    // (issue #1444: skipping CloudFront is a determinism plus, not a
+    // workaround). With the HTTPS origin leg seeded that is the NetScaler VIP
+    // hostname over TLS (`https://<edgeOriginHostname>`) -- the same target
+    // the edge origin probe Lambda dials -- because the ALB's
+    // `*.elb.amazonaws.com` name cannot pass cert verification against the
+    // :443 listener's cert. Before the leg is seeded it falls back to the ALB
+    // DNS name on :80. The ALB's public listener still gates every request
     // on the X-Origin-Verify shared secret (B07), so the container gets it
     // injected via its OWN dedicated execution role (canaryTaskExecutionRole
     // above) -- never the shared deploy execution role, which must stay
     // scoped to exactly the four DB DSNs (ADR-009, asserted in
     // app-stack.test.ts).
     //
-    // No `taskRole` grant: the canary makes outbound HTTP calls only and
+    // No `taskRole` grant: the canary makes outbound HTTPS calls only and
     // touches no AWS API at runtime.
     // ------------------------------------------------------------------
     this.searchEvalCanaryTaskDefinition = new ecs.FargateTaskDefinition(
@@ -3808,7 +3843,9 @@ export class AppStack extends Stack {
       essential: true,
       entryPoint: ["npx", "tsx", "scripts/search-eval/canary.ts"],
       environment: {
-        CANARY_HOST: `http://${this.publicAlb.loadBalancerDnsName}`,
+        CANARY_HOST: originTlsReady
+          ? `https://${envConfig.edgeOriginHostname}`
+          : `http://${this.publicAlb.loadBalancerDnsName}`,
       },
       logging: ecs.LogDriver.awsLogs({
         logGroup: searchEvalCanaryLogGroup,
@@ -3912,7 +3949,7 @@ export class AppStack extends Stack {
     // Every resource that establishes a TG -> LB association must be
     // an upstream dependency of the service:
     //   - internalListener: associates the TG via its DefaultActions.
-    //   - originVerifiedRule: the priority-1 rule on the public listener
+    //   - originVerifiedRule(Https): the priority-1 rule on each public listener
     //     that forwards to the TG (the listener's own default action is
     //     a fixed-response 403, so the rule -- not the listener -- is
     //     what creates the public-side TG/LB association).
@@ -3921,12 +3958,13 @@ export class AppStack extends Stack {
     // suspenders, but it keeps the intent self-evident in a refactor.
     this.ecsService.node.addDependency(publicAppTargetGroup);
     this.ecsService.node.addDependency(internalAppTargetGroup);
-    this.ecsService.node.addDependency(publicListener);
-    this.ecsService.node.addDependency(originVerifiedRule);
+    if (publicListener && originVerifiedRule) {
+      this.ecsService.node.addDependency(publicListener, originVerifiedRule);
+    }
     this.ecsService.node.addDependency(internalListener);
-    // #1938: the :443 listener + its priority-1 forward rule also bind the
-    // public TG to the ALB. Added alongside (not instead of) the :80 deps so
-    // :80 can later be removed without a dependency-ordering gap.
+    // #1938: the :443 listener + its priority-1 forward rule bind the public TG
+    // to the ALB. Once :80 is retired (originTlsReady) these are the ONLY
+    // public-side TG association, so the service must wait on them.
     if (publicHttpsListener && originVerifiedHttpsRule) {
       this.ecsService.node.addDependency(publicHttpsListener, originVerifiedHttpsRule);
     }

@@ -399,7 +399,7 @@ Read from `Sps-App-${env}` CloudFormation outputs (see [`docs/PRODUCTION_ADDENDU
 | `EcsClusterName` | Migrate, Update, Wait | `aws ecs` cluster arg |
 | `EcsServiceName` | Update, Wait | `aws ecs update-service` target |
 | `EcsMigrationTaskFamily` | Migrate | `aws ecs run-task --task-definition` |
-| `PublicAlbDns` | Smoke test | `curl http://{dns}/api/health` |
+| `PublicAlbDns` | Origin backout only | CloudFront `HTTP_ONLY` origin while `edgeOriginHostname` is empty. The ALB has no :80 otherwise; smoke-test through the site or the origin hostname over HTTPS |
 
 ### OIDC trust shape
 
