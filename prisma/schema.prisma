@@ -4970,6 +4970,23 @@ model MatchaBrief {
   @@map("matcha_brief")
 }
 
+/// Matcha report v2: the stored concepts of one paste grouped into at most six labelled themes
+/// for the report's coverage table. One Sonnet call per (paste, concept set); a failed call
+/// saves nothing. `conceptsHash` = sha256 of the sorted concept terms, so a re-extraction that
+/// changes the concepts gets fresh themes while the old row stays inert.
+model MatchaReportTheme {
+  id              String   @id @default(uuid()) @db.VarChar(64)
+  descriptionHash String   @map("description_hash") @db.VarChar(64)
+  conceptsHash    String   @map("concepts_hash") @db.VarChar(64)
+  /// `ReportTheme[]`: `[{ label, terms[] }]`, every concept term in exactly one theme.
+  themes          Json
+  model           String   @db.VarChar(64)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([descriptionHash, conceptsHash])
+  @@map("matcha_report_theme")
+}
+
 
 /// One CTSC feed record whose CWID CTSC should fix at the source, rebuilt each
 /// night by `etl/ctsc-roster`. Shown on the CTSC center's /edit page ("Feed

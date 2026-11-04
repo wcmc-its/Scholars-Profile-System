@@ -1,5 +1,5 @@
 /**
- * Matcha Phase 4: the printable scouting report (`/edit/matcha/report`).
+ * Matcha Phase 4: the printable scouting report (`/edit/matcha/report`), v2 coverage layout.
  *
  * Server-only. Everything here is read from the SAVED search, the paste's `MatchaBrief` rows and
  * live records; the client names a submission and PIs, nothing else. A cwid absent from the stored
@@ -8,7 +8,8 @@
  *
  * External-safe by construction: this module never SELECTS what the report must not show — no
  * brief note, no researcher email, no score or ask weight, no researcher-type label, no InfoEd
- * routing field, no award amount, no `removedCount`. The view can only render what this returns.
+ * routing field, no award amount, no `removedCount`, and not the raw paste. The view can only
+ * render what this returns. Contribution ranks reach the view only as coverage marks.
  */
 import { db } from "@/lib/db";
 import type { EditSession } from "@/lib/auth/superuser";
@@ -23,7 +24,15 @@ import {
   type BriefTopic,
 } from "@/lib/api/matcha-brief";
 import { fitTier, type MatchaCandidate, type MatchaFitTier } from "@/lib/api/matcha-contract";
-import { briefTopics, briefWhy } from "@/lib/edit/matcha-brief-types";
+import { loadReportThemes } from "@/lib/api/matcha-report-themes";
+import { briefTopics, briefWhy, firstSentence } from "@/lib/edit/matcha-brief-types";
+import {
+  computeCoverage,
+  signalChips,
+  type Coverage,
+  type ReportTheme,
+} from "@/lib/edit/matcha-report-coverage";
+import { headshotUrl } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
 import { siteBaseUrl } from "@/lib/site-url";
 import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
@@ -43,7 +52,12 @@ export type ReportPaper = { pmid: string; title: string; year: number | null };
 export type ReportPi = {
   cwid: string;
   rank: number;
+  /** Display name, with postnominals. */
   name: string;
+  /** Preferred name without postnominals: initials, the gaps prose. */
+  shortName: string;
+  /** Directory headshot URL; "" when the scholar is known to have none (initials only). */
+  photoUrl: string;
   title: string | null;
   department: string | null;
   profileUrl: string;
@@ -52,6 +66,10 @@ export type ReportPi = {
   funding: BriefRecords["funding"];
   translation: BriefRecords["translation"];
   fit: MatchaFitTier;
+  /** Up to two record-derived shortlist chips (`signalChips`). */
+  signals: string[];
+  /** The shortlist's line: the first sentence of Why (edited text wins). Null with no brief. */
+  oneLine: string | null;
   keyPapers: ReportPaper[];
   /** Edited text when present, else generated. Null = no brief drafted for this PI. */
   brief: { why: string; topics: BriefTopic[]; draftedAt: Date } | null;
@@ -59,10 +77,15 @@ export type ReportPi = {
 
 export type MatchaReport = {
   title: string;
-  ask: string;
   generatedAt: Date;
   officer: { name: string; email: string | null };
   pis: ReportPi[];
+  /** Every concept member, in stored order, de-duplicated: the footer's full search terms. */
+  searchTerms: string[];
+  /** Null when grouping failed: the coverage table, gaps callout and gaps card are hidden. */
+  themes: ReportTheme[] | null;
+  /** Rows align with `pis`; columns with `themes`. Null exactly when `themes` is. */
+  coverage: Coverage | null;
 };
 
 /** `a,b,c` → distinct, trimmed, plausible cwids in the order given. Uncapped: the cap applies
@@ -79,7 +102,7 @@ export function parseReportCwids(raw: string | null | undefined): string[] {
 }
 
 /**
- * The officer named on the cover: the session's own directory entry (name + mail), else their
+ * The officer named in the header: the session's own directory entry (name + mail), else their
  * Scholar row, else the bare cwid. Never throws; a slow directory falls through.
  */
 export async function loadOfficerContact(
@@ -150,7 +173,8 @@ export async function loadMatchaReport(
 ): Promise<MatchaReport | null> {
   const sub = await db.read.sponsorMatchSubmission.findUnique({
     where: { id: submissionId, ...matchaSubmissionScope(session) },
-    select: { descriptionHash: true, description: true, title: true, titleOverride: true },
+    // NEVER `description`: the raw paste is not part of the report.
+    select: { descriptionHash: true, title: true, titleOverride: true },
   });
   if (!sub) return null;
   const stored = await loadStoredResult(sub.descriptionHash, requested);
@@ -160,7 +184,7 @@ export async function loadMatchaReport(
   const cwids = requested.filter((c) => byCwid.has(c)).slice(0, MATCHA_REPORT_CAP);
   const topScore = stored.candidates.reduce((m, c) => Math.max(m, c.fusedScore), 0);
 
-  const [briefRows, records, scholars, officer] = await Promise.all([
+  const [briefRows, records, scholars, officer, themes] = await Promise.all([
     cwids.length
       ? db.read.matchaBrief.findMany({
           where: { descriptionHash: sub.descriptionHash, cwid: { in: cwids } },
@@ -180,10 +204,13 @@ export async function loadMatchaReport(
             primaryTitle: true,
             primaryDepartment: true,
             slug: true,
+            hasHeadshot: true,
           },
         })
       : Promise.resolve([]),
     loadOfficerContact(session.cwid),
+    // Never throws: null hides the coverage section for this view.
+    cwids.length ? loadReportThemes(sub.descriptionHash, stored.concepts ?? []) : Promise.resolve(null),
   ]);
   const briefBy = new Map(briefRows.map((b) => [b.cwid, b]));
   const scholarBy = new Map(scholars.map((s) => [s.cwid, s]));
@@ -221,6 +248,8 @@ export async function loadMatchaReport(
       cwid,
       rank: i + 1,
       name,
+      shortName: s?.preferredName ?? c.name,
+      photoUrl: headshotUrl(cwid, s?.hasHeadshot),
       title: s?.primaryTitle ?? c.title,
       department: s?.primaryDepartment ?? c.department,
       profileUrl: new URL(profilePath(s?.slug ?? c.profileSlug), siteBaseUrl()).toString(),
@@ -229,6 +258,8 @@ export async function loadMatchaReport(
       funding: rec.funding,
       translation: rec.translation,
       fit: fitTier(c.fusedScore, topScore),
+      signals: signalChips(rec.funding, c.technologyCount ?? 0),
+      oneLine: brief && brief.why.trim() ? firstSentence(brief.why) : null,
       keyPapers: papersFrom(brief?.topics ?? [], c),
       brief,
     };
@@ -251,11 +282,27 @@ export async function loadMatchaReport(
     );
   }
 
+  const searchTerms: string[] = [];
+  for (const concept of stored.concepts ?? []) {
+    for (const m of concept.members?.length ? concept.members : [concept.term]) {
+      const t = m.trim();
+      if (t && !searchTerms.some((x) => x.toLowerCase() === t.toLowerCase())) searchTerms.push(t);
+    }
+  }
+  const coverage = themes
+    ? computeCoverage(
+        cwids.map((cwid) => ({ cwid, contributions: byCwid.get(cwid)!.contributions ?? [] })),
+        themes,
+      )
+    : null;
+
   return {
     title: sub.titleOverride ?? sub.title ?? "Untitled search",
-    ask: sub.description,
     generatedAt: new Date(),
     officer,
     pis,
+    searchTerms,
+    themes: coverage ? themes : null,
+    coverage,
   };
 }
