@@ -150,12 +150,13 @@ type HonorsQueueViewer = {
   isHonorsCurator?: boolean;
   isObserver?: boolean;
   isContentEditor?: boolean;
+  isCommsSteward?: boolean;
 };
 
 /**
  * Who may READ the honors queue (page, CSV export, tab): a superuser, an
- * honors_curator, or an observer / content editor (read-only, decision
- * 2026-10-01). Deciding stays superuser / honors_curator: the decision routes
+ * honors_curator, or an observer / content editor / comms_steward (read-only,
+ * decision 2026-10-01). Deciding stays superuser / honors_curator: the decision routes
  * check `isHonorsCurator` on the write session.
  */
 export function canViewHonorsQueue(session: HonorsQueueViewer): boolean {
@@ -163,7 +164,8 @@ export function canViewHonorsQueue(session: HonorsQueueViewer): boolean {
     session.isSuperuser ||
     session.isHonorsCurator === true ||
     session.isObserver === true ||
-    session.isContentEditor === true
+    session.isContentEditor === true ||
+    session.isCommsSteward === true
   );
 }
 

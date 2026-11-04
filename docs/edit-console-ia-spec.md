@@ -25,7 +25,7 @@ The matrix is `tests/unit/console-tab-matrix.fixture.ts`, not this table. That f
 | Profiles / Org units | ✓ | ✓ | ✗ | ✓ (`manageableUnitCount > 0`) | ✓ same | ✗ |
 | URL requests / URL registry / Activity / ETL status | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Cores | ✓ (flag) | ✓ (flag; 2026-08-26 policy widening, decision #6 — full curator-parity on cores) | ✗ | ✗ (owner-scoped index still a deliberately deferred gap) | ✗ | ✗ |
-| Honors | ✓ (flag) | ✗ | ✓ | ✗ | ✗ | ✗ |
+| Honors | ✓ (flag) | ✓ read-only | ✓ | ✗ | ✗ | ✗ |
 | News | ✓ | ✓ (flag) | ✗ | ✗ | ✗ | ✗ |
 | Administrators | ✓ (flag) | ✗ | ✗ | ✓ — `ownerUnitCount > 0` only, D5 | ✗ (by design, D5) | ✗ |
 | Method families | ✓ (flag) | ✓ | ✗ | ✗ | ✗ | ✗ |
