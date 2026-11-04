@@ -219,5 +219,5 @@ scope and would each be their own follow-on workstream:
   ```
   aws ecr-public describe-images \
     --repository-name aws-otel-collector \
-    --image-ids imageTag=v0.43.3 --region us-east-1
+    --image-ids imageTag=v0.51.0 --region us-east-1
   ```
