@@ -72,7 +72,8 @@ const EXT: Source[] = [
 const PUB: Source[] = [
   { name: "PubMed", data: "Publication records, retractions", cad: "nightly" },
   { name: "Scopus", data: "Citation counts, papers not in PubMed", cad: "nightly" },
-  { name: "OpenAlex", data: "Papers not in PubMed", cad: "nightly" },
+  { name: "OpenAlex", data: "Papers not in PubMed and their abstracts", cad: "nightly" },
+  { name: "Crossref", data: "Abstracts for papers not in PubMed, where OpenAlex has none", cad: "nightly" },
   { name: "NIH iCite", data: "Citing papers", cad: "occasional" },
 ];
 
@@ -207,6 +208,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
       },
       { field: "Papers not in PubMed", detail: "From Scopus or OpenAlex", source: "ReCiter, added by library curators", cadence: "Nightly", tag: "At the source", how: "Ask the library curation team to add or remove one." },
       { field: "Publication details", detail: "Title, authors, journal, DOI", source: "PubMed", cadence: "Nightly", tag: "Request a change", how: "Routes to ITS Support. The fix is made at PubMed." },
+      { field: "Abstracts of papers not in PubMed", detail: "Conference abstracts and preprints", source: "OpenAlex, or Crossref where OpenAlex has none, via the ReCiter database", cadence: "Nightly", tag: "At the source", how: "Follows the publisher's record. Some publishers share no abstract, so none is shown." },
       { field: "MeSH topics", detail: "The Topics list on your profile", source: "PubMed indexing, via ReCiter", cadence: "Nightly", tag: "At the source", how: "Set by NLM indexers. Hide a paper to drop its tags." },
       { field: "Citation count", source: "Scopus", cadence: "Nightly", tag: "At the source", how: "Follows Scopus." },
       { field: "Citing papers", source: "NIH iCite", cadence: "Occasional", tag: "At the source", how: "Follows iCite." },
