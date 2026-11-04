@@ -34,7 +34,13 @@ type XDoc = XNode & {
   createTextNode(text: string): XNode;
 };
 
-export type Run = { text: string; bold?: boolean };
+export type Run = {
+  text: string;
+  bold?: boolean;
+  /** PubMed inline markup in citation titles (`<i>`, `<sup>`, `<sub>`). */
+  italic?: boolean;
+  vertAlign?: "superscript" | "subscript";
+};
 
 // ponytail: module-relative resolve so the standalone build can find the asset
 // (next.config `outputFileTracingIncludes` ships it). cwd works in dev + tests.
@@ -138,6 +144,12 @@ function makeRun(doc: XDoc, run: Run, rPrTemplate?: XNode): XNode {
   const r = doc.createElement("w:r");
   const rPr = rPrTemplate ? rPrTemplate.cloneNode(true) : arialRPr(doc);
   if (run.bold && childrenByTag(rPr, "w:b").length === 0) rPr.appendChild(doc.createElement("w:b"));
+  if (run.italic && childrenByTag(rPr, "w:i").length === 0) rPr.appendChild(doc.createElement("w:i"));
+  if (run.vertAlign && childrenByTag(rPr, "w:vertAlign").length === 0) {
+    const va = doc.createElement("w:vertAlign");
+    va.setAttribute?.("w:val", run.vertAlign);
+    rPr.appendChild(va);
+  }
   r.appendChild(rPr);
   const tEl = doc.createElement("w:t");
   tEl.setAttribute?.("xml:space", "preserve");

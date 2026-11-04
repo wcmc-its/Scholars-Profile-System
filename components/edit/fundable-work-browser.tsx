@@ -26,6 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { conferenceOf, type FundableWorkFunder } from "@/lib/fundable-work";
 import { cn } from "@/lib/utils";
+import { PubAbstract, PubTitle } from "@/components/publication/pub-html";
 
 export type FundableWorkAuthorRow = {
   cwid: string;
@@ -480,7 +481,7 @@ function WorkCard({
 
         <h2 className="text-[17px] leading-snug font-semibold">
           <a href={r.url} target="_blank" rel="noreferrer" className="hover:text-apollo-slate hover:underline">
-            {r.title}
+            <PubTitle value={r.title} />
             <ExternalLink size={14} className="text-muted-foreground ml-1.5 inline-block align-[-1px]" aria-hidden />
           </a>
         </h2>
@@ -576,7 +577,7 @@ function WorkCard({
 
         {abstractOpen && (
           <div className="bg-apollo-page border-apollo-border text-muted-foreground mt-1 max-h-70 overflow-auto rounded-lg border px-4 py-3.5 text-[13px] leading-relaxed whitespace-pre-line">
-            {r.abstract || "No abstract text."}
+            {r.abstract ? <PubAbstract value={r.abstract} /> : "No abstract text."}
           </div>
         )}
       </div>

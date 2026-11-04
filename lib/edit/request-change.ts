@@ -11,6 +11,7 @@
  */
 import { REQUEST_A_CHANGE, type RequestAttribute } from "@/lib/edit/request-a-change";
 import { siteBaseUrl } from "@/lib/site-url";
+import { htmlToPlainText } from "@/lib/utils";
 
 /** Human label per attribute — drives the email subject + body (mirrors the dialog map). */
 const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
@@ -80,7 +81,9 @@ export function resolveRequestChange(attribute: RequestAttribute, issueId: strin
 
 /** Strip CR/LF from a single-line field so the structured body stays well-formed. */
 function oneLine(value: string): string {
-  return value.replace(/[\r\n]+/g, " ").trim();
+  // Item labels can be PubMed titles with inline markup (`<i>BRCA1</i>`);
+  // the email is plain text, so strip tags and decode entities.
+  return htmlToPlainText(value, Number.POSITIVE_INFINITY);
 }
 
 /** The fixed subject for an attribute — never user free text (no injection vector). */

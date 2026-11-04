@@ -46,6 +46,23 @@ function deltas(over: Partial<OverviewSelectionDeltas> = {}): OverviewSelectionD
   return { ...DEFAULT_OVERVIEW_SELECTION_DELTAS, ...over };
 }
 
+describe("OverviewIncludePicker — marked-up publication strings", () => {
+  it("names the checkbox by the plain-text title and strips markup from the venue", () => {
+    const opts = options();
+    opts.publications[0] = {
+      ...opts.publications[0],
+      title: "<i>CLN3</i> gene therapy",
+      venue: "<i>Sci</i> Transl Med &amp; More",
+    };
+    render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    const r = screen.getByTestId("overview-source-row-publication-11");
+    const box = r.querySelector('input[type="checkbox"]');
+    expect(box?.getAttribute("aria-label")).toMatch(/: CLN3 gene therapy$/);
+    expect(r.textContent).toContain("Sci Transl Med & More");
+    expect(r.textContent).not.toContain("<i>");
+  });
+});
+
 describe("OverviewIncludePicker — tiers", () => {
   it("shows featured rows and hides the Available tail (more / mid) by default", () => {
     render(<OverviewIncludePicker options={options()} deltas={deltas()} onChange={() => {}} />);

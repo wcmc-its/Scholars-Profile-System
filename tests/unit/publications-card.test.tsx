@@ -103,6 +103,23 @@ describe("PublicationsCard — filter", () => {
     expect(screen.queryByText("Gamma study")).toBeNull();
   });
 
+  it("filters on the plain-text title, not its PubMed markup", () => {
+    const pubs = [
+      pub({ pmid: "a", title: "<i>BRCA1</i> mutation in patients aged &lt;18" }),
+      pub({ pmid: "b", title: "Beta <sub>2</sub> study" }),
+    ];
+    const { container } = render(<PublicationsCard cwid={CWID} publications={pubs} />);
+    const filterTo = (value: string) =>
+      fireEvent.change(screen.getByTestId("publications-filter"), { target: { value } });
+    filterTo("brca1 mutation");
+    expect(container.textContent).toContain("BRCA1 mutation");
+    expect(container.textContent).not.toContain("Beta 2 study");
+    filterTo("aged <18");
+    expect(container.textContent).toContain("BRCA1 mutation");
+    filterTo("sub");
+    expect(screen.getByText(/No publications match/i)).toBeTruthy();
+  });
+
   it("shows the no-match copy when the filter narrows to zero", () => {
     const pubs = [pub({ pmid: "a", title: "Alpha study" })];
     render(<PublicationsCard cwid={CWID} publications={pubs} />);

@@ -41,6 +41,53 @@ describe("htmlToPlainText", () => {
     expect(htmlToPlainText(title)).toBe("Dosing at <5 mg vs >20 mg in vivo");
   });
 
+  it("keeps bare (unescaped) comparators — only tag-shaped < is markup", () => {
+    expect(
+      htmlToPlainText("Effect in patients aged <18 years and >65", Number.POSITIVE_INFINITY),
+    ).toBe("Effect in patients aged <18 years and >65");
+    expect(htmlToPlainText("p<0.05 vs q>1 outcome")).toBe("p<0.05 vs q>1 outcome");
+    expect(htmlToPlainText("a < b <i>gene</i> > c")).toBe("a < b gene > c");
+  });
+
+  it("still strips non-inline tags, closers, and comments to a space", () => {
+    expect(htmlToPlainText("line<br/>break")).toBe("line break");
+    expect(htmlToPlainText("one<!-- c -->two</div>three")).toBe("one two three");
+  });
+
+  it("a decoded &lt;i&gt; is data: never stripped as a tag", () => {
+    expect(htmlToPlainText("the &lt;i&gt; tag and <i>real</i> italics")).toBe(
+      "the <i> tag and real italics",
+    );
+  });
+
+  it("treats <mark> and <u> as inline (no inserted space)", () => {
+    expect(htmlToPlainText('(<mark class="pill">BRCA1</mark>)')).toBe("(BRCA1)");
+    expect(htmlToPlainText("<mark>COVID</mark>-19")).toBe("COVID-19");
+    expect(htmlToPlainText("pre<u>fix</u>ed")).toBe("prefixed");
+  });
+
+  it("an orphan tag-shaped < never swallows text up to a later tag", () => {
+    expect(htmlToPlainText("x <a few cases<br>BRCA1")).toBe("x <a few cases BRCA1");
+  });
+
+  it("keeps text around UNESCAPED bare comparators (not tag-shaped)", () => {
+    expect(htmlToPlainText("aged <18 years and >65", Number.POSITIVE_INFINITY)).toBe(
+      "aged <18 years and >65",
+    );
+    expect(htmlToPlainText("p<0.05 in <i>BRCA1</i> carriers, OR>2")).toBe(
+      "p<0.05 in BRCA1 carriers, OR>2",
+    );
+  });
+
+  it("decodes numeric entities and decodes &amp; last (once)", () => {
+    expect(htmlToPlainText("&#946;-cell &#x3B1; &amp;lt;tag&amp;gt;")).toBe("β-cell α &lt;tag&gt;");
+  });
+
+  it("never reassembles a tag from nested pieces", () => {
+    expect(htmlToPlainText("x<<i>iframe src=y>z")).not.toMatch(/<iframe/i);
+    expect(htmlToPlainText("<<b>script>alert(1)<</b>/script>")).not.toMatch(/<\/?script/i);
+  });
+
   it("keeps the excerpt truncation contract", () => {
     const long = "word ".repeat(60).trim();
     const out = htmlToPlainText(long, 50);

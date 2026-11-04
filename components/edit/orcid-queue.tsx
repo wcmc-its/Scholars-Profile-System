@@ -1695,7 +1695,7 @@ function Publications({
             {r.newWorksSample.map((w, i) => (
               <PubItem
                 key={i}
-                title={w.title ?? "Untitled work"}
+                title={w.title ? <PubTitle value={w.title} /> : "Untitled work"}
                 year={w.year}
                 meta={w.source}
                 ids={{ doi: w.doi, pmid: w.pmid }}

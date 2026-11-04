@@ -2506,6 +2506,17 @@ describe("matchesQuery", () => {
     meshTerms: [{ ui: "D000000", label: "Zebrafish" }],
   });
 
+  it("matches the plain text of a marked-up title / journal, never the tags", () => {
+    const marked = row({
+      title: "Role of <i>BRCA1</i> mutation in patients aged &lt;18",
+      journal: "<i>Nature</i> Genetics",
+    });
+    expect(matchesQuery(marked, "brca1 mutation")).toBe(true);
+    expect(matchesQuery(marked, "aged <18")).toBe(true);
+    expect(matchesQuery(marked, "nature genetics")).toBe(true);
+    expect(matchesQuery(marked, "<i>")).toBe(false);
+  });
+
   it("matches on each field the card puts on screen", () => {
     expect(matchesQuery(searchable, "advanced mri")).toBe(true); // title, case-insensitive
     expect(matchesQuery(searchable, "NeuroImage")).toBe(true); // journal

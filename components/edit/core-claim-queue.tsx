@@ -100,6 +100,8 @@ import {
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { toCsv } from "@/lib/csv";
+import { PubJournal, PubTitle, pubTitleAccessibleName } from "@/components/publication/pub-html";
+import { htmlToPlainText } from "@/lib/utils";
 
 /** Server-side batch cap on `POST /api/edit/core-claim/bulk` (MAX_BULK_PMIDS).
  *  Mirrored here so an over-long paste is caught before the round-trip, and so
@@ -1056,8 +1058,10 @@ export function matchesFilters(
  */
 export function searchBlob(row: CoreQueueRow): string {
   return [
-    row.title,
-    row.journal,
+    // Plain text, so a query matches what the reviewer READS ("BRCA1 mutation"
+    // hits "<i>BRCA1</i> mutation", "<18" hits "&lt;18") and never the markup.
+    htmlToPlainText(row.title, Number.POSITIVE_INFINITY),
+    row.journal ? htmlToPlainText(row.journal, Number.POSITIVE_INFINITY) : null,
     row.pmid,
     row.synopsis,
     row.authorsString,
@@ -2183,7 +2187,8 @@ export function CoreClaimQueue({
         else next.delete(pmid);
         return next;
       });
-      const title = candidates.find((c) => c.pmid === pmid)?.title ?? "this publication";
+      const found = candidates.find((c) => c.pmid === pmid)?.title;
+      const title = found ? pubTitleAccessibleName(found) : "this publication";
       setAnnounce(
         status === "revoked"
           ? "Undone."
@@ -2463,7 +2468,7 @@ export function CoreClaimQueue({
     const result = await postClaim(pmid, revokeStatusFor(row));
     if (result.ok) {
       setRevokedConfirmed((s) => new Set(s).add(pmid));
-      setAnnounce(`Revoked ${title}.`);
+      setAnnounce(`Revoked ${pubTitleAccessibleName(title)}.`);
     } else {
       setError(pmid, result.error);
     }
@@ -2498,7 +2503,7 @@ export function CoreClaimQueue({
     const result = await postClaim(pmid, "revoked");
     if (result.ok) {
       setRestoredRejected((s) => new Set(s).add(pmid));
-      setAnnounce(`Restored ${title}.`);
+      setAnnounce(`Restored ${pubTitleAccessibleName(title)}.`);
     } else {
       setError(pmid, result.error);
     }
@@ -4304,7 +4309,7 @@ function ConfirmedListRow({
           checked={checked}
           disabled={pending}
           onChange={onCheck}
-          aria-label={`Select ${row.title}`}
+          aria-label={`Select ${pubTitleAccessibleName(row.title)}`}
           className="mt-1 size-4 shrink-0 accent-[var(--apollo-slate)]"
         />
       )}
@@ -4319,7 +4324,7 @@ function ConfirmedListRow({
               revoked ? "text-muted-foreground line-through" : "text-foreground"
             }`}
           >
-            {displayTitle(row.title)}
+            <PubTitle value={displayTitle(row.title)} />
           </span>
           <span className="text-muted-foreground mt-0.5 block text-xs tabular-nums">{meta}</span>
           {row.isManual ? null : (
@@ -4459,7 +4464,7 @@ function ConfirmedPaper({
     <article
       data-slot="core-queue-confirmed-focus"
       data-pmid={row.pmid}
-      aria-label={`Confirmed: ${row.title}`}
+      aria-label={`Confirmed: ${pubTitleAccessibleName(row.title)}`}
       className={`${
         sheetOpen ? "fixed inset-0 z-40 flex overflow-y-auto" : "hidden"
       } bg-apollo-surface lg:border-apollo-border min-w-0 flex-col gap-4 p-5 lg:sticky lg:inset-auto lg:top-4 lg:z-auto lg:flex lg:overflow-visible lg:rounded-[var(--apollo-radius-card)] lg:border lg:px-[22px] lg:py-5 lg:shadow-[var(--apollo-shadow-card)]`}
@@ -4496,7 +4501,7 @@ function ConfirmedPaper({
 
       <div>
         <h3 className="text-foreground text-[19px] leading-snug font-medium text-pretty">
-          {displayTitle(row.title)}
+          <PubTitle value={displayTitle(row.title)} />
         </h3>
         <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px]">
           {row.year !== null ? (
@@ -4722,7 +4727,7 @@ function RejectedRow({
         <span className="size-4 shrink-0" aria-hidden />
         <span className="flex min-w-0 flex-1 items-baseline gap-2">
           <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
-          <span className="truncate">{row.title}</span>
+          <PubTitle className="truncate" value={row.title} />
           {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
           <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
           <span className="shrink-0 text-xs italic">— Restored, re-files on next load</span>
@@ -4745,12 +4750,12 @@ function RejectedRow({
         checked={checked}
         disabled={pending}
         onChange={onCheck}
-        aria-label={`Select ${row.title}`}
+        aria-label={`Select ${pubTitleAccessibleName(row.title)}`}
         className="size-4 shrink-0 accent-[var(--apollo-slate)]"
       />
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <X className="text-muted-foreground size-3.5 shrink-0 translate-y-0.5" aria-hidden />
-        <span className="text-foreground truncate">{row.title}</span>
+        <PubTitle className="text-foreground truncate" value={row.title} />
         {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
         <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
       </span>
@@ -4872,7 +4877,7 @@ function QueueListRow({
         type="checkbox"
         checked={checked}
         onChange={onCheck}
-        aria-label={`Select ${row.title}`}
+        aria-label={`Select ${pubTitleAccessibleName(row.title)}`}
         className="mt-1 size-4 shrink-0 accent-[var(--apollo-slate)]"
       />
       <button
@@ -4882,7 +4887,7 @@ function QueueListRow({
       >
         <span className="min-w-0 flex-1">
           <span className="text-foreground line-clamp-2 block text-sm leading-snug">
-            {displayTitle(row.title)}
+            <PubTitle value={displayTitle(row.title)} />
           </span>
           <span
             data-slot="core-queue-row-meta"
@@ -4890,7 +4895,7 @@ function QueueListRow({
           >
             {meta.journal ? (
               <>
-                <span className="min-w-0 truncate">{meta.journal}</span>
+                <PubJournal as="span" className="min-w-0 truncate" value={meta.journal} />
                 <span className="shrink-0 whitespace-pre"> · </span>
               </>
             ) : null}
@@ -5016,7 +5021,7 @@ function FocusedPaper({
   const journalLabel = row.journal ?? row.journalAbbrev;
   const addedToPubMed = formatAddedToPubMed(row.dateAddedToEntrez);
   const metaParts: Array<{ key: string; node: ReactNode }> = [];
-  if (journalLabel) metaParts.push({ key: "journal", node: <span>{journalLabel}</span> });
+  if (journalLabel) metaParts.push({ key: "journal", node: <PubJournal as="span" value={journalLabel} /> });
   if (addedToPubMed) metaParts.push({ key: "added", node: <span>{addedToPubMed}</span> });
   else if (row.year !== null)
     metaParts.push({ key: "year", node: <span className="tabular-nums">{row.year}</span> });
@@ -5039,7 +5044,7 @@ function FocusedPaper({
     <article
       data-slot="core-queue-focus"
       data-pmid={row.pmid}
-      aria-label={`Candidate: ${row.title}`}
+      aria-label={`Candidate: ${pubTitleAccessibleName(row.title)}`}
       className={`${
         sheetOpen ? "fixed inset-0 z-40 flex overflow-y-auto" : "hidden"
       } bg-apollo-surface lg:border-apollo-border min-w-0 flex-col gap-4 p-5 lg:sticky lg:inset-auto lg:top-4 lg:z-auto lg:flex lg:overflow-visible lg:rounded-[var(--apollo-radius-card)] lg:border lg:px-[22px] lg:py-5 lg:shadow-[var(--apollo-shadow-card)]`}
@@ -5083,7 +5088,7 @@ function FocusedPaper({
           </p>
         ) : null}
         <h3 className="text-foreground text-[19px] leading-snug font-medium text-pretty">
-          {displayTitle(row.title)}
+          <PubTitle value={displayTitle(row.title)} />
         </h3>
         <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px]">
           {metaParts.map((part, i) => (

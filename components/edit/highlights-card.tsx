@@ -45,7 +45,7 @@ import { Switch } from "@/components/ui/switch";
 import type { EditContextHighlights } from "@/lib/api/edit-context";
 import { MAX_SELECTED_HIGHLIGHTS as MAX } from "@/lib/edit/validators";
 import { NEVER_DISPLAY_TYPES, displayPublicationType } from "@/lib/publication-types";
-import { cn } from "@/lib/utils";
+import { cn, htmlToPlainText } from "@/lib/utils";
 
 export type HighlightsCardProps = {
   cwid: string;
@@ -111,8 +111,8 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
     const filtered = highlights.pickable.filter((p) => {
       if (!q) return true;
       return (
-        p.title.toLowerCase().includes(q) ||
-        (p.journal ?? "").toLowerCase().includes(q) ||
+        htmlToPlainText(p.title, Number.POSITIVE_INFINITY).toLowerCase().includes(q) ||
+        htmlToPlainText(p.journal ?? "", Number.POSITIVE_INFINITY).toLowerCase().includes(q) ||
         p.pmid.includes(q)
       );
     });

@@ -44,9 +44,9 @@ const SCAN_ROOTS = ["app", "components"];
 const SOURCE_EXT = /\.(tsx|jsx)$/;
 
 /** Variable names that, by convention in this codebase, hold a publication. */
-const PUBLICATION_VARS = ["pub", "p", "publication", "hit", "c", "citing"];
+const PUBLICATION_VARS = ["pub", "p", "publication", "hit", "c", "citing", "suggestion", "hero"];
 /** PubMed-sourced string fields that must be sanitized before render. */
-const PUB_FIELDS = ["title", "journal", "abstract"];
+const PUB_FIELDS = ["title", "journal", "abstract", "articleTitle"];
 
 /**
  * Tokens that mean "this `{...}` is already on the sanctioned path." Presence of
@@ -195,6 +195,8 @@ const BAD_FIXTURES: { name: string; src: string }[] = [
   { name: "journal inside join", src: `{[p.journal, p.year].filter(Boolean).join(" · ")}` },
   { name: "CardTitle pub title", src: `<CardTitle>{publication.title}</CardTitle>` },
   { name: "citing-pub journal", src: `<em className="not-italic">{c.journal}</em>` },
+  { name: "ReCiter suggestion title", src: `<p className="text-sm">{suggestion.articleTitle}</p>` },
+  { name: "ReCiter hero title", src: `<span>{hero.articleTitle}</span>` },
 ];
 
 const GOOD_FIXTURES: { name: string; src: string }[] = [

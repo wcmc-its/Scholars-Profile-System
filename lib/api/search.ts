@@ -5535,7 +5535,8 @@ async function searchPublicationsCore(opts: {
     //      contiguous typed phrase when it exists ("Microbiome Research"), so the
     //      highlight mirrors the phrase-boosted rank; scattered, only the
     //      discriminating token lights up.
-    // The indexed title is plain text and short, so no analyzer-offset cap is
+    // The indexed title is short (and `pub_text` html_strips its PubMed
+    // markup, so marks land on content, not tag names), so no analyzer-offset cap is
     // needed (unlike the People `publicationTitles` blob). Omitted when the flag
     // is off ⇒ body unchanged.
     ...(highlightMatches

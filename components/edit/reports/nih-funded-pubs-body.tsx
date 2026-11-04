@@ -21,6 +21,7 @@
 import { LowerConfidenceBadge } from "@/components/funding/expanded-grant";
 import { loadNihFundedPublicationsReport } from "@/lib/edit/nih-funded-publications-report";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 
 const thClass = "px-3 py-2 font-medium";
 const tdClass = "px-3 py-2";
@@ -81,14 +82,16 @@ export async function renderNihFundedPubsReport({
                         rel="noreferrer"
                         className="hover:underline"
                       >
-                        {r.title}
+                        <PubTitle value={r.title} />
                       </a>
                       {r.year === null ? null : (
                         <span className="text-muted-foreground ml-1">({r.year})</span>
                       )}
                       {r.isLowerConfidence ? <LowerConfidenceBadge /> : null}
                     </td>
-                    <td className={tdClass}>{r.journal ?? "—"}</td>
+                    <td className={tdClass}>
+                      {r.journal ? <PubJournal as="span" className="not-italic" value={r.journal} /> : "—"}
+                    </td>
                     <td className={tdClass}>{r.grantTitle}</td>
                     <td className={`${tdClass} whitespace-nowrap`}>{r.awardNumber ?? "—"}</td>
                     <td className={tdClass}>

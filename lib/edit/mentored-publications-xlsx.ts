@@ -38,6 +38,7 @@ import {
 import { POSITION_FACET_LABEL, WINDOW_FACET_LABEL } from "@/lib/edit/mentored-publications-facets";
 import { MENTORSHIP_TYPE_LABEL, mentorshipLabel } from "@/lib/edit/mentorship-type";
 import { workbookBuffer } from "@/lib/edit/report-xlsx";
+import { htmlToPlainText } from "@/lib/utils";
 
 export const SUMMARY_SHEET = "Summary";
 export const RAW_SHEET = "Raw Data";
@@ -270,8 +271,8 @@ export async function buildMentoredPublicationsWorkbook(
       ? [mentorNames(r.paperMentors), mentorCwids(r.paperMentors)]
       : [r.mentorCwid, r.mentorName, r.mentorDepartment, r.mentorInstitution, r.mentorship]),
     r.pmid,
-    r.title,
-    r.journal,
+    htmlToPlainText(r.title, Number.POSITIVE_INFINITY),
+    r.journal ? htmlToPlainText(r.journal, Number.POSITIVE_INFINITY) : r.journal,
     r.jif,
     r.year,
     r.dateAdded,

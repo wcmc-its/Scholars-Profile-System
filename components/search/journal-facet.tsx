@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { TransitionLink as Link } from "@/components/search/transition-link";
 import { ChevronDown, Search } from "lucide-react";
+import { PubJournal } from "@/components/publication/pub-html";
 
 const TOP_VISIBLE = 8;
 
@@ -79,7 +80,7 @@ export function JournalFacet({
                 aria-hidden="true"
                 className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
               />
-              <span className="min-w-0 flex-1 break-words">{j.value}</span>
+              <PubJournal as="span" className="min-w-0 flex-1 break-words not-italic" value={j.value} />
               <span className="mt-[1px] shrink-0 text-[12px] text-muted-foreground tabular-nums">
                 {j.count.toLocaleString()}
               </span>

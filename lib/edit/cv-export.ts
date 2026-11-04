@@ -35,6 +35,8 @@ import {
 import type { PopsEnrichment } from "./pops";
 import type { CvSourceKey } from "./field-sources";
 import { lastNameKey } from "@/lib/last-name-key";
+import { pubmedSegments } from "@/lib/pubmed-segments";
+import { htmlToPlainText } from "@/lib/utils";
 export type {
   PopsEnrichment,
   PopsBoardCert,
@@ -205,15 +207,35 @@ function authorRuns(authorsString: string | null, selected: ReadonlySet<string>)
   return runs;
 }
 
+/** A citation title as runs honoring PubMed inline markup (`<i>` italic,
+ *  `<sup>`/`<sub>` vertAlign; bold is dropped, per Vancouver style), with
+ *  entities decoded and the trailing period(s) normalized to exactly one. */
+export function titleRuns(title: string): Run[] {
+  const runs: Run[] = pubmedSegments(title).map((seg) => ({
+    text: seg.text,
+    ...(seg.italic ? { italic: true } : {}),
+    ...(seg.sup ? { vertAlign: "superscript" as const } : seg.sub ? { vertAlign: "subscript" as const } : {}),
+  }));
+  // Drop trailing whitespace/periods across the tail runs, then end with ". ".
+  while (runs.length > 0) {
+    const last = runs[runs.length - 1]!;
+    last.text = last.text.replace(/[.\s]+$/, "");
+    if (last.text) break;
+    runs.pop();
+  }
+  runs.push({ text: ". " });
+  return runs;
+}
+
 /** A single Vancouver citation as runs (surname bold). Plain text — PMID/DOI are
  *  not hyperlinked (the template-fill path avoids relationship plumbing). */
 function citationRuns(index: number, pub: PubForCitation, selected: ReadonlySet<string>): Run[] {
   const runs: Run[] = [{ text: `${index + 1}. ` }];
   runs.push(...authorRuns(pub.fullAuthorsString ?? pub.authorsString, selected));
   runs.push({ text: ". " });
-  runs.push({ text: `${pub.title.replace(/\.+$/, "")}. ` });
+  runs.push(...titleRuns(pub.title));
   const journal = pub.journalAbbrev ?? pub.journal;
-  if (journal) runs.push({ text: `${journal}. ` });
+  if (journal) runs.push({ text: `${htmlToPlainText(journal, Number.POSITIVE_INFINITY)}. ` });
   // #2580 — the shared formatter treats a literal "NULL" volume/issue/pages as
   // absent; the local copy printed `2024;NULL(NULL):NULL.` into the CV.
   const vip = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
@@ -654,7 +676,11 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
   // Bibliography: classify each confirmed publication into its WCM category, so
   // the preview's S1–S9 bins match where the builder injects each entry.
   const pubLine = (pub: ProfilePayload["publications"][number]): string =>
-    [pub.title?.replace(/\.+$/, ""), pub.journal, pub.year ? `(${pub.year})` : ""]
+    [
+      pub.title ? htmlToPlainText(pub.title, Number.POSITIVE_INFINITY).replace(/\.+$/, "") : "",
+      pub.journal ? htmlToPlainText(pub.journal, Number.POSITIVE_INFINITY) : "",
+      pub.year ? `(${pub.year})` : "",
+    ]
       .filter(Boolean)
       .join(" — ");
   const bibByKey = new Map<BibSubsectionKey, string[]>();

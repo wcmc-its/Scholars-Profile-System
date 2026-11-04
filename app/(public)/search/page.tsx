@@ -119,6 +119,7 @@ import { methodologyHref } from "@/lib/methodology-anchors";
 import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { compactUnitName } from "@/lib/org-unit-names";
+import { htmlToPlainText } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -1955,7 +1956,7 @@ async function PublicationsResults({
     });
   }
   for (const v of journal) {
-    chips.push({ label: v, removeHref: removeMulti("journal", v) });
+    chips.push({ label: htmlToPlainText(v, Number.POSITIVE_INFINITY), removeHref: removeMulti("journal", v) });
   }
   // Issue #837 — Department chips. Label resolved via the dept/div map (falls
   // back to the bare key — e.g. a `name:<dept>` long-tail value — through

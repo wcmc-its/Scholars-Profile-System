@@ -7,6 +7,8 @@
  * file, and a db import would drag the mariadb driver into the client build.
  */
 
+import { htmlToPlainText } from "@/lib/utils";
+
 /** A topic's supporting fact, resolved from the model's key — never model-written. */
 export type BriefSource =
   | { kind: "pub"; pmid: string; year: number | null; title: string }
@@ -91,7 +93,10 @@ export function shortTitle(title: string, maxWords = 6): string {
 /** "2024 · Endothelial barrier function in…" / "R01 (through 2028)". */
 export function briefSourceLabel(s: BriefSource): string {
   if (s.kind === "pub") {
-    return s.year != null ? `${s.year} · ${shortTitle(s.title)}` : shortTitle(s.title);
+    // Strip PubMed markup BEFORE the word cut, so a cut can never leave an
+    // unclosed `<i>` and entities (`&lt;18`) read as characters.
+    const title = shortTitle(htmlToPlainText(s.title, Number.POSITIVE_INFINITY));
+    return s.year != null ? `${s.year} · ${title}` : title;
   }
   return `${s.mechanism ?? s.funder} (through ${s.endYear})`;
 }

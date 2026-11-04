@@ -101,3 +101,20 @@ describe("highlightedTitleHtml — tag-splicing bypass", () => {
     );
   });
 });
+
+describe("highlightedTitleHtml — mark inside a tag name (analyzer indexed tag names)", () => {
+  it("restores <i>/</i> when the highlighter wrapped the tag name", () => {
+    const frag = "Type <mark>I</mark> IFN and <<mark>i</mark>>BRCA1</<mark>i</mark>>";
+    expect(highlightedTitleHtml(frag)).toBe(`Type ${mark("I")} IFN and <i>BRCA1</i>`);
+  });
+
+  it("restores sub/b and keeps a real mark on the content", () => {
+    const frag = "H<<mark>sub</mark>>2</<mark>sub</mark>>O <<mark>b</mark>><mark>cells</mark></b>";
+    expect(highlightedTitleHtml(frag)).toBe(`H<sub>2</sub>O <b>${mark("cells")}</b>`);
+  });
+
+  it("a repaired non-whitelisted tag is still dropped", () => {
+    const out = highlightedTitleHtml("<<mark>script</mark>>alert(1)</<mark>script</mark>>");
+    expect(out).toBe("alert(1)");
+  });
+});
