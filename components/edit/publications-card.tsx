@@ -161,11 +161,25 @@ export function PublicationsCard({
   const totalCount = list.length;
   const hiddenCount = list.filter((p) => p.state !== "shown").length;
 
+  // Match on the title the scholar READS: strip PubMed markup and decode
+  // entities once per row, so "BRCA1 mutation" hits "<i>BRCA1</i> mutation"
+  // and "<18" hits "&lt;18", while "sub" / "i" never match a tag.
+  const plainTitles = React.useMemo(
+    () =>
+      new Map(
+        optimistic.map((p) => [
+          p.pmid,
+          htmlToPlainText(p.title, Number.POSITIVE_INFINITY).toLowerCase(),
+        ]),
+      ),
+    [optimistic],
+  );
+
   const filtered = React.useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (q === "") return optimistic;
-    return optimistic.filter((p) => p.title.toLowerCase().includes(q));
-  }, [optimistic, filter]);
+    return optimistic.filter((p) => (plainTitles.get(p.pmid) ?? "").includes(q));
+  }, [optimistic, filter, plainTitles]);
 
   const grouped = React.useMemo(() => groupByYearDesc(filtered), [filtered]);
 

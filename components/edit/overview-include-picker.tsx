@@ -33,7 +33,7 @@
 import * as React from "react";
 import { ChevronDown, Info, Pin, TriangleAlert } from "lucide-react";
 
-import { PubTitle } from "@/components/publication/pub-html";
+import { PubTitle, pubTitleAccessibleName } from "@/components/publication/pub-html";
 import { fundingRoleLabel } from "@/lib/funding-roles";
 import type {
   OverviewSourceEducation,
@@ -50,7 +50,7 @@ import {
   type OverviewRecordType,
   type OverviewSelectionDeltas,
 } from "@/lib/edit/overview-params";
-import { cn } from "@/lib/utils";
+import { cn, htmlToPlainText } from "@/lib/utils";
 
 type ToolOption = OverviewSourceOptions["tools"][number];
 
@@ -128,6 +128,8 @@ type RecordView = {
   id: string;
   /** The display title — a node so publications can use {@link PubTitle}. */
   title: React.ReactNode;
+  /** Plain-text title for the checkbox aria-label when `title` is a node. */
+  ariaTitle?: string;
   meta: string[];
   /** The §7.1 human reason ("why this?") — never a score. */
   reason?: string;
@@ -160,10 +162,11 @@ function buildPublications(options: OverviewSourceOptions): RecordView[] {
     return {
       id: p.pmid,
       title: <PubTitle as="span" value={p.title} />,
+      ariaTitle: pubTitleAccessibleName(p.title),
       // Every citation carries its PMID (the row already links to PubMed; the number is what
       // a reader can search or paste).
       meta: [
-        p.venue ?? null,
+        p.venue ? htmlToPlainText(p.venue, Number.POSITIVE_INFINITY) : null,
         pubRole(p),
         p.year != null ? String(p.year) : null,
         `PMID ${p.pmid}`,
@@ -667,7 +670,7 @@ function RecordRow({
         checked={included}
         onChange={check.onClick}
         disabled={disabled}
-        aria-label={`${check.label}: ${typeof record.title === "string" ? record.title : "source"}`}
+        aria-label={`${check.label}: ${record.ariaTitle ?? (typeof record.title === "string" ? record.title : "source")}`}
         className="accent-foreground mt-0.5 size-[18px] shrink-0 cursor-pointer"
         data-testid={check.testid}
       />

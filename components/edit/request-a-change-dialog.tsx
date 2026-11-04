@@ -39,7 +39,7 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { PubTitle } from "@/components/publication/pub-html";
-import { cn } from "@/lib/utils";
+import { cn, htmlToPlainText } from "@/lib/utils";
 import {
   getChangeConfig,
   resolveSelfServiceHref,
@@ -168,6 +168,12 @@ export function RequestAChangeDialog({
 }: RequestAChangeDialogProps) {
   const config = getChangeConfig(attribute);
   const attributeLabel = ATTRIBUTE_LABEL[attribute];
+  // `itemLabel` may be a PubMed title carrying inline markup / entities. The
+  // raw value feeds <PubTitle>; every plain-text sink (tooltip, sr-only name,
+  // mailto body) gets this stripped + decoded copy instead.
+  const itemPlain = itemLabel
+    ? htmlToPlainText(itemLabel, Number.POSITIVE_INFINITY) || itemLabel
+    : undefined;
 
   const [open, setOpen] = React.useState(false);
   const [issueId, setIssueId] = React.useState<string | null>(null);
@@ -254,7 +260,7 @@ export function RequestAChangeDialog({
         cwid,
         scholarName,
         issueLabel: issue!.label,
-        itemLabel,
+        itemLabel: itemPlain,
         sourceSystem: action.sourceSystem,
         detail,
       });
@@ -267,7 +273,7 @@ export function RequestAChangeDialog({
         cwid,
         scholarName,
         issueLabel: issue!.label,
-        itemLabel,
+        itemLabel: itemPlain,
         detail,
       });
     }
@@ -362,7 +368,7 @@ export function RequestAChangeDialog({
                   every panel (vision-round T1.8). Radix wires aria-labelledby to
                   this node, so an aria-label on DialogContent would be a no-op. */}
               <span className="sr-only">
-                {` to ${attributeLabel}${itemLabel ? `: ${itemLabel}` : ""}`}
+                {` to ${attributeLabel}${itemPlain ? `: ${itemPlain}` : ""}`}
               </span>
             </DialogTitle>
             {inRouter && (
@@ -371,7 +377,7 @@ export function RequestAChangeDialog({
                     — a generic question above it only pushed it down. */}
                 <p id={`rac-q-${attribute}`} className="text-lg font-semibold">
                   {itemLabel ? (
-                    <PubTitle value={itemLabel} title={itemLabel} className="line-clamp-2" />
+                    <PubTitle value={itemLabel} title={itemPlain} className="line-clamp-2" />
                   ) : (
                     config.heading
                   )}

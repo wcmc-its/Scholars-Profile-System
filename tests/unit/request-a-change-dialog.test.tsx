@@ -206,6 +206,28 @@ describe("RequestAChangeDialog", () => {
     expect(decodeURIComponent(window.location.href)).toContain("Item: R01 Test Grant");
   });
 
+  it("a marked-up publication title reaches every plain-text sink as plain text", async () => {
+    mockFetch({ ok: false, status: 500 });
+    render(
+      <RequestAChangeDialog
+        attribute="publications"
+        cwid="abc1001"
+        scholarName="Jane Scholar"
+        itemLabel="Role of <i>BRCA1</i> in patients aged &lt;18"
+        initialIssueId="publication-not-mine"
+        triggerTestId="pub-not-mine"
+      />,
+    );
+    open("pub-not-mine");
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector(".sr-only")?.textContent).toContain(
+      "Role of BRCA1 in patients aged <18",
+    );
+    const heading = dialog.querySelector("[title]");
+    expect(heading?.getAttribute("title")).toBe("Role of BRCA1 in patients aged <18");
+    expect(heading?.innerHTML).toContain("<i>BRCA1</i>");
+  });
+
   it("the fallback mailto names the scholar + links back to their profile (#2480)", async () => {
     mockFetch({ ok: false, status: 500 });
     render(
