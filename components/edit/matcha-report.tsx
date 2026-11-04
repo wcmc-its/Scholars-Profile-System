@@ -720,7 +720,7 @@ export function MatchaReportView({ report }: { report: MatchaReport }) {
           <div className="text-apollo-maroon text-[12px] font-semibold tracking-[0.08em] uppercase">
             Matcha scouting report
           </div>
-          <h1 className="m-0 max-w-[820px] font-serif first-letter:uppercase text-[32px] leading-[1.12] font-normal tracking-[-0.01em] text-balance sm:text-[44px]">
+          <h1 className="m-0 max-w-[820px] font-serif text-[32px] leading-[1.12] font-normal tracking-[-0.01em] text-balance sm:text-[44px]">
             {report.title}
           </h1>
           <p className="m-0 max-w-[720px] text-[17px] leading-[1.55] text-pretty text-[var(--evidence-body)]">
