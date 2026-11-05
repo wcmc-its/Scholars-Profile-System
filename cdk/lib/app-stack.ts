@@ -40,11 +40,11 @@ import {
  * Look up the current digest with:
  *   aws ecr-public describe-images \
  *     --repository-name aws-otel-collector \
- *     --image-ids imageTag=v0.43.3 --region us-east-1
+ *     --image-ids imageTag=v0.51.0 --region us-east-1
  */
 const ADOT_COLLECTOR_IMAGE =
   "public.ecr.aws/aws-observability/aws-otel-collector" +
-  "@sha256:8aa9ea5f67b8d318f7d6af24677e3c70f7098bc0631147cb5fa91addbe980b06";
+  "@sha256:955e240b27d7fd3c7995fd937db4b963975948eb553f656d8c37a564e5b5e07d";
 
 /**
  * WCM SAML IdP coordinates (#466). Identical across staging and prod — WCM

@@ -1884,7 +1884,7 @@ service:
               },
             ],
             "Essential": false,
-            "Image": "public.ecr.aws/aws-observability/aws-otel-collector@sha256:8aa9ea5f67b8d318f7d6af24677e3c70f7098bc0631147cb5fa91addbe980b06",
+            "Image": "public.ecr.aws/aws-observability/aws-otel-collector@sha256:955e240b27d7fd3c7995fd937db4b963975948eb553f656d8c37a564e5b5e07d",
             "LogConfiguration": {
               "LogDriver": "awslogs",
               "Options": {
@@ -6980,7 +6980,7 @@ service:
               },
             ],
             "Essential": false,
-            "Image": "public.ecr.aws/aws-observability/aws-otel-collector@sha256:8aa9ea5f67b8d318f7d6af24677e3c70f7098bc0631147cb5fa91addbe980b06",
+            "Image": "public.ecr.aws/aws-observability/aws-otel-collector@sha256:955e240b27d7fd3c7995fd937db4b963975948eb553f656d8c37a564e5b5e07d",
             "LogConfiguration": {
               "LogDriver": "awslogs",
               "Options": {
