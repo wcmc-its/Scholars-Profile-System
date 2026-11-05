@@ -1,4 +1,4 @@
-# docs/ADR-015 — Human AWS access is SAML federation with 1-hour sessions; no IAM Identity Center
+# docs/ADR-015 — Human AWS access: personal MFA-gated IAM users or SAML federation; no shared keys, no IAM Identity Center
 
 **Status:** Accepted (2026-11-05)
 **Date:** 2026-11-05
@@ -28,12 +28,18 @@ The full email thread is kept in the team's private project notes, not in this p
 
 ## Decision
 
-- **People:** AWS console and CLI access is through WCM SAML federation only. The CLI uses `saml2aws`. We accept the 1-hour session and re-authenticate when it expires. We do not issue IAM user access keys to people.
-- **Workloads:** use IAM roles (ECS task roles, EKS IRSA, Lambda execution roles). A workload that cannot use a role yet keeps a dedicated, least-privilege key scoped to that workload alone, and that key is listed for retirement.
-- We will not reopen the session-length question unless the 1-hour cap blocks real work. If it does, the request goes to WCM Security, not ITS Cloud.
+- **No shared credentials for people.** Every human action must be attributable to one named person. Shared IAM user keys are retired.
+- **Daily CLI work: a personal IAM user, gated on MFA.** Each developer who needs the CLI gets an IAM user named after their WCM ID. A deny-unless-MFA inline policy blocks every action except MFA self-management and `sts:GetSessionToken`, so the long-term access key is useless on its own. Once a day the developer exchanges a TOTP code for a 12-hour session (`sts:GetSessionToken`), so there is one authentication event per working day. EKS access is granted to the user through an access entry.
+- **SAML federation stays available** for the console and for occasional CLI use via `saml2aws`, with its 1-hour sessions.
+- **Workloads:** use IAM roles (ECS task roles, EKS IRSA, Lambda execution roles). A workload that cannot use a role yet keeps a dedicated key scoped to that workload alone, and that key is listed for retirement.
+
+### Why personal IAM users and not SAML alone
+
+`saml2aws` cannot hold an IdP session across refreshes, so every hourly refresh means a full sign-in with MFA. That is roughly eight interactive sign-ins a day, and it breaks unattended work longer than an hour. A personal IAM user with an MFA-gated policy keeps the two properties that matter, per-person attribution and MFA on every session, at one sign-in a day. The trade-off is a long-lived access key on the developer's machine. The MFA gate reduces that key to a factor that cannot act alone.
 
 ## Consequences
 
-- Long-running local jobs, such as backfills and probes, must either finish within an hour or run in-account (ECS task, `run-staging-probe.sh`) under a task role. They cannot rely on a laptop session.
-- Every human action in CloudTrail is attributed to a federated session name, not to a shared IAM user.
-- If WCM later enables IAM Identity Center, this ADR should be revised to move the CLI to `aws sso login`.
+- CloudTrail attributes every human CLI action to a named IAM user (or a federated session name), not to a shared user.
+- Offboarding a developer means deleting their IAM user and EKS access entry. It does not touch workloads or other people.
+- Personal IAM users will show up in security scanners as "IAM user with access key". These are expected; the MFA-only policy is the compensating control.
+- If WCM later enables IAM Identity Center or lengthens the SAML session, revise this ADR and retire the personal IAM users in favour of federation.
