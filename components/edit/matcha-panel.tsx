@@ -134,6 +134,8 @@ import {
   briefTopics,
   briefWhy,
   firstSentence,
+  methodLabel,
+  methodsSummary,
   reporterUrl,
   UNSOURCED_LABEL,
   type BriefRecords,
@@ -5382,21 +5384,23 @@ function BriefRecordsBlock({ records }: { records: BriefRecords | undefined }) {
         <dt className={capClass}>Appointments</dt>
         <dd>{appointments ? <span>{appointments}</span> : none}</dd>
         {methods.length > 0 || trialCount > 0 ? (
-          <>
-            <dt className={capClass}>Methods and tools</dt>
-            <dd className="flex flex-col gap-0.5" data-slot="matcha-brief-methods">
-              {methods.map((m) => (
-                <div key={m.name}>
-                  {m.name} · {m.papers} paper{m.papers === 1 ? "" : "s"}
+          // The full list (up to the loader's cap) is tucked behind one collapsed line.
+          <dd className="col-span-full" data-slot="matcha-brief-methods">
+            {methods.length > 0 ? (
+              <details>
+                <summary className="text-apollo-slate cursor-pointer">
+                  {methodsSummary(methods.length, trialCount)}
+                </summary>
+                <div className="mt-1 flex flex-col gap-0.5 pl-4">
+                  {methods.map((m) => (
+                    <div key={m.name}>{methodLabel(m)}</div>
+                  ))}
                 </div>
-              ))}
-              {trialCount > 0 ? (
-                <div>
-                  {trialCount} clinical trial{trialCount === 1 ? "" : "s"} on record
-                </div>
-              ) : null}
-            </dd>
-          </>
+              </details>
+            ) : (
+              <span>{methodsSummary(0, trialCount)}</span>
+            )}
+          </dd>
         ) : null}
       </dl>
     </div>

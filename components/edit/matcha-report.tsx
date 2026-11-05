@@ -22,6 +22,8 @@ import type { MatchaFitTier } from "@/lib/api/matcha-contract";
 import {
   briefSourceLabel,
   briefSourceUrl,
+  methodLabel,
+  methodsSummary,
   reporterUrl,
   type BriefSource,
 } from "@/lib/edit/matcha-brief-types";
@@ -691,28 +693,34 @@ function FundingStrip({ pi }: { pi: ReportPi }) {
   );
 }
 
-/** "Name · N papers" for one method row. */
-export function methodLabel(m: { name: string; papers: number }): string {
-  return `${m.name} · ${m.papers} ${m.papers === 1 ? "paper" : "papers"}`;
-}
-
-/** "Methods and tools": records only (never generated). Omitted when there is nothing to list. */
+/**
+ * "Methods and tools": records only (never generated), tucked behind a native `<details>` so the
+ * full list (up to the loader's cap) costs one line until opened, with no JS. Printing prints the
+ * state on screen. Omitted when there is nothing to list; trials alone get a plain line.
+ */
 function MethodsAndTools({ pi }: { pi: Pick<ReportPi, "methods" | "trialCount"> }) {
   if (pi.methods.length === 0 && pi.trialCount <= 0) return null;
+  const summary = methodsSummary(pi.methods.length, pi.trialCount);
+  const label =
+    "text-[12px] font-semibold tracking-[0.06em] text-[var(--evidence-faint)] uppercase";
+  if (pi.methods.length === 0) {
+    return (
+      <div data-report-methods>
+        <p className={`m-0 ${label}`}>{summary}</p>
+      </div>
+    );
+  }
   return (
-    <div className="flex flex-col gap-2" data-report-methods>
-      <SectionLabel>Methods and tools</SectionLabel>
-      <ul className="m-0 flex list-none flex-col gap-1 p-0 text-[15px] leading-normal">
+    <details className="break-inside-avoid" data-report-methods>
+      <summary className={`cursor-pointer print:cursor-auto print:list-none ${label}`}>
+        {summary}
+      </summary>
+      <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-[15px] leading-normal">
         {pi.methods.map((m) => (
           <li key={m.name}>{methodLabel(m)}</li>
         ))}
-        {pi.trialCount > 0 ? (
-          <li data-report-trials>
-            {pi.trialCount} clinical {pi.trialCount === 1 ? "trial" : "trials"} on record
-          </li>
-        ) : null}
       </ul>
-    </div>
+    </details>
   );
 }
 
