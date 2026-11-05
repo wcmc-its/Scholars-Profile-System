@@ -61,8 +61,7 @@ function shortDate(d: Date): string {
 export function reportFooterText(d: Date): string {
   return (
     `Drawn from Weill Cornell Scholars records on ${reportDate(d)}. Funding and technology ` +
-    "details come from institutional records; summaries were drafted with AI assistance and " +
-    "reviewed by CTL."
+    "details come from institutional records; summaries were drafted with AI assistance."
   );
 }
 

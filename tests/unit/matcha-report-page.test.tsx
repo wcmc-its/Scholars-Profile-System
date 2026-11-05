@@ -265,6 +265,7 @@ describe("Matcha report page", () => {
     expect(html).toContain("Olive Officer, Information Technologies &amp; Services");
     // The unit is the officer's own directory department, never a hard-coded CTL.
     expect(html).not.toContain("Center for Technology Licensing");
+    expect(html).not.toMatch(/reviewed by/i);
     expect(html).not.toContain("We want widget collaborators.");
     expect(html).toContain("Two Weill Cornell investigators whose published work");
   });
