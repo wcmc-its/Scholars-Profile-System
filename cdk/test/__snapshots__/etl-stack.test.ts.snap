@@ -3464,7 +3464,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ASMS_TLS_VERIFY",
-                "Value": "off",
+                "Value": "on",
               },
             ],
             "Essential": true,
