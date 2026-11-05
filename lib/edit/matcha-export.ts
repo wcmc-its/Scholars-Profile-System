@@ -25,6 +25,7 @@
  */
 import { toCsv } from "@/lib/csv";
 import {
+  briefAngle,
   briefSourceLabel,
   briefTopics,
   briefWhy,
@@ -66,22 +67,26 @@ export type MatchaCsvRow = {
   /** Matcha Phase 3 — Why this PI (the officer's edit when present). Written only when
    *  `buildMatchaCsv` is asked for the brief columns; "" when the row has no brief. */
   briefWhy?: string;
+  /** Matcha Phase 3 — the partnership angle (the officer's edit when present); "" when none. */
+  briefAngle?: string;
   /** Matcha Phase 3 — discussion topics with their source labels, edited text when present. */
   briefTopics?: string;
 };
 
 /**
- * The brief's two exported cells, from a wire brief. The NOTE IS NEVER READ HERE: it is shared
+ * The brief's exported cells, from a wire brief. The NOTE IS NEVER READ HERE: it is shared
  * with anyone who opens the search and is labelled "Never exported" in the UI, so this function
  * is the one place an export could leak it, and it takes only the fields it writes.
  */
 export function briefCsvFields(brief: Pick<BriefWire, "generated" | "edited"> | undefined): {
   briefWhy: string;
+  briefAngle: string;
   briefTopics: string;
 } {
-  if (!brief) return { briefWhy: "", briefTopics: "" };
+  if (!brief) return { briefWhy: "", briefAngle: "", briefTopics: "" };
   return {
     briefWhy: briefWhy(brief),
+    briefAngle: briefAngle(brief),
     briefTopics: briefTopics(brief)
       .map((t) =>
         t.sources.length > 0
@@ -112,14 +117,14 @@ export function buildMatchaCsv(
   rows: readonly MatchaCsvRow[],
   /** `eligibility: true` (Grant Matcha) appends the `Eligible` column — an OPTION, not inferred
    *  from the rows, so an empty grant-path export still writes the header the full one would.
-   *  `brief: true` (MATCHA_BRIEF) appends the two brief columns, same rule. */
+   *  `brief: true` (MATCHA_BRIEF) appends the three brief columns, same rule. */
   opts: { eligibility?: boolean; brief?: boolean } = {},
 ): string {
   return toCsv(
     [
       ...HEADERS,
       ...(opts.eligibility ? ["Eligible"] : []),
-      ...(opts.brief ? ["Why this PI", "Discussion topics"] : []),
+      ...(opts.brief ? ["Why this PI", "Partnership angle", "Discussion topics"] : []),
     ],
     rows.map((r) => [
       r.rank,
@@ -136,7 +141,7 @@ export function buildMatchaCsv(
       r.technologyCount,
       r.profileUrl,
       ...(opts.eligibility ? [r.eligible ?? ""] : []),
-      ...(opts.brief ? [r.briefWhy ?? "", r.briefTopics ?? ""] : []),
+      ...(opts.brief ? [r.briefWhy ?? "", r.briefAngle ?? "", r.briefTopics ?? ""] : []),
     ]),
   );
 }

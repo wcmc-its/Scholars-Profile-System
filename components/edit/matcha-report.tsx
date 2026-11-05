@@ -117,7 +117,7 @@ function printCss(footer: string): string {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  [data-report-bar], [data-report-amber], [data-report-mark], [data-report-avatar], [data-report-tech] {
+  [data-report-bar], [data-report-amber], [data-report-mark], [data-report-avatar], [data-report-tech], [data-report-angle] {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -691,6 +691,31 @@ function FundingStrip({ pi }: { pi: ReportPi }) {
   );
 }
 
+/** "Name · N papers" for one method row. */
+export function methodLabel(m: { name: string; papers: number }): string {
+  return `${m.name} · ${m.papers} ${m.papers === 1 ? "paper" : "papers"}`;
+}
+
+/** "Methods and tools": records only (never generated). Omitted when there is nothing to list. */
+function MethodsAndTools({ pi }: { pi: Pick<ReportPi, "methods" | "trialCount"> }) {
+  if (pi.methods.length === 0 && pi.trialCount <= 0) return null;
+  return (
+    <div className="flex flex-col gap-2" data-report-methods>
+      <SectionLabel>Methods and tools</SectionLabel>
+      <ul className="m-0 flex list-none flex-col gap-1 p-0 text-[15px] leading-normal">
+        {pi.methods.map((m) => (
+          <li key={m.name}>{methodLabel(m)}</li>
+        ))}
+        {pi.trialCount > 0 ? (
+          <li data-report-trials>
+            {pi.trialCount} clinical {pi.trialCount === 1 ? "trial" : "trials"} on record
+          </li>
+        ) : null}
+      </ul>
+    </div>
+  );
+}
+
 function ProfileCard({ pi }: { pi: ReportPi }) {
   const titleLine = [pi.title, pi.department].filter(Boolean).join(" · ");
   return (
@@ -730,6 +755,18 @@ function ProfileCard({ pi }: { pi: ReportPi }) {
           </ExtLink>
         </div>
       </div>
+
+      {pi.brief?.angle ? (
+        <div
+          data-report-angle
+          className="bg-apollo-slate-tint border-apollo-border flex flex-col gap-1 border-b px-5 py-4 sm:px-7"
+        >
+          <SectionLabel>Partnership angle</SectionLabel>
+          <p className="m-0 text-[15px] leading-[1.55] font-medium text-pretty italic">
+            {pi.brief.angle}
+          </p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col md:flex-row print:flex-row">
         <div className="flex min-w-0 flex-1 flex-col gap-[22px] px-5 py-6 sm:px-7">
@@ -786,6 +823,8 @@ function ProfileCard({ pi }: { pi: ReportPi }) {
               {NO_BRIEF}
             </p>
           )}
+
+          <MethodsAndTools pi={pi} />
 
           {pi.translation.length > 0 ? (
             <div className="flex flex-col gap-2">
