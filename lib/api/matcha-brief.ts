@@ -55,6 +55,14 @@ export function isMatchaBriefEnabled(): boolean {
   return process.env.MATCHA_BRIEF === "on";
 }
 
+/** Drafting/editing briefs and resolving contact addresses: superuser or developer only, never an
+ *  observer (who may run searches but must not spend Bedrock, write rows or pull addresses). */
+export function canWriteMatchaBriefs(
+  session: Pick<EditSession, "isSuperuser" | "isDeveloper">,
+): boolean {
+  return session.isSuperuser || session.isDeveloper === true;
+}
+
 /**
  * The ONE scope predicate for retained Matcha searches, shared by `/api/edit/matcha` (GET, DELETE,
  * PATCH) and `/api/edit/matcha/brief`: superuser or developer ⇒ every officer's rows (no filter);

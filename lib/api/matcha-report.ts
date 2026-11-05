@@ -25,7 +25,7 @@ import {
 } from "@/lib/api/matcha-brief";
 import { fitTier, type MatchaCandidate, type MatchaFitTier } from "@/lib/api/matcha-contract";
 import { loadReportThemes } from "@/lib/api/matcha-report-themes";
-import { briefTopics, briefWhy, firstSentence } from "@/lib/edit/matcha-brief-types";
+import { briefAngle, briefTopics, briefWhy, firstSentence } from "@/lib/edit/matcha-brief-types";
 import {
   computeCoverage,
   signalChips,
@@ -65,6 +65,10 @@ export type ReportPi = {
   centers: string[];
   funding: BriefRecords["funding"];
   translation: BriefRecords["translation"];
+  /** "Methods and tools": top `ScholarTool` rows by papers (records, never generated). */
+  methods: BriefRecords["methods"];
+  /** Distinct clinical trials on record; 0 hides the line. */
+  trialCount: number;
   fit: MatchaFitTier;
   /** Up to two record-derived shortlist chips (`signalChips`). */
   signals: string[];
@@ -72,7 +76,13 @@ export type ReportPi = {
   oneLine: string | null;
   keyPapers: ReportPaper[];
   /** Edited text when present, else generated. Null = no brief drafted for this PI. */
-  brief: { why: string; topics: BriefTopic[]; draftedAt: Date } | null;
+  brief: {
+    why: string;
+    /** Partnership angle, edited text winning; "" on a brief drafted before angles existed. */
+    angle: string;
+    topics: BriefTopic[];
+    draftedAt: Date;
+  } | null;
 };
 
 export type MatchaReport = {
@@ -238,6 +248,7 @@ export async function loadMatchaReport(
     const brief = wire
       ? {
           why: briefWhy(wire),
+          angle: briefAngle(wire).trim(),
           // A grant suppressed (or hideFunding set) since drafting must not ride along as a source.
           topics: withLiveSources(briefTopics(wire), rec),
           draftedAt: row!.createdAt,
@@ -261,6 +272,8 @@ export async function loadMatchaReport(
       centers: rec.centers,
       funding: rec.funding,
       translation: rec.translation,
+      methods: rec.methods,
+      trialCount: rec.trialCount,
       fit: fitTier(c.fusedScore, topScore),
       signals: signalChips(rec.funding, c.technologyCount ?? 0),
       oneLine: brief && brief.why.trim() ? firstSentence(brief.why) : null,

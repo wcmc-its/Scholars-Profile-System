@@ -125,6 +125,7 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
   const BRIEF = {
     generated: {
       why: "Generated why.",
+      angle: "Generated angle.",
       topics: [
         {
           concept: "x",
@@ -136,6 +137,7 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
     },
     edited: {
       why: "Edited why.",
+      angle: "Edited angle.",
       topics: [{ concept: "", text: "My own topic", sources: [] }],
     },
     note: "CONFIDENTIAL-NOTE-TEXT",
@@ -148,8 +150,10 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
   it("writes the EDITED why and topics when present", () => {
     const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields(BRIEF) }], { brief: true });
     const [head, line] = csv.split("\r\n");
-    expect(head).toBe(`${HEADER},Why this PI,Discussion topics`);
+    expect(head).toBe(`${HEADER},Why this PI,Partnership angle,Discussion topics`);
     expect(line).toContain("Edited why.");
+    expect(line).toContain("Edited angle.");
+    expect(line).not.toContain("Generated angle.");
     expect(line).toContain("My own topic [unsourced]");
     expect(line).not.toContain("Generated why.");
   });
@@ -159,6 +163,7 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
       brief: true,
     });
     expect(csv).toContain("Generated why.");
+    expect(csv).toContain("Generated angle.");
     expect(csv).toContain("Generated topic [2024 · Short paper title]");
   });
 
@@ -170,8 +175,16 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
     expect(csv.split("\r\n")[0]).not.toMatch(/note/i);
   });
 
+  it("writes a blank angle for a brief drafted before angles existed", () => {
+    const { angle: _drop, ...legacy } = BRIEF.generated;
+    void _drop;
+    const fields = briefCsvFields({ generated: legacy, edited: null });
+    expect(fields.briefAngle).toBe("");
+    expect(fields.briefWhy).toBe("Generated why.");
+  });
+
   it("writes blanks for a row with no brief", () => {
     const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields(undefined) }], { brief: true });
-    expect(csv.split("\r\n")[1].endsWith("https://example.org/alice-alpha,,")).toBe(true);
+    expect(csv.split("\r\n")[1].endsWith("https://example.org/alice-alpha,,,")).toBe(true);
   });
 });

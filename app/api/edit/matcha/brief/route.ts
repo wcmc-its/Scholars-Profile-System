@@ -25,6 +25,7 @@ import { isMatchaEnabled } from "@/lib/api/matcha";
 import { askTitleFrom } from "@/lib/api/matcha-contract";
 import {
   MAX_BRIEF_CWIDS,
+  canWriteMatchaBriefs,
   generateBrief,
   isMatchaBriefEnabled,
   loadBriefRecords,
@@ -63,9 +64,7 @@ function enabled(): boolean {
 }
 
 /** Drafting and editing spend Bedrock / write rows: superuser or developer only, never observer. */
-function canWriteBriefs(session: Pick<EditSession, "isSuperuser" | "isDeveloper">): boolean {
-  return session.isSuperuser || session.isDeveloper === true;
-}
+const canWriteBriefs = canWriteMatchaBriefs;
 
 /** The clicked submission (in the caller's scope) → its paste hash and display title. */
 async function resolveSubmission(

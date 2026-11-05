@@ -110,6 +110,8 @@ const records = (cwid: string) => ({
   translation: [],
   secondaryAppointments: [],
   centers: [],
+  methods: [],
+  trialCount: 0,
 });
 
 function setup(opts: {
@@ -491,6 +493,65 @@ describe("Matcha report page", () => {
     // b's single award fits: no "+N more".
     expect(cardB).toContain("Active funding · 1");
     expect(cardB).not.toContain("more on Scholars profile");
+  });
+
+  it("shows the partnership angle under the header (edited wins), and omits it when empty", async () => {
+    setup({
+      candidates: ["a", "b", "c"],
+      briefs: [
+        brief("a", {
+          generated: { ...brief("a").generated, angle: "Generated angle for a." },
+          edited: { angle: "Edited angle for a." },
+        }),
+        brief("b", { generated: { ...brief("b").generated, angle: "Trial lead with patient data." } }),
+        // Drafted before angles existed: no angle at all.
+        brief("c"),
+      ],
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
+    const card = (cwid: string) =>
+      new RegExp(`data-report-pi="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "";
+    expect(card("a")).toContain("Partnership angle");
+    expect(card("a")).toContain("Edited angle for a.");
+    expect(card("a")).not.toContain("Generated angle for a.");
+    // Directly under the header: before the "Why this investigator" section.
+    expect(card("a").indexOf("Edited angle for a.")).toBeLessThan(
+      card("a").indexOf("Why this investigator"),
+    );
+    expect(card("b")).toContain("Trial lead with patient data.");
+    expect(card("c")).not.toContain("Partnership angle");
+    expect(card("c")).not.toContain("data-report-angle");
+  });
+
+  it("lists methods and tools after the discussion topics, and omits the section when empty", async () => {
+    setup({
+      candidates: ["a", "b", "c"],
+      briefs: [brief("a"), brief("b")],
+      records: {
+        a: {
+          methods: [
+            { name: "Mouse models", category: null, papers: 14 },
+            { name: "Flow cytometry", category: null, papers: 1 },
+          ],
+          trialCount: 3,
+        },
+        b: { methods: [], trialCount: 0 },
+        c: { methods: [], trialCount: 1 },
+      },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
+    const card = (cwid: string) =>
+      new RegExp(`data-report-pi="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "";
+    expect(card("a")).toContain("Methods and tools");
+    expect(card("a")).toContain("Mouse models · 14 papers");
+    expect(card("a")).toContain("Flow cytometry · 1 paper");
+    expect(card("a")).toContain("3 clinical trials on record");
+    expect(card("a").indexOf("Suggested discussion topics")).toBeLessThan(
+      card("a").indexOf("Methods and tools"),
+    );
+    expect(card("b")).not.toContain("Methods and tools");
+    // Records, not the brief: shown for a PI with no brief, and a single trial reads singular.
+    expect(card("c")).toContain("1 clinical trial on record");
   });
 
   it("404s a submission outside the caller's scope", async () => {
