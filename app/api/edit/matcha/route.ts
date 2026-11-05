@@ -631,8 +631,17 @@ export async function GET(): Promise<NextResponse> {
     // Rows arrive newest-first, so the FIRST row seen for a hash IS the newest run of that
     // paste — the one whose id the Delete button should carry and whose count is current.
     const newestPerPaste = new Map<string, (typeof rows)[number]>();
+    // Recent-searches drawer — how many runs each paste has, and whether the VIEWER ran it at
+    // least once (the drawer's Everyone/Mine toggle). Counted over the same scoped scan window
+    // the dedup reads, so a normal user's count is their own runs — exactly what their Delete
+    // erases — and a superuser's is everyone's, which is what theirs erases. Window-bounded like
+    // the list itself (see SUBMISSION_SCAN_MAX).
+    const runCountByHash = new Map<string, number>();
+    const viewerRanHash = new Set<string>();
     for (const row of rows) {
       if (!newestPerPaste.has(row.descriptionHash)) newestPerPaste.set(row.descriptionHash, row);
+      runCountByHash.set(row.descriptionHash, (runCountByHash.get(row.descriptionHash) ?? 0) + 1);
+      if (row.submittedBy === session.cwid) viewerRanHash.add(row.descriptionHash);
     }
     // Resolve names over the rows we actually SHIP (≤100 distinct pastes, and in practice a
     // handful of distinct actors), not the 500 scanned.
@@ -655,6 +664,9 @@ export async function GET(): Promise<NextResponse> {
       // render a cwid at a chair again.
       submittedByName: nameByCwid.get(row.submittedBy) ?? row.submittedBy,
       createdAt: row.createdAt,
+      // Derived from the hash server-side; the hash itself never ships.
+      runCount: runCountByHash.get(row.descriptionHash) ?? 1,
+      mine: viewerRanHash.has(row.descriptionHash),
     }));
 
     // `Recent (N)` counts `submissions`, which is post-scope, post-dedup and post-cap — so N is
