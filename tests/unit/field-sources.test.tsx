@@ -37,7 +37,7 @@ describe("FIELD_SOURCE map", () => {
     expect(fieldSource("appointments")).toBe("ASMS by way of Enterprise Directory");
     expect(fieldSource("education")).toBe("ASMS");
     expect(fieldSource("funding")).toBe("InfoEd");
-    expect(fieldSource("publications")).toBe("ReCiter (PubMed, Scopus, OpenAlex)");
+    expect(fieldSource("publications")).toBe("ReCiter (PubMed, Scopus, OpenAlex, Crossref)");
   });
 });
 
@@ -106,6 +106,6 @@ describe("panel wiring — source line is surfaced in each sourced panel", () =>
   it("PublicationsCard shows the PubMed source", () => {
     render(<PublicationsCard cwid="self01" publications={[]} />);
     const line = document.querySelector('[data-slot="field-source"]')!;
-    expect(line.textContent).toBe("Source: ReCiter (PubMed, Scopus, OpenAlex)");
+    expect(line.textContent).toBe("Source: ReCiter (PubMed, Scopus, OpenAlex, Crossref)");
   });
 });

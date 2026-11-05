@@ -969,6 +969,7 @@ describe("getPublicationDetail — external-source pubs (#3259)", () => {
     ["SCOPUS:86000793624", "SCOPUS:86000793624"],
     // PM #1060 — the DOI's "/" arrives decoded from Next, or still as %2F.
     ["CROSSREF:10.1016/j.surg.2026.110815", "CROSSREF:10.1016/j.surg.2026.110815"],
+    ["CROSSREF:0123456789abcdef0123456", "CROSSREF:0123456789abcdef0123456"],
     ["CROSSREF%3A10.1016%2Fj.surg.2026.110815", "CROSSREF:10.1016/j.surg.2026.110815"],
     // A literal "%" in a decoded DOI is not decoded a second time.
     ["CROSSREF:10.1234/50%zz", "CROSSREF:10.1234/50%zz"],

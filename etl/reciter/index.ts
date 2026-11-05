@@ -54,6 +54,7 @@ import { buildMenteeSuggestions } from "./mentee-suggestions";
 import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
 import { syncPendingMyncbiPmids, syncRejectedPmids } from "./rejected-pmids";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { externalKey } from "@/lib/pub-key";
 import {
   RESEARCH_TYPE_YEARS,
   researchVolumeByCwid,
@@ -446,15 +447,15 @@ async function main() {
     // curated external set changes. Key them on the stable, source-prefixed
     // article_id instead (e.g. "SCOPUS:105037533819") so an external pub's SPS
     // identity and detail URL don't churn. PubMed rows keep their real pmid.
-    // ponytail: article_id assumed <=32 chars (every Scopus/OpenAlex/WOS id is);
-    // if a source ever exceeds it, widen publication.pmid to VarChar(96).
-    // PM #1060: a CROSSREF:<doi> id (up to 96 chars) fits only when the DOI is
-    // <=23 chars; a longer one keeps the synthetic pmid until that widening lands.
+    // publication.pmid is VarChar(32): externalKey() keeps ids that fit, hashes a
+    // longer CROSSREF:<doi> id (PM #1060), and returns null for anything else over 32.
+    // ponytail: a non-Crossref id >32 chars keeps the synthetic pmid; widen to VarChar(96) if one appears.
     const articleIdByPmid = new Map<number, string>();
     for (const a of articleByPmid.values()) {
       if (a.article_id == null) continue;
-      if (a.article_id.length <= 32) {
-        articleIdByPmid.set(Number(a.pmid), a.article_id);
+      const key = externalKey(a.article_id);
+      if (key) {
+        articleIdByPmid.set(Number(a.pmid), key);
       } else {
         console.warn(
           `External article_id > 32 chars; keeping synthetic pmid ${a.pmid}: ${a.article_id}`,

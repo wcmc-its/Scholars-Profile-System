@@ -108,6 +108,14 @@ export function citationIdentifier(pmid: string | number): CitationIdentifier {
     return { label: "PMID", value: raw, href: `https://pubmed.ncbi.nlm.nih.gov/${raw}/` };
   }
   const colon = raw.indexOf(":");
+  // PM #1060 — a CROSSREF key is the DOI (linkable) or, for a DOI too long for the
+  // VarChar(32) key, a hash (lib/pub-key externalKey) that is not citable.
+  if (sourceLabel === "Crossref") {
+    const doi = raw.slice(colon + 1);
+    return doi.startsWith("10.")
+      ? { label: sourceLabel, value: doi, href: `https://doi.org/${encodeURI(doi)}` }
+      : { label: "Source", value: sourceLabel, href: null };
+  }
   if (sourceLabel && colon > 0) {
     return { label: sourceLabel, value: raw.slice(colon + 1), href: null };
   }

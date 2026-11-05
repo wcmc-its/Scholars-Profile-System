@@ -193,7 +193,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
     rows: [
       {
         field: "Which papers are yours",
-        source: "ReCiter, which stores curated data from PubMed, Scopus, and OpenAlex",
+        source: "ReCiter, which stores curated data from PubMed, Scopus, OpenAlex, and Crossref",
         cadence: "Nightly",
         tag: "Yours to edit",
         how: (

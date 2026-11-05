@@ -78,6 +78,12 @@ describe("citationIdentifier", () => {
     ).toEqual({
       label: "Crossref",
       value: "10.1002/(sici)1097-4636(199706)35:4<399::aid-jbm1>3.0.co;2-k",
+      href: "https://doi.org/10.1002/(sici)1097-4636(199706)35:4%3C399::aid-jbm1%3E3.0.co;2-k",
+    });
+    // A DOI too long for the 32-char key is keyed on a hash: not citable, source only.
+    expect(citationIdentifier("CROSSREF:0123456789abcdef0123456")).toEqual({
+      label: "Source",
+      value: "Crossref",
       href: null,
     });
     expect(citationIdentifier("WOS:000123456")).toEqual({

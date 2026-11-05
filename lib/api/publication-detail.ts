@@ -207,9 +207,10 @@ function parsePmid(pmid: string): number | null {
 
 /**
  * #3259 — `Publication.pmid` keys external-source pubs on their source-prefixed id
- * (`etl/reciter` pubKey). Only the prefixes that ETL writes are accepted.
+ * (`etl/reciter` pubKey). Only the prefixes that ETL writes are accepted, including the
+ * hashed `CROSSREF:<23 hex>` form `lib/pub-key` externalKey uses for a DOI over 32 chars.
  */
-const EXTERNAL_KEY = /^(SCOPUS:\d{1,20}|OPENALEX:W\d{1,15}|CROSSREF:10\.\d{4,9}\/\S+)$/;
+const EXTERNAL_KEY = /^(SCOPUS:\d{1,20}|OPENALEX:W\d{1,15}|CROSSREF:10\.\d{4,9}\/\S+|CROSSREF:[0-9a-f]{23})$/;
 /** PM #1060 — reciterdb `external_article.article_id` is VARCHAR(96); ReCiter rejects longer. */
 const EXTERNAL_KEY_MAX = 96;
 const isExternalKey = (s: string): boolean => s.length <= EXTERNAL_KEY_MAX && EXTERNAL_KEY.test(s);
