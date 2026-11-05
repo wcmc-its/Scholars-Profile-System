@@ -61,8 +61,7 @@ function shortDate(d: Date): string {
 export function reportFooterText(d: Date): string {
   return (
     `Drawn from Weill Cornell Scholars records on ${reportDate(d)}. Funding and technology ` +
-    "details come from institutional records; summaries were drafted with AI assistance and " +
-    "reviewed by CTL."
+    "details come from institutional records; summaries were drafted with AI assistance."
   );
 }
 
@@ -625,14 +624,17 @@ function ProfileCard({ pi }: { pi: ReportPi }) {
               <div className="text-[14px] text-[var(--evidence-faint)]">{NO_FUNDING}</div>
             ) : (
               <div className="border-apollo-border flex flex-col border-t">
-                {pi.funding.map((g, i) => (
+                {/* No mechanism on any award (e.g. all foundation grants) → drop the column. */}
+                {pi.funding.map((g, i, all) => (
                   <div
                     key={i}
-                    className="border-apollo-border grid grid-cols-[56px_minmax(0,1fr)_auto] items-baseline gap-3 border-b py-2.5 text-[14px] leading-[1.45]"
+                    className={`border-apollo-border grid ${all.some((a) => a.mechanism) ? "grid-cols-[56px_minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]"} items-baseline gap-3 border-b py-2.5 text-[14px] leading-[1.45]`}
                   >
-                    <span className="font-mono text-[12px] font-semibold text-[var(--evidence-body)]">
-                      {g.mechanism ?? ""}
-                    </span>
+                    {all.some((a) => a.mechanism) && (
+                      <span className="font-mono text-[12px] font-semibold text-[var(--evidence-body)]">
+                        {g.mechanism ?? ""}
+                      </span>
+                    )}
                     <div className="flex min-w-0 flex-col gap-0.5">
                       <span className="text-pretty">
                         {g.applId != null ? (

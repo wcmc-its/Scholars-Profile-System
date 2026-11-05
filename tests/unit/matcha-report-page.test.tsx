@@ -95,7 +95,8 @@ const THEMES = [
 const records = (cwid: string) => ({
   funding: [
     {
-      mechanism: "R01",
+      // "b" holds only a foundation award: no mechanism.
+      mechanism: cwid === "b" ? null : "R01",
       funder: "NIH",
       title: `Award for ${cwid}`,
       endYear: 2029,
@@ -265,6 +266,7 @@ describe("Matcha report page", () => {
     expect(html).toContain("Olive Officer, Information Technologies &amp; Services");
     // The unit is the officer's own directory department, never a hard-coded CTL.
     expect(html).not.toContain("Center for Technology Licensing");
+    expect(html).not.toMatch(/reviewed by/i);
     expect(html).not.toContain("We want widget collaborators.");
     expect(html).toContain("Two Weill Cornell investigators whose published work");
   });
@@ -345,6 +347,12 @@ describe("Matcha report page", () => {
     const html = await renderPage({ submissionId: "s1", cwids: "a" });
     expect(html).toContain("Coverage of your ask");
     expect(html).not.toContain("data-report-gaps=");
+  });
+
+  it("drops the funding mechanism column for a PI whose awards have none", async () => {
+    setup({ candidates: ["a", "b"], briefs: [brief("a"), brief("b")] });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
+    expect(html.match(/grid-cols-\[56px_/g)).toHaveLength(1);
   });
 
   it("404s a submission outside the caller's scope", async () => {
