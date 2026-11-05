@@ -128,6 +128,7 @@ import type { CareerStage } from "@/lib/career-stage";
 import { RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
 import { briefCsvFields, buildMatchaCsv } from "@/lib/edit/matcha-export";
 import {
+  briefAngle,
   briefSourceLabel,
   briefSourceUrl,
   briefTopics,
@@ -4792,7 +4793,8 @@ function ResearcherRow({
 // ── Matcha Phase 3: per-PI briefs (MATCHA_BRIEF) ─────────────────────────────
 //
 // Layout v3.1 (`Matcha Brief Layout v3.dc.html`): the brief lives INSIDE the existing card. The
-// model writes only Why this PI + Discussion topics; Funding / Translation / Appointments render
+// model writes only Why this PI, Partnership angle + Discussion topics; Funding / Translation /
+// Appointments / Methods and tools render
 // from Scholars records and are never editable. Every control below is absent while the flag is
 // off — the rows are handed no `brief` prop, so master's markup renders untouched.
 
@@ -4803,7 +4805,12 @@ type BriefState =
   | { kind: "failed" }
   | { kind: "ready"; brief: BriefWire };
 
-type BriefPatch = { why?: string | null; topics?: string[] | null; note?: string | null };
+type BriefPatch = {
+  why?: string | null;
+  angle?: string | null;
+  topics?: string[] | null;
+  note?: string | null;
+};
 
 /** What a row needs to render its brief. Absent ⇒ the flag is off (or there is no saved run). */
 type BriefRowProps = {
@@ -4861,7 +4868,10 @@ function formatBriefDate(iso: string, withYear = false): string {
 
 function briefMeta(brief: BriefWire): string {
   const whyEdited = brief.edited?.why !== undefined;
-  const edits = (whyEdited ? 1 : 0) + (brief.edited?.topics !== undefined ? 1 : 0);
+  const edits =
+    (whyEdited ? 1 : 0) +
+    (brief.edited?.angle !== undefined ? 1 : 0) +
+    (brief.edited?.topics !== undefined ? 1 : 0);
   const removed = brief.generated.removedCount;
   // The removed count describes the GENERATED why; once the officer has rewritten it the count
   // no longer describes what is on screen (mockup: hidden when Why is edited).
@@ -5002,6 +5012,8 @@ function BriefRecordsBlock({ records }: { records: BriefRecords | undefined }) {
   const translation = records?.translation ?? [];
   const secondary = [...new Set((records?.secondaryAppointments ?? []).map((a) => a.organization))];
   const centers = records?.centers ?? [];
+  const methods = records?.methods ?? [];
+  const trialCount = records?.trialCount ?? 0;
   const appointments = [
     ...(secondary.length > 0 ? [`Secondary: ${secondary.join("; ")}`] : []),
     ...(centers.length > 0 ? [`Centers: ${centers.join("; ")}`] : []),
@@ -5061,6 +5073,23 @@ function BriefRecordsBlock({ records }: { records: BriefRecords | undefined }) {
         </dd>
         <dt className={capClass}>Appointments</dt>
         <dd>{appointments ? <span>{appointments}</span> : none}</dd>
+        {methods.length > 0 || trialCount > 0 ? (
+          <>
+            <dt className={capClass}>Methods and tools</dt>
+            <dd className="flex flex-col gap-0.5" data-slot="matcha-brief-methods">
+              {methods.map((m) => (
+                <div key={m.name}>
+                  {m.name} · {m.papers} paper{m.papers === 1 ? "" : "s"}
+                </div>
+              ))}
+              {trialCount > 0 ? (
+                <div>
+                  {trialCount} clinical trial{trialCount === 1 ? "" : "s"} on record
+                </div>
+              ) : null}
+            </dd>
+          </>
+        ) : null}
       </dl>
     </div>
   );
@@ -5069,7 +5098,7 @@ function BriefRecordsBlock({ records }: { records: BriefRecords | undefined }) {
 /** The tinted brief panel inside the Detailed card (after the department line, above the strip). */
 function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
   const { state, records, canEdit, onDraft, onPatch } = brief;
-  const [editing, setEditing] = useState<null | "why" | "topics">(null);
+  const [editing, setEditing] = useState<null | "why" | "angle" | "topics">(null);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -5129,8 +5158,10 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
   } else {
     const b = state.brief;
     const why = briefWhy(b);
+    const angle = briefAngle(b);
     const topics = briefTopics(b);
     const whyEdited = b.edited?.why !== undefined;
+    const angleEdited = b.edited?.angle !== undefined;
     const topicsEdited = b.edited?.topics !== undefined;
     body = (
       <div className="flex flex-col gap-3">
@@ -5180,6 +5211,46 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
             />
           ) : (
             <p className="text-[14px] text-pretty">{why}</p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1" data-slot="matcha-brief-angle">
+          <BriefSectionHeader
+            label="Partnership angle"
+            edited={angleEdited}
+            editing={editing === "angle"}
+            canEdit={canEdit}
+            name={name}
+            onEdit={() => {
+              setDraft(angle);
+              setSaveError(false);
+              setEditing("angle");
+            }}
+            onRevert={() => void save({ angle: null })}
+          />
+          {editing === "angle" ? (
+            <BriefEditor
+              value={draft}
+              rows={3}
+              label={`Partnership angle for ${name}`}
+              saving={saving}
+              error={saveError}
+              onChange={setDraft}
+              onSave={() => void save({ angle: draft.trim() ? draft : null })}
+              onCancel={() => setEditing(null)}
+            />
+          ) : angle ? (
+            <p className="text-[14px] text-pretty">{angle}</p>
+          ) : b.generated.angle === undefined ? (
+            // A brief drafted before angles existed: the header's Redraft adds one.
+            <p className="text-muted-foreground text-[13px] italic">
+              Drafted before partnership angles.{canEdit ? " Redraft to add one." : ""}
+            </p>
+          ) : (
+            // The fact-check removed every statement in it.
+            <p className="text-muted-foreground text-[13px] italic">
+              No grounded angle in this draft.
+            </p>
           )}
         </div>
 

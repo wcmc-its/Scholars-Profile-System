@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { briefSourceLabel } from "@/lib/edit/matcha-brief-types";
+import { briefAngle, briefSourceLabel } from "@/lib/edit/matcha-brief-types";
+
+describe("briefAngle", () => {
+  const generated = { why: "w", topics: [], removedCount: 0 };
+  it("prefers the edit, then the generated angle", () => {
+    expect(briefAngle({ generated: { ...generated, angle: "Gen." }, edited: null })).toBe("Gen.");
+    expect(
+      briefAngle({ generated: { ...generated, angle: "Gen." }, edited: { angle: "Mine." } }),
+    ).toBe("Mine.");
+  });
+  it('treats a brief stored before angles existed as ""', () => {
+    expect(briefAngle({ generated, edited: null })).toBe("");
+    expect(briefAngle({ generated, edited: { why: "x" } })).toBe("");
+  });
+});
 
 describe("briefSourceLabel — PubMed markup in pub titles", () => {
   it("strips tags and decodes entities before the word cut", () => {
