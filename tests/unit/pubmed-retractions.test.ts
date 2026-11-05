@@ -73,18 +73,39 @@ describe("fetchRetractedPmids", () => {
     );
   });
 
+  function errorResponse(): Response {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ esearchresult: { ERROR: "Search Backend failed" } }),
+      text: async () => "",
+    } as unknown as Response;
+  }
+
   it("surfaces an ESearch ERROR payload instead of returning a partial set", async () => {
-    const fetchFn = vi.fn(async () =>
-      ({
-        ok: true,
-        status: 200,
-        json: async () => ({ esearchresult: { ERROR: "Search Backend failed" } }),
-        text: async () => "",
-      }) as unknown as Response,
-    );
-    await expect(fetchRetractedPmids({ fetchFn, throughYear: 1990, delayMs: 0 })).rejects.toThrow(
-      /ESearch error/,
-    );
+    const fetchFn = vi.fn(async () => errorResponse());
+    await expect(
+      fetchRetractedPmids({ fetchFn, throughYear: 1990, delayMs: 0, retryBaseMs: 0 }),
+    ).rejects.toThrow(/ESearch error/);
+    // first bucket: 1 try + 5 retries, then it throws before the next bucket
+    expect(fetchFn).toHaveBeenCalledTimes(6);
+  });
+
+  it("retries an ESearch ERROR payload then succeeds (transient backend outage)", async () => {
+    let calls = 0;
+    const fetchFn = vi.fn(async () => {
+      calls++;
+      return calls <= 2 ? errorResponse() : jsonResponse(["7"]);
+    });
+    const out = await fetchRetractedPmids({
+      fetchFn,
+      throughYear: 1990,
+      delayMs: 0,
+      retryBaseMs: 0,
+    });
+    expect([...out]).toEqual(["7"]);
+    // pre-1990 bucket: 2 errors + 1 success; 1990 bucket: 1 call
+    expect(calls).toBe(4);
   });
 
   it("retries on a 429 then succeeds", async () => {
@@ -97,7 +118,12 @@ describe("fetchRetractedPmids", () => {
       return jsonResponse([]);
     });
     // pre-1990 + 1990 = 2 buckets; first call 429s then retries
-    const out = await fetchRetractedPmids({ fetchFn, throughYear: 1990, delayMs: 0 });
+    const out = await fetchRetractedPmids({
+      fetchFn,
+      throughYear: 1990,
+      delayMs: 0,
+      retryBaseMs: 0,
+    });
     expect(out.size).toBe(0);
     expect(calls).toBeGreaterThanOrEqual(3);
   });
