@@ -62,7 +62,7 @@
  * to skew a ranking with no way for the officer to say so.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, ExternalLink, FileText, Lock, RefreshCw, Trash2 } from "lucide-react";
+import { Download, ExternalLink, FileText, Lock, Mail, RefreshCw, Trash2 } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -139,6 +139,14 @@ import {
   type BriefRecords,
   type BriefWire,
 } from "@/lib/edit/matcha-brief-types";
+import {
+  MAILTO_SOFT_LIMIT,
+  addressList,
+  buildGroupEmail,
+  buildMailto,
+  buildPersonEmail,
+  emailFocus,
+} from "@/lib/edit/matcha-email";
 import { readOverviewStream } from "@/lib/edit/overview-stream";
 import type { EligibilityRequirements } from "@/lib/funding/screening";
 import {
@@ -679,6 +687,8 @@ export function MatchaPanel({
   const [briefsSavedAt, setBriefsSavedAt] = useState<string | null>(null);
   // Matcha Phase 4 — the missing-brief prompt in front of "Report (PDF)". Null = closed.
   const [reportPrompt, setReportPrompt] = useState<ReportPrompt | null>(null);
+  // Matcha contact — the "Email selected (BCC)" dialog. Null = closed.
+  const [emailDialog, setEmailDialog] = useState<EmailDialogState | null>(null);
   // The submission a draft belongs to — a result landing after a new search is dropped.
   const briefSubRef = useRef<string | null>(null);
   const briefQueueRef = useRef<{ cwid: string; sid: string }[]>([]);
@@ -1660,6 +1670,7 @@ export function MatchaPanel({
       state: briefStateFor(cwid),
       records: briefRecords[cwid],
       canEdit: briefCanEdit,
+      ...(contactOn ? { onEmail: () => emailOne(cwid) } : {}),
       onDraft: () => enqueueBriefs([cwid]),
       onPatch: (patch) => patchBrief(cwid, patch),
     };
@@ -1721,6 +1732,77 @@ export function MatchaPanel({
     if (!reportPrompt || !briefCanEdit) return;
     enqueueBriefs(reportPrompt.missing);
     setReportPrompt({ ...reportPrompt, phase: "drafting" });
+  }
+
+  // ── Matcha contact ──
+  // Drafters only (the contacts route uses the brief-drafting gate; observers never see these).
+  const contactOn = briefsOn && briefCanEdit;
+  /** The search's focus for the outreach text: the title without its "{requester} — " prefix and
+   *  without the preference suffix ("· Early career" describes the sponsor's ask, not the topic). */
+  const contactFocus = titleOverride
+    ? emailFocus(titleOverride, effectiveRequester)
+    : (askTitleFrom(concepts, [], titleSummary, null)?.title ?? "");
+
+  /** Addresses for `cwids`, resolved on CLICK by the gated route — never at render, never stored. */
+  async function fetchContacts(cwids: readonly string[]): Promise<ContactsResult> {
+    const r = await fetch("/api/edit/matcha/contacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({ submissionId, cwids }),
+    });
+    const body = (await r.json().catch(() => null)) as
+      | (Partial<ContactsResult> & { ok?: boolean; error?: string })
+      | null;
+    if (!r.ok || !body?.ok) {
+      throw new Error(
+        CONTACT_ERRORS[body?.error ?? ""] ?? "Couldn't load the email addresses. Please try again.",
+      );
+    }
+    return {
+      contacts: body.contacts ?? [],
+      missing: body.missing ?? [],
+      officer: body.officer ?? { name: "", email: null },
+    };
+  }
+
+  /** "Email selected (BCC)": resolve the ticked rows' addresses, then the editable dialog. */
+  async function openEmailDialog() {
+    if (!contactOn || shortlistRows.length === 0) return;
+    const cwids = shortlistRows.map(({ c }) => c.cwid);
+    setEmailDialog({ kind: "loading" });
+    try {
+      const res = await fetchContacts(cwids);
+      const { subject, body } = buildGroupEmail({
+        focus: contactFocus,
+        requester: effectiveRequester,
+        officerName: res.officer.name,
+      });
+      setEmailDialog({ kind: "ready", ...res, subject, body, copied: null });
+    } catch (err) {
+      setEmailDialog({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** Per-person "Email": that person alone, greeted by name, with their partnership angle. */
+  async function emailOne(cwid: string): Promise<boolean> {
+    const res = await fetchContacts([cwid]);
+    const person = res.contacts[0];
+    if (!person) return false;
+    const brief = briefMap.get(cwid);
+    const { subject, body } = buildPersonEmail({
+      focus: contactFocus,
+      requester: effectiveRequester,
+      officerName: res.officer.name,
+      name: person.name,
+      angle: brief ? briefAngle(brief) : null,
+    });
+    window.location.href = buildMailto({ to: person.email, subject, body });
+    return true;
   }
 
   /** Missing PIs whose draft has landed (brief) or failed. */
@@ -3186,6 +3268,39 @@ export function MatchaPanel({
                         </HoverTooltip>
                       )
                     ) : null}
+                    {/* Matcha contact — drafters only; the ticked rows are the recipients. */}
+                    {contactOn ? (
+                      shortlistRows.length > CONTACT_MAX ? (
+                        <HoverTooltip
+                          wide
+                          text={`Email addresses are available for ${CONTACT_MAX} or fewer people. Untick some rows.`}
+                        >
+                          <Button type="button" variant="outline" size="sm" disabled>
+                            <Mail className="size-3.5" />
+                            Email selected (BCC)
+                          </Button>
+                        </HoverTooltip>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          data-slot="matcha-email-selected"
+                          disabled={shortlistRows.length === 0 || emailDialog?.kind === "loading"}
+                          onClick={() => void openEmailDialog()}
+                        >
+                          <Mail className="size-3.5" />
+                          Email selected (BCC)
+                        </Button>
+                      )
+                    ) : null}
+                    {emailDialog ? (
+                      <EmailSelectedDialog
+                        state={emailDialog}
+                        onChange={setEmailDialog}
+                        onClose={() => setEmailDialog(null)}
+                      />
+                    ) : null}
                     {reportPrompt ? (
                       <Dialog
                         open
@@ -3781,6 +3896,161 @@ function FacetGroup({
 }
 
 /**
+ * Matcha contact — the "Email selected (BCC)" dialog: editable Subject and Body prefilled from the
+ * standard template (`lib/edit/matcha-email.ts`), then "Open in mail app" (a `mailto:` with the
+ * officer as To, so clients accept it, and the researchers in Bcc) or "Copy addresses" (for long
+ * lists). Addresses live only in this dialog's state; nothing is sent from Scholars.
+ */
+function EmailSelectedDialog({
+  state,
+  onChange,
+  onClose,
+}: {
+  state: EmailDialogState;
+  onChange: (next: EmailDialogState) => void;
+  onClose: () => void;
+}) {
+  const emails = state.kind === "ready" ? state.contacts.map((c) => c.email) : [];
+  const mailto =
+    state.kind === "ready" && emails.length > 0
+      ? buildMailto({
+          to: state.officer.email,
+          bcc: emails,
+          subject: state.subject,
+          body: state.body,
+        })
+      : "";
+  const tooLong = mailto.length > MAILTO_SOFT_LIMIT;
+
+  async function copyAddresses() {
+    if (state.kind !== "ready") return;
+    try {
+      await navigator.clipboard.writeText(addressList(emails));
+      onChange({ ...state, copied: "ok" });
+    } catch {
+      onChange({ ...state, copied: "manual" });
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent data-slot="matcha-email-dialog" className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Email selected researchers</DialogTitle>
+          <DialogDescription>
+            {state.kind === "ready"
+              ? `${state.contacts.length} ${state.contacts.length === 1 ? "address" : "addresses"} in Bcc. Edit the message, then open it in your mail app.`
+              : "Addresses are looked up when you ask and are not saved."}
+          </DialogDescription>
+        </DialogHeader>
+        {state.kind === "loading" ? (
+          <p className="text-sm" role="status">
+            Looking up addresses…
+          </p>
+        ) : state.kind === "error" ? (
+          <p className="text-destructive text-sm" role="alert">
+            {state.message}
+          </p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {state.missing.length > 0 ? (
+              <p className="text-muted-foreground text-sm" data-slot="matcha-email-missing">
+                {state.missing.length} without an email on record:{" "}
+                {state.missing.map((m) => m.name).join(", ")}
+              </p>
+            ) : null}
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              Subject
+              <Input
+                value={state.subject}
+                onChange={(e) => onChange({ ...state, subject: e.target.value })}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium">
+              Body
+              <Textarea
+                rows={10}
+                value={state.body}
+                onChange={(e) => onChange({ ...state, body: e.target.value })}
+              />
+            </label>
+            {tooLong ? (
+              <p className="text-sm" data-slot="matcha-email-too-long">
+                This message is long for some mail apps to open with every address. If it does
+                not open, copy the addresses and paste them into Bcc.
+              </p>
+            ) : null}
+            {state.copied === "ok" ? (
+              <p className="text-sm" role="status">
+                Copied {emails.length} {emails.length === 1 ? "address" : "addresses"}. Paste them
+                into Bcc.
+              </p>
+            ) : state.copied === "manual" ? (
+              <textarea
+                readOnly
+                rows={3}
+                value={addressList(emails)}
+                aria-label="Email addresses"
+                className="border-border w-full rounded border p-2 text-xs"
+                onFocus={(e) => e.currentTarget.select()}
+                autoFocus
+              />
+            ) : null}
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          {state.kind === "ready" && emails.length > 0 ? (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={() => void copyAddresses()}>
+                Copy addresses
+              </Button>
+              <Button asChild variant="apollo" size="sm">
+                <a href={mailto} data-slot="matcha-email-open">
+                  Open in mail app
+                </a>
+              </Button>
+            </>
+          ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Matcha contact — one researcher's templated email (with their partnership angle). Resolves the
+ *  address on CLICK, like `ContactButton`, through the gated contacts route. */
+function EmailPersonButton({ onEmail }: { onEmail: () => Promise<boolean> }) {
+  const [state, setState] = useState<"idle" | "loading" | "none" | "error">("idle");
+  if (state === "none") {
+    return <span className="text-muted-foreground shrink-0 text-xs">No email on record</span>;
+  }
+  return (
+    <button
+      type="button"
+      data-slot="matcha-email-person"
+      disabled={state === "loading"}
+      onClick={() => {
+        setState("loading");
+        onEmail()
+          .then((ok) => setState(ok ? "idle" : "none"))
+          .catch(() => setState("error"));
+      }}
+      className="border-border text-foreground/80 shrink-0 rounded-full border px-2.5 py-0.5 text-xs transition-colors hover:border-[var(--color-accent-slate)] disabled:opacity-50"
+    >
+      {state === "loading" ? "Resolving…" : state === "error" ? "Email (retry)" : "Email"}
+    </button>
+  );
+}
+
+/**
  * ONE scholar's email, resolved on click.
  *
  * SCOPE, and it is the whole design: this is the per-card `Contact` of the mockup and NOTHING
@@ -3788,7 +4058,9 @@ function FacetGroup({
  * set — and that is a standing policy no-go, not a deferral: `docs/email-visibility-spec.md`
  * forbids bulk email download "even for internal users" at a cap of 50, and a sponsor pool runs
  * to 800. Per-person is a different act with a different consent story, and it is the one the
- * route below is built for.
+ * route below is built for. (Matcha contact later added "Email selected (BCC)" for DRAFTERS only,
+ * through `/api/edit/matcha/contacts`, refused above the 50-person policy cap; a drafter's card
+ * shows `EmailPersonButton` in place of this one.)
  *
  * NO ADDRESS EVER ENTERS THE MATCH PAYLOAD. `/api/profile/[cwid]/contact-email` is a separate,
  * `no-store`, per-person directory lookup that fails CLOSED — release gate off, external viewer,
@@ -4547,7 +4819,11 @@ function ResearcherRow({
           {/* Grant Matcha — the eligibility pill sits INLINE beside the fit tier (mockup §9). */}
           {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
           <ResearcherTypePill measures={candidate.measures} />
-          <ContactButton cwid={candidate.cwid} />
+          {brief?.onEmail ? (
+            <EmailPersonButton onEmail={brief.onEmail} />
+          ) : (
+            <ContactButton cwid={candidate.cwid} />
+          )}
           {/* The way back. `↑` is this file's existing word for "collapse" — the relevance floor's
               toggle already reads "Hide ↑" — rather than a third glyph for a second idea; the
               compact row's `›` is its opposite number. It needs a REAL name because it is the only
@@ -4820,7 +5096,38 @@ type BriefRowProps = {
   canEdit: boolean;
   onDraft: () => void;
   onPatch: (patch: BriefPatch) => Promise<boolean>;
+  /** Matcha contact — the per-person templated "Email". Present only for a drafter (the contacts
+   *  route's gate); resolves false when the person has no address on record. */
+  onEmail?: () => Promise<boolean>;
 };
+
+/** What `/api/edit/matcha/contacts` returns. Held only in the open dialog's state. */
+type ContactsResult = {
+  contacts: { cwid: string; name: string; email: string }[];
+  missing: { cwid: string; name: string }[];
+  officer: { name: string; email: string | null };
+};
+
+type EmailDialogState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | (ContactsResult & {
+      kind: "ready";
+      subject: string;
+      body: string;
+      /** After "Copy addresses": "ok", or "manual" when the clipboard refused (shown to select). */
+      copied: "ok" | "manual" | null;
+    });
+
+const CONTACT_ERRORS: Record<string, string> = {
+  over_contact_cap: "Email addresses are available for 50 or fewer people at a time.",
+  not_developer_contact: "Only Matcha drafters can email researchers.",
+  impersonation_readonly: "Emailing is not available while viewing as someone else.",
+};
+
+/** The policy cap the contacts route enforces (`SCHOLAR_EXPORT_CAP`); this copy disables the
+ *  button rather than letting the server refuse. */
+const CONTACT_MAX = 50;
 
 /** The compact row's single muted line. Absent ⇒ no brief ⇒ nothing extra on the row. */
 type CompactBriefLine = { kind: "text"; text: string } | { kind: "drafting" } | { kind: "failed" };
