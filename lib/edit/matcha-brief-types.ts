@@ -30,13 +30,16 @@ export type BriefTopic = {
 
 export type BriefGenerated = {
   why: string;
+  /** 1-2 sentences: the concrete role this PI could play for the requester. Absent on briefs
+   *  drafted before it existed; read it through `briefAngle`, which treats absent as "". */
+  angle?: string;
   topics: BriefTopic[];
   /** How many unsupported statements the fact-check removed. A count only — never the claim. */
   removedCount: number;
 };
 
 /** The officer's version. A field present here wins over `generated`; absent = not edited. */
-export type BriefEdited = { why?: string; topics?: BriefTopic[] };
+export type BriefEdited = { why?: string; angle?: string; topics?: BriefTopic[] };
 
 export type BriefRecords = {
   funding: {
@@ -50,6 +53,10 @@ export type BriefRecords = {
   translation: { title: string; patentStatus: string | null; url: string }[];
   secondaryAppointments: { title: string; organization: string }[];
   centers: string[];
+  /** Top `ScholarTool` rows by distinct papers, strongest first. */
+  methods: { name: string; category: string | null; papers: number }[];
+  /** Distinct clinical trials on record (`PersonClinicalTrial`). */
+  trialCount: number;
 };
 
 /** One brief as `/api/edit/matcha/brief` ships it (GET, POST stream lines, PATCH). */
@@ -67,6 +74,11 @@ export type BriefWire = {
 /** The text the officer sees: their edit when present, else the generated text. */
 export function briefWhy(b: Pick<BriefWire, "generated" | "edited">): string {
   return b.edited?.why ?? b.generated.why;
+}
+
+/** The partnership angle on screen; "" for a brief drafted before angles existed. */
+export function briefAngle(b: Pick<BriefWire, "generated" | "edited">): string {
+  return b.edited?.angle ?? b.generated.angle ?? "";
 }
 
 export function briefTopics(b: Pick<BriefWire, "generated" | "edited">): BriefTopic[] {

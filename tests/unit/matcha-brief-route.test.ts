@@ -99,7 +99,14 @@ const storedResult = {
   candidates: [storedCandidate, { ...storedCandidate, cwid: "b" }],
   titleSummary: "generated handle",
 };
-const emptyRecords = { funding: [], translation: [], secondaryAppointments: [], centers: [] };
+const emptyRecords = {
+  funding: [],
+  translation: [],
+  secondaryAppointments: [],
+  centers: [],
+  methods: [],
+  trialCount: 0,
+};
 const generated = { why: "Works on obesity.", topics: [], removedCount: 0 };
 const row = (cwid: string, extra: Record<string, unknown> = {}) => ({
   cwid,
@@ -300,6 +307,7 @@ describe("PATCH (edit)", () => {
   const src = { kind: "pub", pmid: "1", year: 2025, title: "t" };
   const gen = {
     why: "Generated why.",
+    angle: "Generated angle.",
     topics: [{ concept: "obesity", text: "beige fat", sources: [src] }],
     removedCount: 0,
   };
@@ -341,6 +349,26 @@ describe("PATCH (edit)", () => {
     expect(mockBriefUpdate.mock.calls[0][0].data.note).toBe("Spoke in Sept.");
     await PATCH(req(devSession, { submissionId: "s1", cwid: "a", note: "  " }));
     expect(mockBriefUpdate.mock.calls[1][0].data.note).toBeNull();
+  });
+
+  it("stores an edited angle; the generated text or null reverts it; a bad type 400s", async () => {
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angle: " Trial lead. " }));
+    expect(mockBriefUpdate.mock.calls[0][0].data.edited).toEqual({ angle: "Trial lead." });
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angle: "Generated angle." }));
+    expect(mockBriefUpdate.mock.calls[1][0].data.edited).toBe(Prisma.DbNull);
+    mockBriefFindUnique.mockResolvedValue(row("a", { generated: gen, edited: { angle: "Mine." } }));
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angle: null }));
+    expect(mockBriefUpdate.mock.calls[2][0].data.edited).toBe(Prisma.DbNull);
+    expect((await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angle: 7 }))).status).toBe(400);
+  });
+
+  it("a brief drafted before angles (none stored) takes an angle edit; empty stays unedited", async () => {
+    const legacy = { why: "Generated why.", topics: [], removedCount: 0 };
+    mockBriefFindUnique.mockResolvedValue(row("a", { generated: legacy }));
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angle: "Consultant on imaging." }));
+    expect(mockBriefUpdate.mock.calls[0][0].data.edited).toEqual({ angle: "Consultant on imaging." });
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angle: "" }));
+    expect(mockBriefUpdate.mock.calls[1][0].data.edited).toBe(Prisma.DbNull);
   });
 
   it("404s a brief that was never drafted", async () => {

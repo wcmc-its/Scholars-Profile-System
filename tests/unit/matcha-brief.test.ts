@@ -20,6 +20,8 @@ const {
   mockAppointmentFindMany,
   mockOverrideFindMany,
   mockSuppressionFindMany,
+  mockToolFindMany,
+  mockTrialGroupBy,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockVerify: vi.fn(),
@@ -31,6 +33,8 @@ const {
   mockAppointmentFindMany: vi.fn(),
   mockOverrideFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
+  mockToolFindMany: vi.fn(),
+  mockTrialGroupBy: vi.fn(),
 }));
 
 vi.mock("ai", async (importOriginal) => ({
@@ -56,11 +60,14 @@ vi.mock("@/lib/db", () => ({
       appointment: { findMany: mockAppointmentFindMany },
       fieldOverride: { findMany: mockOverrideFindMany },
       suppression: { findMany: mockSuppressionFindMany },
+      scholarTool: { findMany: mockToolFindMany },
+      personClinicalTrial: { groupBy: mockTrialGroupBy },
     },
   },
 }));
 
 import {
+  BRIEF_MAX_METHODS,
   BRIEF_MAX_TOPICS,
   briefFacts,
   briefMatchedConcepts,
@@ -155,6 +162,8 @@ const records: BriefRecords = {
   translation: [],
   secondaryAppointments: [],
   centers: [],
+  methods: [{ name: "Mouse models", category: "animal model", papers: 14 }],
+  trialCount: 3,
 };
 
 const matched: BriefMatchedConcept[] = [
@@ -239,6 +248,12 @@ describe("postCheckBrief", () => {
       sources,
     );
     expect(r.why).toBe("Studies G1 phase arrest and P53 loss.");
+  });
+
+  it("strips keys and PMIDs from `angle`, and defaults a missing angle to empty", () => {
+    const out = postCheckBrief({ why: "x", angle: "Trial lead (P1) for PMID: 123 cohorts." }, matched, sources);
+    expect(out.angle).toBe("Trial lead for cohorts.");
+    expect(postCheckBrief({ why: "x", angle: null }, matched, sources).angle).toBe("");
   });
 
   it("strips PMIDs from `why`", () => {
@@ -349,6 +364,29 @@ describe("loadBriefRecords", () => {
       { cwid: "a", title: "Professor", organization: "Physiology", externalId: "ap-1" },
       { cwid: "a", title: "Adjunct", organization: "Hidden by curator", externalId: "ap-supp" },
     ]);
+    // Already ordered by pmidCount desc (the query's orderBy); 7 for "a" => cut to 6.
+    mockToolFindMany.mockResolvedValue([
+      ...Array.from({ length: 7 }, (_, i) => ({
+        cwid: "a",
+        toolName: `Tool ${i + 1}`,
+        category: i === 0 ? "imaging" : null,
+        pmidCount: 20 - i,
+      })),
+      { cwid: "b", toolName: "Flow cytometry", category: null, pmidCount: 1 },
+    ]);
+    mockTrialGroupBy.mockResolvedValue([{ cwid: "a", _count: { _all: 4 } }]);
+  });
+
+  it("loads the top 6 methods per PI by papers and the distinct trial count", async () => {
+    const out = await loadBriefRecords(["a", "b"]);
+    expect(out.get("a")!.methods).toHaveLength(BRIEF_MAX_METHODS);
+    expect(out.get("a")!.methods[0]).toEqual({ name: "Tool 1", category: "imaging", papers: 20 });
+    expect(out.get("a")!.methods.map((m) => m.name)).not.toContain("Tool 7");
+    expect(out.get("b")!.methods).toEqual([{ name: "Flow cytometry", category: null, papers: 1 }]);
+    expect(out.get("a")!.trialCount).toBe(4);
+    expect(out.get("b")!.trialCount).toBe(0);
+    expect(mockToolFindMany.mock.calls[0][0].orderBy[0]).toEqual({ pmidCount: "desc" });
+    expect(mockTrialGroupBy.mock.calls[0][0]).toMatchObject({ by: ["cwid"], where: { cwid: { in: ["a", "b"] } } });
   });
 
   it("keeps only active PI awards, minus suppressed grants and hideFunding scholars", async () => {
@@ -370,12 +408,17 @@ describe("loadBriefRecords", () => {
   });
 });
 
+const generatedWhy = "Runs a lab on endothelial lipid signaling. Leads a clinical trial.";
+// The post-checked angle (the bracketed key stripped) is what the fact-check and revise see.
+const generatedAngle = "Could validate candidates in mouse models. Holds a patent on a device.";
+
 describe("generateBrief", () => {
   beforeEach(() => {
     mockAssemble.mockResolvedValue(facts);
     mockGenerateObject.mockResolvedValue({
       object: {
-        why: "Runs a lab on endothelial lipid signaling. Leads a clinical trial.",
+        why: generatedWhy,
+        angle: "Could validate candidates in mouse models (P1). Holds a patent on a device.",
         topics: [
           { concept: "vascular inflammation", text: "S1P signaling in vascular inflammation", sources: ["P1"] },
           { concept: "obesity", text: "beige fat and blood pressure", sources: ["G1"] },
@@ -386,8 +429,13 @@ describe("generateBrief", () => {
     mockVerify.mockResolvedValue([
       { span: "Leads a clinical trial.", category: "c", reason: "r" },
       { span: "beige fat", category: "c", reason: "r" },
+      { span: "Holds a patent on a device.", category: "c", reason: "r" },
     ]);
-    mockRevise.mockResolvedValue("Runs a lab on endothelial lipid signaling.");
+    mockRevise.mockImplementation(async (prose: string) =>
+      prose.startsWith("Runs")
+        ? "Runs a lab on endothelial lipid signaling."
+        : "Could validate candidates in mouse models.",
+    );
   });
 
   it("drafts from the saved concepts, fact-checks, and returns only grounded, anchored content", async () => {
@@ -401,13 +449,17 @@ describe("generateBrief", () => {
     expect(model).toMatch(/sonnet/);
     expect(generated.why).toBe("Runs a lab on endothelial lipid signaling.");
     expect(generated.topics.map((t) => t.concept)).toEqual(["vascular inflammation"]);
-    expect(generated.removedCount).toBe(2);
+    expect(generated.angle).toBe("Could validate candidates in mouse models.");
+    expect(generated.removedCount).toBe(3);
 
     // The model saw the FILTERED PI award, never the overview's unfiltered one.
     const call = mockGenerateObject.mock.calls[0][0];
     const researcher = call.messages[1].content as string;
     expect(researcher).toContain("Endothelial sphingolipid synthesis");
     expect(researcher).not.toContain("SUPPRESSED OR NON-PI AWARD");
+    // Methods and the trial count are grounding facts for the angle.
+    expect(researcher).toContain("Mouse models");
+    expect(researcher).toContain("CLINICAL_TRIALS_ON_RECORD: 3");
     // The shared ask block carries the cache point and the saved concepts.
     expect(call.messages[0].content).toContain("vascular inflammation");
     // The fact-check sees the ask's concepts as allowed.
@@ -416,8 +468,24 @@ describe("generateBrief", () => {
     expect(askPart).toContain("sarcopenia"); // naming any ask concept is allowed...
     expect(matchedPart).toContain("vascular inflammation");
     expect(matchedPart).not.toContain("sarcopenia"); // ...claiming the PI meets it is not
-    // Only `why`'s span is sent for revision.
-    expect(mockRevise.mock.calls[0][1].map((u: { span: string }) => u.span)).toEqual(["Leads a clinical trial."]);
+    // The angle is fact-checked with the methods and trial count as allowed facts.
+    expect(mockVerify.mock.calls[0][1]).toContain(generatedAngle);
+    expect(matchedPart).toContain("- Mouse models [animal model]");
+    expect(matchedPart).toContain("CLINICAL TRIALS ON RECORD: 3");
+    // Each prose field's own spans go to its own revision.
+    const revised = Object.fromEntries(
+      mockRevise.mock.calls.map((c) => [c[0], c[1].map((u: { span: string }) => u.span)]),
+    );
+    expect(revised[generatedWhy]).toEqual(["Leads a clinical trial."]);
+    expect(revised[generatedAngle]).toEqual(["Holds a patent on a device."]);
+  });
+
+  it("defaults a missing angle to empty (the model omitted it)", async () => {
+    mockVerify.mockResolvedValue([]);
+    mockGenerateObject.mockResolvedValue({ object: { why: "Works on lipids.", topics: [] } });
+    const { generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
+    expect(generated.angle).toBe("");
+    expect(mockVerify.mock.calls[0][1]).toBe("Works on lipids.");
   });
 
   it("skips the revise call when the fact-check finds nothing", async () => {

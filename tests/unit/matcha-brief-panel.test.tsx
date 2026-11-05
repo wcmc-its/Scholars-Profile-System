@@ -67,6 +67,8 @@ const EMPTY_RECORDS: BriefRecords = {
   translation: [],
   secondaryAppointments: [],
   centers: [],
+  methods: [],
+  trialCount: 0,
 };
 
 function brief(cwid: string, over: Partial<BriefWire> = {}): BriefWire {
@@ -106,6 +108,8 @@ function stub(opts: {
   post?: Record<string, unknown>;
   /** The PATCH response body. */
   patch?: Record<string, unknown>;
+  /** Records the GET returns for every saved brief (default: empty). */
+  records?: BriefRecords;
 }) {
   const calls: Call[] = [];
   const held: (() => void)[] = [];
@@ -119,7 +123,9 @@ function stub(opts: {
           json: async () => ({
             ok: true,
             briefs: opts.saved ?? [],
-            records: Object.fromEntries((opts.saved ?? []).map((b) => [b.cwid, EMPTY_RECORDS])),
+            records: Object.fromEntries(
+              (opts.saved ?? []).map((b) => [b.cwid, opts.records ?? EMPTY_RECORDS]),
+            ),
             canEdit: opts.canEdit ?? true,
           }),
         };
@@ -286,6 +292,68 @@ describe("Matcha brief UI", () => {
     expect(
       screen.getByText("Never exported · visible to anyone who opens this search"),
     ).toBeTruthy();
+  });
+
+  it("shows Methods and tools from records, and omits the section when there are none", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    stub({
+      candidates: pool(2),
+      saved: [brief("p1")],
+      records: {
+        ...EMPTY_RECORDS,
+        methods: [
+          { name: "Mouse models", category: "animal model", papers: 14 },
+          { name: "Flow cytometry", category: null, papers: 1 },
+        ],
+        trialCount: 2,
+      },
+    });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    expect(within(section).getByText("Methods and tools")).toBeTruthy();
+    expect(within(section).getByText("Mouse models · 14 papers")).toBeTruthy();
+    expect(within(section).getByText("Flow cytometry · 1 paper")).toBeTruthy();
+    expect(within(section).getByText("2 clinical trials on record")).toBeTruthy();
+    cleanup();
+    stub({ candidates: pool(2), saved: [brief("p1")] });
+    await search();
+    const bare = await screen.findByRole("region", { name: "Brief for Person 01" });
+    expect(within(bare).queryByText("Methods and tools")).toBeNull();
+  });
+
+  it("shows the partnership angle under Why and saves an edit of it", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    const saved = brief("p1");
+    saved.generated.angle = "Could validate leads in mouse models.";
+    const { calls } = stub({
+      candidates: pool(2),
+      saved: [saved],
+      patch: { brief: { ...saved, edited: { angle: "Trial lead." } } },
+    });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    expect(within(section).getByText("Partnership angle")).toBeTruthy();
+    expect(within(section).getByText("Could validate leads in mouse models.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Partnership angle for Person 01" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Partnership angle for Person 01" }), {
+      target: { value: "Trial lead." },
+    });
+    fireEvent.click(within(section).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH" && c.body?.angle === "Trial lead.")).toBe(true),
+    );
+    expect(await within(section).findByText("Trial lead.")).toBeTruthy();
+  });
+
+  it("a brief drafted before angles shows no crash and points to Redraft", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    stub({ candidates: pool(2), saved: [brief("p1")] });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    expect(
+      within(section).getByText("Drafted before partnership angles. Redraft to add one."),
+    ).toBeTruthy();
+    expect(within(section).getByRole("button", { name: "Redraft brief for Person 01" })).toBeTruthy();
   });
 
   it("flag off: no brief request, no brief chrome", async () => {

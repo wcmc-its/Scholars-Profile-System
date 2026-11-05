@@ -225,6 +225,8 @@ export async function loadMatchaReport(
       translation: [],
       secondaryAppointments: [],
       centers: [],
+      methods: [],
+      trialCount: 0,
     };
     const row = briefBy.get(cwid);
     const wire = row

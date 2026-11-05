@@ -5,7 +5,8 @@
  *   history gate (superuser / developer / observer), scoped like Recent.
  * POST `{ submissionId, cwids[] }` → draft (or redraft) briefs, max 20. Superuser / developer
  *   ONLY: it spends Bedrock and writes rows, so an observer — who may run searches — may not.
- * PATCH `{ submissionId, cwid, why?, topics?, note? }` → the officer's edits. Same gate as POST.
+ * PATCH `{ submissionId, cwid, why?, angle?, topics?, note? }` → the officer's edits. Same gate as
+ *   POST.
  *
  * TRUST BOUNDARY: the client names a submission and PIs, nothing else. The ask's concepts and
  * each PI's matched evidence are re-read from the SAVED search (`SponsorMatchSubmission.result`);
@@ -52,6 +53,7 @@ const PATH = "/api/edit/matcha/brief";
 /** Parallel Bedrock drafts per request. */
 const CONCURRENCY = 4;
 const MAX_WHY_CHARS = 2000;
+const MAX_ANGLE_CHARS = 2000;
 const MAX_TOPIC_CHARS = 300;
 const MAX_TOPICS = 5;
 const MAX_NOTE_CHARS = 5000;
@@ -327,20 +329,27 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return editError(403, "not_developer_brief");
   }
 
-  const { submissionId, cwid, why, topics, note } = body;
+  const { submissionId, cwid, why, angle, topics, note } = body;
   if (typeof submissionId !== "string" || submissionId.length === 0 || submissionId.length > 64) {
     return editError(400, "invalid_submission_id", "submissionId");
   }
   if (typeof cwid !== "string" || cwid.length === 0 || cwid.length > 32) {
     return editError(400, "invalid_cwid", "cwid");
   }
-  // undefined = leave as is; null = revert to generated (why/topics) or clear (note).
+  // undefined = leave as is; null = revert to generated (why/angle/topics) or clear (note).
   if (
     why !== undefined &&
     why !== null &&
     (typeof why !== "string" || why.length > MAX_WHY_CHARS)
   ) {
     return editError(400, "invalid_why", "why");
+  }
+  if (
+    angle !== undefined &&
+    angle !== null &&
+    (typeof angle !== "string" || angle.length > MAX_ANGLE_CHARS)
+  ) {
+    return editError(400, "invalid_angle", "angle");
   }
   if (
     topics !== undefined &&
@@ -377,6 +386,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         if (why.trim() === generated.why) delete edited.why;
         else edited.why = why.trim();
       }
+      if (angle === null) delete edited.angle;
+      else if (typeof angle === "string") {
+        // A brief drafted before angles has none generated: "" is then the generated text.
+        if (angle.trim() === (generated.angle ?? "")) delete edited.angle;
+        else edited.angle = angle.trim();
+      }
       if (topics === null) delete edited.topics;
       else if (Array.isArray(topics)) {
         const next = topicsFromTexts(topics as string[], generated.topics);
@@ -386,7 +401,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         if (same) delete edited.topics;
         else edited.topics = next;
       }
-      const hasEdits = edited.why !== undefined || edited.topics !== undefined;
+      const hasEdits =
+        edited.why !== undefined || edited.angle !== undefined || edited.topics !== undefined;
 
       return tx.matchaBrief.update({
         where: key,
