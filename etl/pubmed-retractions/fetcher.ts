@@ -25,8 +25,10 @@ const RETRACTED_TERM = '"Retracted Publication"[Publication Type]';
 /** ESearch hard cap: it refuses retstart > 9998. Year buckets must stay under
  *  this many hits or the fetch throws (so we never silently miss records). */
 const ESEARCH_MAX = 9999;
-const MAX_RETRIES = 3;
-const RETRY_BASE_MS = 1000;
+/** Backoff doubles from RETRY_BASE_MS (2+4+8+16+32s, about a minute per
+ *  bucket), long enough to ride out a short NCBI backend outage. */
+const MAX_RETRIES = 5;
+const RETRY_BASE_MS = 2000;
 const DEFAULT_DELAY_MS = 350;
 
 /** Earliest bucket is open-ended; MeSH retraction indexing predates 1990 only
@@ -50,6 +52,7 @@ async function esearchYear(
   hi: number,
   fetchFn: FetchFn,
   apiKey: string | undefined,
+  retryBaseMs: number,
 ): Promise<string[]> {
   const params = new URLSearchParams({
     db: "pubmed",
@@ -61,6 +64,7 @@ async function esearchYear(
   const url = `${ESEARCH}?${params.toString()}`;
 
   let retries = 0;
+  const backoff = () => sleep(retryBaseMs * 2 ** (retries - 1));
   for (;;) {
     let response: Response;
     try {
@@ -68,7 +72,7 @@ async function esearchYear(
     } catch (err) {
       if (retries < MAX_RETRIES) {
         retries++;
-        await sleep(RETRY_BASE_MS * retries);
+        await backoff();
         continue;
       }
       throw err;
@@ -76,7 +80,7 @@ async function esearchYear(
     if (!response.ok) {
       if ((response.status === 429 || response.status >= 500) && retries < MAX_RETRIES) {
         retries++;
-        await sleep(RETRY_BASE_MS * retries);
+        await backoff();
         continue;
       }
       throw new Error(`ESearch ${response.status} for ${lo}:${hi}: ${await response.text()}`);
@@ -84,6 +88,13 @@ async function esearchYear(
     const json = (await response.json()) as { esearchresult?: EsearchResult & { ERROR?: string } };
     const res = json.esearchresult;
     if (!res || res.ERROR) {
+      // NCBI reports backend outages ("Search Backend failed ... Cannot
+      // connect to SOLR") as HTTP 200 with an ERROR body, so retry these too.
+      if (retries < MAX_RETRIES) {
+        retries++;
+        await backoff();
+        continue;
+      }
       throw new Error(`ESearch error for ${lo}:${hi}: ${res?.ERROR ?? "no esearchresult"}`);
     }
     const count = Number(res.count);
@@ -105,6 +116,7 @@ interface FetchOptions {
   throughYear: number;
   apiKey?: string;
   delayMs?: number;
+  retryBaseMs?: number;
 }
 
 /**
@@ -113,7 +125,13 @@ interface FetchOptions {
  * bucket so the caller never stamps from a partial set.
  */
 export async function fetchRetractedPmids(options: FetchOptions): Promise<Set<string>> {
-  const { fetchFn = fetch, throughYear, apiKey, delayMs = DEFAULT_DELAY_MS } = options;
+  const {
+    fetchFn = fetch,
+    throughYear,
+    apiKey,
+    delayMs = DEFAULT_DELAY_MS,
+    retryBaseMs = RETRY_BASE_MS,
+  } = options;
   const out = new Set<string>();
 
   // One open-ended pre-1990 bucket, then one bucket per year through the run year.
@@ -121,7 +139,7 @@ export async function fetchRetractedPmids(options: FetchOptions): Promise<Set<st
   for (let y = FIRST_YEAR; y <= throughYear; y++) buckets.push([y, y]);
 
   for (const [lo, hi] of buckets) {
-    const ids = await esearchYear(lo, hi, fetchFn, apiKey);
+    const ids = await esearchYear(lo, hi, fetchFn, apiKey, retryBaseMs);
     for (const id of ids) out.add(id);
     await sleep(delayMs);
   }
