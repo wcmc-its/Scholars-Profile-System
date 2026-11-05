@@ -82,6 +82,13 @@ export default function RootLayout({
       data-scroll-behavior="smooth"
     >
       <body className="bg-background text-foreground antialiased">
+        {/* Streamed (Suspense) content stays hidden without JS, so pages look
+            blank. Accepted 2026-11-05; tell the visitor instead of showing nothing. */}
+        <noscript>
+          <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm text-amber-900">
+            Scholars requires JavaScript. Please enable it in your browser to view this page.
+          </div>
+        </noscript>
         <FeedbackBadgeProvider>
           {/* #637 — "View as" banner above all chrome. Client-probed (T6) and
               self-gating: renders nothing unless a live overlay is present, so
