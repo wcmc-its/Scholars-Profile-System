@@ -87,6 +87,7 @@ describe("reviewBareIdsForSource (#2581)", () => {
     [900001, "SCOPUS:105037533819"],
     [900002, "OPENALEX:W4401234567"],
     [900003, "WOS:000123456700001"],
+    [900004, "CROSSREF:10.1016/j.surg.2026.110815"],
   ]);
 
   it("strips only its own prefix, so a bare id is looked up under one source", () => {
@@ -96,12 +97,16 @@ describe("reviewBareIdsForSource (#2581)", () => {
     expect(reviewBareIdsForSource(articleIdByPmid, "OPENALEX:")).toEqual(
       new Map([["W4401234567", 900002]]),
     );
+    expect(reviewBareIdsForSource(articleIdByPmid, "CROSSREF:")).toEqual(
+      new Map([["10.1016/j.surg.2026.110815", 900004]]),
+    );
   });
 
   it("pins each prefix to its authorship_review source", () => {
     expect(REVIEW_BYLINE_SOURCES).toEqual([
       { prefix: "SCOPUS:", source: "scopus" },
       { prefix: "OPENALEX:", source: "openalex" },
+      { prefix: "CROSSREF:", source: "crossref" },
     ]);
   });
 

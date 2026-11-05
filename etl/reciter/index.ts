@@ -230,7 +230,13 @@ export function composeAuthorStringFromReviewJson(authorsJson: unknown): string 
 export const REVIEW_BYLINE_SOURCES = [
   { prefix: "SCOPUS:", source: "scopus" },
   { prefix: "OPENALEX:", source: "openalex" },
+  // PM #1060 — "CROSSREF:" + the lowercased DOI. No AAR lane writes `crossref`
+  // review rows today, so this finds a byline only once reciterdb stores one.
+  { prefix: "CROSSREF:", source: "crossref" },
 ] as const;
+
+/** Every source prefix an external (non-PubMed) `Publication.pmid` key carries. */
+export const EXTERNAL_PMID_PREFIXES = ["OPENALEX:", "SCOPUS:", "CROSSREF:"] as const;
 
 /** #2581 — bare external_id → synthetic pmid, for the article_ids carrying
  *  `prefix` only. An id under any other prefix (or none) is left out, so a bare
@@ -442,6 +448,8 @@ async function main() {
     // identity and detail URL don't churn. PubMed rows keep their real pmid.
     // ponytail: article_id assumed <=32 chars (every Scopus/OpenAlex/WOS id is);
     // if a source ever exceeds it, widen publication.pmid to VarChar(96).
+    // PM #1060: a CROSSREF:<doi> id (up to 96 chars) fits only when the DOI is
+    // <=23 chars; a longer one keeps the synthetic pmid until that widening lands.
     const articleIdByPmid = new Map<number, string>();
     for (const a of articleByPmid.values()) {
       if (a.article_id == null) continue;
@@ -550,7 +558,7 @@ async function main() {
         existing: await db.write.publication.count({
           where: {
             abstract: { not: null },
-            OR: [{ pmid: { startsWith: "OPENALEX:" } }, { pmid: { startsWith: "SCOPUS:" } }],
+            OR: EXTERNAL_PMID_PREFIXES.map((prefix) => ({ pmid: { startsWith: prefix } })),
           },
         }),
         maxDropPct: 30,

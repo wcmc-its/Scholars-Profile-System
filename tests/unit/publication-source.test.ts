@@ -10,6 +10,10 @@ describe("pubSource", () => {
     expect(pubSource("SCOPUS:105037533819")).toEqual({ isPubmed: false, sourceLabel: "Scopus" });
     expect(pubSource("OPENALEX:W2741809807")).toEqual({ isPubmed: false, sourceLabel: "OpenAlex" });
     expect(pubSource("WOS:000123456")).toEqual({ isPubmed: false, sourceLabel: "Web of Science" });
+    expect(pubSource("CROSSREF:10.1016/j.surg.2026.110815")).toEqual({
+      isPubmed: false,
+      sourceLabel: "Crossref",
+    });
   });
 
   it("never treats a synthetic negative pmid or unknown prefix as PubMed", () => {

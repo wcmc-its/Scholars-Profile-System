@@ -9,6 +9,7 @@ const SOURCE_LABELS: Record<string, string> = {
   SCOPUS: "Scopus",
   OPENALEX: "OpenAlex",
   WOS: "Web of Science",
+  CROSSREF: "Crossref",
 };
 
 export function pubSource(pmid: string | null | undefined): {

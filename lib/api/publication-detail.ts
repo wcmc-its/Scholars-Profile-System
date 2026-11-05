@@ -209,7 +209,10 @@ function parsePmid(pmid: string): number | null {
  * #3259 — `Publication.pmid` keys external-source pubs on their source-prefixed id
  * (`etl/reciter` pubKey). Only the prefixes that ETL writes are accepted.
  */
-const EXTERNAL_KEY = /^(SCOPUS:\d{1,20}|OPENALEX:W\d{1,15})$/;
+const EXTERNAL_KEY = /^(SCOPUS:\d{1,20}|OPENALEX:W\d{1,15}|CROSSREF:10\.\d{4,9}\/\S+)$/;
+/** PM #1060 — reciterdb `external_article.article_id` is VARCHAR(96); ReCiter rejects longer. */
+const EXTERNAL_KEY_MAX = 96;
+const isExternalKey = (s: string): boolean => s.length <= EXTERNAL_KEY_MAX && EXTERNAL_KEY.test(s);
 
 /**
  * @internal Exported for unit tests. The `Publication.pmid` key for a modal request,
@@ -217,6 +220,10 @@ const EXTERNAL_KEY = /^(SCOPUS:\d{1,20}|OPENALEX:W\d{1,15})$/;
  * Null when the id is neither.
  */
 export function parsePublicationKey(input: string): { key: string; pmidInt: number | null } | null {
+  // Next 16 hands the route param over already decoded, "/" in a CROSSREF DOI
+  // included (the client sends it as %2F). Take a valid external key as-is, so a
+  // DOI with a literal "%" is not decoded a second time.
+  if (isExternalKey(input)) return { key: input, pmidInt: null };
   // A route param can arrive still percent-encoded ("OPENALEX%3AW…").
   let raw: string;
   try {
@@ -226,7 +233,7 @@ export function parsePublicationKey(input: string): { key: string; pmidInt: numb
   }
   const pmidInt = parsePmid(raw);
   if (pmidInt !== null) return { key: raw, pmidInt };
-  return EXTERNAL_KEY.test(raw) ? { key: raw, pmidInt: null } : null;
+  return isExternalKey(raw) ? { key: raw, pmidInt: null } : null;
 }
 
 /**

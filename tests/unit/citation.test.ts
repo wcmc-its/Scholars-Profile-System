@@ -72,6 +72,14 @@ describe("citationIdentifier", () => {
       value: "W2741809807",
       href: null,
     });
+    // PM #1060 — the bare value is the DOI, a later ":" in it included.
+    expect(
+      citationIdentifier("CROSSREF:10.1002/(sici)1097-4636(199706)35:4<399::aid-jbm1>3.0.co;2-k"),
+    ).toEqual({
+      label: "Crossref",
+      value: "10.1002/(sici)1097-4636(199706)35:4<399::aid-jbm1>3.0.co;2-k",
+      href: null,
+    });
     expect(citationIdentifier("WOS:000123456")).toEqual({
       label: "Web of Science",
       value: "000123456",
