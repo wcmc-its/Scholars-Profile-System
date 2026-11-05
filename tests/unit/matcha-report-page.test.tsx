@@ -272,6 +272,7 @@ describe("Matcha report page", () => {
     // The unit is the officer's own directory department, never a hard-coded CTL.
     expect(html).not.toContain("Center for Technology Licensing");
     expect(html).not.toMatch(/reviewed by/i);
+    expect(html).toMatch(/<img src="data:image\/svg\+xml;base64,[^"]+" alt="Weill Cornell Medicine"/);
     expect(html).not.toContain("We want widget collaborators.");
     expect(html).toContain("Two Weill Cornell investigators whose published work");
   });

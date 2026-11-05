@@ -17,6 +17,7 @@
  * every printed page as a page-margin box (Chromium); on screen it is the last block.
  */
 import type { MatchaReport, ReportPaper, ReportPi } from "@/lib/api/matcha-report";
+import { WCM_LOGO_SRC } from "@/components/edit/wcm-logo";
 import type { MatchaFitTier } from "@/lib/api/matcha-contract";
 import {
   briefSourceLabel,
@@ -860,10 +861,11 @@ export function MatchaReportView({ report }: { report: MatchaReport }) {
       className="bg-apollo-page min-h-screen font-sans text-[#1a1a1a] antialiased"
     >
       <style dangerouslySetInnerHTML={{ __html: printCss(footer) }} />
-      <div data-report-bar className="bg-apollo-bar text-white">
+      <div data-report-bar className="border-apollo-border border-b bg-white">
         <div className="mx-auto flex max-w-[1040px] flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3.5 text-[13px] sm:px-8">
-          <div className="font-semibold tracking-[0.01em]">Weill Cornell Medicine</div>
-          <div className="text-[#d9d3ce]">
+          {/* eslint-disable-next-line @next/next/no-img-element -- inline SVG; must print. */}
+          <img src={WCM_LOGO_SRC} alt="Weill Cornell Medicine" className="h-7 w-auto" />
+          <div className="text-[var(--evidence-faint)]">
             Investigator scouting report · {reportDate(report.generatedAt)}
           </div>
         </div>
