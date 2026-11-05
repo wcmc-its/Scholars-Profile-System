@@ -54,6 +54,7 @@ import { buildMenteeSuggestions } from "./mentee-suggestions";
 import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
 import { syncPendingMyncbiPmids, syncRejectedPmids } from "./rejected-pmids";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { externalKey } from "@/lib/pub-key";
 import {
   RESEARCH_TYPE_YEARS,
   researchVolumeByCwid,
@@ -230,7 +231,13 @@ export function composeAuthorStringFromReviewJson(authorsJson: unknown): string 
 export const REVIEW_BYLINE_SOURCES = [
   { prefix: "SCOPUS:", source: "scopus" },
   { prefix: "OPENALEX:", source: "openalex" },
+  // PM #1060 — "CROSSREF:" + the lowercased DOI. No AAR lane writes `crossref`
+  // review rows today, so this finds a byline only once reciterdb stores one.
+  { prefix: "CROSSREF:", source: "crossref" },
 ] as const;
+
+/** Every source prefix an external (non-PubMed) `Publication.pmid` key carries. */
+export const EXTERNAL_PMID_PREFIXES = ["OPENALEX:", "SCOPUS:", "CROSSREF:"] as const;
 
 /** #2581 — bare external_id → synthetic pmid, for the article_ids carrying
  *  `prefix` only. An id under any other prefix (or none) is left out, so a bare
@@ -440,13 +447,15 @@ async function main() {
     // curated external set changes. Key them on the stable, source-prefixed
     // article_id instead (e.g. "SCOPUS:105037533819") so an external pub's SPS
     // identity and detail URL don't churn. PubMed rows keep their real pmid.
-    // ponytail: article_id assumed <=32 chars (every Scopus/OpenAlex/WOS id is);
-    // if a source ever exceeds it, widen publication.pmid to VarChar(96).
+    // publication.pmid is VarChar(32): externalKey() keeps ids that fit, hashes a
+    // longer CROSSREF:<doi> id (PM #1060), and returns null for anything else over 32.
+    // ponytail: a non-Crossref id >32 chars keeps the synthetic pmid; widen to VarChar(96) if one appears.
     const articleIdByPmid = new Map<number, string>();
     for (const a of articleByPmid.values()) {
       if (a.article_id == null) continue;
-      if (a.article_id.length <= 32) {
-        articleIdByPmid.set(Number(a.pmid), a.article_id);
+      const key = externalKey(a.article_id);
+      if (key) {
+        articleIdByPmid.set(Number(a.pmid), key);
       } else {
         console.warn(
           `External article_id > 32 chars; keeping synthetic pmid ${a.pmid}: ${a.article_id}`,
@@ -550,7 +559,7 @@ async function main() {
         existing: await db.write.publication.count({
           where: {
             abstract: { not: null },
-            OR: [{ pmid: { startsWith: "OPENALEX:" } }, { pmid: { startsWith: "SCOPUS:" } }],
+            OR: EXTERNAL_PMID_PREFIXES.map((prefix) => ({ pmid: { startsWith: prefix } })),
           },
         }),
         maxDropPct: 30,

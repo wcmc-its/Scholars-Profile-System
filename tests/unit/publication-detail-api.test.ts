@@ -963,10 +963,20 @@ describe("getPublicationDetail — external-source pubs (#3259)", () => {
     };
   }
 
-  it.each(["OPENALEX:W7162546682", "OPENALEX%3AW7162546682", "SCOPUS:86000793624"])(
+  it.each([
+    ["OPENALEX:W7162546682", "OPENALEX:W7162546682"],
+    ["OPENALEX%3AW7162546682", "OPENALEX:W7162546682"],
+    ["SCOPUS:86000793624", "SCOPUS:86000793624"],
+    // PM #1060 — the DOI's "/" arrives decoded from Next, or still as %2F.
+    ["CROSSREF:10.1016/j.surg.2026.110815", "CROSSREF:10.1016/j.surg.2026.110815"],
+    ["CROSSREF:0123456789abcdef0123456", "CROSSREF:0123456789abcdef0123456"],
+    ["CROSSREF%3A10.1016%2Fj.surg.2026.110815", "CROSSREF:10.1016/j.surg.2026.110815"],
+    // A literal "%" in a decoded DOI is not decoded a second time.
+    ["CROSSREF:10.1234/50%zz", "CROSSREF:10.1234/50%zz"],
+    ["CROSSREF:10.1234/" + "x".repeat(96 - 17), "CROSSREF:10.1234/" + "x".repeat(96 - 17)],
+  ])(
     "loads %s by its prefixed key without touching reciterdb",
-    async (id) => {
-      const key = decodeURIComponent(id);
+    async (id, key) => {
       mocks.publicationFindUnique.mockResolvedValueOnce(externalPub(key));
       const r = await getPublicationDetail(id);
       expect(mocks.publicationFindUnique.mock.calls[0][0].where).toEqual({ pmid: key });
@@ -978,7 +988,19 @@ describe("getPublicationDetail — external-source pubs (#3259)", () => {
     },
   );
 
-  it.each(["OPENALEX:123", "SCOPUS:W1", "PUBMED:1", "OPENALEX:W1;drop", "%E0%A4%A"])(
+  it.each([
+    "OPENALEX:123",
+    "SCOPUS:W1",
+    "PUBMED:1",
+    "OPENALEX:W1;drop",
+    "%E0%A4%A",
+    "CROSSREF:10.1016",
+    "CROSSREF:10.12/x",
+    "CROSSREF:doi.org/10.1016/x",
+    "CROSSREF:10.1234/a b",
+    // 97 chars: wider than reciterdb external_article.article_id VARCHAR(96).
+    "CROSSREF:10.1234/" + "x".repeat(97 - 17),
+  ])(
     "rejects malformed id %s",
     async (id) => {
       expect(await getPublicationDetail(id)).toBeNull();
