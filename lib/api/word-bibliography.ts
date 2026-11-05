@@ -50,7 +50,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
-import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
+import { bookCitationParts, citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { displayPublicationType } from "@/lib/publication-types";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
 import { lastNameKey } from "@/lib/last-name-key";
@@ -214,6 +214,8 @@ type PubForCitation = {
   pages: string | null;
   doi: string | null;
   pmcid: string | null;
+  isbn: string | null;
+  publisher: string | null;
 };
 
 function buildCitationParagraph(
@@ -230,7 +232,8 @@ function buildCitationParagraph(
   // Vancouver journal/date block: `Abbrev. Year;Vol(Issue):Pages.`
   // Falls back to the verbose journal title when the abbreviation is
   // missing — happens for ~5% of pubs the ETL didn't hit.
-  const journalForCitation = pub.journalAbbrev ?? pub.journal ?? "";
+  const book = bookCitationParts(pub, pub.journalAbbrev ?? pub.journal);
+  const journalForCitation = book.venue ?? "";
   // #2580 — the shared formatter also treats a literal "NULL" volume/issue/pages
   // as absent; the local copy printed `2024;NULL(NULL):NULL.` into the .docx.
   const volIssuePages = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
@@ -283,6 +286,7 @@ function buildCitationParagraph(
           }),
         ]
       : []),
+    ...(book.isbn ? [new TextRun({ text: `ISBN: ${book.isbn}. ` })] : []),
     ...(pub.doi
       ? [
           new TextRun({ text: "doi: " }),
@@ -356,6 +360,8 @@ export async function generateWordBibliography(
       pages: true,
       doi: true,
       pmcid: true,
+      isbn: true,
+      publisher: true,
     },
   });
   const byPmid = new Map(pubs.map((p) => [p.pmid, p]));

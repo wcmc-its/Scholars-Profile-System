@@ -17,7 +17,22 @@ import { sanitizePubTitle } from "@/lib/utils";
 const PUBLICATION_TYPE_LABELS: Readonly<Record<string, string>> = {
   "conference-abstract": "Conference abstract",
   preprint: "Preprint",
+  // Books, in each source's vocabulary (Crossref / OpenAlex lowercase, Scopus
+  // subtypeDescription). Without a label a book reads as an article in a
+  // journal named after its publisher.
+  book: "Book",
+  "edited-book": "Book",
+  monograph: "Book",
+  "reference-book": "Book",
+  Book: "Book",
+  "book-chapter": "Book chapter",
+  "Book Chapter": "Book chapter",
 };
+
+/** A whole book: its venue line is the publisher, not a journal, so it is not italicized. */
+export function isWholeBook(publicationType: string | null | undefined): boolean {
+  return publicationTypeLabel(publicationType) === "Book";
+}
 
 export function publicationTypeLabel(publicationType: string | null | undefined): string | null {
   return publicationType ? (PUBLICATION_TYPE_LABELS[publicationType] ?? null) : null;
@@ -75,7 +90,7 @@ export function PublicationRow({
         <div className="mt-1 text-sm leading-snug text-zinc-700 dark:text-zinc-300">
           {pub.journal ? (
             <em
-              className="italic"
+              className={isWholeBook(pub.publicationType) ? "not-italic" : "italic"}
               dangerouslySetInnerHTML={{ __html: sanitizePubTitle(pub.journal) }}
             />
           ) : null}

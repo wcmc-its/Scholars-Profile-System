@@ -83,3 +83,24 @@ describe("PublicationRow type label", () => {
     expect(screen.queryByText("Preprint")).toBeNull();
   });
 });
+
+describe("PublicationRow books", () => {
+  it.each([
+    ["edited-book", "Book"],
+    ["book", "Book"],
+    ["Book", "Book"],
+    ["book-chapter", "Book chapter"],
+    ["Book Chapter", "Book chapter"],
+  ])("labels %s as %s", (type, label) => {
+    expect(publicationTypeLabel(type)).toBe(label);
+  });
+
+  it("shows a whole book's publisher upright, a chapter's book in italics", () => {
+    const { container, rerender } = render(
+      <PublicationRow pub={makePub({ publicationType: "edited-book", journal: "Johns Hopkins University Press" })} />,
+    );
+    expect(container.querySelector("em")!.className).toBe("not-italic");
+    rerender(<PublicationRow pub={makePub({ publicationType: "Book Chapter", journal: "Encyclopedia of Immunobiology" })} />);
+    expect(container.querySelector("em")!.className).toBe("italic");
+  });
+});

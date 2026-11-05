@@ -1816,6 +1816,11 @@ model Publication {
   /// `lib/api/data-sharing-report.ts`'s `PmcCoverageTotals` doc comment for
   /// where this surfaces on the data-sharing dashboard.
   pmcid                 String?   @db.VarChar(32)
+  /// Book citation fields for external records (Crossref / Scopus books), from
+  /// `reciterdb.external_article.{isbn,publisher}` (ReCiterDB v3.5). `isbn` is
+  /// comma-joined (print + electronic). NULL for PubMed records.
+  isbn                  String?   @db.VarChar(128)
+  publisher             String?   @db.VarChar(255)
   /// Issue #89 — Vancouver-style citation fields. Sourced from
   /// `analysis_summary_article.{volume,issue,pages}`. Stored as varchar
   /// since they're free-form ("12", "Suppl 1", "S5", "538-40").

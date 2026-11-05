@@ -187,6 +187,8 @@ const researchInput: CvInput = {
       pages: "500-510",
       doi: "10.1053/j.ajkd.2023.10.015",
       pmcid: "PMC11098699",
+      isbn: null,
+      publisher: null,
       publicationType: "Academic Article",
     },
   ],
@@ -272,6 +274,8 @@ const clinicalInput: CvInput = {
       pages: "100-108",
       doi: null,
       pmcid: null,
+      isbn: null,
+      publisher: null,
       publicationType: "Review",
     },
   ],
@@ -698,6 +702,35 @@ describe("buildWcmCv — bibliography citation defects (#2580)", () => {
     expect(text).toContain("Scopus: 105037533819");
     expect(text).not.toContain("PMID:");
     expect(text).not.toContain("SCOPUS:105037533819");
+  });
+
+  it("cites a book by its publisher and ISBN", async () => {
+    const text = allText(
+      await documentXml(
+        withPub({
+          pmid: "CROSSREF:10.56021/9781421455143",
+          title: "Your Immune System",
+          authorsString: "((Koretzky GA))",
+          fullAuthorsString: null,
+          journal: "Johns Hopkins University Press",
+          journalAbbrev: null,
+          year: 2026,
+          volume: null,
+          issue: null,
+          pages: null,
+          doi: "10.56021/9781421455143",
+          pmcid: null,
+          isbn: "9781421455150,9781421455143",
+          publisher: "Johns Hopkins University Press",
+          publicationType: "edited-book",
+        }),
+      ),
+    );
+    // Runs are joined with spaces by allText, so compare with whitespace collapsed out.
+    const flat = text.replace(/\s+/g, "");
+    expect(flat).toContain(
+      "Books:1.KoretzkyGA.YourImmuneSystem.JohnsHopkinsUniversityPress.2026.ISBN:9781421455150,9781421455143.doi:10.56021/9781421455143.",
+    );
   });
 
   it("still labels a real PubMed id 'PMID: <n>' alongside its PMCID", async () => {
