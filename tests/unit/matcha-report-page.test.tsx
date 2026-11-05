@@ -416,9 +416,10 @@ describe("Matcha report page", () => {
     expect(html).toMatch(/Topic two <sup data-report-cite="[^"]*"[^>]*>\[3\]<\/sup>/);
     expect(html).toMatch(/Topic three <sup data-report-cite="[^"]*"[^>]*>\[2\]<\/sup>/);
     // A pub beyond the key papers and a grant: the Also line, clipped, joined with "; ".
-    const also = html.match(/data-report-also[^]*?<\/div>/g) ?? [];
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const also = doc.querySelectorAll("[data-report-also]");
     expect(also).toHaveLength(1);
-    const alsoText = (also[0] ?? "").replace(/<[^>]+>/g, "");
+    const alsoText = also[0]?.textContent ?? "";
     expect(alsoText).toContain(
       "Also: 2025 · Widget assembly kinetics in a randomized…; R01 (through 2029)",
     );
