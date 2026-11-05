@@ -8,10 +8,13 @@
  *    on the cover is the only one), nor a score or `removedCount`;
  *  - edited text wins over generated; a PI with no brief renders records only, "No brief drafted."
  *  - the raw paste is never rendered; themes drive the coverage table, gaps callout and amber
- *    card, and all three are hidden when grouping fails (themes null).
+ *    card, and all three are hidden when grouping fails (themes null);
+ *  - v3 card: topics cite the numbered key papers as [n]; other sources go on an "Also:" line;
+ *    funding is a strip of at most four (grouped) rows, then "+N more" to the profile.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { BriefRecords } from "@/lib/edit/matcha-brief-types";
 
 const {
   mockGetSession,
@@ -116,6 +119,7 @@ function setup(opts: {
   themes?: typeof THEMES | null;
   requester?: string;
   requesterOverride?: string | null;
+  records?: Record<string, Partial<BriefRecords>>;
 }) {
   mockThemes.mockResolvedValue(opts.themes === undefined ? THEMES : opts.themes);
   mockSubFindUnique.mockResolvedValue({
@@ -160,7 +164,8 @@ function setup(opts: {
   );
   mockPubFindMany.mockResolvedValue([]);
   mockLoadRecords.mockImplementation(
-    async (cwids: string[]) => new Map(cwids.map((c) => [c, records(c)])),
+    async (cwids: string[]) =>
+      new Map(cwids.map((c) => [c, { ...records(c), ...opts.records?.[c] }])),
   );
 }
 
@@ -267,6 +272,7 @@ describe("Matcha report page", () => {
     // The unit is the officer's own directory department, never a hard-coded CTL.
     expect(html).not.toContain("Center for Technology Licensing");
     expect(html).not.toMatch(/reviewed by/i);
+    expect(html).toMatch(/<img src="data:image\/svg\+xml;base64,[^"]+" alt="Weill Cornell Medicine"/);
     expect(html).not.toContain("We want widget collaborators.");
     expect(html).toContain("Two Weill Cornell investigators whose published work");
   });
@@ -353,6 +359,138 @@ describe("Matcha report page", () => {
     setup({ candidates: ["a", "b"], briefs: [brief("a"), brief("b")] });
     const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
     expect(html.match(/grid-cols-\[56px_/g)).toHaveLength(1);
+  });
+
+  it("numbers key papers and cites them from topics; other sources go on an Also line", async () => {
+    setup({
+      candidates: ["a"],
+      briefs: [
+        brief("a", {
+          generated: {
+            why: "Why a.",
+            topics: [
+              {
+                concept: "widgets",
+                text: "Topic one",
+                sources: [
+                  { kind: "pub", pmid: "11", year: 2024, title: "Widget paper one" },
+                  { kind: "pub", pmid: "12", year: 2023, title: "Widget paper two" },
+                ],
+              },
+              {
+                concept: "sprockets",
+                text: "Topic two",
+                sources: [
+                  { kind: "pub", pmid: "13", year: 2022, title: "Sprocket paper three" },
+                  {
+                    kind: "pub",
+                    pmid: "14",
+                    year: 2025,
+                    title: "Widget assembly kinetics in a randomized sprocket cohort of adults.",
+                  },
+                  { kind: "grant", mechanism: "R01", funder: "NIH", endYear: 2029, applId: 111 },
+                ],
+              },
+              {
+                concept: "widgets",
+                text: "Topic three",
+                sources: [{ kind: "pub", pmid: "12", year: 2023, title: "Widget paper two" }],
+              },
+              { concept: "widgets", text: "Topic four, unsourced", sources: [] },
+            ],
+            removedCount: 0,
+          },
+        }),
+      ],
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a" });
+    // Key papers: the brief's own pubs, in order, numbered.
+    for (const n of [1, 2, 3]) expect(html).toContain(`data-report-paper="${n}"`);
+    expect(html).not.toContain('data-report-paper="4"');
+    expect(html).toContain(">[1]</span>");
+    expect(html).toMatch(
+      /2024 · <a href="https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/11\/"[^>]*>PMID 11 ↗<\/a>/,
+    );
+    // Topic cites, sorted and de-duplicated.
+    expect(html).toMatch(/Topic one <sup data-report-cite="[^"]*"[^>]*>\[1, 2\]<\/sup>/);
+    expect(html).toMatch(/Topic two <sup data-report-cite="[^"]*"[^>]*>\[3\]<\/sup>/);
+    expect(html).toMatch(/Topic three <sup data-report-cite="[^"]*"[^>]*>\[2\]<\/sup>/);
+    // A pub beyond the key papers and a grant: the Also line, clipped, joined with "; ".
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const also = doc.querySelectorAll("[data-report-also]");
+    expect(also).toHaveLength(1);
+    const alsoText = also[0]?.textContent ?? "";
+    expect(alsoText).toContain(
+      "Also: 2025 · Widget assembly kinetics in a randomized…; R01 (through 2029)",
+    );
+    // The unsourced topic carries neither cites nor an Also line.
+    expect(html).toMatch(/Topic four, unsourced<\/span><\/div>/);
+  });
+
+  it("caps funding at four rows, groups shared stems, and links the rest to the profile", async () => {
+    const award = (
+      applId: number,
+      mechanism: string,
+      funder: string,
+      title: string,
+      endYear = 2027,
+    ) => ({
+      mechanism,
+      funder,
+      title,
+      endYear,
+      applId,
+      roleLabel: "PI",
+    });
+    setup({
+      candidates: ["a", "b"],
+      briefs: [brief("a"), brief("b")],
+      records: {
+        a: {
+          funding: [
+            award(1, "R01", "NIH", "Alpha study", 2028),
+            award(2, "P50", "NIMHD", "Widget Center: Core A"),
+            award(3, "P50", "NIMHD", "Widget Center: Core B", 2028),
+            award(4, "P50", "NIMHD", "Widget Center: Supplement"),
+            // Same stem, different funder: not grouped.
+            award(5, "P50", "NIDDK", "Widget Center: Core C"),
+            award(6, "R01", "NIH", "Beta study", 2029),
+            award(7, "U01", "NIH", "Gamma study", 2026),
+          ],
+          translation: [
+            {
+              title: "Sprocket imaging device",
+              patentStatus: null,
+              url: "https://tech.example.org/1",
+            },
+          ],
+        },
+      },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
+    const cardA = /data-report-pi="a"[^]*?<\/article>/.exec(html)?.[0] ?? "";
+    const cardB = /data-report-pi="b"[^]*?<\/article>/.exec(html)?.[0] ?? "";
+    expect(cardA).toContain("Active funding · 7");
+    expect((cardA.match(/data-report-funding-row/g) ?? []).length).toBe(4);
+    expect(cardA).toContain("Widget Center: Core A, Core B and Supplement (3 awards)");
+    // A grouped row has no single RePORTER link, and ends at the group's latest year.
+    expect(cardA).not.toContain('project-details/2"');
+    expect(cardA).toMatch(/\(3 awards\)[^]*?to 2028/);
+    expect(cardA).toContain("Widget Center: Core C");
+    expect(cardA).toContain("Beta study");
+    expect(cardA).not.toContain("Gamma study");
+    // 7 awards, 6 shown (1 + 3 + 1 + 1): one more, linked to the profile.
+    expect(cardA).toMatch(/href="[^"]*slug-a"[^>]*>\+1 more on Scholars profile ↗<\/a>/);
+    // The strip sits after the key-papers rail, full width.
+    expect(cardA.indexOf("data-report-funding=")).toBeGreaterThan(cardA.indexOf("Key papers"));
+    // Technology: a tinted, labelled box.
+    expect(cardA).toContain("Licensable technology");
+    expect(cardA).toContain("data-report-tech");
+    expect(cardA).toContain("Sprocket imaging device");
+    expect(html).not.toContain("Available technology");
+    // b's single award fits: no "+N more".
+    expect(cardB).toContain("Active funding · 1");
+    expect(cardB).not.toContain("more on Scholars profile");
   });
 
   it("404s a submission outside the caller's scope", async () => {

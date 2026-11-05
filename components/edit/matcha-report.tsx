@@ -8,13 +8,24 @@
  * → four stat cards → coverage of the ask + gaps (only when themes exist) → shortlist → one
  * profile card per PI → footer with the full search terms.
  *
+ * Profile card (v3): Why + discussion topics (superscript [n] cites into the numbered key papers;
+ * other sources on an "Also:" line) and any licensable technology | numbered key papers, then a
+ * full-width active-funding strip (grouped rows, at most four, "+N more" to the profile).
+ *
  * Print: the browser's own Print / Save as PDF. 18mm margins, a profile card, the coverage table
  * and the gaps callout never split across pages, colours printed exactly, and the footer rides
  * every printed page as a page-margin box (Chromium); on screen it is the last block.
  */
-import type { MatchaReport, ReportPi } from "@/lib/api/matcha-report";
+import type { MatchaReport, ReportPaper, ReportPi } from "@/lib/api/matcha-report";
+import { WCM_LOGO_SRC } from "@/components/edit/wcm-logo";
 import type { MatchaFitTier } from "@/lib/api/matcha-contract";
-import { briefSourceLabel, briefSourceUrl, reporterUrl } from "@/lib/edit/matcha-brief-types";
+import {
+  briefSourceLabel,
+  briefSourceUrl,
+  reporterUrl,
+  type BriefSource,
+} from "@/lib/edit/matcha-brief-types";
+import { htmlToPlainText } from "@/lib/utils";
 import {
   capitalize,
   joinWords,
@@ -106,7 +117,7 @@ function printCss(footer: string): string {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  [data-report-bar], [data-report-amber], [data-report-mark], [data-report-avatar] {
+  [data-report-bar], [data-report-amber], [data-report-mark], [data-report-avatar], [data-report-tech] {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -116,7 +127,7 @@ function printCss(footer: string): string {
   [data-report-pi], [data-report-coverage-table], [data-report-gaps], [data-report-stats] {
     break-inside: avoid;
   }
-  [data-report-shortlist-item] { break-inside: avoid; }
+  [data-report-shortlist-item], [data-report-funding], [data-report-funding-row] { break-inside: avoid; }
   [data-report-coverage-scroll] { overflow: visible !important; }
   [data-report-coverage-table] { min-width: 0 !important; }
   [data-report-footer] { border-top: 0 !important; padding-top: 0 !important; }
@@ -494,6 +505,192 @@ function Empty() {
   return <p className="m-0 text-[14px] text-[var(--evidence-faint)] italic">{NOT_EVIDENT}</p>;
 }
 
+/** Funding rows shown in a card before the "+N more" link. */
+export const REPORT_MAX_FUNDING_ROWS = 4;
+
+type Award = ReportPi["funding"][number];
+
+/** One funding-strip row: a single award, or `count` awards grouped by `groupFunding`. */
+export type FundingRow = {
+  mechanism: string | null;
+  funder: string;
+  title: string;
+  endYear: number;
+  /** Null on a grouped row: there is no single RePORTER page to link. */
+  applId: number | null;
+  count: number;
+};
+
+/** The title before its first colon, or null when there is none. */
+function titleStem(title: string): string | null {
+  const i = title.indexOf(":");
+  const stem = i > 0 ? title.slice(0, i).trim() : "";
+  return stem || null;
+}
+
+/**
+ * Awards with the SAME mechanism, the SAME funder and an identical title stem (the text before a
+ * colon) fold into one row, "Stem: rest A and rest B", ending at the latest end year. Deliberately
+ * conservative: a title without a colon never groups. First-appearance order is kept.
+ */
+export function groupFunding(awards: readonly Award[]): FundingRow[] {
+  const rows: (FundingRow & { stem: string | null; rests: string[] })[] = [];
+  for (const a of awards) {
+    const stem = titleStem(a.title);
+    const rest = stem ? a.title.slice(a.title.indexOf(":") + 1).trim() : "";
+    const hit = stem
+      ? rows.find((r) => r.stem === stem && r.mechanism === a.mechanism && r.funder === a.funder)
+      : undefined;
+    if (hit) {
+      hit.count += 1;
+      hit.endYear = Math.max(hit.endYear, a.endYear);
+      hit.applId = null;
+      if (rest && !hit.rests.includes(rest)) hit.rests.push(rest);
+      continue;
+    }
+    rows.push({
+      mechanism: a.mechanism,
+      funder: a.funder,
+      title: a.title,
+      endYear: a.endYear,
+      applId: a.applId,
+      count: 1,
+      stem,
+      rests: rest ? [rest] : [],
+    });
+  }
+  return rows.map(({ stem, rests, ...r }) => ({
+    ...r,
+    title: r.count > 1 && stem ? (rests.length ? `${stem}: ${joinWords(rests)}` : stem) : r.title,
+  }));
+}
+
+/** A plain-text title cut to about `max` characters at a word boundary, with "…". */
+export function clipTitle(title: string, max = 40): string {
+  const t = htmlToPlainText(title, Number.POSITIVE_INFINITY)
+    .trim()
+    .replace(/[.\s]+$/, "");
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max + 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 0 ? cut.slice(0, space) : t.slice(0, max)).replace(/[\s,;:.–-]+$/, "")}…`;
+}
+
+/** The "Also:" label for a source that is not a numbered key paper. */
+export function alsoLabel(s: BriefSource): string {
+  if (s.kind === "grant") return briefSourceLabel(s);
+  const title = clipTitle(s.title);
+  return s.year != null ? `${s.year} · ${title}` : title;
+}
+
+/** A topic's sources split into key-paper citation numbers and the rest ("Also:"). */
+export function topicCitations(
+  sources: readonly BriefSource[],
+  keyPapers: readonly ReportPaper[],
+): { cites: number[]; also: BriefSource[] } {
+  const cites: number[] = [];
+  const also: BriefSource[] = [];
+  for (const s of sources) {
+    const n = s.kind === "pub" ? keyPapers.findIndex((p) => p.pmid === s.pmid) + 1 : 0;
+    if (n > 0) {
+      if (!cites.includes(n)) cites.push(n);
+    } else {
+      also.push(s);
+    }
+  }
+  return { cites: cites.sort((a, b) => a - b), also };
+}
+
+function AlsoLine({ also }: { also: readonly BriefSource[] }) {
+  if (also.length === 0) return null;
+  return (
+    <span data-report-also className="text-[12px] leading-[1.45] text-[var(--evidence-faint)]">
+      Also:{" "}
+      {also.map((s, j) => {
+        const url = briefSourceUrl(s);
+        const label = alsoLabel(s);
+        return (
+          <span key={j}>
+            {j > 0 ? "; " : ""}
+            {url ? (
+              <ExtLink href={url} className="hover:text-apollo-maroon text-inherit hover:underline">
+                {label}
+              </ExtLink>
+            ) : (
+              label
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function FundingStrip({ pi }: { pi: ReportPi }) {
+  const rows = groupFunding(pi.funding);
+  const shown = rows.slice(0, REPORT_MAX_FUNDING_ROWS);
+  const more = pi.funding.length - shown.reduce((s, r) => s + r.count, 0);
+  // No mechanism on any award (e.g. all foundation grants) → drop the column (#3291).
+  const hasMechanism = pi.funding.some((a) => a.mechanism);
+  return (
+    <section
+      data-report-funding
+      aria-label="Active funding"
+      className="border-apollo-border flex flex-col gap-2 border-t px-5 py-5 sm:px-7"
+    >
+      <SectionLabel>Active funding · {pi.funding.length}</SectionLabel>
+      {pi.funding.length === 0 ? (
+        <div className="text-[14px] text-[var(--evidence-faint)]">{NO_FUNDING}</div>
+      ) : (
+        <div className="border-apollo-border flex flex-col border-t">
+          {shown.map((g, i) => (
+            <div
+              key={i}
+              data-report-funding-row
+              className={`border-apollo-border grid ${hasMechanism ? "grid-cols-[56px_minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]"} items-baseline gap-3 border-b py-2.5 text-[14px] leading-[1.45]`}
+            >
+              {hasMechanism && (
+                <span className="font-mono text-[12px] font-semibold text-[var(--evidence-body)]">
+                  {g.mechanism ?? ""}
+                </span>
+              )}
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-pretty">
+                  {g.applId != null ? (
+                    <ExtLink
+                      href={reporterUrl(g.applId)}
+                      className="hover:text-apollo-maroon text-inherit hover:underline"
+                    >
+                      {g.title}
+                    </ExtLink>
+                  ) : (
+                    g.title
+                  )}
+                  {g.count > 1 ? ` (${g.count} awards)` : ""}
+                </span>
+                <span className="text-[12px] text-[var(--evidence-faint)]">{g.funder}</span>
+              </div>
+              <span className="text-[12px] whitespace-nowrap text-[var(--evidence-faint)]">
+                to {g.endYear}
+              </span>
+            </div>
+          ))}
+          {more > 0 ? (
+            <div className="pt-2.5">
+              <ExtLink
+                href={pi.profileUrl}
+                className="text-apollo-slate hover:text-apollo-maroon text-[13px] font-semibold hover:underline"
+              >
+                +{more} more on Scholars profile ↗
+              </ExtLink>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ProfileCard({ pi }: { pi: ReportPi }) {
   const titleLine = [pi.title, pi.department].filter(Boolean).join(" · ");
   return (
@@ -550,40 +747,34 @@ function ProfileCard({ pi }: { pi: ReportPi }) {
                 <SectionLabel>Suggested discussion topics</SectionLabel>
                 {pi.brief.topics.length > 0 ? (
                   <ol className="m-0 flex list-none flex-col gap-2.5 p-0">
-                    {pi.brief.topics.map((t, i) => (
-                      <li
-                        key={i}
-                        className="grid grid-cols-[20px_minmax(0,1fr)] gap-2 text-[15px] leading-normal"
-                      >
-                        <span className="text-apollo-slate font-semibold">{i + 1}</span>
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-pretty">{t.text}</span>
-                          {t.sources.length > 0 ? (
-                            <span className="text-[13px] text-[var(--evidence-faint)]">
-                              {t.sources.map((s, j) => {
-                                const url = briefSourceUrl(s);
-                                const label = briefSourceLabel(s);
-                                return (
-                                  <span key={j}>
-                                    {j > 0 ? "; " : ""}
-                                    {url ? (
-                                      <ExtLink
-                                        href={url}
-                                        className="hover:text-apollo-maroon text-inherit hover:underline"
-                                      >
-                                        {label}
-                                      </ExtLink>
-                                    ) : (
-                                      label
-                                    )}
-                                  </span>
-                                );
-                              })}
+                    {pi.brief.topics.map((t, i) => {
+                      const { cites, also } = topicCitations(t.sources, pi.keyPapers);
+                      return (
+                        <li
+                          key={i}
+                          className="grid grid-cols-[20px_minmax(0,1fr)] gap-2 text-[15px] leading-normal"
+                        >
+                          <span className="text-apollo-slate font-semibold">{i + 1}</span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-pretty">
+                              {t.text}
+                              {cites.length > 0 ? (
+                                <>
+                                  {" "}
+                                  <sup
+                                    data-report-cite
+                                    className="text-apollo-slate text-[10px] font-semibold"
+                                  >
+                                    [{cites.join(", ")}]
+                                  </sup>
+                                </>
+                              ) : null}
                             </span>
-                          ) : null}
-                        </div>
-                      </li>
-                    ))}
+                            <AlsoLine also={also} />
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ol>
                 ) : (
                   <Empty />
@@ -598,11 +789,12 @@ function ProfileCard({ pi }: { pi: ReportPi }) {
 
           {pi.translation.length > 0 ? (
             <div className="flex flex-col gap-2">
-              <SectionLabel>Available technology</SectionLabel>
+              <SectionLabel>Licensable technology</SectionLabel>
               {pi.translation.map((t, i) => (
                 <div
                   key={i}
-                  className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate rounded-lg border px-3.5 py-3 text-[15px] font-semibold"
+                  data-report-tech
+                  className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate rounded-lg border px-3.5 py-3 text-[15px] leading-[1.45] font-semibold"
                 >
                   <ExtLink href={t.url} className="text-apollo-slate hover:underline">
                     {t.title}
@@ -617,74 +809,46 @@ function ProfileCard({ pi }: { pi: ReportPi }) {
               ))}
             </div>
           ) : null}
-
-          <div className="flex flex-col gap-2">
-            <SectionLabel>Active funding · {pi.funding.length}</SectionLabel>
-            {pi.funding.length === 0 ? (
-              <div className="text-[14px] text-[var(--evidence-faint)]">{NO_FUNDING}</div>
-            ) : (
-              <div className="border-apollo-border flex flex-col border-t">
-                {/* No mechanism on any award (e.g. all foundation grants) → drop the column. */}
-                {pi.funding.map((g, i, all) => (
-                  <div
-                    key={i}
-                    className={`border-apollo-border grid ${all.some((a) => a.mechanism) ? "grid-cols-[56px_minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]"} items-baseline gap-3 border-b py-2.5 text-[14px] leading-[1.45]`}
-                  >
-                    {all.some((a) => a.mechanism) && (
-                      <span className="font-mono text-[12px] font-semibold text-[var(--evidence-body)]">
-                        {g.mechanism ?? ""}
-                      </span>
-                    )}
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="text-pretty">
-                        {g.applId != null ? (
-                          <ExtLink
-                            href={reporterUrl(g.applId)}
-                            className="hover:text-apollo-maroon text-inherit hover:underline"
-                          >
-                            {g.title}
-                          </ExtLink>
-                        ) : (
-                          g.title
-                        )}
-                      </span>
-                      <span className="text-[12px] text-[var(--evidence-faint)]">{g.funder}</span>
-                    </div>
-                    <span className="text-[12px] whitespace-nowrap text-[var(--evidence-faint)]">
-                      to {g.endYear}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
 
         <aside className="bg-apollo-surface-2 border-apollo-border flex flex-col gap-3 border-t p-5 sm:p-6 md:w-[300px] md:flex-none md:border-t-0 md:border-l print:w-[34%] print:flex-none print:border-t-0 print:border-l">
           <SectionLabel>Key papers</SectionLabel>
           {pi.keyPapers.length > 0 ? (
-            pi.keyPapers.map((paper) => (
-              <a
-                key={paper.pmid}
-                href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(paper.pmid)}/`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-apollo-surface border-apollo-border hover:border-apollo-border-strong flex flex-col gap-1 rounded-lg border p-3 text-[#1a1a1a] no-underline"
-              >
-                {paper.year != null ? (
-                  <span className="text-[12px] font-semibold text-[var(--evidence-faint)]">
-                    {paper.year}
+            <ol className="border-apollo-border m-0 flex list-none flex-col border-t p-0">
+              {pi.keyPapers.map((paper, i) => (
+                <li
+                  key={paper.pmid}
+                  data-report-paper={i + 1}
+                  className="border-apollo-border grid grid-cols-[22px_minmax(0,1fr)] gap-1.5 border-b py-3 last:border-b-0"
+                >
+                  <span className="text-apollo-slate text-[12px] leading-[1.4] font-semibold">
+                    [{i + 1}]
                   </span>
-                ) : null}
-                <PubTitle value={paper.title} className="text-[14px] leading-[1.4] text-pretty" />
-                <span className="text-apollo-slate text-[12px]">PMID {paper.pmid} ↗</span>
-              </a>
-            ))
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <PubTitle
+                      value={paper.title}
+                      className="text-[13px] leading-[1.4] text-pretty"
+                    />
+                    <span className="text-[12px] text-[var(--evidence-faint)]">
+                      {paper.year != null ? `${paper.year} · ` : ""}
+                      <ExtLink
+                        href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(paper.pmid)}/`}
+                        className="text-apollo-slate hover:text-apollo-maroon hover:underline"
+                      >
+                        PMID {paper.pmid} ↗
+                      </ExtLink>
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ol>
           ) : (
             <Empty />
           )}
         </aside>
       </div>
+
+      <FundingStrip pi={pi} />
     </article>
   );
 }
@@ -697,10 +861,11 @@ export function MatchaReportView({ report }: { report: MatchaReport }) {
       className="bg-apollo-page min-h-screen font-sans text-[#1a1a1a] antialiased"
     >
       <style dangerouslySetInnerHTML={{ __html: printCss(footer) }} />
-      <div data-report-bar className="bg-apollo-bar text-white">
+      <div data-report-bar className="border-apollo-border border-b bg-white">
         <div className="mx-auto flex max-w-[1040px] flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3.5 text-[13px] sm:px-8">
-          <div className="font-semibold tracking-[0.01em]">Weill Cornell Medicine</div>
-          <div className="text-[#d9d3ce]">
+          {/* eslint-disable-next-line @next/next/no-img-element -- inline SVG; must print. */}
+          <img src={WCM_LOGO_SRC} alt="Weill Cornell Medicine" className="h-7 w-auto" />
+          <div className="text-[var(--evidence-faint)]">
             Investigator scouting report · {reportDate(report.generatedAt)}
           </div>
         </div>
