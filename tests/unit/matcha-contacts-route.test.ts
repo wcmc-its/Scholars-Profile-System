@@ -90,6 +90,8 @@ beforeEach(() => {
         preferredName: `Jane ${cwid.toUpperCase()}`,
         email: cwid === "b" ? null : `${cwid}@researcher.example.org`,
         roleCategory: "full_time_faculty",
+        // "d" released the address to nobody (the release gate withholds it when on).
+        emailVisibility: cwid === "d" ? "none" : "institution",
       })),
   );
   mockOfficer.mockResolvedValue({
@@ -153,6 +155,26 @@ describe("POST /api/edit/matcha/contacts", () => {
     const body = await (await POST(req(devSession, { submissionId: "s1", cwids: ["a"] }))).json();
     expect(body.contacts).toEqual([]);
     expect(body.missing).toEqual([{ cwid: "a", name: "Jane A" }]);
+  });
+
+  it("withholds an address its owner has not released when the release gate is on", async () => {
+    STORED.push("d");
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
+    try {
+      const body = await (
+        await POST(req(devSession, { submissionId: "s1", cwids: ["a", "d"] }))
+      ).json();
+      expect(body.contacts.map((c: { cwid: string }) => c.cwid)).toEqual(["a"]);
+      expect(body.missing).toEqual([{ cwid: "d", name: "Jane D" }]);
+      process.env.PROFILE_EMAIL_RELEASE_GATE = "off";
+      const open = await (
+        await POST(req(devSession, { submissionId: "s1", cwids: ["a", "d"] }))
+      ).json();
+      expect(open.contacts.map((c: { cwid: string }) => c.cwid)).toEqual(["a", "d"]);
+    } finally {
+      delete process.env.PROFILE_EMAIL_RELEASE_GATE;
+      STORED.pop();
+    }
   });
 
   it("refuses a cwid that is not in the saved result, like the brief POST", async () => {

@@ -13,9 +13,11 @@
  * general directory lookup. At most `SCHOLAR_EXPORT_CAP` (50) people per request: more is REFUSED
  * with 400, never truncated (the scholar-export policy cap).
  *
- * Address rule: the /edit export rule (`exportEmailCell`: the `SCHOLAR_LIST_EXPORT_EMAIL` kill
- * switch and the hidden-role carve), on ACTIVE Scholar rows only — the same rule report 11's
- * "Email these users" applies. Anyone without an address comes back in `missing`, never silently
+ * Address rule: the #847 SCOPE-export rule, not the unit-roster one — the officer is not these
+ * researchers' unit admin, so the audience matches the capped scope export
+ * (`lib/api/export-scholars.ts`): `exportEmailCell` (the `SCHOLAR_LIST_EXPORT_EMAIL` kill switch
+ * and the hidden-role carve) AND the release-code filter (`isEmailExportableByReleaseCode`, live
+ * where `PROFILE_EMAIL_RELEASE_GATE` is on), on ACTIVE Scholar rows only. Anyone without an address comes back in `missing`, never silently
  * dropped. Addresses are never written to the report page or any stored row.
  */
 import type { NextRequest } from "next/server";
@@ -32,7 +34,10 @@ import { loadOfficerContact } from "@/lib/api/matcha-report";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
-import { exportEmailCell } from "@/lib/profile/email-visibility-flags";
+import {
+  exportEmailCell,
+  isEmailExportableByReleaseCode,
+} from "@/lib/profile/email-visibility-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +91,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const [rows, officer] = await Promise.all([
       db.read.scholar.findMany({
         where: { cwid: { in: wanted }, deletedAt: null, status: "active" },
-        select: { cwid: true, preferredName: true, email: true, roleCategory: true },
+        select: {
+          cwid: true,
+          preferredName: true,
+          email: true,
+          roleCategory: true,
+          emailVisibility: true,
+        },
       }),
       loadOfficerContact(realCwid),
     ]);
@@ -97,9 +108,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const cwid of wanted) {
       const r = rowBy.get(cwid);
       const name = r?.preferredName ?? byCwid.get(cwid)!.name;
-      const email = r
-        ? exportEmailCell({ email: r.email?.trim() || null, roleCategory: r.roleCategory })
-        : "";
+      const email =
+        r && isEmailExportableByReleaseCode(r.emailVisibility)
+          ? exportEmailCell({ email: r.email?.trim() || null, roleCategory: r.roleCategory })
+          : "";
       if (email) contacts.push({ cwid, name, email });
       else missing.push({ cwid, name });
     }

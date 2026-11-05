@@ -4059,7 +4059,8 @@ function EmailPersonButton({ onEmail }: { onEmail: () => Promise<boolean> }) {
  * forbids bulk email download "even for internal users" at a cap of 50, and a sponsor pool runs
  * to 800. Per-person is a different act with a different consent story, and it is the one the
  * route below is built for. (Matcha contact later added "Email selected (BCC)" for DRAFTERS only,
- * through `/api/edit/matcha/contacts`, refused above the 50-person policy cap; a drafter's card
+ * through `/api/edit/matcha/contacts`: the #847 scope-export rule, i.e. refused above the 50-person
+ * cap and filtered by the release code, consistent with docs/email-visibility-spec.md; a drafter's card
  * shows `EmailPersonButton` in place of this one.)
  *
  * NO ADDRESS EVER ENTERS THE MATCH PAYLOAD. `/api/profile/[cwid]/contact-email` is a separate,
