@@ -371,6 +371,37 @@ describe("PATCH (edit)", () => {
     expect(mockBriefUpdate.mock.calls[1][0].data.edited).toBe(Prisma.DbNull);
   });
 
+  it("stores an edited angleRole; the generated role or null reverts it; bad input 400s", async () => {
+    const withRole = { ...gen, angleRole: "Trial lead" };
+    mockBriefFindUnique.mockResolvedValue(row("a", { generated: withRole }));
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angleRole: " Cohort steward " }));
+    expect(mockBriefUpdate.mock.calls[0][0].data.edited).toEqual({ angleRole: "Cohort steward" });
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angleRole: "Trial lead" }));
+    expect(mockBriefUpdate.mock.calls[1][0].data.edited).toBe(Prisma.DbNull);
+    // Clearing a generated role is an edit (the angle then prints unbolded).
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angleRole: "" }));
+    expect(mockBriefUpdate.mock.calls[2][0].data.edited).toEqual({ angleRole: "" });
+    mockBriefFindUnique.mockResolvedValue(row("a", { generated: withRole, edited: { angleRole: "Mine" } }));
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angleRole: null }));
+    expect(mockBriefUpdate.mock.calls[3][0].data.edited).toBe(Prisma.DbNull);
+
+    for (const angleRole of [7, "x".repeat(61)]) {
+      const resp = await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angleRole }));
+      expect(resp.status).toBe(400);
+      expect((await resp.json()).error).toBe("invalid_angle_role");
+    }
+    expect(mockBriefUpdate).toHaveBeenCalledTimes(4);
+    // 60 characters is allowed.
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angleRole: "x".repeat(60) }));
+    expect(mockBriefUpdate).toHaveBeenCalledTimes(5);
+  });
+
+  it("an older brief (no role stored): an empty role stays unedited", async () => {
+    mockBriefFindUnique.mockResolvedValue(row("a", { generated: gen }));
+    await PATCH(req(devSession, { submissionId: "s1", cwid: "a", angle: "Generated angle.", angleRole: "" }));
+    expect(mockBriefUpdate.mock.calls[0][0].data.edited).toBe(Prisma.DbNull);
+  });
+
   it("404s a brief that was never drafted", async () => {
     mockBriefFindUnique.mockResolvedValue(null);
     expect((await PATCH(req(devSession, { submissionId: "s1", cwid: "a", why: "x" }))).status).toBe(404);

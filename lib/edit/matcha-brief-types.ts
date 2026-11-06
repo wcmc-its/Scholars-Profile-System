@@ -33,13 +33,29 @@ export type BriefGenerated = {
   /** 1-2 sentences: the concrete role this PI could play for the requester. Absent on briefs
    *  drafted before it existed; read it through `briefAngle`, which treats absent as "". */
   angle?: string;
+  /** 2-6 words: the role the angle sentence is built around ("Clinical-trial lead"), shown bold
+   *  before it. Absent on briefs drafted before it existed and when the model gave no valid one;
+   *  read it through `briefAngleRole`. */
+  angleRole?: string;
+  /** The names in `records.methods` the model labelled data sources (registries, claims/EHR data,
+   *  cohorts, biobanks, national databases, trial datasets). Each is one of the method names it
+   *  was given, never invented. Absent on older briefs = no split (every method is a "Method"). */
+  dataSources?: string[];
   topics: BriefTopic[];
   /** How many unsupported statements the fact-check removed. A count only — never the claim. */
   removedCount: number;
 };
 
 /** The officer's version. A field present here wins over `generated`; absent = not edited. */
-export type BriefEdited = { why?: string; angle?: string; topics?: BriefTopic[] };
+export type BriefEdited = {
+  why?: string;
+  angle?: string;
+  angleRole?: string;
+  topics?: BriefTopic[];
+};
+
+/** Longest role phrase the model or an officer may store. */
+export const MAX_ANGLE_ROLE_CHARS = 60;
 
 export type BriefRecords = {
   funding: {
@@ -79,6 +95,57 @@ export function briefWhy(b: Pick<BriefWire, "generated" | "edited">): string {
 /** The partnership angle on screen; "" for a brief drafted before angles existed. */
 export function briefAngle(b: Pick<BriefWire, "generated" | "edited">): string {
   return b.edited?.angle ?? b.generated.angle ?? "";
+}
+
+/** The bold role before the angle; "" for a brief drafted before roles existed (the angle then
+ *  prints unbolded). */
+export function briefAngleRole(b: Pick<BriefWire, "generated" | "edited">): string {
+  return b.edited?.angleRole ?? b.generated.angleRole ?? "";
+}
+
+/** The method names the model labelled data sources; [] for an older brief (no split). */
+export function briefDataSources(b: Pick<BriefWire, "generated">): string[] {
+  return b.generated.dataSources ?? [];
+}
+
+/** A method name folded for matching: lowercase, every run of whitespace/punctuation collapsed to
+ *  one space. "RNA-seq" and "RNA seq" fold together. */
+export function normalizeMethodName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, " ")
+    .trim();
+}
+
+/** Merge methods whose names fold together (`normalizeMethodName`), keeping the row with the most
+ *  papers, at the position of the first occurrence. */
+export function dedupeMethods<T extends { name: string; papers: number }>(methods: readonly T[]): T[] {
+  const out: T[] = [];
+  const at = new Map<string, number>();
+  for (const m of methods) {
+    const key = normalizeMethodName(m.name);
+    const i = at.get(key);
+    if (i === undefined) {
+      at.set(key, out.length);
+      out.push(m);
+    } else if (m.papers > out[i].papers) {
+      out[i] = m;
+    }
+  }
+  return out;
+}
+
+/** Split a methods list into the ones named in `dataSourceNames` (matched case- and
+ *  punctuation-insensitively) and the rest, each keeping its order. No names = all methods. */
+export function splitMethods<T extends { name: string }>(
+  methods: readonly T[],
+  dataSourceNames: readonly string[],
+): { dataSources: T[]; methods: T[] } {
+  const names = new Set(dataSourceNames.map(normalizeMethodName));
+  const dataSources: T[] = [];
+  const rest: T[] = [];
+  for (const m of methods) (names.has(normalizeMethodName(m.name)) ? dataSources : rest).push(m);
+  return { dataSources, methods: rest };
 }
 
 export function briefTopics(b: Pick<BriefWire, "generated" | "edited">): BriefTopic[] {

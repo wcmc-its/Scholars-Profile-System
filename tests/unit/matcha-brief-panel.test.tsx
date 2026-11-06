@@ -76,6 +76,7 @@ function brief(cwid: string, over: Partial<BriefWire> = {}): BriefWire {
     cwid,
     generated: {
       why: `Generated why for ${cwid}. Second sentence.`,
+      angle: `Angle for ${cwid}.`,
       topics: [
         {
           concept: "Immuno-oncology",
@@ -92,6 +93,13 @@ function brief(cwid: string, over: Partial<BriefWire> = {}): BriefWire {
     updatedAt: "2026-10-03T12:00:00.000Z",
     ...over,
   };
+}
+
+/** A brief drafted before partnership angles (and roles, and data sources) existed. */
+function preAngle(cwid: string): BriefWire {
+  const b = brief(cwid);
+  delete b.generated.angle;
+  return b;
 }
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
@@ -352,13 +360,92 @@ describe("Matcha brief UI", () => {
 
   it("a brief drafted before angles shows no crash and points to Redraft", async () => {
     window.localStorage.setItem("sponsor-match-density", "detailed");
-    stub({ candidates: pool(2), saved: [brief("p1")] });
+    stub({ candidates: pool(2), saved: [preAngle("p1")] });
     await search();
     const section = await screen.findByRole("region", { name: "Brief for Person 01" });
     expect(
       within(section).getByText("Drafted before partnership angles. Redraft to add one."),
     ).toBeTruthy();
     expect(within(section).getByRole("button", { name: "Redraft brief for Person 01" })).toBeTruthy();
+  });
+
+  it("shows the role in bold before the angle, and saves a role edit with the angle", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    const saved = brief("p1");
+    saved.generated.angle = "Could run trials on the cohort.";
+    saved.generated.angleRole = "Clinical-trial lead";
+    const { calls } = stub({
+      candidates: pool(2),
+      saved: [saved],
+      patch: { brief: { ...saved, edited: { angleRole: "Cohort steward" } } },
+    });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    const role = section.querySelector('[data-slot="matcha-brief-angle-role"]')!;
+    expect(role.tagName).toBe("STRONG");
+    expect(role.textContent).toBe("Clinical-trial lead.");
+    expect(role.parentElement!.textContent).toBe(
+      "Clinical-trial lead. Could run trials on the cohort.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Partnership angle for Person 01" }));
+    const input = screen.getByRole("textbox", { name: "Partnership role for Person 01" });
+    expect((input as HTMLInputElement).value).toBe("Clinical-trial lead");
+    fireEvent.change(input, { target: { value: "Cohort steward" } });
+    fireEvent.click(within(section).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "PATCH" &&
+            c.body?.angleRole === "Cohort steward" &&
+            c.body?.angle === "Could run trials on the cohort.",
+        ),
+      ).toBe(true),
+    );
+    expect(await within(section).findByText("Cohort steward.")).toBeTruthy();
+  });
+
+  it("an older brief with an angle but no role prints the angle unbolded", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    stub({ candidates: pool(2), saved: [brief("p1")] });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    expect(within(section).getByText("Angle for p1.")).toBeTruthy();
+    expect(section.querySelector('[data-slot="matcha-brief-angle-role"]')).toBeNull();
+  });
+
+  it("splits Methods and tools into Data sources and Methods when the brief labels data sources", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    const saved = brief("p1");
+    saved.generated.dataSources = ["Regional stroke registry"];
+    const methods = [
+      { name: "Regional stroke registry", category: null, papers: 9 },
+      { name: "Mouse models", category: "animal model", papers: 7 },
+      { name: "mouse  models.", category: null, papers: 2 },
+    ];
+    stub({ candidates: pool(2), saved: [saved], records: { ...EMPTY_RECORDS, methods } });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    // The near-duplicate merges: two rows, not three.
+    const summary = within(section).getByText("Methods and tools · 2");
+    fireEvent.click(summary);
+    const sources = section.querySelector('[data-slot="matcha-brief-data-sources"]') as HTMLElement;
+    const rest = section.querySelector('[data-slot="matcha-brief-method-list"]') as HTMLElement;
+    expect(within(sources).getByText("Data sources")).toBeTruthy();
+    expect(within(sources).getByText("Regional stroke registry · 9 papers")).toBeTruthy();
+    expect(within(rest).getByText("Methods")).toBeTruthy();
+    expect(within(rest).getByText("Mouse models · 7 papers")).toBeTruthy();
+    expect(within(rest).queryByText(/registry/)).toBeNull();
+    cleanup();
+
+    // An older brief (no dataSources): one flat list, unchanged.
+    stub({ candidates: pool(2), saved: [brief("p1")], records: { ...EMPTY_RECORDS, methods } });
+    await search();
+    const flat = await screen.findByRole("region", { name: "Brief for Person 01" });
+    expect(flat.querySelector('[data-slot="matcha-brief-data-sources"]')).toBeNull();
+    expect(within(flat).queryByText("Data sources")).toBeNull();
+    expect(within(flat).getByText("Regional stroke registry · 9 papers")).toBeTruthy();
   });
 
   it("flag off: no brief request, no brief chrome", async () => {
@@ -473,6 +560,52 @@ describe("Matcha report (PDF)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Open report without them" }));
     expect(open).toHaveBeenCalledWith(reportUrl(["p1", "p2"]), "_blank", "noopener");
     expect(briefPosts(calls)).toHaveLength(0);
+  });
+
+  it("counts a brief drafted before partnership angles as missing, and redrafts it", async () => {
+    const open = openSpy();
+    const { calls } = stub({ candidates: pool(5), saved: [brief("p1"), preAngle("p2")] });
+    await search();
+    await screen.findByText("Generated why for p2.");
+    tick(1);
+    tick(2);
+    tick(3);
+    fireEvent.click(screen.getByRole("button", { name: "Report (PDF)" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        "2 of 3 shortlisted researchers have no brief or one drafted before partnership angles.",
+      ),
+    ).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Open report as is" })).toBeTruthy();
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Draft 2 briefs, then open report" }),
+    );
+    await waitFor(() => expect(open).toHaveBeenCalledWith(reportUrl(["p1", "p2", "p3"]), "_blank"));
+    expect(
+      briefPosts(calls)
+        .map((c) => (c.body as { cwids: string[] }).cwids[0])
+        .sort(),
+    ).toEqual(["p2", "p3"]);
+  });
+
+  it("titles a prompt of only angle-less briefs as such", async () => {
+    openSpy();
+    stub({ candidates: pool(3), saved: [preAngle("p1")] });
+    await search();
+    await screen.findByText("Generated why for p1.");
+    tick(1);
+    fireEvent.click(screen.getByRole("button", { name: "Report (PDF)" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        "1 of 1 shortlisted researcher has a brief drafted before partnership angles.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: "Redraft 1 brief, then open report" }),
+    ).toBeTruthy();
   });
 
   it("flag off: no Report button", async () => {
