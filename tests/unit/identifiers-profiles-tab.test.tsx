@@ -102,7 +102,7 @@ describe("OrcidCard", () => {
       />,
     );
     expect(screen.getByTestId("orcid-suggested-status").textContent).toBe(
-      "High confidence suggestion",
+      "Suggested",
     );
     const why = screen.getByTestId("orcid-suggested-evidence");
     expect(why.querySelectorAll("li")).toHaveLength(2);
@@ -188,7 +188,7 @@ describe("OrcidCard", () => {
     const also = screen.getByTestId("orcid-also-suggested");
     expect(also.textContent).toContain("0000-0002-9930-2193");
     expect(screen.getByTestId("orcid-also-suggested-status").textContent).toBe(
-      "High confidence suggestion",
+      "Suggested",
     );
     expect(screen.getByTestId("orcid-remove").textContent).toBe("Remove both");
     // Keep → confirms the on-file iD and records the suggestion as dismissed (it
@@ -335,11 +335,25 @@ describe("OrcidCard — Connect your ORCID iD (#3115)", () => {
   it("connect on, an unauthenticated iD on file: no Change (typing), but connect is offered", () => {
     render(<OrcidCard {...base} onFile={ID} connectEnabled />);
     expect(screen.queryByTestId("orcid-change")).toBeNull();
-    expect(screen.getByTestId("orcid-connect").textContent).toContain("Connect a different ORCID iD");
+    expect(screen.getByTestId("orcid-connect").textContent).toContain("Sign in to ORCID to verify");
     cleanup();
   });
 
-  it("a suggested iD: Connect sits inline with Confirm, its note below the row", () => {
+  it("the on-file iD names who confirmed it (ADR-016 D2); unknown origin stays 'On file'", () => {
+    render(<OrcidCard {...base} onFile={ID} confirmMethod="rpm_admin" />);
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toContain("Confirmed");
+    expect(screen.getByTestId("orcid-on-file-evidence").textContent).toContain(
+      "Added by a Publication Manager admin",
+    );
+    cleanup();
+    render(<OrcidCard {...base} onFile={ID} confirmMethod={null} />);
+    expect(screen.getByTestId("orcid-on-file-status").textContent).toContain("On file");
+    cleanup();
+  });
+
+  it("a suggested iD, scholar's own view: sign-in leads; one-click confirm and Not me sit below it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, orcid: null }) });
+    vi.stubGlobal("fetch", fetchMock);
     render(
       <OrcidCard
         {...base}
@@ -348,9 +362,17 @@ describe("OrcidCard — Connect your ORCID iD (#3115)", () => {
         suggested={{ orcid: ID, accepted: 5, evidence: [{ source: "rpm_inferred", accepted: 5, rejected: 0 }] }}
       />,
     );
-    const row = screen.getByTestId("orcid-connect").parentElement;
-    expect(row).toBe(screen.getByTestId("orcid-confirm").parentElement);
-    expect(row?.contains(screen.getByTestId("orcid-connect-block"))).toBe(false);
+    const connect = screen.getByTestId("orcid-connect");
+    expect(connect.textContent).toContain("Sign in to ORCID to confirm");
+    expect(connect.className).toContain("bg-apollo-maroon");
+    const confirm = screen.getByTestId("orcid-confirm");
+    expect(confirm.textContent).toBe("Yes, this is my iD");
+    expect(connect.parentElement?.contains(confirm)).toBe(false);
+    expect(screen.queryByTestId("orcid-form")).toBeNull();
+    fireEvent.click(screen.getByTestId("orcid-not-me"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body).toMatchObject({ orcid: null, confirmedSuggestion: false, dismiss: [ID] });
     cleanup();
   });
 

@@ -1598,6 +1598,7 @@ function renderPanel(
               onFileEvidence={row.onFileEvidence}
               suggested={row.suggested}
               authenticated={ctx.scholar.orcidAuthenticated === true}
+              confirmMethod={ctx.scholar.orcidConfirmMethod ?? null}
               connectEnabled={orcidConnectEnabled && mode === "self"}
             />
           )}

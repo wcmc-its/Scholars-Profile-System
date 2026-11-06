@@ -25,7 +25,7 @@ export function normalizeOrcid(input: string): string | null {
 export type OrcidEvidence = { source: string; accepted: number; rejected: number };
 
 /** The scholar's first name — what a colleague would call them in a sentence
- *  ("Is this Olivier's ORCID iD?"). From `scholar.preferredName`. */
+ *  ("Confirm Olivier's ORCID iD"). From `scholar.preferredName`. */
 export function firstName(preferredName: string): string {
   return preferredName.trim().split(/\s+/)[0] || preferredName;
 }

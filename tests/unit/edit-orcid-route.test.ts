@@ -246,6 +246,18 @@ describe("POST /api/edit/orcid", () => {
     expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
   });
 
+  it("Not me on a bare suggestion: the iD is dismissed as not_this_person and the audit row is not marked removed", async () => {
+    mockTxScholarFindUnique.mockResolvedValue({ orcid: null });
+    const res = await POST(post({ cwid: "self01", orcid: null, dismiss: [ID] }));
+    expect(res.status).toBe(200);
+    expect(mockTxDismissalUpsert).toHaveBeenCalledTimes(1);
+    expect(mockTxDismissalUpsert.mock.calls[0][0]).toMatchObject({
+      create: { cwid: "self01", orcid: ID, reason: "not_this_person" },
+    });
+    const args = mockTxExecuteRaw.mock.calls[0] as unknown[];
+    expect(args.some((v) => typeof v === "string" && v.includes('"removed":true'))).toBe(false);
+  });
+
   it("a remove dismisses only scholar.orcid: an rpm_admin iD is a candidate, not on file, so it is left alone", async () => {
     mockTxScholarFindUnique.mockResolvedValue({ orcid: OTHER_ID });
     mockTxCandidateFindMany.mockResolvedValue([{ orcid: ID }]);
