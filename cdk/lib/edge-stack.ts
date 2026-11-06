@@ -1471,13 +1471,16 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
-        ],
+          // #432: public launch drops the gate; everything after it stays.
+          // ponytail: the IPSet is kept (unreferenced) so rolling back is a
+          // pure rule re-add -- delete it with the rest of this block later.
+        ].filter((r) => !(envConfig.edgePublic && r.name === "block-non-wcm")),
         visibilityConfig: {
           cloudWatchMetricsEnabled: true,
           metricName: `sps-edge-${env}-wcm-only`,
           sampledRequestsEnabled: true,
         },
-        description: `SPS front end ${env} - WCM-only IP allow, AWS managed rule groups enforced, bot-aware rate limit`,
+        description: `SPS front end ${env} - ${envConfig.edgePublic ? "public" : "WCM-only IP allow"}, AWS managed rule groups enforced, bot-aware rate limit`,
       });
       webAclArn = webAcl.attrArn;
 

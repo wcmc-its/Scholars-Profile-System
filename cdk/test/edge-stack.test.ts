@@ -1566,6 +1566,28 @@ describe("EdgeStack", () => {
       expect(dc.WebACLId).toBeDefined();
     });
 
+    it("edgePublic (#432): prod drops block-non-wcm, keeps the managed rules; staging stays gated", () => {
+      const rulesOf = (t: Template) =>
+        (
+          Object.values(t.findResources("AWS::WAFv2::WebACL"))[0]
+            ?.Properties as { Rules: Array<{ Name: string }> }
+        ).Rules.map((r) => r.Name);
+      const prod = rulesOf(buildEdgeStack("prod").template);
+      expect(prod).not.toContain("block-non-wcm");
+      expect(prod).toEqual(
+        expect.arrayContaining([
+          "AWSManagedRulesCommonRuleSet",
+          "AWSManagedRulesKnownBadInputsRuleSet",
+          "AWSManagedRulesSQLiRuleSet",
+          "AWSManagedRulesBotControlRuleSet",
+          "rate-limit",
+        ]),
+      );
+      expect(rulesOf(buildEdgeStack("staging").template)).toContain(
+        "block-non-wcm",
+      );
+    });
+
     describe("with -c edgeAllowedCidrs set", () => {
       const { template } = buildEdgeStack("staging", {
         allowedCidrs: "140.251.0.0/16,157.139.0.0/16",
