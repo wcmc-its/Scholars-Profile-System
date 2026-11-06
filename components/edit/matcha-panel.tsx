@@ -136,6 +136,8 @@ import { RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
 import { briefCsvFields, buildMatchaCsv } from "@/lib/edit/matcha-export";
 import {
   briefAngle,
+  briefAngleRole,
+  briefDataSources,
   briefSourceLabel,
   briefSourceUrl,
   briefTopics,
@@ -143,7 +145,10 @@ import {
   firstSentence,
   methodLabel,
   methodsSummary,
+  dedupeMethods,
+  MAX_ANGLE_ROLE_CHARS,
   reporterUrl,
+  splitMethods,
   UNSOURCED_LABEL,
   type BriefRecords,
   type BriefWire,
@@ -1721,7 +1726,12 @@ export function MatchaPanel({
    *  inside the click, so no popup blocker objects); otherwise the in-page prompt first. */
   function openReport() {
     if (!submissionId || reportCwids.length === 0) return;
-    const missing = reportCwids.filter((c) => !briefMap.has(c));
+    // A brief drafted before partnership angles counts as missing: drafting it again (POST always
+    // redrafts) adds the angle.
+    const missing = reportCwids.filter((c) => {
+      const b = briefMap.get(c);
+      return !b || !briefAngle(b);
+    });
     if (missing.length === 0) {
       window.open(reportHref(submissionId, reportCwids), "_blank", "noopener");
       return;
@@ -1729,6 +1739,7 @@ export function MatchaPanel({
     setReportPrompt({
       cwids: reportCwids,
       missing,
+      outdated: missing.filter((c) => briefMap.has(c)).length,
       noun: shortlistRows.length > 0 ? "shortlisted" : "selected",
       phase: "ask",
       blocked: false,
@@ -1821,13 +1832,14 @@ export function MatchaPanel({
     return true;
   }
 
-  /** Missing PIs whose draft has landed (brief) or failed. */
+  /** Missing PIs whose draft has landed (brief) or failed. An outdated brief is already in the
+   *  map, so for it only leaving the drafting set counts (enqueueing adds it there at once). */
   const reportSettled = reportPrompt
     ? reportPrompt.missing.filter(
         (c) => !briefDrafting.has(c) && (briefMap.has(c) || briefFailed.has(c)),
       )
     : [];
-  const reportFailed = reportPrompt ? reportSettled.filter((c) => !briefMap.has(c)) : [];
+  const reportFailed = reportPrompt ? reportSettled.filter((c) => briefFailed.has(c)) : [];
 
   // Every missing PI settled ⇒ open the report. This runs after an async wait, so a popup blocker
   // may refuse the tab: then the prompt stays up with an "Open report" link (a click) instead. A
@@ -3517,15 +3529,14 @@ export function MatchaPanel({
                         <DialogContent data-slot="matcha-report-prompt">
                           <DialogHeader>
                             <DialogTitle className="leading-snug">
-                              {reportPrompt.missing.length} of {reportPrompt.cwids.length}{" "}
-                              {reportPrompt.noun} researcher
-                              {reportPrompt.cwids.length === 1 ? "" : "s"}{" "}
-                              {reportPrompt.missing.length === 1 ? "has" : "have"} no brief yet.
+                              {reportPromptTitle(reportPrompt)}
                             </DialogTitle>
                             <DialogDescription>
-                              {
-                                'Their sections will show records only (funding, appointments, key papers), with no "Why this PI" or discussion topics.'
-                              }
+                              {reportPrompt.outdated === 0
+                                ? 'Their sections will show records only (funding, appointments, key papers), with no "Why this PI" or discussion topics.'
+                                : reportPrompt.outdated === reportPrompt.missing.length
+                                  ? "Their sections will print without a partnership angle. Redrafting adds one and keeps your edits."
+                                  : 'Researchers with no brief show records only, with no "Why this PI" or discussion topics; older briefs print without a partnership angle.'}
                             </DialogDescription>
                           </DialogHeader>
                           {!briefCanEdit ? (
@@ -3546,7 +3557,11 @@ export function MatchaPanel({
                           {reportFailed.length > 0 && reportPrompt.phase !== "ask" ? (
                             <p className="text-destructive text-sm">
                               Could not draft: {reportFailed.map(nameOf).join(", ")}. They stay in
-                              the report, records only.
+                              the report
+                              {reportFailed.some((c) => briefMap.has(c))
+                                ? " as they were"
+                                : ", records only"}
+                              .
                             </p>
                           ) : null}
                           <DialogFooter>
@@ -3566,7 +3581,9 @@ export function MatchaPanel({
                                   size="sm"
                                   onClick={openReportAnyway}
                                 >
-                                  Open report without them
+                                  {reportPrompt.outdated === 0
+                                    ? "Open report without them"
+                                    : "Open report as is"}
                                 </Button>
                                 {briefCanEdit ? (
                                   <Button
@@ -3575,7 +3592,10 @@ export function MatchaPanel({
                                     size="sm"
                                     onClick={draftThenReport}
                                   >
-                                    Draft {reportPrompt.missing.length} brief
+                                    {reportPrompt.outdated === reportPrompt.missing.length
+                                      ? "Redraft"
+                                      : "Draft"}{" "}
+                                    {reportPrompt.missing.length} brief
                                     {reportPrompt.missing.length === 1 ? "" : "s"}, then open report
                                   </Button>
                                 ) : null}
@@ -5292,6 +5312,7 @@ type BriefState =
 type BriefPatch = {
   why?: string | null;
   angle?: string | null;
+  angleRole?: string | null;
   topics?: string[] | null;
   note?: string | null;
 };
@@ -5357,11 +5378,28 @@ function reportHref(submissionId: string, cwids: readonly string[]): string {
   );
 }
 
+/** "2 of 3 selected researchers have no brief yet." / "…have briefs drafted before partnership
+ *  angles." / "…have no brief or one drafted before partnership angles." */
+function reportPromptTitle(p: ReportPrompt): string {
+  const n = p.missing.length;
+  const verb = n === 1 ? "has" : "have";
+  const what =
+    p.outdated === 0
+      ? "no brief yet"
+      : p.outdated === n
+        ? `${n === 1 ? "a brief" : "briefs"} drafted before partnership angles`
+        : "no brief or one drafted before partnership angles";
+  return `${n} of ${p.cwids.length} ${p.noun} researcher${p.cwids.length === 1 ? "" : "s"} ${verb} ${what}.`;
+}
+
 /** The missing-brief prompt's state: who the report covers, who lacks a brief, and how far the
  *  "Draft N briefs, then open report" run has got. */
 type ReportPrompt = {
   cwids: string[];
+  /** No brief, or a brief drafted before partnership angles (empty `briefAngle`). */
   missing: string[];
+  /** How many of `missing` HAVE a brief, one that predates partnership angles. */
+  outdated: number;
   /** "shortlisted" when the ticked rows are the selection, else "selected". */
   noun: string;
   phase: "ask" | "drafting" | "done";
@@ -5522,13 +5560,23 @@ function BriefEditor({
   );
 }
 
-function BriefRecordsBlock({ records }: { records: BriefRecords | undefined }) {
+function BriefRecordsBlock({
+  records,
+  dataSourceNames = [],
+}: {
+  records: BriefRecords | undefined;
+  /** The brief's `dataSources`: when non-empty, the methods list splits into two groups. */
+  dataSourceNames?: readonly string[];
+}) {
   const funding = records?.funding ?? [];
   const translation = records?.translation ?? [];
   const secondary = [...new Set((records?.secondaryAppointments ?? []).map((a) => a.organization))];
   const centers = records?.centers ?? [];
-  const methods = records?.methods ?? [];
+  const methods = dedupeMethods(records?.methods ?? []);
   const trialCount = records?.trialCount ?? 0;
+  const groups = splitMethods(methods, dataSourceNames);
+  const methodList = (items: readonly { name: string; papers: number }[]) =>
+    items.map((m) => <div key={m.name}>{methodLabel(m)}</div>);
   const appointments = [
     ...(secondary.length > 0 ? [`Secondary: ${secondary.join("; ")}`] : []),
     ...(centers.length > 0 ? [`Centers: ${centers.join("; ")}`] : []),
@@ -5596,11 +5644,23 @@ function BriefRecordsBlock({ records }: { records: BriefRecords | undefined }) {
                 <summary className="text-apollo-slate cursor-pointer">
                   {methodsSummary(methods.length, trialCount)}
                 </summary>
-                <div className="mt-1 flex flex-col gap-0.5 pl-4">
-                  {methods.map((m) => (
-                    <div key={m.name}>{methodLabel(m)}</div>
-                  ))}
-                </div>
+                {groups.dataSources.length > 0 ? (
+                  // The brief labelled some of them data sources: two groups.
+                  <div className="mt-1 flex flex-col gap-2 pl-4">
+                    <div className="flex flex-col gap-0.5" data-slot="matcha-brief-data-sources">
+                      <div className={capClass}>Data sources</div>
+                      {methodList(groups.dataSources)}
+                    </div>
+                    {groups.methods.length > 0 ? (
+                      <div className="flex flex-col gap-0.5" data-slot="matcha-brief-method-list">
+                        <div className={capClass}>Methods</div>
+                        {methodList(groups.methods)}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-1 flex flex-col gap-0.5 pl-4">{methodList(methods)}</div>
+                )}
               </details>
             ) : (
               <span>{methodsSummary(0, trialCount)}</span>
@@ -5617,6 +5677,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
   const { state, records, canEdit, onDraft, onPatch } = brief;
   const [editing, setEditing] = useState<null | "why" | "angle" | "topics">(null);
   const [draft, setDraft] = useState("");
+  const [roleDraft, setRoleDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
@@ -5676,9 +5737,10 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
     const b = state.brief;
     const why = briefWhy(b);
     const angle = briefAngle(b);
+    const role = briefAngleRole(b);
     const topics = briefTopics(b);
     const whyEdited = b.edited?.why !== undefined;
-    const angleEdited = b.edited?.angle !== undefined;
+    const angleEdited = b.edited?.angle !== undefined || b.edited?.angleRole !== undefined;
     const topicsEdited = b.edited?.topics !== undefined;
     body = (
       <div className="flex flex-col gap-3">
@@ -5740,24 +5802,47 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
             name={name}
             onEdit={() => {
               setDraft(angle);
+              setRoleDraft(role);
               setSaveError(false);
               setEditing("angle");
             }}
-            onRevert={() => void save({ angle: null })}
+            onRevert={() => void save({ angle: null, angleRole: null })}
           />
           {editing === "angle" ? (
-            <BriefEditor
-              value={draft}
-              rows={3}
-              label={`Partnership angle for ${name}`}
-              saving={saving}
-              error={saveError}
-              onChange={setDraft}
-              onSave={() => void save({ angle: draft.trim() ? draft : null })}
-              onCancel={() => setEditing(null)}
-            />
+            <div className="flex flex-col gap-1.5">
+              <Input
+                value={roleDraft}
+                maxLength={MAX_ANGLE_ROLE_CHARS}
+                aria-label={`Partnership role for ${name}`}
+                placeholder="Role, e.g. Clinical-trial lead"
+                onChange={(e) => setRoleDraft(e.target.value)}
+                className="bg-apollo-surface h-8 text-[14px] font-semibold"
+              />
+              <BriefEditor
+                value={draft}
+                rows={3}
+                label={`Partnership angle for ${name}`}
+                saving={saving}
+                error={saveError}
+                onChange={setDraft}
+                // The role goes as typed: "" clears a generated role (an edit), and the route
+                // treats a value equal to the generated one as a revert.
+                onSave={() =>
+                  void save({ angle: draft.trim() ? draft : null, angleRole: roleDraft.trim() })
+                }
+                onCancel={() => setEditing(null)}
+              />
+            </div>
           ) : angle ? (
-            <p className="text-[14px] text-pretty">{angle}</p>
+            <p className="text-[14px] text-pretty">
+              {role ? (
+                <strong className="font-semibold" data-slot="matcha-brief-angle-role">
+                  {role}.
+                </strong>
+              ) : null}
+              {role ? " " : null}
+              {angle}
+            </p>
           ) : b.generated.angle === undefined ? (
             // A brief drafted before angles existed: the header's Redraft adds one.
             <p className="text-muted-foreground text-[13px] italic">
@@ -5841,7 +5926,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
           )}
         </div>
 
-        <BriefRecordsBlock records={records} />
+        <BriefRecordsBlock records={records} dataSourceNames={briefDataSources(b)} />
       </div>
     );
   }

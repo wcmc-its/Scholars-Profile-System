@@ -76,6 +76,8 @@ import {
   briefMatchedConcepts,
   buildAskBlock,
   buildSourceTable,
+  checkDataSources,
+  cleanAngleRole,
   generateBrief,
   loadBriefRecords,
   matchaSubmissionScope,
@@ -177,6 +179,59 @@ const sources = buildSourceTable(facts, records);
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("angleRole and dataSources validation", () => {
+  const given = [
+    { name: "State Trauma Registry", category: null, papers: 6 },
+    { name: "Mouse models", category: "animal model", papers: 14 },
+  ];
+
+  it("trims the role, drops a trailing period, and drops a role over 60 characters", () => {
+    expect(cleanAngleRole("  Clinical-trial   lead. ")).toBe("Clinical-trial lead");
+    expect(cleanAngleRole(null)).toBe("");
+    expect(cleanAngleRole("   ")).toBe("");
+    expect(cleanAngleRole("x".repeat(60))).toBe("x".repeat(60));
+    expect(cleanAngleRole("x".repeat(61))).toBe("");
+  });
+
+  it("keeps only data sources that name a given method, in that method's spelling", () => {
+    expect(
+      checkDataSources(
+        ["state trauma registry", "National claims database", "State Trauma Registry"],
+        given,
+      ),
+    ).toEqual(["State Trauma Registry"]);
+    expect(checkDataSources(null, given)).toEqual([]);
+    expect(checkDataSources(["State Trauma Registry"], [])).toEqual([]);
+  });
+
+  it("postCheckBrief carries both through, validated against the methods passed in", () => {
+    const r = postCheckBrief(
+      {
+        why: "x",
+        angle: "Could lead registry studies.",
+        angleRole: " Registry-study lead ",
+        dataSources: ["State Trauma Registry", "An invented biobank"],
+      },
+      matched,
+      sources,
+      given,
+    );
+    expect(r.angleRole).toBe("Registry-study lead");
+    expect(r.dataSources).toEqual(["State Trauma Registry"]);
+    // No methods given (the second, prose-only pass): nothing can be a data source.
+    expect(
+      postCheckBrief({ why: "x", dataSources: ["State Trauma Registry"] }, matched, sources)
+        .dataSources,
+    ).toEqual([]);
+  });
+
+  it("the draft prompt asks for both, copied from METHODS_AND_TOOLS", () => {
+    expect(BRIEF_SYSTEM_PROMPT).toContain("`angleRole`");
+    expect(BRIEF_SYSTEM_PROMPT).toContain("`dataSources`");
+    expect(BRIEF_SYSTEM_PROMPT).toMatch(/only names that appear there/);
+  });
 });
 
 describe("postCheckBrief", () => {
@@ -560,6 +615,49 @@ describe("generateBrief", () => {
       expect(researcher).toContain(`"${m.name}"`);
       expect(extra).toContain(`- ${m.name}`);
     }
+  });
+
+  it("returns the role and the validated data sources", async () => {
+    mockVerify.mockResolvedValue([]);
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        why: "Works on lipids.",
+        angle: "Could validate candidates in mouse models.",
+        angleRole: "Animal-model validation partner",
+        dataSources: ["Mouse models", "A made-up cohort"],
+        topics: [],
+      },
+    });
+    const { generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
+    expect(generated.angleRole).toBe("Animal-model validation partner");
+    expect(generated.dataSources).toEqual(["Mouse models"]);
+  });
+
+  it("drops the role when the fact-check flags it or revises the angle away", async () => {
+    const object = {
+      why: "Works on lipids.",
+      angle: "Trial lead for statin studies.",
+      angleRole: "Trial lead",
+      topics: [],
+    };
+    mockGenerateObject.mockResolvedValue({ object });
+    mockVerify.mockResolvedValue([{ span: "Trial lead for statin studies.", category: "c", reason: "r" }]);
+    mockRevise.mockResolvedValue("Could advise on statin studies.");
+    let { generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
+    expect(generated.angle).toBe("Could advise on statin studies.");
+    expect(generated.angleRole).toBeUndefined();
+
+    mockVerify.mockResolvedValue([{ span: "statin studies", category: "c", reason: "r" }]);
+    mockRevise.mockResolvedValue("");
+    ({ generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records }));
+    expect(generated.angle).toBe("");
+    expect(generated.angleRole).toBeUndefined();
+
+    // A flag elsewhere in the angle leaves the role alone.
+    mockVerify.mockResolvedValue([{ span: "statin studies", category: "c", reason: "r" }]);
+    mockRevise.mockResolvedValue("Trial lead for lipid studies.");
+    ({ generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records }));
+    expect(generated.angleRole).toBe("Trial lead");
   });
 
   it("defaults a missing angle to empty (the model omitted it)", async () => {

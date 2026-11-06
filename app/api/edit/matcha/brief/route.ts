@@ -5,7 +5,7 @@
  *   history gate (superuser / developer / observer), scoped like Recent.
  * POST `{ submissionId, cwids[] }` → draft (or redraft) briefs, max 20. Superuser / developer
  *   ONLY: it spends Bedrock and writes rows, so an observer — who may run searches — may not.
- * PATCH `{ submissionId, cwid, why?, angle?, topics?, note? }` → the officer's edits. Same gate as
+ * PATCH `{ submissionId, cwid, why?, angle?, angleRole?, topics?, note? }` → the officer's edits. Same gate as
  *   POST.
  *
  * TRUST BOUNDARY: the client names a submission and PIs, nothing else. The ask's concepts and
@@ -41,6 +41,7 @@ import {
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { appendAuditRow } from "@/lib/edit/audit";
+import { MAX_ANGLE_ROLE_CHARS } from "@/lib/edit/matcha-brief-types";
 import { logEditDenial } from "@/lib/edit/authz";
 import {
   editError,
@@ -328,7 +329,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return editError(403, "not_developer_brief");
   }
 
-  const { submissionId, cwid, why, angle, topics, note } = body;
+  const { submissionId, cwid, why, angle, angleRole, topics, note } = body;
   if (typeof submissionId !== "string" || submissionId.length === 0 || submissionId.length > 64) {
     return editError(400, "invalid_submission_id", "submissionId");
   }
@@ -349,6 +350,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     (typeof angle !== "string" || angle.length > MAX_ANGLE_CHARS)
   ) {
     return editError(400, "invalid_angle", "angle");
+  }
+  if (
+    angleRole !== undefined &&
+    angleRole !== null &&
+    (typeof angleRole !== "string" || angleRole.length > MAX_ANGLE_ROLE_CHARS)
+  ) {
+    return editError(400, "invalid_angle_role", "angleRole");
   }
   if (
     topics !== undefined &&
@@ -391,6 +399,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         if (angle.trim() === (generated.angle ?? "")) delete edited.angle;
         else edited.angle = angle.trim();
       }
+      if (angleRole === null) delete edited.angleRole;
+      else if (typeof angleRole === "string") {
+        // A brief drafted before roles has none generated: "" is then the generated text.
+        if (angleRole.trim() === (generated.angleRole ?? "")) delete edited.angleRole;
+        else edited.angleRole = angleRole.trim();
+      }
       if (topics === null) delete edited.topics;
       else if (Array.isArray(topics)) {
         const next = topicsFromTexts(topics as string[], generated.topics);
@@ -401,7 +415,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         else edited.topics = next;
       }
       const hasEdits =
-        edited.why !== undefined || edited.angle !== undefined || edited.topics !== undefined;
+        edited.why !== undefined ||
+        edited.angle !== undefined ||
+        edited.angleRole !== undefined ||
+        edited.topics !== undefined;
 
       return tx.matchaBrief.update({
         where: key,
