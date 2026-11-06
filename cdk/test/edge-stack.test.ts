@@ -1390,10 +1390,7 @@ describe("EdgeStack", () => {
         )[0]?.Properties as Record<string, unknown> | undefined;
         const dc = props?.DistributionConfig as Record<string, unknown>;
         // No context flags passed -- these resolve from config.prod.
-        expect(dc.Aliases).toEqual([
-          "scholars.weill.cornell.edu",
-          "vivo.weill.cornell.edu",
-        ]);
+        expect(dc.Aliases).toEqual(["scholars.weill.cornell.edu"]);
         const cert = dc.ViewerCertificate as Record<string, unknown>;
         expect(cert.AcmCertificateArn).toBe(
           "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
@@ -1464,7 +1461,9 @@ describe("EdgeStack", () => {
 
   describe("legacy VIVO host alias (#945)", () => {
     it("prod attaches vivo.weill.cornell.edu beside the canonical alias", () => {
-      const { template } = buildEdgeStack("prod");
+      const { template } = buildEdgeStack("prod", undefined, {
+        edgeAliasDomains: ["vivo.weill.cornell.edu"],
+      });
       template.hasResourceProperties("AWS::CloudFront::Distribution", {
         DistributionConfig: Match.objectLike({
           Aliases: ["scholars.weill.cornell.edu", "vivo.weill.cornell.edu"],
@@ -1473,7 +1472,9 @@ describe("EdgeStack", () => {
     });
 
     it("prod runs the redirect on every behavior without its own viewer-request function", () => {
-      const { template } = buildEdgeStack("prod");
+      const { template } = buildEdgeStack("prod", undefined, {
+        edgeAliasDomains: ["vivo.weill.cornell.edu"],
+      });
       const fns = template.findResources("AWS::CloudFront::Function");
       const redirectId = Object.keys(fns).find((id) =>
         id.startsWith("EdgeLegacyHostRedirect"),
