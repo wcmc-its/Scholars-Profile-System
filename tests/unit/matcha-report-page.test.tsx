@@ -608,6 +608,49 @@ describe("Matcha report page", () => {
     expect(card("c")).not.toContain("data-report-pill-row");
   });
 
+  it("bolds the angle role and splits data sources above methods when the brief labels them", async () => {
+    const m = (name: string, papers: number) => ({ name, category: null, papers });
+    setup({
+      candidates: ["a", "b"],
+      briefs: [
+        brief("a", {
+          generated: {
+            ...brief("a").generated,
+            angle: "Could lead a trial using the gizmo registry.",
+            angleRole: "Clinical-trial lead",
+            dataSources: ["Gizmo registry"],
+          },
+        }),
+        brief("b", { generated: { ...brief("b").generated, angle: "Could advise on widgets." } }),
+      ],
+      records: {
+        a: { methods: [m("Mouse models", 9), m("Gizmo registry", 4)], trialCount: 0 },
+        b: { methods: [m("Mouse models", 9), m("Gizmo registry", 4)], trialCount: 0 },
+      },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
+    const card = (cwid: string) =>
+      new DOMParser().parseFromString(
+        new RegExp(`data-report-cwid="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "",
+        "text/html",
+      );
+    const pills = (d: Document, label: string) =>
+      [...d.querySelectorAll(`[data-report-pill-row="${label}"] [data-report-pill]`)].map(
+        (p) => p.textContent,
+      );
+    const a = card("a");
+    expect(a.querySelector("[data-report-angle] strong")?.textContent?.trim()).toBe(
+      "Clinical-trial lead",
+    );
+    expect(pills(a, "Data sources")).toEqual(["Gizmo registry"]);
+    expect(pills(a, "Methods")).toEqual(["Mouse models"]);
+    // An older brief: no bold role, every method under Methods.
+    const b = card("b");
+    expect(b.querySelector("[data-report-angle] strong")).toBeNull();
+    expect(b.querySelector('[data-report-pill-row="Data sources"]')).toBeNull();
+    expect(pills(b, "Methods")).toEqual(["Mouse models", "Gizmo registry"]);
+  });
+
   it("renders one stat line with tier counts, awards, technologies and gaps", async () => {
     setup({
       candidates: ["a", "b", "c"],

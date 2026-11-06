@@ -25,6 +25,7 @@ import {
   briefSourceLabel,
   briefSourceUrl,
   reporterUrl,
+  splitMethods,
   type BriefSource,
 } from "@/lib/edit/matcha-brief-types";
 import { htmlToPlainText } from "@/lib/utils";
@@ -761,10 +762,17 @@ function PillRow({ label, items }: { label: string; items: readonly string[] }) 
  * and ranked by paper count. One row today ("Methods"); a "Data sources" row slots in above it once
  * briefs label them. A clinical-trial count, when any, is a plain line.
  */
-function MethodsAndData({ pi }: { pi: Pick<ReportPi, "methods" | "trialCount"> }) {
-  const methods = mergeMethods(pi.methods).map((m) => m.name);
+function MethodsAndData({
+  pi,
+}: {
+  pi: Pick<ReportPi, "methods" | "trialCount"> & { brief: { dataSources: string[] } | null };
+}) {
+  const split = splitMethods(mergeMethods(pi.methods), pi.brief?.dataSources ?? []);
   const rows: { label: string; items: string[] }[] = [];
-  if (methods.length > 0) rows.push({ label: "Methods", items: methods });
+  if (split.dataSources.length > 0)
+    rows.push({ label: "Data sources", items: split.dataSources.map((m) => m.name) });
+  if (split.methods.length > 0)
+    rows.push({ label: "Methods", items: split.methods.map((m) => m.name) });
   if (rows.length === 0 && pi.trialCount <= 0) return null;
   return (
     <div data-report-methods className="flex flex-col gap-2">
@@ -929,7 +937,7 @@ function StrongProfile({ pi }: { pi: ReportPi }) {
         </div>
       </header>
 
-      {pi.brief?.angle ? <AngleBand angle={pi.brief.angle} /> : null}
+      {pi.brief?.angle ? <AngleBand angle={pi.brief.angle} role={pi.brief.angleRole} /> : null}
 
       {pi.brief ? (
         <>

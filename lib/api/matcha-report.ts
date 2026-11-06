@@ -25,7 +25,13 @@ import {
 } from "@/lib/api/matcha-brief";
 import { fitTier, type MatchaCandidate, type MatchaFitTier } from "@/lib/api/matcha-contract";
 import { loadReportThemes } from "@/lib/api/matcha-report-themes";
-import { briefAngle, briefTopics, briefWhy } from "@/lib/edit/matcha-brief-types";
+import {
+  briefAngle,
+  briefAngleRole,
+  briefDataSources,
+  briefTopics,
+  briefWhy,
+} from "@/lib/edit/matcha-brief-types";
 import {
   computeCoverage,
   type Coverage,
@@ -75,6 +81,10 @@ export type ReportPi = {
     why: string;
     /** Partnership angle, edited text winning; "" on a brief drafted before angles existed. */
     angle: string;
+    /** Bold role phrase before the angle; "" on a brief drafted before roles existed. */
+    angleRole: string;
+    /** Method names the brief labelled data sources; [] = no split (all print as Methods). */
+    dataSources: string[];
     topics: BriefTopic[];
     draftedAt: Date;
   } | null;
@@ -244,6 +254,8 @@ export async function loadMatchaReport(
       ? {
           why: briefWhy(wire),
           angle: briefAngle(wire).trim(),
+          angleRole: briefAngleRole(wire).trim(),
+          dataSources: briefDataSources(wire),
           // A grant suppressed (or hideFunding set) since drafting must not ride along as a source.
           topics: withLiveSources(briefTopics(wire), rec),
           draftedAt: row!.createdAt,
