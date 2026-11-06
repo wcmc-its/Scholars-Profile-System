@@ -310,15 +310,20 @@ describe("Matcha brief UI", () => {
     });
     await search();
     const section = await screen.findByRole("region", { name: "Brief for Person 01" });
-    expect(within(section).getByText("Methods and tools")).toBeTruthy();
-    expect(within(section).getByText("Mouse models · 14 papers")).toBeTruthy();
-    expect(within(section).getByText("Flow cytometry · 1 paper")).toBeTruthy();
-    expect(within(section).getByText("2 clinical trials on record")).toBeTruthy();
+    // One collapsed line with the counts; the full list sits inside and opens on click.
+    const summary = within(section).getByText("Methods and tools · 2 · 2 clinical trials on record");
+    const details = summary.closest("details")!;
+    expect(details).toBeTruthy();
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    expect(within(details).getByText("Mouse models · 14 papers")).toBeTruthy();
+    expect(within(details).getByText("Flow cytometry · 1 paper")).toBeTruthy();
     cleanup();
     stub({ candidates: pool(2), saved: [brief("p1")] });
     await search();
     const bare = await screen.findByRole("region", { name: "Brief for Person 01" });
-    expect(within(bare).queryByText("Methods and tools")).toBeNull();
+    expect(within(bare).queryByText(/Methods and tools/)).toBeNull();
   });
 
   it("shows the partnership angle under Why and saves an edit of it", async () => {

@@ -542,16 +542,23 @@ describe("Matcha report page", () => {
     const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
     const card = (cwid: string) =>
       new RegExp(`data-report-pi="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "";
-    expect(card("a")).toContain("Methods and tools");
-    expect(card("a")).toContain("Mouse models · 14 papers");
-    expect(card("a")).toContain("Flow cytometry · 1 paper");
-    expect(card("a")).toContain("3 clinical trials on record");
+    // Collapsed by default behind a native <details> (no JS), the summary carrying the counts.
+    expect(card("a")).toMatch(
+      /<details[^>]*data-report-methods[^>]*><summary[^>]*>Methods and tools · 2 · 3 clinical trials on record<\/summary>/,
+    );
+    expect(card("a")).not.toMatch(/<details[^>]*\bopen\b/);
+    // Expanded contents: the full list, inside the details.
+    const details = /<details[^]*?<\/details>/.exec(card("a"))?.[0] ?? "";
+    expect(details).toContain("Mouse models · 14 papers");
+    expect(details).toContain("Flow cytometry · 1 paper");
     expect(card("a").indexOf("Suggested discussion topics")).toBeLessThan(
       card("a").indexOf("Methods and tools"),
     );
     expect(card("b")).not.toContain("Methods and tools");
-    // Records, not the brief: shown for a PI with no brief, and a single trial reads singular.
-    expect(card("c")).toContain("1 clinical trial on record");
+    // Records, not the brief: shown for a PI with no brief, and a single trial reads singular;
+    // with no methods there is nothing to expand, so no <details>.
+    expect(card("c")).toContain("Methods and tools · 1 clinical trial on record");
+    expect(card("c")).not.toContain("<details");
   });
 
   it("404s a submission outside the caller's scope", async () => {

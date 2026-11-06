@@ -29,6 +29,7 @@ import {
 } from "@/lib/llm/models";
 import { assembleOverviewFacts, type OverviewFacts } from "@/lib/edit/overview-facts";
 import {
+  OVERVIEW_REVISE_SYSTEM_PROMPT,
   reviseDraftForGrounding,
   toModelFacts,
   verifyDraftGrounding,
@@ -127,8 +128,12 @@ export const MAX_BRIEF_CWIDS = 20;
 export const BRIEF_MAX_TOPICS = 3;
 /** The candidate's matched concepts handed to the model, strongest first. */
 const BRIEF_MAX_MATCHED = 6;
-/** `ScholarTool` rows per PI shown under "Methods and tools" and handed to the model. */
-export const BRIEF_MAX_METHODS = 6;
+/**
+ * `ScholarTool` rows per PI, strongest first: ALL of them up to this sanity cap. The full list goes
+ * to the model (draft and fact-check), and the panel and report show it behind a collapsed
+ * "Methods and tools · N" control, so no ranking or filtering decides what a reader may see.
+ */
+export const BRIEF_METHODS_CAP = 40;
 const BRIEF_TIMEOUT_MS = 90_000;
 const BRIEF_MAX_TOKENS = 4096;
 
@@ -192,7 +197,7 @@ export async function loadBriefRecords(cwids: readonly string[]): Promise<Map<st
       where: { entityType: "scholar", fieldName: "hideFunding", value: "true", entityId: { in: ids } },
       select: { entityId: true },
     }),
-    // Every tool row for these PIs (narrow columns), cut to the top N per PI below.
+    // Every tool row for these PIs (narrow columns), filtered and cut to the top N per PI below.
     db.read.scholarTool.findMany({
       where: { cwid: { in: ids } },
       orderBy: [{ pmidCount: "desc" }, { toolName: "asc" }],
@@ -243,9 +248,10 @@ export async function loadBriefRecords(cwids: readonly string[]): Promise<Map<st
     if (suppressedAppointments.has(a.externalId)) continue;
     out.get(a.cwid)!.secondaryAppointments.push({ title: a.title, organization: a.organization });
   }
+  // Rows arrive ordered by pmidCount desc, name asc: keep each PI's first `BRIEF_METHODS_CAP`.
   for (const t of tools) {
     const methods = out.get(t.cwid)!.methods;
-    if (methods.length < BRIEF_MAX_METHODS) {
+    if (methods.length < BRIEF_METHODS_CAP) {
       methods.push({ name: t.toolName, category: t.category, papers: t.pmidCount });
     }
   }
@@ -333,7 +339,8 @@ export const BRIEF_SYSTEM_PROMPT = [
   "of the ask's concepts that work meets, naming those concepts. No PMIDs, award numbers, dollar",
   "amounts or source keys. No superlatives. Do not speculate about the researcher's interest in",
   "industry, intellectual property, commercial potential or availability. Do not use gendered",
-  "pronouns; use the surname or 'their'.",
+  "pronouns; use the surname or 'their'. Never mention the facts, records or inputs, or what is",
+  "missing or absent from them; say only what the researcher does.",
   "",
   "`angle`: 1-2 sentences, at most 50 words, plain prose. Name the concrete role this researcher",
   "could play for the requester, for example clinical-trial lead with access to patient data,",
@@ -342,7 +349,9 @@ export const BRIEF_SYSTEM_PROMPT = [
   "publications and the awards; name the method, tool or trial record it rests on. Prefer a role",
   "that is not obvious from the researcher's topic alone. Never claim a trial, model or method",
   "the facts do not list. The same bans as `why` apply (no numbers other than the trial count,",
-  "no keys, no superlatives, no speculation about interest or availability).",
+  "no keys, no superlatives, no speculation about interest or availability). Never mention the",
+  "facts, records or inputs, or what is missing or absent (no 'no trials are listed'); say only",
+  "what the researcher can do.",
   "",
   "`topics`: 2 discussion topics (3 only when a third matched concept has clearly distinct support).",
   "Each topic is where the ask meets the researcher's own work:",
@@ -353,6 +362,18 @@ export const BRIEF_SYSTEM_PROMPT = [
   "    support this topic. Use only keys that appear in the facts.",
   "",
   "Output only the structured object.",
+].join("\n");
+
+/**
+ * The fact-check reviser for `why` and `angle`: the shared overview reviser plus the brief's
+ * no-meta rule. Removing a flagged claim tempted the reviser to explain the gap ("No trial records
+ * are listed in the facts."), so it carries the same ban as the draft prompt.
+ */
+export const BRIEF_REVISE_SYSTEM_PROMPT = [
+  OVERVIEW_REVISE_SYSTEM_PROMPT,
+  "Never mention the facts, records, inputs or the fact-checker, and never say what is missing,",
+  "absent or not listed. When a claim goes, drop it silently and keep only what the researcher",
+  "does or can do.",
 ].join("\n");
 
 const BriefSchema = z.object({
@@ -469,8 +490,23 @@ export function postCheckBrief(
   return { why: cleanProse(raw.why), angle: cleanProse(raw.angle ?? ""), topics, dropped };
 }
 
+/**
+ * A sentence that talks about the model's INPUTS rather than the researcher ("No trial records are
+ * listed in the facts."). Deliberately narrow: "given 11 trials on record" is a legitimate claim and
+ * must survive, so "on record" alone never matches.
+ */
+const META_SENTENCE =
+  /\b(?:the|provided) facts\b|\b(?:is|are) (?:not )?listed in\b|\bnot (?:listed|provided)\b|\bno\b[^.!?]{0,60}\brecords?\b[^.!?]{0,30}\b(?:listed|provided)\b|\b(?:is|are) not available in\b/i;
+
+/** Drop every sentence of `text` that refers to the inputs (see `META_SENTENCE`). */
+export function dropMetaSentences(text: string): string {
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter((s) => !META_SENTENCE.test(s));
+  return kept.length === sentences.length ? text : kept.join(" ");
+}
+
 function cleanProse(text: string): string {
-  return (
+  return dropMetaSentences(
     text
       .replace(/\(?\bPMID:?\s*\d+\)?/gi, "")
       // Source keys belong in `topics[].sources`, never in prose: strip a bracketed citation like
@@ -478,8 +514,8 @@ function cleanProse(text: string): string {
       .replace(/\s*[([]\s*[PG]\d+(?:\s*[,;]\s*[PG]\d+)*\s*[)\]]/g, "")
       .replace(/\s{2,}/g, " ")
       .replace(/\s+([.,;])/g, "$1")
-      .trim()
-  );
+      .trim(),
+  ).trim();
 }
 
 /** Split a fact-check result across the generated fields: spans inside `why` or `angle` are
@@ -609,11 +645,10 @@ export async function generateBrief(
     ungrounded,
     first.angle,
   );
+  const revise = { model: modelId, system: BRIEF_REVISE_SYSTEM_PROMPT };
   const [why, angle] = await Promise.all([
-    whySpans.length ? reviseDraftForGrounding(first.why, whySpans, { model: modelId }) : first.why,
-    angleSpans.length
-      ? reviseDraftForGrounding(first.angle, angleSpans, { model: modelId })
-      : first.angle,
+    whySpans.length ? reviseDraftForGrounding(first.why, whySpans, revise) : first.why,
+    angleSpans.length ? reviseDraftForGrounding(first.angle, angleSpans, revise) : first.angle,
   ]);
   const clean = postCheckBrief({ why, angle, topics: [] }, matched, sources);
 

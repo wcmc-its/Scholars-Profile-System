@@ -53,7 +53,7 @@ export type BriefRecords = {
   translation: { title: string; patentStatus: string | null; url: string }[];
   secondaryAppointments: { title: string; organization: string }[];
   centers: string[];
-  /** Top `ScholarTool` rows by distinct papers, strongest first. */
+  /** All `ScholarTool` rows (up to a sanity cap) by distinct papers, strongest first. */
   methods: { name: string; category: string | null; papers: number }[];
   /** Distinct clinical trials on record (`PersonClinicalTrial`). */
   trialCount: number;
@@ -126,3 +126,20 @@ export function reporterUrl(applId: number): string {
 /** The label a topic line carries when it has no source: an edited or new line, or a generated
  *  line whose sources no longer hold. */
 export const UNSOURCED_LABEL = "your edit, unsourced";
+
+/** "Name · N papers" for one method row. */
+export function methodLabel(m: { name: string; papers: number }): string {
+  return `${m.name} · ${m.papers} ${m.papers === 1 ? "paper" : "papers"}`;
+}
+
+/** The collapsed "Methods and tools" control's text: "Methods and tools · 23 · 2 clinical trials
+ *  on record", each count omitted when zero. */
+export function methodsSummary(methodCount: number, trialCount: number): string {
+  return [
+    "Methods and tools",
+    ...(methodCount > 0 ? [String(methodCount)] : []),
+    ...(trialCount > 0
+      ? [`${trialCount} clinical ${trialCount === 1 ? "trial" : "trials"} on record`]
+      : []),
+  ].join(" · ");
+}

@@ -67,8 +67,11 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
-  BRIEF_MAX_METHODS,
+  BRIEF_METHODS_CAP,
   BRIEF_MAX_TOPICS,
+  BRIEF_REVISE_SYSTEM_PROMPT,
+  BRIEF_SYSTEM_PROMPT,
+  dropMetaSentences,
   briefFacts,
   briefMatchedConcepts,
   buildAskBlock,
@@ -260,6 +263,56 @@ describe("postCheckBrief", () => {
     const r = postCheckBrief({ why: "Shows barrier repair (PMID: 12345). Also PMID 6789 here.", topics: [] }, matched, sources);
     expect(r.why).toBe("Shows barrier repair. Also here.");
   });
+
+  it("drops a sentence about the inputs from `angle` and `why`, keeping the rest", () => {
+    const r = postCheckBrief(
+      {
+        why: "Studies endpoint validation in liver disease. The provided facts do not mention imaging.",
+        angle:
+          "Could advise on endpoint selection, drawing on their publication evaluating such endpoints. No trial records are listed in the facts.",
+        topics: [],
+      },
+      matched,
+      sources,
+    );
+    expect(r.why).toBe("Studies endpoint validation in liver disease.");
+    expect(r.angle).toBe(
+      "Could advise on endpoint selection, drawing on their publication evaluating such endpoints.",
+    );
+  });
+});
+
+describe("dropMetaSentences", () => {
+  it("drops narrow meta phrasings", () => {
+    for (const bad of [
+      "No trial records are listed in the facts.",
+      "Imaging work is not listed.",
+      "A device patent is not provided.",
+      "Funding is not available in the record.",
+      "Grants are listed in the inputs.",
+    ]) {
+      expect(dropMetaSentences(`Could lead an imaging substudy. ${bad}`)).toBe(
+        "Could lead an imaging substudy.",
+      );
+    }
+  });
+
+  it("keeps legitimate sentences, including a trial count on record", () => {
+    const ok =
+      "Could serve as clinical-trial lead, given 11 trials on record. Has no prior industry projects in this area.";
+    expect(dropMetaSentences(ok)).toBe(ok);
+    expect(dropMetaSentences("Runs a registry of 400 patients.")).toBe("Runs a registry of 400 patients.");
+  });
+});
+
+describe("no-meta rule in the prompts", () => {
+  it("is in the draft prompt for both prose fields and in the fact-check reviser", () => {
+    const [whyPart, anglePart] = BRIEF_SYSTEM_PROMPT.split("`angle`:");
+    expect(whyPart).toMatch(/Never mention the facts, records or inputs/);
+    expect(anglePart).toMatch(/Never mention the\s+facts, records or inputs/);
+    expect(BRIEF_REVISE_SYSTEM_PROMPT).toMatch(/Never mention the facts, records, inputs/);
+    expect(BRIEF_REVISE_SYSTEM_PROMPT).toMatch(/not listed/);
+  });
 });
 
 describe("partitionUngrounded", () => {
@@ -364,24 +417,29 @@ describe("loadBriefRecords", () => {
       { cwid: "a", title: "Professor", organization: "Physiology", externalId: "ap-1" },
       { cwid: "a", title: "Adjunct", organization: "Hidden by curator", externalId: "ap-supp" },
     ]);
-    // Already ordered by pmidCount desc (the query's orderBy); 7 for "a" => cut to 6.
+    // Already ordered by pmidCount desc (the query's orderBy); 45 for "a" => cut to the cap.
     mockToolFindMany.mockResolvedValue([
-      ...Array.from({ length: 7 }, (_, i) => ({
+      ...Array.from({ length: 45 }, (_, i) => ({
         cwid: "a",
         toolName: `Tool ${i + 1}`,
         category: i === 0 ? "imaging" : null,
-        pmidCount: 20 - i,
+        pmidCount: 60 - i,
       })),
       { cwid: "b", toolName: "Flow cytometry", category: null, pmidCount: 1 },
     ]);
     mockTrialGroupBy.mockResolvedValue([{ cwid: "a", _count: { _all: 4 } }]);
   });
 
-  it("loads the top 6 methods per PI by papers and the distinct trial count", async () => {
+  it("loads every method per PI by papers up to the cap, unfiltered, and the distinct trial count", async () => {
     const out = await loadBriefRecords(["a", "b"]);
-    expect(out.get("a")!.methods).toHaveLength(BRIEF_MAX_METHODS);
-    expect(out.get("a")!.methods[0]).toEqual({ name: "Tool 1", category: "imaging", papers: 20 });
-    expect(out.get("a")!.methods.map((m) => m.name)).not.toContain("Tool 7");
+    expect(BRIEF_METHODS_CAP).toBe(40);
+    expect(out.get("a")!.methods).toHaveLength(BRIEF_METHODS_CAP);
+    expect(out.get("a")!.methods[0]).toEqual({ name: "Tool 1", category: "imaging", papers: 60 });
+    // Uncategorized rows are kept: no category filter decides what the reader sees.
+    expect(out.get("a")!.methods[1]).toEqual({ name: "Tool 2", category: null, papers: 59 });
+    expect(out.get("a")!.methods.at(-1)!.name).toBe("Tool 40");
+    expect(out.get("a")!.methods.map((m) => m.name)).not.toContain("Tool 41");
+    expect(mockToolFindMany).toHaveBeenCalledTimes(1);
     expect(out.get("b")!.methods).toEqual([{ name: "Flow cytometry", category: null, papers: 1 }]);
     expect(out.get("a")!.trialCount).toBe(4);
     expect(out.get("b")!.trialCount).toBe(0);
@@ -478,6 +536,30 @@ describe("generateBrief", () => {
     );
     expect(revised[generatedWhy]).toEqual(["Leads a clinical trial."]);
     expect(revised[generatedAngle]).toEqual(["Holds a patent on a device."]);
+    // Both revisions carry the brief's no-meta reviser, not the bare overview one.
+    for (const c of mockRevise.mock.calls) expect(c[2].system).toBe(BRIEF_REVISE_SYSTEM_PROMPT);
+  });
+
+  it("hands the model and the fact-check the FULL methods list, not a top slice", async () => {
+    mockVerify.mockResolvedValue([]);
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      name: `Assay ${i + 1}`,
+      category: i % 2 ? null : "lab method",
+      papers: 40 - i,
+    }));
+    await generateBrief({
+      cwid: "abc1001",
+      askTitle: null,
+      concepts: CONCEPTS,
+      candidate,
+      records: { ...records, methods: many },
+    });
+    const researcher = mockGenerateObject.mock.calls[0][0].messages[1].content as string;
+    const extra = mockVerify.mock.calls[0][2].extraReference as string;
+    for (const m of many) {
+      expect(researcher).toContain(`"${m.name}"`);
+      expect(extra).toContain(`- ${m.name}`);
+    }
   });
 
   it("defaults a missing angle to empty (the model omitted it)", async () => {
