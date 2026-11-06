@@ -450,6 +450,13 @@ export interface SpsEnvConfig {
    */
   readonly edgeAliasDomains?: readonly string[];
   /**
+   * Public launch (#432): drop the `block-non-wcm` WAF rule so the front end
+   * is reachable off the WCM network. Managed rule groups, Bot Control and the
+   * rate limit stay. Unset = WCM-only (staging). Lifting the gate is a manual
+   * `cdk deploy Sps-Edge-<env>`; rolling back = unset this and redeploy.
+   */
+  readonly edgePublic?: boolean;
+  /**
    * CloudFront standard-access-log S3 bucket name (EdgeStack-owned; raw logs at
    * `cf/<env>/`). Referenced by NAME (s3.Bucket.fromBucketName) by AnalyticsStack
    * for the same Edge-decoupling reason as {@link cloudFrontDistributionId}.
@@ -889,6 +896,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     edgeCertArn:
       "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
     edgeAliasDomains: ["vivo.weill.cornell.edu"],
+    // #432: public launch Wed 2026-11-11, same Sps-Edge-prod deploy as the
+    // VIVO alias. Takes effect only on that manual deploy.
+    edgePublic: true,
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
     // #1507 -- HTTPS origin leg, two gates. Seeded for the NetScaler front
     // (mirrors staging): CloudFront dials the NetScaler VIP over HTTPS (carrying
