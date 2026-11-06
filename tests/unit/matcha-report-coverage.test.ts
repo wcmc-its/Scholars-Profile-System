@@ -1,5 +1,5 @@
 /**
- * Matcha report v2: coverage cells, totals, gaps, the theme-output validator and signal chips.
+ * Matcha report v2: coverage cells, totals, gaps, and the theme-output validator.
  * All fixtures are invented.
  */
 import { describe, expect, it } from "vitest";
@@ -10,7 +10,6 @@ import {
   coverageMark,
   joinWords,
   numberWord,
-  signalChips,
   validateThemes,
 } from "@/lib/edit/matcha-report-coverage";
 
@@ -159,37 +158,6 @@ describe("validateThemes", () => {
     ).toBeNull();
     expect(validateThemes(null, terms)).toBeNull();
     expect(validateThemes({ themes: [{ label: 3, terms }] }, terms)).toBeNull();
-  });
-});
-
-describe("signalChips", () => {
-  const grant = (mechanism: string | null, funder = "NIH") => ({
-    mechanism,
-    funder,
-    title: "An invented award",
-    endYear: 2030,
-    applId: null,
-    roleLabel: "PI",
-  });
-
-  it("counts NIH awards when every award carries a mechanism", () => {
-    expect(signalChips([grant("R01"), grant("R21")], 0)).toEqual(["2 active NIH awards"]);
-    expect(signalChips([grant("R01")], 0)).toEqual(["1 active NIH award"]);
-  });
-
-  it("says awards when funders are mixed", () => {
-    expect(signalChips([grant("R01"), grant(null, "Invented Foundation")], 0)).toEqual([
-      "2 active awards",
-    ]);
-  });
-
-  it("leads with a centre mechanism and technology, capped at two", () => {
-    expect(signalChips([grant("R01"), grant("P50")], 3)).toEqual([
-      "P50 center",
-      "Licensable technology",
-    ]);
-    expect(signalChips([], 1)).toEqual(["Licensable technology"]);
-    expect(signalChips([], 0)).toEqual([]);
   });
 });
 

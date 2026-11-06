@@ -1,12 +1,10 @@
 /**
- * Matcha report v2: the pure half of the coverage table, the theme-output validator and the
- * shortlist's signal chips. No db, no LLM, no env: everything here is a function of the stored
+ * Matcha report v2: the pure half of the coverage table and the theme-output validator. No db, no LLM, no env: everything here is a function of the stored
  * result, the theme grouping and the PI's live records, so it is unit-tested directly.
  *
  * Client-safe by construction (no server-only imports), though only the server report uses it.
  */
 import type { MatchaContribution } from "@/lib/api/matcha-contract";
-import type { BriefRecords } from "@/lib/edit/matcha-brief-types";
 
 /** A cell is PRIMARY when the PI's best rank under any concept in the theme is at most this. */
 export const PRIMARY_RANK = 10;
@@ -15,8 +13,6 @@ export const MAX_THEMES = 6;
 /** "Short, at most about 4 words": the validator allows a little slack. */
 export const MAX_THEME_LABEL_WORDS = 6;
 export const MAX_THEME_LABEL_CHARS = 60;
-/** Signal chips per PI on the shortlist. */
-export const MAX_SIGNAL_CHIPS = 2;
 
 /** One theme: a short label and the concept terms (`MatchaConcept.term`) it groups. */
 export type ReportTheme = { label: string; terms: string[] };
@@ -129,41 +125,6 @@ export function computeCoverage(
     gaps.push({ label: t.label, closestCwid: closest?.cwid ?? null });
   });
   return { rows, totals, gaps };
-}
-
-// ── Signal chips (deterministic, records only) ───────────────────────────────
-
-/** NIH centre / programme mechanisms worth a chip, and how each reads. */
-const CENTER_MECHANISMS: Record<string, string> = {
-  P01: "P01 program project",
-  P20: "P20 center",
-  P2C: "P2C center",
-  P30: "P30 center",
-  P50: "P50 center",
-  P60: "P60 center",
-  U19: "U19 program",
-  U2C: "U2C center",
-  U54: "U54 center",
-};
-
-/**
- * At most `MAX_SIGNAL_CHIPS` chips from records the report already holds, strongest first: a
- * centre mechanism, a licensable technology, then the active award count ("3 active NIH awards"
- * when every award is NIH, which is when each carries a mechanism; "3 active awards" otherwise).
- */
-export function signalChips(funding: BriefRecords["funding"], technologyCount: number): string[] {
-  const chips: string[] = [];
-  const center = funding
-    .map((g) => (g.mechanism ? CENTER_MECHANISMS[g.mechanism.toUpperCase()] : undefined))
-    .find((label): label is string => label !== undefined);
-  if (center) chips.push(center);
-  if (technologyCount > 0) chips.push("Licensable technology");
-  const n = funding.length;
-  if (n > 0) {
-    const nih = funding.every((g) => g.mechanism != null && g.mechanism !== "");
-    chips.push(`${n} active ${nih ? "NIH " : ""}award${n === 1 ? "" : "s"}`);
-  }
-  return chips.slice(0, MAX_SIGNAL_CHIPS);
 }
 
 // ── Words ────────────────────────────────────────────────────────────────────

@@ -10,7 +10,9 @@
  *  - the raw paste is never rendered; themes drive the coverage table, gaps callout and amber
  *    card, and all three are hidden when grouping fails (themes null);
  *  - v3 card: topics cite the numbered key papers as [n]; other sources go on an "Also:" line;
- *    funding is a strip of at most four (grouped) rows, then "+N more" to the profile.
+ *  - v4 layout: one stat line, "Coverage and fit" (Fit + Awards columns, a total), no shortlist,
+ *    one section per tier (Strong = full profile with at most three funding lines; Good / Weak =
+ *    compact card), the print stylesheet, and the AI disclaimer exactly once.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -122,6 +124,12 @@ function setup(opts: {
   requester?: string;
   requesterOverride?: string | null;
   records?: Record<string, Partial<BriefRecords>>;
+  /** Fused scores by cwid (default 10, 9, 8, …: every PI strong). */
+  scores?: Record<string, number>;
+  scholars?: Record<
+    string,
+    { preferredName?: string; postnominal?: string | null; hasHeadshot?: boolean | null }
+  >;
 }) {
   mockThemes.mockResolvedValue(opts.themes === undefined ? THEMES : opts.themes);
   mockSubFindUnique.mockResolvedValue({
@@ -141,7 +149,7 @@ function setup(opts: {
               ...(opts.requester ? { requester: opts.requester } : {}),
               concepts: CONCEPTS,
               candidates: opts.candidates.map((c, i) => ({
-                ...candidate(c, 10 - i),
+                ...candidate(c, opts.scores?.[c] ?? 10 - i),
                 ...(opts.contributions?.[c] ? { contributions: opts.contributions[c] } : {}),
               })),
             },
@@ -162,6 +170,7 @@ function setup(opts: {
       slug: `slug-${cwid}`,
       hasHeadshot: null,
       email: `${cwid}@researcher.example.org`,
+      ...opts.scholars?.[cwid],
     })),
   );
   mockPubFindMany.mockResolvedValue([]);
@@ -257,7 +266,7 @@ describe("Matcha report page", () => {
     expect(html).not.toContain("ghost");
     expect(html).toContain("Dr k50");
     expect(html).not.toContain("Dr k51");
-    expect((html.match(/data-report-pi=/g) ?? []).length).toBe(50);
+    expect((html.match(/<article /g) ?? []).length).toBe(50);
   });
 
   it("renders no notes, no researcher emails, no scores and no removed count", async () => {
@@ -316,8 +325,9 @@ describe("Matcha report page", () => {
     });
     const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
     expect(mockThemes).toHaveBeenCalledWith("h1", CONCEPTS);
-    expect(html).toContain("Coverage of your ask");
-    expect(html).toContain("Your 3 search terms, grouped into two themes.");
+    expect(html).toContain("Coverage and fit");
+    expect(html).not.toContain("Coverage of your ask");
+    expect(html).toContain("against your 3 search terms grouped into two themes.");
     expect((html.match(/data-report-mark="primary"/g) ?? []).length).toBe(1 + 1); // cell + legend
     expect((html.match(/data-report-mark="related"/g) ?? []).length).toBe(2 + 1);
     expect((html.match(/data-report-mark="none"/g) ?? []).length).toBe(1);
@@ -328,23 +338,34 @@ describe("Matcha report page", () => {
     expect(html).toContain("data-report-gaps=");
     expect(html).toContain("works directly on Sprocket outcomes.");
     expect(html).toContain("Dr b&#x27;s work is the closest match on Sprocket outcomes.");
-    expect(html).toContain("data-report-gaps-card=");
-    expect(html).toContain("area with no strong match yet: Sprocket outcomes");
-    // Footer: every concept member.
-    expect(html).toContain("Full search terms: widgets, widget assembly, sprockets.");
-    // Shortlist: the first sentence of Why, and record chips.
-    expect(html).toContain("Generated why for a.");
-    expect(html).toContain("1 active NIH award");
+    // The gaps are one paragraph with a bold lead-in, and one amber stat on the stat line.
+    expect(html).toMatch(
+      /data-report-gaps[^>]*><strong[^>]*>Gaps in this report\.<\/strong> No investigator/,
+    );
+    expect(html).toMatch(
+      /data-report-amber[^>]*><span[^>]*>1<\/span><span[^>]*>theme with no strong match/,
+    );
+    // Cover: every concept member, with the count; nothing in the footer.
+    expect(html).toContain("Search terms (3)");
+    expect(html).toContain("widgets, widget assembly, sprockets");
+    expect(html).not.toContain("Full search terms");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const cover = doc.querySelector("[data-report-cover]");
+    expect(cover?.querySelector("[data-report-search-terms]")).not.toBeNull();
   });
 
   it("hides coverage, gaps and the amber card when themes are null", async () => {
     setup({ candidates: ["a"], briefs: [brief("a")], themes: null });
     const html = await renderPage({ submissionId: "s1", cwids: "a" });
-    expect(html).not.toContain("Coverage of your ask");
+    // The table still lists every PI with Fit and Awards, just no theme columns or marks.
+    expect(html).toContain("Coverage and fit");
+    expect(html).toContain("Investigators ranked by fit. Names jump to each profile.");
+    expect(html).not.toContain("data-report-mark=");
+    expect(html).toContain("data-report-coverage-row");
     expect(html).not.toContain("data-report-gaps=");
-    expect(html).not.toContain("data-report-gaps-card=");
-    expect(html).toContain("Shortlist");
-    expect(html).toContain("data-report-pi=");
+    expect(html).not.toContain("data-report-amber=");
+    expect(html).not.toContain("Shortlist");
+    expect(html).toContain("<article ");
   });
 
   it("hides the gaps callout and card when every theme has a primary cell", async () => {
@@ -353,7 +374,7 @@ describe("Matcha report page", () => {
       contributions: { a: [{ term: "widgets", rank: 1 }, { term: "sprockets", rank: 10 }] },
     });
     const html = await renderPage({ submissionId: "s1", cwids: "a" });
-    expect(html).toContain("Coverage of your ask");
+    expect(html).toContain("Coverage and fit");
     expect(html).not.toContain("data-report-gaps=");
   });
 
@@ -429,7 +450,7 @@ describe("Matcha report page", () => {
     expect(html).toMatch(/Topic four, unsourced<\/span><\/div>/);
   });
 
-  it("caps funding at four rows, groups shared stems, and links the rest to the profile", async () => {
+  it("caps funding at three rows, groups shared stems, and links the rest to the profile", async () => {
     const award = (
       applId: number,
       mechanism: string,
@@ -470,19 +491,21 @@ describe("Matcha report page", () => {
       },
     });
     const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
-    const cardA = /data-report-pi="a"[^]*?<\/article>/.exec(html)?.[0] ?? "";
-    const cardB = /data-report-pi="b"[^]*?<\/article>/.exec(html)?.[0] ?? "";
+    const cardA = /data-report-cwid="a"[^]*?<\/article>/.exec(html)?.[0] ?? "";
+    const cardB = /data-report-cwid="b"[^]*?<\/article>/.exec(html)?.[0] ?? "";
     expect(cardA).toContain("Active funding · 7");
-    expect((cardA.match(/data-report-funding-row/g) ?? []).length).toBe(4);
+    expect((cardA.match(/data-report-funding-row/g) ?? []).length).toBe(3);
     expect(cardA).toContain("Widget Center: Core A, Core B and Supplement (3 awards)");
     // A grouped row has no single RePORTER link, and ends at the group's latest year.
     expect(cardA).not.toContain('project-details/2"');
     expect(cardA).toMatch(/\(3 awards\)[^]*?to 2028/);
     expect(cardA).toContain("Widget Center: Core C");
-    expect(cardA).toContain("Beta study");
+    // The short sponsor rides the line.
+    expect(cardA).toMatch(/Widget Center: Core C<\/a><span[^>]*> · NIDDK<\/span>/);
+    expect(cardA).not.toContain("Beta study");
     expect(cardA).not.toContain("Gamma study");
-    // 7 awards, 6 shown (1 + 3 + 1 + 1): one more, linked to the profile.
-    expect(cardA).toMatch(/href="[^"]*slug-a"[^>]*>\+1 more on Scholars profile ↗<\/a>/);
+    // 7 awards, 5 shown (1 + 3 + 1): two more, linked to the profile.
+    expect(cardA).toMatch(/href="[^"]*slug-a"[^>]*>\+2 more on Scholars profile ↗<\/a>/);
     // The strip sits after the key-papers rail, full width.
     expect(cardA.indexOf("data-report-funding=")).toBeGreaterThan(cardA.indexOf("Key papers"));
     // Technology: a tinted, labelled box.
@@ -510,9 +533,15 @@ describe("Matcha report page", () => {
     });
     const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
     const card = (cwid: string) =>
-      new RegExp(`data-report-pi="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "";
+      new RegExp(`data-report-cwid="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "";
     expect(card("a")).toContain("Partnership angle");
     expect(card("a")).toContain("Edited angle for a.");
+    // Regular weight, no italics, in the tinted band with the red left border.
+    expect(card("a")).toMatch(/data-report-angle[^>]*border-apollo-maroon[^>]*border-l-\[3px\]/);
+    const angleP =
+      /data-report-angle[^]*?<p class="([^"]*)">Edited angle/.exec(card("a"))?.[1] ?? "";
+    expect(angleP).toContain("font-normal");
+    expect(angleP).not.toContain("italic");
     expect(card("a")).not.toContain("Generated angle for a.");
     // Directly under the header: before the "Why this investigator" section.
     expect(card("a").indexOf("Edited angle for a.")).toBeLessThan(
@@ -523,15 +552,23 @@ describe("Matcha report page", () => {
     expect(card("c")).not.toContain("data-report-angle");
   });
 
-  it("lists methods and tools after the discussion topics, and omits the section when empty", async () => {
+  it("lists methods as pills (merged, by papers, six then +N more) and omits the section when empty", async () => {
+    const m = (name: string, papers: number) => ({ name, category: null, papers });
     setup({
       candidates: ["a", "b", "c"],
       briefs: [brief("a"), brief("b")],
       records: {
         a: {
           methods: [
-            { name: "Mouse models", category: null, papers: 14 },
-            { name: "Flow cytometry", category: null, papers: 1 },
+            m("Mouse models", 14),
+            m("Flow cytometry", 1),
+            m("Widget assay", 9),
+            m("Sprocket imaging", 8),
+            m("widget  assay", 3), // exact duplicate by normalized name
+            m("Gizmo-tracking", 7),
+            m("Cohort design", 6),
+            m("Survival analysis", 5),
+            m("Gizmo tracking", 2), // punctuation-only duplicate
           ],
           trialCount: 3,
         },
@@ -541,24 +578,292 @@ describe("Matcha report page", () => {
     });
     const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
     const card = (cwid: string) =>
-      new RegExp(`data-report-pi="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "";
-    // Collapsed by default behind a native <details> (no JS), the summary carrying the counts.
-    expect(card("a")).toMatch(
-      /<details[^>]*data-report-methods[^>]*><summary[^>]*>Methods and tools · 2 · 3 clinical trials on record<\/summary>/,
+      new RegExp(`data-report-cwid="${cwid}"[^]*?</article>`).exec(html)?.[0] ?? "";
+    const doc = new DOMParser().parseFromString(card("a"), "text/html");
+    const row = doc.querySelector('[data-report-pill-row="Methods"]');
+    expect(row).not.toBeNull();
+    const pills = [...(row?.querySelectorAll("[data-report-pill]") ?? [])].map(
+      (p) => p.textContent,
     );
-    expect(card("a")).not.toMatch(/<details[^>]*\bopen\b/);
-    // Expanded contents: the full list, inside the details.
-    const details = /<details[^]*?<\/details>/.exec(card("a"))?.[0] ?? "";
-    expect(details).toContain("Mouse models · 14 papers");
-    expect(details).toContain("Flow cytometry · 1 paper");
+    // 7 distinct methods, by paper count: six shown, one behind the expander.
+    expect(pills).toEqual([
+      "Mouse models",
+      "Widget assay",
+      "Sprocket imaging",
+      "Gizmo-tracking",
+      "Cohort design",
+      "Survival analysis",
+      "Flow cytometry",
+    ]);
+    const more = row?.querySelector("details[data-report-more-methods]");
+    expect(more?.querySelector("summary")?.textContent).toBe("+1 more");
+    expect(more?.querySelectorAll("[data-report-pill]")).toHaveLength(1);
+    expect(card("a")).toContain("3 clinical trials on record");
     expect(card("a").indexOf("Suggested discussion topics")).toBeLessThan(
-      card("a").indexOf("Methods and tools"),
+      card("a").indexOf("Methods and data"),
     );
-    expect(card("b")).not.toContain("Methods and tools");
-    // Records, not the brief: shown for a PI with no brief, and a single trial reads singular;
-    // with no methods there is nothing to expand, so no <details>.
-    expect(card("c")).toContain("Methods and tools · 1 clinical trial on record");
-    expect(card("c")).not.toContain("<details");
+    expect(card("b")).not.toContain("Methods and data");
+    // Records, not the brief: shown for a PI with no brief; a single trial reads singular.
+    expect(card("c")).toContain("1 clinical trial on record");
+    expect(card("c")).not.toContain("data-report-pill-row");
+  });
+
+  it("renders one stat line with tier counts, awards, technologies and gaps", async () => {
+    setup({
+      candidates: ["a", "b", "c"],
+      scores: { a: 10, b: 5, c: 4 },
+      briefs: [brief("a"), brief("b"), brief("c")],
+      contributions: { a: [{ term: "widgets", rank: 1 }] },
+      records: {
+        a: {
+          translation: [
+            { title: "Gizmo kit", patentStatus: null, url: "https://tech.example.org/1" },
+          ],
+        },
+        c: { funding: [] },
+      },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const stats = doc.querySelectorAll("[data-report-stats]");
+    expect(stats).toHaveLength(1);
+    const text = [...stats[0].querySelectorAll("[data-report-stat]")].map((s) =>
+      (s.textContent ?? "").replace(/\s+/g, " "),
+    );
+    expect(text).toEqual([
+      "3investigators (1 strong, 2 good)",
+      "2active awards",
+      "1licensable technology",
+      "1theme with no strong match",
+    ]);
+  });
+
+  it("Coverage and fit: Fit pills, right-aligned Awards with a total, names jump to profiles", async () => {
+    setup({
+      candidates: ["a", "b", "c"],
+      scores: { a: 10, b: 5, c: 9 },
+      records: {
+        b: {
+          funding: [
+            {
+              mechanism: "R01",
+              funder: "NIH",
+              title: "B one",
+              endYear: 2028,
+              applId: null,
+              roleLabel: "PI",
+            },
+            {
+              mechanism: "R21",
+              funder: "NIH",
+              title: "B two",
+              endYear: 2027,
+              applId: null,
+              roleLabel: "PI",
+            },
+          ],
+        },
+        c: { funding: [] },
+      },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
+    expect(html).not.toContain("Shortlist");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const table = doc.querySelector("[data-report-coverage-table]")!;
+    const heads = [...table.querySelectorAll("thead th")].map((th) => th.textContent);
+    expect(heads).toEqual(["Investigator", "Fit", "Widget biology", "Sprocket outcomes", "Awards"]);
+    const rows = [...table.querySelectorAll("[data-report-coverage-row]")];
+    expect(rows.map((r) => r.querySelector("[data-report-fit]")?.textContent)).toEqual([
+      "Strong",
+      "Good",
+      "Strong",
+    ]);
+    expect(rows[0].querySelector("[data-report-fit]")?.className).toContain("bg-apollo-slate");
+    expect(rows[1].querySelector("[data-report-fit]")?.className).toContain("bg-transparent");
+    expect(rows.map((r) => r.querySelector("[data-report-awards]")?.textContent)).toEqual([
+      "1",
+      "2",
+      "—",
+    ]);
+    expect(rows[0].querySelector("[data-report-awards]")?.className).toContain("text-right");
+    expect(table.querySelector("[data-report-awards-total]")?.textContent).toBe("3");
+    expect(rows[1].querySelector("a")?.getAttribute("href")).toBe("#pi-2");
+    expect(doc.getElementById("pi-2")?.getAttribute("data-report-cwid")).toBe("b");
+    // The table is not held at 820px when printed.
+    expect(html).toContain("[data-report-coverage-table] { min-width: 0 !important; }");
+  });
+
+  it("groups profiles by tier: strong full profiles first, then compact good and weak cards", async () => {
+    setup({
+      candidates: ["a", "b", "c"],
+      scores: { a: 10, b: 5, c: 1 },
+      briefs: [brief("a"), brief("b"), brief("c")],
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const tiers = [...doc.querySelectorAll("[data-report-tier]")];
+    expect(tiers.map((t) => t.getAttribute("data-report-tier"))).toEqual([
+      "strong",
+      "good",
+      "weak",
+    ]);
+    expect(tiers.map((t) => t.querySelector("h2")?.textContent)).toEqual([
+      "Strong fit · 1",
+      "Good fit · 1",
+      "Weak fit · 1",
+    ]);
+    expect(tiers[0].querySelector("article")?.hasAttribute("data-report-compact")).toBe(false);
+    expect(tiers[1].querySelector("article")?.hasAttribute("data-report-compact")).toBe(true);
+    // Weak uses the Good-fit compact layout.
+    expect(tiers[2].querySelector("article")?.hasAttribute("data-report-compact")).toBe(true);
+  });
+
+  it("strong profile header: photo img, Name ↗ to the profile, pill; no funding → header line, no section", async () => {
+    setup({
+      candidates: ["a", "b"],
+      briefs: [brief("a"), brief("b")],
+      scholars: {
+        a: { preferredName: "Jane Q Doe", postnominal: "MB,BS, MD, MD", hasHeadshot: true },
+      },
+      records: {
+        a: { funding: [], centers: ["Invented Center"] },
+      },
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const a = doc.querySelector('[data-report-cwid="a"]')!;
+    const header = a.querySelector("[data-report-profile-header]")!;
+    expect(header.querySelector("[data-report-avatar] img")).not.toBeNull();
+    expect(header.querySelector("[style*=background]")).toBeNull();
+    const nameLink = header.querySelector("h3 a")!;
+    expect(nameLink.textContent).toBe("Jane Q. Doe, MB,BS, MD ↗");
+    expect(nameLink.getAttribute("href")).toContain("slug-a");
+    expect(header.querySelector('[data-report-fit="strong"]')?.textContent).toBe("Strong fit");
+    expect(header.querySelector("[data-report-meta]")?.textContent).toBe(
+      "Invented Center · No active funding on record",
+    );
+    expect(a.querySelector("[data-report-funding]")).toBeNull();
+    expect(a.textContent).not.toContain("Scholars profile ↗");
+    // b has an award: no "No active funding" line, and the funding section is there.
+    const b = doc.querySelector('[data-report-cwid="b"]')!;
+    expect(b.textContent).not.toContain("No active funding on record");
+    expect(b.querySelector("[data-report-funding]")).not.toBeNull();
+  });
+
+  it("good-fit compact card: two Why sentences, Discuss, Technology, two papers, funding summary", async () => {
+    setup({
+      candidates: ["a", "b", "c"],
+      scores: { a: 10, b: 5, c: 5 },
+      briefs: [
+        brief("a"),
+        brief("b", {
+          generated: {
+            why: "First sentence for b. Second sentence for b. Third sentence for b.",
+            topics: [
+              {
+                concept: "widgets",
+                text: "Discuss widgets",
+                sources: [{ kind: "pub", pmid: "21", year: 2024, title: "Paper one" }],
+              },
+              { concept: "sprockets", text: "Second topic, not shown", sources: [] },
+            ],
+            removedCount: 0,
+          },
+        }),
+      ],
+      records: {
+        b: {
+          translation: [
+            { title: "Sprocket sensor", patentStatus: null, url: "https://tech.example.org/2" },
+          ],
+          funding: [
+            {
+              mechanism: "R01",
+              funder: "NIDDK",
+              title: "B one",
+              endYear: 2028,
+              applId: null,
+              roleLabel: "PI",
+            },
+            {
+              mechanism: "U54",
+              funder: "National Institute on Aging via Invented University",
+              title: "B two",
+              endYear: 2027,
+              applId: null,
+              roleLabel: "PI",
+            },
+            {
+              mechanism: null,
+              funder: "Invented Pharma Co",
+              title: "B three",
+              endYear: 2027,
+              applId: null,
+              roleLabel: "PI",
+              programType: "BioPharma Alliance Agreement",
+            },
+          ],
+        },
+        c: { funding: [] },
+      },
+    });
+    mockPubFindMany.mockResolvedValue([
+      { pmid: "22", title: "Paper two", year: 2023 },
+      { pmid: "23", title: "Paper three", year: 2022 },
+    ]);
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b,c" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const b = doc.querySelector('[data-report-cwid="b"]')!;
+    expect(b.hasAttribute("data-report-compact")).toBe(true);
+    expect(b.querySelector('[data-report-fit="good"]')?.textContent).toBe("Good fit");
+    expect(b.querySelector("h3 a")?.textContent).toBe("Dr b ↗");
+    expect(b.querySelector("[data-report-why]")?.textContent).toBe(
+      "First sentence for b. Second sentence for b.",
+    );
+    const discuss = b.querySelector("[data-report-discuss]")!;
+    expect(discuss.textContent).toContain("Discuss");
+    expect(discuss.textContent).toContain("Discuss widgets");
+    expect(discuss.querySelector("[data-report-cite]")?.textContent).toBe("[1]");
+    expect(b.textContent).not.toContain("Second topic, not shown");
+    expect(b.querySelector("[data-report-tech-line]")?.textContent).toContain("Sprocket sensor");
+    expect(b.querySelectorAll("[data-report-paper]")).toHaveLength(2);
+    expect(b.querySelector("[data-report-funding-summary]")?.textContent).toBe(
+      "Funding3 active awards: R01 (NIDDK), U54 (NIA), Industry (Invented Pharma Co)",
+    );
+    // A good-fit PI with no brief, and no awards.
+    const c = doc.querySelector('[data-report-cwid="c"]')!;
+    expect(c.querySelector("[data-report-no-brief]")?.textContent).toBe("No brief drafted.");
+    expect(c.querySelector("[data-report-funding-summary]")?.textContent).toBe(
+      "FundingNone on record in Scholars.",
+    );
+  });
+
+  it("print CSS sets US Letter, margins, the running footer and page breaks; disclaimer once", async () => {
+    setup({ candidates: ["a", "b"], briefs: [brief("a")] });
+    const html = await renderPage({ submissionId: "s1", cwids: "a,b" });
+    const css = /<style>([^]*?)<\/style>/.exec(html)?.[1] ?? "";
+    expect(css).toContain("size: letter;");
+    expect(css).toContain("margin: 0.55in 0.6in 0.7in 0.6in;");
+    expect(css).toMatch(
+      /@bottom-left \{\s*content: "Matcha scouting report · Weill Cornell Medicine";/,
+    );
+    expect(css).toMatch(
+      /@bottom-right \{\s*content: "Page " counter\(page\) " of " counter\(pages\);/,
+    );
+    expect(css).toContain("print-color-adjust: exact");
+    expect(css).toContain("font-size: 14px;");
+    expect(css).toContain("line-height: 1.5;");
+    expect(css).toContain("[data-report-tier] { break-before: page;");
+    expect(css).toContain(
+      '[data-report-pi="strong"] + [data-report-pi="strong"] { break-before: page;',
+    );
+    expect(css).toContain("border-top: 2px solid #1a1a1a");
+    expect(css).toContain("[data-report-more-methods] { display: none !important; }");
+    // The AI disclaimer appears once, in the closing footer, and is never hidden in print.
+    expect(html.match(/summaries were drafted with AI assistance\./g)).toHaveLength(1);
+    expect(css).not.toContain("summaries were drafted");
+    expect(css).not.toContain("[data-report-footer-text] { display: none");
+    expect(html).not.toMatch(/reviewed by/i);
   });
 
   it("404s a submission outside the caller's scope", async () => {

@@ -49,6 +49,11 @@ export type BriefRecords = {
     endYear: number;
     applId: number | null;
     roleLabel: string;
+    /** NIH institute code ("NIDDK"); the report's short sponsor. Absent/null when not NIH. */
+    nihIc?: string | null;
+    /** InfoEd program type ("Grant", "BioPharma Alliance Agreement", …): the report's funder-type
+     *  label for an award with no mechanism code. */
+    programType?: string;
   }[];
   translation: { title: string; patentStatus: string | null; url: string }[];
   secondaryAppointments: { title: string; organization: string }[];
