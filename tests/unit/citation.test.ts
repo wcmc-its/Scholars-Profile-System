@@ -9,7 +9,7 @@
  * fails against that guard.
  */
 import { describe, it, expect } from "vitest";
-import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
+import { bookCitationParts, citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 
 describe("formatVolIssuePages", () => {
   it("assembles NLM punctuation from the pieces that are present", () => {
@@ -110,5 +110,17 @@ describe("citationIdentifier", () => {
       value: "38670054",
       href: "https://pubmed.ncbi.nlm.nih.gov/38670054/",
     });
+  });
+});
+
+describe("bookCitationParts", () => {
+  it("cites a book's publisher and every ISBN", () => {
+    expect(
+      bookCitationParts({ publisher: "Johns Hopkins University Press", isbn: "9781421455150,9781421455143" }, null),
+    ).toEqual({ venue: "Johns Hopkins University Press", isbn: "9781421455150, 9781421455143" });
+  });
+  it("leaves an article's journal alone", () => {
+    expect(bookCitationParts({ publisher: null, isbn: null }, "N Engl J Med")).toEqual({ venue: "N Engl J Med", isbn: null });
+    expect(bookCitationParts({}, null)).toEqual({ venue: null, isbn: null });
   });
 });

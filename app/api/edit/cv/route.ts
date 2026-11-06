@@ -237,6 +237,8 @@ export async function POST(request: NextRequest): Promise<Response> {
               pages: true,
               doi: true,
               pmcid: true,
+              isbn: true,
+              publisher: true,
               publicationType: true,
             },
           })

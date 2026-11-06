@@ -16,7 +16,7 @@
  */
 import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
-import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
+import { bookCitationParts, citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { fundingRoleLabel, isPiRole } from "@/lib/funding-roles";
 import {
   appendToLabelParagraph,
@@ -64,6 +64,9 @@ export type PubForCitation = {
   pages: string | null;
   doi: string | null;
   pmcid: string | null;
+  /** Book fields (external records only); see {@link bookCitationParts}. */
+  isbn: string | null;
+  publisher: string | null;
   /** PubMed-style `publication_type`; bins the entry into a WCM bibliography
    *  category ({@link bibSubsectionKey}). Null ⇒ peer-reviewed research article. */
   publicationType: string | null;
@@ -234,12 +237,13 @@ function citationRuns(index: number, pub: PubForCitation, selected: ReadonlySet<
   runs.push(...authorRuns(pub.fullAuthorsString ?? pub.authorsString, selected));
   runs.push({ text: ". " });
   runs.push(...titleRuns(pub.title));
-  const journal = pub.journalAbbrev ?? pub.journal;
+  const { venue: journal, isbn } = bookCitationParts(pub, pub.journalAbbrev ?? pub.journal);
   if (journal) runs.push({ text: `${htmlToPlainText(journal, Number.POSITIVE_INFINITY)}. ` });
   // #2580 — the shared formatter treats a literal "NULL" volume/issue/pages as
   // absent; the local copy printed `2024;NULL(NULL):NULL.` into the CV.
   const vip = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
   if (pub.year !== null) runs.push({ text: vip ? `${pub.year};${vip}. ` : `${pub.year}. ` });
+  if (isbn) runs.push({ text: `ISBN: ${isbn}. ` });
   if (pub.doi) runs.push({ text: `doi: ${pub.doi}. ` });
   // #2580 — `pmid` carries a source-prefixed id for non-PubMed records, so the
   // label is decided per-record ("PMID: 38670054" vs "Scopus: 105037533819")

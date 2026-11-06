@@ -101,6 +101,20 @@ export type CitationIdentifier = {
  * Accepts a number because the co-pubs routes carry `CoPublicationFull.pmid` as
  * a number (a negative one for those same external records).
  */
+/**
+ * The venue and trailing ISBN of a citation. A book (publisher set, from the
+ * external_article projection) cites its publisher where a journal would go,
+ * Vancouver style ("Baltimore: Johns Hopkins University Press; 2026"), less the
+ * place, which no source gives. Everything else keeps its journal and no ISBN.
+ */
+export function bookCitationParts(pub: {
+  publisher?: string | null;
+  isbn?: string | null;
+}, journal: string | null): { venue: string | null; isbn: string | null } {
+  const isbn = pub.isbn ? pub.isbn.split(",").map((s) => s.trim()).filter(Boolean).join(", ") : null;
+  return { venue: pub.publisher || journal, isbn: isbn || null };
+}
+
 export function citationIdentifier(pmid: string | number): CitationIdentifier {
   const raw = String(pmid);
   const { isPubmed, sourceLabel } = pubSource(raw);

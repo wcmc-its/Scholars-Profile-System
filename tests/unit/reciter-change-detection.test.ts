@@ -28,6 +28,8 @@ const basePub = (over: Partial<PublicationComparable> = {}): PublicationComparab
   dateAddedToEntrez: new Date("2020-01-15T00:00:00Z"),
   doi: "10.1/x",
   pmcid: null,
+  isbn: null,
+  publisher: null,
   volume: "12",
   issue: "3",
   pages: "1-10",
@@ -59,6 +61,9 @@ describe("publicationSignature", () => {
         basePub({ ecommonsLink: "https://hdl.handle.net/1813/124348" }),
       ),
     );
+    // A book gaining its ISBN / publisher (ReCiterDB v3.5) must be written.
+    expect(publicationSignature(basePub())).not.toBe(publicationSignature(basePub({ isbn: "9781421455143" })));
+    expect(publicationSignature(basePub())).not.toBe(publicationSignature(basePub({ publisher: "JHU Press" })));
   });
 
   it("distinguishes null from empty string and whitespace (no sentinel collision)", () => {

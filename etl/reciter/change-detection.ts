@@ -47,6 +47,8 @@ export type PublicationComparable = {
   dateAddedToEntrez: Date | null;
   doi: string | null;
   pmcid: string | null;
+  isbn: string | null;
+  publisher: string | null;
   volume: string | null;
   issue: string | null;
   pages: string | null;
@@ -92,6 +94,8 @@ export function publicationSignature(row: PublicationComparable): string {
     dateOnly(row.dateAddedToEntrez),
     row.doi ?? null,
     row.pmcid ?? null,
+    row.isbn ?? null,
+    row.publisher ?? null,
     row.volume ?? null,
     row.issue ?? null,
     row.pages ?? null,

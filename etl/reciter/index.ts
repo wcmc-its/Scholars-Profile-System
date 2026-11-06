@@ -791,6 +791,44 @@ async function main() {
       for (const [pmid, byline] of authorsByPmid) reviewAuthorsByPmid.set(pmid, byline);
     }
 
+    // Book citation fields (ISBN, publisher) for external records, from
+    // reciterdb.external_article (ReCiterDB v3.5), keyed by the prefixed article_id.
+    // Best-effort like the review bylines: before v3.5 the columns don't exist and
+    // the query fails, which leaves both fields null rather than failing the run.
+    // ponytail: no assertSourceVolume — a lost read nulls these two citation
+    // fields for a night, and the next good run restores them.
+    const bookFieldsByPmid = new Map<number, { isbn: string | null; publisher: string | null }>();
+    const pmidByArticleId = new Map<string, number>();
+    // The RAW article_id, not articleIdByPmid's key: that one is hashed for a long CROSSREF id.
+    for (const a of articleByPmid.values()) {
+      if (a.article_id != null) pmidByArticleId.set(a.article_id, Number(a.pmid));
+    }
+    for (const batch of chunks(Array.from(pmidByArticleId.keys()), IN_BATCH)) {
+      try {
+        await withReciterConnection(async (conn) => {
+          const rows = (await conn.query(
+            `SELECT article_id, MAX(isbn) AS isbn, MAX(publisher) AS publisher
+               FROM external_article
+              WHERE article_id IN (?) AND suppressed = 0
+                    AND (isbn IS NOT NULL OR publisher IS NOT NULL)
+              GROUP BY article_id`,
+            [batch],
+          )) as Array<{ article_id: string; isbn: string | null; publisher: string | null }>;
+          for (const r of rows) {
+            const pmid = pmidByArticleId.get(r.article_id);
+            if (pmid !== undefined) bookFieldsByPmid.set(pmid, { isbn: r.isbn, publisher: r.publisher });
+          }
+        });
+      } catch (err) {
+        console.warn(
+          `external_article book fields unavailable for a batch (continuing without them): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    console.log(`Got book fields for ${bookFieldsByPmid.size} external records.`);
+
     // Issue #89 — NLM journal abbreviation. person_article carries the
     // ISO abbreviation per pmid (despite the name, it's the NLM-style
     // form: "Proc Natl Acad Sci U S A"). Distinct per pmid; pick first
@@ -928,6 +966,8 @@ async function main() {
         dateAddedToEntrez: parseDate(a.datePublicationAddedToEntrez),
         doi: a.doi,
         pmcid: a.pmcid,
+        isbn: bookFieldsByPmid.get(Number(a.pmid))?.isbn ?? null,
+        publisher: bookFieldsByPmid.get(Number(a.pmid))?.publisher ?? null,
         // #2580 — external rows carry the literal four-character string 'NULL'
         // in all three columns (40/40 sampled; zero SQL nulls), which printed as
         // `2024;NULL(NULL):NULL.` in every citation. Normalised here at the
@@ -976,6 +1016,8 @@ async function main() {
       dateAddedToEntrez: true,
       doi: true,
       pmcid: true,
+      isbn: true,
+      publisher: true,
       volume: true,
       issue: true,
       pages: true,
