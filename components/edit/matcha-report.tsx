@@ -1,20 +1,22 @@
 /**
- * Matcha report v2: the printable scouting report's body (coverage-table layout). A SERVER
- * component (no "use client"): it renders only what `loadMatchaReport` returns, and that loader
- * never selects notes, researcher emails, scores, researcher-type labels, InfoEd routing fields,
- * award amounts or the raw paste.
+ * Matcha report v4: the printable scouting report's body. A SERVER component (no "use client"):
+ * it renders only what `loadMatchaReport` returns, and that loader never selects notes,
+ * researcher emails, scores, researcher-type labels, InfoEd routing fields, award amounts or the
+ * raw paste.
  *
- * Order: dark header bar → hero (eyebrow, title, count subtitle, Prepared by / Contact / Source)
- * → four stat cards → coverage of the ask + gaps (only when themes exist) → shortlist → one
- * profile card per PI → footer with the full search terms.
+ * Order: header bar → cover (eyebrow, title, subtitle, Prepared for / by, Contact, Source, the
+ * full search terms) → one stat line → the gaps paragraph → "Coverage and fit" (themes, Fit and
+ * Awards columns) → one section per fit tier → the AI disclaimer, once.
  *
- * Profile card (v3): Why + discussion topics (superscript [n] cites into the numbered key papers;
- * other sources on an "Also:" line) and any licensable technology | numbered key papers, then a
- * full-width active-funding strip (grouped rows, at most four, "+N more" to the profile).
+ *  - Strong fit: a full profile (angle band, Why, topics citing numbered key papers, methods,
+ *    technology, a key-paper grid, up to three funding lines). One printed page each.
+ *  - Good and weak fit: a compact card (two Why sentences, one topic, one technology line, two
+ *    papers, a one-line funding summary). Two per printed page.
  *
- * Print: the browser's own Print / Save as PDF. 18mm margins, a profile card, the coverage table
- * and the gaps callout never split across pages, colours printed exactly, and the footer rides
- * every printed page as a page-margin box (Chromium); on screen it is the last block.
+ * Print: US Letter, a running footer ("Matcha scouting report · Weill Cornell Medicine" left,
+ * "Page X of Y" right) as page-margin boxes, no card chrome, a 2px rule between investigators,
+ * each tier on a new page. Name and sponsor clean-ups are display-only
+ * (`lib/edit/matcha-report-format.ts`).
  */
 import type { MatchaReport, ReportPaper, ReportPi } from "@/lib/api/matcha-report";
 import { WCM_LOGO_SRC } from "@/components/edit/wcm-logo";
@@ -22,8 +24,6 @@ import type { MatchaFitTier } from "@/lib/api/matcha-contract";
 import {
   briefSourceLabel,
   briefSourceUrl,
-  methodLabel,
-  methodsSummary,
   reporterUrl,
   type BriefSource,
 } from "@/lib/edit/matcha-brief-types";
@@ -34,18 +34,40 @@ import {
   numberWord,
   type CoverageMark,
 } from "@/lib/edit/matcha-report-coverage";
+import {
+  awardCode,
+  awardsLabel,
+  firstSentences,
+  fundingSummary,
+  mergeMethods,
+  punctuateInitials,
+  reportName,
+  sponsorShort,
+  titleWithoutRequester,
+} from "@/lib/edit/matcha-report-format";
 import { MatchaPrintButton } from "@/components/edit/matcha-print-button";
 import { PubTitle } from "@/components/publication/pub-html";
 
 export const NOT_EVIDENT = "Not evident from Scholars records.";
 export const NO_BRIEF = "No brief drafted.";
 export const NO_FUNDING = "None on record in Scholars.";
+export const NO_ACTIVE_FUNDING = "No active funding on record";
+/** The running footer's left text (a page-margin box in print). */
+export const RUNNING_FOOTER = "Matcha scouting report · Weill Cornell Medicine";
 
 const FIT_LABEL: Record<MatchaFitTier, string> = {
   strong: "Strong fit",
   good: "Good fit",
   weak: "Weak fit",
 };
+
+const FIT_SHORT: Record<MatchaFitTier, string> = {
+  strong: "Strong",
+  good: "Good",
+  weak: "Weak",
+};
+
+const TIER_ORDER: readonly MatchaFitTier[] = ["strong", "good", "weak"];
 
 const MARK_LABEL: Record<CoverageMark, string> = {
   primary: "Primary focus",
@@ -90,7 +112,7 @@ export function reportSubtitle(n: number): string {
   );
 }
 
-/** A CSS string literal (for the `@page` margin box): quotes and backslashes escaped. */
+/** A CSS string literal (for an `@page` margin box): quotes and backslashes escaped. */
 function cssString(s: string): string {
   return `"${s
     .replace(/\\/g, "\\\\")
@@ -98,16 +120,23 @@ function cssString(s: string): string {
     .replace(/[\r\n]+/g, " ")}"`;
 }
 
-function printCss(footer: string): string {
+/** The print stylesheet: page setup, running footer, page breaks and print-only typography. */
+export function printCss(): string {
   return `
 @page {
-  margin: 18mm;
-  @bottom-center {
-    content: ${cssString(footer)};
+  size: letter;
+  margin: 0.55in 0.6in 0.7in 0.6in;
+  @bottom-left {
+    content: ${cssString(RUNNING_FOOTER)};
     font-family: Inter, Helvetica, Arial, sans-serif;
-    font-size: 7.5pt;
+    font-size: 8pt;
     color: #555;
-    vertical-align: middle;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: Inter, Helvetica, Arial, sans-serif;
+    font-size: 8pt;
+    color: #555;
   }
 }
 @media print {
@@ -115,38 +144,62 @@ function printCss(footer: string): string {
   body > *:not([data-matcha-report]) { display: none !important; }
   [data-matcha-report] {
     background: #fff !important;
-    font-size: 9.5pt;
+    font-size: 14px;
+    line-height: 1.5;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  [data-report-bar], [data-report-amber], [data-report-mark], [data-report-avatar], [data-report-tech], [data-report-angle] {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  [data-report-body] { padding: 16px 0 0 !important; max-width: none !important; gap: 24px !important; }
+  [data-matcha-report] * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  [data-report-body] { padding: 16px 0 0 !important; max-width: none !important; }
   [data-report-bar] > div { padding-left: 0 !important; padding-right: 0 !important; }
   [data-report-screen-only] { display: none !important; }
-  [data-report-pi], [data-report-coverage-table], [data-report-gaps], [data-report-stats] {
-    break-inside: avoid;
-  }
-  [data-report-shortlist-item], [data-report-funding], [data-report-funding-row] { break-inside: avoid; }
-  [data-report-coverage-scroll] { overflow: visible !important; }
+  [data-report-title] { font-size: 36px !important; max-width: none !important; }
+  h2, h3, h4, [data-report-label] { break-after: avoid; page-break-after: avoid; }
+  [data-report-coverage], [data-report-gaps], [data-report-stats] { break-inside: avoid; }
+  [data-report-coverage-scroll] { overflow: visible !important; border: 0 !important; border-radius: 0 !important; }
   [data-report-coverage-table] { min-width: 0 !important; }
-  [data-report-footer] { border-top: 0 !important; padding-top: 0 !important; }
-  [data-report-footer-text] { display: none !important; }
+  [data-report-tier] { break-before: page; page-break-before: always; }
+  [data-report-pi] {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+  [data-report-pi] + [data-report-pi] { border-top: 2px solid #1a1a1a !important; }
+  [data-report-pi="strong"] + [data-report-pi="strong"] { break-before: page; page-break-before: always; }
+  [data-report-compact] { break-inside: avoid; }
+  [data-report-compact]:nth-of-type(2n+1):not(:first-of-type) { break-before: page; page-break-before: always; }
+  [data-report-funding-row], [data-report-paper], [data-report-angle], [data-report-tech] { break-inside: avoid; }
+  [data-report-more-methods] { display: none !important; }
+  [data-report-footer] { border-top: 0 !important; }
 }`;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h4 className="text-[12px] font-semibold tracking-[0.06em] text-[var(--evidence-faint)] uppercase">
+    <h4
+      data-report-label
+      className="m-0 text-[11px] font-semibold tracking-[0.08em] text-[var(--evidence-faint)] uppercase"
+    >
       {children}
     </h4>
   );
 }
 
-function H2({ children }: { children: React.ReactNode }) {
-  return <h2 className="m-0 font-serif text-[28px] font-normal">{children}</h2>;
+/** A section heading with the short WCM-red rule above it. */
+function H2({ children, sub }: { children: React.ReactNode; sub?: string }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div aria-hidden="true" className="bg-apollo-maroon mb-3 h-0.5 w-[132px]" />
+      <h2 className="m-0 font-serif text-[28px] leading-tight font-normal">{children}</h2>
+      {sub ? (
+        <p className="m-0 max-w-[720px] text-[14px] text-pretty text-[var(--evidence-faint)]">
+          {sub}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function ExtLink({
@@ -170,17 +223,20 @@ function ExtLink({
   );
 }
 
-function FitChip({ fit, size = "sm" }: { fit: MatchaFitTier; size?: "sm" | "md" }) {
-  const pad = size === "md" ? "px-2.5 py-[3px]" : "px-2 py-0.5";
+/** Strong: a filled slate pill. Good: a slate outline. Weak: a faint outline. */
+function FitPill({ fit, short = false }: { fit: MatchaFitTier; short?: boolean }) {
   const tone =
     fit === "strong"
-      ? "bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate"
-      : "bg-apollo-surface-2 border-apollo-border-strong text-[var(--evidence-body)]";
+      ? "bg-apollo-slate border-apollo-slate text-white"
+      : fit === "good"
+        ? "border-apollo-slate text-apollo-slate bg-transparent"
+        : "border-apollo-border-strong bg-transparent text-[var(--evidence-faint)]";
   return (
     <span
-      className={`rounded-full border text-[12px] font-semibold whitespace-nowrap ${pad} ${tone}`}
+      data-report-fit={fit}
+      className={`inline-block rounded-full border px-2 py-px text-[11px] leading-[1.5] font-semibold whitespace-nowrap ${tone}`}
     >
-      {FIT_LABEL[fit]}
+      {short ? FIT_SHORT[fit] : FIT_LABEL[fit]}
     </span>
   );
 }
@@ -193,7 +249,7 @@ function Mark({ mark }: { mark: CoverageMark }) {
         role="img"
         aria-label={MARK_LABEL.primary}
         title={MARK_LABEL.primary}
-        className="bg-apollo-slate block size-3 rounded-full"
+        className="bg-apollo-slate block size-2.5 rounded-full"
       />
     );
   }
@@ -204,7 +260,7 @@ function Mark({ mark }: { mark: CoverageMark }) {
         role="img"
         aria-label={MARK_LABEL.related}
         title={MARK_LABEL.related}
-        className="border-apollo-slate box-border block size-3 rounded-full border-2"
+        className="border-apollo-slate box-border block size-2.5 rounded-full border-2"
       />
     );
   }
@@ -227,91 +283,66 @@ export function avatarInitials(name: string): string {
   return (first + last).toUpperCase();
 }
 
+/** 48px photo: an `<img>` over the initials, so a missing headshot (empty alt) leaves them. */
 function Avatar({ pi }: { pi: ReportPi }) {
   return (
     <div
       data-report-avatar
-      className="bg-apollo-surface-2 border-apollo-border relative flex size-14 flex-none items-center justify-center overflow-hidden rounded-full border font-serif text-[20px] text-[var(--evidence-body)] sm:size-[72px] sm:text-[24px]"
+      className="bg-apollo-surface-2 border-apollo-border relative flex size-12 flex-none items-center justify-center overflow-hidden rounded-full border font-serif text-[15px] text-[var(--evidence-body)]"
     >
       <span aria-hidden="true">{avatarInitials(pi.shortName)}</span>
       {pi.photoUrl ? (
-        // A background image, not <img>: a directory 404 then simply leaves the initials showing.
-        <div
-          role="img"
-          aria-label={pi.shortName}
-          className="absolute inset-0 bg-cover bg-top"
-          style={{ backgroundImage: `url(${JSON.stringify(pi.photoUrl)})` }}
+        // eslint-disable-next-line @next/next/no-img-element -- external directory photo; must print.
+        <img
+          src={pi.photoUrl}
+          alt=""
+          className="absolute inset-0 size-full object-cover object-top"
         />
       ) : null}
     </div>
   );
 }
 
-function StatCard({
-  value,
-  children,
-  amber = false,
-}: {
-  value: number;
-  children: React.ReactNode;
-  amber?: boolean;
-}) {
-  return (
-    <div
-      {...(amber ? { "data-report-amber": "", "data-report-gaps-card": "" } : {})}
-      className={`flex flex-col gap-1.5 rounded-[var(--apollo-radius-card)] border p-5 ${
-        amber
-          ? "bg-apollo-amber-tint border-apollo-amber-tint-border"
-          : "bg-apollo-surface border-apollo-border"
-      }`}
-    >
-      <div className={`font-serif text-[36px] leading-none ${amber ? "text-apollo-amber" : ""}`}>
-        {value}
-      </div>
-      <div className={`text-[14px] ${amber ? "text-[#5a3c05]" : "text-[var(--evidence-body)]"}`}>
-        {children}
-      </div>
-    </div>
-  );
+/** Distinct licensable technologies across the report. */
+function techCount(report: MatchaReport): number {
+  return new Set(report.pis.flatMap((pi) => pi.translation.map((t) => t.title))).size;
 }
 
-function Stats({ report }: { report: MatchaReport }) {
+/** "11 investigators (7 strong, 4 good) · 25 active awards · 1 licensable technology · 2 themes
+ *  with no strong match", as one line. */
+function StatLine({ report }: { report: MatchaReport }) {
   const n = report.pis.length;
-  const tiers = (["strong", "good", "weak"] as const)
-    .map((t) => ({ t, k: report.pis.filter((pi) => pi.fit === t).length }))
+  const tiers = TIER_ORDER.map((t) => ({ t, k: report.pis.filter((pi) => pi.fit === t).length }))
     .filter((x) => x.k > 0)
-    .map((x) => `${x.k} ${x.t} fit`);
+    .map((x) => `${x.k} ${x.t}`);
   const awards = report.pis.reduce((s, pi) => s + pi.funding.length, 0);
-  const funded = report.pis.filter((pi) => pi.funding.length > 0).length;
-  const techs = report.pis.flatMap((pi) => pi.translation.map((t) => t.title));
-  const uniqueTechs = [...new Set(techs)];
-  const gaps = report.coverage?.gaps ?? [];
+  const techs = techCount(report);
+  const gaps = report.coverage?.gaps.length ?? 0;
+  const stat = (value: number, label: string, amber = false) => (
+    <span
+      data-report-stat
+      {...(amber ? { "data-report-amber": "" } : {})}
+      className={`inline-flex items-baseline gap-1.5 ${amber ? "text-apollo-amber" : ""}`}
+    >
+      <span className="font-serif text-[26px] leading-none">{value}</span>
+      <span className={`text-[14px] ${amber ? "" : "text-[var(--evidence-body)]"}`}>{label}</span>
+    </span>
+  );
   return (
     <section
       data-report-stats
       aria-label="At a glance"
-      className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3 print:grid-cols-[repeat(auto-fit,minmax(130px,1fr))]"
+      className="border-apollo-border-strong flex flex-wrap items-baseline gap-x-7 gap-y-2 border-y py-4"
     >
-      <StatCard value={n}>
-        {plural(n, "investigator", "investigators")} matched
-        {tiers.length ? `, ${joinWords(tiers)}` : ""}
-      </StatCard>
-      <StatCard value={awards}>
-        {awards > 0
-          ? `active sponsored ${plural(awards, "award", "awards")} across ${funded} ${plural(funded, "investigator", "investigators")}`
-          : "active sponsored awards on record"}
-      </StatCard>
-      <StatCard value={uniqueTechs.length}>
-        {uniqueTechs.length === 1
-          ? `licensable technology on record (${uniqueTechs[0]})`
-          : "licensable technologies on record"}
-      </StatCard>
-      {gaps.length > 0 ? (
-        <StatCard value={gaps.length} amber>
-          {plural(gaps.length, "area", "areas")} with no strong match yet:{" "}
-          {joinWords(gaps.map((g) => g.label))}
-        </StatCard>
-      ) : null}
+      {stat(
+        n,
+        `${plural(n, "investigator", "investigators")}${tiers.length ? ` (${tiers.join(", ")})` : ""}`,
+      )}
+      {stat(awards, `active ${plural(awards, "award", "awards")}`)}
+      {stat(techs, `licensable ${plural(techs, "technology", "technologies")}`)}
+      {gaps > 0
+        ? stat(gaps, `${plural(gaps, "theme", "themes")} with no strong match`, true)
+        : null}
     </section>
   );
 }
@@ -320,7 +351,7 @@ function Stats({ report }: { report: MatchaReport }) {
 export function gapsProse(report: MatchaReport): string | null {
   const gaps = report.coverage?.gaps ?? [];
   if (gaps.length === 0) return null;
-  const nameOf = new Map(report.pis.map((pi) => [pi.cwid, pi.shortName]));
+  const nameOf = new Map(report.pis.map((pi) => [pi.cwid, punctuateInitials(pi.shortName)]));
   const parts = [
     `No investigator in this set works directly on ${joinWords(
       gaps.map((g) => g.label),
@@ -337,168 +368,147 @@ export function gapsProse(report: MatchaReport): string | null {
   return parts.join(" ");
 }
 
-function Coverage({ report }: { report: MatchaReport }) {
-  const themes = report.themes;
-  const coverage = report.coverage;
-  if (!themes || !coverage) return null;
+function Gaps({ report }: { report: MatchaReport }) {
   const prose = gapsProse(report);
-  const nTerms = report.searchTerms.length;
+  if (!prose) return null;
   return (
-    <section data-report-coverage aria-label="Coverage of your ask" className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <H2>Coverage of your ask</H2>
-        <p className="m-0 max-w-[720px] text-[15px] text-pretty text-[var(--evidence-body)]">
-          Your {nTerms} search {plural(nTerms, "term", "terms")}, grouped into{" "}
-          {numberWord(themes.length)} {plural(themes.length, "theme", "themes")}. Each mark shows
-          where an investigator&rsquo;s record supports the theme.
-        </p>
-      </div>
+    <p
+      data-report-gaps
+      data-report-amber
+      className="bg-apollo-amber-tint border-apollo-amber-tint-border m-0 rounded-[10px] border px-4 py-3 text-[14px] leading-[1.55] text-pretty text-[#5a3c05]"
+    >
+      <strong className="font-semibold">Gaps in this report.</strong> {prose}
+    </p>
+  );
+}
+
+/** "Coverage and fit": rank, name (to the profile section), Fit, one column per theme, Awards. */
+function Coverage({ report }: { report: MatchaReport }) {
+  if (report.pis.length === 0) return null;
+  const themes = report.coverage ? (report.themes ?? []) : [];
+  const coverage = report.coverage;
+  const nTerms = report.searchTerms.length;
+  const totalAwards = report.pis.reduce((s, pi) => s + pi.funding.length, 0);
+  const cell = "px-2 py-1.5";
+  return (
+    <section data-report-coverage aria-label="Coverage and fit" className="flex flex-col gap-4">
+      <H2
+        sub={
+          themes.length > 0
+            ? `Investigators ranked by fit, against your ${nTerms} search ${plural(nTerms, "term", "terms")} grouped into ${numberWord(themes.length)} ${plural(themes.length, "theme", "themes")}. Names jump to each profile.`
+            : "Investigators ranked by fit. Names jump to each profile."
+        }
+      >
+        Coverage and fit
+      </H2>
       <div
         data-report-coverage-scroll
         className="bg-apollo-surface border-apollo-border overflow-x-auto rounded-[var(--apollo-radius-card)] border"
       >
         <table
           data-report-coverage-table
-          className="w-full min-w-[820px] table-fixed border-collapse text-left"
+          className={`w-full table-fixed border-collapse text-left ${themes.length > 0 ? "min-w-[820px]" : ""}`}
         >
           <colgroup>
-            <col className="w-[260px] print:w-[30%]" />
+            <col className="w-[230px] print:w-[27%]" />
+            <col className="w-[72px]" />
             {themes.map((t) => (
               <col key={t.label} />
             ))}
+            <col className="w-[64px]" />
           </colgroup>
           <thead>
-            <tr className="bg-apollo-surface-2 border-apollo-border-strong border-b text-[12px] font-semibold text-[var(--evidence-body)]">
-              <th scope="col" className="px-4 py-3 font-semibold">
+            <tr className="bg-apollo-surface-2 border-apollo-border-strong border-b text-[11px] font-semibold text-[var(--evidence-body)]">
+              <th scope="col" className="px-3 py-2 align-bottom font-semibold">
                 Investigator
+              </th>
+              <th scope="col" className={`${cell} align-bottom font-semibold`}>
+                Fit
               </th>
               {themes.map((t) => (
                 <th
                   key={t.label}
                   scope="col"
-                  className="px-2 py-3 text-center leading-[1.3] font-semibold"
+                  className={`${cell} text-center align-bottom leading-[1.3] font-semibold`}
                 >
                   {t.label}
                 </th>
               ))}
+              <th scope="col" className="px-3 py-2 text-right align-bottom font-semibold">
+                Awards
+              </th>
             </tr>
           </thead>
           <tbody>
             {report.pis.map((pi, i) => (
-              <tr key={pi.cwid} className="border-apollo-border border-b text-[14px]">
-                <th scope="row" className="px-4 py-2.5 font-normal">
+              <tr
+                key={pi.cwid}
+                data-report-coverage-row
+                className="border-apollo-border border-b text-[13px]"
+              >
+                <th scope="row" className="px-3 py-1.5 font-normal">
                   <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="w-4 flex-none text-[12px] text-[var(--evidence-faint)]">
-                      {pi.rank}
-                    </span>
-                    <ExtLink
-                      href={pi.profileUrl}
+                    <span className="text-apollo-maroon w-4 flex-none text-[11px]">{pi.rank}</span>
+                    <a
+                      href={`#pi-${pi.rank}`}
                       className="text-apollo-slate hover:text-apollo-maroon font-semibold hover:underline"
                     >
-                      {pi.name}
-                    </ExtLink>
+                      {reportName(pi.name)}
+                    </a>
                   </span>
                 </th>
-                {coverage.rows[i].marks.map((m, j) => (
-                  <td key={j} className="py-2.5">
+                <td className={cell}>
+                  <FitPill fit={pi.fit} short />
+                </td>
+                {themes.map((t, j) => (
+                  <td key={t.label} className={cell}>
                     <span className="flex justify-center">
-                      <Mark mark={m} />
+                      <Mark mark={coverage!.rows[i].marks[j]} />
                     </span>
                   </td>
                 ))}
+                <td data-report-awards className="px-3 py-1.5 text-right tabular-nums">
+                  {pi.funding.length > 0 ? pi.funding.length : "—"}
+                </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr
               data-report-totals
-              className="bg-apollo-surface-2 text-[12px] text-[var(--evidence-faint)]"
+              className="bg-apollo-surface-2 text-[11px] text-[var(--evidence-faint)]"
             >
-              <th scope="row" className="px-4 py-2.5 font-semibold">
+              <th scope="row" className="px-3 py-1.5 font-semibold">
                 Investigators
               </th>
-              {coverage.totals.map((t, j) => (
-                <td key={j} className="px-2 py-2.5 text-center">
-                  {t}
+              <td className={cell} />
+              {themes.map((t, j) => (
+                <td key={t.label} className={`${cell} text-center`}>
+                  {coverage!.totals[j]}
                 </td>
               ))}
+              <td data-report-awards-total className="px-3 py-1.5 text-right tabular-nums">
+                {totalAwards}
+              </td>
             </tr>
           </tfoot>
         </table>
       </div>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[13px] text-[var(--evidence-body)]">
-        <div className="flex items-center gap-2">
-          <Mark mark="primary" />
-          Primary focus
-        </div>
-        <div className="flex items-center gap-2">
-          <Mark mark="related" />
-          Related work
-        </div>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-[var(--evidence-body)]">
+        {themes.length > 0 ? (
+          <>
+            <div className="flex items-center gap-1.5">
+              <Mark mark="primary" />
+              Primary focus
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Mark mark="related" />
+              Related work
+            </div>
+          </>
+        ) : null}
+        <div>Awards: active sponsored awards on record</div>
       </div>
-      {prose ? (
-        <div
-          data-report-gaps
-          data-report-amber
-          className="bg-apollo-amber-tint border-apollo-amber-tint-border flex flex-col gap-1 rounded-[10px] border px-5 py-4 text-[14px] leading-[1.55] text-[#5a3c05]"
-        >
-          <div className="font-semibold">Gaps in this report</div>
-          <div className="text-pretty">{prose}</div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function Shortlist({ report }: { report: MatchaReport }) {
-  return (
-    <section aria-label="Shortlist" className="flex flex-col gap-4">
-      <H2>Shortlist</H2>
-      {report.pis.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          {report.pis.map((pi) => (
-            <a
-              key={pi.cwid}
-              href={`#pi-${pi.rank}`}
-              data-report-shortlist-item
-              className="bg-apollo-surface border-apollo-border hover:border-apollo-border-strong grid grid-cols-[32px_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-[10px] border px-5 py-4 text-[#1a1a1a] no-underline hover:shadow-[var(--apollo-shadow-card)]"
-            >
-              <div className="font-serif text-[22px] leading-[1.2] text-[var(--evidence-faint)]">
-                {pi.rank}
-              </div>
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <span className="text-[16px] font-semibold">{pi.name}</span>
-                  <span className="text-[13px] text-[var(--evidence-faint)]">
-                    {[pi.title, pi.department].filter(Boolean).join(" · ")}
-                  </span>
-                </div>
-                {pi.oneLine ? (
-                  <div className="text-[14px] leading-normal text-pretty text-[var(--evidence-body)]">
-                    {pi.oneLine}
-                  </div>
-                ) : (
-                  <div className="text-[14px] text-[var(--evidence-faint)] italic">{NO_BRIEF}</div>
-                )}
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  <FitChip fit={pi.fit} />
-                  {pi.signals.map((s) => (
-                    <span
-                      key={s}
-                      data-report-signal
-                      className="bg-apollo-surface-2 border-apollo-border rounded-full border px-2 py-0.5 text-[12px] text-[var(--evidence-body)]"
-                    >
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </a>
-          ))}
-        </div>
-      ) : (
-        <p className="text-[var(--evidence-faint)]">No researchers selected.</p>
-      )}
     </section>
   );
 }
@@ -507,15 +517,23 @@ function Empty() {
   return <p className="m-0 text-[14px] text-[var(--evidence-faint)] italic">{NOT_EVIDENT}</p>;
 }
 
-/** Funding rows shown in a card before the "+N more" link. */
-export const REPORT_MAX_FUNDING_ROWS = 4;
+/** Funding lines on a Strong-fit profile before the "+N more" link. */
+export const REPORT_MAX_FUNDING_ROWS = 3;
+/** Method pills shown before "+N more" (and the only ones printed). */
+export const REPORT_MAX_METHOD_PILLS = 6;
+/** Key papers on a compact (Good / Weak fit) card. */
+export const COMPACT_MAX_PAPERS = 2;
 
 type Award = ReportPi["funding"][number];
 
-/** One funding-strip row: a single award, or `count` awards grouped by `groupFunding`. */
+/** One funding row: a single award, or `count` awards grouped by `groupFunding`. */
 export type FundingRow = {
   mechanism: string | null;
+  /** `awardCode`: the mechanism, else a funder-type label. */
+  code: string;
   funder: string;
+  /** `sponsorShort`: "NIDDK", never "… via …". */
+  sponsor: string;
   title: string;
   endYear: number;
   /** Null on a grouped row: there is no single RePORTER page to link. */
@@ -552,7 +570,9 @@ export function groupFunding(awards: readonly Award[]): FundingRow[] {
     }
     rows.push({
       mechanism: a.mechanism,
+      code: awardCode(a),
       funder: a.funder,
+      sponsor: sponsorShort(a),
       title: a.title,
       endYear: a.endYear,
       applId: a.applId,
@@ -628,286 +648,462 @@ function AlsoLine({ also }: { also: readonly BriefSource[] }) {
   );
 }
 
-function FundingStrip({ pi }: { pi: ReportPi }) {
-  const rows = groupFunding(pi.funding);
-  const shown = rows.slice(0, REPORT_MAX_FUNDING_ROWS);
-  const more = pi.funding.length - shown.reduce((s, r) => s + r.count, 0);
-  // No mechanism on any award (e.g. all foundation grants) → drop the column (#3291).
-  const hasMechanism = pi.funding.some((a) => a.mechanism);
+/** Topic text with its superscript key-paper cites, then the "Also:" line. */
+function TopicBody({
+  topic,
+  keyPapers,
+}: {
+  topic: { text: string; sources: BriefSource[] };
+  keyPapers: readonly ReportPaper[];
+}) {
+  const { cites, also } = topicCitations(topic.sources, keyPapers);
   return (
-    <section
-      data-report-funding
-      aria-label="Active funding"
-      className="border-apollo-border flex flex-col gap-2 border-t px-5 py-5 sm:px-7"
+    <div className="flex flex-col gap-0.5">
+      <span className="text-pretty">
+        {topic.text}
+        {cites.length > 0 ? (
+          <>
+            {" "}
+            <sup data-report-cite className="text-apollo-slate text-[10px] font-semibold">
+              [{cites.join(", ")}]
+            </sup>
+          </>
+        ) : null}
+      </span>
+      <AlsoLine also={also} />
+    </div>
+  );
+}
+
+/** Rank in WCM red, "Name ↗" to the Scholars profile, the fit pill on the right. */
+function NameLine({ pi, size }: { pi: ReportPi; size: "lg" | "md" }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <h3
+        className={`m-0 font-serif leading-[1.2] font-normal ${size === "lg" ? "text-[24px]" : "text-[20px]"}`}
+      >
+        <ExtLink
+          href={pi.profileUrl}
+          className="hover:text-apollo-maroon text-inherit no-underline hover:underline"
+        >
+          {reportName(pi.name)}
+          <span className="text-apollo-slate text-[0.7em]"> ↗</span>
+        </ExtLink>
+      </h3>
+      <span className="pt-1">
+        <FitPill fit={pi.fit} />
+      </span>
+    </div>
+  );
+}
+
+/** Partnership angle: a pale band with a red left border. `role`, when a brief carries one, is the
+ *  bold lead-in; old briefs print the angle alone in regular weight. */
+function AngleBand({ angle, role }: { angle: string; role?: string }) {
+  return (
+    <div
+      data-report-angle
+      className="bg-apollo-slate-tint border-apollo-maroon flex flex-col gap-1 border-l-[3px] px-4 py-3"
     >
-      <SectionLabel>Active funding · {pi.funding.length}</SectionLabel>
-      {pi.funding.length === 0 ? (
-        <div className="text-[14px] text-[var(--evidence-faint)]">{NO_FUNDING}</div>
-      ) : (
-        <div className="border-apollo-border flex flex-col border-t">
-          {shown.map((g, i) => (
-            <div
-              key={i}
-              data-report-funding-row
-              className={`border-apollo-border grid ${hasMechanism ? "grid-cols-[56px_minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]"} items-baseline gap-3 border-b py-2.5 text-[14px] leading-[1.45]`}
-            >
-              {hasMechanism && (
-                <span className="font-mono text-[12px] font-semibold text-[var(--evidence-body)]">
-                  {g.mechanism ?? ""}
-                </span>
-              )}
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-pretty">
-                  {g.applId != null ? (
-                    <ExtLink
-                      href={reporterUrl(g.applId)}
-                      className="hover:text-apollo-maroon text-inherit hover:underline"
-                    >
-                      {g.title}
-                    </ExtLink>
-                  ) : (
-                    g.title
-                  )}
-                  {g.count > 1 ? ` (${g.count} awards)` : ""}
-                </span>
-                <span className="text-[12px] text-[var(--evidence-faint)]">{g.funder}</span>
-              </div>
-              <span className="text-[12px] whitespace-nowrap text-[var(--evidence-faint)]">
-                to {g.endYear}
-              </span>
-            </div>
+      <SectionLabel>Partnership angle</SectionLabel>
+      <p className="m-0 text-[15px] leading-[1.55] font-normal text-pretty">
+        {role ? <strong className="font-semibold">{role} </strong> : null}
+        {angle}
+      </p>
+    </div>
+  );
+}
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <li
+      data-report-pill
+      className="bg-apollo-surface-2 border-apollo-border rounded-full border px-2.5 py-0.5 text-[12px] text-[var(--evidence-body)]"
+    >
+      {children}
+    </li>
+  );
+}
+
+/** One labelled pill row: the first `REPORT_MAX_METHOD_PILLS` shown (and printed), the rest
+ *  behind a native "+N more" `<details>` that print hides. */
+function PillRow({ label, items }: { label: string; items: readonly string[] }) {
+  const shown = items.slice(0, REPORT_MAX_METHOD_PILLS);
+  const rest = items.slice(REPORT_MAX_METHOD_PILLS);
+  return (
+    <div data-report-pill-row={label} className="grid grid-cols-[96px_minmax(0,1fr)] gap-2">
+      <span className="pt-0.5 text-[12px] text-[var(--evidence-faint)]">{label}</span>
+      <div className="flex flex-col gap-1.5">
+        <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+          {shown.map((m) => (
+            <Pill key={m}>{m}</Pill>
           ))}
-          {more > 0 ? (
-            <div className="pt-2.5">
-              <ExtLink
-                href={pi.profileUrl}
-                className="text-apollo-slate hover:text-apollo-maroon text-[13px] font-semibold hover:underline"
-              >
-                +{more} more on Scholars profile ↗
-              </ExtLink>
-            </div>
-          ) : null}
-        </div>
-      )}
-    </section>
+        </ul>
+        {rest.length > 0 ? (
+          <details data-report-more-methods>
+            <summary className="text-apollo-slate w-fit cursor-pointer list-none text-[12px] font-semibold">
+              +{rest.length} more
+            </summary>
+            <ul className="m-0 mt-1.5 flex list-none flex-wrap gap-1.5 p-0">
+              {rest.map((m) => (
+                <Pill key={m}>{m}</Pill>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
 /**
- * "Methods and tools": records only (never generated), tucked behind a native `<details>` so the
- * full list (up to the loader's cap) costs one line until opened, with no JS. Printing prints the
- * state on screen. Omitted when there is nothing to list; trials alone get a plain line.
+ * "Methods and data": record-only pill rows (never generated), methods merged by normalized name
+ * and ranked by paper count. One row today ("Methods"); a "Data sources" row slots in above it once
+ * briefs label them. A clinical-trial count, when any, is a plain line.
  */
-function MethodsAndTools({ pi }: { pi: Pick<ReportPi, "methods" | "trialCount"> }) {
-  if (pi.methods.length === 0 && pi.trialCount <= 0) return null;
-  const summary = methodsSummary(pi.methods.length, pi.trialCount);
-  const label =
-    "text-[12px] font-semibold tracking-[0.06em] text-[var(--evidence-faint)] uppercase";
-  if (pi.methods.length === 0) {
-    return (
-      <div data-report-methods>
-        <p className={`m-0 ${label}`}>{summary}</p>
-      </div>
-    );
-  }
+function MethodsAndData({ pi }: { pi: Pick<ReportPi, "methods" | "trialCount"> }) {
+  const methods = mergeMethods(pi.methods).map((m) => m.name);
+  const rows: { label: string; items: string[] }[] = [];
+  if (methods.length > 0) rows.push({ label: "Methods", items: methods });
+  if (rows.length === 0 && pi.trialCount <= 0) return null;
   return (
-    <details className="break-inside-avoid" data-report-methods>
-      <summary className={`cursor-pointer print:cursor-auto print:list-none ${label}`}>
-        {summary}
-      </summary>
-      <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-[15px] leading-normal">
-        {pi.methods.map((m) => (
-          <li key={m.name}>{methodLabel(m)}</li>
-        ))}
-      </ul>
-    </details>
+    <div data-report-methods className="flex flex-col gap-2">
+      <SectionLabel>Methods and data</SectionLabel>
+      {rows.map((r) => (
+        <PillRow key={r.label} label={r.label} items={r.items} />
+      ))}
+      {pi.trialCount > 0 ? (
+        <p className="m-0 text-[13px] text-[var(--evidence-body)]">
+          {pi.trialCount} clinical {plural(pi.trialCount, "trial", "trials")} on record
+        </p>
+      ) : null}
+    </div>
   );
 }
 
-function ProfileCard({ pi }: { pi: ReportPi }) {
+function TechBox({ pi }: { pi: ReportPi }) {
+  if (pi.translation.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <SectionLabel>Licensable technology</SectionLabel>
+      {pi.translation.map((t, i) => (
+        <div
+          key={i}
+          data-report-tech
+          className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate rounded-lg border px-3.5 py-2.5 text-[14px] leading-[1.45] font-semibold"
+        >
+          <ExtLink href={t.url} className="text-apollo-slate hover:underline">
+            {t.title}
+          </ExtLink>
+          {t.patentStatus ? (
+            <span className="font-normal text-[var(--evidence-body)]"> · {t.patentStatus}</span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Numbered key papers in a full-width grid: title clamped to two lines, year and PMID link. */
+function PaperGrid({ papers }: { papers: readonly ReportPaper[] }) {
+  if (papers.length === 0) return <Empty />;
+  return (
+    <ol
+      data-report-papers
+      className={`m-0 grid list-none grid-cols-1 gap-x-5 gap-y-3 p-0 ${papers.length >= 3 ? "sm:grid-cols-3 print:grid-cols-3" : "sm:grid-cols-2 print:grid-cols-2"}`}
+    >
+      {papers.map((paper, i) => (
+        <li
+          key={paper.pmid}
+          data-report-paper={i + 1}
+          className="border-apollo-border grid grid-cols-[22px_minmax(0,1fr)] gap-1 border-t pt-2"
+        >
+          <span className="text-apollo-slate text-[12px] leading-[1.4] font-semibold">
+            [{i + 1}]
+          </span>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <PubTitle value={paper.title} className="line-clamp-2 text-[13px] leading-[1.4]" />
+            <span className="text-[12px] text-[var(--evidence-faint)]">
+              {paper.year != null ? `${paper.year} · ` : ""}
+              <ExtLink
+                href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(paper.pmid)}/`}
+                className="text-apollo-slate hover:text-apollo-maroon hover:underline"
+              >
+                PMID {paper.pmid} ↗
+              </ExtLink>
+            </span>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Up to three one-line grants (code, title, short sponsor, end year), then "+N more". Hidden by
+ *  the caller when there are no awards. */
+function FundingList({ pi }: { pi: ReportPi }) {
+  const rows = groupFunding(pi.funding);
+  const shown = rows.slice(0, REPORT_MAX_FUNDING_ROWS);
+  const more = pi.funding.length - shown.reduce((s, r) => s + r.count, 0);
+  // No mechanism on any award (e.g. all foundation grants) → drop the code column (#3291).
+  const hasMechanism = pi.funding.some((a) => a.mechanism);
+  return (
+    <section data-report-funding aria-label="Active funding" className="flex flex-col gap-1.5">
+      <SectionLabel>Active funding · {pi.funding.length}</SectionLabel>
+      <div className="border-apollo-border flex flex-col border-t">
+        {shown.map((g, i) => (
+          <div
+            key={i}
+            data-report-funding-row
+            className={`border-apollo-border grid ${hasMechanism ? "grid-cols-[56px_minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]"} items-baseline gap-3 border-b py-1.5 text-[13px] leading-[1.45]`}
+          >
+            {hasMechanism && (
+              <span className="font-mono text-[11px] font-semibold text-[var(--evidence-body)]">
+                {g.code}
+              </span>
+            )}
+            <span className="min-w-0 text-pretty">
+              {g.applId != null ? (
+                <ExtLink
+                  href={reporterUrl(g.applId)}
+                  className="hover:text-apollo-maroon text-inherit hover:underline"
+                >
+                  {g.title}
+                </ExtLink>
+              ) : (
+                g.title
+              )}
+              {g.count > 1 ? ` (${g.count} awards)` : ""}
+              <span className="text-[12px] text-[var(--evidence-faint)]"> · {g.sponsor}</span>
+            </span>
+            <span className="text-[12px] whitespace-nowrap text-[var(--evidence-faint)]">
+              to {g.endYear}
+            </span>
+          </div>
+        ))}
+      </div>
+      {more > 0 ? (
+        <ExtLink
+          href={pi.profileUrl}
+          className="text-apollo-slate hover:text-apollo-maroon w-fit text-[12px] font-semibold hover:underline"
+        >
+          +{more} more on Scholars profile ↗
+        </ExtLink>
+      ) : null}
+    </section>
+  );
+}
+
+const cardChrome =
+  "bg-apollo-surface border-apollo-border rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]";
+
+/** A Strong-fit investigator: the full profile, one printed page. */
+function StrongProfile({ pi }: { pi: ReportPi }) {
   const titleLine = [pi.title, pi.department].filter(Boolean).join(" · ");
+  const metaLine = [...pi.centers, ...(pi.funding.length === 0 ? [NO_ACTIVE_FUNDING] : [])].join(
+    " · ",
+  );
   return (
     <article
       id={`pi-${pi.rank}`}
-      data-report-pi={pi.cwid}
-      aria-label={`${pi.rank}. ${pi.name}`}
-      className="bg-apollo-surface border-apollo-border overflow-hidden rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]"
+      data-report-pi="strong"
+      data-report-cwid={pi.cwid}
+      aria-label={`${pi.rank}. ${reportName(pi.name)}`}
+      className={`${cardChrome} flex flex-col gap-5 px-5 py-6 sm:px-7`}
     >
-      <div className="border-apollo-border flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-b px-5 pt-6 pb-5 sm:px-7">
-        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
-          <div className="font-serif text-[28px] leading-none text-[var(--evidence-faint)] sm:text-[32px]">
-            {pi.rank}
-          </div>
-          <Avatar pi={pi} />
-          <div className="flex min-w-0 flex-col gap-1">
-            <h3 className="m-0 font-serif text-[22px] leading-[1.2] font-normal sm:text-[24px]">
-              {pi.name}
-            </h3>
-            {titleLine ? (
-              <div className="text-[14px] text-[var(--evidence-body)]">{titleLine}</div>
-            ) : null}
-            {pi.centers.length > 0 ? (
-              <div className="text-[13px] text-[var(--evidence-faint)]">
-                {pi.centers.join(" · ")}
-              </div>
-            ) : null}
-          </div>
+      <header data-report-profile-header className="flex items-start gap-3 sm:gap-4">
+        <div className="text-apollo-maroon w-7 flex-none font-serif text-[28px] leading-none">
+          {pi.rank}
         </div>
-        <div className="flex flex-row items-center gap-3 sm:flex-col sm:items-end sm:gap-2">
-          <FitChip fit={pi.fit} size="md" />
-          <ExtLink
-            href={pi.profileUrl}
-            className="text-apollo-slate hover:text-apollo-maroon text-[13px] font-semibold hover:underline"
-          >
-            Scholars profile ↗
-          </ExtLink>
-        </div>
-      </div>
-
-      {pi.brief?.angle ? (
-        <div
-          data-report-angle
-          className="bg-apollo-slate-tint border-apollo-border flex flex-col gap-1 border-b px-5 py-4 sm:px-7"
-        >
-          <SectionLabel>Partnership angle</SectionLabel>
-          <p className="m-0 text-[15px] leading-[1.55] font-medium text-pretty italic">
-            {pi.brief.angle}
-          </p>
-        </div>
-      ) : null}
-
-      <div className="flex flex-col md:flex-row print:flex-row">
-        <div className="flex min-w-0 flex-1 flex-col gap-[22px] px-5 py-6 sm:px-7">
-          {pi.brief ? (
-            <>
-              <div className="flex flex-col gap-2">
-                <SectionLabel>Why this investigator</SectionLabel>
-                {pi.brief.why.trim() ? (
-                  <p className="m-0 text-[15px] leading-[1.6] text-pretty">{pi.brief.why}</p>
-                ) : (
-                  <Empty />
-                )}
-              </div>
-              <div className="flex flex-col gap-2.5">
-                <SectionLabel>Suggested discussion topics</SectionLabel>
-                {pi.brief.topics.length > 0 ? (
-                  <ol className="m-0 flex list-none flex-col gap-2.5 p-0">
-                    {pi.brief.topics.map((t, i) => {
-                      const { cites, also } = topicCitations(t.sources, pi.keyPapers);
-                      return (
-                        <li
-                          key={i}
-                          className="grid grid-cols-[20px_minmax(0,1fr)] gap-2 text-[15px] leading-normal"
-                        >
-                          <span className="text-apollo-slate font-semibold">{i + 1}</span>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-pretty">
-                              {t.text}
-                              {cites.length > 0 ? (
-                                <>
-                                  {" "}
-                                  <sup
-                                    data-report-cite
-                                    className="text-apollo-slate text-[10px] font-semibold"
-                                  >
-                                    [{cites.join(", ")}]
-                                  </sup>
-                                </>
-                              ) : null}
-                            </span>
-                            <AlsoLine also={also} />
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                ) : (
-                  <Empty />
-                )}
-              </div>
-            </>
-          ) : (
-            <p className="m-0 text-[15px] text-[var(--evidence-faint)] italic" data-report-no-brief>
-              {NO_BRIEF}
-            </p>
-          )}
-
-          <MethodsAndTools pi={pi} />
-
-          {pi.translation.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <SectionLabel>Licensable technology</SectionLabel>
-              {pi.translation.map((t, i) => (
-                <div
-                  key={i}
-                  data-report-tech
-                  className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate rounded-lg border px-3.5 py-3 text-[15px] leading-[1.45] font-semibold"
-                >
-                  <ExtLink href={t.url} className="text-apollo-slate hover:underline">
-                    {t.title}
-                  </ExtLink>
-                  {t.patentStatus ? (
-                    <span className="font-normal text-[var(--evidence-body)]">
-                      {" "}
-                      · {t.patentStatus}
-                    </span>
-                  ) : null}
-                </div>
-              ))}
+        <Avatar pi={pi} />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <NameLine pi={pi} size="lg" />
+          {titleLine ? (
+            <div className="text-[13px] text-[var(--evidence-body)]">{titleLine}</div>
+          ) : null}
+          {metaLine ? (
+            <div data-report-meta className="text-[12px] text-[var(--evidence-faint)]">
+              {metaLine}
             </div>
           ) : null}
         </div>
+      </header>
 
-        <aside className="bg-apollo-surface-2 border-apollo-border flex flex-col gap-3 border-t p-5 sm:p-6 md:w-[300px] md:flex-none md:border-t-0 md:border-l print:w-[34%] print:flex-none print:border-t-0 print:border-l">
-          <SectionLabel>Key papers</SectionLabel>
-          {pi.keyPapers.length > 0 ? (
-            <ol className="border-apollo-border m-0 flex list-none flex-col border-t p-0">
-              {pi.keyPapers.map((paper, i) => (
-                <li
-                  key={paper.pmid}
-                  data-report-paper={i + 1}
-                  className="border-apollo-border grid grid-cols-[22px_minmax(0,1fr)] gap-1.5 border-b py-3 last:border-b-0"
-                >
-                  <span className="text-apollo-slate text-[12px] leading-[1.4] font-semibold">
-                    [{i + 1}]
-                  </span>
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <PubTitle
-                      value={paper.title}
-                      className="text-[13px] leading-[1.4] text-pretty"
-                    />
-                    <span className="text-[12px] text-[var(--evidence-faint)]">
-                      {paper.year != null ? `${paper.year} · ` : ""}
-                      <ExtLink
-                        href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(paper.pmid)}/`}
-                        className="text-apollo-slate hover:text-apollo-maroon hover:underline"
-                      >
-                        PMID {paper.pmid} ↗
-                      </ExtLink>
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <Empty />
-          )}
-        </aside>
+      {pi.brief?.angle ? <AngleBand angle={pi.brief.angle} /> : null}
+
+      {pi.brief ? (
+        <>
+          <div className="flex max-w-[820px] flex-col gap-1.5">
+            <SectionLabel>Why this investigator</SectionLabel>
+            {pi.brief.why.trim() ? (
+              <p className="m-0 text-[15px] leading-[1.6] text-pretty">{pi.brief.why}</p>
+            ) : (
+              <Empty />
+            )}
+          </div>
+          <div className="flex max-w-[820px] flex-col gap-2">
+            <SectionLabel>Suggested discussion topics</SectionLabel>
+            {pi.brief.topics.length > 0 ? (
+              <ol className="m-0 flex list-none flex-col gap-2 p-0">
+                {pi.brief.topics.map((t, i) => (
+                  <li
+                    key={i}
+                    className="grid grid-cols-[20px_minmax(0,1fr)] gap-2 text-[15px] leading-normal"
+                  >
+                    <span className="text-apollo-slate font-semibold">{i + 1}</span>
+                    <TopicBody topic={t} keyPapers={pi.keyPapers} />
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <Empty />
+            )}
+          </div>
+        </>
+      ) : (
+        <p className="m-0 text-[15px] text-[var(--evidence-faint)] italic" data-report-no-brief>
+          {NO_BRIEF}
+        </p>
+      )}
+
+      <MethodsAndData pi={pi} />
+      <TechBox pi={pi} />
+
+      <div className="flex flex-col gap-2">
+        <SectionLabel>Key papers</SectionLabel>
+        <PaperGrid papers={pi.keyPapers} />
       </div>
 
-      <FundingStrip pi={pi} />
+      {pi.funding.length > 0 ? <FundingList pi={pi} /> : null}
     </article>
+  );
+}
+
+function InlineLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="mr-1.5 text-[11px] font-semibold tracking-[0.08em] text-[var(--evidence-faint)] uppercase">
+      {children}
+    </span>
+  );
+}
+
+/** A Good- or Weak-fit investigator: a compact card, two per printed page. */
+function CompactProfile({ pi }: { pi: ReportPi }) {
+  const titleLine = [pi.title, pi.department].filter(Boolean).join(" · ");
+  const topic = pi.brief?.topics[0];
+  const tech = pi.translation[0];
+  return (
+    <article
+      id={`pi-${pi.rank}`}
+      data-report-pi={pi.fit}
+      data-report-compact
+      data-report-cwid={pi.cwid}
+      aria-label={`${pi.rank}. ${reportName(pi.name)}`}
+      className={`${cardChrome} flex flex-col gap-3 px-5 py-5 sm:px-6`}
+    >
+      <header data-report-profile-header className="flex items-start gap-3">
+        <div className="text-apollo-maroon w-7 flex-none font-serif text-[22px] leading-none">
+          {pi.rank}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <NameLine pi={pi} size="md" />
+          {titleLine ? (
+            <div className="text-[13px] text-[var(--evidence-body)]">{titleLine}</div>
+          ) : null}
+        </div>
+      </header>
+
+      {pi.brief?.why.trim() ? (
+        <p data-report-why className="m-0 text-[14px] leading-[1.55] text-pretty">
+          {firstSentences(pi.brief.why, 2)}
+        </p>
+      ) : (
+        <p className="m-0 text-[14px] text-[var(--evidence-faint)] italic" data-report-no-brief>
+          {NO_BRIEF}
+        </p>
+      )}
+
+      {topic ? (
+        <div data-report-discuss className="flex gap-0 text-[14px] leading-normal">
+          <div>
+            <InlineLabel>Discuss</InlineLabel>
+          </div>
+          <TopicBody topic={topic} keyPapers={pi.keyPapers} />
+        </div>
+      ) : null}
+
+      {tech ? (
+        <div data-report-tech-line className="truncate text-[13px]">
+          <InlineLabel>Technology</InlineLabel>
+          <ExtLink
+            href={tech.url}
+            className="text-apollo-slate hover:text-apollo-maroon font-semibold hover:underline"
+          >
+            {tech.title}
+          </ExtLink>
+          {pi.translation.length > 1 ? (
+            <span className="text-[var(--evidence-faint)]"> +{pi.translation.length - 1} more</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <PaperGrid papers={pi.keyPapers.slice(0, COMPACT_MAX_PAPERS)} />
+
+      <div
+        data-report-funding-summary
+        className="border-apollo-border border-t pt-2 text-[13px] text-[var(--evidence-body)]"
+      >
+        <InlineLabel>Funding</InlineLabel>
+        {pi.funding.length > 0 ? fundingSummary(pi.funding) : NO_FUNDING}
+      </div>
+    </article>
+  );
+}
+
+const TIER_SUB: Record<MatchaFitTier, string> = {
+  strong: "Full profiles, in rank order.",
+  good: "Short profiles. Full publication and funding detail is on each Scholars profile.",
+  weak: "Short profiles. Full publication and funding detail is on each Scholars profile.",
+};
+
+function Tier({ fit, pis }: { fit: MatchaFitTier; pis: readonly ReportPi[] }) {
+  if (pis.length === 0) return null;
+  return (
+    <section data-report-tier={fit} aria-label={FIT_LABEL[fit]} className="flex flex-col gap-5">
+      <H2 sub={TIER_SUB[fit]}>
+        {FIT_LABEL[fit]} · {pis.length}
+      </H2>
+      <div className="flex flex-col gap-5">
+        {pis.map((pi) =>
+          fit === "strong" ? (
+            <StrongProfile key={pi.cwid} pi={pi} />
+          ) : (
+            <CompactProfile key={pi.cwid} pi={pi} />
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[12px] text-[var(--evidence-faint)]">{label}</span>
+      <span className="font-semibold">{children}</span>
+    </div>
   );
 }
 
 export function MatchaReportView({ report }: { report: MatchaReport }) {
   const footer = reportFooterText(report.generatedAt);
+  const nTerms = report.searchTerms.length;
   return (
     <main
       data-matcha-report
       className="bg-apollo-page min-h-screen font-sans text-[#1a1a1a] antialiased"
     >
-      <style dangerouslySetInnerHTML={{ __html: printCss(footer) }} />
+      <style dangerouslySetInnerHTML={{ __html: printCss() }} />
       <div data-report-bar className="border-apollo-border border-b bg-white">
         <div className="mx-auto flex max-w-[1040px] flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3.5 text-[13px] sm:px-8">
           {/* eslint-disable-next-line @next/next/no-img-element -- inline SVG; must print. */}
@@ -930,75 +1126,79 @@ export function MatchaReportView({ report }: { report: MatchaReport }) {
           <MatchaPrintButton />
         </div>
 
-        <header className="flex flex-col gap-6">
+        <header data-report-cover className="flex flex-col gap-5">
           <div className="text-apollo-maroon text-[12px] font-semibold tracking-[0.08em] uppercase">
             Matcha scouting report
           </div>
-          <h1 className="m-0 max-w-[820px] font-serif text-[32px] leading-[1.12] font-normal tracking-[-0.01em] text-balance sm:text-[44px]">
-            {report.title}
+          <h1
+            data-report-title
+            className="m-0 font-serif text-[32px] leading-[1.12] font-normal tracking-[-0.01em] text-balance sm:text-[40px]"
+          >
+            {titleWithoutRequester(report.title, report.requester)}
           </h1>
-          <p className="m-0 max-w-[720px] text-[17px] leading-[1.55] text-pretty text-[var(--evidence-body)]">
+          <p className="m-0 max-w-[720px] text-[16px] leading-[1.55] text-pretty text-[var(--evidence-body)]">
             {reportSubtitle(report.pis.length)}
           </p>
-          <div className="border-apollo-border-strong flex flex-wrap gap-x-10 gap-y-3 border-t pt-5 text-[14px]">
-            {report.requester ? (
-              <div data-slot="matcha-report-prepared-for" className="flex flex-col gap-0.5">
-                <span className="text-[12px] text-[var(--evidence-faint)]">Prepared for</span>
-                <span className="font-semibold">{report.requester}</span>
-              </div>
-            ) : null}
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[12px] text-[var(--evidence-faint)]">Prepared by</span>
-              <span className="font-semibold">
+          <div className="border-apollo-border-strong flex flex-col gap-4 border-t pt-4 text-[14px]">
+            <div className="flex flex-wrap gap-x-10 gap-y-3">
+              {report.requester ? (
+                <div data-slot="matcha-report-prepared-for">
+                  <Detail label="Prepared for">{report.requester}</Detail>
+                </div>
+              ) : null}
+              <Detail label="Prepared by">
                 {report.officer.name}
                 {report.officer.dept ? `, ${report.officer.dept}` : ""}
-              </span>
+              </Detail>
+              {report.officer.email ? (
+                <Detail label="Contact">
+                  <a
+                    href={`mailto:${report.officer.email}`}
+                    className="text-apollo-slate hover:text-apollo-maroon hover:underline"
+                  >
+                    {report.officer.email}
+                  </a>
+                </Detail>
+              ) : null}
+              <Detail label="Source">
+                Matcha, using Weill Cornell Scholars data as of {shortDate(report.generatedAt)}
+              </Detail>
             </div>
-            {report.officer.email ? (
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[12px] text-[var(--evidence-faint)]">Contact</span>
-                <a
-                  href={`mailto:${report.officer.email}`}
-                  className="text-apollo-slate hover:text-apollo-maroon font-semibold hover:underline"
-                >
-                  {report.officer.email}
-                </a>
+            {nTerms > 0 ? (
+              <div data-report-search-terms className="flex flex-col gap-0.5">
+                <span className="text-[12px] text-[var(--evidence-faint)]">
+                  Search terms ({nTerms})
+                </span>
+                <span className="text-[13px] leading-[1.55] text-pretty text-[var(--evidence-body)]">
+                  {report.searchTerms.join(", ")}
+                </span>
               </div>
             ) : null}
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[12px] text-[var(--evidence-faint)]">Source</span>
-              <span className="font-semibold">
-                Matcha, using Weill Cornell Scholars data as of {shortDate(report.generatedAt)}
-              </span>
-            </div>
           </div>
         </header>
 
-        <Stats report={report} />
+        <div className="flex flex-col gap-4">
+          <StatLine report={report} />
+          <Gaps report={report} />
+        </div>
+
         <Coverage report={report} />
-        <Shortlist report={report} />
 
         {report.pis.length > 0 ? (
-          <section aria-label="Investigator profiles" className="flex flex-col gap-6">
-            <H2>Investigator profiles</H2>
-            {report.pis.map((pi) => (
-              <ProfileCard key={pi.cwid} pi={pi} />
-            ))}
-          </section>
-        ) : null}
+          TIER_ORDER.map((fit) => (
+            <Tier key={fit} fit={fit} pis={report.pis.filter((pi) => pi.fit === fit)} />
+          ))
+        ) : (
+          <p className="text-[var(--evidence-faint)]">No researchers selected.</p>
+        )}
 
         <footer
           data-report-footer
-          className="border-apollo-border-strong flex flex-col gap-1.5 border-t pt-5 text-[13px] leading-[1.6] text-[var(--evidence-faint)]"
+          className="border-apollo-border-strong border-t pt-4 text-[12px] leading-[1.6] text-[var(--evidence-faint)]"
         >
-          <div data-report-footer-text className="text-pretty">
+          <p data-report-footer-text className="m-0 text-pretty">
             {footer}
-          </div>
-          {report.searchTerms.length > 0 ? (
-            <div data-report-search-terms className="text-pretty">
-              Full search terms: {report.searchTerms.join(", ")}.
-            </div>
-          ) : null}
+          </p>
         </footer>
       </div>
     </main>

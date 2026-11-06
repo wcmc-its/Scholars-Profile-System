@@ -179,6 +179,8 @@ export async function loadBriefRecords(cwids: readonly string[]): Promise<Map<st
         mechanism: true,
         endDate: true,
         applId: true,
+        nihIc: true,
+        programType: true,
       },
     }),
     db.read.scholarTechnology.findMany({
@@ -237,6 +239,8 @@ export async function loadBriefRecords(cwids: readonly string[]): Promise<Map<st
       endYear: g.endDate.getUTCFullYear(),
       applId: g.applId,
       roleLabel: fundingRoleLabel(g.role.trim()),
+      nihIc: g.nihIc,
+      programType: g.programType,
     });
   }
   for (const t of techs) {

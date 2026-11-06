@@ -25,10 +25,9 @@ import {
 } from "@/lib/api/matcha-brief";
 import { fitTier, type MatchaCandidate, type MatchaFitTier } from "@/lib/api/matcha-contract";
 import { loadReportThemes } from "@/lib/api/matcha-report-themes";
-import { briefAngle, briefTopics, briefWhy, firstSentence } from "@/lib/edit/matcha-brief-types";
+import { briefAngle, briefTopics, briefWhy } from "@/lib/edit/matcha-brief-types";
 import {
   computeCoverage,
-  signalChips,
   type Coverage,
   type ReportTheme,
 } from "@/lib/edit/matcha-report-coverage";
@@ -70,10 +69,6 @@ export type ReportPi = {
   /** Distinct clinical trials on record; 0 hides the line. */
   trialCount: number;
   fit: MatchaFitTier;
-  /** Up to two record-derived shortlist chips (`signalChips`). */
-  signals: string[];
-  /** The shortlist's line: the first sentence of Why (edited text wins). Null with no brief. */
-  oneLine: string | null;
   keyPapers: ReportPaper[];
   /** Edited text when present, else generated. Null = no brief drafted for this PI. */
   brief: {
@@ -275,8 +270,6 @@ export async function loadMatchaReport(
       methods: rec.methods,
       trialCount: rec.trialCount,
       fit: fitTier(c.fusedScore, topScore),
-      signals: signalChips(rec.funding, c.technologyCount ?? 0),
-      oneLine: brief && brief.why.trim() ? firstSentence(brief.why) : null,
       keyPapers: papersFrom(brief?.topics ?? [], c),
       brief,
     };
