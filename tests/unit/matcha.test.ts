@@ -1181,6 +1181,38 @@ describe("POST /api/edit/matcha (route)", () => {
       // The scan window must exceed the page size, or a heavily re-run paste starves the list.
       expect(mockSubmissionFindMany.mock.calls[0][0].take).toBe(500);
     });
+
+    it("GET ships each paste's run count and whether the viewer ran it — never the hash", async () => {
+      // The Recent searches drawer groups runs per paste ("3 runs") and filters Everyone/Mine.
+      // Both are derived server-side from the hash so the hash itself stays off the wire.
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "su1",
+        isSuperuser: true,
+        isDeveloper: false,
+      });
+      mockSubmissionFindMany.mockResolvedValue([
+        { id: "r5", descriptionHash: "h-a", candidateCount: 9, description: "A", submittedBy: "chair9" },
+        { id: "r4", descriptionHash: "h-a", candidateCount: 9, description: "A", submittedBy: "su1" },
+        { id: "r3", descriptionHash: "h-a", candidateCount: 8, description: "A", submittedBy: "chair9" },
+        { id: "r2", descriptionHash: "h-b", candidateCount: 4, description: "B", submittedBy: "chair9" },
+        { id: "r1", descriptionHash: "h-c", candidateCount: 2, description: "C", submittedBy: "su1" },
+      ]);
+
+      const body = await (await GET()).json();
+
+      expect(
+        body.submissions.map((x: { id: string; runCount: number; mine: boolean }) => [
+          x.id,
+          x.runCount,
+          x.mine,
+        ]),
+      ).toEqual([
+        ["r5", 3, true], // newest run is a colleague's, but the viewer ran it too
+        ["r2", 1, false],
+        ["r1", 1, true],
+      ]);
+      for (const s of body.submissions) expect(s).not.toHaveProperty("descriptionHash");
+    });
   });
 
   /**

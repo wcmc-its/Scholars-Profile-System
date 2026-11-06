@@ -23,7 +23,7 @@
  * fetch is stubbed — no route/engine involvement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { MatchaPanel, resultsSummary } from "@/components/edit/matcha-panel";
 import { conceptWeight } from "@/lib/api/matcha-contract";
@@ -218,6 +218,8 @@ type Submission = {
    *  wire; mirror the route's shape here or the fixture stops being a fixture. */
   submittedByName: string;
   createdAt: string;
+  runCount?: number;
+  mine?: boolean;
 };
 
 async function renderAndSearch() {
@@ -2826,8 +2828,8 @@ describe("MatchaPanel", () => {
     // cross-officer, and that WAS the headline reason — §9 removed it for everyone but a
     // superuser once the audience became chairs pasting email. See the scope tests below.)
     //
-    // Matcha Empty State redesign: the idle form no longer hides this behind a "Recent (N)"
-    // drawer trigger — it renders inline, below the ask card, from the SAME fetched `history`.
+    // Matcha Empty State redesign: the idle form renders the list inline, below the ask card,
+    // from the SAME fetched `history`; the header button opens the full drawer.
     stubFetch({
       concepts: CONCEPTS,
       candidates: THREE,
@@ -2844,9 +2846,9 @@ describe("MatchaPanel", () => {
       ],
     });
     render(<MatchaPanel />);
-    // No drawer trigger on the idle form any more.
-    expect(screen.queryByRole("button", { name: /Recent \(/ })).toBeNull();
     expect(await screen.findByRole("heading", { name: "Recent searches · 1" })).toBeTruthy();
+    // The inline list AND the header's drawer trigger (Recent searches drawer, Matcha.dc.html).
+    expect(screen.getByRole("button", { name: "Recent searches (1)" })).toBeTruthy();
     expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
     expect(screen.getByText("12 matched")).toBeTruthy();
     // Default (own) scope — §10 holds inline too: date only, no submitter name.
@@ -2932,7 +2934,7 @@ describe("MatchaPanel", () => {
     expect(document.querySelector('[data-slot="matcha-ask-mark"]')).toBeTruthy();
 
     // Replay a DIFFERENT saved ask; its response never arrives.
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Recent searches \(1\)/ }));
     fireEvent.click(await screen.findByText("cardiac fibrosis"));
     await screen.findByText(/Ranking researchers/);
 
@@ -3001,7 +3003,7 @@ describe("MatchaPanel", () => {
     await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
 
     // Sponsor B replayed from Recent — and its POST fails, so nothing inside `r.ok` runs.
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Recent searches \(1\)/ }));
     fireEvent.click(await screen.findByText("cardiac fibrosis"));
     await waitFor(() => expect(rankCalls(fetchMock)).toBe(3));
     await screen.findByText(/Couldn.t rank researchers/);
@@ -3188,7 +3190,7 @@ describe("MatchaPanel", () => {
     expect(body.description).toBe("We fund cardiac fibrosis work.");
   });
 
-  it("collapses to 7 rows with a Show-all control, which expands the full list", async () => {
+  it("collapses to 7 rows with a Show-all control, which opens the Recent searches drawer", async () => {
     const submissions = Array.from({ length: 9 }, (_, i) => ({
       id: `s${i + 1}`,
       description: `ask ${i + 1}`,
@@ -3208,9 +3210,244 @@ describe("MatchaPanel", () => {
     expect(screen.queryByText("search 9")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Show all 9 searches" }));
-    expect(screen.getByText("search 8")).toBeTruthy();
-    expect(screen.getByText("search 9")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+    // Not an in-place expander any more: the full list is the drawer.
+    const drawer = await screen.findByRole("dialog", { name: "Recent searches (9)" });
+    expect(within(drawer).getByText("search 8")).toBeTruthy();
+    expect(within(drawer).getByText("search 9")).toBeTruthy();
+    expect(within(drawer).getAllByRole("button", { name: /^Actions for search:/ })).toHaveLength(9);
+  });
+
+  // ── Recent searches drawer (Matcha.dc.html) ──────────────────────────────────
+  describe("Recent searches drawer", () => {
+    function row(over: Partial<Submission> = {}): Submission {
+      return {
+        id: "r1",
+        description: "Interested in renal transport physiology.",
+        title: "renal transport",
+        engine: "spine",
+        candidateCount: 21,
+        submittedByName: "Officer One",
+        createdAt: "2026-08-02T10:00:00.000Z",
+        runCount: 1,
+        mine: true,
+        ...over,
+      };
+    }
+    const TWO = (): Submission[] => [
+      row(),
+      row({
+        id: "r2",
+        description: "Seeking partners in retinal imaging.",
+        title: "retinal imaging",
+        candidateCount: 8,
+        submittedByName: "Officer Two",
+        runCount: 3,
+        mine: false,
+      }),
+    ];
+
+    async function openDrawer(name = /^Recent searches \(\d+\)$/) {
+      fireEvent.click(await screen.findByRole("button", { name }));
+      return screen.findByRole("dialog", { name: /^Recent searches \(/ });
+    }
+
+    function postsOf(fetchMock: ReturnType<typeof stubFetch>) {
+      return fetchMock.mock.calls
+        .filter((c) => (c[1] as { method?: string } | undefined)?.method === "POST")
+        .map((c) => JSON.parse(String((c[1] as { body: string }).body)) as Record<string, unknown>);
+    }
+
+    it("the idle page has a Recent searches (N) button that opens the drawer", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer(/^Recent searches \(2\)$/);
+      expect(within(drawer).getByText("renal transport")).toBeTruthy();
+      expect(within(drawer).getByText("retinal imaging")).toBeTruthy();
+      // Own scope: the retention note says who can read it, and no names or scope toggle.
+      expect(within(drawer).getByText(/Only you, developers, and console administrators/)).toBeTruthy();
+      expect(within(drawer).queryByRole("group", { name: "Whose searches" })).toBeNull();
+      expect(within(drawer).queryByText(/Officer One/)).toBeNull();
+    });
+
+    it("the results path keeps a Recent searches (N) button in the ask card, and only one", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      fireEvent.change(screen.getByLabelText(/the ask/i), {
+        target: { value: "We fund immunotherapy research." },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+      await screen.findByText("Alice Alpha");
+      const card = document.querySelector('[data-slot="matcha-ask-card"]') as HTMLElement;
+      expect(within(card).getByRole("button", { name: "Recent searches (2)" })).toBeTruthy();
+      expect(screen.getAllByRole("button", { name: /^Recent searches \(/ })).toHaveLength(1);
+      expect(await openDrawer()).toBeTruthy();
+    });
+
+    it("no button and no drawer trigger when there is no history", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: [] });
+      render(<MatchaPanel />);
+      await screen.findByLabelText(/the ask/i);
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /^Recent searches \(/ })).toBeNull(),
+      );
+    });
+
+    it("search filters rows on title and pasted text", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      const box = within(drawer).getByRole("searchbox", { name: "Search recent searches" });
+
+      fireEvent.change(box, { target: { value: "RETINAL" } });
+      expect(within(drawer).queryByText("renal transport")).toBeNull();
+      expect(within(drawer).getByText("retinal imaging")).toBeTruthy();
+
+      // Pasted text, not just the title.
+      fireEvent.change(box, { target: { value: "physiology" } });
+      expect(within(drawer).getByText("renal transport")).toBeTruthy();
+      expect(within(drawer).queryByText("retinal imaging")).toBeNull();
+
+      fireEvent.change(box, { target: { value: "nothing like this" } });
+      expect(within(drawer).getByText("No searches match.")).toBeTruthy();
+    });
+
+    it("own scope: a submitter name never matches the search (it is not shown)", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      fireEvent.change(within(drawer).getByRole("searchbox"), { target: { value: "Officer Two" } });
+      expect(within(drawer).getByText("No searches match.")).toBeTruthy();
+    });
+
+    it("admin view: names shown and searchable, Everyone/Mine toggle filters to the viewer's own", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, scope: "all", submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      expect(within(drawer).getByText(/You are seeing every user's searches/)).toBeTruthy();
+      expect(within(drawer).getByText(/Officer Two/)).toBeTruthy();
+
+      fireEvent.change(within(drawer).getByRole("searchbox"), { target: { value: "officer two" } });
+      expect(within(drawer).getByText("retinal imaging")).toBeTruthy();
+      expect(within(drawer).queryByText("renal transport")).toBeNull();
+      fireEvent.change(within(drawer).getByRole("searchbox"), { target: { value: "" } });
+
+      const toggle = within(drawer).getByRole("group", { name: "Whose searches" });
+      const mine = within(toggle).getByRole("button", { name: "Mine" });
+      expect(within(toggle).getByRole("button", { name: "Everyone" }).getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      fireEvent.click(mine);
+      expect(mine.getAttribute("aria-pressed")).toBe("true");
+      expect(within(drawer).getByText("renal transport")).toBeTruthy();
+      expect(within(drawer).queryByText("retinal imaging")).toBeNull();
+    });
+
+    it("a paste run more than once shows its run count; a single run shows none", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      const rows = within(drawer).getAllByRole("listitem");
+      expect(within(rows[0]).queryByText(/runs$/)).toBeNull();
+      expect(within(rows[1]).getByText("3 runs")).toBeTruthy();
+    });
+
+    it("Open results replays the saved search (no fresh flag) and closes the drawer", async () => {
+      const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      fireEvent.click(within(drawer).getByRole("button", { name: "Actions for search: renal transport" }));
+      fireEvent.click(within(drawer).getByRole("menuitem", { name: "Open results" }));
+      await waitFor(() => expect(rankCalls(fetchMock)).toBe(1));
+      expect(postsOf(fetchMock)[0].description).toBe("Interested in renal transport physiology.");
+      expect(postsOf(fetchMock)[0]).not.toHaveProperty("fresh");
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+
+    it("Run again re-runs the same description fresh and closes the drawer", async () => {
+      const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      fireEvent.click(within(drawer).getByRole("button", { name: "Actions for search: retinal imaging" }));
+      fireEvent.click(within(drawer).getByRole("menuitem", { name: "Run again" }));
+      await waitFor(() => expect(rankCalls(fetchMock)).toBe(1));
+      expect(postsOf(fetchMock)[0]).toMatchObject({
+        description: "Seeking partners in retinal imaging.",
+        fresh: true,
+      });
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+
+    it("Edit ask and re-run puts the paste back in the textarea, unrun, and closes the drawer", async () => {
+      const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      fireEvent.click(within(drawer).getByRole("button", { name: "Actions for search: renal transport" }));
+      fireEvent.click(within(drawer).getByRole("menuitem", { name: "Edit ask and re-run" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect((screen.getByLabelText(/the ask/i) as HTMLTextAreaElement).value).toBe(
+        "Interested in renal transport physiology.",
+      );
+      expect(rankCalls(fetchMock)).toBe(0);
+    });
+
+    it("the grant path (no editable paste) offers no Edit ask and re-run", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(
+        <MatchaPanel
+          allowEditPaste={false}
+          eligibility={{ careerStages: ["early"], esiTargeted: false, usRequired: false }}
+        />,
+      );
+      const drawer = await openDrawer();
+      fireEvent.click(within(drawer).getByRole("button", { name: "Actions for search: renal transport" }));
+      expect(within(drawer).getByRole("menuitem", { name: "Open results" })).toBeTruthy();
+      expect(within(drawer).queryByRole("menuitem", { name: "Edit ask and re-run" })).toBeNull();
+    });
+
+    it("Delete… asks in the row first; Cancel keeps it, Delete erases via the server", async () => {
+      const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      const deletes = () =>
+        fetchMock.mock.calls.filter(
+          (c) => (c[1] as { method?: string } | undefined)?.method === "DELETE",
+        );
+
+      fireEvent.click(within(drawer).getByRole("button", { name: "Actions for search: renal transport" }));
+      fireEvent.click(within(drawer).getByRole("menuitem", { name: "Delete…" }));
+      const confirm = within(drawer).getByRole("group", { name: "Confirm delete: renal transport" });
+      expect(within(confirm).getByText(/and its pasted text\? This can't be undone\./)).toBeTruthy();
+      fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+      expect(within(drawer).queryByRole("group", { name: /Confirm delete/ })).toBeNull();
+      expect(deletes()).toHaveLength(0);
+
+      fireEvent.click(within(drawer).getByRole("button", { name: "Actions for search: renal transport" }));
+      fireEvent.click(within(drawer).getByRole("menuitem", { name: "Delete…" }));
+      fireEvent.click(
+        within(within(drawer).getByRole("group", { name: /Confirm delete/ })).getByRole("button", {
+          name: "Delete",
+        }),
+      );
+      await waitFor(() => expect(within(drawer).queryByText("renal transport")).toBeNull());
+      expect(deletes()).toHaveLength(1);
+      expect(JSON.parse(String((deletes()[0][1] as { body: string }).body))).toEqual({
+        submissionId: "r1",
+      });
+      // Delete keeps the drawer open on the remaining rows, and never replays.
+      expect(screen.getByRole("dialog", { name: "Recent searches (1)" })).toBeTruthy();
+      expect(rankCalls(fetchMock)).toBe(0);
+    });
+
+    it("a grouped row's delete names every run", async () => {
+      stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: TWO() });
+      render(<MatchaPanel />);
+      const drawer = await openDrawer();
+      fireEvent.click(within(drawer).getByRole("button", { name: "Actions for search: retinal imaging" }));
+      fireEvent.click(within(drawer).getByRole("menuitem", { name: "Delete all 3 runs…" }));
+      const confirm = within(drawer).getByRole("group", { name: "Confirm delete: retinal imaging" });
+      expect(within(confirm).getByText(/^Delete all 3 runs of/)).toBeTruthy();
+      expect(within(confirm).getByRole("button", { name: "Delete all" })).toBeTruthy();
+    });
   });
 
   it("renders NO recent-searches section when history is empty", async () => {
