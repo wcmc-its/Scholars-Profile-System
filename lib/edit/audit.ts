@@ -65,7 +65,7 @@ export type AuditAction =
   /** Identifiers & Profiles — the scholar (or an authorized editor) set the
    *  ORCID iD. `targetEntityType='scholar'`, `targetEntityId` is the cwid;
    *  before/after carry the old and new iD and, when the value came from the
-   *  "Is this your ORCID iD?" suggestion, `confirmed_suggestion: true`. */
+   *  "Confirm your ORCID iD" suggestion, `confirmed_suggestion: true`. */
   | "orcid_set"
   /** a superuser removed a former-URL redirect (a `slug_history` row) from the
    *  Profile URLs registry (`POST /api/edit/slug-redirect`); the old URL stops

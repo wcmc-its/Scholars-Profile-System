@@ -197,7 +197,7 @@ export function withoutDismissed<T extends { cwid: string; orcid: string }>(
  *  ORCID (RPM), or 3+ shared works in the ORCID registry (`orcid_works`), or a
  *  public WCM email on the registry record (`orcid_email` — no count needed). */
 export const STRONG_MIN_ACCEPTED = 3;
-/** The self-edit home board's "Is this your ORCID iD?" row suggests at a lower bar
+/** The self-edit home board's "Confirm your ORCID iD" row suggests at a lower bar
  *  than the console's strong tier: one accepted article carrying the iD at the
  *  scholar's own byline position (and none rejected, and no competing iD) is enough
  *  to ask, because the scholar is the one confirming. The console keeps 3. */
@@ -229,7 +229,7 @@ export function orcidTiers(candidates: CandidateRow[]): Map<string, OrcidTier> {
 }
 
 /** The per-cwid fold behind `orcidTiers`, shared with the self-edit home board so
- *  the console and the "Is this your ORCID iD?" row can never disagree. `rows` are
+ *  the console and the "Confirm your ORCID iD" row can never disagree. `rows` are
  *  one scholar's candidate rows; empty → `none`. `minAccepted` is the support a
  *  sole RPM iD (or an `orcid_works` overlap) needs to be strong-eligible: the console
  *  passes the default (`STRONG_MIN_ACCEPTED`), the home row `SUGGEST_MIN_ACCEPTED`. */

@@ -163,7 +163,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         beforeValues: { orcid: held },
         afterValues: {
           orcid,
-          ...(orcid === null ? { removed: true } : {}),
+          // "Not me" on a bare suggestion clears nothing: only a held iD is "removed".
+          ...(orcid === null && held !== null ? { removed: true } : {}),
           ...(toDismiss.size > 0 ? { dismissed: [...toDismiss] } : {}),
           ...(confirmedSuggestion === true ? { confirmed_suggestion: true } : {}),
           ...(authz.viaUnitAdminUnit

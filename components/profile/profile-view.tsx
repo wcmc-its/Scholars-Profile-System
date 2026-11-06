@@ -8,6 +8,8 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { MentoringInfoTooltip } from "@/components/scholar/mentoring-info-tooltip";
 import { TechnologiesInfoButton } from "@/components/scholar/technologies-info-button";
+import { OrcidIdIcon } from "@/components/scholar/orcid-id-icon";
+import { OrcidInfoButton } from "@/components/scholar/orcid-info-button";
 import { ClinicalTrialsInfoTooltip } from "@/components/scholar/clinical-trials-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
@@ -89,9 +91,9 @@ export async function ProfileView({ slug }: { slug: string }) {
   // faculty-entered external profiles in platform order. The whole list rides
   // SELF_EDIT_PROFILE_LINKS (the loader already returns `{}` for the links when
   // off; the ORCID row is gated here so the public render is dark as one).
-  const externalProfiles: Array<{ label: string; url: string }> = [
+  const externalProfiles: Array<{ label: string; url: string; orcid?: boolean }> = [
     ...(isProfileLinksEnabled() && profile.orcid
-      ? [{ label: "ORCID", url: `https://orcid.org/${profile.orcid}` }]
+      ? [{ label: "ORCID", url: `https://orcid.org/${profile.orcid}`, orcid: true }]
       : []),
     ...PROFILE_LINK_PLATFORM_KEYS.flatMap((k) => {
       const url = profile.profileLinks?.[k];
@@ -336,18 +338,41 @@ export async function ProfileView({ slug }: { slug: string }) {
                   ) : null}
                   {/* #2699 — ORCID (was JSON-LD-only) and the faculty-entered
                       external profiles. `rel="me"` is the identity-link rel. */}
-                  {externalProfiles.map((p) => (
-                    <li key={p.label}>
-                      <a
-                        href={p.url}
-                        target="_blank"
-                        rel="me noopener noreferrer"
-                        className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-                      >
-                        {p.label} →
-                      </a>
-                    </li>
-                  ))}
+                  {externalProfiles.map((p) =>
+                    p.orcid ? (
+                      // ADR-016 D3: every confirmed iD shows; ORCID's iD icon and
+                      // the full URL only for one the scholar authenticated.
+                      <li key={p.label} className="flex items-center gap-1.5" data-testid="profile-orcid">
+                        <a
+                          href={p.url}
+                          target="_blank"
+                          rel="me noopener noreferrer"
+                          className="inline-flex min-w-0 items-center gap-1.5 text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                        >
+                          {profile.orcidAuthenticated ? (
+                            <>
+                              <OrcidIdIcon />
+                              <span className="truncate">{p.url}</span>
+                            </>
+                          ) : (
+                            <>{p.label} →</>
+                          )}
+                        </a>
+                        <OrcidInfoButton />
+                      </li>
+                    ) : (
+                      <li key={p.label}>
+                        <a
+                          href={p.url}
+                          target="_blank"
+                          rel="me noopener noreferrer"
+                          className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                        >
+                          {p.label} →
+                        </a>
+                      </li>
+                    ),
+                  )}
                 </ul>
               </SidebarCard>
             ) : profile.contactEmailRevealable ? (

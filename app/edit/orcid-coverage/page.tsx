@@ -154,7 +154,7 @@ function Definitions() {
         two or more strong candidate iDs. Inferred iDs never appear on public profiles; they become
         the person&rsquo;s iD only when someone confirms one in this console.
       </Definition>
-      <Definition term="&ldquo;Is this your ORCID iD?&rdquo;">
+      <Definition term="&ldquo;Confirm your ORCID iD&rdquo;">
         The prompt in this console uses a lower bar than strong: {SUGGEST_MIN_ACCEPTED} accepted
         article at the person&rsquo;s own byline, none rejected, no competing iD. The person
         confirming it is the safeguard.

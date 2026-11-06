@@ -552,6 +552,9 @@ export type ProfilePayload = {
    *  orcid is null. Sourced by etl/identity. Used by lib/seo/jsonld to
    *  append an https://orcid.org/<id> URL to Person.sameAs. */
   orcid: string | null;
+  /** ADR-016 D3 — `orcid` was proved by the scholar signing in to ORCID; the
+   *  only state that earns ORCID's iD icon on the profile. */
+  orcidAuthenticated?: boolean;
   /** #2699 — faculty-entered external profile links (`field_override('profileLinks')`),
    *  `{ platform: canonical https URL }`. Rendered in the Contact card and pushed
    *  into JSON-LD `sameAs`. `{}` when none or `SELF_EDIT_PROFILE_LINKS` is off. */
@@ -1796,6 +1799,7 @@ export const getScholarFullProfileBySlug = cache(
       hasClinicalProfile: scholar.hasClinicalProfile,
       clinicalProfileUrl: scholar.clinicalProfileUrl,
       orcid: scholar.orcid,
+      orcidAuthenticated: scholar.orcidConfirmMethod === "authenticated",
       profileLinks,
       overview: effectiveOverview,
       appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({

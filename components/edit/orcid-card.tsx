@@ -2,13 +2,16 @@
  * The ORCID iD card on the Identifiers & Profiles tab. Four states, the same
  * ones the home board's ORCID row shows, but with room to act:
  *
- *   suggested  → the inferred iD in a boxed row, pill "High confidence
- *                suggestion", its per-source evidence; "Confirm this iD"
- *                confirms it in one click, or enter a different one.
+ *   suggested  → the inferred iD in a boxed row, pill "Suggested", its
+ *                per-source evidence. The scholar's own view (`ORCID_CONNECT`
+ *                on) leads with "Sign in to ORCID to confirm"; one-click
+ *                "Yes, this is my iD" and "Not me" sit under it. Anyone else
+ *                (proxy, admin, librarian) gets "Confirm this iD" and "Not me".
  *   confirmed  → (this session) the same row, pill "Confirmed", "Confirmed by
  *                you" above the evidence it was confirmed on; Change, Remove.
- *   on file    → the iD that was already there, pill "On file", WHY it is on
- *                file (the evidence persists); Change, Remove.
+ *   on file    → the iD that was already there: pill "Confirmed" with WHO
+ *                confirmed it (`confirmMethod`), or "On file" when nobody knows;
+ *                the evidence persists; Change, Remove.
  *   conflict   → on file AND the inferred rows point at a DIFFERENT iD: both
  *                rows, each with its pill, and "Replace with the suggested iD"
  *                / "Keep the iD on file" / "Remove both". Keep confirms the
@@ -38,7 +41,9 @@ import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, Lock, Sparkles } from "lucide-react";
 
 import { EditPanel, OwnedBadge } from "@/components/edit/edit-panel";
-import { Button } from "@/components/ui/button";
+import { OrcidIdIcon } from "@/components/scholar/orcid-id-icon";
+import { OrcidInfoButton } from "@/components/scholar/orcid-info-button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   firstName,
@@ -58,6 +63,8 @@ export type OrcidCardProps = {
   suggested: { orcid: string; accepted: number; evidence?: OrcidEvidence[] } | null;
   /** `onFile` was proved by an ORCID sign-in (#3115). */
   authenticated?: boolean;
+  /** `scholar.orcidConfirmMethod` — who put `onFile` there (null = unknown). */
+  confirmMethod?: string | null;
   /** Offer "Connect your ORCID iD" — `ORCID_CONNECT` on and the scholar's own view. */
   connectEnabled?: boolean;
 };
@@ -67,21 +74,6 @@ const CONNECT_OUTCOME: Record<string, { text: string; error: boolean }> = {
   denied: { text: "You didn't grant access on ORCID, so nothing changed.", error: false },
   failed: { text: "Couldn't connect your ORCID iD. Try again.", error: true },
 };
-
-/** ORCID's iD mark (brand asset), 16px. */
-function OrcidIdIcon() {
-  return (
-    <svg viewBox="0 0 256 256" className="size-4 shrink-0" aria-hidden>
-      <path fill="#A6CE39" d="M256 128c0 70.7-57.3 128-128 128S0 198.7 0 128 57.3 0 128 0s128 57.3 128 128z" />
-      <path fill="#fff" d="M86.3 186.2H70.9V79.1h15.4v107.1z" />
-      <path
-        fill="#fff"
-        d="M108.9 79.1h41.6c39.6 0 57 28.3 57 53.6 0 27.5-21.5 53.6-56.8 53.6h-41.8V79.1zm15.4 93.3h24.5c34.9 0 42.9-26.5 42.9-39.7 0-21.5-13.7-39.7-43.7-39.7h-23.7v79.4z"
-      />
-      <path fill="#fff" d="M88.7 56.8c0 5.5-4.5 10.1-10.1 10.1s-10.1-4.6-10.1-10.1 4.5-10.1 10.1-10.1 10.1 4.6 10.1 10.1z" />
-    </svg>
-  );
-}
 
 function errorMessage(code: string): string {
   switch (code) {
@@ -99,7 +91,7 @@ type Status = "suggested" | "on-file" | "confirmed" | "authenticated";
 
 const PILL: Record<Status, { label: string; icon: typeof Check; className: string }> = {
   suggested: {
-    label: "High confidence suggestion",
+    label: "Suggested",
     icon: Sparkles,
     className: "bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate",
   },
@@ -120,6 +112,26 @@ const PILL: Record<Status, { label: string; icon: typeof Check; className: strin
   },
 };
 
+/** WHO confirmed the on-file iD, from `orcidConfirmMethod` (ADR-016 D2). */
+function provenanceLine(method: string | null | undefined, subject: string | null) {
+  switch (method) {
+    case "authenticated":
+      return `${subject ?? "You"} signed in to ORCID to confirm this iD`;
+    case "self":
+      return subject ? `Confirmed by ${subject}` : "Confirmed by you";
+    case "proxy":
+      return "Confirmed by a delegate";
+    case "librarian":
+      return "Confirmed by a WCM librarian";
+    case "email_verified":
+      return "Matched to a verified WCM email on the ORCID record";
+    case "rpm_admin":
+      return "Added by a Publication Manager admin";
+    default:
+      return undefined;
+  }
+}
+
 export function OrcidCard({
   cwid,
   mode,
@@ -128,6 +140,7 @@ export function OrcidCard({
   onFileEvidence = [],
   suggested,
   authenticated = false,
+  confirmMethod = null,
   connectEnabled = false,
 }: OrcidCardProps) {
   const router = useRouter();
@@ -209,7 +222,13 @@ export function OrcidCard({
   const offer = suggested && !dismissed ? suggested : null;
   const competing = offer && offer.orcid !== current ? offer : null;
   const status: Status =
-    saved !== undefined ? "confirmed" : authenticated ? "authenticated" : "on-file";
+    saved !== undefined
+      ? "confirmed"
+      : authenticated
+        ? "authenticated"
+        : confirmMethod
+          ? "confirmed"
+          : "on-file";
 
   /** The boxed iD row: the linked iD, its evidence lines, a status pill. */
   const idRow = (
@@ -295,17 +314,39 @@ export function OrcidCard({
   // Sits first in the actions row, inline with Confirm / Remove; its note goes
   // under the row.
   const showConnect = connectEnabled && !(authenticated && saved === undefined);
+  // Only a suggestion with nothing on file makes sign-in the primary action.
+  const connectPrimary = !current && !!offer && !editing;
   const connect = (
     // A full navigation, not <Link>: a prefetch would start the OAuth flow.
     // eslint-disable-next-line @next/next/no-html-link-for-pages
     <a
       href="/api/edit/orcid/connect"
-      className="border-apollo-border-strong hover:bg-apollo-surface-2 text-foreground inline-flex h-8 items-center gap-2 rounded-md border bg-white px-3 text-sm font-semibold"
+      className={
+        connectPrimary
+          ? `${buttonVariants({ variant: "apollo", size: "sm" })} gap-2`
+          : "border-apollo-border-strong hover:bg-apollo-surface-2 text-foreground inline-flex h-8 items-center gap-2 rounded-md border bg-white px-3 text-sm font-semibold"
+      }
       data-testid="orcid-connect"
     >
       <OrcidIdIcon />
-      {current ? "Connect a different ORCID iD" : "Connect your ORCID iD"}
+      {current
+        ? "Sign in to ORCID to verify"
+        : offer
+          ? "Sign in to ORCID to confirm"
+          : "Connect your ORCID iD"}
     </a>
+  );
+  const notMe = offer && (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={() => void save(null, false, [offer.orcid])}
+      disabled={busy}
+      data-testid="orcid-not-me"
+    >
+      {subject ? `Not ${subject}` : "Not me"}
+    </Button>
   );
   const connectNote = (
     <p className="text-muted-foreground text-xs" data-testid="orcid-connect-block">
@@ -317,6 +358,7 @@ export function OrcidCard({
   return (
     <EditPanel
       heading="ORCID iD"
+      headingBadge={<OrcidInfoButton />}
       headerAction={<OwnedBadge />}
       slot="orcid-card"
       description={`Needed for NIH SciENcv biosketches; also makes ${whose} publication matching more reliable.`}
@@ -327,11 +369,7 @@ export function OrcidCard({
           currentEvidence,
           status,
           "orcid-on-file",
-          status === "confirmed"
-            ? "Confirmed by you"
-            : status === "authenticated"
-              ? "You signed in to ORCID to confirm this iD"
-              : undefined,
+          saved !== undefined ? "Confirmed by you" : provenanceLine(confirmMethod, subject),
         )}
       {current &&
         competing &&
@@ -404,7 +442,7 @@ export function OrcidCard({
             </Button>
           </>
         )}
-        {!current && offer && !editing && (
+        {!current && offer && !editing && !connectEnabled && (
           <>
             <Button
               type="button"
@@ -416,23 +454,40 @@ export function OrcidCard({
             >
               Confirm this iD
             </Button>
-            {!connectEnabled && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setEditing(true)}
-                disabled={busy}
-                data-testid="orcid-enter-other"
-              >
-                Enter a different iD
-              </Button>
-            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setEditing(true)}
+              disabled={busy}
+              data-testid="orcid-enter-other"
+            >
+              Enter a different iD
+            </Button>
+            {notMe}
           </>
         )}
         {/* ORCID's rule: with sign-in available, the scholar never types an iD. */}
         {!connectEnabled && (editing || (!current && !offer)) && form}
       </div>
+      {/* The scholar's own view: sign-in leads; one-click confirm stays (ADR-016 D4). */}
+      {connectEnabled && !current && offer && !editing && (
+        <div className="text-muted-foreground flex flex-wrap items-center gap-x-1 text-sm">
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="text-apollo-slate h-auto px-0 underline"
+            onClick={() => void save(offer.orcid, true)}
+            disabled={busy}
+            data-testid="orcid-confirm"
+          >
+            Yes, this is my iD
+          </Button>
+          <span>(without signing in) ·</span>
+          {notMe}
+        </div>
+      )}
       {showConnect && connectNote}
       {outcome && (
         <p

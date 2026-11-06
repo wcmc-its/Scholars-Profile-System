@@ -320,14 +320,14 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(cta.getAttribute("href")).toBe("/edit?attr=identifiers-profiles");
   });
 
-  it("Home: the ORCID row — a strong inference asks 'Is this your ORCID iD?' with the evidence and a Review button; it does not count as done", () => {
+  it("Home: the ORCID row — a strong inference asks 'Confirm your ORCID iD' with the evidence and a Review button; it does not count as done", () => {
     const withSuggestion: EditContext = {
       ...ctx,
       orcidVerdict: { tier: "strong", orcid: "0000-0002-9930-2193", accepted: 3 },
     };
     render(<EditPage ctx={withSuggestion} mode="self" orcidTabEnabled />);
     const row = screen.getByTestId("home-item-orcid");
-    expect(row.textContent).toContain("Is this your ORCID iD?");
+    expect(row.textContent).toContain("Confirm your ORCID iD");
     expect(row.textContent).toContain("0000-0002-9930-2193 · on 3 of your accepted publications in ReCiter");
     expect(row.textContent).toContain("WCM records");
     expect(screen.getByTestId("home-card-orcid").textContent).toContain("Review");
@@ -359,7 +359,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByTestId("orcid-on-file-status").textContent).toBe("On file");
     const also = screen.getByTestId("orcid-also-suggested");
     expect(also.textContent).toContain("0000-0002-9930-2193");
-    expect(screen.getByTestId("orcid-also-suggested-status").textContent).toBe("High confidence suggestion");
+    expect(screen.getByTestId("orcid-also-suggested-status").textContent).toBe("Suggested");
     expect(within(also).getByTestId("orcid-also-suggested-evidence").querySelectorAll("li")).toHaveLength(2);
   });
 
@@ -403,7 +403,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
     };
     render(<EditPage ctx={withSuggestion} mode="superuser" />);
     const row = screen.getByTestId("home-item-orcid");
-    expect(row.textContent).toContain("Is this Alex's ORCID iD?");
+    expect(row.textContent).toContain("Confirm Alex's ORCID iD");
     expect(row.textContent).toContain("matches Alex's record in the ORCID registry");
     expect(row.textContent).toContain("makes Alex's publication matching more reliable");
     expect(row.textContent).not.toContain("their");
