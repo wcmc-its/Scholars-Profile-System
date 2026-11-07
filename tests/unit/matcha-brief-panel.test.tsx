@@ -448,6 +448,49 @@ describe("Matcha brief UI", () => {
     expect(within(flat).getByText("Regional stroke registry · 9 papers")).toBeTruthy();
   });
 
+  it("shows the brief's curated method pills in two groups, counting pills", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    const saved = brief("p1");
+    saved.generated.angle = "Five trials on record and a cohort of scans.";
+    saved.generated.angleRole = "Imaging trial site lead";
+    saved.generated.dataSources = ["Regional stroke registry", "Stroke registry (regional)"];
+    saved.generated.methodPills = [
+      { label: "MRI", kind: "method", from: ["Magnetic resonance imaging (MRI) scanner"] },
+      {
+        label: "Stroke registry",
+        kind: "data",
+        from: ["Regional stroke registry", "Stroke registry (regional)"],
+      },
+      { label: "Mouse models", kind: "method", from: ["Mouse models"] },
+    ];
+    const methods = [
+      { name: "Regional stroke registry", category: null, papers: 9 },
+      { name: "Stroke registry (regional)", category: null, papers: 2 },
+      { name: "Magnetic resonance imaging (MRI) scanner", category: "imaging", papers: 8 },
+      { name: "Mouse models", category: "animal model", papers: 7 },
+      { name: "Chi-square test", category: "statistics", papers: 6 },
+    ];
+    stub({ candidates: pool(2), saved: [saved], records: { ...EMPTY_RECORDS, methods } });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    const role = section.querySelector('[data-slot="matcha-brief-angle-role"]')!;
+    expect(role.textContent).toBe("Imaging trial site lead.");
+    expect(role.parentElement!.textContent).toBe(
+      "Imaging trial site lead. Five trials on record and a cohort of scans.",
+    );
+
+    fireEvent.click(within(section).getByText("Methods and tools · 3"));
+    const sources = section.querySelector('[data-slot="matcha-brief-data-sources"]') as HTMLElement;
+    const rest = section.querySelector('[data-slot="matcha-brief-method-list"]') as HTMLElement;
+    expect(within(sources).getByText("Stroke registry")).toBeTruthy();
+    expect(within(sources).queryByText(/Regional stroke registry/)).toBeNull();
+    expect(
+      [...rest.querySelectorAll("div")].slice(1).map((d) => d.textContent),
+    ).toEqual(["MRI", "Mouse models"]);
+    // A raw row the model left out (a generic statistic) is not shown.
+    expect(within(section).queryByText(/Chi-square/)).toBeNull();
+  });
+
   it("flag off: no brief request, no brief chrome", async () => {
     const { calls } = stub({ candidates: pool(3), saved: [brief("p1")] });
     await search(false);

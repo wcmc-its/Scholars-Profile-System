@@ -33,14 +33,21 @@ export type BriefGenerated = {
   /** 1-2 sentences: the concrete role this PI could play for the requester. Absent on briefs
    *  drafted before it existed; read it through `briefAngle`, which treats absent as "". */
   angle?: string;
-  /** 2-6 words: the role the angle sentence is built around ("Clinical-trial lead"), shown bold
-   *  before it. Absent on briefs drafted before it existed and when the model gave no valid one;
+  /** A 3-5 word noun phrase: the role the angle sentence is built around ("Clinical-trial lead"),
+   *  shown bold with a trailing period before it (`angleRoleLead`); the sentence does not restate
+   *  it. Absent on briefs drafted before it existed and when the model gave no valid one;
    *  read it through `briefAngleRole`. */
   angleRole?: string;
   /** The names in `records.methods` the model labelled data sources (registries, claims/EHR data,
    *  cohorts, biobanks, national databases, trial datasets). Each is one of the method names it
    *  was given, never invented. Absent on older briefs = no split (every method is a "Method"). */
   dataSources?: string[];
+  /** The model's curated "Methods and tools": at most `MAX_METHOD_PILLS` short labels, most
+   *  relevant to the ask first, aliases merged, generic statistics left out. `from` lists the
+   *  `records.methods` names each pill stands for (post-checked: each names a given method).
+   *  Absent on older briefs; read it through `briefMethodPills`. When present, `dataSources` is
+   *  derived from it (every `from` name of a "data" pill). */
+  methodPills?: MethodPill[];
   topics: BriefTopic[];
   /** How many unsupported statements the fact-check removed. A count only — never the claim. */
   removedCount: number;
@@ -56,6 +63,13 @@ export type BriefEdited = {
 
 /** Longest role phrase the model or an officer may store. */
 export const MAX_ANGLE_ROLE_CHARS = 60;
+
+/** One curated method pill as stored. */
+export type MethodPill = { label: string; kind: "data" | "method"; from: string[] };
+/** At most this many pills per brief. */
+export const MAX_METHOD_PILLS = 12;
+/** Longest pill label kept; a longer one is not a short label and is dropped. */
+export const MAX_METHOD_PILL_CHARS = 40;
 
 export type BriefRecords = {
   funding: {
@@ -106,6 +120,35 @@ export function briefAngle(b: Pick<BriefWire, "generated" | "edited">): string {
  *  prints unbolded). */
 export function briefAngleRole(b: Pick<BriefWire, "generated" | "edited">): string {
   return b.edited?.angleRole ?? b.generated.angleRole ?? "";
+}
+
+/** The bold lead before the angle sentence: the role with a trailing period ("Clinical-trial
+ *  lead."), unless it already ends in sentence punctuation. "" for no role. */
+export function angleRoleLead(role: string): string {
+  const r = role.trim();
+  if (!r) return "";
+  return /[.!?]$/.test(r) ? r : `${r}.`;
+}
+
+/** The brief's curated method pills, each with a paper count: the most papers of any `methods`
+ *  row (the live records) the pill stands for, 0 when none is on record any more. [] for an older
+ *  brief with no pills; callers then fall back to `splitMethods`. */
+export function briefMethodPills(
+  b: Pick<BriefWire, "generated">,
+  methods: readonly { name: string; papers: number }[],
+): { label: string; kind: "data" | "method"; papers: number }[] {
+  const pills = b.generated.methodPills ?? [];
+  if (pills.length === 0) return [];
+  const papersByName = new Map<string, number>();
+  for (const m of methods) {
+    const key = normalizeMethodName(m.name);
+    papersByName.set(key, Math.max(papersByName.get(key) ?? 0, m.papers));
+  }
+  return pills.map((p) => ({
+    label: p.label,
+    kind: p.kind,
+    papers: Math.max(0, ...p.from.map((n) => papersByName.get(normalizeMethodName(n)) ?? 0)),
+  }));
 }
 
 /** The method names the model labelled data sources; [] for an older brief (no split). */
