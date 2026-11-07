@@ -9,6 +9,7 @@
  * the officer pastes the copied addresses into Bcc.
  */
 import { TITLE_ORG_JOIN } from "@/lib/api/matcha-contract";
+import { angleRoleLead } from "@/lib/edit/matcha-brief-types";
 import { stripUnitDisambiguation } from "@/lib/name-sort";
 
 /** `{focus}` = the search's focus (its title without the requester prefix). */
@@ -130,4 +131,36 @@ export function buildMailto(parts: {
 /** The addresses as Outlook takes them in Bcc. */
 export function addressList(emails: readonly string[]): string {
   return emails.join("; ");
+}
+
+/** The targeted message's discussion-topic line (the brief's first topic). */
+export const MATCHA_EMAIL_TOPIC_LINE = "A possible starting point: {topic}";
+
+/**
+ * One investigator's TARGETED message (the "Email individually" review queue): the per-person
+ * message with, after the first paragraph, the officer's pitch, "Why we thought of you:
+ * {Role.} {angle}" and one discussion topic. Each missing piece is left out cleanly; with no
+ * angle there is no "Why" line even when a role is set (the role only leads the angle).
+ */
+export function buildTargetedEmail(
+  ctx: EmailContext & {
+    name: string;
+    pitch?: string | null;
+    angle?: string | null;
+    angleRole?: string | null;
+    topic?: string | null;
+  },
+): { subject: string; body: string } {
+  const { subject, body } = buildPersonEmail({ ...ctx, angle: null });
+  const angle = ctx.angle?.trim();
+  const lead = angleRoleLead(ctx.angleRole ?? "");
+  const topic = ctx.topic?.trim();
+  const extra = [
+    ctx.pitch?.trim() ?? "",
+    angle ? fillTemplate(MATCHA_EMAIL_ANGLE_LINE, { angle: lead ? `${lead} ${angle}` : angle }) : "",
+    topic ? fillTemplate(MATCHA_EMAIL_TOPIC_LINE, { topic }) : "",
+  ].filter(Boolean);
+  const paragraphs = body.split("\n\n");
+  paragraphs.splice(2, 0, ...extra);
+  return { subject, body: paragraphs.join("\n\n") };
 }
