@@ -163,6 +163,7 @@ import {
   buildPersonEmail,
   emailFocus,
 } from "@/lib/edit/matcha-email";
+import { TargetedEmailDialog, type TargetedPerson } from "@/components/edit/matcha-targeted-dialog";
 import { readOverviewStream } from "@/lib/edit/overview-stream";
 import type { EligibilityRequirements } from "@/lib/funding/screening";
 import {
@@ -712,6 +713,8 @@ export function MatchaPanel({
   const [reportPrompt, setReportPrompt] = useState<ReportPrompt | null>(null);
   // Matcha contact — the "Email selected (BCC)" dialog. Null = closed.
   const [emailDialog, setEmailDialog] = useState<EmailDialogState | null>(null);
+  // Matcha targeted messages — the "Email individually" queue: its people, snapshotted on open.
+  const [targetedPeople, setTargetedPeople] = useState<TargetedPerson[] | null>(null);
   // The submission a draft belongs to — a result landing after a new search is dropped.
   const briefSubRef = useRef<string | null>(null);
   const briefQueueRef = useRef<{ cwid: string; sid: string }[]>([]);
@@ -1815,6 +1818,38 @@ export function MatchaPanel({
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  /** "Email individually": the ticked rows in rank order, with the brief pieces each message uses. */
+  function openTargetedDialog() {
+    if (!contactOn || shortlistRows.length === 0 || shortlistRows.length > CONTACT_MAX) return;
+    setTargetedPeople(
+      shortlistRows.map(({ c }) => {
+        const b = briefMap.get(c.cwid);
+        return {
+          cwid: c.cwid,
+          name: c.name,
+          hasBrief: b != null,
+          angle: b ? briefAngle(b) : "",
+          angleRole: b ? briefAngleRole(b) : "",
+          topic: b ? (briefTopics(b)[0]?.text ?? "") : "",
+        };
+      }),
+    );
+  }
+
+  /** The pitch, drafted by the gated route from the SAVED search. */
+  async function draftPitch(): Promise<string> {
+    const r = await fetch("/api/edit/matcha/pitch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({ submissionId }),
+    });
+    const body = (await r.json().catch(() => null)) as { ok?: boolean; pitch?: string } | null;
+    if (!r.ok || !body?.ok) throw new Error("pitch_unavailable");
+    return body.pitch ?? "";
   }
 
   /** Per-person "Email": that person alone, greeted by name, with their partnership angle. */
@@ -3513,6 +3548,43 @@ export function MatchaPanel({
                           Email selected (BCC)
                         </Button>
                       )
+                    ) : null}
+                    {/* Matcha targeted messages — same audience and cap as the Bcc action. */}
+                    {contactOn ? (
+                      shortlistRows.length > CONTACT_MAX ? (
+                        <HoverTooltip
+                          wide
+                          text={`Email addresses are available for ${CONTACT_MAX} or fewer people. Untick some rows.`}
+                        >
+                          <Button type="button" variant="outline" size="sm" disabled>
+                            <Mail className="size-3.5" />
+                            Email individually
+                          </Button>
+                        </HoverTooltip>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          data-slot="matcha-email-individually"
+                          disabled={shortlistRows.length === 0 || targetedPeople != null}
+                          onClick={openTargetedDialog}
+                        >
+                          <Mail className="size-3.5" />
+                          Email individually
+                        </Button>
+                      )
+                    ) : null}
+                    {targetedPeople && submissionId ? (
+                      <TargetedEmailDialog
+                        submissionId={submissionId}
+                        people={targetedPeople}
+                        focus={contactFocus}
+                        requester={effectiveRequester ?? null}
+                        loadContacts={() => fetchContacts(targetedPeople.map((p) => p.cwid))}
+                        draftPitch={draftPitch}
+                        onClose={() => setTargetedPeople(null)}
+                      />
                     ) : null}
                     {emailDialog ? (
                       <EmailSelectedDialog
