@@ -16,6 +16,8 @@ import { sanitizePubTitle } from "@/lib/utils";
  *  isn't a peer-reviewed article. Every other type renders no label. */
 const PUBLICATION_TYPE_LABELS: Readonly<Record<string, string>> = {
   "conference-abstract": "Conference abstract",
+  // Proceedings venues (e.g. a lecture-notes series) read like journals without it.
+  "conference-paper": "Conference paper",
   preprint: "Preprint",
   // Books, in each source's vocabulary (Crossref / OpenAlex lowercase, Scopus
   // subtypeDescription). Without a label a book reads as an article in a

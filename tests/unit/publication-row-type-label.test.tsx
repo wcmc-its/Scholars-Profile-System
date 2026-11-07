@@ -47,6 +47,7 @@ describe("publicationTypeLabel", () => {
 describe("PublicationRow type label", () => {
   it.each([
     ["conference-abstract", "Conference abstract"],
+    ["conference-paper", "Conference paper"],
     ["preprint", "Preprint"],
   ])("renders %s as a %s badge", (type, label) => {
     render(<PublicationRow pub={makePub({ publicationType: type })} />);
