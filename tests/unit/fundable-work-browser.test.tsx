@@ -82,6 +82,11 @@ describe("FundableWorkBrowser", () => {
     // A preprint has no conference, and nor does a journal we have no society for.
     expect(conferenceOf({ type: "preprint", venue: "bioRxiv", date: "2026-06-01" })).toBeNull();
     expect(conferenceOf({ type: "conference-abstract", venue: "Clinical Chemistry", date: "2026-06-01" })).toBeNull();
+    // A conference paper names its meeting the same way.
+    expect(
+      conferenceOf({ type: "conference-paper", venue: "IEEE Widget Imaging Symposium", date: "2026-06-01" }),
+    ).toEqual({ name: "IEEE Widget Imaging Symposium", inferred: false });
+    expect(conferenceOf({ type: "preprint", venue: "IEEE Widget Imaging Symposium", date: "2026-06-01" })).toBeNull();
   });
 
   it("facets on the derived conference and marks it inferred", () => {
