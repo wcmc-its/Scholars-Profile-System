@@ -249,6 +249,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   matcha: "deny",
   "matcha/brief": "deny",
   "matcha/contacts": "deny",
+  "matcha/pitch": "deny",
   "mentee-suggestions/[id]/dismiss": "deny",
   "mentee-suggestions/[id]/restore": "deny",
   "methods/families/review": "allow",
