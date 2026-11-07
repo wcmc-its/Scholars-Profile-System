@@ -45,7 +45,10 @@ import {
 } from "@/lib/api/matcha-contract";
 import {
   MAX_ANGLE_ROLE_CHARS,
+  MAX_METHOD_PILLS,
+  MAX_METHOD_PILL_CHARS,
   normalizeMethodName,
+  type MethodPill,
   type BriefEdited,
   type BriefGenerated,
   type BriefRecords,
@@ -147,7 +150,7 @@ export function briefModelId(): string {
 
 // The persisted shapes live in a CLIENT-SAFE module (`lib/edit/matcha-brief-types.ts`) so the
 // console panel can type against them without importing this file, which pulls in `@/lib/db`.
-export type { BriefEdited, BriefGenerated, BriefRecords, BriefSource, BriefTopic };
+export type { BriefEdited, BriefGenerated, BriefRecords, BriefSource, BriefTopic, MethodPill };
 
 // ── Records (deterministic) ──────────────────────────────────────────────────
 
@@ -357,17 +360,28 @@ export const BRIEF_SYSTEM_PROMPT = [
   "the facts do not list. The same bans as `why` apply (no numbers other than the trial count,",
   "no keys, no superlatives, no speculation about interest or availability). Never mention the",
   "facts, records or inputs, or what is missing or absent (no 'no trials are listed'); say only",
-  "what the researcher can do.",
+  "what the researcher can do. The angle is printed right after `angleRole` in bold, so it must",
+  "NOT restate or rephrase the role: start with what the researcher brings ('Five trials on",
+  "record and …') or with a verb phrase ('Can validate …'), never with the role or a noun phrase",
+  "like it ('Imaging biomarker partner who …').",
   "",
-  "`angleRole`: the role your `angle` sentence is built around, as a short noun phrase of 2-6",
-  "words in sentence case, for example 'Clinical-trial lead' or 'Animal-model validation partner'.",
-  "It is shown in bold before the angle sentence, so it must name the same role. No names, numbers",
-  "or keys.",
+  "`angleRole`: the role your `angle` sentence is built around, as a noun phrase of 3-5 words in",
+  "sentence case, for example 'Clinical-trial site lead' or 'Animal-model validation partner'.",
+  "No names, numbers or keys, and no final period.",
   "",
-  "`dataSources`: the names in METHODS_AND_TOOLS that are data sources rather than methods:",
-  "registries, claims or EHR data, cohorts, biobanks, national databases and trial datasets. Copy",
-  "each name exactly as METHODS_AND_TOOLS spells it, and only names that appear there. Return an",
-  "empty list when none are data sources.",
+  "`methodPills`: a curated list of at most 12 methods and data sources from METHODS_AND_TOOLS,",
+  "ordered most relevant to the ask first. Each pill has:",
+  "  - `label`: a short conventional label, at most 40 characters, in sentence case except",
+  "    acronyms and proper names: an acronym like 'MRI' rather than 'Magnetic resonance imaging",
+  "    (MRI) scanner', a database's common short name.",
+  "  - `kind`: 'data' for registries, claims or EHR data, cohorts, biobanks, national databases,",
+  "    trial datasets and public data systems; 'method' for everything else.",
+  "  - `from`: the METHODS_AND_TOOLS names this pill stands for, each copied exactly as",
+  "    METHODS_AND_TOOLS spells it. Only names that appear there.",
+  "Merge aliases and synonyms into ONE pill whose `from` lists them all (two names for the same",
+  "index or score; the same registry listed twice). Leave out generic statistics and generic",
+  "measurements (ANOVA, chi-square, multivariable analysis, BMI and the like): they do not help a",
+  "pharma reader. Return an empty list when nothing qualifies.",
   "",
   "`topics`: 2 discussion topics (3 only when a third matched concept has clearly distinct support).",
   "Each topic is where the ask meets the researcher's own work:",
@@ -396,7 +410,20 @@ const BriefSchema = z.object({
   why: z.string(),
   angle: z.string().nullish(),
   angleRole: z.string().nullish(),
+  // No longer asked for (methodPills replaced it); still accepted, and the fallback when the
+  // model returns no valid pill.
   dataSources: z.array(z.string()).nullish(),
+  // `kind` is a plain string, not an enum: anything but "data" reads as a method instead of
+  // failing the whole draft on a schema error.
+  methodPills: z
+    .array(
+      z.object({
+        label: z.string(),
+        kind: z.string().nullish(),
+        from: z.array(z.string()).nullish(),
+      }),
+    )
+    .nullish(),
   topics: z
     .array(
       z.object({
@@ -476,8 +503,11 @@ const norm = (s: string) => s.trim().toLowerCase();
  *   - a PMID-looking token in `why` or `angle` is stripped (the prompt forbids them; this enforces
  *     it).
  * Concept spelling is canonicalized to the saved search's term.
- * `angleRole` is trimmed and length-capped (`cleanAngleRole`); `dataSources` keeps only names in
- * `methods`, the list the model was given (`checkDataSources`).
+ * `angleRole` is trimmed and length-capped (`cleanAngleRole`), and an angle that opens by
+ * restating it loses the restatement (`stripRoleRestatement`). `methodPills` is grounded in
+ * `methods`, the list the model was given (`checkMethodPills`); `dataSources` is derived from the
+ * kept "data" pills, or, with no pill kept, is the model's own list filtered the same way
+ * (`checkDataSources`).
  */
 export function postCheckBrief(
   raw: RawBrief,
@@ -489,6 +519,7 @@ export function postCheckBrief(
   angle: string;
   angleRole: string;
   dataSources: string[];
+  methodPills: MethodPill[];
   topics: BriefTopic[];
   dropped: number;
 } {
@@ -515,14 +546,92 @@ export function postCheckBrief(
     seen.add(concept);
     topics.push({ concept, text, sources: resolved as BriefSource[] });
   }
+  const angleRole = cleanAngleRole(raw.angleRole);
+  const methodPills = checkMethodPills(raw.methodPills, methods);
   return {
     why: cleanProse(raw.why),
-    angle: cleanProse(raw.angle ?? ""),
-    angleRole: cleanAngleRole(raw.angleRole),
-    dataSources: checkDataSources(raw.dataSources, methods),
+    angle: stripRoleRestatement(cleanProse(raw.angle ?? ""), angleRole),
+    angleRole,
+    dataSources:
+      methodPills.length > 0
+        ? [...new Set(methodPills.filter((p) => p.kind === "data").flatMap((p) => p.from))]
+        : checkDataSources(raw.dataSources, methods),
+    methodPills,
     topics,
     dropped,
   };
+}
+
+/**
+ * The model's method pills, grounded: each `from` keeps only names that match a given method
+ * (`normalizeMethodName`, canonicalized to that method's spelling, deduplicated); a pill left with
+ * none is dropped, as is a label that is empty, longer than `MAX_METHOD_PILL_CHARS`, or a
+ * case-insensitive repeat of an earlier one. Any `kind` but "data" is a method. At most
+ * `MAX_METHOD_PILLS`, in the model's order.
+ */
+export function checkMethodPills(
+  raw: RawBrief["methodPills"],
+  methods: readonly { name: string }[],
+): MethodPill[] {
+  const byNorm = new Map(methods.map((m) => [normalizeMethodName(m.name), m.name]));
+  const labels = new Set<string>();
+  const out: MethodPill[] = [];
+  for (const p of raw ?? []) {
+    if (out.length >= MAX_METHOD_PILLS) break;
+    const label = p.label.replace(/\s+/g, " ").trim();
+    const key = label.toLowerCase();
+    if (!label || label.length > MAX_METHOD_PILL_CHARS || labels.has(key)) continue;
+    const from: string[] = [];
+    for (const n of p.from ?? []) {
+      const name = byNorm.get(normalizeMethodName(n));
+      if (name !== undefined && !from.includes(name)) from.push(name);
+    }
+    if (from.length === 0) continue;
+    labels.add(key);
+    out.push({ label, kind: p.kind?.trim().toLowerCase() === "data" ? "data" : "method", from });
+  }
+  return out;
+}
+
+const ROLE_STOPWORDS = new Set(["a", "an", "the", "of", "for", "and", "in", "on", "with", "to", "as"]);
+const contentWords = (s: string) =>
+  normalizeMethodName(s)
+    .split(" ")
+    .filter((w) => w && !ROLE_STOPWORDS.has(w));
+
+/** Where a restated role ends: a colon, a dash, a comma, or a "who"/"that" clause. */
+const RESTATEMENT_END = /\s*[:—–,]\s*|\s+-\s+|\s+(?:who|that)\s+/i;
+/** A restated role is a short noun phrase; a longer lead is a real clause, left alone. */
+const MAX_RESTATEMENT_WORDS = 8;
+
+/**
+ * The angle without a leading restatement of the bold role it is printed after: "Imaging
+ * biomarker development partner who has run five trials." after "Imaging biomarker validation
+ * partner." becomes "Has run five trials." The lead (the angle up to the first colon, dash, comma
+ * or "who"/"that") counts as a restatement when the angle starts with the role itself, or when the
+ * lead opens with one of the role's content words and shares at least min(3, role's content
+ * words) of them, at least half its own. Kept as is when there is no such lead, or when cutting it
+ * would leave fewer than three words.
+ */
+export function stripRoleRestatement(angle: string, role: string): string {
+  if (!angle || !role) return angle;
+  const m = RESTATEMENT_END.exec(angle);
+  if (!m) return angle;
+  const lead = angle.slice(0, m.index);
+  const rest = angle.slice(m.index + m[0].length).trim();
+  const leadWords = contentWords(lead);
+  const roleWords = new Set(contentWords(role));
+  if (leadWords.length === 0 || roleWords.size === 0) return angle;
+  if (lead.trim().split(/\s+/).length > MAX_RESTATEMENT_WORDS) return angle;
+  const startsWithRole = normalizeMethodName(angle).startsWith(normalizeMethodName(role));
+  const shared = leadWords.filter((w) => roleWords.has(w)).length;
+  const overlaps =
+    roleWords.has(leadWords[0]) &&
+    shared >= Math.min(3, roleWords.size) &&
+    shared * 2 >= leadWords.length;
+  if (!startsWithRole && !overlaps) return angle;
+  if (rest.split(/\s+/).length < 3) return angle;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
 /** The role phrase, trimmed (and a trailing period dropped); "" when absent, empty, or longer than
@@ -718,9 +827,11 @@ export async function generateBrief(
   return {
     generated: {
       why: clean.why,
-      angle: clean.angle,
+      // A revision may reintroduce the restatement the first pass stripped.
+      angle: stripRoleRestatement(clean.angle, angleRole),
       ...(angleRole ? { angleRole } : {}),
       dataSources: first.dataSources,
+      ...(first.methodPills.length > 0 ? { methodPills: first.methodPills } : {}),
       topics: keptTopics,
       removedCount: ungrounded.length,
     },

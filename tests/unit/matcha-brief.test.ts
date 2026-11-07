@@ -77,7 +77,9 @@ import {
   buildAskBlock,
   buildSourceTable,
   checkDataSources,
+  checkMethodPills,
   cleanAngleRole,
+  stripRoleRestatement,
   generateBrief,
   loadBriefRecords,
   matchaSubmissionScope,
@@ -89,6 +91,7 @@ import {
   type BriefRecords,
   type BriefTopic,
 } from "@/lib/api/matcha-brief";
+import { MAX_METHOD_PILLS } from "@/lib/edit/matcha-brief-types";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import type { MatchaCandidate, MatchaConcept } from "@/lib/api/matcha-contract";
 
@@ -227,10 +230,164 @@ describe("angleRole and dataSources validation", () => {
     ).toEqual([]);
   });
 
-  it("the draft prompt asks for both, copied from METHODS_AND_TOOLS", () => {
+  it("the draft prompt asks for the role and the method pills, copied from METHODS_AND_TOOLS", () => {
     expect(BRIEF_SYSTEM_PROMPT).toContain("`angleRole`");
-    expect(BRIEF_SYSTEM_PROMPT).toContain("`dataSources`");
-    expect(BRIEF_SYSTEM_PROMPT).toMatch(/only names that appear there/);
+    expect(BRIEF_SYSTEM_PROMPT).toContain("`methodPills`");
+    expect(BRIEF_SYSTEM_PROMPT).toMatch(/Only names that appear there/);
+  });
+});
+
+describe("stripRoleRestatement", () => {
+  const role = "Imaging biomarker validation partner";
+
+  it("strips a near-restatement of the role up to a 'who' clause and capitalizes the rest", () => {
+    expect(
+      stripRoleRestatement(
+        "Imaging biomarker development partner who has run five trials on tumour response.",
+        role,
+      ),
+    ).toBe("Has run five trials on tumour response.");
+  });
+
+  it("strips up to a colon, a dash or a comma, and past a leading article", () => {
+    expect(stripRoleRestatement("An imaging biomarker partner: five trials on record.", role)).toBe(
+      "Five trials on record.",
+    );
+    expect(
+      stripRoleRestatement("Imaging biomarker validation partner — can score scans at scale.", role),
+    ).toBe("Can score scans at scale.");
+    expect(
+      stripRoleRestatement("Imaging biomarker validation partner, with a cohort of scans.", role),
+    ).toBe("With a cohort of scans.");
+  });
+
+  it("strips the exact role text even for a short role", () => {
+    expect(stripRoleRestatement("Trial site lead: runs three open trials.", "Trial site lead")).toBe(
+      "Runs three open trials.",
+    );
+  });
+
+  it("keeps an angle that does not restate the role", () => {
+    const own = "Five trials on record, and a cohort of scans for response readouts.";
+    expect(stripRoleRestatement(own, role)).toBe(own);
+    const verb = "Can validate imaging biomarkers, using a cohort of scans.";
+    expect(stripRoleRestatement(verb, role)).toBe(verb);
+    // Sharing one word with the role is not a restatement.
+    const one = "Imaging cores at two sites, with scans on file.";
+    expect(stripRoleRestatement(one, role)).toBe(one);
+  });
+
+  it("keeps the angle when there is no break to cut at, or the rest would be too short", () => {
+    const noBreak = "Imaging biomarker validation partner for oncology programs.";
+    expect(stripRoleRestatement(noBreak, role)).toBe(noBreak);
+    const short = "Imaging biomarker validation partner: yes.";
+    expect(stripRoleRestatement(short, role)).toBe(short);
+  });
+
+  it("is a no-op with no role or no angle", () => {
+    expect(stripRoleRestatement("Imaging biomarker partner: five trials on record.", "")).toBe(
+      "Imaging biomarker partner: five trials on record.",
+    );
+    expect(stripRoleRestatement("", role)).toBe("");
+  });
+
+  it("postCheckBrief applies it to the angle against the cleaned role", () => {
+    const r = postCheckBrief(
+      { why: "x", angle: "Imaging biomarker partner who can score scans at scale.", angleRole: `${role}.` },
+      matched,
+      sources,
+    );
+    expect(r.angleRole).toBe(role);
+    expect(r.angle).toBe("Can score scans at scale.");
+  });
+});
+
+describe("checkMethodPills / derived dataSources", () => {
+  const given = [
+    { name: "State Kidney Registry", category: null, papers: 6 },
+    { name: "State kidney registry (SKR)", category: null, papers: 3 },
+    { name: "Magnetic resonance imaging (MRI) scanner", category: "imaging", papers: 9 },
+    { name: "Mouse models", category: "animal model", papers: 14 },
+  ];
+
+  it("keeps only the given method names in `from`, canonicalized and deduplicated", () => {
+    expect(
+      checkMethodPills(
+        [
+          {
+            label: "Kidney registry",
+            kind: "data",
+            from: ["state kidney registry", "State kidney registry (SKR)", "State Kidney Registry", "Invented db"],
+          },
+        ],
+        given,
+      ),
+    ).toEqual([
+      { label: "Kidney registry", kind: "data", from: ["State Kidney Registry", "State kidney registry (SKR)"] },
+    ]);
+  });
+
+  it("drops a pill with no grounded name, an empty or over-long label, and a repeated label", () => {
+    const pills = checkMethodPills(
+      [
+        { label: "Made-up biobank", kind: "data", from: ["A made-up biobank"] },
+        { label: "No sources", kind: "method", from: null },
+        { label: "   ", kind: "method", from: ["Mouse models"] },
+        { label: "x".repeat(41), kind: "method", from: ["Mouse models"] },
+        { label: `  ${"y".repeat(40)} `, kind: "method", from: ["Mouse models"] },
+        { label: "MRI", kind: "method", from: ["Magnetic resonance imaging (MRI) scanner"] },
+        { label: "mri", kind: "method", from: ["Mouse models"] },
+      ],
+      given,
+    );
+    expect(pills.map((p) => p.label)).toEqual(["y".repeat(40), "MRI"]);
+  });
+
+  it("reads any kind but 'data' as a method, and caps at 12 in the model's order", () => {
+    const many = Array.from({ length: 15 }, (_, i) => ({
+      label: `Pill ${i + 1}`,
+      kind: i === 0 ? "DATA" : i === 1 ? "registry" : "method",
+      from: ["Mouse models"],
+    }));
+    const pills = checkMethodPills(many, given);
+    expect(pills).toHaveLength(MAX_METHOD_PILLS);
+    expect(pills[0]).toMatchObject({ label: "Pill 1", kind: "data" });
+    expect(pills[1]).toMatchObject({ label: "Pill 2", kind: "method" });
+    expect(pills[11].label).toBe("Pill 12");
+    expect(checkMethodPills(null, given)).toEqual([]);
+  });
+
+  it("postCheckBrief derives dataSources from the data pills, ignoring the model's own list", () => {
+    const r = postCheckBrief(
+      {
+        why: "x",
+        dataSources: ["Mouse models"],
+        methodPills: [
+          { label: "MRI", kind: "method", from: ["Magnetic resonance imaging (MRI) scanner"] },
+          { label: "Kidney registry", kind: "data", from: ["State Kidney Registry", "State kidney registry (SKR)"] },
+        ],
+      },
+      matched,
+      sources,
+      given,
+    );
+    expect(r.methodPills.map((p) => p.label)).toEqual(["MRI", "Kidney registry"]);
+    expect(r.dataSources).toEqual(["State Kidney Registry", "State kidney registry (SKR)"]);
+  });
+
+  it("with no valid pill, dataSources falls back to the model's list, grounded", () => {
+    const r = postCheckBrief(
+      {
+        why: "x",
+        dataSources: ["State Kidney Registry", "Invented db"],
+        methodPills: [{ label: "Invented", kind: "data", from: ["Invented db"] }],
+      },
+      matched,
+      sources,
+      given,
+    );
+    expect(r.methodPills).toEqual([]);
+    expect(r.dataSources).toEqual(["State Kidney Registry"]);
   });
 });
 
@@ -631,6 +788,33 @@ describe("generateBrief", () => {
     const { generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
     expect(generated.angleRole).toBe("Animal-model validation partner");
     expect(generated.dataSources).toEqual(["Mouse models"]);
+  });
+
+  it("returns grounded method pills with dataSources derived, and strips a restated role", async () => {
+    mockVerify.mockResolvedValue([]);
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        why: "Works on lipids.",
+        angle: "Animal model validation partner who can test candidates in mouse models.",
+        angleRole: "Animal-model validation partner",
+        methodPills: [
+          { label: "Mouse models", kind: "method", from: ["Mouse models"] },
+          { label: "Made-up cohort", kind: "data", from: ["A made-up cohort"] },
+        ],
+        topics: [],
+      },
+    });
+    let { generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
+    expect(generated.angle).toBe("Can test candidates in mouse models.");
+    expect(generated.methodPills).toEqual([{ label: "Mouse models", kind: "method", from: ["Mouse models"] }]);
+    expect(generated.dataSources).toEqual([]);
+
+    // No valid pill: the field is omitted, so readers fall back to the old split.
+    mockGenerateObject.mockResolvedValue({
+      object: { why: "Works on lipids.", methodPills: [{ label: "X", kind: "data", from: ["Nope"] }], topics: [] },
+    });
+    ({ generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records }));
+    expect(generated.methodPills).toBeUndefined();
   });
 
   it("drops the role when the fact-check flags it or revises the angle away", async () => {

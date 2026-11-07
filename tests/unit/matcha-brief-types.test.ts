@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  angleRoleLead,
   briefAngle,
   briefAngleRole,
   briefDataSources,
+  briefMethodPills,
   briefSourceLabel,
   dedupeMethods,
   normalizeMethodName,
@@ -92,5 +94,55 @@ describe("method helpers", () => {
     const { dataSources, methods: rest } = splitMethods(methods, []);
     expect(dataSources).toEqual([]);
     expect(rest).toEqual(methods);
+  });
+});
+
+describe("angleRoleLead", () => {
+  it("adds a trailing period, keeps existing sentence punctuation, and is empty for no role", () => {
+    expect(angleRoleLead("Cohort data partner")).toBe("Cohort data partner.");
+    expect(angleRoleLead("  Cohort data partner ")).toBe("Cohort data partner.");
+    expect(angleRoleLead("Cohort data partner.")).toBe("Cohort data partner.");
+    expect(angleRoleLead("Cohort data partner?")).toBe("Cohort data partner?");
+    expect(angleRoleLead("")).toBe("");
+    expect(angleRoleLead("   ")).toBe("");
+  });
+});
+
+describe("briefMethodPills", () => {
+  const generated = { why: "w", topics: [], removedCount: 0 };
+  const methods = [
+    { name: "Regional Fracture Registry", papers: 4 },
+    { name: "Fracture registry (regional)", papers: 11 },
+    { name: "Magnetic resonance imaging (MRI) scanner", papers: 7 },
+  ];
+
+  it("gives each pill the most papers of the methods it stands for, matched loosely", () => {
+    const pills = briefMethodPills(
+      {
+        generated: {
+          ...generated,
+          methodPills: [
+            {
+              label: "Fracture registry",
+              kind: "data",
+              from: ["Regional Fracture Registry", "Fracture registry (regional)"],
+            },
+            { label: "MRI", kind: "method", from: ["magnetic resonance imaging MRI scanner"] },
+            { label: "Gone", kind: "method", from: ["A method no longer on record"] },
+          ],
+        },
+      },
+      methods,
+    );
+    expect(pills).toEqual([
+      { label: "Fracture registry", kind: "data", papers: 11 },
+      { label: "MRI", kind: "method", papers: 7 },
+      { label: "Gone", kind: "method", papers: 0 },
+    ]);
+  });
+
+  it("is [] for an older brief with no pills (callers fall back to the split)", () => {
+    expect(briefMethodPills({ generated }, methods)).toEqual([]);
+    expect(briefMethodPills({ generated: { ...generated, methodPills: [] } }, methods)).toEqual([]);
   });
 });

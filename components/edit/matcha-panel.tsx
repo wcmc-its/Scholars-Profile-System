@@ -135,9 +135,11 @@ import type { CareerStage } from "@/lib/career-stage";
 import { RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
 import { briefCsvFields, buildMatchaCsv } from "@/lib/edit/matcha-export";
 import {
+  angleRoleLead,
   briefAngle,
   briefAngleRole,
   briefDataSources,
+  briefMethodPills,
   briefSourceLabel,
   briefSourceUrl,
   briefTopics,
@@ -5563,10 +5565,14 @@ function BriefEditor({
 function BriefRecordsBlock({
   records,
   dataSourceNames = [],
+  pills = [],
 }: {
   records: BriefRecords | undefined;
   /** The brief's `dataSources`: when non-empty, the methods list splits into two groups. */
   dataSourceNames?: readonly string[];
+  /** The brief's curated method pills (`briefMethodPills`): when non-empty they replace the raw
+   *  list, grouped into Data sources and Methods. [] for an older brief. */
+  pills?: readonly { label: string; kind: "data" | "method" }[];
 }) {
   const funding = records?.funding ?? [];
   const translation = records?.translation ?? [];
@@ -5574,9 +5580,20 @@ function BriefRecordsBlock({
   const centers = records?.centers ?? [];
   const methods = dedupeMethods(records?.methods ?? []);
   const trialCount = records?.trialCount ?? 0;
+  // Curated pills (newer briefs) show their labels; an older brief splits the raw rows by its
+  // `dataSources` (or not at all).
+  const curated = pills.length > 0;
   const groups = splitMethods(methods, dataSourceNames);
-  const methodList = (items: readonly { name: string; papers: number }[]) =>
-    items.map((m) => <div key={m.name}>{methodLabel(m)}</div>);
+  const dataItems = curated
+    ? pills.filter((p) => p.kind === "data").map((p) => p.label)
+    : groups.dataSources.map(methodLabel);
+  const methodItems = curated
+    ? pills.filter((p) => p.kind === "method").map((p) => p.label)
+    : groups.methods.map(methodLabel);
+  const methodCount = curated ? pills.length : methods.length;
+  const split = curated || groups.dataSources.length > 0;
+  const methodList = (items: readonly string[]) =>
+    items.map((text) => <div key={text}>{text}</div>);
   const appointments = [
     ...(secondary.length > 0 ? [`Secondary: ${secondary.join("; ")}`] : []),
     ...(centers.length > 0 ? [`Centers: ${centers.join("; ")}`] : []),
@@ -5636,30 +5653,32 @@ function BriefRecordsBlock({
         </dd>
         <dt className={capClass}>Appointments</dt>
         <dd>{appointments ? <span>{appointments}</span> : none}</dd>
-        {methods.length > 0 || trialCount > 0 ? (
-          // The full list (up to the loader's cap) is tucked behind one collapsed line.
+        {methodCount > 0 || trialCount > 0 ? (
+          // The list is tucked behind one collapsed line.
           <dd className="col-span-full" data-slot="matcha-brief-methods">
-            {methods.length > 0 ? (
+            {methodCount > 0 ? (
               <details>
                 <summary className="text-apollo-slate cursor-pointer">
-                  {methodsSummary(methods.length, trialCount)}
+                  {methodsSummary(methodCount, trialCount)}
                 </summary>
-                {groups.dataSources.length > 0 ? (
-                  // The brief labelled some of them data sources: two groups.
+                {split ? (
+                  // Curated pills, or an older brief that labelled data sources: two groups.
                   <div className="mt-1 flex flex-col gap-2 pl-4">
-                    <div className="flex flex-col gap-0.5" data-slot="matcha-brief-data-sources">
-                      <div className={capClass}>Data sources</div>
-                      {methodList(groups.dataSources)}
-                    </div>
-                    {groups.methods.length > 0 ? (
+                    {dataItems.length > 0 ? (
+                      <div className="flex flex-col gap-0.5" data-slot="matcha-brief-data-sources">
+                        <div className={capClass}>Data sources</div>
+                        {methodList(dataItems)}
+                      </div>
+                    ) : null}
+                    {methodItems.length > 0 ? (
                       <div className="flex flex-col gap-0.5" data-slot="matcha-brief-method-list">
                         <div className={capClass}>Methods</div>
-                        {methodList(groups.methods)}
+                        {methodList(methodItems)}
                       </div>
                     ) : null}
                   </div>
                 ) : (
-                  <div className="mt-1 flex flex-col gap-0.5 pl-4">{methodList(methods)}</div>
+                  <div className="mt-1 flex flex-col gap-0.5 pl-4">{methodList(methodItems)}</div>
                 )}
               </details>
             ) : (
@@ -5837,7 +5856,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
             <p className="text-[14px] text-pretty">
               {role ? (
                 <strong className="font-semibold" data-slot="matcha-brief-angle-role">
-                  {role}.
+                  {angleRoleLead(role)}
                 </strong>
               ) : null}
               {role ? " " : null}
@@ -5926,7 +5945,11 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
           )}
         </div>
 
-        <BriefRecordsBlock records={records} dataSourceNames={briefDataSources(b)} />
+        <BriefRecordsBlock
+          records={records}
+          dataSourceNames={briefDataSources(b)}
+          pills={briefMethodPills(b, records?.methods ?? [])}
+        />
       </div>
     );
   }
