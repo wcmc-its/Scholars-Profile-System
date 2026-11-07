@@ -5,7 +5,9 @@
  *  - `reportName`: dedupe postnominal degrees ("MB,BS, MD, MD" → "MB,BS, MD") and give a bare
  *    middle initial its period ("Jane Q Doe" → "Jane Q. Doe").
  *  - `sponsorShort`: "NCI via Some University" → "NCI"; a full NIH institute name → its acronym.
- *  - `awardCode`: the mechanism, else a funder-type label ("Industry", "Foundation", …).
+ *  - `awardCode`: the mechanism, else a funder-type label ("Industry", "Foundation", …);
+ *    `displayCode` / `awardLabel` drop the label where the sponsor's name already says it.
+ *  - `fundingSummary`: identical "code (sponsor)" entries fold into "×N", so parts add up.
  *  - `mergeMethods`: exact duplicates (by normalized name) merged, strongest first.
  */
 import { getSponsor, listSponsors, type SponsorCategory } from "@/lib/sponsor-lookup";
@@ -95,16 +97,47 @@ export function awardsLabel(n: number): string {
   return `${n} active ${n === 1 ? "award" : "awards"}`;
 }
 
-/** "6 active awards: R01 (NIA), U54 (NIBIB), Industry (Example Co)". Identical entries once. */
+/** Code-less funder types whose label adds nothing to the sponsor's own name: a foundation or
+ *  society names itself, and "Other" says nothing. "Industry", "Federal" and "NIH" stay, since a
+ *  company or agency name alone does not say what kind of award it is. */
+const SELF_DESCRIBING_TYPES: ReadonlySet<string> = new Set(["Foundation", "Other"]);
+
+/** The award's code for display, or null when its funder-type label adds nothing (a code-less
+ *  foundation or other grant: the sponsor name alone is shown). */
+export function displayCode(a: Pick<Award, "mechanism" | "funder" | "programType">): string | null {
+  if (a.mechanism?.trim()) return a.mechanism.trim();
+  const label = funderTypeLabel(a);
+  return SELF_DESCRIBING_TYPES.has(label) ? null : label;
+}
+
+/** One award as the summary names it: "R01 (NIA)", "Industry (Example Co)", or a foundation's
+ *  bare name. */
+export function awardLabel(
+  a: Pick<Award, "mechanism" | "funder" | "programType" | "nihIc">,
+): string {
+  const code = displayCode(a);
+  const sponsor = sponsorShort(a);
+  return !code || code === sponsor ? sponsor : `${code} (${sponsor})`;
+}
+
+/** "6 active awards: R01 (NIA) ×3, U54 (NIBIB), Industry (Example Co), Example Foundation".
+ *  Identical entries fold into one with a "×N" count, so the parts always add up to N. */
 export function fundingSummary(awards: readonly Award[]): string {
-  const parts: string[] = [];
+  const counts = new Map<string, number>();
   for (const a of awards) {
-    const code = awardCode(a);
-    const sponsor = sponsorShort(a);
-    const label = code === sponsor ? code : `${code} (${sponsor})`;
-    if (!parts.includes(label)) parts.push(label);
+    const label = awardLabel(a);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
   }
+  const parts = [...counts].map(([label, n]) => (n > 1 ? `${label} ×${n}` : label));
   return `${awardsLabel(awards.length)}: ${parts.join(", ")}`;
+}
+
+/** A partnership-angle role phrase as a sentence lead: trimmed, with a closing period unless it
+ *  already ends in terminal punctuation. "" stays "". */
+export function roleLead(role: string): string {
+  const r = role.trim();
+  if (!r) return "";
+  return /[.!?:]$/.test(r) ? r : `${r}.`;
 }
 
 /** Lowercase, punctuation to spaces, whitespace collapsed: the key exact duplicates share. */

@@ -9,7 +9,7 @@
  * Awards columns) → one section per fit tier → the AI disclaimer, once.
  *
  *  - Strong fit: a full profile (angle band, Why, topics citing numbered key papers, methods,
- *    technology, a key-paper grid, up to three funding lines). One printed page each.
+ *    technology, a key-paper grid, up to two funding lines). One printed page each.
  *  - Good and weak fit: a compact card (two Why sentences, one topic, one technology line, two
  *    papers, a one-line funding summary). Two per printed page.
  *
@@ -36,13 +36,13 @@ import {
   type CoverageMark,
 } from "@/lib/edit/matcha-report-coverage";
 import {
-  awardCode,
-  awardsLabel,
+  displayCode,
   firstSentences,
   fundingSummary,
   mergeMethods,
   punctuateInitials,
   reportName,
+  roleLead,
   sponsorShort,
   titleWithoutRequester,
 } from "@/lib/edit/matcha-report-format";
@@ -121,12 +121,33 @@ function cssString(s: string): string {
     .replace(/[\r\n]+/g, " ")}"`;
 }
 
-/** The print stylesheet: page setup, running footer, page breaks and print-only typography. */
-export function printCss(): string {
+/** The running header's title: the cover title without the requester, cut short. */
+export function runningHeaderTitle(title: string, requester: string | null): string {
+  return clipTitle(titleWithoutRequester(title, requester), 70);
+}
+
+/**
+ * The print stylesheet: page setup, running header and footer, page breaks and print-only
+ * typography. The top margin boxes are always defined (an empty string when there is no
+ * requester) so Chrome prints them in place of its own date / URL header.
+ */
+export function printCss(
+  header: { title: string; requester: string | null } = { title: "", requester: null },
+): string {
+  const marginType = `
+    font-family: Inter, Helvetica, Arial, sans-serif;
+    font-size: 8pt;
+    color: #555;`;
   return `
 @page {
   size: letter;
   margin: 0.55in 0.6in 0.7in 0.6in;
+  @top-left {
+    content: ${cssString(runningHeaderTitle(header.title, header.requester))};${marginType}
+  }
+  @top-right {
+    content: ${cssString(header.requester?.trim() ? `Prepared for ${header.requester.trim()}` : "")};${marginType}
+  }
   @bottom-left {
     content: ${cssString(RUNNING_FOOTER)};
     font-family: Inter, Helvetica, Arial, sans-serif;
@@ -169,10 +190,13 @@ export function printCss(): string {
   }
   [data-report-pi] + [data-report-pi] { border-top: 2px solid #1a1a1a !important; }
   [data-report-pi="strong"] + [data-report-pi="strong"] { break-before: page; page-break-before: always; }
+  [data-report-pi="strong"] { gap: 12px !important; padding-top: 12px !important; padding-bottom: 0 !important; }
+  [data-report-pi="strong"] [data-report-section] { gap: 4px !important; }
+  [data-report-pi="strong"] [data-report-papers] { row-gap: 6px !important; }
   [data-report-compact] { break-inside: avoid; }
   [data-report-compact]:nth-of-type(2n+1):not(:first-of-type) { break-before: page; page-break-before: always; }
   [data-report-funding-row], [data-report-paper], [data-report-angle], [data-report-tech] { break-inside: avoid; }
-  [data-report-more-methods] { display: none !important; }
+  [data-report-more-methods], [data-report-row-overflow] { display: none !important; }
   [data-report-footer] { border-top: 0 !important; }
 }`;
 }
@@ -383,6 +407,12 @@ function Gaps({ report }: { report: MatchaReport }) {
   );
 }
 
+/** One theme column's width: at most 13% of the table, and all of them together at most 52%, so
+ *  two themes leave the Investigator column wide and six still fit. */
+export function themeColWidth(n: number): string {
+  return `${Math.round(Math.min(13, 52 / Math.max(1, n)) * 10) / 10}%`;
+}
+
 /** "Coverage and fit": rank, name (to the profile section), Fit, one column per theme, Awards. */
 function Coverage({ report }: { report: MatchaReport }) {
   if (report.pis.length === 0) return null;
@@ -408,15 +438,21 @@ function Coverage({ report }: { report: MatchaReport }) {
       >
         <table
           data-report-coverage-table
-          className={`w-full table-fixed border-collapse text-left ${themes.length > 0 ? "min-w-[820px]" : ""}`}
+          className={`w-full table-fixed border-collapse text-left ${themes.length > 3 ? "min-w-[820px]" : ""}`}
         >
+          {/* Fixed Fit / Awards and narrow theme columns sized to the theme count; the
+              Investigator column (no width) takes the rest, so names don't wrap. */}
           <colgroup>
-            <col className="w-[230px] print:w-[27%]" />
-            <col className="w-[72px]" />
+            <col data-report-col="investigator" />
+            <col data-report-col="fit" style={{ width: "72px" }} />
             {themes.map((t) => (
-              <col key={t.label} />
+              <col
+                key={t.label}
+                data-report-col="theme"
+                style={{ width: themeColWidth(themes.length) }}
+              />
             ))}
-            <col className="w-[64px]" />
+            <col data-report-col="awards" style={{ width: "64px" }} />
           </colgroup>
           <thead>
             <tr className="bg-apollo-surface-2 border-apollo-border-strong border-b text-[11px] font-semibold text-[var(--evidence-body)]">
@@ -518,9 +554,10 @@ function Empty() {
   return <p className="m-0 text-[14px] text-[var(--evidence-faint)] italic">{NOT_EVIDENT}</p>;
 }
 
-/** Funding lines on a Strong-fit profile before the "+N more" link. */
-export const REPORT_MAX_FUNDING_ROWS = 3;
-/** Method pills shown before "+N more" (and the only ones printed). */
+/** Funding lines on a Strong-fit profile before the "+N more" link, on screen and in print:
+ *  three let a full profile spill a grant onto its own printed page. */
+export const REPORT_MAX_FUNDING_ROWS = 2;
+/** Method pills shown before "+N more" (and the only ones printed), across ALL pill rows. */
 export const REPORT_MAX_METHOD_PILLS = 6;
 /** Key papers on a compact (Good / Weak fit) card. */
 export const COMPACT_MAX_PAPERS = 2;
@@ -530,7 +567,8 @@ type Award = ReportPi["funding"][number];
 /** One funding row: a single award, or `count` awards grouped by `groupFunding`. */
 export type FundingRow = {
   mechanism: string | null;
-  /** `awardCode`: the mechanism, else a funder-type label. */
+  /** `displayCode`: the mechanism, else a funder-type label; "" for a foundation / other grant,
+   *  whose sponsor name says it already. */
   code: string;
   funder: string;
   /** `sponsorShort`: "NIDDK", never "… via …". */
@@ -571,7 +609,7 @@ export function groupFunding(awards: readonly Award[]): FundingRow[] {
     }
     rows.push({
       mechanism: a.mechanism,
-      code: awardCode(a),
+      code: displayCode(a) ?? "",
       funder: a.funder,
       sponsor: sponsorShort(a),
       title: a.title,
@@ -699,7 +737,8 @@ function NameLine({ pi, size }: { pi: ReportPi; size: "lg" | "md" }) {
 }
 
 /** Partnership angle: a pale band with a red left border. `role`, when a brief carries one, is the
- *  bold lead-in; old briefs print the angle alone in regular weight. */
+ *  bold lead-in, closed with a period ("**Trial lead.** Could run …"); old briefs print the angle
+ *  alone in regular weight. */
 function AngleBand({ angle, role }: { angle: string; role?: string }) {
   return (
     <div
@@ -708,7 +747,8 @@ function AngleBand({ angle, role }: { angle: string; role?: string }) {
     >
       <SectionLabel>Partnership angle</SectionLabel>
       <p className="m-0 text-[15px] leading-[1.55] font-normal text-pretty">
-        {role ? <strong className="font-semibold">{role} </strong> : null}
+        {role?.trim() ? <strong className="font-semibold">{roleLead(role)}</strong> : null}
+        {role?.trim() ? " " : null}
         {angle}
       </p>
     </div>
@@ -726,13 +766,24 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** One labelled pill row: the first `REPORT_MAX_METHOD_PILLS` shown (and printed), the rest
- *  behind a native "+N more" `<details>` that print hides. */
-function PillRow({ label, items }: { label: string; items: readonly string[] }) {
-  const shown = items.slice(0, REPORT_MAX_METHOD_PILLS);
-  const rest = items.slice(REPORT_MAX_METHOD_PILLS);
+/** One labelled pill row: the `shown` pills (the only ones printed), the rest behind a native
+ *  "+N more" `<details>` that print hides. */
+function PillRow({
+  label,
+  shown,
+  rest,
+}: {
+  label: string;
+  shown: readonly string[];
+  rest: readonly string[];
+}) {
   return (
-    <div data-report-pill-row={label} className="grid grid-cols-[96px_minmax(0,1fr)] gap-2">
+    <div
+      data-report-pill-row={label}
+      // Every pill of this row is past the cap: nothing would print but its label.
+      {...(shown.length === 0 ? { "data-report-row-overflow": "" } : {})}
+      className="grid grid-cols-[96px_minmax(0,1fr)] gap-2"
+    >
       <span className="pt-0.5 text-[12px] text-[var(--evidence-faint)]">{label}</span>
       <div className="flex flex-col gap-1.5">
         <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
@@ -758,27 +809,53 @@ function PillRow({ label, items }: { label: string; items: readonly string[] }) 
 }
 
 /**
- * "Methods and data": record-only pill rows (never generated), methods merged by normalized name
- * and ranked by paper count. One row today ("Methods"); a "Data sources" row slots in above it once
- * briefs label them. A clinical-trial count, when any, is a plain line.
+ * The "Data sources" and "Methods" pill rows. Curated pills (`methodPills`) print as given, in the
+ * brief's order; without them, record methods are merged by normalized name, ranked by paper
+ * count and split by the brief's `dataSources`. Either way at most `REPORT_MAX_METHOD_PILLS` show
+ * across BOTH rows, data sources first; the rest go behind each row's "+N more".
  */
+export function methodRows(
+  pi: Pick<ReportPi, "methods" | "methodPills"> & { brief: { dataSources: string[] } | null },
+): { label: string; shown: string[]; rest: string[] }[] {
+  let data: string[];
+  let methods: string[];
+  if (pi.methodPills?.length) {
+    data = pi.methodPills.filter((p) => p.kind === "data").map((p) => p.label);
+    methods = pi.methodPills.filter((p) => p.kind === "method").map((p) => p.label);
+  } else {
+    const split = splitMethods(mergeMethods(pi.methods), pi.brief?.dataSources ?? []);
+    data = split.dataSources.map((m) => m.name);
+    methods = split.methods.map((m) => m.name);
+  }
+  let budget = REPORT_MAX_METHOD_PILLS;
+  const rows: { label: string; shown: string[]; rest: string[] }[] = [];
+  for (const [label, items] of [
+    ["Data sources", data],
+    ["Methods", methods],
+  ] as const) {
+    if (items.length === 0) continue;
+    const n = Math.min(budget, items.length);
+    budget -= n;
+    rows.push({ label, shown: items.slice(0, n), rest: items.slice(n) });
+  }
+  return rows;
+}
+
+/** "Methods and data": the pill rows, then a clinical-trial count, when any, as a plain line. */
 function MethodsAndData({
   pi,
 }: {
-  pi: Pick<ReportPi, "methods" | "trialCount"> & { brief: { dataSources: string[] } | null };
+  pi: Pick<ReportPi, "methods" | "methodPills" | "trialCount"> & {
+    brief: { dataSources: string[] } | null;
+  };
 }) {
-  const split = splitMethods(mergeMethods(pi.methods), pi.brief?.dataSources ?? []);
-  const rows: { label: string; items: string[] }[] = [];
-  if (split.dataSources.length > 0)
-    rows.push({ label: "Data sources", items: split.dataSources.map((m) => m.name) });
-  if (split.methods.length > 0)
-    rows.push({ label: "Methods", items: split.methods.map((m) => m.name) });
+  const rows = methodRows(pi);
   if (rows.length === 0 && pi.trialCount <= 0) return null;
   return (
     <div data-report-methods className="flex flex-col gap-2">
       <SectionLabel>Methods and data</SectionLabel>
       {rows.map((r) => (
-        <PillRow key={r.label} label={r.label} items={r.items} />
+        <PillRow key={r.label} label={r.label} shown={r.shown} rest={r.rest} />
       ))}
       {pi.trialCount > 0 ? (
         <p className="m-0 text-[13px] text-[var(--evidence-body)]">
@@ -803,8 +880,16 @@ function TechBox({ pi }: { pi: ReportPi }) {
           <ExtLink href={t.url} className="text-apollo-slate hover:underline">
             {t.title}
           </ExtLink>
-          {t.patentStatus ? (
-            <span className="font-normal text-[var(--evidence-body)]"> · {t.patentStatus}</span>
+          {t.patentStatus?.trim() ? (
+            <>
+              {" "}
+              <span
+                data-report-patent-status
+                className="border-apollo-slate-tint-border ml-1 inline-block rounded-full border bg-white px-2 py-px align-[1px] text-[11px] leading-[1.5] font-semibold whitespace-nowrap text-[var(--evidence-body)]"
+              >
+                {t.patentStatus.trim()}
+              </span>
+            </>
           ) : null}
         </div>
       ))}
@@ -941,7 +1026,7 @@ function StrongProfile({ pi }: { pi: ReportPi }) {
 
       {pi.brief ? (
         <>
-          <div className="flex max-w-[820px] flex-col gap-1.5">
+          <div data-report-section className="flex max-w-[820px] flex-col gap-1.5">
             <SectionLabel>Why this investigator</SectionLabel>
             {pi.brief.why.trim() ? (
               <p className="m-0 text-[15px] leading-[1.6] text-pretty">{pi.brief.why}</p>
@@ -949,7 +1034,7 @@ function StrongProfile({ pi }: { pi: ReportPi }) {
               <Empty />
             )}
           </div>
-          <div className="flex max-w-[820px] flex-col gap-2">
+          <div data-report-section className="flex max-w-[820px] flex-col gap-2">
             <SectionLabel>Suggested discussion topics</SectionLabel>
             {pi.brief.topics.length > 0 ? (
               <ol className="m-0 flex list-none flex-col gap-2 p-0">
@@ -977,7 +1062,7 @@ function StrongProfile({ pi }: { pi: ReportPi }) {
       <MethodsAndData pi={pi} />
       <TechBox pi={pi} />
 
-      <div className="flex flex-col gap-2">
+      <div data-report-section className="flex flex-col gap-2">
         <SectionLabel>Key papers</SectionLabel>
         <PaperGrid papers={pi.keyPapers} />
       </div>
@@ -1111,7 +1196,11 @@ export function MatchaReportView({ report }: { report: MatchaReport }) {
       data-matcha-report
       className="bg-apollo-page min-h-screen font-sans text-[#1a1a1a] antialiased"
     >
-      <style dangerouslySetInnerHTML={{ __html: printCss() }} />
+      <style
+        dangerouslySetInnerHTML={{
+          __html: printCss({ title: report.title, requester: report.requester }),
+        }}
+      />
       <div data-report-bar className="border-apollo-border border-b bg-white">
         <div className="mx-auto flex max-w-[1040px] flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3.5 text-[13px] sm:px-8">
           {/* eslint-disable-next-line @next/next/no-img-element -- inline SVG; must print. */}
