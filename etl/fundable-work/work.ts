@@ -8,7 +8,7 @@ import { matchEntry, splitDisplayName, type ScholarIndex } from "../honors/lists
 
 /** Weill Cornell Medicine + Weill Cornell Medical Center. NOT WCM-Qatar (I4210152471). */
 export const WCM_OPENALEX_IDS = ["I4387153466", "I4405272987"];
-export const WORK_TYPES = ["conference-abstract", "preprint"] as const;
+export const WORK_TYPES = ["conference-abstract", "conference-paper", "preprint"] as const;
 
 export type OpenAlexWork = {
   id: string;
@@ -129,7 +129,7 @@ export const ScoreSchema = z.object({
 });
 export type Score = z.infer<typeof ScoreSchema>;
 
-export const SYSTEM_PROMPT = `You assess research for a medical school's corporate and foundation relations team. Each item is a conference abstract or preprint by a Weill Cornell faculty member. Judge its potential to attract PRIVATE funding: industry (pharma, biotech, device, diagnostics) sponsored research or partnerships, and disease foundations or philanthropy. NIH fit does not count.
+export const SYSTEM_PROMPT = `You assess research for a medical school's corporate and foundation relations team. Each item is a conference abstract, conference paper or preprint by a Weill Cornell faculty member. Judge its potential to attract PRIVATE funding: industry (pharma, biotech, device, diagnostics) sponsored research or partnerships, and disease foundations or philanthropy. NIH fit does not count.
 
 Score 1-5:
 5 - A concrete, actionable asset or target in an area of active industry investment, with data strong enough to start a conversation now (e.g. in vivo efficacy, a biomarker validated in a patient cohort, an early clinical signal).

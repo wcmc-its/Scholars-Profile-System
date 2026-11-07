@@ -57,7 +57,11 @@ export type FundableWorkRow = {
   authors: FundableWorkAuthorRow[];
 };
 
-const TYPE_LABEL: Record<string, string> = { "conference-abstract": "Abstract", preprint: "Preprint" };
+const TYPE_LABEL: Record<string, string> = {
+  "conference-abstract": "Abstract",
+  "conference-paper": "Conference paper",
+  preprint: "Preprint",
+};
 const typeLabel = (t: string) => TYPE_LABEL[t] ?? t;
 
 const SCORE_OPTS = [1, 2, 3, 4, 5];
@@ -297,7 +301,7 @@ export function FundableWorkBrowser({ rows, truncated }: { rows: FundableWorkRow
         <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold">Matcha for emergent research</h1>
           <p className="text-muted-foreground mt-1.5 text-sm">
-            Conference abstracts and preprints by full-time faculty from the last two years, with postdoc co-authors
+            Conference abstracts, conference papers and preprints by full-time faculty from the last two years, with postdoc co-authors
             listed, scored 1–5 for industry and foundation funding potential. Scores, pitches and funder suggestions
             are an AI first pass; check them before outreach.
           </p>

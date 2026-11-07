@@ -1,9 +1,9 @@
 /**
- * Fundable work — WCM conference abstracts and preprints, scored for
+ * Fundable work — WCM conference abstracts, conference papers and preprints, scored for
  * private-funding potential. Read by `/edit/fundable-work`.
  *
- *   1. FETCH   OpenAlex works with a WCM affiliation, type conference-abstract or
- *              preprint, published in the last WINDOW_DAYS. Reciterdb cannot
+ *   1. FETCH   OpenAlex works with a WCM affiliation, type conference-abstract,
+ *              conference-paper or preprint, published in the last WINDOW_DAYS. Reciterdb cannot
  *              supply these: PubMed and Scopus skip meeting abstracts.
  *   2. MATCH   Authors from reciterdb's OpenAlex lane where it has the work: curator-
  *              resolved `authorship_review` rows (else the lane's proposed person) plus
@@ -124,7 +124,7 @@ async function readReciter(
 
 async function main(): Promise<number> {
   const works = await fetchWorks();
-  console.log(`OpenAlex: ${works.length} WCM conference abstracts + preprints.`);
+  console.log(`OpenAlex: ${works.length} WCM conference abstracts, conference papers + preprints.`);
 
   const people = await db.read.scholar.findMany({
     where: { roleCategory: { in: ["full_time_faculty", "postdoc"] }, status: "active", deletedAt: null },

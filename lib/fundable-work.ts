@@ -67,7 +67,8 @@ export function conferenceOf(work: {
   venue: string | null;
   date: string;
 }): FundableWorkConference | null {
-  if (work.type !== "conference-abstract" || !work.venue) return null;
+  if ((work.type !== "conference-abstract" && work.type !== "conference-paper") || !work.venue)
+    return null;
   if (VENUE_IS_MEETING.test(work.venue)) return { name: work.venue, inferred: false };
   const society = CONFERENCE_BY_VENUE[work.venue];
   if (!society) return null;
