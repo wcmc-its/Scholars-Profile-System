@@ -31,6 +31,8 @@ import {
   briefDataSources,
   briefTopics,
   briefWhy,
+  normalizeMethodName,
+  type BriefSource,
 } from "@/lib/edit/matcha-brief-types";
 import {
   computeCoverage,
@@ -54,6 +56,10 @@ const PAPER_READ_CONCURRENCY = 4;
 
 export type ReportPaper = { pmid: string; title: string; year: number | null };
 
+/** One curated "Methods and data" pill: the brief's own label (printed as given, never recased),
+ *  its row, and the strongest paper count among the PI's method records it was drawn from. */
+export type ReportMethodPill = { label: string; kind: "data" | "method"; papers: number };
+
 export type ReportPi = {
   cwid: string;
   rank: number;
@@ -72,6 +78,9 @@ export type ReportPi = {
   translation: BriefRecords["translation"];
   /** "Methods and tools": top `ScholarTool` rows by papers (records, never generated). */
   methods: BriefRecords["methods"];
+  /** The brief's curated pills (`generated.methodPills`), in the brief's order; null = none (or a
+   *  malformed list), and the view falls back to `methods` split by `brief.dataSources`. */
+  methodPills: ReportMethodPill[] | null;
   /** Distinct clinical trials on record; 0 hides the line. */
   trialCount: number;
   fit: MatchaFitTier;
@@ -179,6 +188,73 @@ function papersFrom(topics: readonly BriefTopic[], candidate: MatchaCandidate): 
   return out;
 }
 
+/** True when any topic cites a paper: the impact-scored top-up is then skipped, so a paper is
+ *  never listed only for being highly cited when the brief names the ones that matter. */
+function topicsCitePapers(topics: readonly BriefTopic[]): boolean {
+  return topics.some((t) => t.sources.some((s) => s.kind === "pub"));
+}
+
+type Award = BriefRecords["funding"][number];
+
+/** Whether a brief's grant source names this award (the same match `withLiveSources` uses). */
+function citesAward(s: BriefSource, a: Award): boolean {
+  if (s.kind !== "grant") return false;
+  return s.applId != null
+    ? a.applId === s.applId
+    : a.funder === s.funder && a.mechanism === s.mechanism && a.endYear === s.endYear;
+}
+
+/**
+ * Awards in report order: the ones the brief's topics cite first (in topic, then citation,
+ * order), then by end year, latest first; ties keep the records' order.
+ */
+export function orderFunding(funding: readonly Award[], topics: readonly BriefTopic[]): Award[] {
+  const cites = topics.flatMap((t) => t.sources.filter((s) => s.kind === "grant"));
+  const citedAt = (a: Award) => {
+    const i = cites.findIndex((s) => citesAward(s, a));
+    return i < 0 ? Number.POSITIVE_INFINITY : i;
+  };
+  return funding
+    .map((a, i) => ({ a, i, c: citedAt(a) }))
+    .sort(
+      (x, y) => (x.c === y.c ? 0 : x.c < y.c ? -1 : 1) || y.a.endYear - x.a.endYear || x.i - y.i,
+    )
+    .map((x) => x.a);
+}
+
+/**
+ * `generated.methodPills`, read defensively from the stored JSON: an array of
+ * `{ label, kind: "data" | "method", from: string[] }`. Anything else, an empty list, or a single
+ * malformed entry ⇒ null (the caller keeps the records split). Each pill's paper count is the
+ * strongest among the PI's method records whose normalized name matches one of its `from` names.
+ */
+export function curatedMethodPills(
+  generated: unknown,
+  methods: BriefRecords["methods"],
+): ReportMethodPill[] | null {
+  const raw =
+    generated && typeof generated === "object"
+      ? (generated as { methodPills?: unknown }).methodPills
+      : undefined;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const papersBy = new Map<string, number>();
+  for (const m of methods) {
+    const k = normalizeMethodName(m.name);
+    papersBy.set(k, Math.max(papersBy.get(k) ?? 0, m.papers));
+  }
+  const out: ReportMethodPill[] = [];
+  for (const p of raw) {
+    if (!p || typeof p !== "object") return null;
+    const { label, kind, from } = p as { label?: unknown; kind?: unknown; from?: unknown };
+    if (typeof label !== "string" || !label.trim()) return null;
+    if (kind !== "data" && kind !== "method") return null;
+    if (!Array.isArray(from) || !from.every((f) => typeof f === "string")) return null;
+    const papers = Math.max(0, ...from.map((f) => papersBy.get(normalizeMethodName(f)) ?? 0));
+    out.push({ label: label.trim(), kind, papers });
+  }
+  return out;
+}
+
 /**
  * The report, or null when the submission is not in the caller's scope (or has no stored
  * answer to check the selection against). Caller enforces the flag and the read gate.
@@ -277,9 +353,10 @@ export async function loadMatchaReport(
       profileUrl: new URL(profilePath(s?.slug ?? c.profileSlug), siteBaseUrl()).toString(),
       secondaryAppointments: rec.secondaryAppointments,
       centers: rec.centers,
-      funding: rec.funding,
+      funding: orderFunding(rec.funding, brief?.topics ?? []),
       translation: rec.translation,
       methods: rec.methods,
+      methodPills: row ? curatedMethodPills(row.generated, rec.methods) : null,
       trialCount: rec.trialCount,
       fit: fitTier(c.fusedScore, topScore),
       keyPapers: papersFrom(brief?.topics ?? [], c),
@@ -287,8 +364,11 @@ export async function loadMatchaReport(
     };
   });
 
-  // Top up short paper lists from the PI's own record, a few reads at a time.
-  const short = pis.filter((p) => p.keyPapers.length < 2);
+  // Top up short paper lists from the PI's own record, a few reads at a time — only when the
+  // brief cites no paper: impact alone never displaces (or pads) the papers the topics chose.
+  const short = pis.filter(
+    (p) => p.keyPapers.length < 2 && !topicsCitePapers(p.brief?.topics ?? []),
+  );
   for (let i = 0; i < short.length; i += PAPER_READ_CONCURRENCY) {
     await Promise.all(
       short.slice(i, i + PAPER_READ_CONCURRENCY).map(async (p) => {

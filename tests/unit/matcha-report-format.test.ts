@@ -3,9 +3,13 @@
  * All fixtures are invented.
  */
 import { describe, expect, it } from "vitest";
+import { listSponsors } from "@/lib/sponsor-lookup";
 import {
   awardCode,
+  awardLabel,
   awardsLabel,
+  displayCode,
+  roleLead,
   dedupeDegrees,
   firstSentences,
   fundingSummary,
@@ -86,7 +90,55 @@ describe("sponsors and award codes", () => {
           programType: "BioPharma Alliance Agreement",
         }),
       ]),
-    ).toBe("4 active awards: R01 (NIA), U54 (NIBIB), Industry (Invented Co)");
+    ).toBe("4 active awards: R01 (NIA) ×2, U54 (NIBIB), Industry (Invented Co)");
+  });
+
+  it("folds identical entries into ×N so the parts add up to the award count", () => {
+    const awards = [
+      award(),
+      award({ mechanism: "U54", funder: "NIBIB" }),
+      award({ title: "Second" }),
+      award({ title: "Third" }),
+      award({ mechanism: null, funder: "Invented Heart Foundation" }),
+      award({ mechanism: null, funder: "Invented Heart Foundation", title: "Again" }),
+    ];
+    const summary = fundingSummary(awards);
+    expect(summary).toBe(
+      "6 active awards: R01 (NIA) ×3, U54 (NIBIB), Invented Heart Foundation ×2",
+    );
+    const parts = summary.slice(summary.indexOf(": ") + 2).split(", ");
+    const total = parts.reduce((s, p) => s + Number(/ ×(\d+)$/.exec(p)?.[1] ?? 1), 0);
+    expect(total).toBe(awards.length);
+  });
+
+  it("names a code-less foundation or other grant by its sponsor alone; Industry keeps its label", () => {
+    expect(displayCode({ mechanism: null, funder: "Invented Trust" })).toBeNull();
+    expect(awardLabel({ mechanism: null, funder: "Invented Trust" })).toBe("Invented Trust");
+    expect(awardLabel({ mechanism: null, funder: "Invented Trust via Elsewhere" })).toBe(
+      "Invented Trust",
+    );
+    // A sponsor the lookup knows as a foundation: its name only, never "Foundation (…)".
+    const foundation = listSponsors().find((s) => s.category === "Foundation")!;
+    expect(foundation).toBeDefined();
+    expect(awardLabel({ mechanism: null, funder: foundation.short })).toBe(foundation.short);
+    expect(
+      awardLabel({
+        mechanism: null,
+        funder: "Invented Co",
+        programType: "BioPharma Alliance Agreement",
+      }),
+    ).toBe("Industry (Invented Co)");
+    expect(awardLabel({ mechanism: "R01", funder: "NIA" })).toBe("R01 (NIA)");
+    expect(fundingSummary([award({ mechanism: null, funder: "Invented Trust" })])).not.toContain(
+      "Other",
+    );
+  });
+
+  it("closes the angle role with a period unless it already ends a sentence", () => {
+    expect(roleLead("Trial lead")).toBe("Trial lead.");
+    expect(roleLead("  Trial lead.  ")).toBe("Trial lead.");
+    expect(roleLead("Who leads?")).toBe("Who leads?");
+    expect(roleLead("   ")).toBe("");
   });
 });
 
