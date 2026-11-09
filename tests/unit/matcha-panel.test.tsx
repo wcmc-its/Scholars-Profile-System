@@ -3470,6 +3470,9 @@ describe("MatchaPanel", () => {
           : new Promise(() => {}),
       ),
     );
+    const scrollIntoView = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
     render(<MatchaPanel />);
     await waitFor(() =>
       expect(document.querySelector('[data-slot="matcha-recent"]')).toBeTruthy(),
@@ -3484,6 +3487,11 @@ describe("MatchaPanel", () => {
     expect(loading.textContent).toBe("Ranking researchers…");
     expect(loading.querySelector("svg.animate-spin")).toBeTruthy();
     expect(document.querySelector('[data-slot="matcha-recent"]')).toBeNull();
+    // A spinner in the button just clicked, and the loading block brought into view.
+    const button = screen.getByRole("button", { name: "Ranking…" });
+    expect(button.querySelector("svg.animate-spin")).toBeTruthy();
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" });
+    HTMLElement.prototype.scrollIntoView = original;
   });
 
   it("renders NO recent-searches section when history is empty", async () => {
