@@ -2,11 +2,14 @@
 
 /**
  * Matcha targeted messages — the "Email individually" review queue. Top: "the pitch" (what the
- * partner is looking for), drafted on open by `/api/edit/matcha/pitch` and editable. Then one card
- * per selected researcher, in rank order, with their own editable message
- * (`buildTargetedEmail`): "Open in mail app" (a `mailto:` to that person), "Copy", and a "Done"
- * tick the officer works down. Editing the pitch rewrites every card the officer has not edited
- * by hand. Nothing is sent from Scholars; addresses live only in this dialog's state.
+ * partner is looking for) and the subject, drafted on open by `/api/edit/matcha/pitch` and
+ * editable. Then one card per selected researcher, in rank order. Each card's "Why I thought of
+ * you" bullets and "One idea to discuss" line are drafted per person, in the second person, from
+ * their saved brief (same route, with `cwid`). The message shows as a formatted preview with
+ * "Edit"; "Open in mail app" (a plain-text `mailto:`), "Copy" (HTML with real bullets and bold
+ * labels, plus plain text) and a "Done" tick the officer works down. Editing the pitch or subject
+ * rewrites every card the officer has not edited by hand. Nothing is sent from Scholars; addresses
+ * live only in this dialog's state.
  */
 import { useEffect, useState } from "react";
 
@@ -19,54 +22,128 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { MAILTO_SOFT_LIMIT, buildMailto, buildTargetedEmail } from "@/lib/edit/matcha-email";
+import {
+  MAILTO_SOFT_LIMIT,
+  buildMailto,
+  buildTargetedEmail,
+  emailBodyToHtml,
+  parseEmailBody,
+} from "@/lib/edit/matcha-email";
 
-/** One selected researcher, with the brief pieces the message uses ("" when absent). */
+/** One selected researcher. */
 export type TargetedPerson = {
   cwid: string;
   name: string;
   hasBrief: boolean;
-  angle: string;
-  angleRole: string;
-  topic: string;
 };
 
 /** What `/api/edit/matcha/contacts` returns. */
 export type TargetedContacts = {
   contacts: { cwid: string; name: string; email: string }[];
   missing: { cwid: string; name: string }[];
-  officer: { name: string; email: string | null };
+  officer: { name: string; email: string | null; dept?: string | null };
 };
+
+type Lines = { bullets: string[]; idea: string };
+type Drafted = { pitch: string; subject: string };
 
 type Card = {
   /** The officer's hand edit; absent ⇒ the message follows the pitch. */
   override?: string;
+  editing?: boolean;
   done: boolean;
   copied?: "ok" | "failed";
 };
 
-/** localStorage key for the officer's pitch on one search. */
+/** Above this many words the pitch box warns: the whole email should stay near 120 words. */
+export const PITCH_WARN_WORDS = 70;
+/** Per-person drafts in flight at once. */
+const LINES_CONCURRENCY = 3;
+
+/** localStorage key for the officer's pitch and subject on one search. */
 export function pitchStorageKey(submissionId: string): string {
   return `matcha-pitch:${submissionId}`;
 }
+/** localStorage key for one researcher's drafted lines on one search. */
+export function linesStorageKey(submissionId: string, cwid: string): string {
+  return `matcha-lines:${submissionId}:${cwid}`;
+}
 
-// ponytail: the edited pitch is cached in THIS browser only (localStorage); persist it on the
-// submission server-side if officers need it across devices.
-function readCachedPitch(submissionId: string): string | null {
+// ponytail: the drafts are cached in THIS browser only (localStorage); persist them on the
+// submission server-side if officers need them across devices.
+function readCache<T>(key: string): T | null {
   try {
-    return window.localStorage.getItem(pitchStorageKey(submissionId));
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
   }
 }
 
-function writeCachedPitch(submissionId: string, pitch: string): void {
+function writeCache(key: string, value: unknown): void {
   try {
-    window.localStorage.setItem(pitchStorageKey(submissionId), pitch);
+    window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // Storage blocked: the pitch still lives in the dialog.
+    // Storage blocked: the draft still lives in the dialog.
   }
+}
+
+/** A cached pitch: the JSON `{pitch, subject}`, or a bare string from before subjects existed
+ *  (`readCache` then fails to parse it and the dialog drafts afresh). */
+function readCachedPitch(submissionId: string): Drafted | null {
+  const c = readCache<Drafted>(pitchStorageKey(submissionId));
+  return c && typeof c.pitch === "string" ? { pitch: c.pitch, subject: c.subject ?? "" } : null;
+}
+
+function wordCount(t: string): number {
+  return t.split(/\s+/).filter(Boolean).length;
+}
+
+/** Copy as HTML (real bullets, bold labels) with a plain-text twin; plain text alone where the
+ *  browser has no `ClipboardItem`. */
+async function copyMessage(body: string): Promise<void> {
+  if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([emailBodyToHtml(body)], { type: "text/html" }),
+        "text/plain": new Blob([body], { type: "text/plain" }),
+      }),
+    ]);
+    return;
+  }
+  await navigator.clipboard.writeText(body);
+}
+
+/** The message as the recipient will see it in a rich mail client. */
+function MessagePreview({ body }: { body: string }) {
+  return (
+    <div
+      data-slot="matcha-targeted-preview"
+      className="border-input bg-background flex flex-col gap-3 rounded-md border px-3 py-2 text-sm"
+    >
+      {parseEmailBody(body).map((b, i) =>
+        b.kind === "ul" ? (
+          <ul key={i} className="-mt-2 list-disc pl-5">
+            {b.items.map((item, j) => (
+              <li key={j}>{item}</li>
+            ))}
+          </ul>
+        ) : (
+          <p key={i}>
+            {b.lines.map((l, j) => (
+              <span key={j}>
+                {j > 0 ? <br /> : null}
+                {l.label ? <strong>{l.label}</strong> : null}
+                {l.text}
+              </span>
+            ))}
+          </p>
+        ),
+      )}
+    </div>
+  );
 }
 
 export function TargetedEmailDialog({
@@ -76,6 +153,7 @@ export function TargetedEmailDialog({
   requester,
   loadContacts,
   draftPitch,
+  draftLines,
   onClose,
 }: {
   submissionId: string;
@@ -84,7 +162,8 @@ export function TargetedEmailDialog({
   focus: string;
   requester: string | null;
   loadContacts: () => Promise<TargetedContacts>;
-  draftPitch: () => Promise<string>;
+  draftPitch: () => Promise<Drafted>;
+  draftLines: (cwid: string) => Promise<Lines>;
   onClose: () => void;
 }) {
   const [contacts, setContacts] = useState<
@@ -92,26 +171,28 @@ export function TargetedEmailDialog({
     | { kind: "error"; message: string }
     | ({ kind: "ready" } & TargetedContacts)
   >({ kind: "loading" });
-  const [pitch, setPitchState] = useState("");
+  const [drafted, setDraftedState] = useState<Drafted>({ pitch: "", subject: "" });
   const [pitchStatus, setPitchStatus] = useState<"idle" | "drafting" | "error">("idle");
+  const [lines, setLines] = useState<Record<string, Lines | "drafting" | "failed">>({});
   const [cards, setCards] = useState<Record<string, Card>>({});
 
-  function setPitch(next: string) {
-    setPitchState(next);
-    writeCachedPitch(submissionId, next);
+  function setDrafted(next: Drafted) {
+    setDraftedState(next);
+    writeCache(pitchStorageKey(submissionId), next);
   }
 
   function regenerate() {
     setPitchStatus("drafting");
     draftPitch()
-      .then((p) => {
-        setPitch(p);
+      .then((d) => {
+        setDrafted(d);
         setPitchStatus("idle");
       })
       .catch(() => setPitchStatus("error"));
   }
 
-  // On open: addresses, and the pitch (the cached edit when there is one, else a fresh draft).
+  // On open: addresses; the pitch (cached edit, else a fresh draft); each briefed person's lines
+  // (cached, else drafted, `LINES_CONCURRENCY` at a time).
   useEffect(() => {
     let live = true;
     loadContacts()
@@ -125,8 +206,34 @@ export function TargetedEmailDialog({
           }),
       );
     const cached = readCachedPitch(submissionId);
-    if (cached) setPitchState(cached);
+    if (cached) setDraftedState(cached);
     else regenerate();
+
+    const queue: string[] = [];
+    const initial: Record<string, Lines | "drafting"> = {};
+    for (const p of people) {
+      if (!p.hasBrief) continue;
+      const c = readCache<Lines>(linesStorageKey(submissionId, p.cwid));
+      if (c && Array.isArray(c.bullets)) initial[p.cwid] = c;
+      else {
+        initial[p.cwid] = "drafting";
+        queue.push(p.cwid);
+      }
+    }
+    setLines(initial);
+    const worker = async () => {
+      for (let cwid = queue.shift(); cwid && live; cwid = queue.shift()) {
+        const id = cwid;
+        try {
+          const l = await draftLines(id);
+          writeCache(linesStorageKey(submissionId, id), l);
+          if (live) setLines((prev) => ({ ...prev, [id]: l }));
+        } catch {
+          if (live) setLines((prev) => ({ ...prev, [id]: "failed" }));
+        }
+      }
+    };
+    for (let i = 0; i < LINES_CONCURRENCY; i++) void worker();
     return () => {
       live = false;
     };
@@ -135,13 +242,15 @@ export function TargetedEmailDialog({
   }, []);
 
   const officerName = contacts.kind === "ready" ? contacts.officer.name : "";
-  // The directory's preferred name (as the per-person Email greets) and address, by cwid.
+  const officerDept = contacts.kind === "ready" ? (contacts.officer.dept ?? null) : null;
+  // The directory's preferred name (as the greeting uses) and address, by cwid.
   const contactBy = new Map(
     contacts.kind === "ready" ? contacts.contacts.map((c) => [c.cwid, c]) : [],
   );
   const reachable = people.filter((p) => contactBy.has(p.cwid));
   const missing = contacts.kind === "ready" ? contacts.missing : [];
   const doneCount = reachable.filter((p) => cards[p.cwid]?.done).length;
+  const pitchWords = wordCount(drafted.pitch);
 
   function patchCard(cwid: string, patch: Partial<Card>) {
     setCards((prev) => ({ ...prev, [cwid]: { ...(prev[cwid] ?? { done: false }), ...patch } }));
@@ -159,7 +268,9 @@ export function TargetedEmailDialog({
         className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
       >
         <DialogHeader>
-          <DialogTitle>Email researchers individually</DialogTitle>
+          <DialogTitle>
+            {people.length === 1 ? "Email researcher" : "Email researchers individually"}
+          </DialogTitle>
           <DialogDescription>
             {contacts.kind === "ready"
               ? `${doneCount} of ${reachable.length} done. Review each message, then open it in your mail app or copy it. Nothing is sent by Scholars.`
@@ -177,10 +288,10 @@ export function TargetedEmailDialog({
           <Textarea
             id="matcha-pitch"
             rows={4}
-            value={pitch}
+            value={drafted.pitch}
             disabled={pitchStatus === "drafting"}
             placeholder={pitchStatus === "drafting" ? "Drafting the pitch…" : ""}
-            onChange={(e) => setPitch(e.target.value)}
+            onChange={(e) => setDrafted({ ...drafted, pitch: e.target.value })}
           />
           <div className="flex items-center gap-2">
             <Button
@@ -192,12 +303,35 @@ export function TargetedEmailDialog({
             >
               {pitchStatus === "drafting" ? "Drafting…" : "Regenerate"}
             </Button>
+            <span
+              data-slot="matcha-pitch-words"
+              className={
+                pitchWords > PITCH_WARN_WORDS
+                  ? "text-destructive text-xs"
+                  : "text-muted-foreground text-xs"
+              }
+            >
+              {pitchWords} words
+              {pitchWords > PITCH_WARN_WORDS
+                ? ` · over ${PITCH_WARN_WORDS}; shorter reads better`
+                : ""}
+            </span>
             {pitchStatus === "error" ? (
               <span className="text-destructive text-xs" role="alert">
                 Couldn&apos;t draft the pitch. Write one, or try again.
               </span>
             ) : null}
           </div>
+          <label htmlFor="matcha-subject" className="mt-2 text-sm font-medium">
+            Subject
+          </label>
+          <Input
+            id="matcha-subject"
+            value={drafted.subject}
+            disabled={pitchStatus === "drafting"}
+            placeholder={buildTargetedEmail({ focus, requester, name: "" }).subject}
+            onChange={(e) => setDrafted({ ...drafted, subject: e.target.value })}
+          />
         </div>
 
         {contacts.kind === "loading" ? (
@@ -213,15 +347,17 @@ export function TargetedEmailDialog({
             {reachable.map((p) => {
               const card = cards[p.cwid] ?? { done: false };
               const { name, email } = contactBy.get(p.cwid)!;
+              const l = lines[p.cwid];
               const built = buildTargetedEmail({
                 focus,
                 requester,
                 officerName,
+                officerDept,
                 name,
-                pitch,
-                angle: p.angle,
-                angleRole: p.angleRole,
-                topic: p.topic,
+                pitch: drafted.pitch,
+                subject: drafted.subject,
+                bullets: typeof l === "object" ? l.bullets : null,
+                idea: typeof l === "object" ? l.idea : null,
               });
               const body = card.override ?? built.body;
               const mailto = buildMailto({ to: email, subject: built.subject, body });
@@ -253,19 +389,31 @@ export function TargetedEmailDialog({
                     >
                       No brief — draft one for a personal line
                     </p>
+                  ) : l === "drafting" && card.override == null ? (
+                    <p className="text-muted-foreground text-xs" role="status">
+                      Drafting the personal lines…
+                    </p>
+                  ) : l === "failed" && card.override == null ? (
+                    <p className="text-destructive text-xs" role="alert">
+                      Couldn&apos;t draft the personal lines; the message goes without them.
+                    </p>
                   ) : null}
-                  <Textarea
-                    aria-label={`Message to ${name}`}
-                    rows={10}
-                    value={body}
-                    onChange={(e) => patchCard(p.cwid, { override: e.target.value })}
-                  />
+                  {card.editing ? (
+                    <Textarea
+                      aria-label={`Message to ${name}`}
+                      rows={body.split("\n").length + 1}
+                      value={body}
+                      onChange={(e) => patchCard(p.cwid, { override: e.target.value })}
+                    />
+                  ) : (
+                    <MessagePreview body={body} />
+                  )}
                   {mailto.length > MAILTO_SOFT_LIMIT ? (
                     <p className="text-xs" data-slot="matcha-targeted-too-long">
                       Too long for some mail apps — use Copy.
                     </p>
                   ) : null}
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button asChild variant="apollo" size="sm">
                       <a href={mailto} onClick={() => patchCard(p.cwid, { done: true })}>
                         Open in mail app
@@ -276,21 +424,28 @@ export function TargetedEmailDialog({
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        navigator.clipboard
-                          .writeText(body)
+                        copyMessage(body)
                           .then(() => patchCard(p.cwid, { copied: "ok" }))
                           .catch(() => patchCard(p.cwid, { copied: "failed" }));
                       }}
                     >
                       Copy
                     </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => patchCard(p.cwid, { editing: !card.editing })}
+                    >
+                      {card.editing ? "Preview" : "Edit"}
+                    </Button>
                     {card.copied === "ok" ? (
                       <span className="text-xs" role="status">
-                        Copied
+                        Copied. Paste into Outlook keeps the bullets and bold.
                       </span>
                     ) : card.copied === "failed" ? (
                       <span className="text-destructive text-xs" role="alert">
-                        Couldn&apos;t copy; select the message and copy it.
+                        Couldn&apos;t copy; click Edit, select the message and copy it.
                       </span>
                     ) : null}
                   </div>

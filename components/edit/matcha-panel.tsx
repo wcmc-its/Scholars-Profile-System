@@ -68,6 +68,7 @@ import {
   FileText,
   Lock,
   Mail,
+  Loader2,
   MoreHorizontal,
   RefreshCw,
   Trash2,
@@ -160,7 +161,6 @@ import {
   addressList,
   buildGroupEmail,
   buildMailto,
-  buildPersonEmail,
   emailFocus,
 } from "@/lib/edit/matcha-email";
 import { TargetedEmailDialog, type TargetedPerson } from "@/components/edit/matcha-targeted-dialog";
@@ -1667,10 +1667,15 @@ export function MatchaPanel({
   const briefsOn = matchaBrief && !grantPath && target === "people" && submissionId != null;
 
   /** What "Draft briefs" drafts: the CURRENT view (sliders + filters applied), rows without a
-   *  brief and not already drafting. Ticked rows win (the shortlist, capped at the server's 20);
-   *  otherwise the top 10 of the filtered, fit-ordered view. */
+   *  brief, or with one drafted before partnership angles existed (POST always redrafts, which
+   *  adds the angle and keeps the officer's edits), and not already drafting. Ticked rows win
+   *  (the shortlist, capped at the server's 20); otherwise the top 10 of the filtered,
+   *  fit-ordered view. */
   const briefTargets = useMemo(() => {
-    const lacks = (cwid: string) => !briefMap.has(cwid) && !briefDrafting.has(cwid);
+    const lacks = (cwid: string) => {
+      const b = briefMap.get(cwid);
+      return (!b || b.generated.angle === undefined) && !briefDrafting.has(cwid);
+    };
     if (shortlistRows.length > 0) {
       return shortlistRows
         .map(({ c }) => c.cwid)
@@ -1810,6 +1815,7 @@ export function MatchaPanel({
         focus: contactFocus,
         requester: effectiveRequester,
         officerName: res.officer.name,
+        officerDept: res.officer.dept,
       });
       setEmailDialog({ kind: "ready", ...res, subject, body, copied: null });
     } catch (err) {
@@ -1820,54 +1826,33 @@ export function MatchaPanel({
     }
   }
 
-  /** "Email individually": the ticked rows in rank order, with the brief pieces each message uses. */
+  /** "Email individually": the ticked rows in rank order. */
   function openTargetedDialog() {
     if (!contactOn || shortlistRows.length === 0 || shortlistRows.length > CONTACT_MAX) return;
     setTargetedPeople(
-      shortlistRows.map(({ c }) => {
-        const b = briefMap.get(c.cwid);
-        return {
-          cwid: c.cwid,
-          name: c.name,
-          hasBrief: b != null,
-          angle: b ? briefAngle(b) : "",
-          angleRole: b ? briefAngleRole(b) : "",
-          topic: b ? (briefTopics(b)[0]?.text ?? "") : "",
-        };
-      }),
+      shortlistRows.map(({ c }) => ({ cwid: c.cwid, name: c.name, hasBrief: briefMap.has(c.cwid) })),
     );
   }
 
-  /** The pitch, drafted by the gated route from the SAVED search. */
-  async function draftPitch(): Promise<string> {
-    const r = await fetch("/api/edit/matcha/pitch", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "same-origin",
-      cache: "no-store",
-      body: JSON.stringify({ submissionId }),
-    });
-    const body = (await r.json().catch(() => null)) as { ok?: boolean; pitch?: string } | null;
-    if (!r.ok || !body?.ok) throw new Error("pitch_unavailable");
-    return body.pitch ?? "";
+  /** The pitch and subject, drafted by the gated route from the SAVED search. */
+  async function draftPitch(): Promise<{ pitch: string; subject: string }> {
+    const body = await postPitch({ submissionId });
+    return { pitch: body.pitch ?? "", subject: body.subject ?? "" };
   }
 
-  /** Per-person "Email": that person alone, greeted by name, with their partnership angle. */
-  async function emailOne(cwid: string): Promise<boolean> {
-    const res = await fetchContacts([cwid]);
-    const person = res.contacts[0];
-    if (!person) return false;
-    const brief = briefMap.get(cwid);
-    const { subject, body } = buildPersonEmail({
-      focus: contactFocus,
-      requester: effectiveRequester,
-      officerName: res.officer.name,
-      name: person.name,
-      angle: brief ? briefAngle(brief) : null,
-    });
-    window.location.href = buildMailto({ to: person.email, subject, body });
-    return true;
+  /** One researcher's second-person bullets and idea, drafted from their saved brief. */
+  async function draftLines(cwid: string): Promise<{ bullets: string[]; idea: string }> {
+    const body = await postPitch({ submissionId, cwid });
+    return { bullets: body.bullets ?? [], idea: body.idea ?? "" };
   }
+
+  /** Per-person "Email": the review dialog for that one person, so the message is the same
+   *  second-person one as "Email individually" (never the brief's third-person angle). */
+  function emailOne(cwid: string) {
+    const row = shortlistRows.find(({ c }) => c.cwid === cwid) ?? eligibleRows.find(({ c }) => c.cwid === cwid);
+    setTargetedPeople([{ cwid, name: row?.c.name ?? "", hasBrief: briefMap.has(cwid) }]);
+  }
+
 
   /** Missing PIs whose draft has landed (brief) or failed. An outdated brief is already in the
    *  map, so for it only leaving the drafting set counts (enqueueing adds it there at once). */
@@ -2937,13 +2922,22 @@ export function MatchaPanel({
             </div>
           </div>
         </form>
-        {recentSearchesSection}
+        {/* Hidden while a search runs: the loading state below would otherwise sit under the
+            whole list, out of view. */}
+        {status.kind === "loading" ? null : recentSearchesSection}
         </>
       )}
 
       {status.kind === "loading" ? (
         <div aria-busy="true">
-          <p className="text-muted-foreground py-3 text-sm">Ranking {targetNoun}…</p>
+          <p
+            role="status"
+            data-slot="matcha-loading"
+            className="text-muted-foreground flex items-center gap-2 py-3 text-sm"
+          >
+            <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+            Ranking {targetNoun}…
+          </p>
           <div className="space-y-3">
             {Array.from({ length: 4 }, (_, i) => (
               <div key={i} className="border-apollo-border bg-apollo-surface rounded-lg border p-4">
@@ -3583,6 +3577,7 @@ export function MatchaPanel({
                         requester={effectiveRequester ?? null}
                         loadContacts={() => fetchContacts(targetedPeople.map((p) => p.cwid))}
                         draftPitch={draftPitch}
+                        draftLines={draftLines}
                         onClose={() => setTargetedPeople(null)}
                       />
                     ) : null}
@@ -4326,27 +4321,17 @@ function EmailSelectedDialog({
   );
 }
 
-/** Matcha contact — one researcher's templated email (with their partnership angle). Resolves the
- *  address on CLICK, like `ContactButton`, through the gated contacts route. */
-function EmailPersonButton({ onEmail }: { onEmail: () => Promise<boolean> }) {
-  const [state, setState] = useState<"idle" | "loading" | "none" | "error">("idle");
-  if (state === "none") {
-    return <span className="text-muted-foreground shrink-0 text-xs">No email on record</span>;
-  }
+/** Matcha contact — one researcher's email: opens the targeted review dialog for that person
+ *  (addresses resolved there, on open, through the gated contacts route). */
+function EmailPersonButton({ onEmail }: { onEmail: () => void }) {
   return (
     <button
       type="button"
       data-slot="matcha-email-person"
-      disabled={state === "loading"}
-      onClick={() => {
-        setState("loading");
-        onEmail()
-          .then((ok) => setState(ok ? "idle" : "none"))
-          .catch(() => setState("error"));
-      }}
+      onClick={onEmail}
       className="border-border text-foreground/80 shrink-0 rounded-full border px-2.5 py-0.5 text-xs transition-colors hover:border-[var(--color-accent-slate)] disabled:opacity-50"
     >
-      {state === "loading" ? "Resolving…" : state === "error" ? "Email (retry)" : "Email"}
+      Email
     </button>
   );
 }
@@ -5401,15 +5386,36 @@ type BriefRowProps = {
   onPatch: (patch: BriefPatch) => Promise<boolean>;
   /** Matcha contact — the per-person templated "Email". Present only for a drafter (the contacts
    *  route's gate); resolves false when the person has no address on record. */
-  onEmail?: () => Promise<boolean>;
+  onEmail?: () => void;
 };
 
 /** What `/api/edit/matcha/contacts` returns. Held only in the open dialog's state. */
 type ContactsResult = {
   contacts: { cwid: string; name: string; email: string }[];
   missing: { cwid: string; name: string }[];
-  officer: { name: string; email: string | null };
+  officer: { name: string; email: string | null; dept?: string | null };
 };
+
+/** POST to the gated pitch route; throws on any failure. */
+async function postPitch(payload: { submissionId: string | null; cwid?: string }): Promise<{
+  pitch?: string;
+  subject?: string;
+  bullets?: string[];
+  idea?: string;
+}> {
+  const r = await fetch("/api/edit/matcha/pitch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    cache: "no-store",
+    body: JSON.stringify(payload),
+  });
+  const body = (await r.json().catch(() => null)) as
+    | ({ ok?: boolean } & Record<string, unknown>)
+    | null;
+  if (!r.ok || !body?.ok) throw new Error("pitch_unavailable");
+  return body as never;
+}
 
 type EmailDialogState =
   | { kind: "loading" }

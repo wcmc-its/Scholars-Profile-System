@@ -6,8 +6,9 @@ import {
   addressList,
   buildGroupEmail,
   buildMailto,
-  buildPersonEmail,
   emailFocus,
+  emailSignature,
+  focusPhrase,
   fillTemplate,
   salutationSurname,
 } from "@/lib/edit/matcha-email";
@@ -22,7 +23,7 @@ describe("buildGroupEmail", () => {
     expect(subject).toBe("Possible industry collaboration: antibody-drug conjugates");
     expect(body).toBe(
       "Dear colleague,\n\n" +
-        "I'm reaching out because Northwind Bio is looking for Weill Cornell investigators working on antibody-drug conjugates. Your research came up as a strong match.\n\n" +
+        "I'm reaching out because Northwind Bio is looking for Weill Cornell investigators working on antibody-drug conjugates, and your work stood out.\n\n" +
         "Would you be open to a brief conversation about a possible collaboration? I'm happy to share more details.\n\n" +
         "Best regards,\nOlive Officer",
     );
@@ -40,33 +41,28 @@ describe("buildGroupEmail", () => {
   });
 });
 
-describe("buildPersonEmail", () => {
-  const ctx = { focus: "obesity", requester: "Acme Labs", officerName: "Olive Officer" };
-
-  it("greets by surname and adds the partnership angle after the first paragraph", () => {
-    const { subject, body } = buildPersonEmail({
-      ...ctx,
-      name: "Jane Q. Doe",
-      angle: "Could lead a trial with an existing patient cohort.",
-    });
-    expect(subject).toBe("Possible industry collaboration: obesity");
-    const paras = body.split("\n\n");
-    expect(paras[0]).toBe("Dear Dr. Doe,");
-    expect(paras[1]).toContain("Acme Labs is looking for");
-    expect(paras[2]).toBe(
-      "Why we thought of you: Could lead a trial with an existing patient cohort.",
+describe("focusPhrase", () => {
+  it("lowers an ordinary capitalised first word, for use mid-sentence", () => {
+    expect(focusPhrase("Sleep apnea in older adults")).toBe(
+      "sleep apnea in older adults",
     );
-    expect(paras[3]).toMatch(/^Would you be open/);
   });
 
-  it("has no angle paragraph when the brief has none", () => {
-    const { body } = buildPersonEmail({ ...ctx, name: "Jane Doe", angle: "" });
-    expect(body).not.toContain("Why we thought of you");
-    expect(body.split("\n\n")).toHaveLength(4);
+  it("keeps acronyms and mixed-case names", () => {
+    expect(focusPhrase("HIV vaccines")).toBe("HIV vaccines");
+    expect(focusPhrase("McArdle disease")).toBe("McArdle disease");
+    expect(focusPhrase("mRNA delivery")).toBe("mRNA delivery");
   });
+});
 
-  it("falls back to 'Dear colleague,' with no usable name", () => {
-    expect(buildPersonEmail({ ...ctx, name: "" }).body.startsWith("Dear colleague,")).toBe(true);
+describe("emailSignature", () => {
+  it("adds the department line when known", () => {
+    expect(emailSignature({ officerName: "Olive Officer", officerDept: "Example Library" })).toBe(
+      "Best regards,\nOlive Officer\nExample Library, Weill Cornell Medicine",
+    );
+    expect(emailSignature({ officerName: "Olive Officer", officerDept: " " })).toBe(
+      "Best regards,\nOlive Officer",
+    );
   });
 });
 

@@ -6,28 +6,25 @@
  * are `{name}`; an unknown placeholder is left as typed.
  *
  * Nothing is sent from Scholars: the officer's own mail app composes, from a `mailto:` link, or
- * the officer pastes the copied addresses into Bcc.
+ * the officer pastes the copied addresses into Bcc. A `mailto:` body is plain text only, so the
+ * messages are written to read well as plain text; Copy also puts an HTML version (real bullets,
+ * bold labels) on the clipboard (`emailBodyToHtml`).
  */
 import { TITLE_ORG_JOIN } from "@/lib/api/matcha-contract";
-import { angleRoleLead } from "@/lib/edit/matcha-brief-types";
 import { stripUnitDisambiguation } from "@/lib/name-sort";
 
 /** `{focus}` = the search's focus (its title without the requester prefix). */
 export const MATCHA_EMAIL_SUBJECT = "Possible industry collaboration: {focus}";
 
-/** The group (Bcc) body. `{requesterPhrase}`, `{focus}`, `{officerName}`. */
+/** The group (Bcc) body. `{requesterPhrase}`, `{focus}`, `{signature}`. */
 export const MATCHA_EMAIL_BODY =
   "Dear colleague,\n\n" +
-  "I'm reaching out because {requesterPhrase} is looking for Weill Cornell investigators working on {focus}. Your research came up as a strong match.\n\n" +
+  "I'm reaching out because {requesterPhrase} is looking for Weill Cornell investigators working on {focus}, and your work stood out.\n\n" +
   "Would you be open to a brief conversation about a possible collaboration? I'm happy to share more details.\n\n" +
-  "Best regards,\n" +
-  "{officerName}";
+  "{signature}";
 
-/** The per-person greeting, replacing the group body's first line. */
+/** The per-person greeting. */
 export const MATCHA_EMAIL_PERSON_GREETING = "Dear Dr. {lastName},";
-
-/** The per-person paragraph inserted after the first paragraph when the brief has an angle. */
-export const MATCHA_EMAIL_ANGLE_LINE = "Why we thought of you: {angle}";
 
 /** `{requesterPhrase}` when the search names no requester. */
 export const MATCHA_EMAIL_NO_REQUESTER = "an industry partner";
@@ -52,6 +49,14 @@ export function emailFocus(title: string | null | undefined, requester?: string 
   return t;
 }
 
+/** "Sleep apnea in older adults" → "sleep apnea in older adults", for use
+ *  mid-sentence. Only an ordinary capitalised first word is lowered: "HIV vaccines" and
+ *  "McArdle disease" stay as they are. */
+export function focusPhrase(focus: string): string {
+  const f = focus.trim();
+  return /^[A-Z][a-z]+(?![A-Za-z])/.test(f) ? f[0].toLowerCase() + f.slice(1) : f;
+}
+
 export type EmailContext = {
   /** The search focus (see `emailFocus`). */
   focus: string;
@@ -59,13 +64,24 @@ export type EmailContext = {
   requester?: string | null;
   /** The signing officer; "" leaves the sign-off blank for them to fill in. */
   officerName?: string | null;
+  /** The officer's department: the signature's last line, "{dept}, Weill Cornell Medicine". */
+  officerDept?: string | null;
 };
+
+/** "Best regards," + the officer's name + (when known) "{dept}, Weill Cornell Medicine". */
+export function emailSignature(ctx: Pick<EmailContext, "officerName" | "officerDept">): string {
+  const dept = ctx.officerDept?.trim();
+  const lines = ["Best regards,", ctx.officerName?.trim() ?? ""];
+  if (dept) lines.push(`${dept}, Weill Cornell Medicine`);
+  return lines.join("\n");
+}
 
 function vars(ctx: EmailContext): Record<string, string> {
   return {
-    focus: ctx.focus.trim() || "your area of research",
+    focus: focusPhrase(ctx.focus) || "your area of research",
     requesterPhrase: ctx.requester?.trim() || MATCHA_EMAIL_NO_REQUESTER,
     officerName: ctx.officerName?.trim() ?? "",
+    signature: emailSignature(ctx),
   };
 }
 
@@ -89,22 +105,12 @@ export function salutationSurname(name: string): string {
   return (tokens[end - 1] ?? "").replace(/,$/, "");
 }
 
-/** One investigator's message: "Dear Dr. {lastName}," and, with an angle, a "Why we thought of
- *  you" paragraph after the first paragraph. */
-export function buildPersonEmail(ctx: EmailContext & { name: string; angle?: string | null }): {
-  subject: string;
-  body: string;
-} {
-  const group = buildGroupEmail(ctx);
-  const surname = salutationSurname(ctx.name);
-  const greeting = surname
+/** "Dear Dr. {lastName}," — or "Dear colleague," when the name gives no surname. */
+export function personGreeting(name: string): string {
+  const surname = salutationSurname(name);
+  return surname
     ? fillTemplate(MATCHA_EMAIL_PERSON_GREETING, { lastName: surname })
     : "Dear colleague,";
-  const paragraphs = group.body.split("\n\n");
-  paragraphs[0] = paragraphs[0].replace(/^Dear colleague,/, greeting);
-  const angle = ctx.angle?.trim();
-  if (angle) paragraphs.splice(2, 0, fillTemplate(MATCHA_EMAIL_ANGLE_LINE, { angle }));
-  return { subject: group.subject, body: paragraphs.join("\n\n") };
 }
 
 /** An address for a mailto: URL — encoded, with "@" kept literal (some clients mishandle %40). */
@@ -133,34 +139,108 @@ export function addressList(emails: readonly string[]): string {
   return emails.join("; ");
 }
 
-/** The targeted message's discussion-topic line (the brief's first topic). */
-export const MATCHA_EMAIL_TOPIC_LINE = "A possible starting point: {topic}";
+/** The two labels of the targeted message, bold in the HTML copy and the preview. */
+export const MATCHA_EMAIL_WHY_LABEL = "Why I thought of you:";
+export const MATCHA_EMAIL_IDEA_LABEL = "One idea to discuss:";
+/** The plain-text bullet: a bullet character and a space. */
+export const EMAIL_BULLET = "• ";
+/** The targeted message's opening when the officer left the pitch empty. */
+export const MATCHA_EMAIL_FALLBACK_PITCH =
+  "{requesterPhrase} is looking for Weill Cornell investigators working on {focus}.";
+export const MATCHA_EMAIL_TARGETED_ASK =
+  "Would you be open to a brief conversation? I'm happy to share more details.";
 
 /**
- * One investigator's TARGETED message (the "Email individually" review queue): the per-person
- * message with, after the first paragraph, the officer's pitch, "Why we thought of you:
- * {Role.} {angle}" and one discussion topic. Each missing piece is left out cleanly; with no
- * angle there is no "Why" line even when a role is set (the role only leads the angle).
+ * One investigator's TARGETED message (the "Email individually" review queue), plain text:
+ *
+ *   Dear Dr. {lastName},
+ *   {pitch}                        (or the fallback sentence)
+ *   Why I thought of you:          (only with bullets)
+ *   • {bullet}
+ *   One idea to discuss: {idea}    (only with an idea)
+ *   {ask}
+ *   {signature}
+ *
+ * The bullets and idea come already written to the reader (`generateEmailLines`); the brief's
+ * own third-person text never goes into the message.
  */
 export function buildTargetedEmail(
   ctx: EmailContext & {
     name: string;
     pitch?: string | null;
-    angle?: string | null;
-    angleRole?: string | null;
-    topic?: string | null;
+    /** The drafted subject; empty ⇒ the template subject. */
+    subject?: string | null;
+    bullets?: readonly string[] | null;
+    idea?: string | null;
   },
 ): { subject: string; body: string } {
-  const { subject, body } = buildPersonEmail({ ...ctx, angle: null });
-  const angle = ctx.angle?.trim();
-  const lead = angleRoleLead(ctx.angleRole ?? "");
-  const topic = ctx.topic?.trim();
-  const extra = [
-    ctx.pitch?.trim() ?? "",
-    angle ? fillTemplate(MATCHA_EMAIL_ANGLE_LINE, { angle: lead ? `${lead} ${angle}` : angle }) : "",
-    topic ? fillTemplate(MATCHA_EMAIL_TOPIC_LINE, { topic }) : "",
+  const v = vars(ctx);
+  const pitch = ctx.pitch?.trim() || fillTemplate(MATCHA_EMAIL_FALLBACK_PITCH, v);
+  const bullets = (ctx.bullets ?? []).map((b) => b.trim()).filter(Boolean);
+  const idea = ctx.idea?.trim();
+  const paragraphs = [
+    personGreeting(ctx.name),
+    pitch[0].toUpperCase() + pitch.slice(1),
+    bullets.length > 0
+      ? [MATCHA_EMAIL_WHY_LABEL, ...bullets.map((b) => EMAIL_BULLET + b)].join("\n")
+      : "",
+    idea ? `${MATCHA_EMAIL_IDEA_LABEL} ${idea}` : "",
+    MATCHA_EMAIL_TARGETED_ASK,
+    v.signature,
   ].filter(Boolean);
-  const paragraphs = body.split("\n\n");
-  paragraphs.splice(2, 0, ...extra);
-  return { subject, body: paragraphs.join("\n\n") };
+  return {
+    subject: ctx.subject?.trim() || fillTemplate(MATCHA_EMAIL_SUBJECT, v),
+    body: paragraphs.join("\n\n"),
+  };
+}
+
+/** A plain-text message as blocks: paragraphs of lines (a known label split off so it can be
+ *  bold) and bullet lists. Shared by the HTML copy and the dialog's preview. */
+export type EmailBlock =
+  { kind: "p"; lines: { label: string; text: string }[] } | { kind: "ul"; items: string[] };
+
+const BOLD_LABELS = [MATCHA_EMAIL_WHY_LABEL, MATCHA_EMAIL_IDEA_LABEL];
+const BULLET_LINE = /^\s*[•*-]\s+/;
+
+export function parseEmailBody(body: string): EmailBlock[] {
+  const blocks: EmailBlock[] = [];
+  for (const para of body.replace(/\r\n/g, "\n").split(/\n\s*\n/)) {
+    let current: EmailBlock | null = null;
+    for (const line of para.split("\n")) {
+      if (BULLET_LINE.test(line)) {
+        if (current?.kind !== "ul") blocks.push((current = { kind: "ul", items: [] }));
+        current.items.push(line.replace(BULLET_LINE, ""));
+      } else {
+        if (current?.kind !== "p") blocks.push((current = { kind: "p", lines: [] }));
+        const label = BOLD_LABELS.find((l) => line.startsWith(l)) ?? "";
+        current.lines.push({ label, text: line.slice(label.length) });
+      }
+    }
+  }
+  return blocks;
+}
+
+function escapeHtml(t: string): string {
+  return t
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * The HTML copy of a plain-text message: real `<ul>` bullets and the two labels in bold, all text
+ * escaped. Outlook renders pasted HTML with no font in Times, hence the wrapper's font.
+ */
+export function emailBodyToHtml(body: string): string {
+  const html = parseEmailBody(body)
+    .map((b) =>
+      b.kind === "ul"
+        ? `<ul>${b.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`
+        : `<p style="margin:0 0 12px">${b.lines
+            .map((l) => (l.label ? `<b>${escapeHtml(l.label)}</b>` : "") + escapeHtml(l.text))
+            .join("<br>")}</p>`,
+    )
+    .join("");
+  return `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt">${html}</div>`;
 }

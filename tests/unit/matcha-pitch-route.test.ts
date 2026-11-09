@@ -9,19 +9,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
-const { mockReadEditRequest, mockLogEditDenial, mockSubFindUnique, mockSubFindMany, mockGenerate } =
-  vi.hoisted(() => ({
-    mockReadEditRequest: vi.fn(),
-    mockLogEditDenial: vi.fn(),
-    mockSubFindUnique: vi.fn(),
-    mockSubFindMany: vi.fn(),
-    mockGenerate: vi.fn(),
-  }));
+const {
+  mockReadEditRequest,
+  mockLogEditDenial,
+  mockSubFindUnique,
+  mockSubFindMany,
+  mockGenerate,
+  mockBriefFindUnique,
+  mockScholarFindUnique,
+  mockLoadRecords,
+} = vi.hoisted(() => ({
+  mockReadEditRequest: vi.fn(),
+  mockLogEditDenial: vi.fn(),
+  mockSubFindUnique: vi.fn(),
+  mockSubFindMany: vi.fn(),
+  mockGenerate: vi.fn(),
+  mockBriefFindUnique: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
+  mockLoadRecords: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
       sponsorMatchSubmission: { findUnique: mockSubFindUnique, findMany: mockSubFindMany },
+      matchaBrief: { findUnique: mockBriefFindUnique },
+      scholar: { findUnique: mockScholarFindUnique },
     },
   },
 }));
@@ -31,10 +44,19 @@ vi.mock("@/lib/edit/request", async (importOriginal) => ({
 }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogEditDenial }));
 vi.mock("ai", () => ({ generateText: mockGenerate }));
+vi.mock("@/lib/api/matcha-brief", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/matcha-brief")>()),
+  loadBriefRecords: mockLoadRecords,
+}));
 vi.mock("@/lib/llm/client", () => ({ bedrockClient: () => (id: string) => ({ id }) }));
 
 import { POST } from "@/app/api/edit/matcha/pitch/route";
-import { PITCH_MAX_WORDS, postCheckPitch } from "@/lib/api/matcha-pitch";
+import {
+  PITCH_MAX_WORDS,
+  parsePitchOutput,
+  postCheckEmailLines,
+  postCheckPitch,
+} from "@/lib/api/matcha-pitch";
 
 const devSession = { cwid: "dev1", isSuperuser: false, isDeveloper: true };
 function req(session: Record<string, unknown>, body: Record<string, unknown>) {
@@ -76,8 +98,23 @@ beforeEach(() => {
         ],
   );
   mockGenerate.mockResolvedValue({
-    text: "Example Pharma wants partners who study gut hormones and appetite.",
+    text:
+      "SUBJECT: Example Pharma collaboration: gut hormone research\n" +
+      "PITCH: Example Pharma wants partners who study gut hormones and appetite.",
   });
+  mockBriefFindUnique.mockResolvedValue({
+    generated: {
+      why: "Ada Example runs nine trials on appetite.",
+      angle: "She could lead a feeding study.",
+      angleRole: "Feeding-study lead",
+      methodPills: [{ label: "Indirect calorimetry", kind: "method", from: ["calorimetry"] }],
+      topics: [{ concept: "Gut hormones", text: "GLP-1 response in feeding studies", sources: [] }],
+      removedCount: 0,
+    },
+    edited: null,
+  });
+  mockScholarFindUnique.mockResolvedValue({ preferredName: "Ada Example" });
+  mockLoadRecords.mockResolvedValue(new Map([["aaa1001", { methods: [], trialCount: 9 }]]));
 });
 
 async function json(r: Response) {
@@ -119,6 +156,7 @@ describe("POST /api/edit/matcha/pitch", () => {
     expect(r.status).toBe(200);
     expect(await json(r)).toEqual({
       ok: true,
+      subject: "Example Pharma collaboration: gut hormone research",
       pitch: "Example Pharma wants partners who study gut hormones and appetite.",
     });
     const prompt = mockGenerate.mock.calls[0][0].messages[0].content as string;
@@ -155,9 +193,87 @@ describe("POST /api/edit/matcha/pitch", () => {
     expect(body.pitch).toBe("The partner seeks gut-hormone labs. Write to or call, see for more.");
   });
 
+  it("with a cwid, drafts that person's lines from their SAVED brief", async () => {
+    mockGenerate.mockResolvedValue({
+      text: '{"bullets": ["Nine trials on appetite.", "Indirect calorimetry"], "idea": "GLP-1 response in feeding studies"}',
+    });
+    const r = await POST(req(devSession, { submissionId: "s1", cwid: "aaa1001" }));
+    expect(r.status).toBe(200);
+    expect(await json(r)).toEqual({
+      ok: true,
+      bullets: ["Nine trials on appetite", "Indirect calorimetry"],
+      idea: "GLP-1 response in feeding studies.",
+    });
+    expect(mockBriefFindUnique.mock.calls[0][0].where).toEqual({
+      descriptionHash_cwid: { descriptionHash: "h1", cwid: "aaa1001" },
+    });
+    const prompt = mockGenerate.mock.calls[0][0].messages[0].content as string;
+    expect(prompt).toContain("Role: Feeding-study lead");
+    expect(prompt).toContain("Methods and data: Indirect calorimetry");
+    expect(prompt).toContain("Clinical trials: 9");
+  });
+
+  it("with a cwid that has no brief on this paste, 404s with no model call", async () => {
+    mockBriefFindUnique.mockResolvedValue(null);
+    const r = await POST(req(devSession, { submissionId: "s1", cwid: "zzz9999" }));
+    expect(r.status).toBe(404);
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("400s on a malformed cwid", async () => {
+    expect((await POST(req(devSession, { submissionId: "s1", cwid: 7 }))).status).toBe(400);
+  });
+
   it("500s when the model call fails", async () => {
     mockGenerate.mockRejectedValue(new Error("bedrock down"));
     expect((await POST(req(devSession, { submissionId: "s1" }))).status).toBe(500);
+  });
+});
+
+describe("parsePitchOutput", () => {
+  it("splits the labelled lines and trims a subject's period", () => {
+    expect(parsePitchOutput("SUBJECT: A b c.\nPITCH: The partner wants x.")).toEqual({
+      subject: "A b c",
+      pitch: "The partner wants x.",
+    });
+  });
+
+  it("treats unlabelled output as all pitch", () => {
+    expect(parsePitchOutput("The partner wants x.")).toEqual({
+      subject: "",
+      pitch: "The partner wants x.",
+    });
+  });
+});
+
+describe("postCheckEmailLines", () => {
+  it("drops any part that names the researcher or uses he/she/Dr.", () => {
+    const out = postCheckEmailLines(
+      JSON.stringify({
+        bullets: [
+          "Quill has nine trials",
+          "She designs pilots",
+          "Your caregiver measures",
+          "Pilot designs",
+        ],
+        idea: "letting Dr. Quill shape a pilot",
+      }),
+      "Jordan Quill",
+    );
+    expect(out).toEqual({ bullets: ["Your caregiver measures", "Pilot designs"], idea: "" });
+  });
+
+  it("caps bullets, drops overlong ones, lowercases and closes the idea", () => {
+    const long = Array.from({ length: 25 }, () => "w").join(" ");
+    const out = postCheckEmailLines(
+      `Sure: {"bullets": ["a", "${long}", "b", "c", "d"], "idea": "Mental health training"}`,
+      "Ada Example",
+    );
+    expect(out).toEqual({ bullets: ["a", "b", "c"], idea: "mental health training." });
+  });
+
+  it("returns nothing for unparseable output", () => {
+    expect(postCheckEmailLines("no json here", "Ada")).toEqual({ bullets: [], idea: "" });
   });
 });
 

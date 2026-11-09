@@ -3450,6 +3450,42 @@ describe("MatchaPanel", () => {
     });
   });
 
+  it("hides the inline recent searches while a search runs, so the spinner is in view", async () => {
+    const submission = {
+      id: "r1",
+      description: "Interested in renal transport physiology.",
+      title: "renal transport",
+      engine: "spine",
+      candidateCount: 21,
+      submittedByName: "Officer One",
+      createdAt: "2026-08-02T10:00:00.000Z",
+      runCount: 1,
+      mine: true,
+    } as Submission;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: { method?: string }) =>
+        (init?.method ?? "GET") === "GET"
+          ? { ok: true, json: async () => ({ ok: true, submissions: [submission], scope: "own" }) }
+          : new Promise(() => {}),
+      ),
+    );
+    render(<MatchaPanel />);
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="matcha-recent"]')).toBeTruthy(),
+    );
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "renal partners" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    const loading = await waitFor(() => {
+      const el = document.querySelector('[data-slot="matcha-loading"]');
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    expect(loading.textContent).toBe("Ranking researchers…");
+    expect(loading.querySelector("svg.animate-spin")).toBeTruthy();
+    expect(document.querySelector('[data-slot="matcha-recent"]')).toBeNull();
+  });
+
   it("renders NO recent-searches section when history is empty", async () => {
     stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: [] });
     render(<MatchaPanel />);
