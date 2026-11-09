@@ -84,7 +84,10 @@ const LINES = {
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
 
-function stub(opts: { canEdit?: boolean; pitch?: string } = {}) {
+/** The saved brief's version (its `updatedAt`), part of the lines cache key. */
+const V1 = "2026-11-01T12:00:00.000Z";
+
+function stub(opts: { canEdit?: boolean; pitch?: string; lines?: () => object } = {}) {
   const calls: Call[] = [];
   vi.stubGlobal(
     "fetch",
@@ -113,7 +116,7 @@ function stub(opts: { canEdit?: boolean; pitch?: string } = {}) {
           ok: true,
           json: async () =>
             body?.cwid
-              ? { ok: true, ...LINES }
+              ? { ok: true, ...(opts.lines ? opts.lines() : LINES) }
               : { ok: true, pitch: opts.pitch ?? PITCH, subject: SUBJECT },
         };
       }
@@ -222,7 +225,7 @@ describe("Email individually — the review queue", () => {
     // Lines are drafted for the briefed person only.
     await waitFor(() => expect(linesCalls(calls)).toHaveLength(1));
     expect(linesCalls(calls)[0].body).toEqual({ submissionId: "sub-1", cwid: "p1" });
-    expect(window.localStorage.getItem(linesStorageKey("sub-1", "p1"))).toBe(JSON.stringify(LINES));
+    expect(window.localStorage.getItem(linesStorageKey("sub-1", "p1", V1))).toBe(JSON.stringify(LINES));
 
     const cards = within(dialog).getAllByRole("region");
     expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual(["Ada Person", "Bea Person"]);
@@ -287,13 +290,41 @@ describe("Email individually — the review queue", () => {
       pitchStorageKey("sub-1"),
       JSON.stringify({ pitch: "Kept from last time.", subject: "Kept subject" }),
     );
-    window.localStorage.setItem(linesStorageKey("sub-1", "p1"), JSON.stringify(LINES));
+    window.localStorage.setItem(linesStorageKey("sub-1", "p1", V1), JSON.stringify(LINES));
     const calls = stub();
     await search();
     const { pitch } = await openQueue([1]);
     expect(pitch.value).toBe("Kept from last time.");
     expect(pitchCalls(calls)).toHaveLength(0);
     expect(linesCalls(calls)).toHaveLength(0);
+  });
+
+  it("ignores lines cached for an older version of the brief", async () => {
+    window.localStorage.setItem(
+      linesStorageKey("sub-1", "p1", "2026-10-01T00:00:00.000Z"),
+      JSON.stringify(LINES),
+    );
+    const calls = stub();
+    await search();
+    await openQueue([1]);
+    await waitFor(() => expect(linesCalls(calls)).toHaveLength(1));
+  });
+
+  it("an empty result says so, is not cached, and Retry drafts again", async () => {
+    let n = 0;
+    const calls = stub({ lines: () => (n++ === 0 ? { bullets: [], idea: "" } : LINES) });
+    await search();
+    const { dialog } = await openQueue([1]);
+    const card = within(dialog).getByRole("region", { name: "Ada Person" });
+    expect(await within(card).findByText(/No personal lines came out of this brief/)).toBeTruthy();
+    expect(window.localStorage.getItem(linesStorageKey("sub-1", "p1", V1))).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(linesCalls(calls)).toHaveLength(2));
+    expect(await within(card).findByText("Appetite circuit mapping")).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(window.localStorage.getItem(linesStorageKey("sub-1", "p1", V1))).toBe(
+      JSON.stringify(LINES),
+    );
   });
 
   it("Done toggles by hand, and opening the mailto ticks it", async () => {

@@ -695,7 +695,12 @@ describe("POST /api/edit/matcha (route)", () => {
     });
 
     it("serves a persisted answer WITHOUT running the engine, labelled with its date", async () => {
-      mockSubmissionFindFirst.mockResolvedValue({
+      // Two reads: the newest matching row's id (narrow columns only, so MySQL never sorts the
+      // multi-MB JSON — 1038 "Out of sort memory"), then its answer by id.
+      mockSubmissionFindFirst.mockImplementation(async (args: { where: object }) =>
+        "resultKey" in args.where ? { id: "stored-1" } : null,
+      );
+      mockSubmissionFindUnique.mockResolvedValue({
         result: { concepts: [concept], candidates: [candidate], titleSummary: "Stored — Acme" },
         createdAt: new Date("2026-09-04T16:30:38Z"),
       });
@@ -705,6 +710,12 @@ describe("POST /api/edit/matcha (route)", () => {
       expect(body.candidates).toEqual([candidate]);
       expect(body.titleSummary).toBe("Stored — Acme");
       expect(body.asOf).toBe("2026-09-04T16:30:38.000Z");
+      const sortQuery = mockSubmissionFindFirst.mock.calls.find((c) => "resultKey" in c[0].where)!;
+      expect(sortQuery[0].select).toEqual({ id: true });
+      expect(mockSubmissionFindUnique).toHaveBeenCalledWith({
+        where: { id: "stored-1" },
+        select: { result: true, createdAt: true },
+      });
       expect(mockRankSpine).not.toHaveBeenCalled();
       expect(mockCachedReasonAgg).not.toHaveBeenCalled();
       // The ask is still recorded — but this row carries no answer of its own.
