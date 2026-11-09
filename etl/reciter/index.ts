@@ -953,7 +953,10 @@ async function main() {
             : (recoveredTitles.get(Number(a.pmid)) ?? `(untitled, pmid ${a.pmid})`),
         ),
         authorsString,
-        fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? reviewByline,
+        // An external row with no review byline (Crossref books/OpenAlex) still has the
+        // reciterdb v3.5 byline in analysis_summary_author.authors -> authorsString.
+        // Without this fallback the profile shows the byline but the modal shows none.
+        fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? reviewByline ?? authorsString,
         journal: a.journalTitleVerbose,
         year: a.articleYear,
         publicationType: a.publicationTypeCanonical,
