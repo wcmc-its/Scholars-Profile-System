@@ -383,6 +383,16 @@ describe("OrcidCard — Connect your ORCID iD (#3115)", () => {
     cleanup();
   });
 
+  it("ORCID display guidelines: green iD icon only when authenticated, the unauthenticated icon otherwise", () => {
+    render(<OrcidCard {...base} onFile={ID} authenticated connectEnabled />);
+    expect(screen.getByTestId("orcid-on-file").querySelector("img")).toBeNull();
+    expect(screen.getByTestId("orcid-on-file").querySelector("svg path[fill='#A6CE39']")).not.toBeNull();
+    cleanup();
+    render(<OrcidCard {...base} onFile={ID} connectEnabled />);
+    expect(screen.getByTestId("orcid-on-file").querySelector("img")).not.toBeNull();
+    cleanup();
+  });
+
   it("the callback's ?orcid= outcome is shown once", () => {
     window.history.replaceState(null, "", "/edit?attr=identifiers-profiles&orcid=denied");
     render(<OrcidCard {...base} onFile={null} connectEnabled />);

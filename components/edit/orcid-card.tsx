@@ -41,7 +41,7 @@ import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, Lock, Sparkles } from "lucide-react";
 
 import { EditPanel, OwnedBadge } from "@/components/edit/edit-panel";
-import { OrcidIdIcon } from "@/components/scholar/orcid-id-icon";
+import { OrcidIdIcon, OrcidUnauthIcon } from "@/components/scholar/orcid-id-icon";
 import { OrcidInfoButton } from "@/components/scholar/orcid-info-button";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -251,6 +251,11 @@ export function OrcidCard({
             rel="noreferrer"
             className="text-apollo-slate hover:text-apollo-maroon decoration-apollo-slate/40 hover:decoration-apollo-maroon inline-flex items-center gap-1.5 font-mono text-lg font-[600] tracking-[0.01em] underline underline-offset-4"
           >
+            {rowStatus === "authenticated" ? (
+              <OrcidIdIcon className="size-5 shrink-0" />
+            ) : (
+              <OrcidUnauthIcon className="size-5 shrink-0" />
+            )}
             {id}
             <ArrowUpRight className="size-3.5 shrink-0" aria-hidden />
           </a>

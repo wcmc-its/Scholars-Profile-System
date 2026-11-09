@@ -8,7 +8,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { MentoringInfoTooltip } from "@/components/scholar/mentoring-info-tooltip";
 import { TechnologiesInfoButton } from "@/components/scholar/technologies-info-button";
-import { OrcidIdIcon } from "@/components/scholar/orcid-id-icon";
+import { OrcidIdIcon, OrcidUnauthIcon } from "@/components/scholar/orcid-id-icon";
 import { OrcidInfoButton } from "@/components/scholar/orcid-info-button";
 import { ClinicalTrialsInfoTooltip } from "@/components/scholar/clinical-trials-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
@@ -340,8 +340,9 @@ export async function ProfileView({ slug }: { slug: string }) {
                       external profiles. `rel="me"` is the identity-link rel. */}
                   {externalProfiles.map((p) =>
                     p.orcid ? (
-                      // ADR-016 D3: every confirmed iD shows; ORCID's iD icon and
-                      // the full URL only for one the scholar authenticated.
+                      // ADR-016 D3, per ORCID's iD display guidelines: the full URL
+                      // with the green iD icon when the scholar authenticated it,
+                      // else the unauthenticated icon and an "(unauthenticated)" suffix.
                       <li key={p.label} className="flex items-center gap-1.5" data-testid="profile-orcid">
                         <a
                           href={p.url}
@@ -349,15 +350,12 @@ export async function ProfileView({ slug }: { slug: string }) {
                           rel="me noopener noreferrer"
                           className="inline-flex min-w-0 items-center gap-1.5 text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                         >
-                          {profile.orcidAuthenticated ? (
-                            <>
-                              <OrcidIdIcon />
-                              <span className="truncate">{p.url}</span>
-                            </>
-                          ) : (
-                            <>{p.label} →</>
-                          )}
+                          {profile.orcidAuthenticated ? <OrcidIdIcon /> : <OrcidUnauthIcon />}
+                          <span className="truncate">{p.url}</span>
                         </a>
+                        {!profile.orcidAuthenticated && (
+                          <span className="text-muted-foreground shrink-0 text-sm">(unauthenticated)</span>
+                        )}
                         <OrcidInfoButton />
                       </li>
                     ) : (
