@@ -189,13 +189,14 @@ export function buildLinesPrompt(input: EmailLinesInput): string {
     .join("\n");
 }
 
-/** Words that would name the researcher in the third person: the name's tokens of 3+ letters. */
-function nameTokens(name: string): RegExp | null {
-  const tokens = name
-    .split(/[\s,.]+/)
-    .filter((t) => t.length >= 3 && /^[\p{L}'-]+$/u.test(t))
-    .map((t) => t.replace(/[-']/g, "\\$&"));
-  return tokens.length > 0 ? new RegExp(`\\b(?:${tokens.join("|")})\\b`, "i") : null;
+/** A text's words, lowercased (letters, apostrophes and hyphens kept inside a word). */
+function words(text: string): string[] {
+  return text.toLowerCase().match(/[\p{L}'-]+/gu) ?? [];
+}
+
+/** Words that would name the researcher in the third person: the name's words of 3+ letters. */
+function nameWords(name: string): Set<string> {
+  return new Set(words(name).filter((w) => w.length >= 3));
 }
 
 const THIRD_PERSON_RE = /\b(?:he|she|his|her|hers|him|Dr\.)(?=\s|$|[,.;:])/i;
@@ -218,8 +219,8 @@ export function postCheckEmailLines(
   } catch {
     parsed = {};
   }
-  const nameRe = nameTokens(name);
-  const leaks = (t: string) => (nameRe?.test(t) ?? false) || THIRD_PERSON_RE.test(t);
+  const named = nameWords(name);
+  const leaks = (t: string) => words(t).some((w) => named.has(w)) || THIRD_PERSON_RE.test(t);
   const bullets = (Array.isArray(parsed.bullets) ? parsed.bullets : [])
     .filter((b): b is string => typeof b === "string")
     .map((b) =>
