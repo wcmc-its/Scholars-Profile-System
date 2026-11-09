@@ -721,6 +721,12 @@ export function MatchaPanel({
   const briefActiveRef = useRef(0);
   const briefInflightRef = useRef<Set<string>>(new Set());
   const pending = status.kind === "loading";
+  // The loading block sits under the (tall) ask form, often below the fold: bring it into view
+  // when a search starts. `nearest` leaves the page alone when it is already visible.
+  const loadingRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (pending) loadingRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [pending]);
   // What this ask ranks — drives the submit/loading/empty copy so grant mode never says "researchers".
   const targetNoun = target === "grants" ? "opportunities" : "researchers";
   // The grant-path reskin gate (Matcha Redesign.dc.html). `eligibility` presence is already this
@@ -2785,7 +2791,7 @@ export function MatchaPanel({
                         }
                         className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
                       >
-                        {pending ? "Ranking…" : "Re-run match"}
+                        {pending ? <RankingLabel /> : "Re-run match"}
                       </Button>
                       {recentButton}
                     </>
@@ -2913,9 +2919,9 @@ export function MatchaPanel({
                 disabled={pending || description.trim().length === 0}
                 className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
               >
-                {pending
-                  ? "Ranking…"
-                  : target === "grants"
+                {pending ? (
+                  <RankingLabel />
+                ) : target === "grants"
                     ? "Rank opportunities"
                     : "Rank researchers"}
               </Button>
@@ -2929,7 +2935,7 @@ export function MatchaPanel({
       )}
 
       {status.kind === "loading" ? (
-        <div aria-busy="true">
+        <div aria-busy="true" ref={loadingRef} className="scroll-mt-4 scroll-mb-24">
           <p
             role="status"
             data-slot="matcha-loading"
@@ -4318,6 +4324,16 @@ function EmailSelectedDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The run buttons' busy label: a spinner where the officer just clicked. */
+function RankingLabel() {
+  return (
+    <>
+      <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+      Ranking…
+    </>
   );
 }
 
