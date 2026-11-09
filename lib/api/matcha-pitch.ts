@@ -35,7 +35,13 @@ export const PITCH_SYSTEM_PROMPT = [
   "  name or hint at any company, sponsor or organization.",
   "- Do not mention the researcher, the officer, Weill Cornell or this email. Describe the partner's",
   "  interest only (the problem, the kind of expertise or collaboration they want).",
-  "- Output the paragraph only.",
+  "- Also write a SUBJECT line for the email, at most 10 words: who is asking (the REQUESTER, or",
+  '  "Industry partner" when none is given), the kind of opportunity and the topic in lowercase,',
+  '  e.g. "Example Society pilot funding: sleep medicine research". No quotation marks.',
+  "",
+  "Output exactly two lines:",
+  "SUBJECT: <the subject>",
+  "PITCH: <the paragraph>",
 ].join("\n");
 
 export function buildPitchPrompt(input: {
@@ -87,12 +93,32 @@ export function postCheckPitch(raw: string): string {
   return t;
 }
 
-/** Draft the pitch (Sonnet, low effort) and post-check it. Throws on a Bedrock failure. */
+/** Longest subject kept, in words. */
+export const SUBJECT_MAX_WORDS = 14;
+
+/** The model's two labelled lines → `{ subject, pitch }`, both post-checked. Unlabelled output
+ *  is all pitch with no subject (the email then falls back to the template subject). */
+export function parsePitchOutput(raw: string): { subject: string; pitch: string } {
+  const subjectMatch = /^\s*SUBJECT:\s*(.+)$/im.exec(raw);
+  const pitchMatch = /^\s*PITCH:\s*([\s\S]+)$/im.exec(raw);
+  const subject = subjectMatch
+    ? postCheckPitch(subjectMatch[1].replace(/["“”]/g, ""))
+        .split(" ")
+        .slice(0, SUBJECT_MAX_WORDS)
+        .join(" ")
+        .replace(/[.]$/, "")
+    : "";
+  const pitch = postCheckPitch(pitchMatch ? pitchMatch[1] : raw.replace(/^\s*SUBJECT:.*$/im, ""));
+  return { subject, pitch };
+}
+
+/** Draft the pitch and subject (Sonnet, low effort) and post-check them. Throws on a Bedrock
+ *  failure. */
 export async function generatePitch(input: {
   description: string;
   requester: string | null;
   concepts: readonly Pick<MatchaConcept, "term">[];
-}): Promise<string> {
+}): Promise<{ subject: string; pitch: string }> {
   const modelId = briefModelId();
   const { text } = await generateText({
     model: bedrockClient()(modelId),
@@ -103,5 +129,130 @@ export async function generatePitch(input: {
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0.3 } : {}),
     ...bedrockCallOptions(modelId, { effort: "low" }),
   });
-  return postCheckPitch(text);
+  return parsePitchOutput(text);
+}
+
+// ── Per-person lines ─────────────────────────────────────────────────────────
+
+/** At most this many evidence bullets per message. */
+export const LINES_MAX_BULLETS = 3;
+/** A bullet longer than this is not a bullet and is dropped. */
+export const LINES_BULLET_MAX_WORDS = 20;
+/** The idea sentence is cut back to this many words. */
+export const LINES_IDEA_MAX_WORDS = 25;
+
+export const LINES_SYSTEM_PROMPT = [
+  "You write two short parts of a technology-transfer officer's email TO one university researcher,",
+  "from a brief the officer's tool wrote ABOUT that researcher in the third person.",
+  "",
+  "1. BULLETS: 2 or 3 short fragments (at most 15 words each) giving the concrete facts from the",
+  "   brief that make this researcher a fit: trials, cohorts, methods, measures, findings. They sit",
+  '   under the heading "Why I thought of you:", so they address the reader implicitly: write',
+  '   "Nine clinical trials, including pilot randomized designs", never the researcher\'s name,',
+  '   "he", "she", "they" or "Dr.". "Your" is fine. No trailing periods.',
+  '2. IDEA: one sentence (at most 20 words) naming one thing to discuss, written to follow "One idea',
+  '   to discuss:", e.g. "caregiver coaching in cardiac rehabilitation."',
+  "",
+  "Rules:",
+  "- Use only facts stated in the brief. Never invent numbers, names or results.",
+  '- Sound like a person, not a database: never write "on record", "match", "matched", "score",',
+  '  "brief" or "the tool".',
+  "- Never include email addresses, phone numbers, web addresses or dollar amounts.",
+  '- Output JSON only: {"bullets": ["...", "..."], "idea": "..."}',
+].join("\n");
+
+export type EmailLinesInput = {
+  name: string;
+  role: string;
+  angle: string;
+  why: string;
+  topics: readonly string[];
+  methods: readonly string[];
+  trialCount: number;
+};
+
+export function buildLinesPrompt(input: EmailLinesInput): string {
+  return [
+    `RESEARCHER (never name them in the output): ${input.name}`,
+    "",
+    "BRIEF:",
+    input.role ? `Role: ${input.role}` : null,
+    input.angle ? `Partnership angle: ${input.angle}` : null,
+    input.why ? `Why a fit: ${input.why}` : null,
+    input.topics.length > 0
+      ? `Discussion topics:\n${input.topics.map((t) => `- ${t}`).join("\n")}`
+      : null,
+    input.methods.length > 0 ? `Methods and data: ${input.methods.join("; ")}` : null,
+    input.trialCount > 0 ? `Clinical trials: ${input.trialCount}` : null,
+  ]
+    .filter((l): l is string => l != null)
+    .join("\n");
+}
+
+/** Words that would name the researcher in the third person: the name's tokens of 3+ letters. */
+function nameTokens(name: string): RegExp | null {
+  const tokens = name
+    .split(/[\s,.]+/)
+    .filter((t) => t.length >= 3 && /^[\p{L}'-]+$/u.test(t))
+    .map((t) => t.replace(/[-']/g, "\\$&"));
+  return tokens.length > 0 ? new RegExp(`\\b(?:${tokens.join("|")})\\b`, "i") : null;
+}
+
+const THIRD_PERSON_RE = /\b(?:he|she|his|her|hers|him|Dr\.)(?=\s|$|[,.;:])/i;
+
+/**
+ * Deterministic clean-up of the model's JSON: contact details and amounts stripped (as the pitch),
+ * bullets without trailing periods, any part that names the researcher or uses he/she/Dr. dropped
+ * (the third-person leak this step exists to remove), at most `LINES_MAX_BULLETS` bullets of at
+ * most `LINES_BULLET_MAX_WORDS` words, and the idea cut to `LINES_IDEA_MAX_WORDS` words with a
+ * closing period. Unparseable output ⇒ nothing.
+ */
+export function postCheckEmailLines(
+  raw: string,
+  name: string,
+): { bullets: string[]; idea: string } {
+  const json = /\{[\s\S]*\}/.exec(raw)?.[0];
+  let parsed: { bullets?: unknown; idea?: unknown } = {};
+  try {
+    parsed = json ? (JSON.parse(json) as typeof parsed) : {};
+  } catch {
+    parsed = {};
+  }
+  const nameRe = nameTokens(name);
+  const leaks = (t: string) => (nameRe?.test(t) ?? false) || THIRD_PERSON_RE.test(t);
+  const bullets = (Array.isArray(parsed.bullets) ? parsed.bullets : [])
+    .filter((b): b is string => typeof b === "string")
+    .map((b) =>
+      postCheckPitch(b)
+        .replace(/^[-•*]\s*/, "")
+        .replace(/[.;]+$/, ""),
+    )
+    .filter((b) => b && !leaks(b) && b.split(" ").length <= LINES_BULLET_MAX_WORDS)
+    .slice(0, LINES_MAX_BULLETS);
+  let idea = typeof parsed.idea === "string" ? postCheckPitch(parsed.idea) : "";
+  const words = idea.split(" ").filter(Boolean);
+  if (words.length > LINES_IDEA_MAX_WORDS) idea = words.slice(0, LINES_IDEA_MAX_WORDS).join(" ");
+  idea = idea.replace(/[,;:\s]+$/, "");
+  if (idea && !/[.!?]$/.test(idea)) idea += ".";
+  if (leaks(idea)) idea = "";
+  // Follows "One idea to discuss:", so it starts lowercase unless it opens on an acronym/name.
+  if (/^[A-Z][a-z]/.test(idea)) idea = idea[0].toLowerCase() + idea.slice(1);
+  return { bullets, idea };
+}
+
+/** Draft one researcher's bullets and idea from their brief (Sonnet, low effort). */
+export async function generateEmailLines(
+  input: EmailLinesInput,
+): Promise<{ bullets: string[]; idea: string }> {
+  const modelId = briefModelId();
+  const { text } = await generateText({
+    model: bedrockClient()(modelId),
+    system: LINES_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: buildLinesPrompt(input) }],
+    maxOutputTokens: PITCH_MAX_TOKENS,
+    abortSignal: AbortSignal.timeout(PITCH_TIMEOUT_MS),
+    ...(modelAcceptsTemperature(modelId) ? { temperature: 0.3 } : {}),
+    ...bedrockCallOptions(modelId, { effort: "low" }),
+  });
+  return postCheckEmailLines(text, input.name);
 }

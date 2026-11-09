@@ -97,7 +97,7 @@ beforeEach(() => {
   mockOfficer.mockResolvedValue({
     name: "Olive Officer",
     email: "officer@example.org",
-    dept: null,
+    dept: "Example Library",
   });
 });
 
@@ -141,7 +141,11 @@ describe("POST /api/edit/matcha/contacts", () => {
       { cwid: "b", name: "Jane B" },
       { cwid: "c", name: "Stored c" },
     ]);
-    expect(body.officer).toEqual({ name: "Olive Officer", email: "officer@example.org" });
+    expect(body.officer).toEqual({
+      name: "Olive Officer",
+      email: "officer@example.org",
+      dept: "Example Library",
+    });
     expect(mockOfficer).toHaveBeenCalledWith("dev1");
     // Only active scholars are read.
     expect(mockScholarFindMany.mock.calls[0][0].where).toMatchObject({

@@ -119,7 +119,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const res = editOk({
       contacts,
       missing,
-      officer: { name: officer.name === realCwid ? "" : officer.name, email: officer.email },
+      officer: {
+        name: officer.name === realCwid ? "" : officer.name,
+        email: officer.email,
+        dept: officer.dept,
+      },
     });
     res.headers.set("cache-control", "no-store");
     return res;

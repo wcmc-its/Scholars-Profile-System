@@ -1,8 +1,11 @@
 /**
  * Matcha targeted messages in the panel — the "Email individually" review queue:
  *  - the action shows for a drafter only, enabled once a row is ticked;
- *  - its dialog drafts the pitch on open, then one card per selected person with an address
- *    (rank order), and lists people without one under "No email on file";
+ *  - its dialog drafts the pitch and subject on open, then one card per selected person with an
+ *    address (rank order), and lists people without one under "No email on file";
+ *  - a briefed person's second-person lines are drafted per person (and cached); the brief's
+ *    third-person angle never reaches the message;
+ *  - each message shows as a preview with real bullets and bold labels; Edit opens the text;
  *  - editing the pitch rewrites every card not edited by hand, never an edited one;
  *  - the Done tick toggles, and opening a card's mailto ticks it;
  *  - a mailto past the soft limit warns to use Copy.
@@ -12,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { MatchaPanel } from "@/components/edit/matcha-panel";
-import { pitchStorageKey } from "@/components/edit/matcha-targeted-dialog";
+import { linesStorageKey, pitchStorageKey } from "@/components/edit/matcha-targeted-dialog";
 import type { MatchaCandidate, MatchaConcept } from "@/lib/api/matcha-contract";
 import type { BriefRecords, BriefWire } from "@/lib/edit/matcha-brief-types";
 
@@ -73,6 +76,11 @@ const DIRECTORY: Record<string, { name: string; email: string | null }> = {
 };
 
 const PITCH = "Northwind Bio wants partners who study appetite regulation.";
+const SUBJECT = "Northwind Bio collaboration: appetite research";
+const LINES = {
+  bullets: ["Your diet-induced obesity models", "Appetite circuit mapping"],
+  idea: "appetite circuits in diet models.",
+};
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
 
@@ -101,7 +109,13 @@ function stub(opts: { canEdit?: boolean; pitch?: string } = {}) {
         };
       }
       if (url === "/api/edit/matcha/pitch") {
-        return { ok: true, json: async () => ({ ok: true, pitch: opts.pitch ?? PITCH }) };
+        return {
+          ok: true,
+          json: async () =>
+            body?.cwid
+              ? { ok: true, ...LINES }
+              : { ok: true, pitch: opts.pitch ?? PITCH, subject: SUBJECT },
+        };
       }
       if (url.startsWith("/api/edit/matcha/brief") && method === "GET") {
         return {
@@ -134,7 +148,10 @@ function stub(opts: { canEdit?: boolean; pitch?: string } = {}) {
   return calls;
 }
 
-const pitchCalls = (calls: Call[]) => calls.filter((c) => c.url === "/api/edit/matcha/pitch");
+const pitchCalls = (calls: Call[]) =>
+  calls.filter((c) => c.url === "/api/edit/matcha/pitch" && !c.body?.cwid);
+const linesCalls = (calls: Call[]) =>
+  calls.filter((c) => c.url === "/api/edit/matcha/pitch" && c.body?.cwid);
 
 async function search() {
   render(<MatchaPanel matchaBrief />);
@@ -157,8 +174,13 @@ async function openQueue(cwids = [1, 2, 3]) {
   return { dialog, pitch };
 }
 
-const message = (dialog: HTMLElement, name: string) =>
-  within(dialog).getByLabelText(`Message to ${name}`) as HTMLTextAreaElement;
+/** The card's message text, switching the card from preview to Edit first. */
+function message(dialog: HTMLElement, name: string): HTMLTextAreaElement {
+  const card = within(dialog).getByRole("region", { name });
+  const edit = within(card).queryByRole("button", { name: "Edit" });
+  if (edit) fireEvent.click(edit);
+  return within(card).getByLabelText(`Message to ${name}`) as HTMLTextAreaElement;
+}
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -196,22 +218,42 @@ describe("Email individually — the review queue", () => {
     expect(pitchCalls(calls)).toHaveLength(1);
     expect(pitchCalls(calls)[0].body).toEqual({ submissionId: "sub-1" });
     expect(pitch.value).toBe(PITCH);
+    expect((within(dialog).getByLabelText("Subject") as HTMLInputElement).value).toBe(SUBJECT);
+    // Lines are drafted for the briefed person only.
+    await waitFor(() => expect(linesCalls(calls)).toHaveLength(1));
+    expect(linesCalls(calls)[0].body).toEqual({ submissionId: "sub-1", cwid: "p1" });
+    expect(window.localStorage.getItem(linesStorageKey("sub-1", "p1"))).toBe(JSON.stringify(LINES));
 
     const cards = within(dialog).getAllByRole("region");
     expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual(["Ada Person", "Bea Person"]);
     expect(within(cards[0]).getByText("p1@researcher.example.org")).toBeTruthy();
 
-    const ada = message(dialog, "Ada Person").value;
-    expect(ada.startsWith("Dear Dr. Person,\n\nI'm reaching out because Northwind Bio")).toBe(true);
-    expect(ada).toContain(
-      `${PITCH}\n\nWhy we thought of you: Validation partner. Could run validation studies in an existing mouse model.\n\nA possible starting point: Appetite circuits in diet models`,
-    );
-    expect(ada.endsWith("Best regards,\nOlive Officer")).toBe(true);
+    // The preview: real list items and the bold label.
+    const preview = await waitFor(() => {
+      const el = cards[0].querySelector('[data-slot="matcha-targeted-preview"]') as HTMLElement;
+      expect(within(el).getAllByRole("listitem")).toHaveLength(2);
+      return el;
+    });
+    expect(within(preview).getByText("Why I thought of you:").tagName).toBe("STRONG");
 
-    // Bea has no brief: the message has no Why/topic lines and the card says so.
+    const ada = message(dialog, "Ada Person").value;
+    expect(ada).toBe(
+      [
+        "Dear Dr. Person,",
+        PITCH,
+        "Why I thought of you:\n• Your diet-induced obesity models\n• Appetite circuit mapping",
+        "One idea to discuss: appetite circuits in diet models.",
+        "Would you be open to a brief conversation? I'm happy to share more details.",
+        "Best regards,\nOlive Officer",
+      ].join("\n\n"),
+    );
+    // The brief's third-person angle never goes into the message.
+    expect(ada).not.toContain("Validation partner");
+
+    // Bea has no brief: no Why lines, and the card says so.
     const bea = message(dialog, "Bea Person").value;
     expect(bea).toContain(PITCH);
-    expect(bea).not.toContain("Why we thought of you");
+    expect(bea).not.toContain("Why I thought of you");
     expect(within(cards[1]).getByText("No brief — draft one for a personal line")).toBeTruthy();
     expect(within(cards[0]).queryByText(/No brief/)).toBeNull();
 
@@ -222,6 +264,7 @@ describe("Email individually — the review queue", () => {
     const link = within(cards[0]).getByRole("link", { name: "Open in mail app" });
     expect(link.getAttribute("href")!.startsWith("mailto:p1@researcher.example.org?")).toBe(true);
     expect(link.getAttribute("href")).not.toContain("bcc=");
+    expect(link.getAttribute("href")).toContain(`subject=${encodeURIComponent(SUBJECT)}`);
   });
 
   it("a pitch edit rewrites unedited cards only, and is cached for this search", async () => {
@@ -233,16 +276,24 @@ describe("Email individually — the review queue", () => {
     expect(message(dialog, "Ada Person").value).toContain("An edited pitch.");
     expect(message(dialog, "Ada Person").value).not.toContain(PITCH);
     expect(message(dialog, "Bea Person").value).toBe("My own words.");
-    expect(window.localStorage.getItem(pitchStorageKey("sub-1"))).toBe("An edited pitch.");
+    expect(JSON.parse(window.localStorage.getItem(pitchStorageKey("sub-1"))!)).toEqual({
+      pitch: "An edited pitch.",
+      subject: SUBJECT,
+    });
   });
 
   it("reopening uses the cached pitch instead of drafting again", async () => {
-    window.localStorage.setItem(pitchStorageKey("sub-1"), "Kept from last time.");
+    window.localStorage.setItem(
+      pitchStorageKey("sub-1"),
+      JSON.stringify({ pitch: "Kept from last time.", subject: "Kept subject" }),
+    );
+    window.localStorage.setItem(linesStorageKey("sub-1", "p1"), JSON.stringify(LINES));
     const calls = stub();
     await search();
     const { pitch } = await openQueue([1]);
     expect(pitch.value).toBe("Kept from last time.");
     expect(pitchCalls(calls)).toHaveLength(0);
+    expect(linesCalls(calls)).toHaveLength(0);
   });
 
   it("Done toggles by hand, and opening the mailto ticks it", async () => {
@@ -276,7 +327,17 @@ describe("Email individually — the review queue", () => {
     expect(within(bea).queryByText(/Too long/)).toBeNull();
   });
 
-  it("Copy puts the card's message on the clipboard", async () => {
+  it("shows the pitch's word count and warns past 70 words", async () => {
+    stub();
+    await search();
+    const { dialog, pitch } = await openQueue([1]);
+    const count = dialog.querySelector('[data-slot="matcha-pitch-words"]') as HTMLElement;
+    expect(count.textContent).toBe("8 words");
+    fireEvent.change(pitch, { target: { value: "word ".repeat(71) } });
+    expect(count.textContent).toBe("71 words · over 70; shorter reads better");
+  });
+
+  it("Copy puts plain text on the clipboard where there is no ClipboardItem", async () => {
     stub();
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
@@ -287,6 +348,6 @@ describe("Email individually — the review queue", () => {
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(message(dialog, "Ada Person").value),
     );
-    expect(await within(ada).findByText("Copied")).toBeTruthy();
+    expect(await within(ada).findByText(/^Copied/)).toBeTruthy();
   });
 });

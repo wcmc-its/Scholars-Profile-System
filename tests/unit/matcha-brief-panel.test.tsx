@@ -222,6 +222,16 @@ describe("Matcha brief UI", () => {
     expect(await screen.findByText("Fresh why p1.")).toBeTruthy();
   });
 
+  it("redrafts briefs drafted before partnership angles, not current ones", async () => {
+    const { calls } = stub({ candidates: pool(3), saved: [preAngle("p1"), brief("p2")] });
+    await search();
+    expect(await screen.findByText("Generated why for p1.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Draft briefs (top 10)" }));
+    await waitFor(() => expect(briefPosts(calls)).toHaveLength(2));
+    const drafted = briefPosts(calls).map((c) => (c.body as { cwids: string[] }).cwids[0]);
+    expect(drafted.sort()).toEqual(["p1", "p3"]);
+  });
+
   it("drafts the current FILTERED view, not the whole pool", async () => {
     const { calls } = stub({ candidates: pool(14) });
     await search();

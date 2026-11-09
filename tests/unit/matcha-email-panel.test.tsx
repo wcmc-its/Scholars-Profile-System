@@ -3,7 +3,8 @@
  *  - "Email selected (BCC)" shows for a drafter only, enabled once a row is ticked;
  *  - its dialog is prefilled from the standard template, says who has no address, and its
  *    "Open in mail app" link is a mailto: with the officer in To and the researchers in Bcc;
- *  - the per-person "Email" replaces Contact for a drafter and carries the partnership angle;
+ *  - the per-person "Email" replaces Contact for a drafter and opens the targeted review dialog
+ *    for that one person (never a mailto carrying the brief's third-person angle);
  *  - addresses are looked up on click only.
  * fetch is stubbed and routed by URL + method.
  */
@@ -89,6 +90,15 @@ function stub(opts: { canEdit?: boolean; post?: Record<string, unknown> } = {}) 
               .map((c) => ({ cwid: c, name: DIRECTORY[c]?.name ?? c })),
             officer: { name: "Olive Officer", email: "officer@example.org" },
           }),
+        };
+      }
+      if (url === "/api/edit/matcha/pitch") {
+        return {
+          ok: true,
+          json: async () =>
+            body?.cwid
+              ? { ok: true, bullets: ["Your mouse models"], idea: "validation studies." }
+              : { ok: true, pitch: "Northwind Bio wants appetite labs.", subject: "S" },
         };
       }
       if (url.startsWith("/api/edit/matcha/brief") && method === "GET") {
@@ -190,7 +200,7 @@ describe("Email selected (BCC)", () => {
     expect(body.value).toContain(
       "because Northwind Bio is looking for Weill Cornell investigators",
     );
-    expect(body.value).toContain("working on obesity therapeutics.");
+    expect(body.value).toContain("working on obesity therapeutics, and your work stood out.");
     expect(body.value.endsWith("Best regards,\nOlive Officer")).toBe(true);
     expect(within(dialog).getByText(/1 without an email on record/)).toBeTruthy();
 
@@ -226,7 +236,7 @@ describe("Email selected (BCC)", () => {
 });
 
 describe("per-person Email", () => {
-  it("replaces Contact for a drafter and opens a mailto with the partnership angle", async () => {
+  it("replaces Contact for a drafter and opens the review dialog for that person", async () => {
     window.localStorage.setItem("sponsor-match-density", "detailed");
     const calls = stub();
     await search();
@@ -237,23 +247,25 @@ describe("per-person Email", () => {
     expect(contactCalls(calls)).toHaveLength(0);
 
     fireEvent.click(buttons[0]);
-    await waitFor(() => expect(window.location.href).toMatch(/^mailto:/));
-    expect(contactCalls(calls)[0].body).toEqual({ submissionId: "sub-1", cwids: ["p1"] });
-    const href = window.location.href;
-    expect(href.startsWith("mailto:p1@researcher.example.org?")).toBe(true);
-    expect(href).not.toContain("bcc=");
-    const body = decodeURIComponent(/body=([^&]*)/.exec(href)![1]);
-    expect(body.startsWith("Dear Dr. Person,")).toBe(true);
-    expect(body).toContain(`Why we thought of you: ${ANGLE}`);
+    const dialog = await screen.findByRole("dialog", { name: "Email researcher" });
+    await waitFor(() =>
+      expect(contactCalls(calls)[0].body).toEqual({ submissionId: "sub-1", cwids: ["p1"] }),
+    );
+    const card = await within(dialog).findByRole("region");
+    const preview = card.querySelector('[data-slot="matcha-targeted-preview"]') as HTMLElement;
+    await waitFor(() => expect(within(preview).getByText("Your mouse models")).toBeTruthy());
+    expect(preview.textContent).not.toContain(ANGLE);
+    expect(window.location.href).toBe("");
   });
 
-  it("says so when the person has no address on record", async () => {
+  it("lists the person under No email on file when they have no address", async () => {
     window.localStorage.setItem("sponsor-match-density", "detailed");
     stub();
     await search();
     fireEvent.click(screen.getAllByRole("button", { name: "Email" })[2]);
-    expect(await screen.findByText("No email on record")).toBeTruthy();
-    expect(window.location.href).toBe("");
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("No email on file")).toBeTruthy();
+    expect(within(dialog).queryByRole("region")).toBeNull();
   });
 
   it("an observer keeps the plain Contact button", async () => {
