@@ -225,7 +225,9 @@ describe("Email individually — the review queue", () => {
     // Lines are drafted for the briefed person only.
     await waitFor(() => expect(linesCalls(calls)).toHaveLength(1));
     expect(linesCalls(calls)[0].body).toEqual({ submissionId: "sub-1", cwid: "p1" });
-    expect(window.localStorage.getItem(linesStorageKey("sub-1", "p1", V1))).toBe(JSON.stringify(LINES));
+    expect(window.localStorage.getItem(linesStorageKey("sub-1", "p1", V1))).toBe(
+      JSON.stringify(LINES),
+    );
 
     const cards = within(dialog).getAllByRole("region");
     expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual(["Ada Person", "Bea Person"]);
@@ -366,6 +368,42 @@ describe("Email individually — the review queue", () => {
     expect(count.textContent).toBe("8 words");
     fireEvent.change(pitch, { target: { value: "word ".repeat(71) } });
     expect(count.textContent).toBe("71 words · over 70; shorter reads better");
+  });
+
+  it("Download draft saves that person's message as an unsent .eml and ticks Done", async () => {
+    stub();
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.fn((b: Blob) => {
+      blobs.push(b);
+      return "blob:draft";
+    });
+    const { createObjectURL: realCreate, revokeObjectURL: realRevoke } = URL;
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    const clicked: HTMLAnchorElement[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push(this);
+    });
+    await search();
+    const { dialog } = await openQueue([1]);
+    const card = within(dialog).getByRole("region", { name: "Ada Person" });
+    await within(card).findByText("Appetite circuit mapping");
+    fireEvent.click(within(card).getByRole("button", { name: "Download draft" }));
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0].download).toBe("Draft to Person.eml");
+    expect(blobs[0].type).toBe("message/rfc822");
+    const eml = await blobs[0].text();
+    expect(eml).toMatch(/^X-Unsent: 1\r\n/);
+    expect(eml).toContain("To: p1@researcher.example.org\r\n");
+    expect(eml).toContain(`Subject: ${SUBJECT}\r\n`);
+    expect((within(card).getByRole("checkbox", { name: "Done" }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    click.mockRestore();
+    URL.createObjectURL = realCreate;
+    URL.revokeObjectURL = realRevoke;
   });
 
   it("Copy puts plain text on the clipboard where there is no ClipboardItem", async () => {

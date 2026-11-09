@@ -6,8 +6,9 @@
  * editable. Then one card per selected researcher, in rank order. Each card's "Why I thought of
  * you" bullets and "One idea to discuss" line are drafted per person, in the second person, from
  * their saved brief (same route, with `cwid`). The message shows as a formatted preview with
- * "Edit"; "Open in mail app" (a plain-text `mailto:`), "Copy" (HTML with real bullets and bold
- * labels, plus plain text) and a "Done" tick the officer works down. Editing the pitch or subject
+ * "Edit"; "Open in mail app" (a plain-text `mailto:`), "Download draft" (an `.eml` draft with the
+ * formatting, `buildEml`), "Copy" (HTML with real bullets and bold labels, plus plain text) and a
+ * "Done" tick the officer works down. Editing the pitch or subject
  * rewrites every card the officer has not edited by hand. Nothing is sent from Scholars; addresses
  * live only in this dialog's state.
  */
@@ -26,8 +27,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   MAILTO_SOFT_LIMIT,
+  buildEml,
   buildMailto,
   buildTargetedEmail,
+  salutationSurname,
   emailBodyToHtml,
   parseEmailBody,
 } from "@/lib/edit/matcha-email";
@@ -103,6 +106,16 @@ function writeCache(key: string, value: unknown): void {
 function readCachedPitch(submissionId: string): Drafted | null {
   const c = readCache<Drafted>(pitchStorageKey(submissionId));
   return c && typeof c.pitch === "string" ? { pitch: c.pitch, subject: c.subject ?? "" } : null;
+}
+
+/** Save an `.eml` draft through a temporary object URL. */
+function downloadEml(filename: string, eml: string): void {
+  const url = URL.createObjectURL(new Blob([eml], { type: "message/rfc822" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function wordCount(t: string): number {
@@ -451,6 +464,20 @@ export function TargetedEmailDialog({
                       <a href={mailto} onClick={() => patchCard(p.cwid, { done: true })}>
                         Open in mail app
                       </a>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        downloadEml(
+                          `Draft to ${salutationSurname(name) || "researcher"}.eml`,
+                          buildEml({ to: email, subject: built.subject, body }),
+                        );
+                        patchCard(p.cwid, { done: true });
+                      }}
+                    >
+                      Download draft
                     </Button>
                     <Button
                       type="button"

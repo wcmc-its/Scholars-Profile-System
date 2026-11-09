@@ -244,3 +244,48 @@ export function emailBodyToHtml(body: string): string {
     .join("");
   return `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt">${html}</div>`;
 }
+
+/** UTF-8 text as base64, wrapped at 76 characters (RFC 2045). */
+function base64Lines(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return (btoa(bin).match(/.{1,76}/g) ?? []).join("\r\n");
+}
+
+/** A header value as an RFC 2047 encoded word when it is not plain ASCII. */
+function headerValue(v: string): string {
+  const clean = v.replace(/[\r\n]+/g, " ");
+  return /^[\x20-\x7e]*$/.test(clean)
+    ? clean
+    : `=?UTF-8?B?${base64Lines(clean).replace(/\r\n/g, "")}?=`;
+}
+
+/**
+ * An unsent draft as an `.eml` file: `X-Unsent: 1` makes Outlook (Windows) open it as an editable
+ * draft rather than a received message. multipart/alternative carries the HTML (real bullets,
+ * bold labels, `emailBodyToHtml`) and the plain text. The boundary cannot occur in base64.
+ */
+export function buildEml(parts: { to: string; subject: string; body: string }): string {
+  const boundary = "matcha-alt-boundary";
+  return [
+    "X-Unsent: 1",
+    `To: ${headerValue(parts.to)}`,
+    `Subject: ${headerValue(parts.subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Lines(parts.body.replace(/\r?\n/g, "\r\n")),
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Lines(`<html><body>${emailBodyToHtml(parts.body)}</body></html>`),
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+}

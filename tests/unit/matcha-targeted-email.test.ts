@@ -2,7 +2,12 @@
  *  the plain-text → HTML copy (`emailBodyToHtml`). */
 import { describe, expect, it } from "vitest";
 
-import { buildTargetedEmail, emailBodyToHtml, parseEmailBody } from "@/lib/edit/matcha-email";
+import {
+  buildEml,
+  buildTargetedEmail,
+  emailBodyToHtml,
+  parseEmailBody,
+} from "@/lib/edit/matcha-email";
 
 const BASE = {
   focus: "Antibody-drug conjugates",
@@ -91,5 +96,43 @@ describe("emailBodyToHtml", () => {
       { kind: "p", lines: [{ label: "", text: "Points:" }] },
       { kind: "ul", items: ["a", "b"] },
     ]);
+  });
+});
+
+describe("buildEml", () => {
+  const decode = (b64: string) =>
+    new TextDecoder().decode(
+      Uint8Array.from(atob(b64.replace(/\r\n/g, "")), (c) => c.charCodeAt(0)),
+    );
+  const eml = buildEml({
+    to: "ada@researcher.example.org",
+    subject: "Northwind Bio collaboration: café research",
+    body: "Dear Dr. Example,\n\nWhy I thought of you:\n• One\n• Two",
+  });
+  const [head, ...parts] = eml.split("--matcha-alt-boundary");
+
+  it("is an unsent draft addressed to the person, with a UTF-8 encoded subject", () => {
+    expect(head).toMatch(/^X-Unsent: 1\r\n/);
+    expect(head).toContain("To: ada@researcher.example.org\r\n");
+    const subject = /Subject: =\?UTF-8\?B\?(.+)\?=/.exec(head)![1];
+    expect(decode(subject)).toBe("Northwind Bio collaboration: café research");
+    expect(head).toContain('Content-Type: multipart/alternative; boundary="matcha-alt-boundary"');
+    expect(eml.endsWith("--matcha-alt-boundary--\r\n")).toBe(true);
+  });
+
+  it("carries the plain text and the HTML (real list, bold label)", () => {
+    const body = (part: string) => decode(part.split("\r\n\r\n")[1].trim());
+    expect(parts[0]).toContain("Content-Type: text/plain; charset=UTF-8");
+    expect(body(parts[0])).toBe("Dear Dr. Example,\r\n\r\nWhy I thought of you:\r\n• One\r\n• Two");
+    expect(parts[1]).toContain("Content-Type: text/html; charset=UTF-8");
+    const html = body(parts[1]);
+    expect(html).toContain("<b>Why I thought of you:</b>");
+    expect(html).toContain("<ul><li>One</li><li>Two</li></ul>");
+  });
+
+  it("keeps a header on one line", () => {
+    expect(buildEml({ to: "a@b.org", subject: "Line\r\nBcc: x@y.org", body: "x" })).toContain(
+      "Subject: Line Bcc: x@y.org\r\n",
+    );
   });
 });
