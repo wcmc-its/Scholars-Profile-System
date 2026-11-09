@@ -190,13 +190,13 @@ export function buildLinesPrompt(input: EmailLinesInput): string {
 }
 
 /** A text's words, lowercased (letters, apostrophes and hyphens kept inside a word). */
-function words(text: string): string[] {
+function wordsOf(text: string): string[] {
   return text.toLowerCase().match(/[\p{L}'-]+/gu) ?? [];
 }
 
 /** Words that would name the researcher in the third person: the name's words of 3+ letters. */
 function nameWords(name: string): Set<string> {
-  return new Set(words(name).filter((w) => w.length >= 3));
+  return new Set(wordsOf(name).filter((w) => w.length >= 3));
 }
 
 const THIRD_PERSON_RE = /\b(?:he|she|his|her|hers|him|Dr\.)(?=\s|$|[,.;:])/i;
@@ -220,7 +220,7 @@ export function postCheckEmailLines(
     parsed = {};
   }
   const named = nameWords(name);
-  const leaks = (t: string) => words(t).some((w) => named.has(w)) || THIRD_PERSON_RE.test(t);
+  const leaks = (t: string) => wordsOf(t).some((w) => named.has(w)) || THIRD_PERSON_RE.test(t);
   const bullets = (Array.isArray(parsed.bullets) ? parsed.bullets : [])
     .filter((b): b is string => typeof b === "string")
     .map((b) =>
