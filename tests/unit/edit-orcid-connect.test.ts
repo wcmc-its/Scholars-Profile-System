@@ -17,6 +17,7 @@ const {
   mockTxDismissalUpsert,
   mockTxDismissalDeleteMany,
   mockTxAuthUpsert,
+  mockTxAuthFindUnique,
   mockTxExecuteRaw,
   mockReflectOverviewEdit,
 } = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ const {
   mockTxDismissalUpsert: vi.fn(),
   mockTxDismissalDeleteMany: vi.fn(),
   mockTxAuthUpsert: vi.fn(),
+  mockTxAuthFindUnique: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
 }));
@@ -63,6 +65,7 @@ import {
   decryptToken,
   encryptToken,
   orcidConnectConfig,
+  revokeStoredTokens,
   stateMatches,
   STATE_COOKIE,
 } from "@/lib/edit/orcid-connect";
@@ -82,7 +85,7 @@ const fakeTx = {
   scholar: { findUnique: mockTxScholarFindUnique, update: mockTxScholarUpdate },
   orcidCandidate: { findMany: mockTxCandidateFindMany },
   orcidDismissal: { upsert: mockTxDismissalUpsert, deleteMany: mockTxDismissalDeleteMany },
-  orcidAuthentication: { upsert: mockTxAuthUpsert },
+  orcidAuthentication: { upsert: mockTxAuthUpsert, findUnique: mockTxAuthFindUnique },
   $executeRaw: mockTxExecuteRaw,
 };
 
@@ -119,6 +122,7 @@ beforeEach(() => {
   mockTxScholarFindUnique.mockResolvedValue({ orcid: OLD_ID });
   mockTxCandidateFindMany.mockResolvedValue([{ orcid: OLD_ID }]);
   mockTxExecuteRaw.mockResolvedValue(1);
+  mockTxAuthFindUnique.mockResolvedValue(null);
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => tokenOk()),
@@ -258,5 +262,48 @@ describe("GET /api/edit/orcid/callback", () => {
     expect(decryptToken(stored.accessTokenEnc, Buffer.from(KEY, "base64"))).toBe("tok-123");
     expect(mockTxExecuteRaw).toHaveBeenCalled();
     expect(mockReflectOverviewEdit).toHaveBeenCalledWith("self01-slug");
+  });
+
+  it("a repeat sign-in revokes the token it replaced (keep the latest)", async () => {
+    const key = Buffer.from(KEY, "base64");
+    mockTxAuthFindUnique.mockResolvedValue({ accessTokenEnc: encryptToken("tok-old", key), sandbox: true });
+    await CALLBACK(callback("code=c&state=s1"));
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.map((c) => String(c[0]))).toEqual([
+      "https://sandbox.orcid.org/oauth/token",
+      "https://sandbox.orcid.org/oauth/revoke",
+    ]);
+    const body = new URLSearchParams(String((calls[1][1] as RequestInit).body));
+    expect(body.get("token")).toBe("tok-old");
+    expect(body.get("client_id")).toBe("APP-TEST");
+  });
+
+  it("never revokes when ORCID handed back the same token", async () => {
+    const key = Buffer.from(KEY, "base64");
+    mockTxAuthFindUnique.mockResolvedValue({ accessTokenEnc: encryptToken("tok-123", key), sandbox: true });
+    await CALLBACK(callback("code=c&state=s1"));
+    expect(vi.mocked(fetch).mock.calls.map((c) => String(c[0]))).toEqual([
+      "https://sandbox.orcid.org/oauth/token",
+    ]);
+  });
+});
+
+describe("revokeStoredTokens", () => {
+  const cfg = () => orcidConnectConfig(ENV)!;
+  it("best effort: a failed revoke is logged, not thrown; a token from the other ORCID base is skipped", async () => {
+    const key = Buffer.from(KEY, "base64");
+    const f = vi.fn(async () => new Response("no", { status: 500 }));
+    await expect(
+      revokeStoredTokens(
+        [
+          { accessTokenEnc: encryptToken("a", key), sandbox: true },
+          { accessTokenEnc: encryptToken("b", key), sandbox: false },
+        ],
+        cfg(),
+        f,
+      ),
+    ).resolves.toBeUndefined();
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledTimes(2);
   });
 });

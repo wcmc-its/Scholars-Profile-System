@@ -9,6 +9,8 @@
  *  - any `orcid_dismissal` for that iD is deleted, and every OTHER iD on file or
  *    suggested for this scholar is dismissed: the person proved which iD is theirs;
  *  - `orcid_authentication` is replaced (name, iD, encrypted token, scope, expiry);
+ *    after commit the token it replaced is revoked at ORCID (keep the latest,
+ *    revoke the rest — ORCID's recommended option B);
  *  - the B03 audit row, `orcid_set` with `authenticated: true`.
  *
  * Always ends in a 302 to the scholar's Identifiers & Profiles tab with
@@ -23,10 +25,13 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { normalizeOrcid } from "@/lib/edit/orcid";
 import {
+  decryptToken,
   encryptToken,
   exchangeCode,
+  revokeStoredTokens,
   isOrcidConnectEnabled,
   orcidConnectConfig,
+  type OrcidConnectConfig,
   RETURN_PATH,
   STATE_COOKIE,
   STATE_COOKIE_OPTIONS,
@@ -42,6 +47,19 @@ function back(outcome: "connected" | "denied" | "failed", request: NextRequest):
   const res = NextResponse.redirect(`${origin}${RETURN_PATH}&orcid=${outcome}`, 302);
   res.cookies.set(STATE_COOKIE, "", { ...STATE_COOKIE_OPTIONS, maxAge: 0 });
   return res;
+}
+
+function isSameToken(
+  row: { accessTokenEnc: string; sandbox: boolean },
+  token: string,
+  cfg: OrcidConnectConfig,
+): boolean {
+  if (row.sandbox !== cfg.sandbox) return false;
+  try {
+    return decryptToken(row.accessTokenEnc, cfg.tokenKey) === token;
+  } catch {
+    return false; // unreadable (key rotated): revokeStoredTokens logs and moves on
+  }
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -69,8 +87,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
   if (!scholar) return back("failed", request);
 
+  let replaced: { accessTokenEnc: string; sandbox: boolean } | null = null;
+  let newToken = "";
   try {
     const tok = await exchangeCode(cfg, code);
+    newToken = tok.accessToken;
     const orcid = normalizeOrcid(tok.orcid);
     if (!orcid) throw new Error("ORCID returned an invalid iD");
     await db.write.$transaction(async (tx) => {
@@ -118,6 +139,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         sandbox: cfg.sandbox,
         authenticatedAt: new Date(),
       };
+      replaced = await tx.orcidAuthentication.findUnique({
+        where: { cwid: scholar.cwid },
+        select: { accessTokenEnc: true, sandbox: true },
+      });
       await tx.orcidAuthentication.upsert({
         where: { cwid: scholar.cwid },
         create: { cwid: scholar.cwid, ...auth },
@@ -148,6 +173,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return back("failed", request);
   }
 
+  // ORCID may hand back the same token on a repeat sign-in; never revoke the live one.
+  const old = replaced as { accessTokenEnc: string; sandbox: boolean } | null;
+  if (old && !isSameToken(old, newToken, cfg)) await revokeStoredTokens([old], cfg);
   await reflectOverviewEdit(scholar.slug);
   return back("connected", request);
 }

@@ -71,7 +71,10 @@ export type OrcidCardProps = {
 
 const CONNECT_OUTCOME: Record<string, { text: string; error: boolean }> = {
   connected: { text: "Your ORCID iD is connected.", error: false },
-  denied: { text: "You didn't grant access on ORCID, so nothing changed.", error: false },
+  denied: {
+    text: "You didn't grant access on ORCID, so nothing changed. Connecting lets Weill Cornell match your publications to you and keep your iD current in WCM systems. You can try again any time.",
+    error: false,
+  },
   failed: { text: "Couldn't connect your ORCID iD. Try again.", error: true },
 };
 
@@ -350,8 +353,10 @@ export function OrcidCard({
   );
   const connectNote = (
     <p className="text-muted-foreground text-xs" data-testid="orcid-connect-block">
-      You’ll sign in at ORCID to prove the iD is yours. Weill Cornell records your iD and the name
-      on it to match your publications and fill NIH biosketches. We never change your ORCID record.
+      Connect once and Weill Cornell matches your publications to you and fills your iD into NIH
+      biosketches and other WCM systems, so you never have to type it. You’ll sign in at ORCID to
+      prove the iD is yours; we record the iD and the name on it, and never change your ORCID
+      record.
     </p>
   );
 

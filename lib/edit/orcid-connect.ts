@@ -142,10 +142,50 @@ export function encryptToken(plain: string, key: Buffer): string {
   return [iv, c.getAuthTag(), ct].map((b) => b.toString("base64url")).join(".");
 }
 
-/** Only the unit test calls this; nothing in the app reads the token back. */
+/** Read back only to revoke the token (`revokeStoredTokens`). */
 export function decryptToken(stored: string, key: Buffer): string {
   const [iv, tag, ct] = stored.split(".").map((p) => Buffer.from(p, "base64url"));
   const d = createDecipheriv("aes-256-gcm", key, iv);
   d.setAuthTag(tag);
   return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
+}
+
+/** POST /oauth/revoke for one token. Throws on a non-200. */
+export async function revokeToken(
+  cfg: OrcidConnectConfig,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const res = await fetchImpl(`${cfg.base}/oauth/revoke`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: cfg.clientId, client_secret: cfg.clientSecret, token }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`ORCID token revoke failed: HTTP ${res.status}`);
+}
+
+/**
+ * Revoke tokens we are discarding, so WCM leaves the person's ORCID "Trusted
+ * organizations" once none remain (ORCID integration review, 2026-11-06). Run
+ * AFTER the SPS write commits; best effort — a failure is logged, never thrown,
+ * and the SPS change stands. A token minted against the other ORCID base
+ * (sandbox vs production) can't be revoked with this client and is skipped.
+ */
+export async function revokeStoredTokens(
+  rows: { accessTokenEnc: string; sandbox: boolean }[],
+  cfg: OrcidConnectConfig | null = orcidConnectConfig(),
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  for (const r of rows) {
+    if (!cfg || r.sandbox !== cfg.sandbox) {
+      console.warn("[orcid] token not revoked: no client for its ORCID base");
+      continue;
+    }
+    try {
+      await revokeToken(cfg, decryptToken(r.accessTokenEnc, cfg.tokenKey), fetchImpl);
+    } catch (err) {
+      console.warn("[orcid] token revoke failed:", err instanceof Error ? err.message : err);
+    }
+  }
 }

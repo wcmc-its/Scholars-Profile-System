@@ -24,7 +24,8 @@
  *    `etl:orcid-push` clear it from Identity, `etl:identity` not re-offer it as a
  *    candidate, and the `orcid_candidate` readers (`withoutDismissed`) drop any
  *    mirror row for it.
- *  Either way an `orcid_authentication` row (#3115) for any other iD is deleted.
+ *  Either way an `orcid_authentication` row (#3115) for any other iD is deleted,
+ *  and after commit its token is revoked at ORCID (best effort).
  *  Plus the B03 audit row, same transaction.
  *
  * Gated by `SELF_EDIT_ORCID_SUGGESTION` (404 when off) — one kill switch for the
@@ -43,6 +44,7 @@ import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isCwid } from "@/lib/cwid";
 import { normalizeOrcid } from "@/lib/edit/orcid";
+import { revokeStoredTokens } from "@/lib/edit/orcid-connect";
 import { isOrcidSuggestionEnabled } from "@/lib/edit/orcid-suggestion-flag";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
@@ -107,6 +109,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // --- scholar.orcid + dismissal + the B03 audit row, one transaction ---
+  let dropped: { accessTokenEnc: string; sandbox: boolean }[] = [];
   try {
     await db.write.$transaction(async (tx) => {
       // `held` is re-read on the writer: the `db.read` lookup above can lag
@@ -135,9 +138,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
       // An ORCID sign-in (#3115) vouches only for the iD it returned; Remove or a
       // change to a different iD drops it, token included.
-      await tx.orcidAuthentication.deleteMany({
-        where: { cwid: scholar.cwid, ...(orcid === null ? {} : { orcid: { not: orcid } }) },
+      const authWhere = {
+        cwid: scholar.cwid,
+        ...(orcid === null ? {} : { orcid: { not: orcid } }),
+      };
+      dropped = await tx.orcidAuthentication.findMany({
+        where: authWhere,
+        select: { accessTokenEnc: true, sandbox: true },
       });
+      await tx.orcidAuthentication.deleteMany({ where: authWhere });
       for (const d of toDismiss) {
         await tx.orcidDismissal.upsert({
           where: { cwid_orcid: { cwid: scholar.cwid, orcid: d } },
@@ -184,7 +193,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(500, "write_failed");
   }
 
-  // --- post-commit: the public profile shows the iD ---
+  // --- post-commit: revoke dropped sign-in tokens; the public profile shows the iD ---
+  if (dropped.length > 0) await revokeStoredTokens(dropped);
   await reflectOverviewEdit(scholar.slug);
 
   return editOk({ orcid });
