@@ -11,7 +11,7 @@
  * rewrites every card the officer has not edited by hand. Nothing is sent from Scholars; addresses
  * live only in this dialog's state.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,9 @@ export type TargetedPerson = {
   cwid: string;
   name: string;
   hasBrief: boolean;
+  /** The brief's `updatedAt`: part of the lines cache key, so a redraft or an edit drafts the
+   *  personal lines afresh. "" with no brief. */
+  briefVersion: string;
 };
 
 /** What `/api/edit/matcha/contacts` returns. */
@@ -66,9 +69,14 @@ const LINES_CONCURRENCY = 3;
 export function pitchStorageKey(submissionId: string): string {
   return `matcha-pitch:${submissionId}`;
 }
-/** localStorage key for one researcher's drafted lines on one search. */
-export function linesStorageKey(submissionId: string, cwid: string): string {
-  return `matcha-lines:${submissionId}:${cwid}`;
+/** localStorage key for one researcher's drafted lines on one search and brief version. */
+export function linesStorageKey(submissionId: string, cwid: string, briefVersion: string): string {
+  return `matcha-lines:${submissionId}:${cwid}:${briefVersion}`;
+}
+
+/** Lines with nothing in them: the post-check dropped every part (or the model wrote none). */
+function isEmptyLines(l: Lines): boolean {
+  return l.bullets.length === 0 && !l.idea;
 }
 
 // ponytail: the drafts are cached in THIS browser only (localStorage); persist them on the
@@ -181,6 +189,20 @@ export function TargetedEmailDialog({
     writeCache(pitchStorageKey(submissionId), next);
   }
 
+  // False once the dialog closes: a draft landing after that is dropped.
+  const liveRef = useRef(false);
+
+  /** Draft one person's lines; cache them unless empty (an empty result is retried next open). */
+  async function fetchLines(p: TargetedPerson) {
+    try {
+      const l = await draftLines(p.cwid);
+      if (!isEmptyLines(l)) writeCache(linesStorageKey(submissionId, p.cwid, p.briefVersion), l);
+      if (liveRef.current) setLines((prev) => ({ ...prev, [p.cwid]: l }));
+    } catch {
+      if (liveRef.current) setLines((prev) => ({ ...prev, [p.cwid]: "failed" }));
+    }
+  }
+
   function regenerate() {
     setPitchStatus("drafting");
     draftPitch()
@@ -209,33 +231,26 @@ export function TargetedEmailDialog({
     if (cached) setDraftedState(cached);
     else regenerate();
 
-    const queue: string[] = [];
+    const queue: TargetedPerson[] = [];
     const initial: Record<string, Lines | "drafting"> = {};
     for (const p of people) {
       if (!p.hasBrief) continue;
-      const c = readCache<Lines>(linesStorageKey(submissionId, p.cwid));
-      if (c && Array.isArray(c.bullets)) initial[p.cwid] = c;
+      const c = readCache<Lines>(linesStorageKey(submissionId, p.cwid, p.briefVersion));
+      if (c && Array.isArray(c.bullets) && !isEmptyLines(c)) initial[p.cwid] = c;
       else {
         initial[p.cwid] = "drafting";
-        queue.push(p.cwid);
+        queue.push(p);
       }
     }
     setLines(initial);
     const worker = async () => {
-      for (let cwid = queue.shift(); cwid && live; cwid = queue.shift()) {
-        const id = cwid;
-        try {
-          const l = await draftLines(id);
-          writeCache(linesStorageKey(submissionId, id), l);
-          if (live) setLines((prev) => ({ ...prev, [id]: l }));
-        } catch {
-          if (live) setLines((prev) => ({ ...prev, [id]: "failed" }));
-        }
-      }
+      for (let p = queue.shift(); p && liveRef.current; p = queue.shift()) await fetchLines(p);
     };
+    liveRef.current = true;
     for (let i = 0; i < LINES_CONCURRENCY; i++) void worker();
     return () => {
       live = false;
+      liveRef.current = false;
     };
     // Once per open: the dialog is remounted for a new selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -393,10 +408,28 @@ export function TargetedEmailDialog({
                     <p className="text-muted-foreground text-xs" role="status">
                       Drafting the personal lines…
                     </p>
-                  ) : l === "failed" && card.override == null ? (
-                    <p className="text-destructive text-xs" role="alert">
-                      Couldn&apos;t draft the personal lines; the message goes without them.
-                    </p>
+                  ) : (l === "failed" || (typeof l === "object" && isEmptyLines(l))) &&
+                    card.override == null ? (
+                    <div className="flex items-center gap-2 text-xs" role="alert">
+                      <span
+                        className={l === "failed" ? "text-destructive" : "text-muted-foreground"}
+                      >
+                        {l === "failed"
+                          ? "Couldn't draft the personal lines; the message goes without them."
+                          : "No personal lines came out of this brief; the message goes without them."}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() => {
+                          setLines((prev) => ({ ...prev, [p.cwid]: "drafting" }));
+                          void fetchLines(p);
+                        }}
+                      >
+                        Retry
+                      </Button>
+                    </div>
                   ) : null}
                   {card.editing ? (
                     <Textarea

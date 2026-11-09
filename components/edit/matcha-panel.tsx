@@ -1832,11 +1832,17 @@ export function MatchaPanel({
     }
   }
 
+  /** One person for the targeted dialog; the brief's `updatedAt` versions their cached lines. */
+  function targetedPerson(cwid: string, name: string): TargetedPerson {
+    const b = briefMap.get(cwid);
+    return { cwid, name, hasBrief: b != null, briefVersion: b?.updatedAt ?? "" };
+  }
+
   /** "Email individually": the ticked rows in rank order. */
   function openTargetedDialog() {
     if (!contactOn || shortlistRows.length === 0 || shortlistRows.length > CONTACT_MAX) return;
     setTargetedPeople(
-      shortlistRows.map(({ c }) => ({ cwid: c.cwid, name: c.name, hasBrief: briefMap.has(c.cwid) })),
+      shortlistRows.map(({ c }) => targetedPerson(c.cwid, c.name)),
     );
   }
 
@@ -1856,7 +1862,7 @@ export function MatchaPanel({
    *  second-person one as "Email individually" (never the brief's third-person angle). */
   function emailOne(cwid: string) {
     const row = shortlistRows.find(({ c }) => c.cwid === cwid) ?? eligibleRows.find(({ c }) => c.cwid === cwid);
-    setTargetedPeople([{ cwid, name: row?.c.name ?? "", hasBrief: briefMap.has(cwid) }]);
+    setTargetedPeople([targetedPerson(cwid, row?.c.name ?? "")]);
   }
 
 

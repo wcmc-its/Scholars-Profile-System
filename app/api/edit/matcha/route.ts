@@ -410,12 +410,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const stored =
       body.fresh === true
         ? null
-        : await db.read.sponsorMatchSubmission
+        : // Sort on narrow columns, then fetch the JSON by id: selecting `result` in the ORDER BY
+          // query makes MySQL sort the multi-MB rows and fail with 1038 "Out of sort memory"
+          // (as `loadStoredResult`).
+          await db.read.sponsorMatchSubmission
             .findFirst({
               where: { descriptionHash: engineInputHash, resultKey: cacheKey },
               orderBy: { createdAt: "desc" },
-              select: { result: true, createdAt: true },
+              select: { id: true },
             })
+            .then((hit) =>
+              hit
+                ? db.read.sponsorMatchSubmission.findUnique({
+                    where: { id: hit.id },
+                    select: { result: true, createdAt: true },
+                  })
+                : null,
+            )
             .catch((err: unknown) => {
               logEditFailure(`${PATH}#stored`, err);
               return null;
