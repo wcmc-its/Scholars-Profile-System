@@ -60,7 +60,7 @@ If revisited, request `/read-limited` and `/activities/update` in one review, as
 
 ### D7. Token storage
 
-ORCID's minimum requirements ask integrators to store the access token. SPS stores it in `orcid_authentication`, encrypted with AES-256-GCM, with the key in AWS Secrets Manager (`scholars/<env>/orcid-api`). The token is never decrypted or used to call ORCID under D6.
+ORCID's minimum requirements ask integrators to store the access token. SPS stores it in `orcid_authentication`, encrypted with AES-256-GCM, with the key in AWS Secrets Manager (`scholars/<env>/orcid-api`). The token is decrypted only to revoke it. Whenever SPS discards a token, it revokes that token at ORCID's `/oauth/revoke` after the write commits. That covers three cases: Remove, a change to a different iD, and a repeat sign-in. A repeat sign-in keeps the latest token and revokes the one it replaced (ORCID's option B). Once no tokens remain, WCM drops off the person's Trusted Organizations list. Revocation is best effort: a failure is logged and the SPS change stands. This follows the ORCID integration review on 2026-11-06.
 
 ## Consequences
 
@@ -71,4 +71,4 @@ ORCID's minimum requirements ask integrators to store the access token. SPS stor
 ## Open
 
 - Key is CWID only. Extending to Cornell Ithaca (NetIDs, no WCM SSO, so no sign-in route) needs its own decision.
-- Whether ORCID requires or merely recommends reserving the iD icon for authenticated iDs. Treated as required.
+- ORCID's display guidelines answer the old icon question. The green iD icon is for authenticated iDs only. Unauthenticated iDs should get ORCID's separate unauthenticated icon plus an "(unauthenticated)" suffix, not a plain link. SPS shows a plain link today, so this is pending a decision.

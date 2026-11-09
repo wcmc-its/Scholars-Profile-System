@@ -25,6 +25,8 @@ const {
   mockTxDismissalDeleteMany,
   mockTxExecuteRaw,
   mockTxAuthDeleteMany,
+  mockTxAuthFindMany,
+  mockRevokeStoredTokens,
   mockReflectOverviewEdit,
   mockWithReciterConnection,
 } = vi.hoisted(() => ({
@@ -43,11 +45,17 @@ const {
   mockTxDismissalDeleteMany: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
   mockTxAuthDeleteMany: vi.fn(),
+  mockTxAuthFindMany: vi.fn(),
+  mockRevokeStoredTokens: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
   mockWithReciterConnection: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/edit/orcid-connect", async (orig) => ({
+  ...(await orig<typeof import("@/lib/edit/orcid-connect")>()),
+  revokeStoredTokens: mockRevokeStoredTokens,
+}));
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEditSession,
   impersonationActive: vi.fn().mockReturnValue(false),
@@ -87,7 +95,7 @@ const fakeTx = {
   scholar: { update: mockTxScholarUpdate, findUnique: mockTxScholarFindUnique },
   orcidCandidate: { deleteMany: mockTxCandidateDeleteMany, findMany: mockTxCandidateFindMany },
   orcidDismissal: { upsert: mockTxDismissalUpsert, deleteMany: mockTxDismissalDeleteMany },
-  orcidAuthentication: { deleteMany: mockTxAuthDeleteMany },
+  orcidAuthentication: { deleteMany: mockTxAuthDeleteMany, findMany: mockTxAuthFindMany },
   $executeRaw: mockTxExecuteRaw,
 };
 const ID = "0000-0002-1825-0097";
@@ -119,6 +127,7 @@ beforeEach(() => {
   mockTxDismissalDeleteMany.mockResolvedValue({ count: 0 });
   mockTxExecuteRaw.mockResolvedValue(1);
   mockTxAuthDeleteMany.mockResolvedValue({ count: 0 });
+  mockTxAuthFindMany.mockResolvedValue([]);
   mockReflectOverviewEdit.mockResolvedValue(undefined);
 });
 
@@ -395,5 +404,18 @@ describe("POST /api/edit/orcid", () => {
     });
     await POST(post({ cwid: "self01", orcid: null }));
     expect(mockTxAuthDeleteMany).toHaveBeenLastCalledWith({ where: { cwid: "self01" } });
+  });
+
+  it("revokes the dropped sign-in's token at ORCID after commit, and only when one was dropped", async () => {
+    await POST(post({ cwid: "self01", orcid: ID }));
+    expect(mockRevokeStoredTokens).not.toHaveBeenCalled();
+    const row = { accessTokenEnc: "enc", sandbox: false };
+    mockTxAuthFindMany.mockResolvedValue([row]);
+    await POST(post({ cwid: "self01", orcid: null }));
+    expect(mockTxAuthFindMany).toHaveBeenLastCalledWith({
+      where: { cwid: "self01" },
+      select: { accessTokenEnc: true, sandbox: true },
+    });
+    expect(mockRevokeStoredTokens).toHaveBeenCalledWith([row]);
   });
 });
