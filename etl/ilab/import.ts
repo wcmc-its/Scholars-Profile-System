@@ -29,6 +29,10 @@
  *   npm run etl:ilab:import -- --from 2026-07-01 --to 2026-09-30
  *   npm run etl:ilab:import -- --from 2026-07-01 --to 2026-09-30 --key ilab/charges.xlsx
  *   npm run etl:ilab:import -- --from 2026-07-01 --to 2026-09-30 --file ./charges.xlsx --dry-run
+ *
+ * `--subsidy-account <acct>[,<acct>]` marks charges to those payment accounts as
+ * the subsidy line, for a raw iLab export with no "Subsidy" column. The account
+ * is passed at run time, not committed: this repo is public.
  */
 import { readFile } from "node:fs/promises";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
@@ -73,7 +77,19 @@ async function loadBytes(): Promise<Uint8Array> {
 async function main() {
   const start = Date.now();
   const erpWindow = parseErpWindow(arg("--from"), arg("--to"));
-  const { charges: parsed, skipped } = await readChargesWorkbook(await loadBytes());
+  const subsidyAccounts = new Set(
+    (arg("--subsidy-account") ?? "")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean),
+  );
+  const { charges: parsed, skipped } = await readChargesWorkbook(await loadBytes(), {
+    subsidyAccounts,
+  });
+  const subsidyRows = parsed.filter((c) => c.isSubsidy).length;
+  console.log(`Subsidy lines: ${subsidyRows}.`);
+  if (subsidyRows === 0)
+    console.warn("WARNING: no subsidy lines. A raw iLab export needs --subsidy-account <acct>.");
   const range = erpRange(parsed);
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   const { inside: charges, outside } = chargesInWindow(parsed, erpWindow);

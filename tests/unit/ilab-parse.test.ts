@@ -264,3 +264,27 @@ describe("parseErpWindow", () => {
     expect(() => parseErpWindow("2026-01-01", "2026-09-30")).toThrow(/at most one quarter/);
   });
 });
+
+describe("parseChargeRows subsidy account", () => {
+  // A raw iLab export: no "Subsidy" column at all.
+  const row = (payment: string, id: string) => ({
+    "PI Email": "abc1001@med.cornell.edu",
+    "Payment Information": payment,
+    "Total Price": 10,
+    "Date file sent to ERP": d("2026-07-15"),
+    "Core Name": "Example Core",
+    "Charge ID": id,
+  });
+
+  it("marks charges to a given subsidy account as the subsidy line", () => {
+    const { charges } = parseChargeRows([row("11112222", "1"), row("1234567801", "2")], {
+      subsidyAccounts: new Set(["11112222"]),
+    });
+    expect(charges.map((c) => c.isSubsidy)).toEqual([true, false]);
+  });
+
+  it("marks nothing as subsidy without the column or an account", () => {
+    const { charges } = parseChargeRows([row("11112222", "1")]);
+    expect(charges[0].isSubsidy).toBe(false);
+  });
+});

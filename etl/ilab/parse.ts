@@ -133,7 +133,13 @@ function day(v: unknown): Date | null {
 }
 
 /** Parse header-keyed rows (values already flattened) into `core_charge` rows. */
-export function parseChargeRows(rows: Array<Record<string, unknown>>): ParseResult {
+/** Payment accounts whose charges are the subsidy line, for exports without a "Subsidy" column. */
+export type ParseOptions = { subsidyAccounts?: ReadonlySet<string> };
+
+export function parseChargeRows(
+  rows: Array<Record<string, unknown>>,
+  { subsidyAccounts }: ParseOptions = {},
+): ParseResult {
   const skipped = {
     noChargeId: 0,
     longChargeId: 0,
@@ -170,6 +176,7 @@ export function parseChargeRows(rows: Array<Record<string, unknown>>): ParseResu
       skipped.badPrice++;
       continue;
     }
+    const paymentNumber = payment(r[COL.payment]);
     const charge: CoreChargeRow = {
       chargeId,
       coreName: coreName.slice(0, TEXT_MAX),
@@ -177,8 +184,12 @@ export function parseChargeRows(rows: Array<Record<string, unknown>>): ParseResu
       piCwid: emailCwid(str(r[COL.piEmail])),
       ilabMcc: str(r[COL.mcc])?.toUpperCase() === "Y",
       totalPrice: price.toFixed(2),
-      isSubsidy: str(r[COL.subsidy]) === "Subsidy",
-      paymentNumber: payment(r[COL.payment]),
+      // The hand-built report labels the subsidy line; a raw iLab export does
+      // not, but the line is always charged to the center's subsidy account.
+      isSubsidy:
+        str(r[COL.subsidy]) === "Subsidy" ||
+        (paymentNumber !== null && subsidyAccounts?.has(paymentNumber) === true),
+      paymentNumber,
       erpDate,
       billingDate: day(r[COL.billingDate]),
       purchaseDate: day(r[COL.purchaseDate]),
@@ -203,7 +214,10 @@ export function parseChargeRows(rows: Array<Record<string, unknown>>): ParseResu
  * "Charge ID" header cell in its first 10 rows (the export also carries pivot
  * and chart sheets, and the sheet name changes per quarter).
  */
-export async function readChargesWorkbook(buffer: ArrayBuffer | Uint8Array): Promise<ParseResult> {
+export async function readChargesWorkbook(
+  buffer: ArrayBuffer | Uint8Array,
+  opts: ParseOptions = {},
+): Promise<ParseResult> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
   for (const ws of wb.worksheets) {
@@ -222,7 +236,7 @@ export async function readChargesWorkbook(buffer: ArrayBuffer | Uint8Array): Pro
         for (const [col, name] of header) rec[name] = plain(row.getCell(col).value);
         rows.push(rec);
       }
-      return parseChargeRows(rows);
+      return parseChargeRows(rows, opts);
     }
   }
   throw new Error(`No worksheet has a "${COL.chargeId}" header; is this an iLab charges export?`);
