@@ -274,6 +274,36 @@ describe("computeSharedResourceUsage", () => {
     );
     expect(v.srByProgram[0].byGroup).toEqual({ P1: 100, P2: 300 });
     expect(v.memberCount).toBe(1);
+    // Views 3/4 count the PI once, in their roster (latest) program, on both sides.
+    expect(v.programShare[0].byGroup).toEqual({
+      P1: { users: 0, members: 0 },
+      P2: { users: 1, members: 1 },
+    });
+    expect(v.memberShare[0]).toEqual({ sr: "SR One", users: 1, members: 1 });
+  });
+
+  it("a PI whose only line at an SR is a refund is not a user", () => {
+    const v = run([
+      charge({ totalPrice: -80 }),
+      charge({ coreName: "Core C", piCwid: "pi_p2a", totalPrice: 50 }),
+      charge({ coreName: "Core C", piCwid: "pi_p2a", totalPrice: -50 }),
+    ]);
+    expect(v.srByProgram[0].byGroup).toEqual({ P1: -80 });
+    expect(v.programShare[0].byGroup.P1).toEqual({ users: 0, members: 2 });
+    expect(v.memberShare).toEqual([
+      { sr: "SR One", users: 0, members: 5 },
+      { sr: "SR Two", users: 0, members: 5 },
+    ]);
+  });
+
+  it("a member code outside the center's programs still gets a group", () => {
+    const v = run(
+      [charge({ piCwid: "pi_old", totalPrice: 40 })],
+      [...MEMBERS, mem("pi_old", "RETIRED")],
+    );
+    expect(v.groups).toEqual(["P1", "P2", "RETIRED", NO_PROGRAM]);
+    expect(v.programShare[0].byGroup.RETIRED).toEqual({ users: 1, members: 1 });
+    expect(v.coresByProgram[0]).toEqual({ core: "Core A", byGroup: { RETIRED: 40 }, total: 40 });
   });
 
   it("an SR with no charges still gets its row", () => {

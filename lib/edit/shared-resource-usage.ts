@@ -155,13 +155,13 @@ export type LabRow = {
 };
 
 export type SharedResourceUsage = {
-  /** Member groups in display order: the center's programs, then `NO_PROGRAM` if any member has none. */
+  /** Member groups in display order: the center's programs, any other code a member holds, then `NO_PROGRAM` if any member has none. */
   groups: string[];
   /** View 1: SR x program, members only. */
   srByProgram: Array<{ sr: string } & GroupDollars>;
   /** View 2: SR x programs + `NON_MEMBER`. */
   srByAll: Array<{ sr: string } & GroupDollars>;
-  /** View 3: per SR, per group, distinct member PIs using it over the group's members. */
+  /** View 3: per SR, per group, distinct member PIs netting above $0 there over the group's members (both by roster group). */
   programShare: Array<{ sr: string; byGroup: Record<string, ShareCell> }>;
   /** View 4: per SR, distinct member PIs using it over all members. */
   memberShare: Array<{ sr: string } & ShareCell>;
@@ -246,7 +246,7 @@ export function computeSharedResourceUsage(input: {
   );
   const srAll = new Map<string, Map<string, number>>();
   const cores = new Map<string, Map<string, number>>();
-  const users = new Map<string, Map<string, Set<string>>>(); // sr -> group -> cwids
+  const net = new Map<string, Map<string, number>>(); // sr -> member cwid -> net cents
   const labs = new Map<string, LabRow & { totalC: number; subsidyC: number }>();
   const dq = {
     lines: 0,
@@ -255,7 +255,7 @@ export function computeSharedResourceUsage(input: {
     outsideC: 0,
     notFlagged: new Set<string>(),
   };
-  let anyNoProgram = [...roster.values()].includes(NO_PROGRAM);
+  const seen = new Set(roster.values());
 
   for (const c of charges) {
     const group = groupOn(c.piCwid, c.erpDate);
@@ -263,15 +263,11 @@ export function computeSharedResourceUsage(input: {
     const sr = srOf.get(c.coreName);
     const amt = cents(c.totalPrice);
     const lab = c.customerLab ?? "(no lab)";
-    if (group === NO_PROGRAM) anyNoProgram = true;
+    if (member) seen.add(group);
 
     if (sr) {
       addTo(srAll, sr, group, amt);
-      if (member && c.piCwid) {
-        const g = users.get(sr) ?? new Map<string, Set<string>>();
-        g.set(group, (g.get(group) ?? new Set()).add(c.piCwid));
-        users.set(sr, g);
-      }
+      if (member && c.piCwid) addTo(net, sr, c.piCwid, amt);
     }
     if (member) addTo(cores, c.coreName, group, amt);
 
@@ -300,7 +296,21 @@ export function computeSharedResourceUsage(input: {
     if (member && !c.ilabMcc) dq.notFlagged.add(lab);
   }
 
-  const groups = [...input.programs, ...(anyNoProgram ? [NO_PROGRAM] : [])];
+  // Codes outside the center's programs (e.g. retired) still get a group, so no dollars drop out of a bar.
+  const extra = [...seen].filter((g) => g !== NO_PROGRAM && !input.programs.includes(g)).sort();
+  const groups = [...input.programs, ...extra, ...(seen.has(NO_PROGRAM) ? [NO_PROGRAM] : [])];
+  // A user nets above $0 at the SR in the quarter (a refund-only line is not use), and
+  // is counted in their roster group so views 3 and 4 share one denominator rule.
+  const users = new Map<string, Map<string, Set<string>>>(); // sr -> group -> cwids
+  for (const [sr, byPi] of net) {
+    const g = new Map<string, Set<string>>();
+    for (const [cwid, c] of byPi) {
+      if (c <= 0) continue;
+      const grp = roster.get(cwid) ?? NO_PROGRAM;
+      g.set(grp, (g.get(grp) ?? new Set()).add(cwid));
+    }
+    users.set(sr, g);
+  }
   const memberOnly = (r: GroupDollars): GroupDollars => {
     const byGroup = Object.fromEntries(Object.entries(r.byGroup).filter(([g]) => g !== NON_MEMBER));
     return { byGroup, total: dollars(Object.values(byGroup).reduce((s, v) => s + cents(v), 0)) };

@@ -198,7 +198,13 @@ export async function renderSharedResourceUsageReport({
   );
   const srRows = (rows: ReadonlyArray<{ sr: string } & GroupDollars>) =>
     rows.map((x) => ({ ...x, key: x.sr, label: srLabel(x.sr) }));
-  const maxCore = Math.max(0, ...(u?.coresByProgram ?? []).map((c) => c.total));
+  // The widest bar's drawn length: positive parts only, as StackedBars draws them.
+  const maxCore = Math.max(
+    0,
+    ...(u?.coresByProgram ?? []).map((c) =>
+      Object.values(c.byGroup).reduce((s, v) => s + Math.max(0, v), 0),
+    ),
+  );
   const srTotal = (u?.srByAll ?? []).reduce((s, x) => s + x.total, 0);
 
   const filters = (
