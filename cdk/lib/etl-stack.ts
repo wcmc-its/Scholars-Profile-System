@@ -1477,6 +1477,45 @@ export class EtlStack extends Stack {
       ],
     });
 
+    // Image vulnerability alert (OPERATIONS-RUNBOOK § Patching). Amazon
+    // Inspector (enabled by CLI, not CDK) continuously scans the scholars-*
+    // ECR repos and emits one event per new finding. Prod only: every staging
+    // merge pushes a new image, and each push re-reports every known CVE as a
+    // fresh finding, so a staging rule would post the same cards several times
+    // a day. Prod pushes only on a prod deploy. Only ACTIVE findings with a fix
+    // available are actionable; suppressed (accepted) findings are not ACTIVE.
+    if (env === "prod") {
+      new events.Rule(this, "InspectorImageFindingRule", {
+        ruleName: `sps-image-vulnerability-${env}`,
+        description: `SPS ${env}: Inspector found a fixable CRITICAL or HIGH vulnerability in a running image`,
+        eventPattern: {
+          source: ["aws.inspector2"],
+          detailType: ["Inspector2 Finding"],
+          detail: {
+            severity: ["CRITICAL", "HIGH"],
+            status: ["ACTIVE"],
+            fixAvailable: ["YES"],
+            resources: {
+              details: {
+                awsEcrContainerImage: {
+                  repositoryName: [`scholars-app-${env}`, `scholars-etl-${env}`],
+                },
+              },
+            },
+          },
+        },
+        targets: [
+          new eventsTargets.SnsTopic(this.failureTopic, {
+            message: events.RuleTargetInput.fromObject({
+              env,
+              step: "ImageVulnerability",
+              error: `${events.EventField.fromPath("$.detail.severity")} ${events.EventField.fromPath("$.detail.title")} in ${events.EventField.fromPath("$.detail.resources[0].details.awsEcrContainerImage.repositoryName")}. Fix: OPERATIONS-RUNBOOK, Patching section`,
+            }),
+          }),
+        ],
+      });
+    }
+
     // PR-7 — P1 page topic. Abort-tier step failures publish here (vs the
     // warn-tier etl-failures topic); the relay's severityForRecord defaults any
     // non-warn topic to the page channel, so no lambda change is needed.

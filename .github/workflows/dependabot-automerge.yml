@@ -1,0 +1,38 @@
+name: Dependabot auto-merge
+
+# Queues auto-merge on Dependabot PRs that are low-risk patches
+# (OPERATIONS-RUNBOOK § Patching):
+#   - the grouped security-fix PRs (npm-security, cdk-security)
+#   - Docker base-image digest bumps (OS and Node patches)
+#   - any PR whose biggest change is a patch version
+# Minor and major version PRs still need a person.
+#
+# GitHub merges the PR only after the required checks (build, cdk,
+# dependency-review) pass. A merge made this way does NOT trigger deploy.yml
+# (GITHUB_TOKEN events never start other workflows), so the patch reaches
+# staging with the next human merge or a manual deploy dispatch, and prod with
+# the next prod deploy.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+
+      - name: Queue auto-merge
+        if: >-
+          steps.meta.outputs.dependency-group == 'npm-security' ||
+          steps.meta.outputs.dependency-group == 'cdk-security' ||
+          steps.meta.outputs.package-ecosystem == 'docker' ||
+          steps.meta.outputs.update-type == 'version-update:semver-patch'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

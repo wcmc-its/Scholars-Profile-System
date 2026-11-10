@@ -7872,6 +7872,60 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "InspectorImageFindingRule31A50FE2": {
+      "Properties": {
+        "Description": "SPS prod: Inspector found a fixable CRITICAL or HIGH vulnerability in a running image",
+        "EventPattern": {
+          "detail": {
+            "fixAvailable": [
+              "YES",
+            ],
+            "resources": {
+              "details": {
+                "awsEcrContainerImage": {
+                  "repositoryName": [
+                    "scholars-app-prod",
+                    "scholars-etl-prod",
+                  ],
+                },
+              },
+            },
+            "severity": [
+              "CRITICAL",
+              "HIGH",
+            ],
+            "status": [
+              "ACTIVE",
+            ],
+          },
+          "detail-type": [
+            "Inspector2 Finding",
+          ],
+          "source": [
+            "aws.inspector2",
+          ],
+        },
+        "Name": "sps-image-vulnerability-prod",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "EtlFailureTopic8361D0D0",
+            },
+            "Id": "Target0",
+            "InputTransformer": {
+              "InputPathsMap": {
+                "detail-resources-0--details-awsEcrContainerImage-repositoryName": "$.detail.resources[0].details.awsEcrContainerImage.repositoryName",
+                "detail-severity": "$.detail.severity",
+                "detail-title": "$.detail.title",
+              },
+              "InputTemplate": "{"env":"prod","step":"ImageVulnerability","error":"<detail-severity> <detail-title> in <detail-resources-0--details-awsEcrContainerImage-repositoryName>. Fix: OPERATIONS-RUNBOOK, Patching section"}",
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
     "InternalAlbIngressFromEtl": {
       "Properties": {
         "Description": "ETL SG to SPS internal ALB HTTP (prod) -- /api/revalidate",
