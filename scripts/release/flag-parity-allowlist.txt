@@ -113,6 +113,7 @@ ORCID_REGISTRY_DRY_RUN              # orcid-registry: env twin of --dry-run (not
 ORCID_REGISTRY_MAX_RECORDS          # orcid-registry: local smoke — truncates the registry union and FORCES a dry run (a partial mirror would let the delete pass wipe the rest)
 ORCID_EVIDENCE_DRY_RUN              # orcid-evidence: env twin of --dry-run (nothing written, no EtlRun row); local/operator only
 ORCID_EVIDENCE_MAX_RECORDS          # orcid-evidence: local smoke — truncates the iD list and FORCES a dry run (a partial mirror would let the delete pass wipe the rest)
+SEARCH_INDEX_SKIP_HEALTH            # search-index: local seed-data only — skips the pre-swap health asserts; ignored when NODE_ENV=production
 SCHOLARS_VIVO_ORG_CROSSWALK
 SCHOLARS_VIVO_ORG_REDIRECT_OUTPUT
 SCHOLARS_VIVO_PUB_REDIRECT_OUTPUT

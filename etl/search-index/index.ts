@@ -807,7 +807,15 @@ function preSwapGate(
       existing: liveCount,
       maxDropPct: 20,
     });
-    await health(client, newIndex);
+    // Dev-only escape hatch. The health asserts expect real-corpus
+    // content (e.g. "Neoplasms" MeSH, a non-empty trials index) that the
+    // synthetic `npm run seed` fixtures lack. Inert in the ETL image
+    // (NODE_ENV=production), so prod swaps stay gated.
+    if (process.env.SEARCH_INDEX_SKIP_HEALTH === "1" && process.env.NODE_ENV !== "production") {
+      console.warn(`  ...SEARCH_INDEX_SKIP_HEALTH=1: skipping health asserts for ${newIndex}`);
+    } else {
+      await health(client, newIndex);
+    }
     console.log(
       `  ...pre-swap gate passed for ${newIndex} (${docsIndexed} docs vs ${liveCount} live)`,
     );

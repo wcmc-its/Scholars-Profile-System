@@ -4,17 +4,19 @@ A profile system for researchers at Weill Cornell Medicine. Phase 1 replacement 
 
 ## Status
 
-Local prototype under active development. See the planning artifacts in `~/Dropbox/Index/Scholars Profile System : VIVO Replacement/` (functional spec, charter, design decisions, build plan) for context.
+In production at Weill Cornell Medicine.
+
+**Running outside WCM:** the ETLs read WCM-internal source systems (Enterprise Directory, ReCiter, InfoEd, ASMS, …), which are not reachable from outside the WCM network. A local install runs on the synthetic fixtures from `npm run seed` (about a dozen scholars), which is enough to exercise profiles, search, and the UI.
 
 ## Stack
 
 | Layer | Local | Production target |
 |---|---|---|
-| Framework | Next.js 15 (App Router) | Same, on Fargate |
+| Framework | Next.js 16 (App Router) | Same, on Fargate |
 | Language | TypeScript (strict) | Same |
 | Database | MariaDB 11 on host (homebrew) | Aurora MySQL on RDS |
 | Search | OpenSearch 2.x (Docker) | OpenSearch Service (managed) |
-| ETL | TypeScript via `tsx` | Lambda + EventBridge |
+| ETL | TypeScript via `tsx` | ECS tasks orchestrated by Step Functions |
 | Styling | Tailwind 4 + shadcn/ui | Same |
 | Testing | Vitest + Playwright | Same |
 | CI | GitHub Actions | Same |
@@ -25,8 +27,8 @@ For a visual map of the system — context, app/AWS topology, network, and edge 
 
 ## Prerequisites
 
-- Node.js 22+
-- Docker (with at least 4GB allocated for OpenSearch)
+- Node.js 24+ (see `.nvmrc`; the production image runs Node 26)
+- Docker with at least 6 GB of memory allocated (the OpenSearch container alone uses a 4 GB heap)
 - MariaDB 11 on the host (homebrew on macOS; see "Database setup" below)
 - npm 10+
 
@@ -39,8 +41,10 @@ The app talks to **host MariaDB on `127.0.0.1:3306`**, not a Dockerized MySQL. T
 brew install mariadb
 brew services start mariadb
 
-# Create the scholars user and database (run as root once)
-mysql -uroot <<'SQL'
+# Create the scholars user and database (once). Homebrew MariaDB authenticates
+# the local admin over the unix socket as your macOS user, so `mysql -uroot`
+# is refused; connect as yourself (or `sudo mysql` on Linux).
+mysql -u"$(whoami)" <<'SQL'
 CREATE DATABASE IF NOT EXISTS scholars CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'scholars'@'localhost' IDENTIFIED BY 'scholars';
 GRANT ALL PRIVILEGES ON scholars.* TO 'scholars'@'localhost';
@@ -72,6 +76,8 @@ audit row to a **separate** `scholars_audit` database, and the app role needs an
 
 ```bash
 # BOOTSTRAP_DSN = a privileged local login (root) that can CREATE DATABASE + GRANT.
+#                 It must accept TCP logins; Homebrew's root is socket-only, so
+#                 create a password-auth admin user first if you need one.
 # APP_RW_DSN    = your app DSN (the grantee). GRANTEE_HOST=localhost because the
 #                 local app user is 'scholars'@'localhost' (Aurora uses '%').
 BOOTSTRAP_DSN='mysql://root@127.0.0.1:3306/' \
@@ -94,21 +100,33 @@ cd Scholars-Profile-System
 # 2. Install
 npm install
 
-# 3. Copy env template (real credentials live in ~/.zshrc, never committed)
-cp .env.example .env.local
+# 3. Copy env template. It must be `.env` (not `.env.local`): Prisma and the
+#    tsx scripts (db:check, seed, search:index) load `.env` only. Next.js
+#    reads both. Never commit either file.
+cp .env.example .env
 
 # 4. Start OpenSearch (MariaDB runs on the host — see "Database setup")
 npm run db:up
 
-# 5. Verify DB target, then apply migrations
+# 5. Verify DB target, then apply the committed migrations
 npm run db:check
-npm run db:migrate
+npx prisma migrate deploy
 
-# 6. Run dev server
+# 6. Load synthetic data and build the search indexes. The indexer's
+#    pre-swap health checks expect the real corpus; SEARCH_INDEX_SKIP_HEALTH=1
+#    skips them for seed data (ignored when NODE_ENV=production).
+npm run seed
+SEARCH_INDEX_SKIP_HEALTH=1 npm run search:index
+
+# 7. Run dev server
 npm run dev
 ```
 
 Open <http://localhost:3000>.
+
+`npm run db:migrate` (`prisma migrate dev`) is for **authoring** a new migration. It needs a shadow database, so the DB user must also be able to `CREATE DATABASE` (e.g. `GRANT ALL PRIVILEGES ON *.* TO 'scholars'@'localhost'`); the scoped grant above is enough for `migrate deploy`.
+
+**`/edit` (the editing console) is not reachable on a fresh clone.** It sits behind WCM SAML SSO; outside a configured IdP, dev builds redirect to a local-only `/api/auth/dev-login` route that is not committed to this repo. Public pages (home, profiles, search, browse) work without it.
 
 ## Useful commands
 
@@ -123,7 +141,7 @@ npm run format       # Prettier
 npm run db:up        # Start OpenSearch via docker compose (MariaDB runs on the host)
 npm run db:down      # Stop the local containers
 npm run db:check     # Show which DB DATABASE_URL points at + grant schema sanity check
-npm run db:migrate   # Apply Prisma migrations (dev)
+npm run db:migrate   # Author a new Prisma migration (needs CREATE DATABASE for the shadow DB)
 npm run db:reset     # Drop + recreate local DB and re-run migrations
 npm run seed         # Load synthetic seed data
 ```
