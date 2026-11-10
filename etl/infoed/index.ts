@@ -389,6 +389,56 @@ export function joinAccountPeriods(
   });
 }
 
+/**
+ * MCC shared-resource report: InfoEd `proposal.acct` is the 8-digit financial
+ * account behind an iLab WBS (acct + a 2-digit suffix). Mapped to the parent
+ * Account_Number, the same value `grant.external_id` carries. One acct can sit
+ * under several accounts, so this is a pair list, not a column on `grant`.
+ */
+const FIN_ACCOUNT_QUERY = `
+SELECT DISTINCT
+  LTRIM(RTRIM(CAST(p.acct AS NVARCHAR(64)))) AS fin_account,
+  CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number
+FROM wc_infoedprod.dbo.proposal AS p
+WHERE p.inst_code = 'WCORNELLMC'
+  AND LTRIM(RTRIM(CAST(p.acct AS NVARCHAR(64)))) LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+`;
+
+export type FinAccountRow = { fin_account: unknown; Account_Number: unknown };
+
+/** Distinct, validated (8-digit fin account, Account_Number) pairs. */
+export function toFinAccountPairs(
+  rows: readonly FinAccountRow[],
+): Array<{ finAccount: string; accountNumber: string }> {
+  const seen = new Map<string, { finAccount: string; accountNumber: string }>();
+  for (const r of rows) {
+    const finAccount = String(r.fin_account ?? "").trim();
+    const accountNumber = String(r.Account_Number ?? "").trim();
+    if (!/^\d{8}$/.test(finAccount) || accountNumber === "") continue;
+    seen.set(`${finAccount}|${accountNumber}`, { finAccount, accountNumber });
+  }
+  return [...seen.values()];
+}
+
+/** Full-replace `infoed_fin_account`; an empty read keeps the existing rows. */
+async function replaceFinAccounts(rows: readonly FinAccountRow[]): Promise<void> {
+  const pairs = toFinAccountPairs(rows);
+  if (pairs.length === 0) {
+    console.warn("[InfoEd] fin-account query returned 0 pairs; keeping existing infoed_fin_account rows.");
+    return;
+  }
+  await db.write.$transaction(
+    async (tx) => {
+      await tx.infoedFinAccount.deleteMany({});
+      for (const batch of chunks(pairs, INSERT_BATCH)) {
+        await tx.infoedFinAccount.createMany({ data: batch });
+      }
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+  console.log(`[InfoEd] infoed_fin_account replaced: ${pairs.length} pairs.`);
+}
+
 /** createdBy marker for the title-based confidentiality safety net (below).
  *  A manual revoke (a human confirming the title is a false positive, e.g.
  *  "Winn CDA" trials that are actually fine to be public) carries a different
@@ -926,6 +976,9 @@ async function main() {
 
     await reconcileDateGaps(undated, backfilledIds);
     await reconcileConfidentialTitles(inserts);
+    await replaceFinAccounts(
+      (await pool.request().query(FIN_ACCOUNT_QUERY)).recordset as FinAccountRow[],
+    );
 
     await db.write.etlRun.update({
       where: { id: run.id },
