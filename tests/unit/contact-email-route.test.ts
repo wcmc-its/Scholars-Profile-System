@@ -21,9 +21,13 @@ vi.mock("@/lib/api/profile", () => ({ loadScholarContactEmail: vi.fn() }));
 
 const EMAIL = "person@med.cornell.edu";
 
-function call(cwid: string) {
+function call(cwid: string, opts: { reveal?: boolean; ua?: string } = {}) {
+  const qs = opts.reveal ? "?reveal=1" : "";
+  const headers = opts.ua ? { "user-agent": opts.ua } : undefined;
   return GET(
-    new Request("http://localhost/api/profile/" + cwid + "/contact-email") as never,
+    new Request("http://localhost/api/profile/" + cwid + "/contact-email" + qs, {
+      headers,
+    }) as never,
     { params: Promise.resolve({ cwid }) },
   );
 }
@@ -53,14 +57,14 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
     expect(loadScholarContactEmail).not.toHaveBeenCalled();
   });
 
-  it("internal viewer + institution → reveals the email for ANY cwid", async () => {
+  it("network viewer + institution + ?reveal=1 → reveals the email for ANY cwid", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
     vi.mocked(loadScholarContactEmail).mockResolvedValue({
       email: EMAIL,
       emailVisibility: "institution",
     });
-    const body = await (await call("p001")).json();
+    const body = await (await call("p001", { reveal: true })).json();
     expect(body.email).toBe(EMAIL);
     expect(body.viewer).toBe("network");
     expect(loadScholarContactEmail).toHaveBeenCalledWith("p001");
@@ -96,5 +100,71 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
     vi.mocked(loadScholarContactEmail).mockResolvedValue(null);
     const body = await (await call("p001")).json();
     expect(body.email).toBeNull();
+  });
+
+  // Crawler hardening (2026-11-09 institution-email-reveal spec).
+
+  it("network viewer WITHOUT ?reveal=1 → no address, revealable:true (button, not leak)", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
+    vi.mocked(loadScholarContactEmail).mockResolvedValue({
+      email: EMAIL,
+      emailVisibility: "institution",
+    });
+    const res = await call("p001");
+    const text = await res.text();
+    expect(text).not.toContain(EMAIL);
+    expect(JSON.parse(text)).toEqual({ email: null, viewer: "network", revealable: true });
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("network viewer WITHOUT ?reveal=1 + none → revealable:false (no dead button)", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
+    vi.mocked(loadScholarContactEmail).mockResolvedValue({ email: EMAIL, emailVisibility: "none" });
+    const body = await (await call("p001")).json();
+    expect(body).toEqual({ email: null, viewer: "network", revealable: false });
+  });
+
+  it("session viewer → auto-reveals without ?reveal=1", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "session" });
+    vi.mocked(loadScholarContactEmail).mockResolvedValue({
+      email: EMAIL,
+      emailVisibility: "institution",
+    });
+    const body = await (await call("p001")).json();
+    expect(body.email).toBe(EMAIL);
+  });
+
+  it.each([
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 HeadlessChrome/131.0.0.0 Safari/537.36",
+    "python-requests/2.32.3",
+    "curl/8.7.1",
+  ])("bot UA %s → external shape even with ?reveal=1; never resolves viewer or loads", async (ua) => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
+    vi.mocked(loadScholarContactEmail).mockResolvedValue({
+      email: EMAIL,
+      emailVisibility: "institution",
+    });
+    const body = await (await call("p001", { reveal: true, ua })).json();
+    expect(body).toEqual({ email: null, viewer: "external" });
+    expect(resolveViewerContext).not.toHaveBeenCalled();
+    expect(loadScholarContactEmail).not.toHaveBeenCalled();
+  });
+
+  it("real browser UA from a network viewer still reveals on click", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
+    vi.mocked(loadScholarContactEmail).mockResolvedValue({
+      email: EMAIL,
+      emailVisibility: "institution",
+    });
+    const ua =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
+    const body = await (await call("p001", { reveal: true, ua })).json();
+    expect(body.email).toBe(EMAIL);
   });
 });

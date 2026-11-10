@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Mail } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { SidebarCard } from "./sidebar-card";
 
@@ -17,6 +21,12 @@ import { SidebarCard } from "./sidebar-card";
  * external viewer gets `null` and this renders nothing — so external and `none`
  * cases are indistinguishable and the address never leaks via the shared cache.
  *
+ * Crawler hardening (2026-11-09 institution-email-reveal spec): only a SESSION
+ * viewer gets the address on mount. An anonymous on-campus ("network") viewer
+ * gets `{ revealable }` and sees a "Show email" button; the address is fetched
+ * with `?reveal=1` only on click, so a JS-rendering indexer on the WCM network
+ * (which renders but never clicks) never sees it.
+ *
  * `mode`:
  *   - "li"   → renders just the `<li>` (inserted into an existing Contact card,
  *              e.g. alongside a clinical-profile link).
@@ -24,6 +34,16 @@ import { SidebarCard } from "./sidebar-card";
  *              resolves), used when there is no server-baked contact content so an
  *              external viewer never sees an empty card.
  */
+type RevealResponse = { email?: string | null; revealable?: boolean };
+
+function fetchContactEmail(cwid: string, reveal: boolean): Promise<RevealResponse> {
+  const qs = reveal ? "?reveal=1" : "";
+  return fetch(`/api/profile/${encodeURIComponent(cwid)}/contact-email${qs}`, {
+    cache: "no-store",
+    credentials: "same-origin",
+  }).then((r) => (r.ok ? r.json() : {}));
+}
+
 export function ContactEmailReveal({
   cwid,
   mode = "li",
@@ -32,16 +52,15 @@ export function ContactEmailReveal({
   mode?: "li" | "card";
 }) {
   const [email, setEmail] = useState<string | null>(null);
+  const [revealable, setRevealable] = useState(false);
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/profile/${encodeURIComponent(cwid)}/contact-email`, {
-      cache: "no-store",
-      credentials: "same-origin",
-    })
-      .then((r) => (r.ok ? r.json() : { email: null }))
-      .then((d: { email?: string | null }) => {
-        if (active && typeof d?.email === "string" && d.email) setEmail(d.email);
+    fetchContactEmail(cwid, false)
+      .then((d) => {
+        if (!active) return;
+        if (typeof d?.email === "string" && d.email) setEmail(d.email);
+        else if (d?.revealable === true) setRevealable(true);
       })
       .catch(() => {
         /* leave hidden — fail-closed */
@@ -51,26 +70,52 @@ export function ContactEmailReveal({
     };
   }, [cwid]);
 
-  if (!email) return null;
+  const onReveal = () => {
+    fetchContactEmail(cwid, true)
+      .then((d) => {
+        if (typeof d?.email === "string" && d.email) setEmail(d.email);
+        else setRevealable(false);
+      })
+      .catch(() => setRevealable(false));
+  };
 
-  const link = (
-    <a
-      href={`mailto:${email}`}
-      className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-    >
-      {email}
-    </a>
-  );
+  let content: ReactNode;
+  if (email) {
+    content = (
+      <a
+        href={`mailto:${email}`}
+        className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+      >
+        {email}
+      </a>
+    );
+  } else if (revealable) {
+    content = (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="outline" size="sm" onClick={onReveal}>
+              <Mail aria-hidden="true" />
+              Show email
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">Shown only to on-campus and signed-in visitors</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  } else {
+    return null;
+  }
 
   if (mode === "card") {
     return (
       <SidebarCard title="Contact">
         <ul className="flex flex-col gap-2">
-          <li>{link}</li>
+          <li>{content}</li>
         </ul>
       </SidebarCard>
     );
   }
 
-  return <li>{link}</li>;
+  return <li>{content}</li>;
 }
