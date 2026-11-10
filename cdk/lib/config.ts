@@ -230,10 +230,9 @@ export interface SpsEnvConfig {
    * {@link etlSchedulesEnabled} on purpose: the backup cadence must be
    * independently controllable, so flipping the heavy nightly/weekly/annual ETL
    * cadences on or off never touches the backup, and vice versa. `true` in
-   * staging so it runs from the first deploy after activation; `false` in prod
-   * until the prod curated-tables backup is activated (`cdk deploy Sps-Etl-prod`
-   * creates the bucket + grant + env, then flip this flag) — see
-   * docs/curation-backup-runbook.md § Prod.
+   * staging and prod (prod since 2026-11-09). A new env flips it only after a
+   * hand-verified first run — see docs/curation-backup-runbook.md
+   * § Status by environment.
    */
   readonly curationBackupScheduleEnabled: boolean;
   /**
@@ -832,7 +831,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     cdnReconcileScheduleEnabled: true,
     // #1032 — curated-tables backup ACTIVATED on prod 2026-11-09: bucket + task-def
     // env were already deployed, and a manual run exited 0 (17 tables, 10,379 rows).
-    // See docs/curation-backup-runbook.md § Prod.
+    // See docs/curation-backup-runbook.md § Status by environment.
     curationBackupScheduleEnabled: true,
     // Nightly grants bulk export — staging hand-verified 2026-08-11 (13,266
     // rows, correct NDJSON schema, both an ECS RunTask and a real Step

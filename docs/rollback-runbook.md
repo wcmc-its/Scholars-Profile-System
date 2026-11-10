@@ -1,68 +1,161 @@
-# Rollback runbook — production ECS service
+# SPS Rollback Runbook
 
-Operator-facing procedure for rolling the production ECS service back to the previous task definition revision. Pairs with [`ADR-004 — Deploy strategy: ECS rolling`](./ADR-004-deploy-strategy.md).
+Rolling the app back to the previous version · Scholars Profile System
 
-This runbook is for **app-code rollback only**. There is no migration rollback — see [`PRODUCTION_ADDENDUM.md` § Schema migration policy](./PRODUCTION_ADDENDUM.md#schema-migration-policy) and `CONTRIBUTING.md` § Schema migrations. The additive-only migration rule means rolling the image back is safe; rolling the schema back is not.
+| | | | |
+|---|---|---|---|
+| **Last updated** | **2026-11-09** | **Version** | 2.0 |
+| **Owner** | Paul Albert, SPS service owner (paa2013@med.cornell.edu) | **Last drill** | 2026-11-10 00:48 UTC, staging: **Pass** |
+| **Audience** | Whoever is handling a bad production deploy | **Next drill due** | By 2027-02-10 (quarterly), or after any pipeline, ECS or CDK change |
 
-## When to roll back
+> [!IMPORTANT]
+> **Use this runbook when**
+>
+> A deploy went out and the app is now misbehaving for real users: more errors or slower pages, even though the new tasks passed their health checks. Rolling back points the service at the previous app version. It takes about 3 to 6 minutes and touches nothing else.
 
-Roll back when **either** of the following holds for the post-deploy service, sustained over 5 minutes (i.e. not a single outlier minute):
+> [!WARNING]
+> **Never roll back by re-running the deploy workflow from an older commit**
+>
+> That re-runs the database migration step: if the bad commit carried a migration, it either re-applies an applied migration or attempts a downgrade that doesn't fit a hot rollback. Use the command in [Step 2](#step-2-roll-back) instead: it moves only the app service.
 
-- 5xx rate at the ALB target group ≥ 1% of requests, or
-- p95 latency at the ALB target group ≥ 2× the pre-deploy steady-state baseline.
+| **Not this problem?** | **Go to** |
+|---|---|
+| New tasks fail to start or fail health checks | Nothing to do: ECS rolls back on its own (deployment circuit breaker) |
+| A database migration went wrong | Don't roll it back. Fix forward with another additive migration ([`CONTRIBUTING.md`](../CONTRIBUTING.md) § Schema migrations) |
+| Data in the database is wrong or lost | [`restore-drill-runbook.md`](./restore-drill-runbook.md) (Aurora restore) |
+| Pages still show old or wrong content | Operations Runbook, Playbook 6 (caches) |
+| Search results are wrong | Operations Runbook, Playbook 14 (rebuild the index) |
 
-Both signals are visible on the ALB target-group CloudWatch dashboard. The deployment circuit breaker (configured per ADR-004) handles task-startup failures automatically; this runbook covers regressions that pass health checks but degrade real traffic.
+**Contents**
 
-## The paste-able rollback command
+- [Step 1. Decide whether to roll back](#step-1-decide-whether-to-roll-back)
+- [Step 2. Roll back](#step-2-roll-back)
+- [Step 3. Confirm it worked](#step-3-confirm-it-worked)
+- [Step 4. After the rollback](#step-4-after-the-rollback)
+- [What users experience](#what-users-experience)
+- [Drills](#drills)
+- [How it works](#how-it-works)
+- [Revision history](#revision-history)
 
-Every deploy registers a new, digest-pinned task-definition revision for `sps-app-<env>` (and the migrate/db-bootstrap/verify-grants families it depends on) instead of force-new-deploying the same revision against a mutable `:latest` tag (`.github/workflows/deploy.yml`, the "Pin task-definition revisions to this deploy's images" step, #2121). Every revision in the family history is therefore a genuinely distinct, immutable image — selecting a previous revision **does** roll code back.
+## Step 1. Decide whether to roll back
 
-Rollback is one command. `<env>` is `staging` or `prod`.
+Roll back if **either** of these has held for 5 minutes or more since the deploy (not just one bad minute):
 
-```bash
-# 1. Identify the previous known-good revision (each is pinned to one image digest).
-aws ecs list-task-definitions --family-prefix sps-app-<env> --sort DESC --max-items 5
-aws ecs describe-task-definition --task-definition sps-app-<env>:<REVISION> \
-  --query 'taskDefinition.containerDefinitions[?name==`app`].image' --output text
+| **Signal** | **Threshold** |
+|---|---|
+| Error rate at the load balancer (ALB target group 5xx) | **1% or more** of requests |
+| Response time at the load balancer (ALB target group p95) | **At least twice** the steady-state level before the deploy |
 
-# 2. Point the service at that revision. This starts a new rolling deployment.
-aws ecs update-service --cluster sps-cluster-<env> \
-  --service sps-app-<env> --task-definition sps-app-<env>:<PREVIOUS_REVISION>
-```
+Both are on the `sps-reliability-<env>` dashboard and the ALB target-group metrics in CloudWatch. The `sps-app-unavailable-<env>` and `sps-alb-latency-p99-<env>` alarms usually fire first.
 
-The service scheduler rolls the tasks using the same `minimumHealthyPercent: 100` / `maximumPercent: 200` configuration as a forward deploy, gated by the same circuit breaker. Expected duration: 4–6 minutes for a 4-task service.
+> [!NOTE]
+> **Is the deploy really the cause?**
+>
+> If the problem started at the same time as an upstream outage or a database alarm, check the Operations Runbook triage table before rolling back. Stale data is never a reason to roll back.
 
-**Do not re-run the deploy workflow from a prior commit as your rollback path.** It re-runs the migration step. If the bad commit carried a migration you will either re-apply an applied migration (no-op, slow) or attempt a downgrade-via-expand that does not fit a hot rollback. The command above only moves the app service; it does not touch the migrate/db-bootstrap/verify-grants task definitions, matching this runbook's app-code-only scope.
+## Step 2. Roll back
 
-The identical procedure appears in [`DEPLOY-RUNBOOK.md` § Bad image](./DEPLOY-RUNBOOK.md); that document is the operational source of truth for the deploy pipeline. Keep the two in sync, or collapse this section into a pointer.
+Set the environment first: `export ENV=prod` (or `staging`). Every deploy registers a new numbered revision of task definition `sps-app-<env>`, each pinned to one exact image, so picking the previous revision really does bring back the previous code.
 
-## Verifying the rollback
+1. See which revision is running now:
 
-1. Watch `aws ecs describe-services --cluster sps-cluster-<env> --services sps-app-<env>` until `deployments` contains a single entry with `status: PRIMARY` and `runningCount == desiredCount`. The revision number is now a real rollback signal: confirm it matches `<PREVIOUS_REVISION>` from step 1.
-2. Confirm the ALB target-group 5xx rate returns to baseline within 5 minutes of the new tasks reaching healthy.
-3. Tail CloudWatch Logs for the service and confirm new task IDs are emitting normal log lines (no boot-time errors).
+   ```bash
+   aws ecs describe-services --cluster sps-cluster-$ENV --services sps-app-$ENV \
+     --query 'services[0].deployments[].[status,taskDefinition,createdAt]' --output table
+   ```
 
-## Blast radius
+2. List the most recent revisions:
 
-Read endpoints: small. CloudFront serves cached responses for 24 hours, so most users see no change during the rollback window. Affected requests are origin-misses (uncached paths or expired cache entries) that hit the new bad code; rolling back stops new misses from hitting it.
+   ```bash
+   aws ecs list-task-definitions --family-prefix sps-app-$ENV --sort DESC --max-items 5
+   ```
 
-Write endpoints (`/api/edit*`, `/api/revalidate*`): rollback is immediate from the user's perspective once the new tasks register. In-flight requests against the bad version may have already written; the audit log (B03 #102) records the actor and the before/after values for any successful edit, so the scope of any bad writes is recoverable.
+3. Check which image a candidate revision runs. Pick the last one that was known to be good, usually the one just before the current revision:
 
-ETL: not affected. ETL Lambdas write to MySQL and trigger `/api/revalidate` independently of the request-path service revision.
+   ```bash
+   aws ecs describe-task-definition --task-definition sps-app-$ENV:<REVISION> \
+     --query 'taskDefinition.containerDefinitions[?name==`app`].image' --output text
+   ```
 
-## What this runbook does *not* cover
+4. Point the service at that revision. This starts a normal rolling deployment:
 
-- **Migration rollback.** Don't. Fix forward with another expand migration. See `CONTRIBUTING.md`.
-- **Aurora point-in-time recovery.** Different runbook (B10 #109). Use only when data corruption originates in the database itself, not in the app code.
-- **CloudFront cache invalidation.** Use `/api/revalidate` (B04 #103) for surgical invalidation; `aws cloudfront create-invalidation` only for emergencies after an app-code rollback that changed cacheable response shapes.
-- **OpenSearch alias swap.** Different system, different runbook (B18 #117). The request-path service rollback does not affect the search index.
+   ```bash
+   aws ecs update-service --cluster sps-cluster-$ENV \
+     --service sps-app-$ENV --task-definition sps-app-$ENV:<PREVIOUS_REVISION>
+   ```
 
-## Drill cadence
+5. Wait for it to settle (about 3 to 6 minutes):
 
-Per ADR-004 acceptance criteria, a full rollback drill must be executed against staging before the runbook is considered validated. Re-run the drill at least quarterly thereafter, or after any change to the deploy pipeline, ECS service definition, or CDK stack.
+   ```bash
+   aws ecs wait services-stable --cluster sps-cluster-$ENV --services sps-app-$ENV
+   ```
 
-### Drills
+The rollout keeps every existing task serving until replacements are healthy (minimum 100%, maximum 200%), and the same circuit breaker protects it as on a forward deploy.
 
-| Date (UTC) | Env | From → to | Rollback stable | Roll-forward stable | Outcome |
+## Step 3. Confirm it worked
+
+1. The service shows a single deployment, marked `PRIMARY`, with running tasks equal to desired, on the revision you chose:
+
+   ```bash
+   aws ecs describe-services --cluster sps-cluster-$ENV --services sps-app-$ENV \
+     --query 'services[0].{deployments:deployments[].[status,taskDefinition,runningCount,desiredCount]}'
+   ```
+
+2. Within 5 minutes of the new tasks becoming healthy, the ALB 5xx rate is back to its normal level.
+
+3. The new tasks are logging normally, with no startup errors:
+
+   ```bash
+   aws logs tail /aws/ecs/sps-app-$ENV --since 10m
+   ```
+
+> [!TIP]
+> **If it didn't help**
+>
+> The deploy probably wasn't the cause. Roll forward again to the newer revision (same command, newer number) and work through the Operations Runbook triage table.
+
+## Step 4. After the rollback
+
+- **Prod now runs older code than master.** The next prod deploy will bring the bad change back unless it is fixed first. Fix forward: merge the fix to master, let it reach staging, then dispatch a prod deploy (Operations Runbook, Part 3).
+- **Edits made by the bad version** are in the audit log (`scholars_audit.manual_edit_audit`), with who made them and the before and after values, so any bad writes can be found and corrected.
+- **Cached pages.** If the bad version changed what cached pages look like, invalidate them surgically through `/api/revalidate`; use `aws cloudfront create-invalidation` only in an emergency. Otherwise the edge refreshes within minutes on its own.
+- Tell active operators and record what happened (incident ticket, Teams thread).
+
+## What users experience
+
+| **Area** | **Effect of the rollback** |
+|---|---|
+| Public pages | Small. CloudFront and the origin page cache keep serving pages they already have. Only requests that miss the cache reach the app, so rolling back stops new misses from hitting the bad code. |
+| Edits and cache refreshes (`/api/edit*`, `/api/revalidate*`) | Switch to the old code as soon as the new tasks register. Requests already handled by the bad version may have written data; see the audit log note in [Step 4](#step-4-after-the-rollback). |
+| ETL | Not affected. ETL runs as separate ECS tasks under Step Functions and doesn't depend on which app revision is serving. |
+
+## Drills
+
+Run a drill on staging **every quarter**, and after any change to the deploy pipeline, the ECS service definition or the CDK app stack.
+
+**How to run a drill (staging)**
+
+1. Note the current revision (call it N) and confirm the previous revision runs a different image.
+2. Roll back to N−1 using [Step 2](#step-2-roll-back). Time how long until the service is stable, and check `/api/health` returns 200.
+3. Roll forward to N the same way. Time it and check `/api/health` again.
+4. Confirm a single deployment with running equal to desired after each step, then add a row to the log below.
+
+| **Date (UTC)** | **Env** | **Revisions** | **Rollback stable** | **Roll-forward stable** | **Outcome** |
 |---|---|---|---|---|---|
-| 2026-11-10 00:48 | staging | `sps-app-staging:1028` → `:1027` → `:1028` (distinct image digests) | 170 s, `/api/health` 200 | 219 s, `/api/health` 200 | **Pass.** One deployment, running = desired after each step. First logged drill. |
+| 2026-11-10 00:48 | staging | `:1028` → `:1027` → `:1028` (different images) | 170 s, health 200 | 219 s, health 200 | **Pass.** One deployment, running = desired after each step. First logged drill. |
+
+## How it works
+
+- Each deploy (`.github/workflows/deploy.yml`, step "Pin task-definition revisions to this deploy's images") registers new revisions of `sps-app-<env>` and of the migrate, db-bootstrap and verify-grants families, each pinned to an image digest rather than the moving `:latest` tag. Every revision in the history is a distinct, unchangeable image.
+- The rollback command moves only the app service. It doesn't touch the migration, bootstrap or grant-check task definitions, so the database is left as it is.
+- Migrations are additive only, which is why running older app code against the newer schema is safe, and why migrations are never rolled back.
+- The same procedure appears in [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) § Bad image, app returning 5xx, which is the source of truth for the deploy pipeline. Keep the two in sync.
+
+Related: [`ADR-004-deploy-strategy.md`](./ADR-004-deploy-strategy.md) · [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) · [`PRODUCTION_ADDENDUM.md` § Schema migration policy](./PRODUCTION_ADDENDUM.md#schema-migration-policy) · [`OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md)
+
+## Revision history
+
+| **Version** | **Date** | **Changes** |
+|---|---|---|
+| 2.0 | 2026-11-09 | Rewritten as a step-by-step procedure with a decision step, verification, after-care and a drill procedure. Corrections:<br>• CloudFront no longer caches pages for 24 hours (edge limit is now 60 seconds, plus a 6-hour origin page cache).<br>• ETL runs as ECS tasks under Step Functions, not Lambda functions.<br>• Rollback timing based on the measured drill rather than a 4-task service (prod runs 2 tasks).<br>• Added a wait command and a log check to verification. |
+| 1.0 | Earlier | Original runbook, including the first staging drill. |
