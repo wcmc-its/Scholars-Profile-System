@@ -1,7 +1,7 @@
 -- MCC shared-resource usage report, PR 1: ingest.
 --
 -- `core_charge` holds iLab core charges, loaded quarterly by
--- etl/ilab/import.ts (replaces every row in the file's ERP-date range).
+-- etl/ilab/import.ts (replaces every row in an explicit one-quarter ERP window).
 -- `infoed_fin_account` maps an 8-digit InfoEd `proposal.acct` (the first 8
 -- digits of an iLab WBS) to the parent InfoEd Account_Number used in
 -- grant.external_id; full-replaced by etl/infoed/index.ts.
@@ -15,7 +15,7 @@ CREATE TABLE `core_charge` (
     `ilab_mcc` BOOLEAN NOT NULL,
     `total_price` DECIMAL(12, 2) NOT NULL,
     `is_subsidy` BOOLEAN NOT NULL,
-    `payment_number` VARCHAR(32) NULL,
+    `payment_number` VARCHAR(255) NULL,
     `erp_date` DATE NOT NULL,
     `billing_date` DATE NULL,
     `purchase_date` DATE NULL,

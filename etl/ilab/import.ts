@@ -6,14 +6,19 @@
  * in-VPC `run-task`. A scheduled RAC extract can later write the same key with
  * no code change. For a manual run, `--file <path>` reads a local xlsx instead.
  *
- * Replace semantics: in ONE transaction, delete every `core_charge` row whose
- * ERP date falls in the file's [min, max] ERP-date range (plus any row whose
- * charge id the file carries), then insert the file's rows. Re-running the same
- * file is a no-op; a later file that overlaps the previous one supersedes it on
- * the overlap. Rows outside the range are untouched.
+ * Replace semantics: the operator names the quarter with `--from` / `--to`
+ * (inclusive ERP dates, at most one quarter). In ONE transaction, delete every
+ * `core_charge` row whose ERP date falls in that window (plus any row whose
+ * charge id the loaded rows carry), then insert the file's rows in the window.
+ * File rows outside the window are skipped and counted, never loaded, so a
+ * stray old ERP date cannot widen the delete. Re-running the same file is a
+ * no-op. Rows outside the window are untouched.
  *
- * SAFETY: refuses a file that yields 0 charges (wrong key, wrong sheet, or a
- * broken export); there is no range to replace and nothing to load.
+ * SAFETY: refuses a window with 0 charges in the file (wrong key, wrong sheet,
+ * wrong quarter, or a broken export), and refuses (guard `ilab:core-charge`)
+ * when the window already holds far more rows than the file brings, e.g. an
+ * export filtered to a subset of cores. Bypass a deliberate shrink with
+ * ETL_GUARD_BYPASS="ilab:core-charge".
  *
  * Env (AWS default credential chain; never hardcode keys):
  *   ILAB_BUCKET          (default ARTIFACTS_BUCKET, else wcmc-reciterai-artifacts)
@@ -21,19 +26,23 @@
  *   AWS_DEFAULT_REGION   (default us-east-1)
  *
  * Usage:
- *   npm run etl:ilab:import
- *   npm run etl:ilab:import -- --key ilab/charges.xlsx
- *   npm run etl:ilab:import -- --file ./charges.xlsx --dry-run
+ *   npm run etl:ilab:import -- --from 2026-07-01 --to 2026-09-30
+ *   npm run etl:ilab:import -- --from 2026-07-01 --to 2026-09-30 --key ilab/charges.xlsx
+ *   npm run etl:ilab:import -- --from 2026-07-01 --to 2026-09-30 --file ./charges.xlsx --dry-run
  */
 import { readFile } from "node:fs/promises";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { db } from "../../lib/db";
-import { erpRange, readChargesWorkbook } from "./parse";
+import { assertSourceVolume } from "../../lib/etl-guard";
+import { chargesInWindow, erpRange, parseErpWindow, readChargesWorkbook } from "./parse";
 
-const BUCKET = process.env.ILAB_BUCKET ?? process.env.ARTIFACTS_BUCKET ?? "wcmc-reciterai-artifacts";
+const BUCKET =
+  process.env.ILAB_BUCKET ?? process.env.ARTIFACTS_BUCKET ?? "wcmc-reciterai-artifacts";
 const REGION = process.env.AWS_DEFAULT_REGION ?? "us-east-1";
 const DEFAULT_KEY = "ilab/charges.xlsx";
 const INSERT_BATCH = 1000;
+/// Max tolerated shrink of the window's row count vs what is already loaded.
+const MAX_DROP_PCT = 25;
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -63,18 +72,28 @@ async function loadBytes(): Promise<Uint8Array> {
 
 async function main() {
   const start = Date.now();
-  const { charges, skipped } = await readChargesWorkbook(await loadBytes());
-  const range = erpRange(charges);
+  const erpWindow = parseErpWindow(arg("--from"), arg("--to"));
+  const { charges: parsed, skipped } = await readChargesWorkbook(await loadBytes());
+  const range = erpRange(parsed);
   const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const { inside: charges, outside } = chargesInWindow(parsed, erpWindow);
   console.log(
-    `Parsed ${charges.length} charges` +
+    `Parsed ${parsed.length} charges` +
       (range ? ` with ERP dates ${iso(range.from)}..${iso(range.to)}` : "") +
+      `; ${charges.length} in window ${iso(erpWindow.from)}..${iso(erpWindow.to)}, ${outside} outside it (not loaded)` +
       `; skipped ${JSON.stringify(skipped)}.`,
   );
+  if (skipped.badPrice + skipped.duplicateMismatch + skipped.longChargeId > 0) {
+    console.warn(
+      `WARNING: ${skipped.badPrice} unparseable prices, ${skipped.duplicateMismatch} repeated charge ids ` +
+        `with a different price or payment, ${skipped.longChargeId} overlong charge ids were dropped; ` +
+        "their dollars are missing from the report. Check the export.",
+    );
+  }
 
-  if (!range) {
+  if (charges.length === 0) {
     throw new Error(
-      "Refusing to import: 0 charges parsed. Verify the S3 key / file is an iLab charges export.",
+      "Refusing to import: 0 charges in the window. Verify --from/--to and that the S3 key / file is an iLab charges export.",
     );
   }
 
@@ -82,6 +101,14 @@ async function main() {
     console.log("DRY-RUN: parsed only, no DB writes.");
     return;
   }
+
+  assertSourceVolume("ilab:core-charge", {
+    incoming: charges.length,
+    existing: await db.write.coreCharge.count({
+      where: { erpDate: { gte: erpWindow.from, lte: erpWindow.to } },
+    }),
+    maxDropPct: MAX_DROP_PCT,
+  });
 
   const runRow = await db.write.etlRun.create({
     data: { source: "iLab-Import", status: "running" },
@@ -91,11 +118,15 @@ async function main() {
     await db.write.$transaction(
       async (tx) => {
         deleted += (
-          await tx.coreCharge.deleteMany({ where: { erpDate: { gte: range.from, lte: range.to } } })
+          await tx.coreCharge.deleteMany({
+            where: { erpDate: { gte: erpWindow.from, lte: erpWindow.to } },
+          })
         ).count;
         for (const batch of chunks(charges, INSERT_BATCH)) {
           deleted += (
-            await tx.coreCharge.deleteMany({ where: { chargeId: { in: batch.map((c) => c.chargeId) } } })
+            await tx.coreCharge.deleteMany({
+              where: { chargeId: { in: batch.map((c) => c.chargeId) } },
+            })
           ).count;
           await tx.coreCharge.createMany({ data: batch });
         }

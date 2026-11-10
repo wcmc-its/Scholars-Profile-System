@@ -5068,7 +5068,7 @@ model FundableWorkAuthor {
 
 /// One iLab core charge (MCC shared-resource usage report). Loaded quarterly
 /// from the iLab charges export by `etl/ilab/import.ts`, which replaces every
-/// row in the file's ERP-date range. Only the columns the report needs are
+/// row in an explicit one-quarter ERP-date window. Only the columns the report needs are
 /// kept: no names, emails or line descriptions. `piCwid` is the join key and
 /// `customerLab` is the display.
 model CoreCharge {
@@ -5077,7 +5077,8 @@ model CoreCharge {
   /// iLab "Core Name", trimmed (iLab ships some with a trailing space).
   coreName      String    @map("core_name") @db.VarChar(255)
   customerLab   String?   @map("customer_lab") @db.VarChar(255)
-  /// Local part of iLab "PI Email", lowercased.
+  /// Local part of iLab "PI Email", lowercased, only for a WCM domain and a
+  /// CWID-shaped local part; null otherwise (external PI, first.last alias).
   piCwid        String?   @map("pi_cwid") @db.VarChar(32)
   /// iLab "MCC (Y/N)" = 'Y'.
   ilabMcc       Boolean   @map("ilab_mcc")
@@ -5087,7 +5088,7 @@ model CoreCharge {
   isSubsidy     Boolean   @map("is_subsidy")
   /// iLab "Payment Information": a 10-digit WBS (8-digit InfoEd `acct` + a
   /// 2-digit suffix) or an 8-digit department/MCC fund, which is not a grant.
-  paymentNumber String?   @map("payment_number") @db.VarChar(32)
+  paymentNumber String?   @map("payment_number") @db.VarChar(255)
   /// iLab "Date file sent to ERP"; defines the quarter.
   erpDate       DateTime  @map("erp_date") @db.Date
   billingDate   DateTime? @map("billing_date") @db.Date

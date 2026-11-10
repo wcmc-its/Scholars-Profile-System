@@ -37,7 +37,7 @@
  * Usage: `npm run etl:infoed`
  */
 import { db, disconnect } from "../../lib/db";
-import { assertPruneVolume } from "../../lib/etl-guard";
+import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
@@ -394,14 +394,24 @@ export function joinAccountPeriods(
  * account behind an iLab WBS (acct + a 2-digit suffix). Mapped to the parent
  * Account_Number, the same value `grant.external_id` carries. One acct can sit
  * under several accounts, so this is a pair list, not a column on `grant`.
+ * Same base filters as ACCOUNT_PERIOD_QUERY (PT system, no subprojects, award
+ * statuses, not confidential), so every pair names an account `grant` can hold.
  */
 const FIN_ACCOUNT_QUERY = `
 SELECT DISTINCT
   LTRIM(RTRIM(CAST(p.acct AS NVARCHAR(64)))) AS fin_account,
   CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number
-FROM wc_infoedprod.dbo.proposal AS p
-WHERE p.inst_code = 'WCORNELLMC'
-  AND LTRIM(RTRIM(CAST(p.acct AS NVARCHAR(64)))) LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+FROM   wc_infoedprod.dbo.proposal AS p
+LEFT OUTER JOIN wc_infoedprod.dbo.pt_project AS psub ON psub.child = p.prop_no AND psub.inst_code = p.inst_code
+LEFT OUTER JOIN wc_infoedprod.dbo.prop_u     AS pu   ON pu.prop_no = p.prop_no AND pu.inst_code = p.inst_code
+INNER JOIN wc_infoedprod.dbo.projstatxref    AS pps  ON p.prop_stat  = pps.appr_stat
+INNER JOIN wc_infoedprod.dbo.codetab         AS pcd  ON pps.projstat = pcd.codeid
+WHERE  p.system = 'PT'
+  AND  p.inst_code = 'WCORNELLMC'
+  AND  psub.child IS NULL
+  AND  pcd.code_desc IN ('Active Award', 'Expired Award', 'In Process')
+  AND  ISNULL(pu.p_log_50, 0) <> 1
+  AND  LTRIM(RTRIM(CAST(p.acct AS NVARCHAR(64)))) LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
 `;
 
 export type FinAccountRow = { fin_account: unknown; Account_Number: unknown };
@@ -420,13 +430,21 @@ export function toFinAccountPairs(
   return [...seen.values()];
 }
 
-/** Full-replace `infoed_fin_account`; an empty read keeps the existing rows. */
+/**
+ * Full-replace `infoed_fin_account`. An empty read keeps the existing rows; a
+ * truncated one is refused by the `infoed:fin-account` volume guard.
+ */
 async function replaceFinAccounts(rows: readonly FinAccountRow[]): Promise<void> {
   const pairs = toFinAccountPairs(rows);
   if (pairs.length === 0) {
     console.warn("[InfoEd] fin-account query returned 0 pairs; keeping existing infoed_fin_account rows.");
     return;
   }
+  assertSourceVolume("infoed:fin-account", {
+    incoming: pairs.length,
+    existing: await db.write.infoedFinAccount.count(),
+    maxDropPct: 10,
+  });
   await db.write.$transaction(
     async (tx) => {
       await tx.infoedFinAccount.deleteMany({});
@@ -976,9 +994,15 @@ async function main() {
 
     await reconcileDateGaps(undated, backfilledIds);
     await reconcileConfidentialTitles(inserts);
-    await replaceFinAccounts(
-      (await pool.request().query(FIN_ACCOUNT_QUERY)).recordset as FinAccountRow[],
-    );
+    // The fin-account map only feeds the MCC shared-resource report; a failure
+    // here keeps the previous map and must not fail the committed grant run.
+    try {
+      await replaceFinAccounts(
+        (await pool.request().query(FIN_ACCOUNT_QUERY)).recordset as FinAccountRow[],
+      );
+    } catch (err) {
+      console.error("[InfoEd] infoed_fin_account NOT refreshed; keeping the previous map:", err);
+    }
 
     await db.write.etlRun.update({
       where: { id: run.id },

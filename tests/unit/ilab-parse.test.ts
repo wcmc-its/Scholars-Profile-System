@@ -1,7 +1,15 @@
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
-import { erpRange, parseChargeRows, readChargesWorkbook, wbsFinAccount } from "@/etl/ilab/parse";
+import {
+  chargesInWindow,
+  emailCwid,
+  erpRange,
+  parseChargeRows,
+  parseErpWindow,
+  readChargesWorkbook,
+  wbsFinAccount,
+} from "@/etl/ilab/parse";
 
 // Synthetic fixtures only: invented labs, CWIDs, accounts and amounts.
 const HEADER = [
@@ -48,10 +56,10 @@ describe("readChargesWorkbook", () => {
   it("finds the charges sheet and maps every kept column", async () => {
     const buf = await workbook([
       [
-        { text: "abc1001@example.edu", hyperlink: "mailto:abc1001@example.edu" },
+        { text: "abc1001@med.cornell.edu", hyperlink: "mailto:abc1001@med.cornell.edu" },
         "Example Lab A",
         "Y",
-        1234567801,
+        123456701,
         "Subsidy",
         -25.5,
         d("2026-06-20"),
@@ -60,10 +68,30 @@ describe("readChargesWorkbook", () => {
         "Example Core ",
         900001,
       ],
-      ["XYZ2002@Example.edu", "Example Lab B", "#N/A", 87654321, "Paid by Researcher", 100, null, null, d("2026-10-20"), "Other Core", 900002],
+      [
+        "XYZ2002@Med.Cornell.edu",
+        "Example Lab B",
+        "#N/A",
+        87654321,
+        "Paid by Researcher",
+        100,
+        null,
+        null,
+        d("2026-10-20"),
+        "Other Core",
+        900002,
+      ],
     ]);
     const { charges, skipped } = await readChargesWorkbook(buf);
-    expect(skipped).toEqual({ noChargeId: 0, noCoreName: 0, noErpDate: 0, badPrice: 0, duplicate: 0 });
+    expect(skipped).toEqual({
+      noChargeId: 0,
+      longChargeId: 0,
+      noCoreName: 0,
+      noErpDate: 0,
+      badPrice: 0,
+      duplicate: 0,
+      duplicateMismatch: 0,
+    });
     expect(charges).toEqual([
       {
         chargeId: "900001",
@@ -73,7 +101,7 @@ describe("readChargesWorkbook", () => {
         ilabMcc: true,
         totalPrice: "-25.50",
         isSubsidy: true,
-        paymentNumber: "1234567801",
+        paymentNumber: "0123456701",
         erpDate: d("2026-07-15"),
         billingDate: d("2026-07-02"),
         purchaseDate: d("2026-06-20"),
@@ -111,15 +139,65 @@ describe("parseChargeRows", () => {
     "Date file sent to ERP": d("2026-07-01"),
   };
 
-  it("keeps rows from any date; the import replaces their ERP-date range", () => {
+  it("keeps rows from any date; the import loads only those in its explicit window", () => {
     const { charges } = parseChargeRows([
       { ...base, "Charge ID": 1, "Date file sent to ERP": d("2026-07-01") },
       { ...base, "Charge ID": 2, "Date file sent to ERP": d("2026-10-31") },
-      { ...base, "Charge ID": 3, "Date file sent to ERP": d("2026-09-15") },
+      { ...base, "Charge ID": 3, "Date file sent to ERP": d("2026-09-30") },
+      { ...base, "Charge ID": 4, "Date file sent to ERP": d("2026-01-05") },
     ]);
-    expect(charges).toHaveLength(3);
-    expect(erpRange(charges)).toEqual({ from: d("2026-07-01"), to: d("2026-10-31") });
+    expect(charges).toHaveLength(4);
+    expect(erpRange(charges)).toEqual({ from: d("2026-01-05"), to: d("2026-10-31") });
     expect(erpRange([])).toBeNull();
+    const { inside, outside } = chargesInWindow(
+      charges,
+      parseErpWindow("2026-07-01", "2026-09-30"),
+    );
+    expect(inside.map((c) => c.chargeId)).toEqual(["1", "3"]);
+    expect(outside).toBe(2);
+  });
+
+  it("parses currency text prices and re-pads numeric payment cells", () => {
+    const { charges, skipped } = parseChargeRows([
+      { ...base, "Charge ID": 1, "Total Price": "$1,234.50", "Payment Information": 1234567 },
+      { ...base, "Charge ID": 2, "Total Price": "(25.00)", "Payment Information": 12345678 },
+      { ...base, "Charge ID": 3, "Total Price": " -3 ", "Payment Information": "0123456701" },
+    ]);
+    expect(skipped.badPrice).toBe(0);
+    expect(charges.map((c) => [c.totalPrice, c.paymentNumber])).toEqual([
+      ["1234.50", "01234567"],
+      ["-25.00", "12345678"],
+      ["-3.00", "0123456701"],
+    ]);
+  });
+
+  it("truncates overlong text and skips an overlong charge id", () => {
+    const { charges, skipped } = parseChargeRows([
+      {
+        ...base,
+        "Charge ID": 1,
+        "Payment Information": `PO ${"x".repeat(300)}`,
+        "Customer Lab": "L".repeat(300),
+      },
+      { ...base, "Charge ID": "9".repeat(33) },
+    ]);
+    expect(skipped.longChargeId).toBe(1);
+    expect(charges).toHaveLength(1);
+    expect(charges[0].paymentNumber).toHaveLength(255);
+    expect(charges[0].customerLab).toHaveLength(255);
+    expect(wbsFinAccount(charges[0].paymentNumber)).toBeNull();
+  });
+
+  it("counts a repeated charge id with a different price or payment apart from a plain repeat", () => {
+    const { charges, skipped } = parseChargeRows([
+      { ...base, "Charge ID": 1, "Total Price": 10, "Payment Information": "1111222201" },
+      { ...base, "Charge ID": 1, "Total Price": 10, "Payment Information": "1111222201" },
+      { ...base, "Charge ID": 1, "Total Price": 12, "Payment Information": "1111222201" },
+      { ...base, "Charge ID": 1, "Total Price": 10, "Payment Information": "3333444401" },
+    ]);
+    expect(charges.map((c) => c.totalPrice)).toEqual(["10.00"]);
+    expect(skipped.duplicate).toBe(1);
+    expect(skipped.duplicateMismatch).toBe(2);
   });
 
   it("skips unusable rows and keeps the first of a repeated charge id", () => {
@@ -132,10 +210,57 @@ describe("parseChargeRows", () => {
       { ...base, "Charge ID": 5, "Total Price": "n/a" },
       { ...base, "Charge ID": 6, "PI Email": "no-at-sign" },
     ]);
-    expect(skipped).toEqual({ noChargeId: 1, noCoreName: 1, noErpDate: 1, badPrice: 1, duplicate: 1 });
+    expect(skipped).toEqual({
+      noChargeId: 1,
+      longChargeId: 0,
+      noCoreName: 1,
+      noErpDate: 1,
+      badPrice: 1,
+      duplicate: 1,
+      duplicateMismatch: 0,
+    });
     expect(charges.map((c) => [c.chargeId, c.piCwid])).toEqual([
       ["1", null],
       ["6", null],
     ]);
+  });
+});
+
+describe("emailCwid", () => {
+  it("takes a CWID-shaped local part from a WCM domain", () => {
+    expect(emailCwid("Abc1001@Med.Cornell.edu")).toBe("abc1001");
+    expect(emailCwid("abc1001@weill.cornell.edu")).toBe("abc1001");
+    expect(emailCwid("abc1001@nyp.org")).toBe("abc1001");
+    // Name-derived vanity CWIDs have no digits.
+    expect(emailCwid("exvanity@med.cornell.edu")).toBe("exvanity");
+  });
+
+  it("returns null for an external domain or a non-CWID alias", () => {
+    expect(emailCwid("abc1001@gmail.com")).toBeNull();
+    expect(emailCwid("abc1001@partner.example.org")).toBeNull();
+    expect(emailCwid("first.last@med.cornell.edu")).toBeNull();
+    expect(emailCwid("no-at-sign")).toBeNull();
+    expect(emailCwid(null)).toBeNull();
+  });
+});
+
+describe("parseErpWindow", () => {
+  it("accepts an inclusive window up to one quarter", () => {
+    expect(parseErpWindow("2026-07-01", "2026-09-30")).toEqual({
+      from: d("2026-07-01"),
+      to: d("2026-09-30"),
+    });
+    expect(parseErpWindow("2026-10-01", "2026-12-31")).toEqual({
+      from: d("2026-10-01"),
+      to: d("2026-12-31"),
+    });
+  });
+
+  it("refuses a missing, malformed, reversed or wider-than-a-quarter window", () => {
+    expect(() => parseErpWindow(undefined, "2026-09-30")).toThrow(/--from/);
+    expect(() => parseErpWindow("2026-07-01", undefined)).toThrow(/--to/);
+    expect(() => parseErpWindow("2026-02-30", "2026-03-31")).toThrow(/not a date/);
+    expect(() => parseErpWindow("2026-09-30", "2026-07-01")).toThrow(/before/);
+    expect(() => parseErpWindow("2026-01-01", "2026-09-30")).toThrow(/at most one quarter/);
   });
 });
