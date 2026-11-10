@@ -4,7 +4,7 @@ Scholars Profile System · Weill Cornell Medicine · scholars.weill.cornell.edu
 
 | | | | |
 |---|---|---|---|
-| **Last updated** | **2026-11-10** | **Version** | 2.1 |
+| **Last updated** | **2026-11-10** | **Version** | 2.2 |
 | **Owner** | Paul Albert, SPS service owner (paa2013@med.cornell.edu) | **Next review** | 2027-02-09 (quarterly) |
 | **Audience** | Anyone responding to an SPS issue: ITS Operations, on-call staff, SPS engineers | **Checked against** | Repo commit `bca752e` (2026-11-09): `cdk/lib/*`, `docs/SLOs.md`, `docs/oncall.md`, `docs/cloudfront-cache-spec.md` |
 
@@ -1001,7 +1001,7 @@ From [`cdk/lib/observability-stack.ts`](../cdk/lib/observability-stack.ts) as of
 | Honors; funding digest | `sps-honors-status`; `sps-funding-digest-status` | none | none |
 | Opportunity freshness | `sps-etl-opportunity-freshness` | none | none |
 
-Also on `etl-failures-<env>`: individual step failures (each step's error handler publishes) and failed AWS Backup or cross-region copy jobs (rule `sps-aws-backup-failure-<env>`). Failures in the critical steps Ed, Dynamodb, SearchIndexNightly, IntegrityNightly, SearchIndexWeekly and IntegrityWeekly go to `etl-page-<env>` instead and arrive as **P1**.
+Also on `etl-failures-<env>`: individual step failures (each step's error handler publishes), failed AWS Backup or cross-region copy jobs (rule `sps-aws-backup-failure-<env>`) and, in prod, new fixable critical or high image vulnerabilities (rule `sps-image-vulnerability-prod`, step `ImageVulnerability`; see [Patching](#patching)). Failures in the critical steps Ed, Dynamodb, SearchIndexNightly, IntegrityNightly, SearchIndexWeekly and IntegrityWeekly go to `etl-page-<env>` instead and arrive as **P1**.
 
 ### How alerts reach people
 
@@ -1227,13 +1227,17 @@ Permissions fail closed: a directory outage blocks all editing but never affects
 | Layer | Who patches | How |
 |---|---|---|
 | Fargate hosts | AWS | Tasks run on the latest Fargate platform version; AWS patches hosts and retires old tasks on its own |
-| Container base image (Debian, Node 26) | SPS | Pinned by digest in the `Dockerfile`. Dependabot opens a PR weekly when a newer digest is published; merging it and deploying ships the patch |
-| App and CDK dependencies (npm) | SPS | Dependabot opens grouped PRs weekly (minor and patch together, majors separately) and a separate grouped PR for security fixes. `dependency-review` checks every PR |
+| Container base image (Debian, Node 26) | SPS | Pinned by digest in the `Dockerfile`. Dependabot opens a PR weekly when a newer digest is published, and it **merges automatically** once CI passes. A prod deploy ships it |
+| App and CDK dependencies (npm) | SPS | Dependabot opens grouped PRs weekly (minor and patch together, majors separately) and a separate grouped PR for security fixes. Security PRs and patch-only PRs **merge automatically** once CI passes; minor and major PRs need a person. `dependency-review` checks every PR |
 | GitHub Actions | SPS | Dependabot, weekly |
 | Aurora MySQL | AWS, scheduled by SPS | Automatic minor-version upgrades are on. OS patches (`os-upgrade`) are **not** applied automatically: opt them in for the next window (command below) |
 | OpenSearch | AWS | Automatic software updates are on (blue/green, no downtime) |
 
 **Scanning.** Amazon Inspector scans every image pushed to the `scholars-*` ECR repositories, then keeps rescanning images in use as new CVEs are published (window: 30 days since last use). Findings are in the Inspector console under **Findings → By container image**. CodeQL scans the code on every PR, and Checkov scans the synthesized CloudFormation and the `Dockerfile` weekly. Inspector and the ECR registry scanning rule were turned on by CLI on 2026-11-10 and are not managed by CDK.
+
+**Alerts.** A new critical or high finding with a fix available, in the image prod is running (`scholars-app-prod` or `scholars-etl-prod`), arrives in Teams as a P2 card through EventBridge rule `sps-image-vulnerability-prod` and topic `etl-failures-prod`. Staging is not alerted: every staging merge pushes a new image and would repeat every known finding. Findings accepted with an Inspector suppression rule stop alerting; each suppression rule must say why and until when.
+
+**Automatic merges.** `.github/workflows/dependabot-automerge.yml` queues auto-merge on Dependabot's security PRs, base-image digest PRs and patch-only PRs. GitHub merges them only after the required checks (`build`, `cdk`, `dependency-review`) pass. These merges don't start a staging deploy (GitHub doesn't trigger workflows from its own token), so the patch reaches staging with the next merge or a manual dispatch, and prod with the next prod deploy.
 
 **Targets** (from when a fix is available):
 
@@ -1248,8 +1252,8 @@ A fix ships like any change: merge to master, check staging, then dispatch a pro
 
 **Weekly review** (Mondays, after Dependabot's run):
 
-1. Merge or close the open Dependabot PRs. Security PRs first.
-2. Check Inspector for critical or high findings on the image prod is running.
+1. Check that last week's automatic merges landed, then merge or close the Dependabot PRs still open (minor and major updates). If an automatic merge is stuck on a red check, fix it or close the PR.
+2. Check Inspector for critical or high findings on the image prod is running, including any that arrived in Teams. Review the suppression rules: remove any that are past their date.
 3. Check for pending Aurora maintenance and opt it in:
 
 ```bash
@@ -1403,6 +1407,7 @@ Master index: [DOCUMENTATION-REGISTRY.md](./DOCUMENTATION-REGISTRY.md), organize
 
 | Version | Date | Changes |
 |---|---|---|
+| 2.2 | 2026-11-10 | Patching: Dependabot security, digest and patch-only PRs merge automatically; new fixable critical or high image findings in prod alert to Teams. |
 | 2.1 | 2026-11-10 | Added Patching (who patches each layer, Inspector image scanning, severity targets, weekly review) and the weekly patch review to Recurring tasks. |
 | 2.0 | 2026-11-09 | Rewritten for responders: triage table, severity levels, contacts up front, 19 step-by-step playbooks, glossary and open-items list. Local development section removed (see README). Checked against repo commit `bca752e`. Corrections:<br>Profiles **are** cached at origin and edge since 2026-10-02; the old guidance said they weren't.<br>Alarm catalog updated from code: added `sps-edge-origin-down`, `-unreachable`, `-origin-cert-expiring`, `-probe-stalled`, `sps-aurora-acu`, `sps-opensearch-breaker`, `sps-etl-duration-margin`, `sps-etl-retry-storm` and the job alarms; the composite now has five inputs.<br>ETL: prod schedules are enabled (removed "disabled until launch"); weekly run is now Sunday 12:00 UTC; staging nightly is 07:45 UTC.<br>Sizing: prod app tasks are 2 vCPU / 4 GB; staging Aurora maximum is 4 ACU; OpenSearch domain names updated.<br>SAML certificate deadline is past; now tracked as a cleanup check.<br>Stack count reconciled (10 classes; 9 deploy in prod, 8 in staging). DR images *are* replicated to us-west-2.<br>Fixed broken repo links and section references; search check now uses the live site instead of localhost. |
 | 1.0 | 2026-06-14 | Consolidated from the existing runbooks. |

@@ -356,16 +356,17 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates eight state machines (3 cadence + #595 heartbeat + grants export + honors lists + funding digest + curated-tables backup), nine EventBridge rules (+ AWS Backup failure alert), two SNS topics", () => {
+      it("creates eight state machines (3 cadence + #595 heartbeat + grants export + honors lists + funding digest + curated-tables backup), ten EventBridge rules (+ AWS Backup failure + image vulnerability alerts), two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the grants-export machine, now
         // that grantsExportScheduleEnabled is true in prod too, + the
         // honors-list scraper (weekly + the console's Run now) + the funding
         // digest import, started by its email landing in the inbound bucket,
         // + the curated-tables backup (#1032, prod activated 2026-11-09).
         // The #393/#353 reconcilers are ECS services now, not state machines.
-        // Rules: one per machine + the AWS Backup failure alert rule.
+        // Rules: one per machine + the AWS Backup failure and image
+        // vulnerability alert rules.
         template.resourceCountIs("AWS::StepFunctions::StateMachine", 8);
-        template.resourceCountIs("AWS::Events::Rule", 9);
+        template.resourceCountIs("AWS::Events::Rule", 10);
         // The heartbeat + both reconcilers + grants export reuse the cadence
         // failure topic; PR-7 adds the etl-page P1 topic, so two total:
         // etl-failures + etl-page.
@@ -434,6 +435,25 @@ describe("EtlStack", () => {
         const policies = JSON.stringify(template.findResources("AWS::SNS::TopicPolicy"));
         expect(policies).toContain("events.amazonaws.com");
         expect(policies).toContain("cloudwatch.amazonaws.com");
+      });
+
+      it("alerts etl-failures-prod on a fixable CRITICAL/HIGH Inspector finding in the prod app or ETL image", () => {
+        const rules = template.findResources("AWS::Events::Rule", {
+          Properties: { Name: "sps-image-vulnerability-prod" },
+        });
+        const rule = Object.values(rules)[0];
+        expect(rule).toBeDefined();
+        const pattern = JSON.stringify(rule?.Properties?.EventPattern);
+        expect(pattern).toContain("aws.inspector2");
+        expect(pattern).toContain("CRITICAL");
+        expect(pattern).toContain('"fixAvailable":["YES"]');
+        expect(pattern).toContain("scholars-app-prod");
+        expect(pattern).toContain("scholars-etl-prod");
+        const topics = template.findResources("AWS::SNS::Topic", {
+          Properties: { TopicName: "etl-failures-prod" },
+        });
+        const target = (rule?.Properties?.Targets as Array<{ Arn: { Ref: string } }>)[0];
+        expect(Object.keys(topics)).toContain(target.Arn.Ref);
       });
 
       it("prod creates the curated-tables backup schedule (curationBackupScheduleEnabled=true since prod activation 2026-11-09; #1032)", () => {
