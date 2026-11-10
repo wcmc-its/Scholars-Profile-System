@@ -11,8 +11,14 @@
  * Progressive enhancement: the caller renders its own submit button as
  * `children`; this island hides it once hydrated (`data-hydrated`) and a no-JS
  * visitor still gets the button. Nothing here reaches `@/lib/db`.
+ *
+ * While the next page loads, the form dims and says "Updating…" so a change
+ * that redraws something off-screen still reads as working. `pageshow` clears
+ * it when Back restores the page from the bfcache mid-submit.
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+
+import { cn } from "@/lib/utils";
 
 export function AutoSubmitForm({
   action,
@@ -28,7 +34,15 @@ export function AutoSubmitForm({
   "data-testid"?: string;
 }) {
   const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+    const reset = (e: PageTransitionEvent) => {
+      if (e.persisted) setPending(false);
+    };
+    window.addEventListener("pageshow", reset);
+    return () => window.removeEventListener("pageshow", reset);
+  }, []);
   const onChange = (e: FormEvent<HTMLFormElement>) => {
     e.currentTarget.requestSubmit();
   };
@@ -36,12 +50,20 @@ export function AutoSubmitForm({
     <form
       method="get"
       action={action}
-      className={className}
+      className={cn(className, "transition-opacity data-[pending=true]:opacity-60")}
       onChange={onChange}
+      onSubmit={() => setPending(true)}
+      aria-busy={pending || undefined}
       data-hydrated={hydrated ? "true" : undefined}
+      data-pending={pending ? "true" : undefined}
       {...rest}
     >
       {children}
+      {pending && (
+        <span role="status" className="text-muted-foreground text-sm">
+          Updating…
+        </span>
+      )}
     </form>
   );
 }

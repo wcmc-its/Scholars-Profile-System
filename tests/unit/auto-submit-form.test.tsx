@@ -35,4 +35,19 @@ describe("AutoSubmitForm", () => {
     fireEvent.click(form.querySelector("input[type=checkbox]")!);
     expect(requestSubmit).toHaveBeenCalledTimes(2);
   });
+
+  it("dims and announces Updating… once it submits", () => {
+    render(
+      <AutoSubmitForm action="/edit/reports/20" data-testid="filters">
+        <button type="submit">Apply</button>
+      </AutoSubmitForm>,
+    );
+    const form = screen.getByTestId("filters") as HTMLFormElement;
+    expect(form.getAttribute("data-pending")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.submit(form);
+    expect(form.getAttribute("data-pending")).toBe("true");
+    expect(form.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("status").textContent).toBe("Updating…");
+  });
 });
