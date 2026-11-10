@@ -210,6 +210,21 @@ function toDollars(r: Map<string, number> | undefined): GroupDollars {
   return { byGroup, total: dollars(total) };
 }
 
+/**
+ * A PI's group on a date: the program on the research membership active that
+ * day (`NO_PROGRAM` without one), else `NON_MEMBER`. `memberships` are lowercased-cwid rows.
+ */
+export function memberGroupOn(
+  memberships: readonly UsageMembership[],
+): (cwid: string | null, date: string) => string {
+  const byCwid = new Map<string, UsageMembership[]>();
+  for (const m of memberships) byCwid.set(m.cwid, [...(byCwid.get(m.cwid) ?? []), m]);
+  return (cwid, date) => {
+    const m = cwid ? byCwid.get(cwid)?.find((x) => isCenterMembershipActive(x, date)) : undefined;
+    return m ? (m.programCode ?? NO_PROGRAM) : NON_MEMBER;
+  };
+}
+
 export function computeSharedResourceUsage(input: {
   charges: readonly UsageCharge[];
   /** The center's research memberships (any dates); this filters by date. */
@@ -224,11 +239,7 @@ export function computeSharedResourceUsage(input: {
   const byCwid = new Map<string, UsageMembership[]>();
   for (const m of input.memberships) byCwid.set(m.cwid, [...(byCwid.get(m.cwid) ?? []), m]);
 
-  // Member group on a date: the program on the membership active that day.
-  const groupOn = (cwid: string | null, date: string): string => {
-    const m = cwid ? byCwid.get(cwid)?.find((x) => isCenterMembershipActive(x, date)) : undefined;
-    return m ? (m.programCode ?? NO_PROGRAM) : NON_MEMBER;
-  };
+  const groupOn = memberGroupOn(input.memberships);
 
   // Denominators: members active at any point in the quarter, by their latest such row's program.
   const roster = new Map<string, string>();

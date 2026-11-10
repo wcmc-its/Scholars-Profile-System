@@ -4,7 +4,7 @@
  * date each was sent to the ERP), split by the PI's program: the center's
  * shared resources (SRs) by program and by all users, the share of members
  * using each SR, every WCM core by program, and the subsidy-by-lab table with
- * its xlsx. Charts are plain CSS bars (no chart library). The counting is
+ * its xlsx, and candidate papers the SRs supported. Charts are plain CSS bars (no chart library). The counting is
  * `computeSharedResourceUsage` (`lib/edit/shared-resource-usage.ts`).
  */
 import * as React from "react";
@@ -12,6 +12,7 @@ import * as React from "react";
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { DownloadAside, SELECT } from "@/components/edit/reports/core-report-ui";
 import { ReportCard, ReportStats } from "@/components/edit/reports/report-ui";
+import { PubTitle } from "@/components/publication/pub-html";
 import { EXTENDED_GROUP_PALETTE } from "@/lib/center-collaboration/graph";
 import { nci2aUnitQuery } from "@/lib/edit/nci-2a-report";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
@@ -427,6 +428,106 @@ export async function renderSharedResourceUsageReport({
             </table>
           </div>
         </Section>
+
+        {r.papers && (
+          <Section
+            title="7. Candidate papers supported by a shared resource"
+            note={
+              <>
+                A research member&apos;s charge at a shared resource, paid on a 10-digit WBS, leads
+                through its InfoEd account to the member grants&apos; papers published after the
+                charge date (the purchase date). Where the account holds several awards, the ones
+                active on the charge date count. Tier A: the cores engine also attributes the paper
+                to the billed core (its status shown). Tier B: the grant link only. The optical
+                microscopy cores are not in the cores catalog, so their papers can only be tier B.
+                Candidates, not confirmed acknowledgements.
+              </>
+            }
+            testId="shared-resource-view-7"
+          >
+            <table
+              className="mb-5 w-full max-w-xl border-collapse text-sm"
+              data-testid="shared-resource-papers-summary"
+            >
+              <thead className="bg-apollo-surface-2 text-left">
+                <tr>
+                  <th className={TH}>Shared resource</th>
+                  <th className={cn(TH, "text-right")}>Tier A</th>
+                  <th className={cn(TH, "text-right")}>Tier B</th>
+                  <th className={cn(TH, "text-right")}>Papers</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.papers.summary.map((x) => (
+                  <tr key={x.sr} className="border-apollo-border border-b">
+                    <td className="px-3 py-2">{srLabel(x.sr)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{x.tierA}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{x.tierB}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{x.tierA + x.tierB}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {r.papers.rows.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No candidate papers this quarter.</p>
+            ) : (
+              <div className="max-h-[640px] overflow-auto">
+                <table
+                  className="w-full min-w-[960px] border-collapse text-sm"
+                  data-testid="shared-resource-papers"
+                >
+                  <thead className="bg-apollo-surface-2 sticky top-0 text-left">
+                    <tr>
+                      <th className={TH}>Lab</th>
+                      <th className={TH}>Program</th>
+                      <th className={TH}>Shared resource</th>
+                      <th className={TH}>Core</th>
+                      <th className={TH}>Grant</th>
+                      <th className={TH}>PMID</th>
+                      <th className={TH}>Title</th>
+                      <th className={cn(TH, "text-right")}>Year</th>
+                      <th className={TH}>Tier</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.papers.rows.map((p) => (
+                      <tr
+                        key={`${p.customerLab}|${p.group}|${p.coreName}|${p.pmid}`}
+                        className="border-apollo-border border-b align-top"
+                      >
+                        <td className="px-3 py-2">{p.customerLab}</td>
+                        <td className="px-3 py-2">{p.group}</td>
+                        <td className="px-3 py-2">{p.sr}</td>
+                        <td className="px-3 py-2">{p.coreName}</td>
+                        <td className="px-3 py-2">{p.awards.join(", ")}</td>
+                        <td className="px-3 py-2 tabular-nums">
+                          <a
+                            href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline"
+                          >
+                            {p.pmid}
+                          </a>
+                        </td>
+                        <td className="px-3 py-2">
+                          <PubTitle value={p.title} />
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{p.year ?? "–"}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {p.tier}
+                          {p.coreStatus && (
+                            <span className="text-muted-foreground"> ({p.coreStatus})</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Section>
+        )}
 
         <Section title="Data quality" testId="shared-resource-dq">
           <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-[13px]">

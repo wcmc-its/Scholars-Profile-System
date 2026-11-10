@@ -29,7 +29,7 @@ export async function GET(
   const { center } = gate;
 
   const p = parseSharedResourceParams(request.nextUrl.searchParams);
-  const r = await loadSharedResourceUsage(center.code, p);
+  const r = await loadSharedResourceUsage(center.code, p, { papers: false });
   const labs = (r.usage?.labs ?? []).filter((l) => !p.core || l.coreName === p.core);
   const buffer = await buildSharedResourceWorkbook(center.name, r.quarter, labs, p);
   const filename = `Shared resource usage ${center.code.replace(/[^a-zA-Z0-9_-]/g, "")} ${r.quarter?.key ?? "none"}.xlsx`;
