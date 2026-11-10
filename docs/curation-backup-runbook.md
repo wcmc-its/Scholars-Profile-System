@@ -1,9 +1,10 @@
 # Curated-tables logical backup — runbook
 
-Staging is the **system-of-record** for data that humans curate by hand through
+SPS is the **system-of-record** for data that humans curate by hand through
 `/edit` — org-unit structure/names/leaders/descriptions and the methods-&-tools
 family-visibility overlays — including edits made by external Comms
-collaborators. This runbook covers the small, durable, **logical** backup of
+collaborators. Each environment's curated rows are its own (nothing syncs
+staging → prod); **prod is authoritative**, and both are backed up daily. This runbook covers the small, durable, **logical** backup of
 just those tables, which complements (does not replace) the cluster-level
 protection already in place.
 
