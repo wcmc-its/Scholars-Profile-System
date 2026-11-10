@@ -37,7 +37,7 @@
  * Usage: `npm run etl:infoed`
  */
 import { db, disconnect } from "../../lib/db";
-import { assertPruneVolume } from "../../lib/etl-guard";
+import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
@@ -387,6 +387,74 @@ export function joinAccountPeriods(
     const p = byAccount.get(r.Account_Number);
     return { ...r, begin_date: p?.begin_date ?? null, end_date: p?.end_date ?? null };
   });
+}
+
+/**
+ * MCC shared-resource report: InfoEd `proposal.acct` is the 8-digit financial
+ * account behind an iLab WBS (acct + a 2-digit suffix). Mapped to the parent
+ * Account_Number, the same value `grant.external_id` carries. One acct can sit
+ * under several accounts, so this is a pair list, not a column on `grant`.
+ * Same base filters as ACCOUNT_PERIOD_QUERY (PT system, no subprojects, award
+ * statuses, not confidential), so every pair names an account `grant` can hold.
+ */
+const FIN_ACCOUNT_QUERY = `
+SELECT DISTINCT
+  LTRIM(RTRIM(CAST(p.acct AS NVARCHAR(64)))) AS fin_account,
+  CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number
+FROM   wc_infoedprod.dbo.proposal AS p
+LEFT OUTER JOIN wc_infoedprod.dbo.pt_project AS psub ON psub.child = p.prop_no AND psub.inst_code = p.inst_code
+LEFT OUTER JOIN wc_infoedprod.dbo.prop_u     AS pu   ON pu.prop_no = p.prop_no AND pu.inst_code = p.inst_code
+INNER JOIN wc_infoedprod.dbo.projstatxref    AS pps  ON p.prop_stat  = pps.appr_stat
+INNER JOIN wc_infoedprod.dbo.codetab         AS pcd  ON pps.projstat = pcd.codeid
+WHERE  p.system = 'PT'
+  AND  p.inst_code = 'WCORNELLMC'
+  AND  psub.child IS NULL
+  AND  pcd.code_desc IN ('Active Award', 'Expired Award', 'In Process')
+  AND  ISNULL(pu.p_log_50, 0) <> 1
+  AND  LTRIM(RTRIM(CAST(p.acct AS NVARCHAR(64)))) LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+`;
+
+export type FinAccountRow = { fin_account: unknown; Account_Number: unknown };
+
+/** Distinct, validated (8-digit fin account, Account_Number) pairs. */
+export function toFinAccountPairs(
+  rows: readonly FinAccountRow[],
+): Array<{ finAccount: string; accountNumber: string }> {
+  const seen = new Map<string, { finAccount: string; accountNumber: string }>();
+  for (const r of rows) {
+    const finAccount = String(r.fin_account ?? "").trim();
+    const accountNumber = String(r.Account_Number ?? "").trim();
+    if (!/^\d{8}$/.test(finAccount) || accountNumber === "") continue;
+    seen.set(`${finAccount}|${accountNumber}`, { finAccount, accountNumber });
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Full-replace `infoed_fin_account`. An empty read keeps the existing rows; a
+ * truncated one is refused by the `infoed:fin-account` volume guard.
+ */
+async function replaceFinAccounts(rows: readonly FinAccountRow[]): Promise<void> {
+  const pairs = toFinAccountPairs(rows);
+  if (pairs.length === 0) {
+    console.warn("[InfoEd] fin-account query returned 0 pairs; keeping existing infoed_fin_account rows.");
+    return;
+  }
+  assertSourceVolume("infoed:fin-account", {
+    incoming: pairs.length,
+    existing: await db.write.infoedFinAccount.count(),
+    maxDropPct: 10,
+  });
+  await db.write.$transaction(
+    async (tx) => {
+      await tx.infoedFinAccount.deleteMany({});
+      for (const batch of chunks(pairs, INSERT_BATCH)) {
+        await tx.infoedFinAccount.createMany({ data: batch });
+      }
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+  console.log(`[InfoEd] infoed_fin_account replaced: ${pairs.length} pairs.`);
 }
 
 /** createdBy marker for the title-based confidentiality safety net (below).
@@ -926,6 +994,15 @@ async function main() {
 
     await reconcileDateGaps(undated, backfilledIds);
     await reconcileConfidentialTitles(inserts);
+    // The fin-account map only feeds the MCC shared-resource report; a failure
+    // here keeps the previous map and must not fail the committed grant run.
+    try {
+      await replaceFinAccounts(
+        (await pool.request().query(FIN_ACCOUNT_QUERY)).recordset as FinAccountRow[],
+      );
+    } catch (err) {
+      console.error("[InfoEd] infoed_fin_account NOT refreshed; keeping the previous map:", err);
+    }
 
     await db.write.etlRun.update({
       where: { id: run.id },

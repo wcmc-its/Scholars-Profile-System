@@ -1503,6 +1503,7 @@ describe("EtlStack", () => {
         // mentoring/* is the mentee co-pub bridge (#443, etl:mentoring:import-copubs);
         // citations/* is the publication cited-by bridge (#928/#938);
         // clinical-trials/* is the clinical-trials bridge (etl:clinical-trials:import);
+        // ilab/* is the quarterly iLab core charges export (etl:ilab:import);
         // grants/* is the opportunities manifest etl:dynamodb reads for producer
         // liveness (#2618) -- added after that PR shipped, because the read was
         // written assuming the ETL "had the bucket" from tools/* when in fact
@@ -1521,6 +1522,7 @@ describe("EtlStack", () => {
           "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
+          "arn:aws:s3:::wcmc-reciterai-artifacts/ilab/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/grants/*",
           "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
         ]);

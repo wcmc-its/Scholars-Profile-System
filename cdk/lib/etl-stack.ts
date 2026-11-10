@@ -601,6 +601,9 @@ export class EtlStack extends Stack {
             // NDJSON (reciterdb exported from a reachable client) from here (#443
             // workaround, same shape as the ed/ and mentoring/ bridges).
             "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
+            // MCC shared-resource report: etl:ilab:import reads the quarterly iLab
+            // core charges export (ilab/charges.xlsx) from here.
+            "arn:aws:s3:::wcmc-reciterai-artifacts/ilab/*",
             // #2618 — etl:dynamodb reads grants/latest/manifest.json for its
             // `generated_at`, which is the only liveness trace
             // reciterai-grants-daily leaves (that pipeline writes no STAGE#

@@ -5065,3 +5065,51 @@ model FundableWorkAuthor {
   @@index([cwid])
   @@map("fundable_work_author")
 }
+
+/// One iLab core charge (MCC shared-resource usage report). Loaded quarterly
+/// from the iLab charges export by `etl/ilab/import.ts`, which replaces every
+/// row in an explicit one-quarter ERP-date window. Only the columns the report needs are
+/// kept: no names, emails or line descriptions. `piCwid` is the join key and
+/// `customerLab` is the display.
+model CoreCharge {
+  /// iLab "Charge ID".
+  chargeId      String    @id @map("charge_id") @db.VarChar(32)
+  /// iLab "Core Name", trimmed (iLab ships some with a trailing space).
+  coreName      String    @map("core_name") @db.VarChar(255)
+  customerLab   String?   @map("customer_lab") @db.VarChar(255)
+  /// Local part of iLab "PI Email", lowercased, only for a WCM domain and a
+  /// CWID-shaped local part; null otherwise (external PI, first.last alias).
+  piCwid        String?   @map("pi_cwid") @db.VarChar(32)
+  /// iLab "MCC (Y/N)" = 'Y'.
+  ilabMcc       Boolean   @map("ilab_mcc")
+  /// iLab "Total Price"; refunds are negative.
+  totalPrice    Decimal   @map("total_price") @db.Decimal(12, 2)
+  /// iLab "Subsidy" = 'Subsidy': the separate subsidy line, not the researcher's share.
+  isSubsidy     Boolean   @map("is_subsidy")
+  /// iLab "Payment Information": a 10-digit WBS (8-digit InfoEd `acct` + a
+  /// 2-digit suffix) or an 8-digit department/MCC fund, which is not a grant.
+  paymentNumber String?   @map("payment_number") @db.VarChar(255)
+  /// iLab "Date file sent to ERP"; defines the quarter.
+  erpDate       DateTime  @map("erp_date") @db.Date
+  billingDate   DateTime? @map("billing_date") @db.Date
+  purchaseDate  DateTime? @map("purchase_date") @db.Date
+  importedAt    DateTime  @default(now()) @map("imported_at")
+
+  @@index([erpDate])
+  @@index([piCwid])
+  @@map("core_charge")
+}
+
+/// InfoEd `dbo.proposal.acct` (the 8-digit financial account behind a WBS) to
+/// the parent `Account_Number`, in the same form `grant.external_id`
+/// (`INFOED-{Account_Number}-{cwid}`) carries it. Many-to-many: one fin account
+/// can sit under several InfoEd accounts; the report breaks the tie on the
+/// award active at the charge date. Full-replaced by `etl/infoed/index.ts`.
+model InfoedFinAccount {
+  finAccount    String @map("fin_account") @db.VarChar(8)
+  accountNumber String @map("account_number") @db.VarChar(64)
+
+  @@id([finAccount, accountNumber])
+  @@index([accountNumber])
+  @@map("infoed_fin_account")
+}
