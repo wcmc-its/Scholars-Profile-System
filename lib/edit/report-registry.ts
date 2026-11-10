@@ -99,6 +99,7 @@ import { renderPublicationsReport } from "@/components/edit/reports/publications
 import { renderPubCitationReport } from "@/components/edit/reports/pub-citation-body";
 import { renderPubRelevanceReport } from "@/components/edit/reports/pub-relevance-body";
 import { renderSharedResourceUsageReport } from "@/components/edit/reports/shared-resource-usage-body";
+import { renderFkAwardsReport } from "@/components/edit/reports/fk-awards-body";
 import type { EditSession } from "@/lib/auth/superuser";
 import {
   REPORT_NUMBERS_BY_KIND,
@@ -242,6 +243,8 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
   "19": { n: "19", gate: "unit", render: renderCollabPubMatrixReport },
   // Center-only: iLab core charges (etl/ilab) by shared resource and program.
   "20": { n: "20", gate: "unit", render: renderSharedResourceUsageReport },
+  // Center-only: F and K awards to members and their trainees (mentor tables).
+  "21": { n: "21", gate: "unit", render: renderFkAwardsReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page
