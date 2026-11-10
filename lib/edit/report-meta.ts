@@ -73,6 +73,7 @@ export const REPORT_KEYS = [
   "17",
   "18",
   "19",
+  "20",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -241,6 +242,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Collaborative publication matrix",
     summary:
       "Per program, how many cancer-relevant publications were inter-programmatic, intra-programmatic, inter-institutional or high impact. EVAL's matrix, with its xlsx.",
+    descriptionHtml: null,
+  },
+  "20": {
+    slug: "shared-resource-usage",
+    name: "Shared resource usage",
+    summary:
+      "One quarter of iLab core charges by program: dollars at each shared resource, the share of members using it, every WCM core, and subsidy by lab.",
     descriptionHtml: null,
   },
 };
