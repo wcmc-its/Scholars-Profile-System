@@ -31,6 +31,8 @@ const ROW = "grid grid-cols-[minmax(0,13rem)_minmax(0,1fr)_5.5rem] items-center 
 const TH =
   "text-muted-foreground px-3 py-2.5 align-bottom text-xs font-semibold tracking-[0.08em] uppercase";
 const NON_MEMBER_COLOR = "var(--apollo-signal-none)";
+/** View 7 renders at most this many paper rows; one busy quarter can reach thousands. */
+const PAPER_ROW_CAP = 500;
 
 function Section({
   title,
@@ -471,60 +473,71 @@ export async function renderSharedResourceUsageReport({
             {r.papers.rows.length === 0 ? (
               <p className="text-muted-foreground text-sm">No candidate papers this quarter.</p>
             ) : (
-              <div className="max-h-[640px] overflow-auto">
-                <table
-                  className="w-full min-w-[960px] border-collapse text-sm"
-                  data-testid="shared-resource-papers"
-                >
-                  <thead className="bg-apollo-surface-2 sticky top-0 text-left">
-                    <tr>
-                      <th className={TH}>Lab</th>
-                      <th className={TH}>Program</th>
-                      <th className={TH}>Shared resource</th>
-                      <th className={TH}>Core</th>
-                      <th className={TH}>Grant</th>
-                      <th className={TH}>PMID</th>
-                      <th className={TH}>Title</th>
-                      <th className={cn(TH, "text-right")}>Year</th>
-                      <th className={TH}>Tier</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.papers.rows.map((p) => (
-                      <tr
-                        key={`${p.customerLab}|${p.group}|${p.coreName}|${p.pmid}`}
-                        className="border-apollo-border border-b align-top"
-                      >
-                        <td className="px-3 py-2">{p.customerLab}</td>
-                        <td className="px-3 py-2">{p.group}</td>
-                        <td className="px-3 py-2">{p.sr}</td>
-                        <td className="px-3 py-2">{p.coreName}</td>
-                        <td className="px-3 py-2">{p.awards.join(", ")}</td>
-                        <td className="px-3 py-2 tabular-nums">
-                          <a
-                            href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline"
-                          >
-                            {p.pmid}
-                          </a>
-                        </td>
-                        <td className="px-3 py-2">
-                          <PubTitle value={p.title} />
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{p.year ?? "–"}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {p.tier}
-                          {p.coreStatus && (
-                            <span className="text-muted-foreground"> ({p.coreStatus})</span>
-                          )}
-                        </td>
+              <>
+                {r.papers.rows.length > PAPER_ROW_CAP && (
+                  <p
+                    className="text-muted-foreground mb-2 text-sm"
+                    data-testid="shared-resource-papers-capped"
+                  >
+                    Showing the first {PAPER_ROW_CAP.toLocaleString()} of{" "}
+                    {r.papers.rows.length.toLocaleString()} rows, tier A first.
+                  </p>
+                )}
+                <div className="max-h-[640px] overflow-auto">
+                  <table
+                    className="w-full min-w-[960px] border-collapse text-sm"
+                    data-testid="shared-resource-papers"
+                  >
+                    <thead className="bg-apollo-surface-2 sticky top-0 text-left">
+                      <tr>
+                        <th className={TH}>Lab</th>
+                        <th className={TH}>Program</th>
+                        <th className={TH}>Shared resource</th>
+                        <th className={TH}>Core</th>
+                        <th className={TH}>Grant</th>
+                        <th className={TH}>PMID</th>
+                        <th className={TH}>Title</th>
+                        <th className={cn(TH, "text-right")}>Year</th>
+                        <th className={TH}>Tier</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {r.papers.rows.slice(0, PAPER_ROW_CAP).map((p) => (
+                        <tr
+                          key={`${p.customerLab}|${p.group}|${p.coreName}|${p.pmid}`}
+                          className="border-apollo-border border-b align-top"
+                        >
+                          <td className="px-3 py-2">{p.customerLab}</td>
+                          <td className="px-3 py-2">{p.group}</td>
+                          <td className="px-3 py-2">{p.sr}</td>
+                          <td className="px-3 py-2">{p.coreName}</td>
+                          <td className="px-3 py-2">{p.awards.join(", ")}</td>
+                          <td className="px-3 py-2 tabular-nums">
+                            <a
+                              href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline"
+                            >
+                              {p.pmid}
+                            </a>
+                          </td>
+                          <td className="px-3 py-2">
+                            <PubTitle value={p.title} />
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{p.year ?? "–"}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {p.tier}
+                            {p.coreStatus && (
+                              <span className="text-muted-foreground"> ({p.coreStatus})</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </Section>
         )}

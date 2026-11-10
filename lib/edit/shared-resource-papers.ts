@@ -7,7 +7,8 @@
  * (`INFOED-{account}-{cwid}`) -> `grant_publication` -> papers. When the fin
  * account reaches several grants, the ones whose dates cover the charge date
  * win; if none covers it, all are kept. A paper counts only when it was
- * published after the charge date.
+ * published after the charge date. Refund and zero-dollar lines lead nowhere,
+ * nor does a lab's WBS at a core that nets to $0 or less for the quarter.
  *
  * Tier A: the cores engine (`publication_core`, candidate or confirmed) also
  * attributes the paper to the billed core. Tier B: the grant link only.
@@ -41,6 +42,8 @@ export type PaperCharge = {
   customerLab: string | null;
   piCwid: string | null;
   paymentNumber: string | null;
+  /** iLab Total Price; refunds are negative. */
+  totalPrice: number;
   /** `YYYY-MM-DD`; places the charge in the quarter and the PI in a program (as views 1–6). */
   erpDate: string;
   /** `YYYY-MM-DD`: when the work was done (purchase date, else billing date, else ERP date). */
@@ -132,9 +135,17 @@ export function computeSrPaperCandidates(input: {
       .map((c) => [`${c.pmid}|${c.coreId}`, c.status]),
   );
 
+  const inQuarter = input.charges.filter(
+    (c) => c.erpDate >= quarter.start && c.erpDate < quarter.end,
+  );
+  const netKey = (c: PaperCharge) => JSON.stringify([c.customerLab, c.coreName, c.paymentNumber]);
+  const netCents = new Map<string, number>();
+  for (const c of inQuarter)
+    netCents.set(netKey(c), (netCents.get(netKey(c)) ?? 0) + Math.round(c.totalPrice * 100));
+
   const rows = new Map<string, PaperRow & { awardSet: Set<string> }>();
-  for (const c of input.charges) {
-    if (c.erpDate < quarter.start || c.erpDate >= quarter.end) continue;
+  for (const c of inQuarter) {
+    if (c.totalPrice <= 0 || (netCents.get(netKey(c)) ?? 0) <= 0) continue;
     const sr = srOf.get(c.coreName);
     const fin = wbsFinAccount(c.paymentNumber);
     if (!sr || !fin) continue;

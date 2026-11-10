@@ -106,6 +106,7 @@ export async function loadSharedResourceUsage(
     customerLab: c.customerLab,
     piCwid: c.piCwid,
     paymentNumber: c.paymentNumber,
+    totalPrice: Number(c.totalPrice),
     erpDate: day(c.erpDate),
     chargeDate: day(c.purchaseDate ?? c.billingDate ?? c.erpDate),
   }));

@@ -35,6 +35,7 @@ const charge = (o: Partial<PaperCharge> = {}): PaperCharge => ({
   customerLab: "Lab One",
   piCwid: "zzz1001",
   paymentNumber: "1111111101",
+  totalPrice: 100,
   erpDate: "2026-08-15",
   chargeDate: "2026-08-01",
   ...o,
@@ -212,6 +213,17 @@ describe("computeSrPaperCandidates", () => {
       ],
     });
     expect(rows).toEqual([]);
+  });
+
+  it("skips refund and zero-dollar lines, and a lab's WBS that nets to $0 or less", () => {
+    expect(run({ charges: [charge({ totalPrice: -100 })] }).rows).toEqual([]);
+    expect(run({ charges: [charge({ totalPrice: 0 })] }).rows).toEqual([]);
+    expect(
+      run({ charges: [charge({ totalPrice: 100 }), charge({ totalPrice: -100 })] }).rows,
+    ).toEqual([]);
+    expect(
+      run({ charges: [charge({ totalPrice: 100 }), charge({ totalPrice: -40 })] }).rows,
+    ).toHaveLength(1);
   });
 
   it("counts distinct papers per SR, tier A winning when one core of the SR agrees", () => {
