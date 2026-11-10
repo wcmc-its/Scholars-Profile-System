@@ -74,6 +74,7 @@ export const REPORT_KEYS = [
   "18",
   "19",
   "20",
+  "21",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -249,6 +250,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Shared resource usage",
     summary:
       "One quarter of iLab core charges by program: dollars at each shared resource, the share of members using it, every WCM core, and subsidy by lab.",
+    descriptionHtml: null,
+  },
+  "21": {
+    slug: "fk-awards",
+    name: "F and K awards",
+    summary:
+      "NIH fellowship (F) and career development (K) awards held by research members and by trainees in their labs, with the mentor and program, and awards whose holder has no mentor record.",
     descriptionHtml: null,
   },
 };
