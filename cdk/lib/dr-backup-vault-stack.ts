@@ -1,4 +1,5 @@
-import { CfnOutput, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
+import { Aws, CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as backup from "aws-cdk-lib/aws-backup";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
@@ -37,6 +38,27 @@ export class DrBackupVaultStack extends Stack {
     this.vault = new backup.BackupVault(this, "DrBackupVault", {
       backupVaultName: `sps-dr-backup-vault-${envConfig.envName}`,
       removalPolicy: RemovalPolicy.RETAIN,
+      // Vault Lock, GOVERNANCE mode -- same rationale as the source vault in
+      // DataStack: no early deletion of DR copies short of an admin first
+      // removing the lock.
+      lockConfiguration: {
+        minRetention: Duration.days(envConfig.awsBackupRetentionDays),
+      },
+    });
+
+    // DR replica of the curated-tables backup bucket (EtlStack's
+    // CurationBackupBucket replicates here). Fixed name so EtlStack can target
+    // it without a cross-region reference: see drCurationBackupBucketName().
+    new s3.Bucket(this, "DrCurationBackupBucket", {
+      bucketName: drCurationBackupBucketName(envConfig.envName),
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      versioned: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        { id: "expire-noncurrent-versions", noncurrentVersionExpiration: Duration.days(90) },
+      ],
     });
 
     new CfnOutput(this, "DrBackupVaultArn", {
@@ -48,4 +70,13 @@ export class DrBackupVaultStack extends Stack {
       description: `SPS DR BackupVault name (${envConfig.drRegion})`,
     });
   }
+}
+
+/**
+ * Name of the DR-region (us-west-2) replica of the curated-tables backup bucket.
+ * Account-qualified for global uniqueness; resolves via the AWS::AccountId
+ * pseudo-parameter so the env-agnostic synth still works.
+ */
+export function drCurationBackupBucketName(envName: string): string {
+  return `sps-curation-backups-dr-${envName}-${Aws.ACCOUNT_ID}`;
 }

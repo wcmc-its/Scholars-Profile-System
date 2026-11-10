@@ -14,6 +14,7 @@ protection already in place.
 | Aurora PITR | continuous point-in-time recovery | 14 days (staging & prod) | whole cluster → new cluster |
 | AWS Backup | daily snapshot 01:00 ET, cross-region copy to `us-west-2` | 14 days staging / 35 days prod | whole cluster → new cluster |
 | **This export** | gzipped SQL dump of the curated tables → S3 | as long as you keep the objects | per-table / per-row, diffable |
+| DR-region replica | S3 replication of `sps-curation-backups/` to `sps-curation-backups-dr-<env>-<account>` (`us-west-2`, owned by `Sps-DrBackupVault-<env>`) | same; deletes are not replicated | per-table / per-row |
 
 The first two are whole-cluster restores capped at 14 days. This export is the
 belt-and-suspenders: long-lived, diffable, and restorable row-by-row.

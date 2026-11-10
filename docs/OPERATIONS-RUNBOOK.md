@@ -135,6 +135,9 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
   3. Rebuild the search index (`npm run search:index`, §4 #9) — OpenSearch is derived from Aurora, not backed up.
   4. Repoint the edge origin (CloudFront → new ALB; see the origin backout in [`./network-security-topology.md`](./network-security-topology.md)) and re-establish WCM connectivity for the ETL sources (Transit Gateway / NetScaler — owned by WCM networking).
 
+  Already in place to shorten that rebuild: prod app and ETL images replicate to `us-west-2` ECR (registry replication, `Sps-Data-prod`), and the curated-tables backup replicates to an S3 bucket there (`Sps-DrBackupVault-${env}`).
+- **Backup protection** — both backup vaults (`sps-backup-vault-${env}`, `sps-dr-backup-vault-${env}`) carry an AWS Backup **Vault Lock in governance mode** (min retention = plan retention), so recovery points cannot be deleted early without first removing the lock. A FAILED / ABORTED / EXPIRED backup or cross-region copy job for the SPS cluster posts to `etl-failures-${env}` → Teams (rule `sps-aws-backup-failure-${env}`, in `Sps-Etl-${env}`).
+
   During the outage CloudFront keeps serving pages that are still cached; uncached requests get the branded maintenance page. Because SPS is a read-mostly data sink, regional recovery can be scheduled rather than rushed.
 
 ## Architecture diagram

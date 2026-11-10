@@ -583,6 +583,51 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "AwsBackupFailureRuleDEBB89FC": {
+      "Properties": {
+        "Description": "SPS prod: AWS Backup or copy job for the Aurora cluster FAILED, ABORTED or EXPIRED",
+        "EventPattern": {
+          "detail": {
+            "resourceArn": [
+              {
+                "prefix": "arn:aws:rds:us-east-1:123456789012:cluster:sps-data-prod-",
+              },
+            ],
+            "state": [
+              "FAILED",
+              "ABORTED",
+              "EXPIRED",
+            ],
+          },
+          "detail-type": [
+            "Backup Job State Change",
+            "Copy Job State Change",
+          ],
+          "source": [
+            "aws.backup",
+          ],
+        },
+        "Name": "sps-aws-backup-failure-prod",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "EtlFailureTopic8361D0D0",
+            },
+            "Id": "Target0",
+            "InputTransformer": {
+              "InputPathsMap": {
+                "detail-state": "$.detail.state",
+                "detail-statusMessage": "$.detail.statusMessage",
+                "detail-type": "$.detail-type",
+              },
+              "InputTemplate": "{"env":"prod","step":"AwsBackup","error":"<detail-type> <detail-state>: <detail-statusMessage>"}",
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
     "BulkDataRuleLogGroup31F582FF": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -1428,6 +1473,44 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "IgnorePublicAcls": true,
           "RestrictPublicBuckets": true,
         },
+        "ReplicationConfiguration": {
+          "Role": {
+            "Fn::GetAtt": [
+              "CurationBackupReplicationRole959ACFE6",
+              "Arn",
+            ],
+          },
+          "Rules": [
+            {
+              "DeleteMarkerReplication": {
+                "Status": "Disabled",
+              },
+              "Destination": {
+                "Bucket": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::sps-curation-backups-dr-prod-",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                    ],
+                  ],
+                },
+              },
+              "Filter": {
+                "Prefix": "sps-curation-backups/",
+              },
+              "Id": "curation-backups-to-dr-region",
+              "Priority": 1,
+              "Status": "Enabled",
+            },
+          ],
+        },
         "VersioningConfiguration": {
           "Status": "Enabled",
         },
@@ -1510,6 +1593,94 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "CurationBackupReplicationRole959ACFE6": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "s3.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "RoleName": "sps-etl-prod-curation-backup-replication",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "CurationBackupReplicationRoleDefaultPolicy104CD2B8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetReplicationConfiguration",
+                "s3:ListBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "CurationBackupBucketE5A802A9",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:GetObjectVersionForReplication",
+                "s3:GetObjectVersionAcl",
+                "s3:GetObjectVersionTagging",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "CurationBackupBucketE5A802A9",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:ReplicateObject",
+                "s3:ReplicateTags",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:s3:::sps-curation-backups-dr-prod-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "CurationBackupReplicationRoleDefaultPolicy104CD2B8",
+        "Roles": [
+          {
+            "Ref": "CurationBackupReplicationRole959ACFE6",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "CurationBackupScheduleRuleC639AC0F": {
       "Properties": {
@@ -2637,6 +2808,17 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Ref": "EtlFailureTopic8361D0D0",
               },
               "Sid": "1",
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "Sid": "2",
             },
           ],
           "Version": "2012-10-17",
@@ -11420,6 +11602,51 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "AwsBackupFailureRuleDEBB89FC": {
+      "Properties": {
+        "Description": "SPS staging: AWS Backup or copy job for the Aurora cluster FAILED, ABORTED or EXPIRED",
+        "EventPattern": {
+          "detail": {
+            "resourceArn": [
+              {
+                "prefix": "arn:aws:rds:us-east-1:123456789012:cluster:sps-data-staging-",
+              },
+            ],
+            "state": [
+              "FAILED",
+              "ABORTED",
+              "EXPIRED",
+            ],
+          },
+          "detail-type": [
+            "Backup Job State Change",
+            "Copy Job State Change",
+          ],
+          "source": [
+            "aws.backup",
+          ],
+        },
+        "Name": "sps-aws-backup-failure-staging",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "EtlFailureTopic8361D0D0",
+            },
+            "Id": "Target0",
+            "InputTransformer": {
+              "InputPathsMap": {
+                "detail-state": "$.detail.state",
+                "detail-statusMessage": "$.detail.statusMessage",
+                "detail-type": "$.detail-type",
+              },
+              "InputTemplate": "{"env":"staging","step":"AwsBackup","error":"<detail-type> <detail-state>: <detail-statusMessage>"}",
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
     "BulkDataRuleLogGroup31F582FF": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -12265,6 +12492,44 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "IgnorePublicAcls": true,
           "RestrictPublicBuckets": true,
         },
+        "ReplicationConfiguration": {
+          "Role": {
+            "Fn::GetAtt": [
+              "CurationBackupReplicationRole959ACFE6",
+              "Arn",
+            ],
+          },
+          "Rules": [
+            {
+              "DeleteMarkerReplication": {
+                "Status": "Disabled",
+              },
+              "Destination": {
+                "Bucket": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::sps-curation-backups-dr-staging-",
+                      {
+                        "Ref": "AWS::AccountId",
+                      },
+                    ],
+                  ],
+                },
+              },
+              "Filter": {
+                "Prefix": "sps-curation-backups/",
+              },
+              "Id": "curation-backups-to-dr-region",
+              "Priority": 1,
+              "Status": "Enabled",
+            },
+          ],
+        },
         "VersioningConfiguration": {
           "Status": "Enabled",
         },
@@ -12347,6 +12612,94 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "CurationBackupReplicationRole959ACFE6": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "s3.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "RoleName": "sps-etl-staging-curation-backup-replication",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "CurationBackupReplicationRoleDefaultPolicy104CD2B8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetReplicationConfiguration",
+                "s3:ListBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "CurationBackupBucketE5A802A9",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:GetObjectVersionForReplication",
+                "s3:GetObjectVersionAcl",
+                "s3:GetObjectVersionTagging",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "CurationBackupBucketE5A802A9",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:ReplicateObject",
+                "s3:ReplicateTags",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:s3:::sps-curation-backups-dr-staging-",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "CurationBackupReplicationRoleDefaultPolicy104CD2B8",
+        "Roles": [
+          {
+            "Ref": "CurationBackupReplicationRole959ACFE6",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "CurationBackupScheduleRuleC639AC0F": {
       "Properties": {
@@ -14118,6 +14471,17 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Ref": "EtlFailureTopic8361D0D0",
               },
               "Sid": "1",
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "Sid": "2",
             },
           ],
           "Version": "2012-10-17",

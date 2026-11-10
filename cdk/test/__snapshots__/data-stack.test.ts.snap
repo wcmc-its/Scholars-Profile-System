@@ -605,6 +605,9 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "DeletionPolicy": "Retain",
       "Properties": {
         "BackupVaultName": "sps-backup-vault-prod",
+        "LockConfiguration": {
+          "MinRetentionDays": 35,
+        },
       },
       "Type": "AWS::Backup::BackupVault",
       "UpdateReplacePolicy": "Retain",
@@ -1061,6 +1064,33 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudFormation::CustomResource",
       "UpdateReplacePolicy": "Delete",
+    },
+    "EcrDrReplication": {
+      "Properties": {
+        "ReplicationConfiguration": {
+          "Rules": [
+            {
+              "Destinations": [
+                {
+                  "Region": "us-west-2",
+                  "RegistryId": "123456789012",
+                },
+              ],
+              "RepositoryFilters": [
+                {
+                  "Filter": "scholars-app-prod",
+                  "FilterType": "PREFIX_MATCH",
+                },
+                {
+                  "Filter": "scholars-etl-prod",
+                  "FilterType": "PREFIX_MATCH",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      "Type": "AWS::ECR::ReplicationConfiguration",
     },
     "ExportsReader8B249524": {
       "DeletionPolicy": "Delete",
