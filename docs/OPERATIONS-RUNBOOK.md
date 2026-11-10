@@ -1,609 +1,1368 @@
 # SPS Operations Runbook
 
-> **This is a consolidated index.** It pulls the operationally-essential facts into one place and links out to the
-> authoritative deep docs for detail. Where this doc and a linked doc disagree, **the linked doc wins** — and the
-> CDK code (`cdk/lib/*`) wins over any doc.
+Scholars Profile System · Weill Cornell Medicine · scholars.weill.cornell.edu
 
-## Start here: triage decision tree
-
-> **Golden rule first:** almost all displayed data is a *derived snapshot* from a scheduled ETL. An upstream outage
-> makes data **stale**, not the site **down**. If the page *renders* (even with old/missing data), it's a freshness
-> problem (ETL/cache), **not** an availability incident — don't roll back or scale for it.
-
-Find your symptom, do the first step, then jump to the cited section.
-
-```
-What's the problem?
-│
-├─ SITE IS DOWN  — 5xx, "Something went wrong", blank pages, no healthy hosts
-│    ├─ Started right after a deploy?  ── YES → roll back app to prev task-def ......... §2 "Roll back"
-│    └─ Else → check Aurora / CloudFront, decide rollback vs fix-forward .............. §4 #6
-│         (need to take it offline now? kill switch = scale to 0; prod = P0) .......... §2 "Kill switch"
-│
-├─ SITE IS UP but DATA IS STALE / WRONG  (page renders, content old or missing)
-│    ├─ A whole profile section is old/missing → that ETL source stalled ............. §4 #2, #3
-│    ├─ Stale only after an edit / reindex / ETL run → bust the edge cache ............ §4 #1
-│    │     (surgical = POST /api/revalidate, NOT cloudfront create-invalidation)
-│    ├─ Retracted paper still showing ............................................... §4 #5
-│    └─ Home "Selected research" empty / wrong authors / bad links .................. §4 #10
-│
-├─ SEARCH IS WRONG  — no results, too few, or stale after a data/mapping change
-│    ├─ Recall problem (e.g. covid19→9 but covid-19→1,425; tylenol→0) .............. §4 #4
-│    └─ Stale/missing after a load or analyzer/mapping change → reindex .............. §4 #9
-│
-├─ AN ALARM FIRED / a Teams card arrived
-│    ├─ Card names an ETL alarm (sps-etl-*-status/-cadence/-heartbeat) .............. §4 #3
-│    ├─ P1 serving cascade: sps-app-unavailable / latency-p99 / cluster-red ........ §4 #6
-│    ├─ P2 "warn"-channel card (Aurora/OpenSearch pressure, edit-403s) — review .... §4 #6
-│    ├─ Alarm fired but NO Teams card within 5 min (paging path broken) ............. §4 #8
-│    └─ Any other alarm → map it via "Quick alarm → entry index" ............ end of §4
-│
-├─ STAFF CAN'T LOG IN to /edit  (SAML/SSO: idp_status_error, no_cwid, Responder…)
-│    └─ SAML IdP / Enterprise Directory issue ...................................... §4 #7
-│         ⚠️ Hard cert deadline 2026-08-19 — both certs must be trusted ............. §5 deadlines
-│
-├─ DB DATA LOSS / CORRUPTION  (data wrong at the source, not an app bug)
-│    └─ Aurora PITR or DR-vault restore (RPO ≤ 24 h, RTO ≤ 4 h) ..................... §4 #11
-│
-├─ /api/revalidate RETURNS 401 / 500  (cache-bust webhook failing)
-│    └─ Token unset / wrong / mid-rotation ......................................... §4 #12
-│
-└─ PLANNED OPERATION  — I need to deploy, scale, roll back, or bust cache on purpose
-     ├─ Deploy code vs infra/flag vs CloudFront (know which mechanism!) ............. §2 "deploy split"
-     ├─ Scale / start / stop / restart the service ................................. §2 "Scale"
-     ├─ Roll back an app deploy ..................................................... §2 "Roll back"
-     └─ Revalidate / cache-bust .................................................... §2 "Revalidate"
-```
-
-**Routing table (same map, for fast lookup):**
-
-| You're seeing… | Go to |
-|---|---|
-| Site down — 5xx, blank, no healthy hosts | §4 #6 → roll back (§2) / kill switch (§2) |
-| Page renders but a section is stale/missing | §4 #2, §4 #3 (ETL) |
-| Stale only after edit/reindex/ETL | §4 #1 (edge cache → `POST /api/revalidate`) |
-| Retracted paper showing | §4 #5 |
-| "Selected research" / spotlight wrong | §4 #10 |
-| Search returns nothing / too few | §4 #4 |
-| Search stale after a load/mapping change | §4 #9 (reindex) |
-| ETL alarm / Teams card | §4 #3 |
-| Alarm fired, no Teams card | §4 #8 |
-| Can't log in to `/edit` (SAML) | §4 #7 (⚠️ cert deadline §5) |
-| DB data loss / corruption | §4 #11 (PITR / DR) |
-| `/api/revalidate` 401/500 | §4 #12 |
-| Deploy / scale / roll back / revalidate (planned) | §2 |
-
-## What this is
-
-The **Scholars Profile System (SPS)** is a read-mostly **Next.js 16 (App Router)** app that renders ~9,000 public WCM
-scholar profiles. It runs on **AWS ECS Fargate** behind two ALBs, fronted by **CloudFront + WAF**, backed by **Aurora
-MySQL** (primary store) and **Amazon OpenSearch** (search/autocomplete only). Every page is a *derived snapshot* — almost
-all displayed data is produced by a scheduled **Step Functions ETL** that pulls from WCM source systems; an upstream
-outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK (TypeScript)** under `cdk/`.
-
-| At a glance | Value |
-|---|---|
-| Prod URL | `https://scholars.weill.cornell.edu` (staging: `scholars-staging.weill.cornell.edu`) |
-| AWS region / DR region | `us-east-1` / `us-west-2` |
-| Compute | ECS Fargate — `next start`, Node 26 (+ OTel sidecar); prod 2 tasks (1024/2048), max 6 |
-| DB / Search | Aurora MySQL Serverless v2 (`VER_3_08_0`) / OpenSearch 2.19 |
-| Operator contact | `paa2013@med.cornell.edu` (alarm email) / GitHub `paulalbert1` (prod deploy approver) — **post-launch ownership TBD** |
-
-> **Two cross-doc facts every operator must internalize:**
-> 1. **Account model.** ADR-008's *decision* is staging and prod in **separate AWS accounts**, but the actual deployment
->    is a documented **single-account deviation**: both envs share account **`665083158573`** in `us-east-1`, isolated
->    by env-prefix. Confirm the live topology with `aws sts get-caller-identity` per env before assuming separate accounts.
-> 2. **Stack count.** ADR-008 says "six stacks"; `cdk/bin/sps-infra.ts` instantiates **nine**. Trust the bin file (table in §2).
-
-## Service profile
-
-> Maps SPS onto WCM's ServiceNow **"RUNBOOK"** template (cf. `KB0012671`, BigFix). Italic _TBD_ fields are facts only
-> Operations holds — **fill these before publishing to WCM Internal KB.** Everything else is sourced from this runbook / the repo.
-
-| Field (WCM template) | Value |
-|---|---|
-| **Application name** | Scholars Profile System (SPS) |
-| **Brief description** | Read-mostly Next.js 16 app rendering ~9,000 public WCM scholar profiles (see [What this is](#what-this-is)) |
-| **Mission critical?** | _TBD — Ops to classify._ Working assumption: **No** — public, read-mostly; an outage is reputational / SEO, not patient-care or safety |
-| **Locations / URLs** | Prod `scholars.weill.cornell.edu` · staging `scholars-staging.weill.cornell.edu`; AWS `us-east-1` (DR `us-west-2`) |
-| **Normal operating hours** | 24×7, public internet-facing |
-| **Scheduled maintenance window** | None required — rolling zero-downtime deploys (§2). AWS-managed windows (defaults, not pinned in CDK): Aurora maintenance prod `Sun 05:27–05:57 UTC`, staging `Thu 10:24–10:54 UTC`; Aurora backup `03:00–04:00 UTC` (14-day retention); AWS Backup daily `05:00 UTC`; OpenSearch is AWS-managed (blue/green, no fixed window) |
-| **IT support / assignment group** | _TBD — Ops to assign (ServiceNow group)_ |
-| **Service Owner (emergency IT contact)** | Today: `paa2013@med.cornell.edu` / GitHub `paulalbert1`; mobile _TBD_. **Post-launch owner TBD (likely ITS management)** — see §5 |
-| **Emergency business contacts** | _TBD — business stakeholders to supply_ |
-| **Emergency comms to users** | _TBD_ — recommend **ITS Alert** (`its.weill.cornell.edu`) + email. Internal paging today = Teams relay (§3) |
-| **Dependencies — inputs from** | Enterprise Directory, ReciterDB, InfoEd, COI Portal, ASMS, Jenzabar, ReciterAI, NIH RePORTER / NSF / NLM MeSH (§1) |
-| **Dependencies — outputs to** | Public web (profiles, search, sitemaps) + search-engine crawlers. **SPS is a data sink** — no downstream WCM system consumes its data |
-| **Secondary / backup system** | Prod multi-AZ: Aurora writer + reader, 2× OpenSearch, ≥2 ECS tasks. AWS Backup daily + cross-region copy to `us-west-2` (§1, §4 #11) |
-| **Hosting / vendor** | Self-managed on **AWS** (Vendor Hosted: No — not SaaS). Account `665083158573` (confirm live, §5). AWS Support tier & Sev-1 case path: _TBD — confirm_ |
-| **Standard OLA / SLA** | _TBD — formal OLA._ Internal SLOs today: 99.5% availability, p99 < 1.5 s (§3) |
-| **Change management** | Prod deploy gated by GitHub Environment approval (§2). ServiceNow Change Request linkage: _TBD — define CR process_ |
-| **CMDB CI** | _TBD — register CI + link_ |
-| **KB article number** | _TBD — assign on publish to WCM Internal KB_ |
-
-**Maintenance & patch windows**
-- **App image / deps** — re-rolled on every deploy (§2); runtime = Node 26 on Fargate, patched by redeploying an updated image.
-- **Aurora MySQL / OpenSearch** — AWS-managed minor-version windows (AWS defaults; not pinned in CDK): Aurora prod `Sun 05:27–05:57 UTC`, staging `Thu 10:24–10:54 UTC`; Aurora automated backup `03:00–04:00 UTC` (retention 14 d); AWS Backup daily `05:00 UTC`. OpenSearch updates are AWS-managed blue/green with no fixed window.
-- **Release management** — continuous: merge to `master` ships staging automatically; prod is manual, approval-gated, **fix-forward** (no scheduled release train).
-
-**Failover guide**
-- **Within-region (automatic)** — multi-AZ Aurora + ≥2 ECS tasks across 2 AZs + ECS circuit-breaker rollback (§2). No operator action for a single-AZ loss.
-- **Data loss / corruption (manual, drilled)** — Aurora PITR to any point in the last 14 days, or a daily AWS Backup snapshot (35 days prod). Last drill **2026-11-09: full pass** — restored and row-count-validated in 17 min ([`./restore-drill-runbook.md`](./restore-drill-runbook.md) Variant A, §4 #11).
-- **Regional loss of `us-east-1` (manual, partially drilled)** — **no automated failover.** The database is recoverable in `us-west-2`: every daily snapshot is copied to `sps-dr-backup-vault-${env}` (35 copies held for prod), and a 2026-11-09 drill restored one to a running writer in 12 min (Variant B). Targets **RPO ≤ 24 h** (met: newest copy is < 24 h old) and **RTO ≤ 4 h**. What is **not** yet drilled is the rest of the stack in `us-west-2`; a regional rebuild means, in order:
-  1. Restore the database from the DR vault into a `us-west-2` network (Variant B), applying the TLS parameter group and Serverless v2 scaling.
-  2. Point the CDK at the DR region (`region` in `cdk/lib/config.ts`) and deploy network → data (import the restored cluster) → app → ETL. Container images are **not** replicated to `us-west-2`; the deploy rebuilds them from `master`.
-  3. Rebuild the search index (`npm run search:index`, §4 #9) — OpenSearch is derived from Aurora, not backed up.
-  4. Repoint the edge origin (CloudFront → new ALB; see the origin backout in [`./network-security-topology.md`](./network-security-topology.md)) and re-establish WCM connectivity for the ETL sources (Transit Gateway / NetScaler — owned by WCM networking).
-
-  Already in place to shorten that rebuild: prod app and ETL images replicate to `us-west-2` ECR (registry replication, `Sps-Data-prod`), and the curated-tables backup replicates to an S3 bucket there (`Sps-DrBackupVault-${env}`).
-- **Backup protection** — both backup vaults (`sps-backup-vault-${env}`, `sps-dr-backup-vault-${env}`) carry an AWS Backup **Vault Lock in governance mode** (min retention = plan retention), so recovery points cannot be deleted early without first removing the lock. A FAILED / ABORTED / EXPIRED backup or cross-region copy job for the SPS cluster posts to `etl-failures-${env}` → Teams (rule `sps-aws-backup-failure-${env}`, in `Sps-Etl-${env}`).
-
-  During the outage CloudFront keeps serving pages that are still cached; uncached requests get the branded maintenance page. Because SPS is a read-mostly data sink, regional recovery can be scheduled rather than rushed.
-
-## Architecture diagram
-
-The full set lives in **[`./architecture/`](./architecture/)** — open **[`index.html`](./architecture/index.html)** for the
-interactive gallery (zoomable SVG, ⌘P → "Save as PDF" for slides). The single most useful operator view is the **system
-context** — every page is a *derived snapshot*, which is the [golden rule](#start-here-triage-decision-tree) in one picture:
-
-![SPS system context — WCM source systems → Step Functions ETL → Aurora (canonical) + OpenSearch (search) → Next.js app → public profiles and SAML-gated /edit](./architecture/system-context.svg)
-
-| Diagram | What it shows | Reach for it when… | Files |
+| | | | |
 |---|---|---|---|
-| **System context** | Source systems → ETL → stores → app → audiences | Onboarding; "where does this data come from / who consumes it" | [svg](./architecture/system-context.svg) |
-| **Application & AWS topology** | ECS / ALB / Aurora / OpenSearch / CloudFront wiring across the stacks | A 5xx / latency incident — tracing the live request path (§4 #6) | [svg](./architecture/app-aws-topology.svg) |
-| **Internal components** | Next.js app internals + libraries (read / merge-at-read / `/edit` write) | A render bug or an `/edit` write/authz issue | [svg](./architecture/app-internals.svg) |
-| **Network topology** | VPC, subnets, SGs, NAT, VPC endpoints, WCM reachability | Connectivity / DNS / SG diagnosis; building an in-VPC `run-task` (§4 #9) | [svg](./architecture/network-topology.svg) |
-| **Edge-topology decision** | The EdgeStack fork (CloudFront / WAF / cert / alias) and why | **Before any `cdk deploy Sps-Edge-*`** — the WAF-strip footgun (§2) | [svg](./architecture/edge-topology-fork.svg) |
+| **Last updated** | **2026-11-09** | **Version** | 2.0 |
+| **Owner** | Paul Albert, SPS service owner (paa2013@med.cornell.edu) | **Next review** | 2027-02-09 (quarterly) |
+| **Audience** | Anyone responding to an SPS issue: ITS Operations, on-call staff, SPS engineers | **Checked against** | Repo commit `bca752e` (2026-11-09): `cdk/lib/*`, `docs/SLOs.md`, `docs/oncall.md`, `docs/cloudfront-cache-spec.md` |
 
-The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) live in the one-page narrative companion
-[`./architecture-overview.md`](./architecture-overview.md).
+> [!IMPORTANT]
+> **Start here**
+>
+> 1. Find what you're seeing in the [Triage table](#triage-what-are-you-seeing).
+> 2. Open the matching playbook in Part 2 and work through its steps in order.
+> 3. If the steps don't resolve it, escalate using [Contacts and escalation](#contacts-and-escalation).
+>
+> Doing planned work (a deploy, scaling, clearing a cache)? Go to [Part 3: Planned operations](#part-3-planned-operations).
 
-> **Provenance & freshness.** Diagrams are generated from the repo's infra sources by `scripts/diagrams/build.mjs` —
-> regenerate with **`npm run diagrams`** after any topology change (new stack, ETL source, or edge change), then commit
-> the updated SVGs + `index.html` (the generated PNGs are gitignored). They reflect the deployed shape as of **2026-05-30**; where a diagram and
-> `cdk/lib/*` disagree, **the CDK wins** (mind the account-model and stack-count caveats in the two cross-doc facts above).
+> [!WARNING]
+> **The one rule to remember: stale is not down**
+>
+> Almost everything on a profile is a snapshot that a scheduled job (the ETL) copies from WCM source systems. When a source system fails, SPS keeps serving the last good copy. **If pages load, even with old or missing data, you have a data freshness problem, not an outage.** Don't roll back, restart or scale for it; go to the data playbooks (6 to 11).
 
-## 1. Services used
+> [!NOTE]
+> **When sources disagree**
+>
+> The linked deep docs win over this runbook, and the CDK code (`cdk/lib/*`) wins over any doc. If you find drift, fix this runbook and update **Last updated** above.
 
-### AWS service inventory (per env; sizes from `../cdk/lib/config.ts`)
+## Contents
 
-| Service | Role in SPS | Resource name / pattern | Prod size | Staging size |
-|---|---|---|---|---|
-| **CloudFront** | CDN/edge; per-route HTML cache (default behavior clamped to **60 s**, but the origin's `stale-while-revalidate` lets the edge serve an older copy while it refetches; profiles are ISR + edge-cached since #3002, see `docs/cloudfront-cache-spec.md`); injects `X-Origin-Verify` | dist id: prod `E28NKDFXC7K2ZL`, staging `E17NRWINXLP3B3` | 1 dist | 1 dist |
-| **AWS WAF (WAFv2)** | Edge filter on the distribution: rate rule (1000 req / 5 min / IP) + AWS Managed Rules; WCM-only gate | attached to CloudFront | — | — |
-| **ECS Fargate (app)** | Runs Next.js + OTel sidecar; 24×7 + autoscale | svc/family `sps-app-${env}`, cluster `sps-cluster-${env}` | 2 × (1024/2048), min 2 / max 6 | 1 × (512/1024), min 1 / max 3 |
-| **ECS Fargate (ETL)** | Runs `npm run etl:<source>` per Step Functions step | family `sps-etl-${env}` | per-run 2048 / 8192 | same |
-| **ECS Fargate (migration)** | One-shot `npx prisma migrate deploy` in deploy pipeline | family `sps-migrate-${env}` | 512 / 1024 | same |
-| **ECS Fargate (db-bootstrap)** | One-shot `db-bootstrap.ts` (creates `scholars_audit`, grants) before migrate (#493) | family `sps-db-bootstrap-${env}` | — | — |
-| **Application Load Balancers** | Two ALBs, same target group: public (CloudFront origin) + internal (`/api/revalidate`) | CDK-auto-named (`Sps-Ap-Publi-<hash>`, `Sps-Ap-Inter-<hash>`) since the shared-VPC move; `sps-public-${env}` / `sps-internal-${env}` only when `useSharedVpc` is off | 2 | 2 |
-| **Aurora MySQL Serverless v2** | Primary store; all page reads + `/api/edit` writes; holds `scholars_audit` DB; `VER_3_08_0`; RETAIN + deletion-protected | CDK-generated under `Sps-Data-${env}` | 1–8 ACU, writer + 1 reader | 0.5–2 ACU, writer-only |
-| **Amazon OpenSearch** | `/search` + suggest autocomplete only; alias `scholars` → `scholars_v{ts}` (atomic swap); OpenSearch 2.19 | prod `opensearch58799-fquptd67j2so`, staging `opensearch58799-9dwko5mxr7bu` | 2 × `m6g.large.search` (multi-AZ) | 1 × `t3.medium.search` |
-| **AWS Backup** | Daily plan + cross-region (us-west-2) copy | vault `sps-backup-vault-${env}`, plan `sps-aurora-daily-${env}` | 35-day archive (PITR 14 d) | 14-day |
-| **Step Functions** | Orchestrates ETL; one Standard state machine per cadence | `scholars-{nightly,weekly,annual,heartbeat}-${env}` | — | — |
-| **EventBridge** | Cron rules firing the state machines | `sps-etl-{nightly,weekly,annual}-${env}` | `false` on first deploy (operator-driven) | `true` |
-| **Secrets Manager** | DB/OpenSearch/SAML/ETL/edge/revalidate creds; injected via exec role only (~11/env) | `scholars/...` (see §6) | ~11 | ~11 |
-| **ECR** | Image registry (app + ETL repos, #454) | `scholars-app-${env}`, `scholars-etl-${env}` | app + ETL | same |
-| **SNS** | Alarm fan-out (page P1 / warn P2) + cost/notify | page `sps-alarms-${env}`, warn `sps-warn-${env}`, notify `sps-notify-${env}`, ETL `etl-failures-${env}` | — | — |
-| **Lambda** | (1) on-call Teams relay; (2) Aurora rotation; (3) nightly CloudFront usage-rollup | `sps-oncall-relay-${env}` (nodejs22.x, 256 MB) + RDS rotation + analytics rollup | — | — |
-| **DynamoDB** | **Upstream input only** (legacy ReciterAI `reciterai` table); SPS provisions **no** table | external `reciterai` | — | — |
-| **S3** | CloudFront access logs (90-day lifecycle); `.next/static` assets; Glue/Athena analytics; Backup; reads ReciterAI artifacts | logs `sps-edge-${env}-logsbucket…` | — | — |
-| **Glue + Athena** | Roll CloudFront logs into durable `daily_usage` table (aggregates only) | AnalyticsStack | — | — |
-| **NAT Gateway** | Outbound internet for in-VPC tasks (ETL pulls, SES, X-Ray) | 1 per env | 1 | 1 |
-| **VPC Endpoints** | Keep AWS traffic off NAT | Secrets Manager (interface) + S3 (gateway); OpenSearch intentionally NOT an endpoint | — | — |
-| **X-Ray** | Tracing from OTel sidecar (5% + 100% errors/slow) | — | — | — |
-| **Amazon SES** | "Request a change" / slug-request mailer (low volume, flagged) | — | — | — |
-| **CloudWatch** | Alarms + logs + reliability dashboard | log groups `/aws/ecs/sps-app-${env}` etc.; 9 platform alarms + `sps-app-unavailable` composite (P1/P2 tiered) | logs 3 mo | logs 1 mo |
-| **AWS Budgets / Cost Anomaly** | Account-wide cost guardrails (**prod only**) | `sps-monthly-budget` ($600/mo), `sps-anomaly-monitor` ($50/day) → notify | yes | none |
+**[Part 1. Triage, severity and contacts](#part-1-triage-severity-and-contacts)**
 
-### The CDK stacks (`../cdk/bin/sps-infra.ts`)
+- [Triage: what are you seeing?](#triage-what-are-you-seeing)
+- [Severity levels](#severity-levels)
+- [Contacts and escalation](#contacts-and-escalation)
+- [Key facts at a glance](#key-facts-at-a-glance)
 
-Ten stack classes, mostly `Sps-{X}-${env}` (e.g. `Sps-App-prod`). `Sps-Network-<env>` is **not synthesized while `useSharedVpc` is on** (both envs today); Data and App import the shared VPC directly, so eight stacks deploy in staging and nine in prod (prod adds the account-singleton `Sps-InboundMail`). Selected via `-c env=staging|prod`; account via `-c <envName>Account=<id>` (never committed). `DataStack` and `NetworkStack` (flag-off only) carry `RemovalPolicy.RETAIN` + deletion protection so a bad `AppStack` deploy can't tear down the database.
+**[Part 2. Incident playbooks (1 to 19)](#part-2-incident-playbooks)**
 
-| Stack | Provisions |
-|---|---|
-| **NetworkStack** | Flag-off only (not synthesized while `useSharedVpc` is on): VPC, public + private-with-egress subnets (2 AZs), base SGs, Route 53 Resolver FORWARD rules for WCM DNS |
-| **DrBackupVaultStack** | us-west-2 DR BackupVault that DataStack's copyAction writes into (B10) |
-| **DataStack** | Aurora MySQL Serverless v2 (writer + reader, PITR, RETAIN) + OpenSearch domain + AWS Backup plan/vault |
-| **SecretsStack** | Secrets Manager secret *definitions* (empty) + RDS rotation Lambda |
-| **AppStack** | ECR (app + ETL), ECS cluster/service/tasks, public + internal ALBs, VPC endpoints, migration + db-bootstrap tasks, deploy/OIDC IAM roles |
-| **EtlStack** | Step Functions (nightly/weekly/annual), EventBridge schedules, ETL Fargate family, `etl-failures-${env}` SNS, cadence/status alarms |
-| **ObservabilityStack** | 9 platform alarms + `sps-app-unavailable` composite, `sps-alarms` (page/P1) / `sps-warn` (P2) / `sps-notify` SNS, on-call relay Lambda, reliability dashboard, **prod-only** budget + cost-anomaly |
-| **EdgeStack** | CloudFront fronting the public ALB, WAF, `sps-security-headers-${env}` policy, legacy-VIVO 301 redirects, access-log bucket |
-| **AnalyticsStack** | Glue + Athena over CloudFront logs + nightly usage-rollup Lambda → durable `daily_usage` table |
+**[Part 3. Planned operations](#part-3-planned-operations)**
 
-> **Stack files:** [`../cdk/bin/sps-infra.ts`](../cdk/bin/sps-infra.ts), [`../cdk/lib/config.ts`](../cdk/lib/config.ts), [`../cdk/lib/app-stack.ts`](../cdk/lib/app-stack.ts), [`../cdk/lib/data-stack.ts`](../cdk/lib/data-stack.ts).
+**[Part 4. Monitoring reference](#part-4-monitoring-reference)**
 
-### External upstreams (data freshness, not live request path)
+**[Part 5. System reference](#part-5-system-reference)**
 
-**Live request-path** (outage = user-visible now): CloudFront+WAF, Aurora, OpenSearch, WCM SAML IdP (`/edit` login only), WCM Enterprise Directory LDAPS (live `/edit/*` authz).
+**[Appendix A. Glossary](#appendix-a-glossary)**
 
-**ETL-path** (outage = stale data, site stays up): Enterprise Directory LDAPS (nightly → Scholar/Appointment/org units), ReciterDB MariaDB (nightly → Publications/MeSH/citations, heavy ~5 min), InfoEd MS SQL (nightly → Grant), COI MS SQL (nightly → CoiActivity), ASMS MS SQL (nightly → Education), Jenzabar MS SQL (weekly → PhD mentoring), ReciterAI DynamoDB+S3 (Topic/Score/Spotlight/tools), NIH RePORTER + NSF (weekly), NLM MeSH (annual), CTSC investigators-and-trainees feed HTTPS (nightly → CTSC center roster; see [CTSC roster sync](#ctsc-roster-sync)). WCM-internal reachability depends on **TGW + WCM firewall owned by Central Services account `091981818184`, not SPS**.
+**[Appendix B. Open items and known risks](#appendix-b-open-items-and-known-risks)**
 
-Method/tool taxonomy and spotlight data are published by ReciterAI as **JSON on S3** (`s3://wcmc-reciterai-artifacts/tools/latest/...`, `.../spotlight/latest/spotlight.json`), **not** DynamoDB; SPS ETL ingests into Aurora.
+**[Appendix C. Where to find more](#appendix-c-where-to-find-more)**
 
-## 2. Starting & stopping the app
+**[Appendix D. Revision history](#appendix-d-revision-history)**
 
-### Production / staging lifecycle
+## Part 1. Triage, severity and contacts
 
-#### The deploy split (the central footgun)
+### Triage: what are you seeing?
 
-There are **two** deploy mechanisms — confusing them is the #1 operator mistake:
+Find the closest match and go to its playbook. The severity tells you how fast to move ([Severity levels](#severity-levels)).
 
-| Change type | Mechanism | Trigger |
+| What you're seeing | Severity | Go to |
 |---|---|---|
-| App **code / image** | `deploy.yml` re-rolls the container image | Auto on push to `master` (staging); manual `workflow_dispatch` (prod) |
-| **Infra / flag / env-var** (`cdk/lib/*`) | Manual `cdk deploy Sps-App-<env>` | **Human only — never CI** |
-| **CloudFront / EdgeStack** | Manual `cdk deploy Sps-Edge-<env>` only | **Human only — deliberately not in `deploy.yml`** |
+| **The site is down, erroring or slow** | | |
+| Site down: 5xx errors, "Something went wrong", blank pages. Teams card `sps-app-unavailable` | P1 | [Playbook 1](#1-the-site-is-down-or-returning-errors-p1) |
+| `sps-edge-origin-down` or `sps-edge-unreachable`, while ALB and ECS alarms are quiet | P1 | [Playbook 2](#2-edge-or-origin-problem-cloudfront-netscaler-p1-p2) |
+| `sps-edge-origin-cert-expiring` or `sps-edge-probe-stalled` | P2 | [Playbook 2](#2-edge-or-origin-problem-cloudfront-netscaler-p1-p2) |
+| Pages are slow: `sps-alb-latency-p99` or `sps-edge-origin-latency-p99` | P1 / P2 | [Playbook 3](#3-pages-are-slow-p1-p2) |
+| 500s with "pool timeout": `sps-db-pool-timeout` or `sps-aurora-connections` | P1 / P2 | [Playbook 4](#4-database-connections-exhausted-p1-p2) |
+| Database load warning: `sps-aurora-cpu` or `sps-aurora-acu` | P2 | [Playbook 5](#5-database-under-heavy-load-p2) |
+| **The site is up, but data is old or wrong** | | |
+| One profile still shows old content after an edit or ETL run | Low | [Playbook 6](#6-one-profile-shows-old-content-low) |
+| A whole section (grants, publications, appointments…) is old or missing across many profiles | P2 | [Playbook 7](#7-a-section-is-stale-across-many-profiles-p2) |
+| Teams card naming an ETL alarm (`-status`, `-cadence`, `-duration`, heartbeat, reconcile, backup…) | P2 | [Playbook 8](#8-an-etl-alarm-arrived-in-teams-p2) |
+| ETL log says `[etl-guard:<name>] … refusing to proceed` | P2 | [Playbook 9](#9-an-etl-safety-guard-refused-to-run-p2) |
+| A retracted paper is still showing, or a paper disappeared | Low | [Playbook 10](#10-a-retracted-paper-is-still-showing-low) |
+| Home page "Selected research" is empty, has wrong authors, or has broken links | Low | [Playbook 11](#11-home-page-selected-research-is-wrong-low) |
+| **Search** | | |
+| `sps-opensearch-cluster-red`, `-jvm-pressure` or `-breaker`; search requests failing | P1 / P2 | [Playbook 12](#12-search-cluster-unhealthy-p1-p2) |
+| A search returns nothing or far too few results | Low | [Playbook 13](#13-search-returns-too-few-results-low) |
+| Search results are stale after a data load or a mapping change | Low | [Playbook 14](#14-rebuild-the-search-index-low) |
+| **Login and editing** | | |
+| Staff can't log in to `/edit`, or `sps-edit-authz-denied` fired | P2 | [Playbook 15](#15-staff-cant-log-in-or-are-denied-on-edit-p2) |
+| `/api/revalidate` returns 401 or 500 | P2 | [Playbook 16](#16-apirevalidate-returns-401-or-500-p2) |
+| **Alerting, backups and recovery** | | |
+| An alarm fired but no Teams card arrived within 5 minutes, or an `sps-oncall-relay-errors` email | Urgent | [Playbook 17](#17-an-alarm-fired-but-no-teams-card-arrived-urgent) |
+| Data is lost or corrupted in the database (not an app bug), or a backup job failed | P1 | [Playbook 18](#18-data-loss-or-corruption-restore-the-database-p1) |
+| AWS us-east-1 regional outage | P1 | [Playbook 19](#19-aws-us-east-1-regional-outage-p1) |
+| Budget or cost-anomaly email | Notify | Not an incident. See [Cost guardrails](#cost-guardrails) |
 
-Consequence: pushing to `master` deploys only the **staging app image**. It does **not** update CloudFront and does **not** apply CDK/flag changes. **Prod lags master** until a human dispatches a prod deploy. A flag wired only in `.env.local` but not in `app-stack.ts` ships silently **off**.
+### Severity levels
+
+| Level | What it means | Examples | Where it arrives | Expected response |
+|---|---|---|---|---|
+| **P1** page | Users are affected right now | Site down, p99 over 1.5 s, search cluster red, DB pool timeouts, edge origin down, an abort-tier ETL step failed | Primary SPS Teams channel | Respond now. Formal target: TBD in OLA |
+| **P2** warn | Early warning, or data going stale. The site still serves | Aurora CPU, capacity or connections; OpenSearch memory; edit 403 bursts; every ETL and reconciler alarm; origin cert expiring | "Warn" Teams channel. Falls back to the primary channel until the warn webhook secret exists | Same or next business day |
+| **Notify** | Not a service incident (except relay errors) | Budget and cost-anomaly alerts; `sps-oncall-relay-errors` | Email to the service owner | Cost: review. Relay errors: act now, alerts are being lost |
+| **P0** | A deliberate full outage | Using the kill switch on prod | Not applicable | Tell active operators before you do it |
+
+> [!WARNING]
+> **Off-hours gap (accepted risk)**
+>
+> Alerting is Teams and email only. There is no SMS, no phone paging and no acknowledgment tracking, so nobody is woken up automatically. A future option is registering SPS as a ServiceNow CI in an escalation group.
+
+### Contacts and escalation
+
+> [!IMPORTANT]
+> **Ownership after launch is unresolved**
+>
+> The likely owner is ITS management. Until that is settled, the service owner below is the only on-call operator. Fill in the TBD rows before publishing this runbook to the WCM Internal KB.
+
+| Area | Contact | How to reach |
+|---|---|---|
+| SPS service owner; production deploy approver | Paul Albert | paa2013@med.cornell.edu; GitHub `paulalbert1`; mobile TBD |
+| Operations owner after launch | TBD (likely ITS management) | TBD |
+| ServiceNow assignment group | TBD | TBD |
+| SPS Teams channels (primary and warn) | TBD: record channel names | Microsoft Teams |
+| Login: SAML IdP and Enterprise Directory (LDAPS) | WCM Identity & Access Management | TBD |
+| Network: NetScaler VIP, origin certificate, Transit Gateway, WCM firewall (Central Services account `091981818184`) | WCM networking | TBD |
+| Upstream data: ReCiter and ReciterAI | TBD | TBD |
+| Upstream data: InfoEd, COI Portal, ASMS, Jenzabar | Source system owners | TBD |
+| CTSC roster feed | CTSC | TBD |
+| AWS | AWS Support (tier and Sev-1 case path TBD) | AWS console |
+| Business stakeholders | TBD | TBD |
+| Telling users about an outage | Recommended: ITS Alert plus email | its.weill.cornell.edu |
+
+> [!WARNING]
+> **Single point of failure in alerting**
+>
+> The Power Automate workflow that posts alerts to Teams belongs to its creator's Microsoft account. If that person leaves WCM, alerting stops without warning. Check every quarter that the workflow owner is still here.
+
+### Key facts at a glance
+
+| Item | Production | Staging |
+|---|---|---|
+| Public URL | https://scholars.weill.cornell.edu | https://scholars-staging.weill.cornell.edu |
+| AWS account and region | `665083158573`, us-east-1 (DR: us-west-2) | Same account and region, separated by name prefix |
+| ECS cluster / service | `sps-cluster-prod` / `sps-app-prod` | `sps-cluster-staging` / `sps-app-staging` |
+| Normal task count | 2 (autoscales up to 6) | 1 (up to 3) |
+| Reliability dashboard | `sps-reliability-prod` | `sps-reliability-staging` |
+| App logs | `/aws/ecs/sps-app-prod` | `/aws/ecs/sps-app-staging` |
+| ETL logs | `/aws/ecs/sps-etl-prod` | `/aws/ecs/sps-etl-staging` |
+| CloudFront distribution | `E28NKDFXC7K2ZL` | `E17NRWINXLP3B3` |
+| Aurora cluster | `sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm` | `sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn` |
+| OpenSearch domain | `opensearchshare-hr8gdfznbeww` | `opensearchshare-mhshucea3jvk` |
+| Monitoring tools | New Relic (live APM); CloudWatch (alarms, long-term history) | Same |
+
+> [!TIP]
+> **How commands in this runbook are written**
+>
+> Commands use `$ENV` for the environment. Set it first: `export ENV=prod` (or `staging`). In running text, `<env>` means the same thing, for example `sps-app-<env>`. Other `<angle brackets>` are values you fill in.
+>
+> Confirm which AWS account you're in before you change anything: `aws sts get-caller-identity`.
+
+## Part 2. Incident playbooks
+
+Every playbook has the same shape: what you'll see, what it means, the steps in order, what not to do, and where to escalate. Each alarm's Teams card also carries a short "Next:" hint written in the CDK code; these playbooks expand on it.
+
+### 1. The site is down or returning errors `P1`
+
+| | |
+|---|---|
+| **You'll see** | Teams card `sps-app-unavailable-<env>`. It fires when any of these is in alarm: ALB 5xx rate over 1%, zero healthy hosts, ECS task shortfall, edge origin down, or edge unreachable. Users see 5xx errors, "Something went wrong", or blank pages. |
+| **What it means** | The serving path is broken. The usual causes are a bad deploy, a database problem (often connection exhaustion), or a fault in front of the app (NetScaler or CloudFront). Error pages are never cached at the edge, so pages that aren't already cached fail first. |
+
+**DO THIS**
+
+1. Open the `sps-reliability-<env>` dashboard and note which underlying alarm fired.
+2. If **only** the edge alarms fired (`sps-edge-origin-down`, `sps-edge-unreachable`) and the ALB and ECS look healthy, go to [Playbook 2](#2-edge-or-origin-problem-cloudfront-netscaler-p1-p2).
+3. If Aurora CPU or connections are also high, suspect connection-pool exhaustion: go to [Playbook 4](#4-database-connections-exhausted-p1-p2).
+4. Did it start right after a deploy? Roll back if, for 5 minutes or more, the ALB 5xx rate is 1% or higher **or** p95 latency is at least twice the pre-deploy baseline. See [Roll back an app deploy](#roll-back-an-app-deploy).
+5. If tasks keep dying (task shortfall), read the ECS service events for image-pull, capacity or IAM failures:
+
+   ```bash
+   aws ecs describe-services --cluster sps-cluster-$ENV --services sps-app-$ENV \
+     --query 'services[0].events[:10].[createdAt,message]' --output table
+   ```
+
+6. Otherwise, pull the app logs for the failing route from `/aws/ecs/sps-app-<env>` and decide whether to roll back or fix forward.
+7. Need to take the site offline right now? Use the [kill switch](#restart-stop-start-and-scale). On prod this is a P0: tell active operators first.
+
+**DON'T**
+
+- Roll back database migrations. They are additive only; always fix forward.
+- Roll back by re-running the deploy workflow from an older commit. That re-runs the migration step.
+
+**ESCALATE**
+
+Service owner. For NetScaler or network faults, WCM networking.
+
+**More detail:** [rollback-runbook.md](./rollback-runbook.md) · [error-handling-spec.md](./error-handling-spec.md) · [dependency-outage-matrix.md](./dependency-outage-matrix.md) · [app-aws-topology.svg](./architecture/app-aws-topology.svg)
+
+### 2. Edge or origin problem (CloudFront, NetScaler) `P1` `P2`
+
+| | |
+|---|---|
+| **You'll see** | P1: `sps-edge-origin-down-<env>` (a synthetic probe couldn't get a 200 through NetScaler VIP, ALB and ECS for 15 minutes) or `sps-edge-unreachable-<env>` (CloudFront isn't answering at the public hostname: DNS or TLS failed). The ALB and ECS alarms stay quiet. P2: `sps-edge-origin-cert-expiring-<env>` (origin certificate expires in under 30 days) or `sps-edge-probe-stalled-<env>` (the probe has stopped running). |
+| **What it means** | The fault is in front of the app. The NetScaler VIP is the only origin for dynamic pages and it has **no failover**. The ALB and ECS alarms can't see this because requests never reach the ALB. Meanwhile CloudFront keeps serving pages it already has cached. |
+
+**DO THIS**
+
+1. **Edge unreachable:** check DNS for the public alias, the viewer certificate's expiry, and that the CloudFront distribution is Enabled and Deployed.
+2. **Origin down:** check the NetScaler VIP (WCM networking), then the ALB port 443 listener and its priority-1 `X-Origin-Verify` rule (a rotated secret looks exactly like an outage), then the origin certificate.
+3. If the VIP stays down, run the **origin backout**: clear `edgeOriginHostname` in `cdk/lib/config.ts` and deploy `Sps-Edge-<env>` on its own, following [Change CloudFront safely](#change-cloudfront-edgestack-safely). Traffic then goes http-only to the ALB on port 80. Note: this backout hasn't been rehearsed on staging yet.
+4. **Origin cert expiring:** ask WCM networking to rotate it. The certificate is not in ACM and does not renew itself. When it expires, every dynamic request returns 502.
+5. **Probe stalled:** check errors on the Lambda function `sps-edge-origin-probe-<env>` and its EventBridge schedule. This is a monitoring gap, not an outage, but the origin alarms are blind until it's fixed.
+
+**DON'T**
+
+- Point the CloudFront origin at the ALB DNS name with https-only in the console. The certificate won't match and every request returns 502.
+- Run a bare `cdk deploy` on EdgeStack. It strips the WAF, the certificate and the custom domain.
+
+**ESCALATE**
+
+WCM networking (NetScaler VIP, origin certificate, Transit Gateway).
+
+**More detail:** [Origin backout](./network-security-topology.md#origin-backout-netscaler-vip-to-alb-1936) · [edge-topology-fork.svg](./architecture/edge-topology-fork.svg)
+
+### 3. Pages are slow `P1` `P2`
+
+| | |
+|---|---|
+| **You'll see** | P1: `sps-alb-latency-p99-<env>` (p99 response time over 1.5 s for 15 minutes; P1 in prod, P2 warn in staging). P2: `sps-edge-origin-latency-p99-<env>` (CloudFront's round trip to the origin over 20 s at p99). |
+| **What it means** | The latency SLO is burning. Above 20 s at the origin, requests are close to CloudFront's 30-second timeout, after which users get 504 errors that the app logs as successes. |
+
+**DO THIS**
+
+1. On the `sps-reliability-<env>` dashboard, compare ALB latency, CloudFront origin latency and Aurora `SelectLatency`.
+2. **ALB fast but CloudFront origin slow:** the delay is in the NetScaler hop. Contact WCM networking.
+3. **ALB slow:** find the slow route. Check Bedrock-backed API routes first. The Athena saved query `sps-perf-slow-routes-<env>` gives p50, p95 and p99 by route ([Usage and performance analytics](#usage-and-performance-analytics)).
+4. Look for a slow query, a cold cache or an undersized task. Trace a slow request with X-Ray (see [tracing.md](./tracing.md)).
+
+**DON'T**
+
+- Raise CloudFront's `OriginReadTimeout` until WCM networking confirms the NetScaler timeout.
+
+**ESCALATE**
+
+Service owner; WCM networking if the delay is in the NetScaler hop.
+
+**More detail:** [tracing.md](./tracing.md) · [performance-baseline.md](./performance-baseline.md)
+
+### 4. Database connections exhausted `P1` `P2`
+
+| | |
+|---|---|
+| **You'll see** | P1: `sps-db-pool-timeout-<env>` (any "pool timeout" in the app logs). P2: `sps-aurora-connections-<env>` (over 70 connections for 10 minutes). Users get 500s with `pool timeout: failed to retrieve a connection from pool`. |
+| **What it means** | Aurora is at its connection limit (about 90). Normal peak is 60. The cause is almost always a **leaked connection pool**: a one-off run-task probe or script that imported `@/lib/db` and never called `await db.$disconnect()`. It prints its output in seconds, then sits in `RUNNING` holding 15 connections. |
+
+**DO THIS**
+
+1. If the log line says `active=0 idle=0`, the database itself is at its limit. **Restarting the app will not help.**
+2. List running one-off tasks (repeat with the other ETL families if needed, see [Run a one-off ETL task](#run-a-one-off-etl-task)):
+
+   ```bash
+   aws ecs list-tasks --cluster sps-cluster-$ENV --family sps-etl-$ENV --desired-status RUNNING
+   ```
+
+3. For each task, confirm it's a finished probe (still `RUNNING` long after it printed its results) and not a live ETL run or evaluation.
+4. Stop the leftover tasks. Read-only probes are safe to stop:
+
+   ```bash
+   aws ecs stop-task --cluster sps-cluster-$ENV --task <task-arn>
+   ```
+
+5. Watch Aurora `DatabaseConnections` drain from about 90 back to normal in roughly 3 minutes. The app recovers on its own.
+
+> [!NOTE]
+> **Staging and prevention**
+>
+> Staging has two Aurora clusters and the idle one reads 0 connections. Look at the `...auroraclusterfromsnapshot...` cluster.
+>
+> To prevent this, one-off tasks must call `$disconnect` and run under a `timeout 600` wrapper.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [performance-baseline.md](./performance-baseline.md)
+
+### 5. Database under heavy load `P2`
+
+| | |
+|---|---|
+| **You'll see** | `sps-aurora-cpu-<env>` (CPU over 80% for 15 minutes in prod, 30 minutes in staging) or, in prod only, `sps-aurora-acu-<env>` (writer capacity use over 80% for 15 minutes). |
+| **What it means** | Either a runaway query (CPU), or the cluster is near its capacity ceiling (8 ACU in prod, 4 in staging). Aurora Serverless reports CPU as a share of *current* capacity, so a maxed-out cluster can still show low CPU. That is why the capacity alarm exists. |
+
+**DO THIS**
+
+1. Check Performance Insights or the slow-query log for the expensive query.
+2. Compare `ServerlessDatabaseCapacity` with the cluster's maximum, and line up the time window against the nightly ETL (starts 07:00 UTC).
+3. Raise the maximum (`auroraMaxCapacity` in `cdk/lib/config.ts`, applied with an [infrastructure change](#apply-an-infrastructure-or-feature-flag-change)) only if the load is legitimate.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [performance-baseline.md](./performance-baseline.md)
+
+### 6. One profile shows old content `Low`
+
+| | |
+|---|---|
+| **You'll see** | A single profile still shows old content after an edit or an ETL run. |
+| **What it means** | Since 2026-10-02 a profile page is cached in two places: a copy at the origin (refreshed at least every 6 hours) and a copy at the CloudFront edge (60 seconds, but CloudFront may keep serving its older copy while it fetches a new one). Edits and the nightly and weekly ETL clear both automatically; the edge purge goes out through the CDN reconciler every 5 minutes. A stale profile can come from bad data, the origin copy or the edge copy. |
+
+Work from the data toward the viewer:
+
+**DO THIS**
+
+1. **Data.** Query the row in prod Aurora (`scripts/run-staging-probe.sh <probe> prod`). If the database is wrong, it's an ETL or source problem: go to [Playbook 7](#7-a-section-is-stale-across-many-profiles-p2).
+2. **Origin.** Fetch the page and read the cache headers. `x-nextjs-cache: HIT` with a recent age and the right content means the origin copy is fresh.
+
+   ```bash
+   curl -sI https://scholars.weill.cornell.edu/<slug> | grep -iE 'x-nextjs-cache|x-cache|^age'
+   ```
+
+3. **Edge.** `x-cache: Hit from cloudfront` with an `age` well over 60 means CloudFront served an older copy. Check that the newest row in the `cdn_invalidation` table has `invalidated_at` set. A pending row with a rising `attempts` count means the reconciler can't purge (check its IAM permissions and the distribution ID).
+4. **Fix.** To clear one profile everywhere, make any `/edit` change to it, or invalidate it at the edge:
+
+   ```bash
+   aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/<slug>"
+   ```
+
+Other pages: departments and centers refresh every 6 hours, topics every 2 hours, and static assets are cached up to a year.
+
+**DON'T**
+
+- Use `POST /api/revalidate?path=/scholars/<slug>`. That path is the old URL, which now only redirects; clearing it does nothing for the profile.
+- Expect `/api/revalidate` alone to fix what users see. It clears only the origin copy, never the edge copy.
+
+**ESCALATE**
+
+Service owner if the reconciler is failing.
+
+**More detail:** [cloudfront-cache-spec.md](./cloudfront-cache-spec.md#profile-pages-isr-at-the-origin-cached-at-the-edge)
+
+### 7. A section is stale across many profiles `P2`
+
+| | |
+|---|---|
+| **You'll see** | Pages load, but a section (publications, grants, appointments, education…) shows old or missing data for many people. |
+| **What it means** | The ETL source that feeds that section stopped refreshing, and SPS is serving the last good snapshot. A "Topics updating" placeholder is normal for about 30 minutes while the reciter to dynamodb steps run. |
+
+| Section | Comes from | Refreshed |
+|---|---|---|
+| People, titles, appointments, org units | Enterprise Directory (LDAPS) | Nightly (runs first) |
+| Publications, MeSH terms, citations | ReciterDB (MariaDB) | Nightly (about 5 min) |
+| Grants | InfoEd (MS SQL) | Nightly |
+| Conflict of interest disclosures | COI Portal (MS SQL) | Nightly |
+| Education | ASMS (MS SQL) | Nightly |
+| PhD mentoring | Jenzabar (MS SQL) | Weekly |
+| Topics, scores, spotlight, methods and tools | ReciterAI (DynamoDB and S3 JSON) | Nightly |
+| CTSC center roster | CTSC investigators and trainees feed | Nightly |
+| NIH and NSF funding detail | NIH RePORTER, NSF | Weekly |
+| MeSH vocabulary | NLM MeSH | Yearly (July 1) |
+
+**DO THIS**
+
+1. Find the last good run for the source:
+
+   ```sql
+   SELECT source, status, completed_at, rows_processed, error_message
+   FROM etl_run WHERE source = '<Source>'
+   ORDER BY started_at DESC LIMIT 5;
+   ```
+
+2. If it failed, read the error and check for an ETL alarm ([Playbook 8](#8-an-etl-alarm-arrived-in-teams-p2)). If the WCM source system itself is down, SPS can't fix it: contact the source owner.
+3. Once the source is reachable, re-run it with `npm run etl:<ed|reciter|infoed|coi|asms|jenzabar|dynamodb|spotlight>` as a [one-off task](#run-a-one-off-etl-task). Re-runs are safe to repeat. `etl:ed` must succeed first because everything else depends on it.
+
+**ESCALATE**
+
+The owner of the source system (see [Contacts](#contacts-and-escalation)).
+
+**More detail:** [dependency-outage-matrix.md](./dependency-outage-matrix.md) · [data-population-runbook.md](./data-population-runbook.md)
+
+### 8. An ETL alarm arrived in Teams `P2`
+
+| | |
+|---|---|
+| **You'll see** | A card naming `sps-etl-<cadence>-status`, `-cadence`, `-duration`, `sps-etl-heartbeat-status`, `sps-etl-duration-margin`, `sps-etl-retry-storm`, or a job alarm such as `sps-reconcile-*`, `sps-cdn-reconcile-*`, `sps-curation-backup-*`, `sps-honors-status` or `sps-grants-export-*`. Failures in the critical steps (Ed, Dynamodb, SearchIndex, Integrity) arrive as **P1** on the primary channel. |
+| **What it means** | **Status:** a run didn't finish cleanly (it failed, timed out or was stopped). **Cadence:** a run that should have started didn't. **Duration:** a run is taking longer than usual. **Heartbeat:** runs look green but the data is still stale. |
+
+**DO THIS**
+
+1. Read the card's Description and its "Next:" line.
+2. In the Step Functions console, open `scholars-<cadence>-<env>` and its newest execution. The red step shows what failed and why.
+3. Read that step's logs in `/aws/ecs/sps-etl-<env>`.
+4. Confirm the effect on data with the `etl_run` query in [Playbook 7](#7-a-section-is-stale-across-many-profiles-p2).
+5. Common causes: a WCM source is unreachable (not fixable from SPS), an EventBridge rule is disabled, a source returned nothing, or a safety guard tripped ([Playbook 9](#9-an-etl-safety-guard-refused-to-run-p2)).
+6. Once fixed, resume the chain from the failed step:
+
+   ```bash
+   aws stepfunctions start-execution --state-machine-arn <arn> \
+     --input '{"startFrom":"<StepId>"}'
+   ```
+
+> [!NOTE]
+> **Good to know**
+>
+> - Prod schedules have been enabled since 2026-07-07, so a missing run is a fault.
+> - The yearly run has no cadence alarm; it is tracked by calendar.
+> - Some steps (for example the CTSC roster and roster prominence) are "continue-tier": a failure keeps last night's data and doesn't fail the run. The freshness heartbeat is their only safety net.
+
+**ESCALATE**
+
+Source system owner if the source is down; otherwise the service owner.
+
+**More detail:** [etl-monitoring.md](./etl-monitoring.md) · [ETL schedules](#etl-schedules)
+
+### 9. An ETL safety guard refused to run `P2`
+
+| | |
+|---|---|
+| **You'll see** | An ETL step fails with `[etl-guard:<name>] … refusing to proceed`, for example `ed:scholar-soft-delete` reporting a large number of departures. |
+| **What it means** | A safety check tripped because the source returned far fewer records than the database holds. **Nothing was written or deleted.** Either the source really shrank or changed shape (in 2026-06 the Enterprise Directory moved students to `ou=students,ou=sors`), or a real backlog of departures built up while nightly runs were failing. |
+
+**DO THIS**
+
+1. **Verify before bypassing.** Reproduce the affected set read-only and spot-check a sample in the source. For the ED example: if every one is LDAP `faculty:expired` and none are active, the departures are genuine.
+2. **Not genuine:** fix how the data is fetched. Don't bypass. (PR #1456 shows how the ED fetch was repointed.)
+3. **Genuine:** run the step once as a [one-off task](#run-a-one-off-etl-task) with the environment variable `ETL_GUARD_BYPASS="<guard-name>"`, set through `containerOverrides.environment`. Separate several guards with commas.
+4. Confirm the next nightly run is clean.
+
+**DON'T**
+
+- Set the bypass permanently, or use `ETL_GUARD_BYPASS="all"` unless you have checked every guard.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [Guard reference for CTSC and roster prominence](#job-specific-notes) · [data-population-runbook.md](./data-population-runbook.md)
+
+### 10. A retracted paper is still showing `Low`
+
+| | |
+|---|---|
+| **You'll see** | A retracted paper is still visible on a profile, or a paper disappeared. |
+| **What it means** | Retraction *notices* are always hidden. The *original* article stays visible as a Journal Article until the nightly `PubMedRetractions` step re-labels it as Retraction (which hides it) and rebuilds search. In prod this runs automatically every night. |
+
+**DO THIS**
+
+1. Check that the `PubMedRetractions` step ran in the latest nightly execution.
+2. If it stopped, check that the ETL schedule rules are enabled:
+
+   ```bash
+   aws events list-rules --name-prefix sps-etl- --query 'Rules[].[Name,State]' --output table
+   ```
+
+3. A manual run is normally unnecessary: `npm run etl:pubmed-retractions`, then [rebuild the search index](#14-rebuild-the-search-index-low).
+
+> [!WARNING]
+> **Known hazard (#1512)**
+>
+> Prod's config once said schedules were disabled while they were actually enabled. The config now says enabled, but the mismatch only fully closes after the next `Sps-Etl-prod` deploy. Until then, a deploy that touches a schedule rule could silently disable the nightly run. Check rule state after any `Sps-Etl-prod` deploy.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [retracted-publications.md](./retracted-publications.md)
+
+### 11. Home page "Selected research" is wrong `Low`
+
+| | |
+|---|---|
+| **You'll see** | The "Selected research" section is empty or hidden, shows the wrong authors, or has links that return 404. |
+| **What it means** | The spotlight data didn't change, too few items survived the display minimum, authors couldn't be matched, or links have the wrong shape. |
+
+**DO THIS**
+
+1. Check the newest `Spotlight` row in `etl_run`: `status = 'success'` and `rows_processed > 0`. A 0 means the input was unchanged (normal), not a failure.
+2. Run `SELECT COUNT(*) FROM spotlight;` (expect 25 or fewer). If fewer than 6 survive, the section hides itself (`SPOTLIGHT_FLOOR=6`).
+3. Authors only appear when their `cwid` is not null.
+4. Browse links must look like `/topics/{parent}?subtopic={sub}`.
+5. To fix the content, re-publish it in ReciterAI (`python3 backfill_spotlight.py --publish`), then run `npm run etl:spotlight`.
+
+**ESCALATE**
+
+ReciterAI owner for content problems.
+
+**More detail:** [spotlight-runbook.md](./spotlight-runbook.md)
+
+### 12. Search cluster unhealthy `P1` `P2`
+
+| | |
+|---|---|
+| **You'll see** | P1: `sps-opensearch-cluster-red-<env>` (shards unassigned). P2: `sps-opensearch-jvm-pressure-<env>` (memory pressure over 85%) or `sps-opensearch-breaker-<env>` (OpenSearch refused queries with `circuit_breaking_exception`, so those searches returned 500). |
+| **What it means** | Only search and autocomplete are affected. Profiles and other pages read from Aurora, not OpenSearch, so they keep working. |
+
+**DO THIS**
+
+1. Check `JVMMemoryPressure` (Maximum), shard count and query load in the OpenSearch console and on the dashboard.
+2. **Memory pressure or breaker:** the nodes are undersized, or a burst of heavy queries (for example the sponsor-match fan-out) is too much for the heap. Throttle the heavy query or scale the domain.
+3. **Cluster red:** check shard allocation in the OpenSearch console. The index is rebuilt from Aurora and isn't backed up, so a fresh [index rebuild](#14-rebuild-the-search-index-low) restores the data.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [SLOs.md](./SLOs.md#alarm-catalog)
+
+### 13. Search returns too few results `Low`
+
+| | |
+|---|---|
+| **You'll see** | A search returns nothing, or far too few people. Known examples: `covid19` finds 9 people but `covid-19` finds 1,425; `tylenol` finds 0. |
+| **What it means** | Either (A) letters and digits glued together, like `covid19`, are indexed as one word (#725), or (B) MeSH concept matching only affects ranking and never adds results (#726). |
+
+**DO THIS**
+
+1. Reproduce and note the total:
+
+   ```bash
+   curl -s -G https://scholars.weill.cornell.edu/api/search \
+     --data-urlencode q=<term> --data-urlencode type=people | jq .total
+   ```
+
+2. **Cause A:** the fix is the `alnum_delimiter` analyzer **plus** an index rebuild, shipped together. Glued terms stay broken until the index is rebuilt.
+3. **Cause B:** the fix is a code change to admit results on `publicationMeshUi` when word matches are sparse.
+4. Then [rebuild the index](#14-rebuild-the-search-index-low).
+
+**ESCALATE**
+
+Service owner (code change needed).
+
+**More detail:** [search-recall.md](./search-recall.md)
+
+### 14. Rebuild the search index `Low`
+
+| | |
+|---|---|
+| **You'll see** | Search results are stale, missing or wrong after a mapping or analyzer change, or after a data load. |
+| **What it means** | The index needs a rebuild outside the normal schedule. The rebuild builds a new index and then swaps the `scholars` alias over in one step, so a failed rebuild never empties live search. |
+
+**DO THIS**
+
+1. Look up the current ETL subnet and security group IDs as described in [data-population-runbook.md](./data-population-runbook.md) section 3. **Never hardcode them:** the VPC move changed both, and old IDs launch into a dead network and time out.
+2. Start the rebuild:
+
+   ```bash
+   aws ecs run-task --cluster sps-cluster-$ENV --task-definition sps-etl-$ENV \
+     --launch-type FARGATE \
+     --network-configuration "awsvpcConfiguration={subnets=[$ETL_SUBNETS],securityGroups=[$ETL_SG],assignPublicIp=DISABLED}" \
+     --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","search:index"]}]}'
+   ```
+
+3. Watch progress in `/aws/ecs/sps-etl-<env>`.
+
+Note: a rebuild doesn't yet refresh cached pages (#479, #353), so pages can lag search until their cache expires.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [data-population-runbook.md](./data-population-runbook.md) · [network-topology.svg](./architecture/network-topology.svg)
+
+### 15. Staff can't log in, or are denied, on /edit `P2`
+
+| | |
+|---|---|
+| **You'll see** | Logging in to `/edit` fails, with callback errors such as `idp_status_error`, `invalid_saml_response`, `no_cwid` or `Responder`, and log events `saml_callback_failed` or `superuser_check_failed`. Or the alarm `sps-edit-authz-denied-<env>` (more than 10 edit 403s in 5 minutes, twice in a row). |
+| **What it means** | Editing is affected; the public site is not. |
+| **Likely cause** | `idp_status_error`: a problem at the WCM SAML identity provider.<br>`superuser_check_failed`, or everyone denied: Enterprise Directory (LDAPS) unreachable. Permissions fail closed, so a directory outage blocks all editing.<br>`invalid_saml_response`: the IdP certificate changed, or `SAML_IDP_CERT` is wrong.<br>`no_cwid`: the IdP isn't releasing the CWID attribute.<br>`Responder`: `SAML_SP_ENTITY_ID` doesn't match.<br>A burst of 403s: a permissions bug in the last deploy, or someone probing. |
+
+**DO THIS**
+
+1. Find the failures in the app logs (CloudWatch Logs Insights on `/aws/ecs/sps-app-<env>`):
+
+   ```
+   fields @timestamp, @message
+   | filter @message like /saml_callback_failed|superuser_check_failed/
+   | sort @timestamp desc | limit 50
+   ```
+
+2. **Certificate problem:** `SAML_IDP_CERT` (secret `scholars/<env>/saml/idp-cert`) holds one or more PEM certificates joined together. Fixing it is an environment change plus a [restart in place](#restart-stop-start-and-scale); no code change.
+3. Test the fix on staging. Staging uses the production IdP.
+4. **403 burst:** review the `edit_authz_denied` log events for the user and path, and compare with the last deploy.
+
+> [!NOTE]
+> **Break-glass and certificate status**
+>
+> There is no way to bypass SSO (by design). To grant emergency superuser access, add the person's CWID to the ED group `ITS:Library:Scholars/superuser-role`. This needs the directory to be reachable.
+>
+> The old IdP signing certificate expired on 2026-08-19; its successor is valid until 2036-03-27. **Confirm** the expired certificate was removed from `SAML_IDP_CERT` (that cleanup was due 2026-08-26).
+
+**ESCALATE**
+
+WCM Identity & Access Management for IdP or directory faults.
+
+**More detail:** [saml-sp.md](./saml-sp.md) · [access-control-rbac.md](./access-control-rbac.md)
+
+### 16. /api/revalidate returns 401 or 500 `P2`
+
+| | |
+|---|---|
+| **You'll see** | The ETL revalidate step, or another caller, gets 401 or 500 from `POST /api/revalidate`. |
+| **What it means** | 500 `server misconfigured`: `SCHOLARS_REVALIDATE_TOKEN` isn't set. 401: the token is missing or wrong, or the header isn't `Authorization: Bearer`. 401 during a token rotation: the app is still using the old token, because it only re-reads tokens when it restarts. |
+
+**DO THIS**
+
+1. In secret `scholars/revalidate-token`, set both `SCHOLARS_REVALIDATE_TOKEN` (new) and `SCHOLARS_REVALIDATE_TOKEN_PREVIOUS` (old).
+2. Redeploy or [restart the app](#restart-stop-start-and-scale) so it reads both.
+3. Switch the ETL callers to the new token.
+4. Confirm both tokens return 200.
+5. After at least 24 hours, remove the previous token and restart the app again.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [revalidate-token-rotation.md](./revalidate-token-rotation.md)
+
+### 17. An alarm fired but no Teams card arrived `Urgent`
+
+| | |
+|---|---|
+| **You'll see** | An alarm is in ALARM but no card reached Teams within 5 minutes, or an email from `sps-oncall-relay-errors-<env>`. |
+| **What it means** | The alert path (CloudWatch, SNS, the relay Lambda, Power Automate, Teams) is broken. Usual causes: the webhook URL in the secret is out of date, the Power Automate workflow was disabled or its owner left, or the alarm never actually reached ALARM. **Until this is fixed, you won't hear about other incidents.** |
+
+**DO THIS**
+
+1. Check whether the relay is losing alerts:
+
+   ```bash
+   aws cloudwatch describe-alarms --alarm-names "sps-oncall-relay-errors-$ENV" \
+     --query 'MetricAlarms[0].StateValue'
+   ```
+
+2. If it's ALARM, lost alerts are waiting in the SQS queue `sps-oncall-relay-dlq-<env>`; each message is one original alarm. Read them. The alarm clears when the queue is empty.
+3. Read the relay's recent log:
+
+   ```bash
+   aws logs tail "/aws/lambda/sps-oncall-relay-$ENV" --since 10m --follow
+   ```
+
+   - `delivered status:202`: the relay worked; the problem is on the Teams side.
+   - `upstream_error 4xx/5xx`: the Power Automate workflow rejected the post.
+
+4. Check the workflow's run history in Power Automate.
+5. Check the webhook URL secret:
+
+   ```bash
+   aws secretsmanager get-secret-value --secret-id "scholars/$ENV/oncall/teams-webhook-url"
+   ```
+
+6. Confirm the original alarm really reached ALARM. `INSUFFICIENT_DATA` doesn't notify anyone.
+7. Confirm the page topic has exactly one subscription, with `Protocol: lambda`:
+
+   ```bash
+   aws sns list-subscriptions-by-topic --topic-arn <ARN of sps-alarms-$ENV>
+   ```
+
+**DON'T**
+
+- Subscribe the workflow URL to SNS directly (`aws sns subscribe --protocol https`). Power Automate rejects SNS's format with HTTP 400; that is why the relay exists.
+
+**ESCALATE**
+
+Service owner. If the workflow owner has left WCM, the workflow must be recreated under a current account.
+
+**More detail:** [oncall.md](./oncall.md#diagnostics-test-alarm-fires-but-no-teams-message)
+
+### 18. Data loss or corruption: restore the database `P1`
+
+| | |
+|---|---|
+| **You'll see** | Data is wrong or missing in Aurora itself (not an app bug), or a Teams card (P2) from `sps-aws-backup-failure-<env>` saying a backup or cross-region copy job failed. |
+| **What it means** | This is outside what an app rollback can fix. Targets: lose no more than 24 hours of data (RPO) and recover within 4 hours (RTO). Both restore methods were tested on **2026-11-09** and passed: point-in-time restore and full row-count validation took 17 minutes; a DR-vault restore to a running database in us-west-2 took 12 minutes (passed on the AWS side; checking the data was deferred because there is no compute in us-west-2). |
+
+| Option | Restores to | Where |
+|---|---|---|
+| **A. Point-in-time restore (PITR)** | Any moment in the last 14 days | Same region, from Aurora's continuous backup |
+| **B. DR vault snapshot** | A daily snapshot (35 kept in prod, 14 in staging) | us-west-2, vault `sps-dr-backup-vault-<env>` |
+| Daily AWS Backup snapshot | A daily snapshot (35 days in prod, 14 in staging) | us-east-1, vault `sps-backup-vault-<env>` |
+
+**DO THIS**
+
+1. Decide the restore point: the last moment the data was known to be good.
+2. **Option A:** restore to a new cluster, then add a `db.serverless` writer instance (about 20 to 40 minutes in total):
+
+   ```bash
+   aws rds restore-db-cluster-to-point-in-time \
+     --source-db-cluster-identifier <cluster> \
+     --db-cluster-identifier <new-cluster> \
+     --use-latest-restorable-time  # or --restore-to-time <UTC timestamp>
+   ```
+
+3. **Option B:** follow Variant B in [restore-drill-runbook.md](./restore-drill-runbook.md).
+4. Validate row counts and cut over as described in [restore-drill-runbook.md](./restore-drill-runbook.md).
+
+Both backup vaults have an AWS Backup Vault Lock (governance mode, minimum retention equal to the plan's: 35 days in prod, 14 in staging), so recovery points can't be deleted early without first removing the lock.
+
+**Backup-failure alert.** A failed, aborted or expired AWS Backup job or cross-region copy job for the SPS cluster is caught by the EventBridge rule `sps-aws-backup-failure-<env>` (in `Sps-Etl-<env>`), which posts to `etl-failures-<env>` and arrives in Teams as a P2 failure card. Copy jobs report in the source region, so the one us-east-1 rule covers both vaults. Check the job in the AWS Backup console, fix the cause, and confirm the next daily job (05:00 UTC) and its copy succeed.
+
+**ESCALATE**
+
+Service owner.
+
+**More detail:** [restore-drill-runbook.md](./restore-drill-runbook.md)
+
+### 19. AWS us-east-1 regional outage `P1`
+
+| | |
+|---|---|
+| **You'll see** | AWS reports a us-east-1 regional outage affecting ECS, Aurora or the load balancers. |
+| **What it means** | There is no automatic failover. CloudFront keeps serving pages it has cached, and other requests get the branded maintenance page. Because SPS is read-mostly and no other WCM system depends on it, recovery can be **scheduled rather than rushed**. Only the database restore has been tested in us-west-2; rebuilding the rest of the stack there has not. |
+
+**DO THIS**
+
+1. Restore the database from the DR vault into a us-west-2 network (Option B in [Playbook 18](#18-data-loss-or-corruption-restore-the-database-p1)), applying the TLS parameter group and Serverless scaling settings.
+2. Point the CDK at the DR region (`region` in `cdk/lib/config.ts`) and deploy in this order: network, data (importing the restored cluster), app, ETL. Prod app and ETL images are already copied to us-west-2 ECR (registry replication, set up by `Sps-Data-prod`), and the curated-tables backup is copied to an S3 bucket there (`Sps-DrBackupVault-<env>`).
+3. Rebuild the search index ([Playbook 14](#14-rebuild-the-search-index-low)). OpenSearch isn't backed up; it's rebuilt from Aurora.
+4. Point CloudFront at the new load balancer (see the [origin backout](./network-security-topology.md#origin-backout-netscaler-vip-to-alb-1936)) and ask WCM networking to restore connectivity to the ETL source systems (Transit Gateway, NetScaler).
+
+**ESCALATE**
+
+Service owner, WCM networking, AWS Support.
+
+**More detail:** [restore-drill-runbook.md](./restore-drill-runbook.md) · [network-security-topology.md](./network-security-topology.md)
+
+## Part 3. Planned operations
+
+### How changes reach production
+
+There are three separate ways a change ships. Mixing them up is the most common operator mistake.
+
+| What changed | How it ships | Who starts it |
+|---|---|---|
+| App code (the container image) | GitHub Actions `deploy.yml` rolls out a new image | Automatic on push to `master` (staging). Manual dispatch plus approval (prod) |
+| Infrastructure, feature flags, environment variables (`cdk/lib/*`) | `cdk deploy Sps-App-<env>` | A person, never CI |
+| CloudFront (EdgeStack) | `cdk deploy Sps-Edge-<env>` on its own | A person. Deliberately kept out of `deploy.yml` |
+
+> [!WARNING]
+> **What a push to master does not do**
+>
+> It deploys **only the staging app image**. It doesn't update CloudFront, doesn't apply CDK or flag changes, and doesn't touch prod: prod stays behind master until someone dispatches a prod deploy. A flag set in `.env.local` but not wired into `app-stack.ts` ships silently **off**.
 
 #### Ship to staging (automatic)
 
-Merge to `master` → `deploy.yml` runs against staging. Pipeline order (load-bearing): build image → push ECR (app + ETL) → **pin task-def revisions to this deploy's image digests** (#2121) → sync `.next/static` → S3 → **db-bootstrap** → **verify-grants** → **prisma migrate deploy** → `ecs update-service --task-definition sps-app-<env>:<new-pinned-revision>` → wait services-stable. Steps 3–5 are **fail-closed gates** (non-zero exit halts; service is not rolled). Wall-clock with no migration: **~7–9 min**.
+Merging to `master` runs `deploy.yml` against staging. It takes about 7 to 9 minutes without a migration. The steps run in this order:
 
-#### Promote to prod (gated, manual)
+1. Build the image and push app and ETL images to ECR.
+2. Pin new task-definition revisions to this deploy's exact image digests.
+3. Sync `.next/static` to S3.
+4. Run db-bootstrap, then verify database grants, then run `prisma migrate deploy`. **These three are gates:** if any fails, the deploy stops and the service is not changed.
+5. Point the ECS service at the new pinned revision and wait until it is stable.
 
-```sh
-gh workflow run deploy.yml --ref master -f env=prod
-```
-Or UI: `Actions → Deploy → Run workflow`, branch **`master`**, env **`prod`** → run lands in *Awaiting approval* → required reviewer (`paulalbert1`) clicks *Approve and deploy*. Three controls gate prod: the `prod` GitHub Environment (master-only + required reviewer), the workflow's "refuse prod from non-master ref" step, and the OIDC sub-claim (`...:environment:prod`).
+#### Promote to production
 
-**Pre-deploy checklist (prod)** — all must hold:
-- `cd cdk && npx cdk diff --exclusively Sps-App-prod -c env=prod -c appImageDigest=$(../scripts/release/running-app-digest.sh prod)` is clean (the workflow does **not** run `cdk diff`).
-- Same commit SHA deployed to staging within last 72 h.
-- No un-previewed Prisma migrations in the diff.
-- On-call coverage for next 30 min.
-- Log groups `/aws/ecs/sps-app-prod`, `/aws/ecs/sps-migrate-prod` reachable without re-auth.
+**BEFORE YOU START: ALL MUST BE TRUE**
 
-#### Apply an infra / feature-flag change (manual cdk)
+- [ ] `cdk diff` is clean (the workflow does **not** run it for you):
 
-```sh
-cd cdk
-digest=$(../scripts/release/running-app-digest.sh <env>)   # keep the running image pinned (#2343)
-npx cdk diff   --exclusively Sps-App-<env> -c env=<env> -c appImageDigest="$digest"   # confirm delta is intended
-npx cdk deploy --exclusively Sps-App-<env> -c env=<env> -c appImageDigest="$digest"
-```
-Without `appImageDigest` the revision registers on mutable `:latest`; for prod the synth refuses (see `DEPLOY-RUNBOOK.md` § "Manual `cdk deploy Sps-App-<env>` keeps the digest pin").
-Adding a new flag to `app-stack.ts` also requires regenerating the snapshot or the `cdk` CI gate fails:
-```sh
-cd cdk && npm ci && npm test -- -u   # commit only the .snap
-```
+  ```bash
+  cd cdk && npx cdk diff --exclusively Sps-App-prod -c env=prod \
+    -c appImageDigest=$(../scripts/release/running-app-digest.sh prod)
+  ```
 
-**EdgeStack (CloudFront) — a bare `cdk deploy` STRIPS the WAF + cert + custom domain.** Always diff `--strict` with all context flags and confirm **no destroy** of WebACL/IPSet/Aliases/ViewerCertificate first:
-```sh
-npx cdk diff --strict --exclusively Sps-Edge-<env> \
-  -c env=<env> -c edgeCustomDomain=<domain> \
-  -c edgeCertArn=<acm-arn-us-east-1> \
-  -c edgeAllowedCidrs=<WCM-campus-CIDRs>   # actual ranges kept out of source (SSM /sps/<env>/edge/allowed-cidrs)
-# verify NO destroy/Removed, then:
-npx cdk deploy --require-approval never --exclusively Sps-Edge-<env> <same -c flags>
-```
-**Ordering** when a new cross-stack ref is added: deploy `Sps-App-<env>` **first**, then `Sps-Edge-<env>`.
+- [ ] The same commit has been on staging within the last 72 hours.
+- [ ] No Prisma migrations in the diff that haven't been tried on staging.
+- [ ] Someone is on call for the next 30 minutes.
+- [ ] You can open log groups `/aws/ecs/sps-app-prod` and `/aws/ecs/sps-migrate-prod` without signing in again.
 
-#### Scale / "start" / "stop" the running app
+**THEN**
 
-Cluster `sps-cluster-<env>`, service `sps-app-<env>`. Floor/ceiling: staging desired 1 / max 3 (512/1024); prod desired 2 / max 6 (1024/2048).
+1. Start the deploy (or in GitHub: Actions, Deploy, Run workflow, branch `master`, env `prod`):
 
-**Kill switch / "stop" (scale to zero)** — drains all tasks in ~30 s; CloudFront then returns `503`. **Killing prod is a P0 — notify active operators first.**
-```sh
-aws ecs update-service --cluster sps-cluster-<env> --service sps-app-<env> --desired-count 0
-```
-**Restore ("start")** — set desired-count back to env default (1 staging / 2 prod):
-```sh
-aws ecs update-service --cluster sps-cluster-<env> --service sps-app-<env> --desired-count <1|2>
-```
-**Restart in place (re-roll same image):**
-```sh
-aws ecs update-service --cluster sps-cluster-<env> --service sps-app-<env> --force-new-deployment
-```
+   ```bash
+   gh workflow run deploy.yml --ref master -f env=prod
+   ```
 
-**Autoscaling (#596):** attached only when `desiredCount > 0`. Two target-tracking policies — CPU **60%** util and ALB **1000 requests/target** on the public TG (scaleOut cooldown 60 s, scaleIn 300 s). *Both thresholds are conservative placeholders pending #554 load-test numbers.* **Rolling deploy:** `minHealthyPercent 100`, `maxHealthyPercent 200`, `healthCheckGracePeriod 120 s`, `circuitBreaker { rollback: true }` (auto-rolls back if new tasks fail health checks — no operator action).
+2. The run waits in **Awaiting approval**. The required reviewer (`paulalbert1`) clicks **Approve and deploy**.
+3. Watch until the service is stable, then check the dashboard and alarms ([health check](#routine-health-check)).
 
-#### Roll back (app code → previous task-def revision)
-
-**No migration rollback — fix forward** (migrations are additive-only). Roll back when, sustained ≥ 5 min: ALB target-group 5xx ≥ 1% **or** p95 ≥ 2× pre-deploy baseline.
-
-```bash
-aws ecs update-service \
-  --cluster <CLUSTER> \
-  --service <SERVICE> \
-  --task-definition <FAMILY>:<PREVIOUS_TASK_DEF_REVISION>
-```
-Find `<PREVIOUS_TASK_DEF_REVISION>` from `aws ecs describe-services → deployments[].taskDefinition` (the entry that was `PRIMARY` before this deploy) — a real, distinct, immutable revision since #2121 (each deploy pins the image by digest, not the mutable `:latest` tag). Expected ~**4–6 min** for a 4-task service. **Do NOT** roll back by re-triggering the workflow from a prior commit — it re-runs the migration step. Rollback does **not** cover: migration rollback (fix forward), Aurora PITR (§5), CloudFront invalidation (use `/api/revalidate`), OpenSearch alias swap.
-
-#### Revalidate webhook / cache-bust
-
-`POST /api/revalidate` (`Authorization: Bearer`) busts the ISR cache after an ETL run. Token in `scholars/revalidate-token` → `SCHOLARS_REVALIDATE_TOKEN`. The app caches accepted tokens for the process lifetime; **only a redeploy/cold-start re-reads them**. One-time CloudFront flush after deploying the HTML-TTL clamp:
-```sh
-aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/about" "/about/*"
-```
-
-### Local dev (developers only — not for ops on the running app)
-
-Prereqs: Node 26+, Docker (≥4 GB), **host** MariaDB 11 on `127.0.0.1:3306` (not Dockerized MySQL), npm 10+.
-
-```bash
-npm install
-cp .env.example .env.local
-npm run db:up          # OpenSearch via docker compose (MariaDB runs on the host)
-npm run db:check       # confirm DATABASE_URL target + grant sanity
-npm run db:migrate     # apply Prisma migrations (dev)
-npm run dev            # Next.js dev server (Turbopack) → http://localhost:3000
-# stop / reset:
-npm run db:down        # stop local docker containers (OpenSearch)
-npm run db:reset       # drop + recreate local DB and re-run migrations
-```
-Search index (local): `npm run search:index` (all three) or `:people` / `:publications` / `:funding`.
-ETL (local, reads prod sources over VPN): `npm run etl:daily` (chain head `etl:ed` must succeed first) / `npm run etl:revalidate`.
-
-> Deeper: [`./DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md), [`./rollback-runbook.md`](./rollback-runbook.md), [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md), [`../README.md`](../README.md).
-
-## 3. What to monitor
-
-### SLOs (measured at the public ALB, 28-day rolling)
-
-| SLO | Target | Error budget |
-|---|---|---|
-| **Availability** | 99.5% of target-side requests return 2xx/3xx (`(2XX+3XX)/RequestCount`; **4xx excluded**) | 3 h 22 min of failed-request time / window |
-| **Latency** | p99 of ALB `TargetResponseTime` < 1.5 s | alarmed at threshold breach |
-
-**Error-budget policy** (policy, *not* enforced): if > 50% of the 28-day budget burns in any rolling 7-day sub-window, prod deploys pause. Non-SLO "normal" brackets: CloudFront cache hit > 85% healthy / < 50% incident signal; Aurora connections alarm at 80.
-
-### Alarm catalog — 10 alarms/env (P1/P2 tiered) + 1 composite (`../cdk/lib/observability-stack.ts`)
-
-P1 → **page** topic `sps-alarms-${env}` (on-call Teams channel); P2 → **warn** topic `sps-warn-${env}` (separate "warn" channel, falls back to page until provisioned). Full detail: `SLOs.md § Alarm catalog` + `oncall.md § Severity tiers`.
-
-| Alarm | Tier | Threshold | Eval | Catches |
-|---|---|---|---|---|
-| `sps-alb-5xx-rate-${env}` | P1† | > 1% (gated by ≥ 5 absolute 5xx first) | 5m, 2/2 | Availability SLO burn |
-| `sps-alb-unhealthy-hosts-${env}` | P1† | `UnHealthyHostCount` > 0 | 1m, 5/5 | Zero healthy targets |
-| `sps-alb-latency-p99-${env}` | P1 | p99 > 1.5 s | 5m, 3/3 | Latency SLO burn |
-| `sps-ecs-task-shortfall-${env}` | P1† | desired − running > 0 | 1m, 5/5 | Tasks died, not replaced |
-| `sps-aurora-cpu-${env}` | P2 | > 80% | 5m, 3/3 | Hot query loop |
-| `sps-aurora-connections-${env}` | P2 | > 70 | 5m, 2/2 | Leaked connection pool (normal peak 60, each pool +15, cap ~90) |
-| `sps-db-pool-timeout-${env}` | P1 | `"pool timeout"` ≥ 1 | 5m, 1/1 | Cannot get a DB connection — users seeing 500s |
-| `sps-opensearch-jvm-pressure-${env}` | P2 | > 85% | 5m, 3/3 | GC pressure → query latency |
-| `sps-opensearch-cluster-red-${env}` | P1 | `ClusterStatus.red` > 0 | 1m, 1/1 | Shards unassigned |
-| `sps-edit-authz-denied-${env}` | P2 | `edit_authz_denied` > 10 | 5m, 2/2 | Edit-surface 403 burst / probing |
-| `sps-edge-origin-latency-p99-${env}` | P2 | CloudFront `OriginLatency` p99 > 20 s (us-east-1, `DistributionId` + `Region=Global`) | 5m, 2/3 | Origin responses nearing the 30 s default `OriginReadTimeout`, i.e. near-504s (#1936) |
-| `sps-app-unavailable-${env}` | P1 | composite: `ALARM(5xx) OR ALARM(unhealthy) OR ALARM(task-shortfall)` | — | The serving cascade — one page for the three †-marked symptoms |
-
-> **† No direct action** — these three feed the `sps-app-unavailable` composite (the single P1 page for a serving cascade); they still evaluate, so the dashboard and the composite rule see them. All ETL/reconciler alarms (`etl-failures-${env}`) are P2.
-> **Count note: code is authoritative — 10 alarms + 1 composite** (`cdk/lib/observability-stack.ts`; the cdk test asserts the exact inventory, so it cannot silently drift). The 10th is `sps-db-pool-timeout` (2026-07-13). An older note here claimed `SLOs.md` undercounted at "eight"; `SLOs.md` now lists the full set.
-
-A separate **relay watchdog** `sps-oncall-relay-errors-${env}` fires when an alert was actually lost: a message in the dead-letter queue `sps-oncall-relay-dlq-${env}` (all three delivery attempts failed) or any relay throttle, over 5 minutes. A single failed attempt that a retry later delivered does not fire it. It routes to the **notify** topic (email), not page — because the page topic flows through the relay Lambda itself — and stays in ALARM until the DLQ is emptied; each DLQ message is the original lost alert.
-
-### Alerting path
-
-| Topic | AWS name | Subscriber | What publishes |
-|---|---|---|---|
-| **Page** (P1) | `sps-alarms-${env}` | `sps-oncall-relay-${env}` Lambda → primary Teams channel | P1: `sps-app-unavailable` composite, latency-p99, cluster-red |
-| **Warn** (P2) | `sps-warn-${env}` | same relay Lambda → "warn" Teams channel (falls back to page until provisioned) | P2: Aurora CPU/connections, OpenSearch JVM, edit-403s + all ETL/reconciler (`etl-failures-${env}`) |
-| **Notify** | `sps-notify-${env}` | `paa2013@med.cornell.edu` (email) + relay-errors alarm | budget thresholds + cost-anomaly (prod) + relay-Lambda failure |
-
-The **B27 relay Lambda** (nodejs22.x, 256 MB) reads the Teams workflow URL from `scholars/${env}/oncall/teams-webhook-url` at cold start and POSTs an **Adaptive Card as `application/json`** — because Power Automate **rejects** SNS's direct `x-www-form-urlencoded` delivery with HTTP 400. **Never** `aws sns subscribe --protocol https` against the workflow URL — it's a permanent trap. **Off-hours gap (accepted):** Teams + email only — no SMS, no phone, no ack-tracking. The relay assigns **severity** by originating topic (`:sps-warn-` / `:etl-failures-` → P2) and posts P2 to a separate "warn" Teams channel via an **optional** `scholars/${env}/oncall/teams-webhook-url-warn` secret; until that secret exists, P2 falls back to the page channel (logged `"channel":"page"`). Activate it with **no redeploy** per `oncall.md § Severity tiers`.
-
-**Cost guardrails (prod-only, account-wide):** `sps-monthly-budget` $600/mo (notify at 50%/80% forecast, 100% actual); `sps-anomaly-monitor` $50/day → notify.
-
-### ETL freshness (all → `etl-failures-${env}` → relay → Teams)
-
-State machines `scholars-{nightly,weekly,annual,heartbeat}-${env}`; EventBridge rules `sps-etl-<cadence>-${env}`. Four signals:
-
-| Signal | Source | Catches |
-|---|---|---|
-| Per-step failure | `NotifyX` SnsPublish in each step's `Catch` | A specific step that threw |
-| Status alarm `sps-etl-<cadence>-status-${env}` | `ExecutionsFailed + ExecutionsTimedOut + ExecutionsAborted` > 0 (metric math) | Any execution that ended without succeeding — it threw, it hit the machine `timeout:` (no `Catch` runs, so nothing else notifies), or an operator stopped it |
-| Cadence alarm `sps-etl-<cadence>-cadence-${env}` | `ExecutionsStarted` < 1 over window (`treatMissingData: BREACHING`) | Schedule never fired |
-| Freshness heartbeat | `etl:freshness` exits non-zero → its status alarm | **Green-but-stale** |
-
-Schedules (UTC): nightly `cron(0 7 * * ? *)`, weekly `cron(0 8 ? * SUN *)`, annual `cron(0 9 1 7 ? *)`, heartbeat `cron(0 13 * * ? *)`. Cadence windows: nightly 30 h, weekly 7 d, heartbeat 30 h; **annual has no cadence alarm** (exceeds CloudWatch max window — caught by calendar). The heartbeat compares each source's last `status='success'` against its SLA (nightly 30 h, weekly 8 d, annual ~400 d) by reading the in-VPC `etl_run` table.
-
-> **Prod caveat:** prod cadences **and** the heartbeat ship **disabled** (`etlSchedulesEnabled=false`) until launch — both activate together. The `etl-failures → relay` subscription is always active.
+> [!IMPORTANT]
+> **How prod is protected**
 >
-> **Not freshness-tracked** (failures still caught, staleness not): `revalidate`, `reporter`, `nsf`, `gates`, `nih-profile`, `search:index`. `rows_processed = 0` is not yet flagged.
+> Three controls: the `prod` GitHub Environment (only `master`, plus a required reviewer), a workflow step that refuses prod from any other branch, and the AWS sign-in claim that only accepts the prod environment on `master`.
+>
+> Two traps: until the `prod` Environment has at least one required reviewer, a prod dispatch runs **without** approval. And `gh api -X PUT .../environments/<name>` replaces the whole configuration, so always resend `deployment_branch_policy` or you wipe the master-only rule.
 
-### CTSC roster sync
+#### Apply an infrastructure or feature-flag change
 
-Nightly step `CtscRoster` (`npm run etl:ctsc-roster`, [`etl/ctsc-roster/index.ts`](../etl/ctsc-roster/index.ts); added by #2780) mirrors the Clinical & Translational Science Center roster into the center with **slug `ctsc`** from the CTSC investigators-and-trainees feed (the same feed the ReCiter Institutional Client reads). It runs after `EdAdmins`, `tier: "continue"`: a failed night leaves last night's roster in place and does not abort the nightly.
+```bash
+cd cdk
+# keep the running image pinned
+digest=$(../scripts/release/running-app-digest.sh $ENV)
+# 1. check the change is what you expect
+npx cdk diff --exclusively Sps-App-$ENV -c env=$ENV -c appImageDigest="$digest"
+# 2. apply it
+npx cdk deploy --exclusively Sps-App-$ENV -c env=$ENV -c appImageDigest="$digest"
+```
 
-- **Roster only.** CTSC is not a publication source; the feed's PubMed IDs are never read.
-- **Identity.** A feed CWID is trusted only after an ED lookup confirms it. A blank or bad CWID falls back to an ED email lookup, accepted only when it names exactly one person whose ED surname agrees with the feed's.
-- **Writes.** A profiled, active scholar gets a `center_membership` row with `source='ctsc-feed'`. Anyone else gets an `external_member` (`cuid` = `ctsc:<feed PrimaryKey>`, `source='ctsc-feed'`) plus a `center_membership` row with `source='ctsc-feed-external'`, shown on the roster as an unlinked plain name with the feed's institution. Suppressed or deleted scholars are skipped. Only rows carrying those sources are ever deleted; a manual row for the same person is never overwritten.
-- **Feed CWID issues.** `ctsc_feed_issue` is full-replaced each run and shown as "Feed CWID issues" on the CTSC center's `/edit` page, one row per record CTSC should fix at the source (suggested CWID and the email it matched, where ED resolved one). A corrected record drops off after the next sync.
-- **Task def and secret.** Runs on its own task def `sps-etl-ctsc-<env>`, which carries `scholars/<env>/etl/ctsc` (JSON keys `CTSC_FEED_URL`, `CTSC_FEED_TOKEN`) plus the ED bind. The feed URL is an internal hostname: it lives only in the secret, never in the repo or a ticket.
-- **Freshness.** Source `CTSC-Roster`, cadence nightly (`lib/etl/freshness-policy.ts`). Its setup ack was dropped once both envs ran green (first sync 2026-09-24). Continue-tier failures are invisible to the status alarm, so freshness is this step's only net.
+- Without `appImageDigest` the new revision points at the moving `:latest` tag. For prod, the CDK refuses to build.
+- Adding a new flag to `app-stack.ts` also needs a refreshed snapshot, or the CDK test in CI fails: `cd cdk && npm ci && npm test -- -u`, then commit only the `.snap` file.
+- `cdk deploy` and secret changes are run by the AWS account holder with their own credentials, never automatically.
 
-**Rollout, in order, per env:**
+#### Change CloudFront (EdgeStack) safely
 
-1. In `/edit`, create the center with slug `ctsc` and add its leadership role vocabulary and assignments. Without it the step fails loudly (no silent no-op).
-2. `cdk deploy Sps-Secrets-<env>` creates the empty `scholars/<env>/etl/ctsc`; seed it out-of-band with `CTSC_FEED_URL` and `CTSC_FEED_TOKEN`. The new task def will not start without it; other steps are unaffected.
-3. Apply migration `20260924180000_ctsc_feed_issue`.
-4. `cdk deploy Sps-Etl-<env>` to add the step.
+> [!WARNING]
+> **A bare `cdk deploy` of EdgeStack strips the WAF, the certificate and the custom domain**
+>
+> Always run the diff with `--strict` and every context flag, and confirm it destroys **nothing**: no WebACL, IPSet, Aliases or ViewerCertificate. If a change adds a new reference between stacks, deploy `Sps-App-<env>` **first**, then `Sps-Edge-<env>`.
 
-**Guards** (all refuse to write; nothing is deleted on a refusal):
+```bash
+npx cdk diff --strict --exclusively Sps-Edge-$ENV \
+  -c env=$ENV -c edgeCustomDomain=<domain> \
+  -c edgeCertArn=<acm-arn-in-us-east-1> \
+  -c edgeAllowedCidrs=<WCM campus CIDRs, from SSM /sps/<env>/edge/allowed-cidrs>
+# confirm: no destroy or Removed lines. Then:
+npx cdk deploy --require-approval never --exclusively Sps-Edge-$ENV <same -c flags>
+```
 
-| Guard | Trips when | Usual cause |
-|---|---|---|
-| `ctsc:feed` | Feed record count drops more than 20% below the memberships held from last night (skipped on the first run) | Short or partial feed read |
-| `ctsc:linked` | Profiled-scholar matches drop more than 20% below last night's `ctsc-feed` rows | Degraded ED read (empty or partial result with no error) that would demote scholars to plain names |
-| `ctsc:prune` | More than 20% of held feed memberships would be removed | Upstream roster restructure or a bad read |
+### Restart, stop, start and scale
 
-Verify before bypassing: confirm with CTSC that the roster really shrank (or that ED is healthy, for `ctsc:linked`). If the drop is genuine, re-run once on a one-off `run-task` of `sps-etl-ctsc-<env>` with `ETL_GUARD_BYPASS="ctsc:feed"` (or `"ctsc:linked"`, `"ctsc:prune"`, comma-separated for several) set via `containerOverrides.environment`, never permanently, then confirm the next nightly is clean. See error row 13 in [Common error messages](#4-common-error-messages--fixes).
+Cluster `sps-cluster-<env>`, service `sps-app-<env>`. Normal size: prod 2 tasks (up to 6), staging 1 task (up to 3).
 
-### Roster prominence
+**Restart in place** (same image, fresh tasks; re-reads secrets):
 
-Nightly step `RosterProminenceNightly` (`npm run etl:roster-prominence`, [`etl/roster-prominence/index.ts`](../etl/roster-prominence/index.ts); #2596) writes `scholar.roster_prominence` and `scholar.roster_leadership_tier` from `computeProminence` in [`lib/api/prominence.ts`](../lib/api/prominence.ts). The formula and weights live only there; this step is the writer. It writes only changed rows, clears deleted scholars to NULL, and leaves `updated_at` alone. Freshness source `RosterProminence`, cadence nightly. `tier: "continue"`: a failed night keeps last night's values.
+```bash
+aws ecs update-service --cluster sps-cluster-$ENV \
+  --service sps-app-$ENV --force-new-deployment
+```
 
-**Tuning a weight.** The stored values move only when this step runs. ETL code ships on the ECR push, so the next nightly picks up a merged weight change. To see it sooner, run the step once on a one-off `run-task` of `sps-etl-<env>` with command `npm run etl:roster-prominence`. A weight tuned *down* trips `roster-prominence:score-drops` (and can trip `roster-prominence:grants`) by design; run that once with `ETL_GUARD_BYPASS="roster-prominence:score-drops,roster-prominence:grants"`.
+**Kill switch** (take the site offline):
 
-**Guards** (all refuse to write; nothing changes on a refusal; each skips the first run):
+```bash
+aws ecs update-service --cluster sps-cluster-$ENV \
+  --service sps-app-$ENV --desired-count 0
+```
 
-| Guard | Trips when | Usual cause |
-|---|---|---|
-| `roster-prominence:scholars` | Scholars scored drop more than 20% below the scored rows held | Short scholar read |
-| `roster-prominence:score-drops` | More than 10% of held scholars' scores fall by over 0.5 | Wiped `scored_pub_count`; also a weight tuned down |
-| `roster-prominence:leaders` | More than 20% of scholars held at a role-awarded tier (chair 4, center director 5, chief 6) get a worse tier or lose over 0.5 of score | Emptied `org_unit_role_assignment` |
-| `roster-prominence:grants` | Of scholars with a PI-grant score tonight plus those with none whose score fell over 0.3, the latter are more than 20% | Emptied `grant` table; also a weight tuned down |
-| `roster-prominence:ranked` | Scholars holding any tier below none (title-derived ranks included) drop more than 20% below the ranked rows held | Titles nulled by an ED run |
+Drains all tasks in about 30 seconds; CloudFront then returns 503. **On prod this is a P0: tell active operators first.**
 
-Verify the inputs before bypassing (`grant`, `org_unit_role_assignment`, `scholar.scored_pub_count` row counts against the previous night).
+**Start again** after the kill switch:
 
-### Where logs live
+```bash
+aws ecs update-service --cluster sps-cluster-$ENV \
+  --service sps-app-$ENV --desired-count 2  # 1 for staging
+```
 
-| Log group | Contents | Retention |
-|---|---|---|
-| `/aws/ecs/sps-app-${env}` | Main app — structured single-line JSON | prod 3 mo / staging 1 mo |
-| `/aws/ecs/sps-migrate-${env}` | `prisma migrate deploy` per deploy | prod 3 mo / staging 1 mo |
-| `/aws/ecs/sps-etl-${env}` | ETL task runs (confirm exact name in synth) | EtlStack default |
-| `/aws/lambda/sps-oncall-relay-${env}` | Relay Lambda (`oncall_relay` events) | 30 days |
-| CloudFront access logs → S3 `cf/${env}/` | Edge request logs | 90-day lifecycle |
+- **Autoscaling** is attached only when the desired count is above 0. It targets 60% CPU and 1,000 requests per task (scale out after 60 s, scale in after 300 s). Both numbers are placeholders until load testing (#554).
+- **Rolling deploys** keep 100% of tasks healthy, allow up to 200%, give new tasks 120 s to pass health checks, and roll back automatically if they fail.
 
-Key structured events to search: `profile_view` (`duration_ms`), `search_degraded`, `edit_authz_denied`, `saml_callback_failed`, `superuser_check_failed`, `edit_write_failed`, `oncall_relay`. Day-to-day dashboard: **`sps-reliability-${env}`** (ALB / CloudFront / ECS / Aurora). New Relic is the live APM; CloudWatch is the durable long-horizon mirror.
+### Roll back an app deploy
 
-### Periodic health check
+**When:** for 5 minutes or more, the ALB 5xx rate is at least 1%, **or** p95 latency is at least twice the pre-deploy baseline. It takes about 4 to 6 minutes.
 
-1. Open dashboard `sps-reliability-${env}`: ALB p99 < 1.5 s, 5xx flat, ECS running = desired, Aurora connections < 80, CF cache hit > 85%.
-2. No alarms in ALARM:
+1. Find the previous task-definition revision (the deployment that was `PRIMARY` before this one):
+
    ```bash
-   aws cloudwatch describe-alarms --alarm-name-prefix "sps-" --state-value ALARM --query 'MetricAlarms[].AlarmName' --output text
+   aws ecs describe-services --cluster sps-cluster-$ENV --services sps-app-$ENV \
+     --query 'services[0].deployments[].[status,taskDefinition,createdAt]' --output table
    ```
-3. Data freshness (query the oracle, don't grep logs):
-   ```sql
-   SELECT source, status, completed_at, rows_processed FROM etl_run ORDER BY started_at DESC LIMIT 20;
-   ```
-   Or confirm `sps-etl-heartbeat-status-${env}` is `OK`.
-4. Paging path alive — fire a non-customer-visible test alarm and confirm a Teams card (prod: prefer the connections alarm over the 5xx-rate alarm):
+
+2. Point the service back at it:
+
    ```bash
-   aws cloudwatch set-alarm-state --alarm-name "sps-aurora-connections-${ENV}" --state-value ALARM --state-reason "health-check dry-run"
+   aws ecs update-service --cluster sps-cluster-$ENV --service sps-app-$ENV \
+     --task-definition sps-app-$ENV:<previous-revision>
    ```
-5. No card? → run the §8/diagnostics sequence in the errors section below.
 
-> Deeper: [`./SLOs.md`](./SLOs.md), [`./oncall.md`](./oncall.md), [`./etl-monitoring.md`](./etl-monitoring.md), [`./logging-reference.md`](./logging-reference.md), [`./tracing.md`](./tracing.md), [`./performance-baseline.md`](./performance-baseline.md).
+3. Watch the dashboard until errors and latency return to normal.
 
-### Usage & performance analytics (on-demand, read-only)
+> [!WARNING]
+> **A rollback does not cover**
+>
+> - Database migrations: they are additive only, so fix forward.
+> - Data problems: use [Playbook 18](#18-data-loss-or-corruption-restore-the-database-p1).
+> - CloudFront: use an invalidation ([Clear caches](#clear-caches)).
+> - The OpenSearch index: rebuild it ([Playbook 14](#14-rebuild-the-search-index-low)).
+>
+> Never roll back by re-running the deploy workflow from an older commit: it re-runs migrations.
 
-Two operator surfaces beyond the live `sps-reliability-${env}` dashboard + alarms above. Neither is scheduled — you pull them when you want a number.
+### Clear caches
 
-**1. CloudFront usage + per-URL performance — Athena saved queries.** AnalyticsStack (`Sps-Analytics-${env}`) rolls CloudFront access logs into Glue/Athena. Console → **Athena** → workgroup selector (top-right) → **`sps-usage-${env}`** → **Saved queries** tab → pick one → **Run**. Needs console access to the SPS account (§5) with Athena/Glue/S3-read. CLI equivalent: `aws athena start-query-execution --work-group sps-usage-${env} --query-execution-context Database=sps_usage_${env} --query-string "<sql>"`.
-
-| Saved query (suffix `-${env}`) | Answers | Source |
-|---|---|---|
-| `sps-usage-daily-pageviews` · `-top-profiles` · `-search-terms` · `-referrers` · `-geo` · `-device` | Marketing: pageviews, top profiles, search terms, referrers, geo, device class | pre-aggregated `daily_usage` rollup (nightly Lambda) |
-| `sps-perf-slow-routes` | p50/p95/p99 `time_taken` + p95 TTFB by route (min 50 hits) | raw `cf_access_logs`, trailing 7 d |
-| `sps-perf-errors-by-route` | 4xx/5xx counts + 5xx rate by route | raw `cf_access_logs`, trailing 7 d |
-| `sps-perf-cache-hit` | edge cache-outcome mix (Hit/Miss/RefreshHit/Error share) | raw `cf_access_logs`, trailing 7 d |
-
-⚠️ The three `sps-perf-*` queries read the **raw** `cf_access_logs` table (client IPs, unredacted paths, query strings). The workgroup is **operator-restricted — do not broaden its grants**. The 7-day bound + the workgroup's bytes-scanned cap keep scan cost and PII exposure bounded; the marketing rollup holds aggregates only (ADR-008 § PII).
-
-**2. In-app Usage dashboard — `/edit/usage`.** The viewer-friendly, no-AWS-console view of the usage aggregates above: pageviews-by-day (SVG bar graph), top profiles (linked to the live page), search terms, referrers, geo, device — over a chosen range (header **Range** dropdown: last 7 / 30 / 90 days, since launch, or custom — a custom range is floored at 2026-05-22, the first day `daily_usage` can hold; default 30, carried in `?range=`), read live from the `daily_usage` rollup and cached ~daily per range. Sign in (SAML) → **`https://scholars.weill.cornell.edu/edit/usage`**; also the **Usage** tab in the admin sub-nav. **Audience: a superuser OR any unit admin (owner/curator)** — global (site-wide) view for all (aggregates carry no PII; the per-URL `sps-perf-*` queries stay Athena/operator-only). Fails soft to "unavailable" on any Athena error. Two operator notes:
-- **Deploy shape:** the app queries Athena at read time, so this needs a `cdk deploy` of **both** `Sps-App-${env}` (the `SPS_USAGE_*` env vars) and `Sps-Analytics-${env}` (the workgroup-scoped Athena/Glue/S3 grant on the app task role). A CD image roll alone will render it "unavailable".
-- **Profile counts** are keyed on the **root vanity slug** (`app/(public)/[slug]`, e.g. `/carl-f-nathan`), not a `/scholar/<cwid>` path (which does not exist). The `pageviews`/`profile` rollup arms exclude a reserved-route list in `cdk/lambda/cf-usage-rollup/queries.ts` — add a new top-level site section there if profile counts ever start absorbing it, then backfill (`aws lambda invoke --function-name sps-cf-usage-rollup-${env} --payload '{"backfillFrom":"YYYY-MM-DD","backfillTo":"YYYY-MM-DD"}'`).
-- **History is durable; raw logs are not.** `daily_usage` partitions live in the analytics bucket (no expiry), so the range dropdown can read back to the first rollup. The raw CloudFront logs they are built from expire after **90 days** (EdgeStack), and a re-roll purges the day's partition first, so the Lambda **skips any day older than 85 days** (`MAX_REROLL_AGE_DAYS`, logs `outcome: skipped_raw_logs_expired`) rather than replace good history with an empty re-roll. A reserved-route fix therefore only corrects the last ~85 days. To fill days the nightly run missed (while their raw logs still exist), run `npx tsx scripts/backfills/2026-09-25-usage-rollup-history.ts --env=${env} --dry-run`, then without `--dry-run`: it rolls only days that have **no** partition, never overwrites one.
-
-**3. Fleet-wide edit activity — `/edit/activity`.** Superuser-only page: edits/day, top editors, most-edited entities, and recent activity over the last 30 days across **all** profile entities (reads `scholars_audit.manual_edit_audit`). Sign in (SAML) → **`https://scholars.weill.cornell.edu/edit/activity`** (staging: same path on the staging host). **Not** linked in the admin nav — superuser URL only. Renders "unavailable" if the read role (`app_ro`) lacks SELECT on the audit DB — the same grant the per-entity `/edit/scholar/[cwid]/history` and `/edit/center/[code]/history` pages need, so if those work this does too. The per-entity history pages are the edit-scoped companion (any editor of that entity, not just superusers).
-
-## 4. Common error messages & fixes
-
-`${env}` / `$ENV` = `staging` or `prod`. This is the section operators use most.
-
-| # | Symptom | Likely cause | Fix / where to look |
-|---|---|---|---|
-| 1 | Page shows old content after an edit/ETL run; or fixed page still looks broken | **Check the route's rendering mode FIRST — a stale profile is not a cache problem.** Profile pages (`/{slug}`, canonical since #671) are `force-dynamic`: they re-render from the DB every request and are **not** ISR- or edge-cached, so a stale profile means stale *data*, not a stale cache — go look at the ETL, not CloudFront. ISR applies to departments/centers (`revalidate=21600`, 6 h) and topics (`revalidate=7200`, 2 h); the CloudFront default behavior is clamped to **60 s**; `/_next/static/*` up to 1 y | Surgical bust = **`POST /api/revalidate`** (bearer), **not** `aws cloudfront create-invalidation` (emergencies only). ⚠ The allow-list takes `/scholars/{slug}` — the **legacy redirect**, not the canonical `/{slug}` — so a "profile revalidation" is a no-op on a redirect. It is not what fixes a stale profile; re-running the source ETL is. Reindex does **not** yet POST revalidate (#479/#353) → data can lag by the TTL. → [`./cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) |
-| 2 | A profile section is stale (renders, old data, not blank) | That section's **ETL source** stopped refreshing — SPS serves last good snapshot | Check last good run: `SELECT source,status,completed_at,rows_processed,error_message FROM etl_run WHERE source='<Source>' ORDER BY started_at DESC LIMIT 5;` then re-run per-source `npm run etl:<ed\|reciter\|infoed\|coi\|asms\|jenzabar\|dynamodb\|spotlight>` (idempotent; `etl:ed` head first). "Topics updating" placeholder is benign (30-min `reciter→dynamodb` window). → [`./dependency-outage-matrix.md`](./dependency-outage-matrix.md), [`./data-population-runbook.md`](./data-population-runbook.md) |
-| 3 | Teams card naming an ETL alarm (`sps-etl-*-status/-cadence/-heartbeat-status-${env}`) | Step threw / schedule never ran / green-but-stale | Read card → Step Functions console `scholars-<cadence>-${env}` newest execution (red state names step + cause) → log group `/aws/ecs/sps-etl-${env}` → confirm impact via `etl_run`. Common: WCM source unreachable (not fixable from SPS alone), EventBridge rule disabled, no-op source, `etl-guard` volume/soft-delete trip (→ #13). Resume mid-chain: `aws stepfunctions start-execution … --input '{"startFrom":"<StepId>"}'`. **Prod schedules are ENABLED** (since 2026-07-07) — a missing run is a fault, not the pre-launch default. → [`./etl-monitoring.md`](./etl-monitoring.md) |
-| 4 | Search returns nothing / too few people (`covid19`→9 but `covid-19`→1,425; `tylenol`→0) | (A) alphanumeric tokenization #725 fuses `covid19`; (B) MeSH concept resolution is ranking-only #726 (never admits a doc) | A = `alnum_delimiter` analyzer **+ reindex together** (glued terms regress until rebuilt). B = admit on `publicationMeshUi` when lexical sparse. Reproduce: `curl -s -G localhost:3002/api/search --data-urlencode q=<term> --data-urlencode type=people` → `.total`. Then reindex (#9 below). → [`./search-recall.md`](./search-recall.md) |
-| 5 | Retracted paper showing (or a paper vanished) | The retraction **notice** is hidden; the **original article** keeps `Journal Article` type until restamped | Nightly `PubMedRetractions` step stamps the retracted PMID set → `publicationType='Retraction'` (then #63 hides), then reindexes. **Auto-runs in prod** (rules ENABLED since 2026-07-07) — manual `npm run etl:pubmed-retractions` **+ reindex** is normally a no-op. ⚠ If it stopped stamping, check the rule state first (`aws events list-rules`). Prod was drifted for ~4 weeks (`etlSchedulesEnabled:false` in config, ENABLED live), so a `cdk deploy Sps-Etl-prod` whose changeset touched a rule could silently disable the nightly (#1512). Config is now `true`; the drift closes on the next `Sps-Etl-prod` deploy, and until that deploy runs the hazard is still live. → [`./retracted-publications.md`](./retracted-publications.md) |
-| 6 | `sps-alb-5xx-rate-${env}` fired / "Something went wrong" | CloudFront/Aurora outage (cache-cold pages 5xx) or a render throw; 5xx is never edge-cached | Check Edge+App dashboards + `sps-alb-5xx-rate`/`sps-aurora-*`. Roll back app code if 5xx ≥ 1% **or** p95 ≥ 2× baseline sustained 5 min (command in §2 Roll back). **Do NOT roll back migrations — fix forward.** → [`./rollback-runbook.md`](./rollback-runbook.md), [`./error-handling-spec.md`](./error-handling-spec.md), [`./dependency-outage-matrix.md`](./dependency-outage-matrix.md) |
-| 7 | Staff can't start `/edit`; callback errors `idp_status_error`/`invalid_saml_response`/`no_cwid`; `superuser_check_failed` | SAML IdP or Enterprise Directory (LDAPS, **fail-closed**) unreachable; or IdP cert rotated / wrong `SAML_IDP_CERT`; `no_cwid` = IdP not releasing `CWID`; `Responder` = `SAML_SP_ENTITY_ID` mismatch | **⚠️ Hard deadline 2026-08-19** (see §6): trust **both** certs in `SAML_IDP_CERT` (concat PEM, secret `scholars/<env>/saml/idp-cert`). Rollover = env-var change + ECS rolling deploy, no code. Diagnose via `saml_callback_failed`/`superuser_check_failed` events; validate via staging smoke (non-prod uses prod IdP). → [`./saml-sp.md`](./saml-sp.md) |
-| 8 | Alarm fired but no Teams card within 5 min | Break in SNS → relay Lambda → Power Automate (stale URL secret, disabled/offboarded workflow, or alarm never reached ALARM) | (1) `aws cloudwatch describe-alarms --alarm-names "sps-oncall-relay-errors-${ENV}" --query 'MetricAlarms[0].StateValue'` — ALARM = Lambda broken (email is the page). (2) `aws logs tail "/aws/lambda/sps-oncall-relay-${ENV}" --since 10m --follow` for `oncall_relay` (`delivered status:202` = Teams-side; `upstream_error 4xx/5xx` = workflow rejected). (3) Power Automate Run history. (4) `aws secretsmanager get-secret-value --secret-id "scholars/${ENV}/oncall/teams-webhook-url"`. (5) verify alarm hit ALARM (INSUFFICIENT_DATA = no-op). (6) `aws sns list-subscriptions-by-topic` — exactly one `Protocol: lambda`. **Never** `aws sns subscribe --protocol https`. → [`./oncall.md`](./oncall.md) |
-| 9 | Search stale/missing/wrong after a mapping/analyzer change or data load | Index needs an out-of-band rebuild (atomic alias swap, so a failed rebuild never blanks the live index) | In-VPC run-task — **resolve `$ETL_SUBNETS`/`$ETL_SG` live per [`data-population-runbook.md`](./data-population-runbook.md) §3** (never hardcode: the VPC cutover moved both and stale ids launch into the dead VPC → timeout): `aws ecs run-task --cluster sps-cluster-$ENV --task-definition sps-etl-$ENV --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[$ETL_SUBNETS],securityGroups=[$ETL_SG],assignPublicIp=DISABLED}" --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","search:index"]}]}'` — watch `/aws/ecs/sps-etl-$ENV`. |
-| 10 | Home "Selected research" empty/hidden/wrong authors/404 links | Spotlight ETL no-op / floor / author join / wrong link shape | `EtlRun` most-recent `Spotlight` row: `status="success"` & `rows_processed>0` (`0` = sha256-unchanged short-circuit). `SELECT COUNT(*) FROM spotlight` (≤25). Floor `SPOTLIGHT_FLOOR=6` hides if < 6 survive. Authors render only `cwid IS NOT NULL`. Browse links must be `/topics/{parent}?subtopic={sub}`. Re-publish upstream in ReciterAI (`python3 backfill_spotlight.py --publish`) then `npm run etl:spotlight`. → [`./spotlight-runbook.md`](./spotlight-runbook.md) |
-| 11 | DB data loss / corruption (not app code) | Outside app-rollback scope — Aurora PITR | Targets **RPO ≤ 24 h, RTO ≤ 4 h**. Variant A — PITR `aws rds restore-db-cluster-to-point-in-time … --use-latest-restorable-time` then add a `db.serverless` writer (~20–40 min). Variant B — snapshot restore from DR vault `sps-dr-backup-vault-${env}` (us-west-2). → [`./restore-drill-runbook.md`](./restore-drill-runbook.md) |
-| 12 | `POST /api/revalidate` returns 401 / 500 | 401 = no/wrong token or non-Bearer scheme; 500 `server misconfigured` = `SCHOLARS_REVALIDATE_TOKEN` unset; mid-rotation 401 = old process cached old token | During rotation stage **both** `SCHOLARS_REVALIDATE_TOKEN` (new) + `SCHOLARS_REVALIDATE_TOKEN_PREVIOUS` (old) in `scholars/revalidate-token`, redeploy app to re-read, roll ETL callers, verify both 200, drop previous after ≥24 h + redeploy. → [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md) |
-| 13 | ETL step fails `[etl-guard:<name>] … refusing to proceed` (e.g. `ed:scholar-soft-delete` with a large departed count) | Fail-safe tripped: the source returned far fewer records than the DB holds. Either the upstream shrank/restructured (e.g. ED moved students to `ou=students,ou=sors`, 2026-06) **or** a genuine offboarding backlog accumulated while nightlies were failing | **Verify before bypassing.** Reproduce the departed set read-only and spot-check a sample upstream (ED case: all LDAP `faculty:expired`, none active ⇒ genuine). Genuine ⇒ one-time rerun with `ETL_GUARD_BYPASS="<guard-name>"` (comma-list or `"all"`; set via `containerOverrides.environment` on a one-off `run-task` — never permanently), then confirm the next nightly is clean. Not genuine ⇒ fix the fetch, don't bypass (see PR #1456 for the ED repoint pattern). |
-| 14 | `sps-db-pool-timeout-${env}` fired, or any route 500s with `pool timeout: failed to retrieve a connection from pool` | Aurora is at its connection cap (~90). Almost always a **leaked Prisma pool**: a one-off `run-task` probe/eval that imported `@/lib/db` (transitively, any `@/lib/api/*`), never called `await db.$disconnect()`, so Node never exited — it prints its output in seconds then sits in `RUNNING` holding **15** connections. Normal peak is 60; each leak is +15. | `active=0 idle=0` in the log line means the pool could not open a **single** connection — the ceiling is the **cluster**, so **recycling the app will not help**. `aws ecs list-tasks --cluster sps-cluster-$ENV --family sps-etl-$ENV --desired-status RUNNING` → confirm each is a finished probe (still RUNNING long after printing results) and not a live ETL/parallel-session eval → `aws ecs stop-task` (read-only probes are data-safe) → watch `DatabaseConnections` drain (90 → baseline in ~3 min; the app self-heals). ⚠ staging has **two** Aurora clusters and the idle one reads 0 — query the `...auroraclusterfromsnapshot...` id. Prevention = `$disconnect` **and** a `timeout 600` wrapper on the container command. → [`./performance-baseline.md`](./performance-baseline.md) |
-| 15 | `sps-edge-origin-down-${env}` fired (via `sps-app-unavailable-${env}`) while the ALB and ECS alarms are quiet | The NetScaler VIP, the only dynamic origin, stopped forwarding. It has no failover (#1936) | Check the VIP, the ALB :443 listener's X-Origin-Verify rule and the origin cert first. If the VIP stays down, run the manual [origin backout](./network-security-topology.md#origin-backout-netscaler-vip-to-alb-1936): clear `edgeOriginHostname` in `config.ts` and deploy `Sps-Edge-${env}` alone. It lands `http-only` on ALB :80. Never repoint the console origin to the ALB DNS name with `https-only` (cert mismatch, 502). Not yet rehearsed on staging |
-| 16 | `sps-edge-origin-latency-p99-${env}` (warn) fired | CloudFront origin round-trip p99 > 20s: requests are close to the 30s default `OriginReadTimeout`, where they become CloudFront 504s that the app logs as successes | Compare the reliability dashboard's CloudFront origin latency panel with ALB latency. ALB fast = the NetScaler hop; ALB slow = a slow route (Bedrock-backed API routes first). Do **not** raise `OriginReadTimeout` until the network team confirms the NetScaler timeout (#1936) |
-
-**ETL manual `run-task` — pick the family by credential group (#1508).** The single ETL task def was split four ways so no step carries a credential it does not need (LDAP bind pw / WCM-DB creds / ReCiter admin key). A one-off `run-task` (rows #2/#9/#13) MUST target the family whose secrets the step reads, or ECS fails it at task-start with a missing key. Rule: LDAP read → `-ldap`; a WCM DB → `-sources`; the ReCiter REST API → `-reciter-api`; everything else (public API / IAM / DB-only) → base. Authoritative mapping is `LDAP_SCRIPTS` / `SOURCES_SCRIPTS` in `cdk/lib/etl-stack.ts`:
-- `sps-etl-$ENV` (base) — `search:index`, `backup:curated`, `etl:dynamodb`, `etl:identity`, `etl:spotlight`, `etl:hierarchy`, `etl:scholar-tool`, `etl:mesh-*`, `etl:pubmed-retractions`, `etl:reporter-grants`, `etl:nsf/gates/nih-profile/pops`, `etl:news`, `etl:technologies`, `etl:revalidate/integrity/completeness/headshot/freshness`, `etl:coi-gap`, `etl:ed:import-email-visibility`.
-- `sps-etl-sources-$ENV` — `etl:reciter`, `etl:reciter:coi-statements`, `etl:asms`, `etl:infoed`, `etl:coi`, `etl:jenzabar`, `etl:reporter`, `etl:clinical-trials`.
-- `sps-etl-ldap-$ENV` — `etl:ed`, `etl:ed:export-email-visibility` (any `etl:ed:*` that binds LDAP).
-- `sps-etl-reciter-api-$ENV` — `etl:reciter-refresh` only (holds the #746 ReCiter admin key; was previously run on `sps-etl-$ENV`).
-
-**Quick alarm → entry index:** 5xx-rate / unhealthy-hosts / ecs-task-shortfall → #6; latency-p99 → #1/#6; aurora-cpu / aurora-connections → #2/#6/#14; db-pool-timeout → #14; opensearch-red / jvm-pressure → #4/#9; etl-*-status/-cadence/-heartbeat → #3; oncall-relay-errors → #8; budget/anomaly (notify, email) = cost guardrail, not a service incident.
-
-## 5. Host, contacts & access
-
-### Operator / on-call & escalation
-
-- **Current named operator:** `paa2013@med.cornell.edu` (notify-topic email + budget/cost recipient) / GitHub `paulalbert1` (prod deploy required reviewer). **⚠️ Post-launch ownership is an explicit open question** (likely owner: ITS management) — until resolved, on-call defaults to this single operator.
-- **WCM ops model:** no automated paging (no PagerDuty/Opsgenie/SMS/ack-tracking). Pattern = **ServiceNow** (tickets + CI escalation groups) + **Teams channels** (chat signal) + **phone calls from Ops** (manual MI escalation). SPS today (B23 phase 1): AWS alarms → Teams (relay Lambda) + email; **off-hours wake-up is an accepted gap**. Future (B23 follow-on, unsized): register SPS as a ServiceNow CI in an escalation group.
-- **Workflow-owner fragility:** the Teams Power Automate workflow is tied to its creator's Microsoft account — if they offboard, alerting silently stops. Quarterly-review check: "Is the Workflow URL holder still at WCM and still owns the workflow?"
-
-### Who can deploy
-
-- Push to `master` auto-deploys **staging only**; prod is `workflow_dispatch`-only. Two-belt prod gate: OIDC sub-claim (prod admits only `…:ref:refs/heads/master`) **and** the `prod` GitHub Environment required reviewer (`paulalbert1`).
-- **Setup caveat:** until the `prod` Environment has ≥1 required reviewer, a `workflow_dispatch env=prod` runs **without** approval (OIDC master-pin still holds).
-- **⚠️ Footgun:** `gh api -X PUT .../environments/<name>` **full-replaces** config — always re-send `deployment_branch_policy` or it wipes the master-only policy.
-- `cdk deploy` / `cdk diff` / secret provisioning are owned by the account holder, run with their AWS creds; **`cdk deploy` is never run autonomously**.
-
-### Who can edit what (RBAC — 3 independent layers; full detail in [`./access-control-rbac.md`](./access-control-rbac.md))
-
-**Layer 1 — Application RBAC** (public read = no login; editing = WCM SSO via SAML):
-
-| Role | Source of truth | Can do |
-|---|---|---|
-| **Self** | `session.cwid == target.cwid` | Edit own overview; hide own scholar/grant/education/appointment; revoke own suppression |
-| **Superuser** | ED group `ITS:Library:Scholars/superuser-role` (LDAPS, re-checked every `/edit/*` GET + POST, never session-cached) | Everything — any field incl. `slug`, whole-pub takedown, grant/revoke unit roles, view suppressed data |
-| **Unit Owner** | `unit_admin` `role=owner` | Edit unit + manage access in owned subtree; proxy-edit in-scope scholars |
-| **Unit Curator** | `unit_admin` `role=curator` | Edit the unit only; cannot delegate |
-| **Proxy editor** | `scholar_proxy` row | Self-edit scope on the one granted scholar |
-
-Properties: **fail-closed** (a directory error denies; an ED outage blocks all editing but never affects public reads); dept grants cascade to divisions but not upward; roster membership never confers edit rights. **Break-glass:** no SSO-bypass exists (a security property) — emergency superuser = add the CWID to the ED group; kill switch = scale service to 0 (P0 in prod).
-
-**Layer 2 — AWS IAM:** `sps-task-exec-${env}` (pulls image, injects enumerated secret ARNs) vs `sps-task-${env}` (running app — **zero attached secret perms**). Pipeline: `sps-deploy-${env}` (OIDC), `sps-migrate-${env}`, `sps-db-bootstrap`.
-
-**Layer 3 — Database roles:** `scholars/db/app-ro` (read-only), `app-rw` (read/write + INSERT-only on `scholars_audit.manual_edit_audit`), `etl` (ETL tables), `bootstrap`/`sps_bootstrap` (create audit schema + grant only).
-
-### AWS account / secrets context
-
-- Region `us-east-1`, DR `us-west-2`. Account IDs are passed at deploy time as CDK context (`-c <envName>Account=<id>`) per ADR-008's "never commit account IDs" rule; in practice the single-account deviation's ID below also appears in several committed docs and `cdk/lib/*` — confirm the live value with `aws sts get-caller-identity`, don't trust a hardcoded one.
-- **⚠️ Account model:** ADR-008 says separate accounts; `PRODUCTION_ADDENDUM.md` documents a single-account deviation, **`665083158573`**. **Confirm live with `aws sts get-caller-identity` per env — do not assume separate accounts.**
-- Secrets (Secrets Manager, referenced by ARN under `secrets:`, never `environment:`): `scholars/db/{app-rw,app-ro,etl,bootstrap}`, `scholars/opensearch/{app,etl}`, `scholars/revalidate-token`, `scholars/etl/{source}`, `scholars/<env>/saml/idp-cert`, `scholars/${env}/oncall/teams-webhook-url`, `scholars/${env}/edge/origin-shared-secret`. **DB creds rotate automatically** (RDS rotation Lambda); the account holder owns quarterly calendar rotation of OpenSearch, `revalidate-token`, and per-source ETL secrets.
-
-### Dated deadlines (do not miss)
-
-| Deadline | What |
+| You want to… | Do this |
 |---|---|
-| **2026-08-05** | Reminder: verify `SAML_IDP_CERT` carries **both** certs and IdP still signs with expected cert |
-| **2026-08-19** | Active WCM IdP signing cert (CN `login-proxy.weill.cornell.edu`, issued 2016-08-19) **expires** — every SSO login breaks unless both certs are trusted beforehand. Successor (2026-03-27→2036-03-27) already in IdP metadata |
-| **2026-08-26** | Reminder: drop the expired cert from `SAML_IDP_CERT` |
-| Within **3 days** of an Observability deploy | Confirm the notify-topic email subscription from `paa2013@med.cornell.edu`'s inbox or it expires |
-| **2036-03-27** | Successor IdP cert expiry (next rollover horizon) |
+| Refresh one profile everywhere | Make any `/edit` change to it, or `aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/<slug>"` |
+| Refresh every profile | Happens automatically after the nightly and weekly ETL (origin plus edge). To force it, revalidate `/(public)/[slug]` and invalidate `/*` |
+| Refresh a department, center, topic, home, about, browse or sitemap page at the origin | `POST /api/revalidate?path=<path>` with `Authorization: Bearer <token>` (token in secret `scholars/revalidate-token`). Served on the internal load balancer |
+| Clear the CloudFront edge | `aws cloudfront create-invalidation`. Use sparingly; `/api/revalidate` never clears the edge |
 
-**Governance gaps:** no formal access-recertification cadence (superuser group / `unit_admin`); no standing emergency-superuser account (elevation depends on ED reachability); post-launch operations ownership unresolved.
+### Run a one-off ETL task
 
-## 6. Where to find more (doc index)
+ETL scripts run in five task-definition families, split so each holds only the credentials it needs. **Pick the family that has the secrets your script reads**, or the task fails at start with a missing key. The authoritative mapping is `LDAP_SCRIPTS`, `SOURCES_SCRIPTS`, `RECITER_API_SCRIPTS` and `CTSC_SCRIPTS` in [`cdk/lib/etl-stack.ts`](../cdk/lib/etl-stack.ts).
 
-[`./DOCUMENTATION-REGISTRY.md`](./DOCUMENTATION-REGISTRY.md) is the **master index**, keyed by the question an operator would ask. The highest-value docs:
+| Family | Use when the script… | Scripts |
+|---|---|---|
+| `sps-etl-<env>` (base) | Uses public APIs, AWS or only the SPS database | `search:index`, `backup:curated`, `etl:dynamodb`, `etl:identity`, `etl:spotlight`, `etl:hierarchy`, `etl:scholar-tool`, `etl:mesh-*`, `etl:pubmed-retractions`, `etl:reporter-grants`, `etl:nsf`, `etl:gates`, `etl:nih-profile`, `etl:pops`, `etl:news`, `etl:technologies`, `etl:revalidate`, `etl:integrity`, `etl:completeness`, `etl:headshot`, `etl:freshness`, `etl:coi-gap`, `etl:roster-prominence`, `etl:ed:import-email-visibility` |
+| `sps-etl-sources-<env>` | Reads a WCM database | `etl:reciter`, `etl:reciter:coi-statements`, `etl:orcid-candidates`, `etl:orcid-evidence`, `etl:fundable-work`, `etl:scholar-active-export`, `etl:asms`, `etl:infoed`, `etl:infoed-biosketch`, `etl:coi`, `etl:frt`, `etl:jenzabar`, `etl:reporter`, `etl:clinical-trials`, `etl:data-sharing`, `etl:journal-impact-factor` |
+| `sps-etl-ldap-<env>` | Reads the Enterprise Directory | `etl:ed`, `etl:ed:admins`, `etl:ed:export-email-visibility` (any `etl:ed:*` that binds LDAP) |
+| `sps-etl-reciter-api-<env>` | Calls the ReCiter admin API | `etl:reciter-refresh` (run by hand) and the nightly `etl:orcid-push` |
+| `sps-etl-ctsc-<env>` | Reads the CTSC feed | `etl:ctsc-roster` |
+
+Use the run-task pattern in [Playbook 14](#14-rebuild-the-search-index-low), changing `--task-definition` and the command. Add environment overrides (such as `ETL_GUARD_BYPASS`) in the same `containerOverrides` entry. Wrap probes in `timeout 600` and make sure they disconnect from the database ([Playbook 4](#4-database-connections-exhausted-p1-p2)).
+
+### Routine health check
+
+Suggested weekly, and after every prod deploy.
+
+1. Open the `sps-reliability-<env>` dashboard. Healthy: ALB p99 under 1.5 s, 5xx flat, ECS running equals desired, Aurora connections under 70, CloudFront cache hit rate over 85%.
+2. No alarms firing:
+
+   ```bash
+   aws cloudwatch describe-alarms --alarm-name-prefix "sps-" --state-value ALARM \
+     --query 'MetricAlarms[].AlarmName' --output text
+   ```
+
+3. Data is fresh (or confirm `sps-etl-heartbeat-status-<env>` is OK):
+
+   ```sql
+   SELECT source, status, completed_at, rows_processed
+   FROM etl_run ORDER BY started_at DESC LIMIT 20;
+   ```
+
+4. Alerts still reach Teams. Fire a test alarm that users can't see (on prod, use the connections alarm, not the 5xx alarm) and confirm a card arrives:
+
+   ```bash
+   aws cloudwatch set-alarm-state --alarm-name "sps-aurora-connections-$ENV" \
+     --state-value ALARM --state-reason "health-check dry-run"
+   ```
+
+5. No card? Go to [Playbook 17](#17-an-alarm-fired-but-no-teams-card-arrived-urgent).
+
+### Recurring tasks and dates
+
+| When | Task |
+|---|---|
+| Quarterly | Rotate the OpenSearch, revalidate-token and per-source ETL secrets ([Playbook 16](#16-apirevalidate-returns-401-or-500-p2) shows the token pattern). Database passwords rotate automatically |
+| Quarterly | Confirm the Teams Power Automate workflow owner is still at WCM |
+| Quarterly | Review this runbook and update **Last updated**. Next due 2027-02-09 |
+| Within 3 days of an Observability deploy | Confirm the notify-topic email subscription from paa2013@med.cornell.edu's inbox, or it expires |
+| After any topology change | Regenerate the architecture diagrams: `npm run diagrams`, then commit the SVGs and `index.html` |
+| When `sps-edge-origin-cert-expiring` fires (30 days out) | Ask WCM networking to rotate the NetScaler origin certificate |
+| 2036-03-27 | The current IdP signing certificate expires: next SAML rollover (see [saml-sp.md](./saml-sp.md)) |
+
+## Part 4. Monitoring reference
+
+### Service level objectives
+
+Measured at the public load balancer over a rolling 28 days.
+
+| Objective | Target | Error budget |
+|---|---|---|
+| Availability | 99.5% of requests return 2xx or 3xx (4xx don't count against it) | 3 h 22 min of failed-request time per 28 days |
+| Latency | p99 of ALB `TargetResponseTime` under 1.5 s | Alarmed when breached |
+
+- **Error-budget policy** (agreed but not enforced): if more than half of the 28-day budget burns within any 7 days, prod deploys pause.
+- **Normal ranges:** CloudFront cache hit above 85% is healthy, below 50% signals a problem. Aurora connections peak around 60 normally.
+
+### Alarm catalog
+
+From [`cdk/lib/observability-stack.ts`](../cdk/lib/observability-stack.ts) as of 2026-11-09. Each alarm's Teams card includes its own description and a "Next:" hint.
+
+| Alarm (environment suffix omitted) | Tier | Fires when | Playbook |
+|---|---|---|---|
+| **Serving: one page for the whole cascade** | | | |
+| `sps-app-unavailable` (composite) | P1 | Any of the five alarms marked † below is in ALARM | [Playbook 1](#1-the-site-is-down-or-returning-errors-p1) |
+| `sps-alb-5xx-rate` † | P1 | 5xx over 1% for 10 min (needs at least 5 errors) | [Playbook 1](#1-the-site-is-down-or-returning-errors-p1) |
+| `sps-alb-unhealthy-hosts` † | P1 | Any unhealthy target for 5 min | [Playbook 1](#1-the-site-is-down-or-returning-errors-p1) |
+| `sps-ecs-task-shortfall` † | P1 | Fewer tasks running than desired for 5 min | [Playbook 1](#1-the-site-is-down-or-returning-errors-p1) |
+| `sps-edge-origin-down` † | P1 | Probe can't get a 200 through NetScaler for 15 min | [Playbook 2](#2-edge-or-origin-problem-cloudfront-netscaler-p1-p2) |
+| `sps-edge-unreachable` † | P1 | CloudFront not answering (DNS or TLS) for 15 min | [Playbook 2](#2-edge-or-origin-problem-cloudfront-netscaler-p1-p2) |
+| **Other paging alarms** | | | |
+| `sps-alb-latency-p99` | P1 (P2 in staging) | p99 over 1.5 s for 15 min | [Playbook 3](#3-pages-are-slow-p1-p2) |
+| `sps-db-pool-timeout` | P1 | Any "pool timeout" in 5 min | [Playbook 4](#4-database-connections-exhausted-p1-p2) |
+| `sps-opensearch-cluster-red` | P1 | Cluster status red for 1 min | [Playbook 12](#12-search-cluster-unhealthy-p1-p2) |
+| **Warnings** | | | |
+| `sps-edge-origin-latency-p99` | P2 | CloudFront origin p99 over 20 s, 2 of 3 five-minute windows | [Playbook 3](#3-pages-are-slow-p1-p2) |
+| `sps-edge-origin-cert-expiring` | P2 | Origin certificate expires in under 30 days | [Playbook 2](#2-edge-or-origin-problem-cloudfront-netscaler-p1-p2) |
+| `sps-edge-probe-stalled` | P2 | Origin probe hasn't run for 15 min | [Playbook 2](#2-edge-or-origin-problem-cloudfront-netscaler-p1-p2) |
+| `sps-aurora-cpu` | P2 | CPU over 80% for 15 min (30 min in staging) | [Playbook 5](#5-database-under-heavy-load-p2) |
+| `sps-aurora-acu` (prod only) | P2 | Writer capacity use over 80% for 15 min | [Playbook 5](#5-database-under-heavy-load-p2) |
+| `sps-aurora-connections` | P2 | Over 70 connections for 10 min | [Playbook 4](#4-database-connections-exhausted-p1-p2) |
+| `sps-opensearch-jvm-pressure` | P2 | JVM memory pressure over 85% | [Playbook 12](#12-search-cluster-unhealthy-p1-p2) |
+| `sps-opensearch-breaker` | P2 | Any query refused by the circuit breaker | [Playbook 12](#12-search-cluster-unhealthy-p1-p2) |
+| `sps-edit-authz-denied` | P2 | Over 10 edit 403s per 5 min, twice in a row | [Playbook 15](#15-staff-cant-log-in-or-are-denied-on-edit-p2) |
+| `sps-etl-duration-margin` | P2 | An ETL step ran at 80% or more of its timeout | [Playbook 8](#8-an-etl-alarm-arrived-in-teams-p2) |
+| `sps-etl-retry-storm` | P2 | A source was retried or re-run within one cycle | [Playbook 8](#8-an-etl-alarm-arrived-in-teams-p2) |
+| **Alerting health** | | | |
+| `sps-oncall-relay-errors` | Notify | An alert couldn't be delivered after 3 tries, or the relay was throttled | [Playbook 17](#17-an-alarm-fired-but-no-teams-card-arrived-urgent) |
+
+† These five don't page on their own; they feed `sps-app-unavailable`, so one root cause produces one page instead of several.
+
+#### ETL and job alarms (all P2, via the etl-failures topic)
+
+| Machine or job | Status | Duration | Cadence |
+|---|---|---|---|
+| Nightly | `sps-etl-nightly-status` | `sps-etl-nightly-duration` | `sps-etl-nightly-cadence` |
+| Weekly | `sps-etl-weekly-status` | `sps-etl-weekly-duration` | `sps-etl-weekly-cadence` |
+| Annual | `sps-etl-annual-status` | none | none (calendar) |
+| Freshness heartbeat | `sps-etl-heartbeat-status` | `sps-etl-heartbeat-duration` | `sps-etl-heartbeat-cadence` |
+| Search-index reconciler | `sps-reconcile-status` | none | `sps-reconcile-cadence` |
+| CDN reconciler | `sps-cdn-reconcile-status` | none | `sps-cdn-reconcile-cadence` |
+| Curation-tables backup | `sps-curation-backup-status` | none | `sps-curation-backup-cadence` |
+| Opportunity projection | `sps-opportunity-projection-status` | none | `sps-opportunity-projection-cadence` |
+| ED email-visibility bridge | `sps-ed-email-visibility-status` | none | `sps-ed-email-visibility-cadence` |
+| Grants export | `sps-grants-export-status` | none | `sps-grants-export-cadence` |
+| Honors; funding digest | `sps-honors-status`; `sps-funding-digest-status` | none | none |
+| Opportunity freshness | `sps-etl-opportunity-freshness` | none | none |
+
+Also on `etl-failures-<env>`: individual step failures (each step's error handler publishes) and failed AWS Backup or cross-region copy jobs (rule `sps-aws-backup-failure-<env>`). Failures in the critical steps Ed, Dynamodb, SearchIndexNightly, IntegrityNightly, SearchIndexWeekly and IntegrityWeekly go to `etl-page-<env>` instead and arrive as **P1**.
+
+### How alerts reach people
+
+| Topic | AWS name | Delivered to | Carries |
+|---|---|---|---|
+| Page (P1) | `sps-alarms-<env>` | Relay Lambda to the primary Teams channel | Composite, latency, cluster red, pool timeout |
+| ETL page (P1) | `etl-page-<env>` | Relay to the primary channel | Critical ETL step failures |
+| Warn (P2) | `sps-warn-<env>` | Relay to the warn channel (falls back to primary) | Resource pressure, edit 403s, edge warnings |
+| ETL failures (P2) | `etl-failures-<env>` | Relay to the warn channel (falls back to primary) | All ETL, reconciler, backup and job alarms |
+| Notify | `sps-notify-<env>` | Email to paa2013@med.cornell.edu | Budget, cost anomaly, relay errors |
+
+- The relay Lambda `sps-oncall-relay-<env>` reads the Teams workflow URL from `scholars/<env>/oncall/teams-webhook-url` when it starts, and posts an Adaptive Card.
+- The warn channel is optional: create secret `scholars/<env>/oncall/teams-webhook-url-warn` to turn it on (no redeploy needed; see [oncall.md § Severity tiers](./oncall.md#severity-tiers-p1-page--p2-warn-and-the-warn-channel)). Until then P2 cards go to the primary channel.
+- Relay-error alerts go by email because the page path itself runs through the relay.
+
+### ETL schedules
+
+State machines are named `scholars-<name>-<env>`; schedule rules `sps-etl-<cadence>-<env>`. Eastern times shown for standard time (EST) and daylight time (EDT).
+
+| Run | UTC | Eastern (EST / EDT) | Missed-run alarm after |
+|---|---|---|---|
+| Nightly (prod) | Daily 07:00 | 2:00 AM / 3:00 AM | 30 hours |
+| Nightly (staging) | Daily 07:45 | 2:45 AM / 3:45 AM | 30 hours |
+| Weekly | Sunday 12:00 | Sun 7:00 AM / 8:00 AM | 7 days |
+| Annual (MeSH) | July 1, 09:00 | 5:00 AM (EDT) | No alarm (calendar) |
+| Freshness heartbeat | Daily 13:00 | 8:00 AM / 9:00 AM | 30 hours |
+| Grants export | Daily 05:30 | 12:30 AM / 1:30 AM | Yes |
+| Curation-tables backup | Daily 06:00 | 1:00 AM / 2:00 AM | Yes |
+| Opportunity projection | Daily 06:30 | 1:30 AM / 2:30 AM | Yes |
+| ED email visibility | Sunday 05:00 | Sun 12:00 AM / 1:00 AM | Yes |
+| Honors | Monday 10:00 | Mon 5:00 AM / 6:00 AM | No |
+| Search-index and CDN reconcilers | Always running | CDN purges every 5 min | Yes |
+
+#### How staleness is caught
+
+| Signal | How it works | Catches |
+|---|---|---|
+| Step failure | Each step's error handler publishes to SNS | A specific step that threw |
+| Status alarm | Failed + timed out + aborted executions above 0 | Any run that didn't finish cleanly, including timeouts (which skip the error handler) and manual stops |
+| Cadence alarm | Fewer than 1 started execution in the window (missing data counts as breaching) | A schedule that never fired |
+| Freshness heartbeat | `etl:freshness` compares each source's last success with its limit (nightly 30 h, weekly 8 d, annual about 400 d) using `etl_run` | Runs that look green but leave data stale |
+
+Not freshness-tracked (failures are still caught, staleness is not): `revalidate`, `reporter`, `nsf`, `gates`, `nih-profile`, `search:index`. A run that processes 0 rows isn't flagged yet.
+
+### Logs and key events
+
+| Log group | Contents | Kept for |
+|---|---|---|
+| `/aws/ecs/sps-app-<env>` | The app; structured one-line JSON | Prod 3 months, staging 1 month |
+| `/aws/ecs/sps-migrate-<env>` | Database migrations, per deploy | Prod 3 months, staging 1 month |
+| `/aws/ecs/sps-etl-<env>` | ETL task runs | Prod 3 months, staging 1 month |
+| `/aws/ecs/sps-reconcile-<env>`, `/aws/ecs/sps-cdn-reconcile-<env>` | Search-index and CDN reconcilers | Prod 3 months, staging 1 month |
+| `/aws/lambda/sps-oncall-relay-<env>` | Alert relay (`oncall_relay` events) | 30 days |
+| S3 `cf/<env>/` in the edge logs bucket | CloudFront request logs | 90 days |
+
+Useful events to search for: `profile_view` (with `duration_ms`), `search_degraded`, `edit_authz_denied`, `saml_callback_failed`, `superuser_check_failed`, `edit_write_failed`, `oncall_relay`. New Relic is the live APM; CloudWatch holds the long-term record. Field reference: [logging-reference.md](./logging-reference.md).
+
+### Usage and performance analytics
+
+Pulled on demand; nothing here is scheduled to report.
+
+#### Athena saved queries
+
+AWS console, Athena, workgroup `sps-usage-<env>` (top right), **Saved queries** tab, pick one, **Run**. Needs Athena, Glue and S3 read access.
+
+| Saved query (add `-<env>`) | Answers | Reads |
+|---|---|---|
+| `sps-usage-daily-pageviews`, `-top-profiles`, `-search-terms`, `-referrers`, `-geo`, `-device` | Page views, top profiles, search terms, referrers, location, device | Daily rollup (aggregates only) |
+| `sps-perf-slow-routes` | p50, p95, p99 time and p95 time-to-first-byte by route (50+ hits) | Raw logs, last 7 days |
+| `sps-perf-errors-by-route` | 4xx and 5xx counts and 5xx rate by route | Raw logs, last 7 days |
+| `sps-perf-cache-hit` | Mix of edge cache outcomes (hit, miss, refresh, error) | Raw logs, last 7 days |
+
+> [!WARNING]
+> **Personal data**
+>
+> The three `sps-perf-*` queries read raw CloudFront logs, which include client IP addresses and full query strings. The workgroup is restricted to operators: **don't widen its permissions.**
+
+#### In-app dashboards
+
+- **Usage** (`/edit/usage`): page views by day, top profiles, search terms, referrers, location and device, for the last 7, 30 or 90 days, since launch, or a custom range (from 2026-05-22). Open to superusers and unit admins. Also the **Usage** tab in the admin menu. Shows "unavailable" if Athena fails, or if `Sps-App-<env>` and `Sps-Analytics-<env>` haven't both been deployed with the usage settings.
+- **Edit activity** (`/edit/activity`): edits per day, top editors and most-edited records over 30 days. Superusers only, not linked in the menu. Shows "unavailable" if the read-only database role lacks access to `scholars_audit`.
+- Profile counts are keyed on the root URL (`/carl-f-nathan`). If a new top-level site section starts being counted as a profile, add it to the reserved-route list in `cdk/lambda/cf-usage-rollup/queries.ts` and backfill. Raw logs expire after 90 days, so a backfill can only fix roughly the last 85 days; use `scripts/backfills/2026-09-25-usage-rollup-history.ts --env=<env> --dry-run` first.
+
+### Cost guardrails
+
+Prod only, account-wide: budget `sps-monthly-budget` at $600 per month (email at 50% and 80% forecast, 100% actual) and `sps-anomaly-monitor` at $50 per day. Both email the notify topic. These are cost signals, not service incidents.
+
+## Part 5. System reference
+
+### What SPS is
+
+The Scholars Profile System publishes about 9,000 public profiles of Weill Cornell Medicine faculty and researchers. It is a mostly read-only Next.js 16 web app running on AWS. Every night, scheduled jobs (the ETL) copy data from WCM source systems into SPS's own database (Aurora MySQL), and a search index (OpenSearch) is built from that database. Visitors reach the site through CloudFront, which caches pages. Staff sign in with WCM single sign-on to edit profiles at `/edit`.
+
+SPS only receives data: no other WCM system depends on it. That is why an upstream failure makes data stale rather than taking the site down.
+
+![WCM source systems feed the Step Functions ETL, which writes to Aurora (canonical) and OpenSearch (search); the Next.js app serves public profiles and the SAML-protected /edit area.](./architecture/system-context.svg)
+
+System context: source systems, ETL, data stores, app, audiences. Generated from the repo's infrastructure code; reflects the deployed shape as of 2026-05-30.
+
+### Architecture diagrams
+
+All diagrams live in [`docs/architecture`](./architecture/). Each SVG opens directly in the browser; for the interactive gallery, open [`index.html`](./architecture/index.html) from a local clone.
+
+| Diagram | Shows | Use it when… |
+|---|---|---|
+| [System context](./architecture/system-context.svg) | Sources, ETL, data stores, app, audiences | Onboarding; "where does this data come from?" |
+| [App and AWS topology](./architecture/app-aws-topology.svg) | How ECS, load balancers, Aurora, OpenSearch and CloudFront connect | Tracing a 5xx or latency incident ([Playbooks 1 to 3](#1-the-site-is-down-or-returning-errors-p1)) |
+| [App internals](./architecture/app-internals.svg) | Next.js internals: read path, merge-at-read, `/edit` writes | A rendering bug or an `/edit` permissions issue |
+| [Network topology](./architecture/network-topology.svg) | VPC, subnets, security groups, NAT, endpoints, WCM reachability | Connectivity or DNS problems; building a run-task network config |
+| [Edge topology decision](./architecture/edge-topology-fork.svg) | CloudFront, WAF, certificate and alias design | Before any `cdk deploy Sps-Edge-*` |
+| [Matching engines](./architecture/matching-engines.svg), [grant matching](./architecture/grant-matching-context.svg), [opportunity pipeline](./architecture/opportunity-pipeline.svg) | Feature-specific data flows | Working on matching or funding opportunities |
+
+Regenerate with `npm run diagrams` after any topology change. Where a diagram and `cdk/lib/*` disagree, the code wins. Request and ETL flows in text form: [architecture-overview.md](./architecture-overview.md).
+
+### What SPS depends on
+
+| | Systems | If it fails |
+|---|---|---|
+| **Live request path** | CloudFront and WAF, NetScaler VIP, Aurora, OpenSearch (search only), WCM SAML IdP and Enterprise Directory LDAPS (`/edit` only) | Users notice right away |
+| **ETL path** | Enterprise Directory, ReciterDB, InfoEd, COI Portal, ASMS, Jenzabar, ReciterAI (DynamoDB `reciterai` table and S3 JSON at `s3://wcmc-reciterai-artifacts/...`), NIH RePORTER, NSF, NLM MeSH, CTSC feed | Data goes stale; the site stays up |
+| **Network to WCM** | Transit Gateway and WCM firewall, owned by the Central Services account `091981818184`, not SPS | ETL can't reach WCM sources |
+
+### Environments and sizing
+
+From [`cdk/lib/config.ts`](../cdk/lib/config.ts) as of 2026-11-09.
+
+| | Production | Staging |
+|---|---|---|
+| App tasks (ECS Fargate) | 2 tasks of 2 vCPU / 4 GB; autoscale 2 to 6 | 1 task of 1 vCPU / 2 GB; up to 3 |
+| ETL tasks | 2 vCPU / 8 GB per run | Same |
+| Migration task | 0.5 vCPU / 1 GB | Same |
+| Aurora MySQL Serverless v2 (`VER_3_08_0`) | 1 to 8 ACU; writer plus 1 reader | 0.5 to 4 ACU; writer only |
+| OpenSearch 2.19 | Multi-AZ domain `opensearchshare-hr8gdfznbeww` | Domain `opensearchshare-mhshucea3jvk` |
+| Database backups | Point-in-time 14 days; daily AWS Backup kept 35 days and copied to us-west-2 | Point-in-time 14 days; daily AWS Backup kept 14 days and copied to us-west-2 |
+| Log retention | 3 months | 1 month |
+| Cost guardrails | Budget and anomaly monitor | None |
+
+### AWS services used
+
+| Service | What SPS uses it for | Names |
+|---|---|---|
+| CloudFront and WAF | CDN and edge cache; rate limit (5,000 requests per 5 min per IP, verified bots exempt), AWS managed rules, WCM-only gate; adds `X-Origin-Verify` | Distributions in [Key facts](#key-facts-at-a-glance) |
+| ECS Fargate | Runs the app (with an OpenTelemetry sidecar), ETL, migrations and DB bootstrap | `sps-app-<env>`, `sps-etl*-<env>`, `sps-migrate-<env>`, `sps-db-bootstrap-<env>` |
+| Load balancers (2) | Public (CloudFront origin) and internal (`/api/revalidate`), same targets | Auto-named `Sps-Ap-Publi-…`, `Sps-Ap-Inter-…` |
+| Aurora MySQL | Main data store for all page reads and `/edit` writes; holds the `scholars_audit` database. Retained and deletion-protected | See [Key facts](#key-facts-at-a-glance) |
+| OpenSearch | Search and autocomplete only. Alias `scholars` points to `scholars_v<timestamp>`, swapped in one step on rebuild | See [Key facts](#key-facts-at-a-glance) |
+| Step Functions and EventBridge | Run and schedule the ETL | `scholars-*-<env>`, `sps-etl-*-<env>` |
+| Secrets Manager | About 11 secrets per environment, given to tasks only through the execution role | `scholars/…` (see [Access](#access-who-can-deploy-and-edit)) |
+| ECR | App and ETL images; prod images copied to us-west-2 | `scholars-app-<env>`, `scholars-etl-<env>` |
+| SNS, Lambda, SQS | Alert topics, the Teams relay (and its dead-letter queue), DB password rotation, the edge probe, usage rollup | See [How alerts reach people](#how-alerts-reach-people) |
+| S3, Glue, Athena | CloudFront logs (90 days), static assets, ISR page cache, usage analytics, backups | `sps-edge-<env>-logsbucket…` |
+| AWS Backup | Daily plan plus us-west-2 copy, with Vault Lock | `sps-aurora-daily-<env>`, `sps-backup-vault-<env>`, `sps-dr-backup-vault-<env>` |
+| SES | Outgoing "Request a change" mail; incoming mail for clips, funding digest and CViche (scholars-mail.weill.cornell.edu) | `Sps-InboundMail` |
+| Networking | NAT gateway (1 per env); VPC endpoints for Secrets Manager and S3 (OpenSearch intentionally not) | |
+| X-Ray, CloudWatch | Tracing (5% of requests plus all errors and slow ones); alarms, logs, dashboard | `sps-reliability-<env>` |
+| DynamoDB | Input only: ReciterAI's `reciterai` table. SPS creates no tables | |
+
+### Infrastructure stacks (CDK)
+
+Defined in [`cdk/bin/sps-infra.ts`](../cdk/bin/sps-infra.ts): ten stack classes. `Sps-Network` isn't deployed while the shared VPC is in use (both environments today), so **nine stacks deploy in prod and eight in staging** (only prod has `Sps-InboundMail`). Choose the environment with `-c env=staging|prod`.
+
+| Stack | Creates |
+|---|---|
+| `Sps-Network-<env>` | Not deployed today. VPC, subnets, base security groups, DNS forwarding for WCM |
+| `Sps-DrBackupVault-<env>` | In us-west-2: the DR backup vault and the curated-tables backup copy |
+| `Sps-Data-<env>` | Aurora, OpenSearch, AWS Backup plan and vault; prod ECR copy to us-west-2. Retained, so a bad app deploy can't delete the database |
+| `Sps-Secrets-<env>` | Empty secret definitions and the DB password rotation Lambda |
+| `Sps-App-<env>` | ECR, ECS cluster, service and tasks, both load balancers, VPC endpoints, migration and bootstrap tasks, deploy IAM roles |
+| `Sps-Etl-<env>` | Step Functions, schedules, ETL task families, reconciler services, ETL topics and alarms, backup-failure rule |
+| `Sps-InboundMail` | Prod only, one per account: SES incoming mail |
+| `Sps-Observability-<env>` | Platform alarms and composite, alert topics, relay Lambda, edge probe, dashboard; prod budget and cost anomaly |
+| `Sps-Edge-<env>` | CloudFront, WAF, security headers, legacy VIVO redirects, access-log bucket |
+| `Sps-Analytics-<env>` | Glue and Athena over CloudFront logs; nightly usage rollup |
+
+> [!NOTE]
+> **Account model**
+>
+> The design decision (ADR-008) was separate AWS accounts for staging and prod. In practice both share account `665083158573` in us-east-1, separated by name prefix (documented in [PRODUCTION_ADDENDUM.md](./PRODUCTION_ADDENDUM.md)). Always confirm with `aws sts get-caller-identity` before acting.
+
+### Access: who can deploy and edit
+
+#### Deploying
+
+- A push to `master` deploys staging only. Prod deploys are manual and need approval from `paulalbert1` (see [Promote to production](#promote-to-production)).
+- `cdk deploy`, `cdk diff` and secret changes are run by the account holder with their own AWS credentials, never automatically.
+
+#### Editing profiles (application roles)
+
+Reading the site needs no login. Editing needs WCM single sign-on.
+
+| Role | Comes from | Can do |
+|---|---|---|
+| Self | Signed-in CWID matches the profile | Edit own overview; hide own items; undo own hides |
+| Superuser | ED group `ITS:Library:Scholars/superuser-role`, checked on every `/edit` request | Everything, including slugs, removing publications, managing unit roles, seeing hidden data |
+| Unit owner | `unit_admin` with `role=owner` | Edit the unit and manage access below it; edit its scholars |
+| Unit curator | `unit_admin` with `role=curator` | Edit the unit only; can't delegate |
+| Proxy editor | `scholar_proxy` row | Self-level editing for one scholar |
+
+Permissions fail closed: a directory outage blocks all editing but never affects public pages. Department access cascades down to divisions, not up. Being on a roster never grants edit rights. Full detail: [access-control-rbac.md](./access-control-rbac.md).
+
+#### AWS and database roles
+
+- **IAM:** `sps-task-exec-<env>` pulls images and injects named secrets; `sps-task-<env>` (the running app) has no secret permissions. Pipeline roles: `sps-deploy-<env>` (GitHub OIDC), `sps-migrate-<env>`, `sps-db-bootstrap`.
+- **Database:** `app-ro` (read only), `app-rw` (read and write, plus insert-only on `scholars_audit.manual_edit_audit`), `etl` (ETL tables), `bootstrap` (creates the audit schema and grants only).
+- **Secrets:** `scholars/db/{app-rw,app-ro,etl,bootstrap}`, `scholars/opensearch/{app,etl}`, `scholars/revalidate-token`, `scholars/etl/<source>`, `scholars/<env>/etl/ctsc`, `scholars/<env>/saml/idp-cert`, `scholars/<env>/oncall/teams-webhook-url` (and optional `-warn`), `scholars/<env>/edge/origin-shared-secret`. Database passwords rotate automatically.
+
+### Backups, maintenance and failover
+
+| | Details |
+|---|---|
+| Single zone failure | Automatic: Aurora writer and reader across zones, at least 2 tasks across 2 zones, automatic deploy rollback. No action needed |
+| Data loss or corruption | Manual and tested: [Playbook 18](#18-data-loss-or-corruption-restore-the-database-p1) |
+| Regional loss of us-east-1 | Manual, partly tested: [Playbook 19](#19-aws-us-east-1-regional-outage-p1) |
+| App patching | Each deploy rebuilds the image (Node 26 on Fargate). Patch by deploying an updated image |
+| Aurora maintenance (AWS default, not set in CDK) | Prod Sunday 05:27 to 05:57 UTC; staging Thursday 10:24 to 10:54 UTC |
+| Aurora automated backup | 03:00 to 04:00 UTC, kept 14 days |
+| AWS Backup | Daily 05:00 UTC, copied to us-west-2; failures alert via `sps-aws-backup-failure-<env>` |
+| OpenSearch | AWS-managed blue/green updates, no fixed window |
+| Release process | Continuous: master ships to staging automatically; prod is manual, approval-gated and fix-forward |
+
+### ServiceNow service profile
+
+Maps SPS onto WCM's ServiceNow runbook template (see KB0012671). Fill in every TBD before publishing to the WCM Internal KB.
+
+| Field | Value |
+|---|---|
+| Application name | Scholars Profile System (SPS) |
+| Mission critical? | *TBD: Operations to classify.* Working assumption: **No**. Public and read-mostly; an outage affects reputation and search ranking, not patient care or safety |
+| Locations and URLs | scholars.weill.cornell.edu; staging scholars-staging.weill.cornell.edu; AWS us-east-1 (DR us-west-2) |
+| Operating hours | 24×7, public internet |
+| Maintenance window | None needed: zero-downtime rolling deploys. AWS windows listed above |
+| Support / assignment group | *TBD* |
+| Service owner (emergency contact) | Paul Albert, paa2013@med.cornell.edu; mobile *TBD*. Post-launch owner *TBD* |
+| Emergency business contacts | *TBD* |
+| Emergency user communication | *TBD*. Recommended: ITS Alert plus email. Internal alerts: Teams |
+| Inputs from | Enterprise Directory, ReciterDB, InfoEd, COI Portal, ASMS, Jenzabar, ReciterAI, NIH RePORTER, NSF, NLM MeSH, CTSC feed |
+| Outputs to | Public web (profiles, search, sitemaps) and search engines. No WCM system consumes SPS data |
+| Secondary / backup system | Multi-zone in us-east-1; daily backups copied to us-west-2 |
+| Hosting | Self-managed on AWS (not vendor hosted), account `665083158573`. AWS Support tier and Sev-1 path: *TBD* |
+| OLA / SLA | *TBD.* Internal objectives: 99.5% availability, p99 under 1.5 s |
+| Change management | Prod deploys need GitHub approval. Link to ServiceNow change requests: *TBD* |
+| CMDB CI; KB article number | *TBD*; *TBD (assign on publish)* |
+
+### Job-specific notes
+
+#### CTSC roster sync
+
+Nightly step `CtscRoster` (`npm run etl:ctsc-roster`, [`etl/ctsc-roster/index.ts`](../etl/ctsc-roster/index.ts)) copies the Clinical & Translational Science Center roster into the center with slug `ctsc`, from the same CTSC feed the ReCiter Institutional Client reads. It runs after `EdAdmins` and is continue-tier: a failed night keeps the previous roster.
+
+- **Roster only.** The feed's PubMed IDs are never read.
+- **Identity.** A CWID from the feed is trusted only after the Enterprise Directory confirms it. A blank or bad CWID falls back to an email lookup, accepted only if it matches exactly one person whose surname agrees.
+- **What it writes.** Active profiled scholars get a `center_membership` row (`source='ctsc-feed'`). Everyone else gets an `external_member` plus a membership row (`source='ctsc-feed-external'`), shown as a plain name with their institution. Hidden or deleted scholars are skipped. Only rows from these sources are ever deleted; manual rows are never overwritten.
+- **Feed problems.** Records CTSC should fix appear as "Feed CWID issues" on the CTSC center's `/edit` page, rebuilt every run.
+- **Task and secret.** Runs on `sps-etl-ctsc-<env>` with secret `scholars/<env>/etl/ctsc` (`CTSC_FEED_URL`, `CTSC_FEED_TOKEN`). The feed URL is internal: keep it out of the repo and tickets.
+- **Freshness.** Source `CTSC-Roster`, nightly. The heartbeat is the only safety net for this step.
+
+| Guard | Trips when | Usual cause |
+|---|---|---|
+| `ctsc:feed` | Feed records drop more than 20% below last night's memberships | Short or partial feed read |
+| `ctsc:linked` | Matched scholars drop more than 20% below last night | Directory returned partial results without an error |
+| `ctsc:prune` | More than 20% of memberships would be removed | Roster restructure, or a bad read |
+
+Before bypassing, confirm with CTSC that the roster really shrank (or that the directory is healthy, for `ctsc:linked`). Then follow [Playbook 9](#9-an-etl-safety-guard-refused-to-run-p2) using the `sps-etl-ctsc-<env>` task.
+
+**SETTING UP CTSC SYNC IN A NEW ENVIRONMENT (IN ORDER)**
+
+1. In `/edit`, create the center with slug `ctsc` and add its leadership roles and assignments. Without it the step fails loudly.
+2. Run `cdk deploy Sps-Secrets-<env>` to create the empty `scholars/<env>/etl/ctsc` secret, then fill in `CTSC_FEED_URL` and `CTSC_FEED_TOKEN` outside the repo. The task won't start without them; other steps are unaffected.
+3. Apply migration `20260924180000_ctsc_feed_issue`.
+4. Run `cdk deploy Sps-Etl-<env>` to add the step.
+
+#### Roster prominence
+
+Nightly step `RosterProminenceNightly` (`npm run etl:roster-prominence`) writes `scholar.roster_prominence` and `roster_leadership_tier` using the formula in [`lib/api/prominence.ts`](../lib/api/prominence.ts) (the only place the weights live). It writes only changed rows and is continue-tier. A merged weight change takes effect at the next nightly; to see it sooner, run the step as a [one-off task](#run-a-one-off-etl-task). Lowering a weight trips `roster-prominence:score-drops` (and maybe `:grants`) by design; bypass those once.
+
+| Guard | Trips when | Usual cause |
+|---|---|---|
+| `roster-prominence:scholars` | Scholars scored drop more than 20% | Short scholar read |
+| `roster-prominence:score-drops` | More than 10% of scholars lose over 0.5 of score | Wiped `scored_pub_count`; a weight lowered |
+| `roster-prominence:leaders` | More than 20% of chairs, center directors or chiefs drop a tier or lose over 0.5 | Emptied `org_unit_role_assignment` |
+| `roster-prominence:grants` | More than 20% of grant-scored scholars lose over 0.3 | Emptied `grant` table; a weight lowered |
+| `roster-prominence:ranked` | Ranked scholars drop more than 20% | Titles wiped by a directory run |
+
+Before bypassing, compare row counts in `grant`, `org_unit_role_assignment` and `scholar.scored_pub_count` with the previous night. Every guard skips the first run.
+
+## Appendix A. Glossary
+
+| Term | Meaning |
+|---|---|
+| ACU | Aurora Capacity Unit: how Aurora Serverless measures database size. It scales between a minimum and maximum |
+| ALB | Application Load Balancer: spreads requests across the app's tasks |
+| Aurora | Amazon's managed MySQL database; SPS's main data store |
+| CDK | AWS Cloud Development Kit: the TypeScript code in `cdk/` that defines all SPS infrastructure |
+| CloudFront / edge | Amazon's CDN. It caches pages close to users; "the edge" means this cache |
+| Composite alarm | An alarm that fires when any of several other alarms fires, so one problem produces one page |
+| CWID | Cornell Weill ID: the person identifier used across WCM systems |
+| ECS Fargate / task | Amazon's container service. A task is one running copy of the app or of a job |
+| ED | Enterprise Directory: WCM's LDAP directory of people, titles and groups |
+| ETL | Extract, transform, load: the scheduled jobs that copy data from source systems into SPS |
+| `etl_run` | Database table with one row per ETL run per source; the record of what ran and whether it worked |
+| Fix forward | Correcting a problem with a new change instead of reverting (always the case for database migrations) |
+| ISR | Incremental Static Regeneration: Next.js keeps a rendered copy of a page and refreshes it on a timer or on request |
+| Kill switch | Scaling the app to zero tasks to take the site offline on purpose |
+| NetScaler VIP | The WCM network appliance address that CloudFront sends requests to; it forwards them to the ALB |
+| OpenSearch | Amazon's search engine; powers SPS search and autocomplete only |
+| PITR | Point-in-time recovery: restoring the database to any moment in the last 14 days |
+| Reconciler | An always-running job that keeps something in sync (the search index; CloudFront purges) |
+| Relay Lambda | The small function that turns AWS alarm messages into Teams cards |
+| Revalidate | Telling Next.js to throw away its cached copy of a page and render it fresh |
+| RPO / RTO | Recovery point objective (how much data you could lose) and recovery time objective (how long recovery takes) |
+| SAML / IdP | The single sign-on protocol, and the WCM identity provider that confirms who a user is |
+| Step Functions | Amazon's workflow service; runs ETL steps in order |
+| Task definition / revision | The recipe for a task (image, size, secrets). Each change creates a new numbered revision |
+| Vault Lock | An AWS Backup setting that stops recovery points being deleted before their retention ends |
+| WAF | Web Application Firewall: filters traffic at CloudFront |
+
+## Appendix B. Open items and known risks
+
+| # | Item | Why it matters |
+|---|---|---|
+| 1 | Name the post-launch operations owner | Today one person is the entire on-call rotation |
+| 2 | Fill in contacts: mobile, Teams channel names, IAM, networking, upstream owners, AWS Support tier | Responders can't escalate without them |
+| 3 | ServiceNow: assignment group, CMDB CI, KB number, change-request process | Needed to publish to the WCM KB and fit Ops processes |
+| 4 | Agree an OLA, response targets and mission-critical classification | "How fast?" is currently undefined |
+| 5 | Off-hours paging (no SMS or phone) | Accepted gap; nobody is woken automatically |
+| 6 | Teams workflow tied to one person's account | Alerting stops silently if they leave |
+| 7 | Confirm the warn-channel webhook secret exists in each environment | Otherwise P2 noise lands in the primary channel |
+| 8 | Confirm the expired IdP certificate was removed from `SAML_IDP_CERT` | Cleanup was due 2026-08-26 |
+| 9 | Close the `Sps-Etl-prod` schedule drift (#1512) with the next deploy, then check rule states | A deploy could silently disable the nightly run |
+| 10 | NetScaler VIP has no failover; origin backout not rehearsed on staging | Single point of failure for every dynamic page |
+| 11 | Record who owns the NetScaler origin certificate (the alarm text says the runbook lists it) | It doesn't renew itself; expiry means 502s everywhere |
+| 12 | Regional rebuild beyond the database is untested | RTO of 4 hours is unproven for a full region loss |
+| 13 | Autoscaling thresholds are placeholders pending load tests (#554) | Scaling may react too late or too early |
+| 14 | No access recertification for superusers and unit admins; no standing emergency superuser | Access drift; break-glass depends on the directory |
+| 15 | Runs with 0 rows aren't flagged; some sources aren't freshness-tracked | Silent staleness is possible |
+| 16 | Architecture diagrams reflect 2026-05-30 | Regenerate after recent edge and ETL changes |
+
+## Appendix C. Where to find more
+
+Master index: [DOCUMENTATION-REGISTRY.md](./DOCUMENTATION-REGISTRY.md), organized by the question you're asking. All links point to the [repo's docs folder](./) on master.
 
 | For… | See |
 |---|---|
-| How it's deployed | [`./DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) |
-| How to roll back | [`./rollback-runbook.md`](./rollback-runbook.md), [`./restore-drill-runbook.md`](./restore-drill-runbook.md) |
-| SLOs, alarms, dashboards | [`./SLOs.md`](./SLOs.md) |
-| On-call routing / paging diagnostics | [`./oncall.md`](./oncall.md) |
-| ETL freshness & failure SOP | [`./etl-monitoring.md`](./etl-monitoring.md), [`./data-population-runbook.md`](./data-population-runbook.md) |
-| What breaks when an upstream is down | [`./dependency-outage-matrix.md`](./dependency-outage-matrix.md) |
-| Who can edit / deploy what (RBAC) | [`./access-control-rbac.md`](./access-control-rbac.md) |
-| Login / SAML / cert rollover | [`./saml-sp.md`](./saml-sp.md) |
-| Edge cache behavior | [`./cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) |
-| Logs / events / Logs Insights | [`./logging-reference.md`](./logging-reference.md) |
-| Tracing a slow request | [`./tracing.md`](./tracing.md) |
-| VPC / network / WAF | [`./network-security-topology.md`](./network-security-topology.md) |
-| Architecture overview | [`./architecture-overview.md`](./architecture-overview.md) |
-| **Master index** (the "where do I find X" doc) | [`./DOCUMENTATION-REGISTRY.md`](./DOCUMENTATION-REGISTRY.md) |
+| Deploys | [DEPLOY-RUNBOOK.md](./DEPLOY-RUNBOOK.md) |
+| Rollback and restore | [rollback-runbook.md](./rollback-runbook.md), [restore-drill-runbook.md](./restore-drill-runbook.md) |
+| SLOs, alarms, dashboards | [SLOs.md](./SLOs.md) |
+| Alert routing and diagnostics | [oncall.md](./oncall.md) |
+| ETL failures and freshness | [etl-monitoring.md](./etl-monitoring.md), [data-population-runbook.md](./data-population-runbook.md) |
+| What breaks when an upstream is down | [dependency-outage-matrix.md](./dependency-outage-matrix.md) |
+| Who can edit or deploy what | [access-control-rbac.md](./access-control-rbac.md) |
+| Login, SAML, certificate rollover | [saml-sp.md](./saml-sp.md) |
+| Caching at the edge and origin | [cloudfront-cache-spec.md](./cloudfront-cache-spec.md) |
+| Logs and events | [logging-reference.md](./logging-reference.md) |
+| Tracing a slow request | [tracing.md](./tracing.md) |
+| Performance and DB connections | [performance-baseline.md](./performance-baseline.md) |
+| Network, VPC, WAF, origin backout | [network-security-topology.md](./network-security-topology.md) |
+| Architecture | [docs/architecture](./architecture/), [architecture-overview.md](./architecture-overview.md) |
+| Local development setup | [README.md](../README.md) (not covered here) |
 
-*Last reviewed: 2026-06-14 (consolidated from existing runbooks).*
+## Appendix D. Revision history
+
+| Version | Date | Changes |
+|---|---|---|
+| 2.0 | 2026-11-09 | Rewritten for responders: triage table, severity levels, contacts up front, 19 step-by-step playbooks, glossary and open-items list. Local development section removed (see README). Checked against repo commit `bca752e`. Corrections:<br>Profiles **are** cached at origin and edge since 2026-10-02; the old guidance said they weren't.<br>Alarm catalog updated from code: added `sps-edge-origin-down`, `-unreachable`, `-origin-cert-expiring`, `-probe-stalled`, `sps-aurora-acu`, `sps-opensearch-breaker`, `sps-etl-duration-margin`, `sps-etl-retry-storm` and the job alarms; the composite now has five inputs.<br>ETL: prod schedules are enabled (removed "disabled until launch"); weekly run is now Sunday 12:00 UTC; staging nightly is 07:45 UTC.<br>Sizing: prod app tasks are 2 vCPU / 4 GB; staging Aurora maximum is 4 ACU; OpenSearch domain names updated.<br>SAML certificate deadline is past; now tracked as a cleanup check.<br>Stack count reconciled (10 classes; 9 deploy in prod, 8 in staging). DR images *are* replicated to us-west-2.<br>Fixed broken repo links and section references; search check now uses the live site instead of localhost. |
+| 1.0 | 2026-06-14 | Consolidated from the existing runbooks. |

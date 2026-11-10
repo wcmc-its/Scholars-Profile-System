@@ -3121,11 +3121,10 @@ export class EtlStack extends Stack {
     //
     // Unlike the cadence/reconciler rules (which prod ships present-but-disabled
     // for an out-of-band `aws events enable-rule`), the WHOLE block is gated on
-    // `curationBackupScheduleEnabled`: on prod the curated-tables backup is not
-    // yet provisioned (the bucket/grant/env land with the first
-    // `cdk deploy Sps-Etl-prod`, and the first run must be verified by hand
-    // before a schedule is trusted), so prod creates no schedule at all until the
-    // flag flips. See docs/curation-backup-runbook.md § Prod.
+    // `curationBackupScheduleEnabled`: a new env's first run must be verified by
+    // hand before a schedule is trusted, so an env creates no schedule at all
+    // until the flag flips (prod flipped 2026-11-09). See
+    // docs/curation-backup-runbook.md § Status by environment.
     // ------------------------------------------------------------------
     if (envConfig.curationBackupScheduleEnabled) {
       const backupUnit = taskUnitFor("backup:curated"); // base (no source creds)
@@ -3693,7 +3692,7 @@ export class EtlStack extends Stack {
     // `opportunity` + scholar tables. It is already a NIGHTLY step, but it sits
     // after `etl:ed`, which the on-prem-routing gap (#443) blocks — so the nightly
     // aborts before reaching it and newly-published opportunities 404 until an
-    // operator re-projects by hand (OPERATIONS-RUNBOOK § run-task). This standalone
+    // operator re-projects by hand (OPERATIONS-RUNBOOK § Run a one-off ETL task). This standalone
     // daily schedule runs just that one step so the funding-matcher corpus stays
     // fresh independent of the blocked nightly. Idempotent upsert, so a double-run
     // with the nightly (once #443 lands) is harmless; retire the stopgap then.

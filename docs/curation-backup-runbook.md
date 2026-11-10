@@ -1,196 +1,225 @@
-# Curated-tables logical backup — runbook
+# SPS Curated Data Backup Runbook
 
-SPS is the **system-of-record** for data that humans curate by hand through
-`/edit` — org-unit structure/names/leaders/descriptions and the methods-&-tools
-family-visibility overlays — including edits made by external Comms
-collaborators. Each environment's curated rows are its own (nothing syncs
-staging → prod); **prod is authoritative**, and both are backed up daily. This runbook covers the small, durable, **logical** backup of
-just those tables, which complements (does not replace) the cluster-level
-protection already in place.
+Daily backup and row-level restore of hand-curated tables · Scholars Profile System
 
-## What already protects this data
-
-| Layer | What | Window | Granularity |
+| | | | |
 |---|---|---|---|
-| Aurora PITR | continuous point-in-time recovery | 14 days (staging & prod) | whole cluster → new cluster |
-| AWS Backup | daily snapshot 01:00 ET, cross-region copy to `us-west-2` | 14 days staging / 35 days prod | whole cluster → new cluster |
-| **This export** | gzipped SQL dump of the curated tables → S3 | as long as you keep the objects | per-table / per-row, diffable |
-| DR-region replica | S3 replication of `sps-curation-backups/` to `sps-curation-backups-dr-<env>-<account>` (`us-west-2`, owned by `Sps-DrBackupVault-<env>`) | same; deletes are not replicated | per-table / per-row |
+| **Last updated** | **2026-11-09** | **Version** | 2.0 |
+| **Owner** | Paul Albert, SPS service owner (paa2013@med.cornell.edu) | **Status** | Staging: running daily. Prod: schedule live 2026-11-09 (manual run passed: 17 tables, 10,379 rows); first scheduled run 06:00 UTC 2026-11-10 |
+| **Audience** | On-call staff, and anyone who needs to recover a hand-made edit | **Checked against** | [`scripts/backups/export-curated-tables.ts`](../scripts/backups/export-curated-tables.ts), [`cdk/lib/etl-stack.ts`](../cdk/lib/etl-stack.ts), [`cdk/lib/config.ts`](../cdk/lib/config.ts) (commit bca752e) |
 
-The first two are whole-cluster restores capped at 14 days. This export is the
-belt-and-suspenders: long-lived, diffable, and restorable row-by-row.
+> [!NOTE]
+> **What this is and why it matters**
+>
+> Some SPS data is entered by hand through `/edit` and exists nowhere else: org-unit structure, names, leaders and descriptions, center rosters and roles, methods-and-tools visibility settings, and core-facility records, including edits by external Comms collaborators. SPS is the system of record for this data, and **prod is authoritative** (nothing syncs between staging and prod).
+>
+> Every day, a small job exports just these tables to S3 as a compressed SQL file. You can restore a single row from it, which a whole-database restore can't do.
 
-## What it captures
+| **Runs** | **Kept** | **Copied to** | **Alarms** |
+|---|---|---|---|
+| Daily at 06:00 UTC (1:00 AM EST / 2:00 AM EDT), an hour before the nightly ETL | Dated files are kept indefinitely; overwritten versions for 90 days | A bucket in us-west-2 (deletes are not copied) | Failure, timeout or abort; and no run for about 2 days |
 
-Defined in `scripts/backups/export-curated-tables.ts` (`CURATED_TABLES`):
+**Contents**
 
-- **Org units:** `department`, `division`, `center`, `center_program`,
-  `center_membership`, `division_membership`, `unit_admin` (membership
-  research/clinical type is a `membership_type` enum column on
-  `center_membership`, not a separate table)
-- **Methods & tools visibility overlays:** `family_suppression_overlay`,
-  `family_sensitivity_overlay`
-- **Cross-cutting manual curation** (org-unit descriptions, leader overrides,
-  "overview for others", hand suppress/show decisions live here):
-  `field_override`, `suppression`
+- [Check today's backup](#check-todays-backup)
+- [Restore rows from a backup](#restore-rows-from-a-backup)
+- [Run a backup now](#run-a-backup-now)
+- [If a backup alarm fires](#if-a-backup-alarm-fires)
+- [What's in the backup](#whats-in-the-backup)
+- [How this fits with the other backups](#how-this-fits-with-the-other-backups)
+- [Set up or change the schedule](#set-up-or-change-the-schedule)
+- [Local and development use](#local-and-development-use)
+- [Revision history](#revision-history)
 
-**Deliberately excluded** (ETL-regenerable from upstream, not hand-entered):
-`scholar_tool`, `scholar_family`, `spotlight`, topics/subtopics, the search
-index. To add or drop a table, edit the single `CURATED_TABLES` list.
+## Check today's backup
 
-## Format
+Every run writes a manifest next to the backup, with the time it was made, row counts and sizes per table, and a checksum of the file. The `latest/` copy always points at the newest run.
 
-A `mysqldump`-compatible `.sql` produced **in-process** via Prisma raw queries
-(`SHOW CREATE TABLE` + `SELECT`) — no `mysqldump`/`mariadb-dump` binary is
-required (the `sps-etl-<env>` image is Node-only). Each table is emitted as
-`DROP TABLE IF EXISTS` + `CREATE TABLE` + batched `INSERT`s, with
-`FOREIGN_KEY_CHECKS=0` and `time_zone='+00:00'` in the header. **Replay it into a
-scratch schema, never onto the live database.**
+1. Find the bucket name. It's generated by CDK, so look it up from the `Sps-Etl-<env>` stack output:
 
-Each run uploads four objects to the backup bucket (`CURATION_BACKUP_BUCKET`):
+   ```bash
+   aws cloudformation describe-stacks --stack-name Sps-Etl-$ENV \
+     --query "Stacks[0].Outputs[?OutputKey=='CurationBackupBucketName'].OutputValue" --output text
+   ```
 
-```
-sps-curation-backups/<env>/<YYYY-MM-DD>/curated-tables-<stamp>.sql.gz
-sps-curation-backups/<env>/<YYYY-MM-DD>/curated-tables-<stamp>.manifest.json
-sps-curation-backups/<env>/latest/curated-tables.sql.gz          # newest pointer
-sps-curation-backups/<env>/latest/curated-tables.manifest.json
-```
+2. Read the newest manifest:
 
-The manifest records per-table row counts, byte sizes, and a sha256 of the gzip.
+   ```bash
+   aws s3 cp s3://<bucket>/sps-curation-backups/$ENV/latest/curated-tables.manifest.json - | jq
+   ```
 
----
+3. Check that `generatedAt` is from today (after 06:00 UTC), that `tables` lists all **17** tables, and that `totalRows` is in line with recent days (prod's first run: 10,379 rows).
 
-## 1. Activate (one-time, per env)
+The job fails outright if a configured table is missing, so a backup is never silently partial.
 
-The bucket + the task role's `PutObject` grant + the `CURATION_BACKUP_BUCKET`
-env var are defined in `cdk/lib/etl-stack.ts`. A normal CD image roll does **not**
-apply CDK changes, so this needs an explicit deploy:
+## Restore rows from a backup
+
+> [!WARNING]
+> **Never replay a backup onto the live database**
+>
+> The file starts each table with `DROP TABLE IF EXISTS`. Loading it into `scholars` would **delete the live tables**. Always load it into a scratch schema, then copy back only the rows you need, by hand.
+
+Work from a one-off ETL task (the `mariadb` client is in the image) or a machine that can reach the database.
+
+1. Download and unzip the backup you want (`latest/`, or a dated folder for an earlier day):
+
+   ```bash
+   aws s3 cp s3://<bucket>/sps-curation-backups/$ENV/latest/curated-tables.sql.gz .
+   gunzip curated-tables.sql.gz
+   ```
+
+2. Load it into a scratch schema:
+
+   ```bash
+   mariadb "$DATABASE_URL" -e "CREATE DATABASE IF NOT EXISTS scholars_restore;"
+   mariadb "$DATABASE_URL" --database scholars_restore < curated-tables.sql
+   ```
+
+3. Find what you need and compare it with live. For example, one center's curation:
+
+   ```bash
+   mariadb "$DATABASE_URL" -e \
+     "SELECT * FROM scholars_restore.center WHERE slug='meyer-cancer-center';"
+   ```
+
+4. Copy the specific rows back into `scholars` with a targeted `INSERT … SELECT` or `UPDATE`, reviewed by a second person. **Don't bulk-replace live tables.**
+
+5. Drop `scholars_restore` when you're done.
+
+This restore path was tested end to end on the local development database: dump, unzip, load into a scratch schema, and the row counts matched the source exactly.
+
+> [!TIP]
+> **Older than the newest file?**
+>
+> Each day's backup is kept under `sps-curation-backups/<env>/<YYYY-MM-DD>/`. List them with `aws s3 ls s3://<bucket>/sps-curation-backups/$ENV/`. If the main bucket is unavailable, the same files are in `sps-curation-backups-dr-<env>-<account>` in us-west-2.
+
+## Run a backup now
+
+Useful before a risky bulk edit, or to fill a gap after a missed run. The task already has the database and bucket settings, so the only override is the command.
+
+1. Look up the current ETL subnets and security group (`ETL_SUBNETS`, `ETL_SG`) as described in [`data-population-runbook.md`](./data-population-runbook.md) section 3. Don't hardcode them: they change when the network moves.
+
+2. Start the task:
+
+   ```bash
+   aws ecs run-task --cluster sps-cluster-$ENV --task-definition sps-etl-$ENV \
+     --launch-type FARGATE \
+     --network-configuration "awsvpcConfiguration={subnets=[$ETL_SUBNETS],securityGroups=[$ETL_SG],assignPublicIp=DISABLED}" \
+     --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","backup:curated"]}]}'
+   ```
+
+3. Watch `/aws/ecs/sps-etl-<env>` (stream prefix `etl`) for the line `Uploaded to s3://…`.
+
+4. [Check the backup](#check-todays-backup).
+
+## If a backup alarm fires
+
+Alarms arrive as **P2** cards in the SPS Teams warn channel (topic `etl-failures-<env>`). Until the optional warn-channel webhook secret `scholars/<env>/oncall/teams-webhook-url-warn` exists, P2 cards go to the page channel instead.
+
+| **You see** | **It means** | **Do this** |
+|---|---|---|
+| A step failure card from `scholars-curation-backup-<env>` | The backup ran and failed | Read the error in the Step Functions execution and in `/aws/ecs/sps-etl-<env>`, fix it, then [run a backup now](#run-a-backup-now) |
+| `sps-curation-backup-status-<env>` | A run timed out (limit 70 minutes) or was aborted. These end without a failure card, so this alarm covers them | Same as above. Step Functions logs: `/aws/states/curation-backup-<env>` |
+| `sps-curation-backup-cadence-<env>` | No run has started for about 2 days: the schedule has stopped | Confirm rule `sps-curation-backup-<env>` is enabled and the state machine's permissions are intact, then [run a backup now](#run-a-backup-now) to cover the gap |
+
+The cadence alarm can't catch a run that started and then hung, which is why both alarms exist. You can check freshness at any time with the [manifest](#check-todays-backup).
+
+## What's in the backup
+
+The list lives in one place: `CURATED_TABLES` in [`scripts/backups/export-curated-tables.ts`](../scripts/backups/export-curated-tables.ts). To add or remove a table, edit that list.
+
+| **Group** | **Tables** |
+|---|---|
+| Org units | `department`, `division`, `center`, `center_program`, `center_membership`, `division_membership`, `unit_admin` (research vs clinical membership is the `membership_type` column on `center_membership`) |
+| Org-unit roles | `org_unit_role`, `org_unit_role_assignment`, `org_unit_role_scope` |
+| Methods and tools visibility | `family_suppression_overlay`, `family_sensitivity_overlay` |
+| Manual curation across the site | `field_override`, `suppression` (org-unit descriptions, leader overrides, "overview for others", hand hide and show decisions) |
+| Core facilities | `core_client`, `core_queue_add`, `core_staff` |
+
+**Deliberately left out** because the ETL rebuilds them from upstream sources: `scholar_tool`, `scholar_family`, `spotlight`, topics and subtopics, and the search index.
+
+### File format and locations
+
+- A mysqldump-compatible `.sql` file, built inside the app with Prisma queries (`SHOW CREATE TABLE` plus `SELECT`), so no dump tool is needed in the image. Each table gets `DROP TABLE IF EXISTS`, `CREATE TABLE` and batched `INSERT`s; the header sets `FOREIGN_KEY_CHECKS=0` and `time_zone='+00:00'`.
+- Each run uploads four files to the bucket named in `CURATION_BACKUP_BUCKET`:
+
+  ```text
+  sps-curation-backups/<env>/<YYYY-MM-DD>/curated-tables-<stamp>.sql.gz
+  sps-curation-backups/<env>/<YYYY-MM-DD>/curated-tables-<stamp>.manifest.json
+  sps-curation-backups/<env>/latest/curated-tables.sql.gz        # newest
+  sps-curation-backups/<env>/latest/curated-tables.manifest.json
+  ```
+
+- The bucket is versioned and retained (never deleted with the stack). Dated files are kept indefinitely because they're tiny; overwritten versions expire after 90 days.
+
+## How this fits with the other backups
+
+| **Layer** | **What** | **How long** | **Restores** |
+|---|---|---|---|
+| Aurora point-in-time recovery | Continuous backup of the whole database | 14 days (staging and prod) | Whole database, into a new cluster |
+| AWS Backup | Daily snapshot at 05:00 UTC, copied to us-west-2 | 14 days staging, 35 days prod | Whole database, into a new cluster |
+| **This backup** | Compressed SQL of the 17 curated tables, in S3 | Indefinitely | **Single tables or rows**; files can be compared |
+| DR copy of this backup | S3 replication to `sps-curation-backups-dr-<env>-<account>` in us-west-2 (owned by `Sps-DrBackupVault-<env>`) | Same; deletes aren't copied | Single tables or rows |
+
+Whole-database restores are covered by [`restore-drill-runbook.md`](./restore-drill-runbook.md).
+
+## Set up or change the schedule
+
+The bucket, the task's write permission and the `CURATION_BACKUP_BUCKET` setting are defined in [`cdk/lib/etl-stack.ts`](../cdk/lib/etl-stack.ts). The schedule (state machine `scholars-curation-backup-<env>`, rule `sps-curation-backup-<env>` and both alarms) exists only when `curationBackupScheduleEnabled` is true for that environment in [`cdk/lib/config.ts`](../cdk/lib/config.ts). It is created only when switched on, so a new environment gets a schedule only after someone has checked a first run by hand.
+
+### Turn it on in an environment
+
+1. Deploy the ETL stack. A normal image deploy does **not** apply CDK changes, so this needs an explicit deploy. Read the **whole** diff first: the ETL stack may be behind master.
+
+   ```bash
+   cd cdk
+   npx cdk diff Sps-Etl-$ENV --exclusively -c env=$ENV
+   npx cdk deploy Sps-Etl-$ENV --exclusively -c env=$ENV
+   ```
+
+2. [Run a backup now](#run-a-backup-now) and [check it](#check-todays-backup).
+
+3. Set `curationBackupScheduleEnabled: true` for the environment in `cdk/lib/config.ts` and deploy `Sps-Etl-<env>` again.
+
+4. Confirm the state machine exists, and the next morning that a new dated folder appeared:
+
+   ```bash
+   aws stepfunctions list-state-machines \
+     --query "stateMachines[?name=='scholars-curation-backup-$ENV'].name"
+   aws s3 ls s3://<bucket>/sps-curation-backups/$ENV/
+   ```
+
+### Status by environment
+
+| **Environment** | **Status** |
+|---|---|
+| Staging | Schedule on and running daily. |
+| Prod | Bucket, permission and setting were already in place. Manual run on 2026-11-09 23:41 UTC: exit 0, 17 tables, 10,379 rows, 132.4 KiB compressed, written to `sps-curation-backups/prod/2026-11-09/` and `latest/`.<br><br>`curationBackupScheduleEnabled` set to true and `Sps-Etl-prod` deployed on 2026-11-09; the state machine, rule and both alarms are confirmed live. **Confirm** that the scheduled prod run at 06:00 UTC 2026-11-10 wrote a new dated folder, and that its copy reached the us-west-2 bucket. |
+
+### Change how often it runs
+
+Edit `events.Schedule.cron(...)` in the `CurationBackupScheduleRule` block of [`cdk/lib/etl-stack.ts`](../cdk/lib/etl-stack.ts) (for example `{ minute: "0", hour: "6", weekDay: "MON" }` for weekly), then deploy `Sps-Etl-<env>`. Keep it before the 07:00 UTC nightly ETL so the backup reflects the latest hand edits.
+
+## Local and development use
 
 ```bash
-cd cdk
-npx cdk diff Sps-Etl-staging      # review: new S3 bucket, PutObject policy, env var
-npx cdk deploy Sps-Etl-staging --exclusively
-```
-
-This creates `sps-curation-backups-…` (versioned, SPS-account-owned, RETAIN) and
-re-rolls the `sps-etl-staging` task definition with the bucket name injected.
-Find the generated bucket name afterward from the stack output
-`CurationBackupBucketName` (or `aws s3 ls | grep curation-backups`).
-
-> Prod: same steps with `Sps-Etl-prod` once staging is exercised. The prod ETL
-> stack may be behind master — read the **full** `cdk diff` before deploying.
-
-## 2. Run on demand (in-VPC run-task)
-
-The deployed task has `DATABASE_URL` and `CURATION_BACKUP_BUCKET` baked in, so the
-command override is just the npm script:
-
-```bash
-# Discover the private subnets + ETL security group from a recent ETL run, or
-# reuse the values the scheduled ETL state machine uses, then:
-aws ecs run-task \
-  --cluster sps-cluster-staging \
-  --task-definition sps-etl-staging \
-  --launch-type FARGATE \
-  --network-configuration 'awsvpcConfiguration={subnets=[SUBNET_A,SUBNET_B],securityGroups=[ETL_SG],assignPublicIp=DISABLED}' \
-  --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","backup:curated"]}]}'
-```
-
-Watch the task logs (`/aws/…` ETL log group, stream prefix `etl`) for the
-`Uploaded to s3://…` line.
-
-## 3. Verify a backup
-
-```bash
-aws s3 cp s3://<bucket>/sps-curation-backups/staging/latest/curated-tables.manifest.json - | jq
-```
-
-Check `generatedAt` is recent, `tables` lists all 12 (none silently missing —
-the script errors on a missing configured table unless `--allow-missing`), and
-`totalRows` looks sane.
-
-## 4. Restore (into a scratch schema — NEVER the live DB)
-
-The dump contains `DROP TABLE IF EXISTS`, so replaying it onto `scholars` would
-**destroy** live tables. Always restore into a throwaway schema, then copy out
-only the rows you need.
-
-```bash
-# In a run-task shell (mariadb client is in the image) or locally:
-aws s3 cp s3://<bucket>/sps-curation-backups/staging/latest/curated-tables.sql.gz .
-gunzip curated-tables.sql.gz
-
-mariadb "$DATABASE_URL" -e "CREATE DATABASE IF NOT EXISTS scholars_restore;"
-mariadb "$DATABASE_URL" --database scholars_restore < curated-tables.sql
-
-# Inspect / diff a specific table, e.g. recover one center's curation:
-mariadb "$DATABASE_URL" -e \
-  "SELECT * FROM scholars_restore.center WHERE slug='meyer-cancer-center';"
-
-# Copy specific rows back into the live schema with a targeted INSERT…SELECT or
-# UPDATE — reviewed by hand. Do NOT bulk-replace live tables.
-```
-
-This was validated end-to-end on the local dev DB: dump → gunzip → replay into a
-scratch schema → row counts matched source exactly.
-
-## 5. Automatic schedule
-
-The backup runs **daily at 06:00 UTC** (ahead of the 07:00 nightly ETL, so the
-snapshot reflects the curated state as last hand-edited). It's wired in
-`cdk/lib/etl-stack.ts` as a small Step Functions state machine
-(`scholars-curation-backup-<env>`) fired by an EventBridge rule
-(`sps-curation-backup-<env>`), gated on the `curationBackupScheduleEnabled`
-config flag:
-
-- **staging:** flag `true` — **live** (runs daily).
-- **prod:** flag `true` since 2026-11-09 — **live** once `Sps-Etl-prod` is
-  deployed with it (see § Prod). The block is gated on creation (not
-  present-but-disabled like the ETL cadences) so a new env gets its schedule
-  only after a hand-verified first run.
-
-Observability: a failed run **Catches to the ETL failure topic**
-(`etl-failures-<env>` → Teams); a **status alarm**
-(`sps-curation-backup-status-<env>`) covers the terminations the Catch cannot
-see — a run that **times out** or is **aborted** never executes its Catch, so it
-publishes nothing; and a **cadence alarm**
-(`sps-curation-backup-cadence-<env>`) fires if no run starts for ~2 days
-(silent schedule death — the failure mode that hurts a backup most). Note the
-cadence alarm cannot substitute for the status alarm: a timed-out run _started_,
-so `ExecutionsStarted` still increments and the cadence alarm stays green.
-Spot-check freshness anytime via the `latest` manifest's `generatedAt` (§ 3).
-
-To change the cadence, edit the `events.Schedule.cron(...)` in the
-`CurationBackupScheduleRule` block (e.g. `{ minute: "0", hour: "6", weekDay:
-"MON" }` for weekly). Changing it needs a `cdk deploy Sps-Etl-<env>`.
-
-## Prod activation (done 2026-11-09)
-
-1. **Bucket + IAM grant + task-def env** — already present on `sps-etl-prod`
-   (`CURATION_BACKUP_BUCKET` set; the bucket is unconditional in `etl-stack.ts`).
-2. **Manual verify run** — 2026-11-09 23:41 UTC, `npm run backup:curated` via
-   `run-task` on `sps-etl-prod` with the app service's network config: exit 0,
-   17 tables, 10,379 rows, 132.4 KiB gzipped, written under
-   `sps-curation-backups/prod/2026-11-09/` plus the `latest/` pointer.
-3. **Schedule** — `curationBackupScheduleEnabled: true` in the prod block of
-   `cdk/lib/config.ts`; `cdk deploy Sps-Etl-prod --exclusively -c env=prod`
-   (no account flag) creates the daily rule, state machine, and the
-   status + cadence alarms. Confirm afterwards with
-   `aws stepfunctions list-state-machines` showing `scholars-curation-backup-prod`
-   and, the next morning, a new object under `sps-curation-backups/prod/`.
-
-Prod's backup bucket inherits the same versioned/retained config as staging
-(retention is per-stack, no extra step).
-
-## Local / dev usage
-
-```bash
-# Dry run — build everything, print the manifest, write nothing:
+# Build everything and print the manifest, without writing anything
 npm run backup:curated -- --dry-run --allow-missing
-
-# Write a local file instead of uploading (dev DB lacks the overlay tables):
+# Write a local file instead of uploading (the dev database lacks some tables)
 DATABASE_URL=… npm run backup:curated -- --out /tmp/spsbackup --allow-missing
 ```
 
-`--allow-missing` is dev-only — on staging a configured table that is absent must
-fail loudly rather than produce a partial backup labelled complete.
+| **Flag** | **Effect** |
+|---|---|
+| `--dry-run` | Build everything, print the manifest, write nothing |
+| `--out <dir>` | Write the file and manifest locally instead of uploading |
+| `--allow-missing` | Skip configured tables that don't exist. **Development only:** on staging and prod a missing table must fail |
+| `--no-drop` | Leave out `DROP TABLE IF EXISTS` |
+| `--env <name>` | Override the environment label in the file path and manifest |
+
+## Revision history
+
+| **Version** | **Date** | **Changes** |
+|---|---|---|
+| 2.0 | 2026-11-09 | Reorganized around tasks (check, restore, run now, alarms) with the restore warning up front. Corrections:<br>• The backup covers **17** tables, not 12: added the three org-unit role tables and the three core-facility tables.<br>• Log group is `/aws/ecs/sps-etl-<env>`; Step Functions logs are `/aws/states/curation-backup-<env>`; run timeout is 70 minutes.<br>• Documented retention (dated files indefinitely, overwritten versions 90 days) and how to look up the bucket name.<br>• Run-task network settings now follow `data-population-runbook.md` instead of placeholders. |
+| 1.0 | Earlier | Original runbook, including prod activation on 2026-11-09. |

@@ -88,4 +88,4 @@ npm run metrics:faculty-coverage   # needs DATABASE_URL → a populated db
 
 - Metric script: [`scripts/faculty-coverage-metric.ts`](../scripts/faculty-coverage-metric.ts)
 - Generic staging-probe runner: [`scripts/run-staging-probe.sh`](../scripts/run-staging-probe.sh)
-  (read-only scripts only; staging network config per `OPERATIONS-RUNBOOK.md §4`).
+  (read-only scripts only; staging network config per `OPERATIONS-RUNBOOK.md` § Run a one-off ETL task).
