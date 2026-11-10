@@ -75,7 +75,7 @@ What's the problem?
 
 ## What this is
 
-The **Scholars Profile System (SPS)** is a read-mostly **Next.js 15 (App Router)** app that renders ~9,000 public WCM
+The **Scholars Profile System (SPS)** is a read-mostly **Next.js 16 (App Router)** app that renders ~9,000 public WCM
 scholar profiles. It runs on **AWS ECS Fargate** behind two ALBs, fronted by **CloudFront + WAF**, backed by **Aurora
 MySQL** (primary store) and **Amazon OpenSearch** (search/autocomplete only). Every page is a *derived snapshot* — almost
 all displayed data is produced by a scheduled **Step Functions ETL** that pulls from WCM source systems; an upstream
@@ -85,7 +85,7 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
 |---|---|
 | Prod URL | `https://scholars.weill.cornell.edu` (staging: `scholars-staging.weill.cornell.edu`) |
 | AWS region / DR region | `us-east-1` / `us-west-2` |
-| Compute | ECS Fargate — `next start`, Node 22 (+ OTel sidecar); prod 2 tasks (1024/2048), max 6 |
+| Compute | ECS Fargate — `next start`, Node 26 (+ OTel sidecar); prod 2 tasks (1024/2048), max 6 |
 | DB / Search | Aurora MySQL Serverless v2 (`VER_3_08_0`) / OpenSearch 2.19 |
 | Operator contact | `paa2013@med.cornell.edu` (alarm email) / GitHub `paulalbert1` (prod deploy approver) — **post-launch ownership TBD** |
 
@@ -103,7 +103,7 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
 | Field (WCM template) | Value |
 |---|---|
 | **Application name** | Scholars Profile System (SPS) |
-| **Brief description** | Read-mostly Next.js 15 app rendering ~9,000 public WCM scholar profiles (see [What this is](#what-this-is)) |
+| **Brief description** | Read-mostly Next.js 16 app rendering ~9,000 public WCM scholar profiles (see [What this is](#what-this-is)) |
 | **Mission critical?** | _TBD — Ops to classify._ Working assumption: **No** — public, read-mostly; an outage is reputational / SEO, not patient-care or safety |
 | **Locations / URLs** | Prod `scholars.weill.cornell.edu` · staging `scholars-staging.weill.cornell.edu`; AWS `us-east-1` (DR `us-west-2`) |
 | **Normal operating hours** | 24×7, public internet-facing |
@@ -122,13 +122,23 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
 | **KB article number** | _TBD — assign on publish to WCM Internal KB_ |
 
 **Maintenance & patch windows**
-- **App image / deps** — re-rolled on every deploy (§2); runtime = Node 22 on Fargate, patched by redeploying an updated image.
+- **App image / deps** — re-rolled on every deploy (§2); runtime = Node 26 on Fargate, patched by redeploying an updated image.
 - **Aurora MySQL / OpenSearch** — AWS-managed minor-version windows (AWS defaults; not pinned in CDK): Aurora prod `Sun 05:27–05:57 UTC`, staging `Thu 10:24–10:54 UTC`; Aurora automated backup `03:00–04:00 UTC` (retention 14 d); AWS Backup daily `05:00 UTC`. OpenSearch updates are AWS-managed blue/green with no fixed window.
 - **Release management** — continuous: merge to `master` ships staging automatically; prod is manual, approval-gated, **fix-forward** (no scheduled release train).
 
 **Failover guide**
 - **Within-region (automatic)** — multi-AZ Aurora + ≥2 ECS tasks across 2 AZs + ECS circuit-breaker rollback (§2). No operator action for a single-AZ loss.
-- **Regional (manual)** — **no automated `us-east-1` → `us-west-2` failover.** DR = restore from the `us-west-2` DR vault / Aurora PITR (§4 #11), targeting **RPO ≤ 24 h, RTO ≤ 4 h**. A full regional-failover procedure is _TBD — not yet drilled end-to-end beyond restore_ ([`./restore-drill-runbook.md`](./restore-drill-runbook.md)).
+- **Data loss / corruption (manual, drilled)** — Aurora PITR to any point in the last 14 days, or a daily AWS Backup snapshot (35 days prod). Last drill **2026-11-09: full pass** — restored and row-count-validated in 17 min ([`./restore-drill-runbook.md`](./restore-drill-runbook.md) Variant A, §4 #11).
+- **Regional loss of `us-east-1` (manual, partially drilled)** — **no automated failover.** The database is recoverable in `us-west-2`: every daily snapshot is copied to `sps-dr-backup-vault-${env}` (35 copies held for prod), and a 2026-11-09 drill restored one to a running writer in 12 min (Variant B). Targets **RPO ≤ 24 h** (met: newest copy is < 24 h old) and **RTO ≤ 4 h**. What is **not** yet drilled is the rest of the stack in `us-west-2`; a regional rebuild means, in order:
+  1. Restore the database from the DR vault into a `us-west-2` network (Variant B), applying the TLS parameter group and Serverless v2 scaling.
+  2. Point the CDK at the DR region (`region` in `cdk/lib/config.ts`) and deploy network → data (import the restored cluster) → app → ETL. Container images are **not** replicated to `us-west-2`; the deploy rebuilds them from `master`.
+  3. Rebuild the search index (`npm run search:index`, §4 #9) — OpenSearch is derived from Aurora, not backed up.
+  4. Repoint the edge origin (CloudFront → new ALB; see the origin backout in [`./network-security-topology.md`](./network-security-topology.md)) and re-establish WCM connectivity for the ETL sources (Transit Gateway / NetScaler — owned by WCM networking).
+
+  Already in place to shorten that rebuild: prod app and ETL images replicate to `us-west-2` ECR (registry replication, `Sps-Data-prod`), and the curated-tables backup replicates to an S3 bucket there (`Sps-DrBackupVault-${env}`).
+- **Backup protection** — both backup vaults (`sps-backup-vault-${env}`, `sps-dr-backup-vault-${env}`) carry an AWS Backup **Vault Lock in governance mode** (min retention = plan retention), so recovery points cannot be deleted early without first removing the lock. A FAILED / ABORTED / EXPIRED backup or cross-region copy job for the SPS cluster posts to `etl-failures-${env}` → Teams (rule `sps-aws-backup-failure-${env}`, in `Sps-Etl-${env}`).
+
+  During the outage CloudFront keeps serving pages that are still cached; uncached requests get the branded maintenance page. Because SPS is a read-mostly data sink, regional recovery can be scheduled rather than rushed.
 
 ## Architecture diagram
 
@@ -311,7 +321,7 @@ aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/about" 
 
 ### Local dev (developers only — not for ops on the running app)
 
-Prereqs: Node 22+, Docker (≥4 GB), **host** MariaDB 11 on `127.0.0.1:3306` (not Dockerized MySQL), npm 10+.
+Prereqs: Node 26+, Docker (≥4 GB), **host** MariaDB 11 on `127.0.0.1:3306` (not Dockerized MySQL), npm 10+.
 
 ```bash
 npm install

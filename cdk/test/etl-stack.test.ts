@@ -356,14 +356,16 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates seven state machines (3 cadence + #595 heartbeat + grants export + honors lists + funding digest), seven EventBridge rules, two SNS topics", () => {
+      it("creates eight state machines (3 cadence + #595 heartbeat + grants export + honors lists + funding digest + curated-tables backup), nine EventBridge rules (+ AWS Backup failure alert), two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the grants-export machine, now
         // that grantsExportScheduleEnabled is true in prod too, + the
         // honors-list scraper (weekly + the console's Run now) + the funding
-        // digest import, started by its email landing in the inbound bucket.
+        // digest import, started by its email landing in the inbound bucket,
+        // + the curated-tables backup (#1032, prod activated 2026-11-09).
         // The #393/#353 reconcilers are ECS services now, not state machines.
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 7);
-        template.resourceCountIs("AWS::Events::Rule", 7);
+        // Rules: one per machine + the AWS Backup failure alert rule.
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 8);
+        template.resourceCountIs("AWS::Events::Rule", 9);
         // The heartbeat + both reconcilers + grants export reuse the cadence
         // failure topic; PR-7 adds the etl-page P1 topic, so two total:
         // etl-failures + etl-page.
@@ -372,7 +374,7 @@ describe("EtlStack", () => {
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates nineteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status + funding digest status)", () => {
+      it("creates twenty-one CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status + funding digest status + curated-tables backup status/cadence)", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
         // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
         // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
@@ -384,7 +386,8 @@ describe("EtlStack", () => {
         // freshness heartbeat, TRACKED.HonorsLists, not a cadence alarm)
         // + the funding digest import's status alarm (event-driven, so no
         // cadence alarm; TRACKED.FundingDigest grades its absence).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 19);
+        // + the curated-tables backup status + cadence alarms (#1032).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 21);
       });
 
       it("creates eight ECS task definitions (5 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -411,20 +414,42 @@ describe("EtlStack", () => {
         expect(rule.Properties?.SourceSecurityGroupId).toBeDefined();
       });
 
-      it("prod does NOT create the curated-tables backup schedule (curationBackupScheduleEnabled=false until prod is activated; #1032)", () => {
+      it("alerts etl-failures-prod on a FAILED/ABORTED/EXPIRED AWS Backup or copy job for the SPS cluster only", () => {
+        const rules = template.findResources("AWS::Events::Rule", {
+          Properties: { Name: "sps-aws-backup-failure-prod" },
+        });
+        const rule = Object.values(rules)[0];
+        expect(rule).toBeDefined();
+        const pattern = JSON.stringify(rule?.Properties?.EventPattern);
+        expect(pattern).toContain("aws.backup");
+        expect(pattern).toContain("Copy Job State Change");
+        expect(pattern).toContain("FAILED");
+        expect(pattern).toContain(":cluster:sps-data-prod-");
+        const topics = template.findResources("AWS::SNS::Topic", {
+          Properties: { TopicName: "etl-failures-prod" },
+        });
+        const target = (rule?.Properties?.Targets as Array<{ Arn: { Ref: string } }>)[0];
+        expect(Object.keys(topics)).toContain(target.Arn.Ref);
+        // The topic's explicit policy must still let CloudWatch publish (#2279).
+        const policies = JSON.stringify(template.findResources("AWS::SNS::TopicPolicy"));
+        expect(policies).toContain("events.amazonaws.com");
+        expect(policies).toContain("cloudwatch.amazonaws.com");
+      });
+
+      it("prod creates the curated-tables backup schedule (curationBackupScheduleEnabled=true since prod activation 2026-11-09; #1032)", () => {
         const rules = template.findResources("AWS::Events::Rule");
         expect(
           Object.values(rules).some(
             (r) => r.Properties?.Name === "sps-curation-backup-prod",
           ),
-        ).toBe(false);
+        ).toBe(true);
         const sms = template.findResources("AWS::StepFunctions::StateMachine");
         expect(
           Object.values(sms).some(
             (s) =>
               s.Properties?.StateMachineName === "scholars-curation-backup-prod",
           ),
-        ).toBe(false);
+        ).toBe(true);
       });
 
       it("prod does NOT create the opportunity-projection schedule (opportunityProjectionScheduleEnabled=false until the prod corpus is published; #1218)", () => {
@@ -741,8 +766,9 @@ describe("EtlStack", () => {
         // opportunity-corpus-freshness alarm + the honors-list scraper's
         // and the funding digest import's status alarms; all share the
         // topic -- a duration alarm that routed elsewhere would be invisible,
-        // so it is covered by the same loop below.
-        expect(Object.keys(alarms)).toHaveLength(19);
+        // so it is covered by the same loop below. + the curated-tables backup
+        // status + cadence alarms (#1032).
+        expect(Object.keys(alarms)).toHaveLength(21);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -2008,8 +2034,9 @@ describe("EtlStack", () => {
       // 2026-07-20 (the nightly now covers the work); the honors-list scraper's
       // weekly rule brings it to 10 (enabled after staging's clean supervised
       // first run on 2026-09-25); the funding digest arrival rule makes 11.
-      // The #393/#353 reconcilers are ECS services, not rules, so 9.
-      expect(Object.keys(rules)).toHaveLength(9);
+      // The #393/#353 reconcilers are ECS services, not rules, so 9; + the
+      // AWS Backup failure alert rule = 10.
+      expect(Object.keys(rules)).toHaveLength(10);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });

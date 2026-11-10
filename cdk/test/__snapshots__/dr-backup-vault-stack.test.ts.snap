@@ -34,9 +34,106 @@ exports[`DrBackupVaultStack prod matches the snapshot 1`] = `
       "DeletionPolicy": "Retain",
       "Properties": {
         "BackupVaultName": "sps-dr-backup-vault-prod",
+        "LockConfiguration": {
+          "MinRetentionDays": 35,
+        },
       },
       "Type": "AWS::Backup::BackupVault",
       "UpdateReplacePolicy": "Retain",
+    },
+    "DrCurationBackupBucket9E75DE13": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "BucketName": {
+          "Fn::Join": [
+            "",
+            [
+              "sps-curation-backups-dr-prod-",
+              {
+                "Ref": "AWS::AccountId",
+              },
+            ],
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "expire-noncurrent-versions",
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 90,
+              },
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled",
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "DrCurationBackupBucketPolicy265219EA": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "DrCurationBackupBucket9E75DE13",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DrCurationBackupBucket9E75DE13",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DrCurationBackupBucket9E75DE13",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
   },
   "Rules": {

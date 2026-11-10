@@ -10,6 +10,7 @@ import {
   type StackProps,
 } from "aws-cdk-lib";
 import * as backup from "aws-cdk-lib/aws-backup";
+import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as events from "aws-cdk-lib/aws-events";
 import * as iam from "aws-cdk-lib/aws-iam";
@@ -637,6 +638,13 @@ export class DataStack extends Stack {
     const sourceVault = new backup.BackupVault(this, "BackupVault", {
       backupVaultName: `sps-backup-vault-${envConfig.envName}`,
       removalPolicy: RemovalPolicy.RETAIN,
+      // Vault Lock, GOVERNANCE mode (no changeableFor => never hardens to
+      // compliance): a recovery point cannot be deleted before its retention
+      // ends, except by a principal holding backup:DeleteBackupVaultLockConfiguration.
+      // Guards against an accidental/scripted purge; reversible by an admin.
+      lockConfiguration: {
+        minRetention: Duration.days(envConfig.awsBackupRetentionDays),
+      },
     });
 
     const backupPlan = new backup.BackupPlan(this, "BackupPlan", {
@@ -668,6 +676,29 @@ export class DataStack extends Stack {
         backup.BackupResource.fromRdsDatabaseCluster(this.auroraCluster),
       ],
     });
+
+    // ECR cross-region replication of the PROD images to the DR region, so a
+    // regional rebuild can pull images instead of rebuilding them. The ECR
+    // replication configuration is a REGISTRY-wide singleton (one per
+    // account+region, and the account is shared with staging and other
+    // teams), so only prod declares it, and it is filtered to SPS prod repos.
+    // Anyone adding replication for another repo in this account must add it
+    // HERE, or this resource will overwrite theirs on the next deploy.
+    if (envConfig.envName === "prod") {
+      new ecr.CfnReplicationConfiguration(this, "EcrDrReplication", {
+        replicationConfiguration: {
+          rules: [
+            {
+              destinations: [{ region: envConfig.drRegion, registryId: this.account }],
+              repositoryFilters: [
+                { filter: "scholars-app-prod", filterType: "PREFIX_MATCH" },
+                { filter: "scholars-etl-prod", filterType: "PREFIX_MATCH" },
+              ],
+            },
+          ],
+        },
+      });
+    }
 
     // ------------------------------------------------------------------
     // Outputs — surfaced for cdk diff / deploy review and for the later

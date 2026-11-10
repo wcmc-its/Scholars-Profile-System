@@ -830,12 +830,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // launch too (empty-queue-safe; no-ops until SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID
     // is set). See flag JSDoc.
     cdnReconcileScheduleEnabled: true,
-    // #1032 — curated-tables backup NOT YET ACTIVATED on prod. Ships disabled:
-    // the prod bucket/grant/env don't exist until `cdk deploy Sps-Etl-prod`, so
-    // the rule would target a task def without CURATION_BACKUP_BUCKET. Activate
-    // prod (deploy + first verify run) then flip this to true. See
-    // docs/curation-backup-runbook.md § Prod.
-    curationBackupScheduleEnabled: false,
+    // #1032 — curated-tables backup ACTIVATED on prod 2026-11-09: bucket + task-def
+    // env were already deployed, and a manual run exited 0 (17 tables, 10,379 rows).
+    // See docs/curation-backup-runbook.md § Prod.
+    curationBackupScheduleEnabled: true,
     // Nightly grants bulk export — staging hand-verified 2026-08-11 (13,266
     // rows, correct NDJSON schema, both an ECS RunTask and a real Step
     // Functions execution). Research Informatics confirmed prod read access

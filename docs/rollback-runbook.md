@@ -60,3 +60,9 @@ ETL: not affected. ETL Lambdas write to MySQL and trigger `/api/revalidate` inde
 ## Drill cadence
 
 Per ADR-004 acceptance criteria, a full rollback drill must be executed against staging before the runbook is considered validated. Re-run the drill at least quarterly thereafter, or after any change to the deploy pipeline, ECS service definition, or CDK stack.
+
+### Drills
+
+| Date (UTC) | Env | From → to | Rollback stable | Roll-forward stable | Outcome |
+|---|---|---|---|---|---|
+| 2026-11-10 00:48 | staging | `sps-app-staging:1028` → `:1027` → `:1028` (distinct image digests) | 170 s, `/api/health` 200 | 219 s, `/api/health` 200 | **Pass.** One deployment, running = desired after each step. First logged drill. |

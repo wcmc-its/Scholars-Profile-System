@@ -25,6 +25,7 @@ import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
+import { drCurationBackupBucketName } from "./dr-backup-vault-stack";
 import { CLIPS_PREFIX, FUNDING_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
 
 /** Props for {@link EtlStack}. */
@@ -780,6 +781,14 @@ export class EtlStack extends Stack {
     // stack name) and injected into the task as CURATION_BACKUP_BUCKET below,
     // mirroring the logs/analytics bucket pattern.
     // ------------------------------------------------------------------
+    // Explicit, env-named replication role (footgun #4: every role carries the
+    // env literal). CDK does NOT attach replication permissions to a role you
+    // pass in, so they are granted explicitly right after the bucket below.
+    const curationReplicationRole = new iam.Role(this, "CurationBackupReplicationRole", {
+      roleName: `sps-etl-${env}-curation-backup-replication`,
+      assumedBy: new iam.ServicePrincipal("s3.amazonaws.com"),
+    });
+    const drCurationBucketArn = `arn:aws:s3:::${drCurationBackupBucketName(env)}`;
     const curationBackupBucket = new s3.Bucket(this, "CurationBackupBucket", {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -793,7 +802,48 @@ export class EtlStack extends Stack {
           abortIncompleteMultipartUploadAfter: Duration.days(7),
         },
       ],
+      // Cross-region copy of the backup output (only the
+      // `sps-curation-backups/` prefix -- not scratch inputs or bulk-data-rule
+      // output) to the DR-region bucket owned by Sps-DrBackupVault-<env>.
+      // Delete markers are NOT replicated, so a delete here never removes
+      // the DR copy. Deploy Sps-DrBackupVault-<env> first (it creates the
+      // destination bucket).
+      replicationRole: curationReplicationRole,
+      replicationRules: [
+        {
+          id: "curation-backups-to-dr-region",
+          priority: 1,
+          filter: { prefix: "sps-curation-backups/" },
+          deleteMarkerReplication: false,
+          destination: s3.Bucket.fromBucketAttributes(this, "DrCurationBackupBucket", {
+            bucketName: drCurationBackupBucketName(envConfig.envName),
+            region: envConfig.drRegion,
+          }),
+        },
+      ],
     });
+    curationReplicationRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:GetReplicationConfiguration", "s3:ListBucket"],
+        resources: [curationBackupBucket.bucketArn],
+      }),
+    );
+    curationReplicationRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "s3:GetObjectVersionForReplication",
+          "s3:GetObjectVersionAcl",
+          "s3:GetObjectVersionTagging",
+        ],
+        resources: [curationBackupBucket.arnForObjects("*")],
+      }),
+    );
+    curationReplicationRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:ReplicateObject", "s3:ReplicateTags"],
+        resources: [`${drCurationBucketArn}/*`],
+      }),
+    );
     // The task role's write grant — PutObject (+ Abort*) on this bucket. The
     // dump step uploads here; restores read it out-of-band by an operator.
     curationBackupBucket.grantPut(taskRole);
@@ -1392,6 +1442,37 @@ export class EtlStack extends Stack {
         conditions: { StringEquals: { "aws:SourceAccount": this.account } },
       }),
     );
+
+    // AWS Backup failure alert. Without this a failed daily Aurora backup, or
+    // a failed cross-region copy to the DR vault, is silent. Matched by the SPS
+    // cluster ARN prefix: the account is shared, so other teams' backup jobs
+    // must not alert here, and a prefix survives the cluster being re-created.
+    // Copy-job events are emitted in the SOURCE region, so this one us-east-1
+    // rule covers both. The payload mimics the Step Functions failure event
+    // ({env, step, error}) so the on-call relay renders it as a failure card.
+    // The SnsTopic target adds an events.amazonaws.com publish grant to the
+    // topic's existing explicit policy (CloudWatch + states stay granted above).
+    new events.Rule(this, "AwsBackupFailureRule", {
+      ruleName: `sps-aws-backup-failure-${env}`,
+      description: `SPS ${env}: AWS Backup or copy job for the Aurora cluster FAILED, ABORTED or EXPIRED`,
+      eventPattern: {
+        source: ["aws.backup"],
+        detailType: ["Backup Job State Change", "Copy Job State Change"],
+        detail: {
+          state: ["FAILED", "ABORTED", "EXPIRED"],
+          resourceArn: [{ prefix: `arn:aws:rds:${this.region}:${this.account}:cluster:sps-data-${env}-` }],
+        },
+      },
+      targets: [
+        new eventsTargets.SnsTopic(this.failureTopic, {
+          message: events.RuleTargetInput.fromObject({
+            env,
+            step: "AwsBackup",
+            error: `${events.EventField.fromPath("$.detail-type")} ${events.EventField.fromPath("$.detail.state")}: ${events.EventField.fromPath("$.detail.statusMessage")}`,
+          }),
+        }),
+      ],
+    });
 
     // PR-7 — P1 page topic. Abort-tier step failures publish here (vs the
     // warn-tier etl-failures topic); the relay's severityForRecord defaults any
