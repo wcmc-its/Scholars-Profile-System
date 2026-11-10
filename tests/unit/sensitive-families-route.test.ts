@@ -32,9 +32,11 @@ const GATED = [
   },
 ];
 
-function call(cwid: string) {
+function call(cwid: string, ua?: string) {
   return GET(
-    new Request("http://localhost/api/profile/" + cwid + "/sensitive-families") as never,
+    new Request("http://localhost/api/profile/" + cwid + "/sensitive-families", {
+      headers: ua ? { "user-agent": ua } : undefined,
+    }) as never,
     { params: Promise.resolve({ cwid }) },
   );
 }
@@ -86,5 +88,32 @@ describe("GET /api/profile/[cwid]/sensitive-families", () => {
     expect(body.viewer).toBe("network");
     expect(body.families).toEqual(GATED);
     expect(loadSensitiveScholarFamilies).toHaveBeenCalledWith("aog");
+  });
+
+  // An anonymous on-network PERSON keeps the reveal; an on-network crawler that
+  // renders the page must not get it (it would index it publicly).
+  it.each([
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 HeadlessChrome/131.0.0.0 Safari/537.36",
+    "python-requests/2.32.3",
+  ])("bot UA %s on-network → [] external; never resolves viewer or loads", async (ua) => {
+    vi.mocked(isMethodsLensSensitiveGateOn).mockReturnValue(true);
+    vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
+    vi.mocked(loadSensitiveScholarFamilies).mockResolvedValue(GATED as never);
+    const body = await (await call("aog", ua)).json();
+    expect(body).toEqual({ families: [], viewer: "external" });
+    expect(resolveViewerContext).not.toHaveBeenCalled();
+    expect(loadSensitiveScholarFamilies).not.toHaveBeenCalled();
+  });
+
+  it("real browser UA, anonymous on-network → still revealed", async () => {
+    vi.mocked(isMethodsLensSensitiveGateOn).mockReturnValue(true);
+    vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
+    vi.mocked(loadSensitiveScholarFamilies).mockResolvedValue(GATED as never);
+    const ua =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
+    const body = await (await call("aog", ua)).json();
+    expect(body.families).toEqual(GATED);
+    expect(body.viewer).toBe("network");
   });
 });
