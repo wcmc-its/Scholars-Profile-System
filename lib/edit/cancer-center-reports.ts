@@ -436,7 +436,7 @@ export async function loadReportableUnitsForActor(
     }));
 }
 
-export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13 | 17 | 18 | 19;
+export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13 | 17 | 18 | 19 | 20;
 
 /**
  * Which numbered reports apply to a unit of this kind — the single source of
@@ -455,7 +455,8 @@ export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13 | 17 | 18 | 19;
 export const REPORT_NUMBERS_BY_KIND: Record<ReportableUnitKind, readonly ReportNumber[]> = {
   // 17 Publication cancer relevance, 18 Publication citation report and
   // 19 Collaborative publication matrix: center-only, read 17's decisions.
-  center: [1, 2, 3, 4, 5, 6, 17, 18, 19],
+  // 20 Shared resource usage: center-only, iLab core charges by program.
+  center: [1, 2, 3, 4, 5, 6, 17, 18, 19, 20],
   department: [3, 6],
   division: [3, 6],
   // 11 Core users, 12 Output over time, 13 Grants citing the core: core-only,
@@ -693,7 +694,7 @@ export async function loadReportLiveness(
           reportingCycle: funding?.latestCycle ?? null,
           toReview: funding?.toReview ?? 0,
         };
-      // 3, 4, 5, 6, 17, 18, 19 — proxied by active-membership existence (center/dept/div)
+      // 3, 4, 5, 6, 17, 18, 19, 20 — proxied by active-membership existence (center/dept/div)
       // or by real confirmed-usage presence (core). 11–13 are core-only and
       // read that same confirmed-usage set, so the same bit is exact for them
       // (13 a proxy like 6: a core with no grant-linked paper renders empty).
