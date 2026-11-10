@@ -24,10 +24,25 @@ import { loadScholarContactEmail } from "@/lib/api/profile";
  *   - internal viewer + public/institution   → { email, viewer: basis }
  *   - internal viewer + none/null/unknown    → { email: null, viewer: basis }
  * Never cached.
+ *
+ * Crawler hardening (2026-11-09 institution-email-reveal spec). A JS-rendering
+ * indexer whose egress IP is on the WCM network counts as a "network" viewer, so
+ * an on-mount reveal would land the address in a public search index:
+ *   - bot-like User-Agent                    → same shape as external, no DB read
+ *   - network viewer WITHOUT `?reveal=1`     → { email: null, viewer: "network",
+ *                                                revealable } — the island renders
+ *                                                a "Show email" button and only
+ *                                                sends `?reveal=1` on click
+ *   - session viewers are unaffected (auto-reveal on mount, as before)
  */
 export const dynamic = "force-dynamic";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
+
+// ponytail: UA regex, not a bot-detection dep. Well-behaved crawlers self-identify;
+// a UA-spoofing crawler that also clicks gets through — upgrade path is a per-IP
+// WAF rate rule on /api/profile/*/contact-email.
+const BOT_UA = /bot|crawl|spider|slurp|headless|python|curl|wget|httpclient|java\//i;
 
 export async function GET(
   request: NextRequest,
@@ -39,6 +54,10 @@ export async function GET(
     return NextResponse.json({ email: null, viewer: "off" }, { headers: NO_STORE });
   }
 
+  if (BOT_UA.test(request.headers.get("user-agent") ?? "")) {
+    return NextResponse.json({ email: null, viewer: "external" }, { headers: NO_STORE });
+  }
+
   const vc = await resolveViewerContext(request);
   if (!vc.internal) {
     return NextResponse.json({ email: null, viewer: "external" }, { headers: NO_STORE });
@@ -46,5 +65,13 @@ export async function GET(
 
   const row = await loadScholarContactEmail(cwid);
   const email = row && isEmailVisibleToViewer(row.emailVisibility, true) ? row.email : null;
+  // Network (anonymous on-campus) viewers get the address only on an explicit
+  // click-driven `?reveal=1`; otherwise just whether a click would yield one.
+  if (vc.basis !== "session" && new URL(request.url).searchParams.get("reveal") !== "1") {
+    return NextResponse.json(
+      { email: null, viewer: vc.basis, revealable: email !== null },
+      { headers: NO_STORE },
+    );
+  }
   return NextResponse.json({ email, viewer: vc.basis }, { headers: NO_STORE });
 }
