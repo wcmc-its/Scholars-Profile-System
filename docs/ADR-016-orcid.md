@@ -34,10 +34,12 @@ Only the authenticated level may be described as authenticated, in UI or in repo
 
 ### D3. Display
 
-- Every confirmed or authenticated iD is shown on the public profile and in JSON-LD. Restricting the profile to authenticated iDs would hide nearly every iD we hold.
-- Per ORCID's iD display guidelines, every iD uses the full `https://orcid.org/` URL with an icon. An authenticated iD gets the green iD icon. Every other iD gets ORCID's unauthenticated icon and an "(unauthenticated)" suffix, and is marked no other way.
+- Revised 2026-11-10 (Paul): ORCID is off the visible public profile by default. Most visitors don't need it, and the guideline display ("(unauthenticated)" on most profiles) was clunky. Only an authenticated iD can be shown, and only when the scholar ticks "Show on my public profile" on the `/edit` card. That choice is stored in the `showOrcid` override. A shown iD appears as the green iD icon plus "ORCID", linked, in the sidebar card, which is renamed "Contact & profiles".
+- An iD that is not authenticated is never shown on the profile.
+- JSON-LD `sameAs` still carries every confirmed iD. It is not displayed, and ORCID iDs are public anyway.
+- In `/edit`, the iD row uses ORCID's icons: green for an authenticated iD, the unauthenticated icon otherwise.
 - Suggestions are never public. They appear only in `/edit` (the card, the home board, the librarian queue).
-- A "What is ORCID?" info popover accompanies the iD in `/edit` and on the profile.
+- A "What is ORCID?" info popover accompanies the iD in `/edit`.
 
 ### D4. Confirmation flow
 

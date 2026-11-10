@@ -78,6 +78,10 @@ export const SECTION_VISIBILITY_FIELDS = [
   "hideNews",
   "hideDatasets",
   "showDatasets",
+  // ADR-016 D3 (Paul, 2026-11-10): ORCID is OFF the public profile unless the
+  // scholar opts in, and only an authenticated iD can show. Inverted like
+  // `showDatasets`: `"true"` = shown.
+  "showOrcid",
 ] as const;
 export type SectionVisibilityField = (typeof SECTION_VISIBILITY_FIELDS)[number];
 

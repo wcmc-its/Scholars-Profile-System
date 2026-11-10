@@ -41,6 +41,7 @@ import { useRouter } from "next/navigation";
 import { ArrowUpRight, Check, Lock, Sparkles } from "lucide-react";
 
 import { EditPanel, OwnedBadge } from "@/components/edit/edit-panel";
+import { Checkbox } from "@/components/ui/checkbox";
 import { OrcidIdIcon, OrcidUnauthIcon } from "@/components/scholar/orcid-id-icon";
 import { OrcidInfoButton } from "@/components/scholar/orcid-info-button";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -65,6 +66,8 @@ export type OrcidCardProps = {
   authenticated?: boolean;
   /** `scholar.orcidConfirmMethod` — who put `onFile` there (null = unknown). */
   confirmMethod?: string | null;
+  /** `showOrcid` opt-in is on (ADR-016 D3); only an authenticated iD can show. */
+  shownOnProfile?: boolean;
   /** Offer "Connect your ORCID iD" — `ORCID_CONNECT` on and the scholar's own view. */
   connectEnabled?: boolean;
 };
@@ -144,6 +147,7 @@ export function OrcidCard({
   suggested,
   authenticated = false,
   confirmMethod = null,
+  shownOnProfile = false,
   connectEnabled = false,
 }: OrcidCardProps) {
   const router = useRouter();
@@ -193,6 +197,35 @@ export function OrcidCard({
       if (dismiss.length > 0) setDismissed(true);
       setEditing(false);
       setValue("");
+      router.refresh();
+    } catch {
+      setError(errorMessage("unknown"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const [shown, setShown] = React.useState(shownOnProfile);
+  const setShownOnProfile = async (next: boolean) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/edit/field", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType: "scholar",
+          entityId: cwid,
+          fieldName: "showOrcid",
+          value: next ? "true" : "false",
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean };
+      if (!res.ok || data.ok !== true) {
+        setError(errorMessage("unknown"));
+        return;
+      }
+      setShown(next);
       router.refresh();
     } catch {
       setError(errorMessage("unknown"));
@@ -381,6 +414,17 @@ export function OrcidCard({
           "orcid-on-file",
           saved !== undefined ? "Confirmed by you" : provenanceLine(confirmMethod, subject),
         )}
+      {current && status === "authenticated" && (
+        // ADR-016 D3: off the public profile by default; only an authenticated iD can show.
+        <label className="flex items-center gap-2 text-sm" data-testid="orcid-show-on-profile">
+          <Checkbox
+            checked={shown}
+            onCheckedChange={(c) => void setShownOnProfile(c === true)}
+            disabled={busy}
+          />
+          Show on {whose} public profile
+        </label>
+      )}
       {current &&
         competing &&
         !editing &&

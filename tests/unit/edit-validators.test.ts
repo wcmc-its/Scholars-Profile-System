@@ -55,7 +55,7 @@ describe("isEditableField", () => {
 // ---------------------------------------------------------------------------
 
 describe("section visibility", () => {
-  it("SECTION_VISIBILITY_FIELDS lists the ten hideable sections + hideEducationYears + showDatasets", () => {
+  it("SECTION_VISIBILITY_FIELDS lists the ten hideable sections + hideEducationYears + showDatasets + showOrcid", () => {
     expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
       "hideMentoring",
       "hideEducation",
@@ -74,6 +74,8 @@ describe("section visibility", () => {
       // the section instead of hiding it (see the SECTION_VISIBILITY_FIELDS
       // doc comment).
       "showDatasets",
+      // ADR-016 D3 — ORCID on the profile is opt-in ("true" shows it).
+      "showOrcid",
     ]);
   });
 
