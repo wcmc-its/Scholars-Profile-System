@@ -38,16 +38,18 @@ function Section({
   title,
   note,
   testId,
+  id,
   children,
 }: {
   title: string;
   note?: React.ReactNode;
   testId: string;
+  id?: string;
   children: React.ReactNode;
 }) {
   return (
     <ReportCard>
-      <section data-testid={testId}>
+      <section data-testid={testId} id={id} className="scroll-mt-24">
         <h2 className="text-lg font-semibold">{title}</h2>
         {note && <p className="text-muted-foreground mt-1 text-[13px]">{note}</p>}
         <div className="mt-4">{children}</div>
@@ -232,20 +234,7 @@ export async function renderSharedResourceUsageReport({
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-1.5 text-sm">
-            Lab table core
-            <select name="core" defaultValue={params.core ?? ""} className={SELECT}>
-              <option value="">All cores</option>
-              {params.core && !coreOptions.includes(params.core) && (
-                <option value={params.core}>{params.core}</option>
-              )}
-              {coreOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
+          {params.core && <input type="hidden" name="core" value={params.core} />}
           <button
             type="submit"
             className="border-foreground/40 hover:bg-apollo-surface-2 rounded border px-3 py-1.5 text-sm group-data-[hydrated=true]:hidden"
@@ -390,11 +379,44 @@ export async function renderSharedResourceUsageReport({
           title="6. Subsidy by lab"
           note={
             params.core
-              ? `${params.core} only. Pick “All cores” above for every core.`
-              : "Every core. Pick one above to narrow the table and the download."
+              ? `${params.core} only. Pick “All cores” for every core.`
+              : "Every core. Pick one to narrow the table and the download."
           }
           testId="shared-resource-view-6"
+          id="subsidy-by-lab"
         >
+          {/* The core filter lives with the only table it narrows, and the
+              reload lands back here, so the change is visible. */}
+          <AutoSubmitForm
+            action={`${basePath}#subsidy-by-lab`}
+            className="group mb-3 flex flex-wrap items-center gap-x-5 gap-y-3"
+            data-testid="shared-resource-core-filter"
+          >
+            {[...new URLSearchParams(unitQuery).entries()].map(([k, v]) => (
+              <input key={k} type="hidden" name={k} value={v} />
+            ))}
+            {shownQuarter && <input type="hidden" name="quarter" value={shownQuarter} />}
+            <label className="flex items-center gap-1.5 text-sm">
+              Core
+              <select name="core" defaultValue={params.core ?? ""} className={SELECT}>
+                <option value="">All cores</option>
+                {params.core && !coreOptions.includes(params.core) && (
+                  <option value={params.core}>{params.core}</option>
+                )}
+                {coreOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="border-foreground/40 hover:bg-apollo-surface-2 rounded border px-3 py-1.5 text-sm group-data-[hydrated=true]:hidden"
+            >
+              Apply
+            </button>
+          </AutoSubmitForm>
           <div className="max-h-[640px] overflow-auto">
             <table
               className="w-full min-w-[720px] border-collapse text-sm"
