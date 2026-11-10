@@ -555,6 +555,9 @@ export type ProfilePayload = {
   /** ADR-016 D3 — `orcid` was proved by the scholar signing in to ORCID; the
    *  only state that earns ORCID's iD icon on the profile. */
   orcidAuthenticated?: boolean;
+  /** ADR-016 D3 — show the ORCID link on the profile: authenticated AND the
+   *  scholar opted in (`showOrcid`). JSON-LD `sameAs` is unaffected. */
+  orcidShown?: boolean;
   /** #2699 — faculty-entered external profile links (`field_override('profileLinks')`),
    *  `{ platform: canonical https URL }`. Rendered in the Contact card and pushed
    *  into JSON-LD `sameAs`. `{}` when none or `SELF_EDIT_PROFILE_LINKS` is off. */
@@ -1800,6 +1803,8 @@ export const getScholarFullProfileBySlug = cache(
       clinicalProfileUrl: scholar.clinicalProfileUrl,
       orcid: scholar.orcid,
       orcidAuthenticated: scholar.orcidConfirmMethod === "authenticated",
+      orcidShown:
+        scholar.orcidConfirmMethod === "authenticated" && hiddenSections.has("showOrcid"),
       profileLinks,
       overview: effectiveOverview,
       appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({

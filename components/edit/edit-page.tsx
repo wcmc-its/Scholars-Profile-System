@@ -1599,6 +1599,7 @@ function renderPanel(
               suggested={row.suggested}
               authenticated={ctx.scholar.orcidAuthenticated === true}
               confirmMethod={ctx.scholar.orcidConfirmMethod ?? null}
+              shownOnProfile={ctx.scholar.hiddenSections.includes("showOrcid")}
               connectEnabled={orcidConnectEnabled && mode === "self"}
             />
           )}

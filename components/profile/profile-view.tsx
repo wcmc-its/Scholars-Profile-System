@@ -8,8 +8,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { MentoringInfoTooltip } from "@/components/scholar/mentoring-info-tooltip";
 import { TechnologiesInfoButton } from "@/components/scholar/technologies-info-button";
-import { OrcidIdIcon, OrcidUnauthIcon } from "@/components/scholar/orcid-id-icon";
-import { OrcidInfoButton } from "@/components/scholar/orcid-info-button";
+import { OrcidIdIcon } from "@/components/scholar/orcid-id-icon";
 import { ClinicalTrialsInfoTooltip } from "@/components/scholar/clinical-trials-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
@@ -92,7 +91,7 @@ export async function ProfileView({ slug }: { slug: string }) {
   // SELF_EDIT_PROFILE_LINKS (the loader already returns `{}` for the links when
   // off; the ORCID row is gated here so the public render is dark as one).
   const externalProfiles: Array<{ label: string; url: string; orcid?: boolean }> = [
-    ...(isProfileLinksEnabled() && profile.orcid
+    ...(isProfileLinksEnabled() && profile.orcid && profile.orcidShown
       ? [{ label: "ORCID", url: `https://orcid.org/${profile.orcid}`, orcid: true }]
       : []),
     ...PROFILE_LINK_PLATFORM_KEYS.flatMap((k) => {
@@ -298,7 +297,7 @@ export async function ProfileView({ slug }: { slug: string }) {
             </div>
 
             {profile.email || profile.hasClinicalProfile || externalProfiles.length > 0 ? (
-              <SidebarCard title="Contact">
+              <SidebarCard title="Contact & profiles">
                 <ul className="flex flex-col gap-2">
                   {profile.email ? (
                     <li>
@@ -340,23 +339,18 @@ export async function ProfileView({ slug }: { slug: string }) {
                       external profiles. `rel="me"` is the identity-link rel. */}
                   {externalProfiles.map((p) =>
                     p.orcid ? (
-                      // ADR-016 D3, per ORCID's iD display guidelines: the full URL
-                      // with the green iD icon when the scholar authenticated it,
-                      // else the unauthenticated icon and an "(unauthenticated)" suffix.
-                      <li key={p.label} className="flex items-center gap-1.5" data-testid="profile-orcid">
+                      // ADR-016 D3: only an authenticated iD the scholar opted in to
+                      // show (`orcidShown`), so always the green iD icon.
+                      <li key={p.label} data-testid="profile-orcid">
                         <a
                           href={p.url}
                           target="_blank"
                           rel="me noopener noreferrer"
-                          className="inline-flex min-w-0 items-center gap-1.5 text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                          className="inline-flex items-center gap-1.5 text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                         >
-                          {profile.orcidAuthenticated ? <OrcidIdIcon /> : <OrcidUnauthIcon />}
-                          <span className="truncate">{p.url}</span>
+                          <OrcidIdIcon />
+                          {p.label} →
                         </a>
-                        {!profile.orcidAuthenticated && (
-                          <span className="text-muted-foreground shrink-0 text-sm">(unauthenticated)</span>
-                        )}
-                        <OrcidInfoButton />
                       </li>
                     ) : (
                       <li key={p.label}>

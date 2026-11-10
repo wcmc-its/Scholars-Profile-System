@@ -393,6 +393,24 @@ describe("OrcidCard — Connect your ORCID iD (#3115)", () => {
     cleanup();
   });
 
+  it("ADR-016 D3: 'Show on your public profile' only for an authenticated iD, and it writes showOrcid", async () => {
+    render(<OrcidCard {...base} onFile={ID} connectEnabled />);
+    expect(screen.queryByTestId("orcid-show-on-profile")).toBeNull();
+    cleanup();
+    const f = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    render(<OrcidCard {...base} onFile={ID} authenticated connectEnabled />);
+    const box = screen.getByTestId("orcid-show-on-profile");
+    expect(box.textContent).toContain("Show on your public profile");
+    fireEvent.click(box.querySelector("button")!);
+    await waitFor(() => expect(f).toHaveBeenCalled());
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/edit/field");
+    expect(JSON.parse(String(init.body))).toMatchObject({ fieldName: "showOrcid", value: "true" });
+    vi.unstubAllGlobals();
+    cleanup();
+  });
+
   it("the callback's ?orcid= outcome is shown once", () => {
     window.history.replaceState(null, "", "/edit?attr=identifiers-profiles&orcid=denied");
     render(<OrcidCard {...base} onFile={null} connectEnabled />);
