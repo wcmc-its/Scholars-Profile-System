@@ -34,7 +34,7 @@ Reading order: edge → app → data → background.
                                  │
                                  ▼
                     ┌─────────────────────────┐
-                    │  ECS Fargate             │  ← `next start` (Node 22)
+                    │  ECS Fargate             │  ← `next start` (Node 26)
                     │  task: scholars-app      │     prod 2-6 tasks, autoscaled on
                     │  image: ghcr.io/.../app  │     avg CPU + ALB req/target
                     └────┬───────────┬────────┘

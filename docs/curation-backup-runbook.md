@@ -142,10 +142,10 @@ snapshot reflects the curated state as last hand-edited). It's wired in
 config flag:
 
 - **staging:** flag `true` — **live** (runs daily).
-- **prod:** flag `false` — **no schedule is created** until prod is activated
-  (see § Prod). Unlike the ETL cadences (which ship present-but-disabled), this
-  block is gated on creation because the prod bucket/grant/env don't exist until
-  the first prod deploy and the first run must be verified by hand.
+- **prod:** flag `true` since 2026-11-09 — **live** once `Sps-Etl-prod` is
+  deployed with it (see § Prod). The block is gated on creation (not
+  present-but-disabled like the ETL cadences) so a new env gets its schedule
+  only after a hand-verified first run.
 
 Observability: a failed run **Catches to the ETL failure topic**
 (`etl-failures-<env>` → Teams); a **status alarm**
@@ -162,30 +162,20 @@ To change the cadence, edit the `events.Schedule.cron(...)` in the
 `CurationBackupScheduleRule` block (e.g. `{ minute: "0", hour: "6", weekDay:
 "MON" }` for weekly). Changing it needs a `cdk deploy Sps-Etl-<env>`.
 
-## Prod activation (TODO — not yet done)
+## Prod activation (done 2026-11-09)
 
-The curated-tables backup is **live on staging only**. To activate prod, in
-order:
-
-1. **Deploy the stack** (creates the prod bucket + IAM grant + task-def env;
-   also brings any other pending `Sps-Etl-prod` changes — review the full diff):
-   ```bash
-   cd cdk
-   npx cdk diff   Sps-Etl-prod --exclusively -c env=prod -c prodAccount=665083158573
-   npx cdk deploy Sps-Etl-prod --exclusively -c env=prod -c prodAccount=665083158573
-   ```
-   (Run from a checkout on master, with prod deploy creds. The ETL image must
-   also include the script — a push to master rebuilds it via `deploy.yml`.)
-2. **Verify a manual run** before trusting a schedule:
-   ```bash
-   aws ecs run-task --cluster sps-cluster-prod --task-definition sps-etl-prod \
-     --launch-type FARGATE --network-configuration '<app-service netcfg>' \
-     --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","backup:curated"]}]}'
-   ```
-   Confirm exit 0 and the objects under `sps-curation-backups/prod/`.
-3. **Flip the schedule on:** set `curationBackupScheduleEnabled: true` in the
-   prod block of `cdk/lib/config.ts`, then `cdk deploy Sps-Etl-prod` again. This
-   creates the daily rule + state machine + cadence alarm on prod.
+1. **Bucket + IAM grant + task-def env** — already present on `sps-etl-prod`
+   (`CURATION_BACKUP_BUCKET` set; the bucket is unconditional in `etl-stack.ts`).
+2. **Manual verify run** — 2026-11-09 23:41 UTC, `npm run backup:curated` via
+   `run-task` on `sps-etl-prod` with the app service's network config: exit 0,
+   17 tables, 10,379 rows, 132.4 KiB gzipped, written under
+   `sps-curation-backups/prod/2026-11-09/` plus the `latest/` pointer.
+3. **Schedule** — `curationBackupScheduleEnabled: true` in the prod block of
+   `cdk/lib/config.ts`; `cdk deploy Sps-Etl-prod --exclusively -c env=prod`
+   (no account flag) creates the daily rule, state machine, and the
+   status + cadence alarms. Confirm afterwards with
+   `aws stepfunctions list-state-machines` showing `scholars-curation-backup-prod`
+   and, the next morning, a new object under `sps-curation-backups/prod/`.
 
 Prod's backup bucket inherits the same versioned/retained config as staging
 (retention is per-stack, no extra step).
