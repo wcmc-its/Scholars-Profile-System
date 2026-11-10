@@ -1,25 +1,24 @@
 # SPEC — Email visibility from Web Directory release code
 
-Status: SHIPPED (staging) / SHIPPED-DARK (prod) — see "Shipped state" below
+Status: SHIPPED (staging + prod) — see "Shipped state" below
 Owner: Paul Albert
-Date: 2026-06-11, revised 2026-08-10
+Date: 2026-06-11, revised 2026-11-10
 
-## Shipped state (verified 2026-08-10)
+## Shipped state (revised 2026-11-10)
 
 This section is the current truth. Where the design body below disagrees with it,
 this section wins — the body is preserved as the design record.
 
 | Flag (`cdk/lib/app-stack.ts`) | staging | prod |
 |---|---|---|
-| `PROFILE_EMAIL_RELEASE_GATE` | `on` | **`off`** |
+| `PROFILE_EMAIL_RELEASE_GATE` | `on` | `on` (since 2026-08-11) |
 | `SCHOLAR_LIST_EXPORT_EMAIL` | `on` | `on` |
 | `EDIT_UNIT_ROSTER_EXPORT` | `on` | `on` |
 
-**Prod cannot flip the gate yet.** Prod `Scholar.email_visibility` is NULL for every
-row — the ED backfill has never run there — and NULL is fail-closed, so flipping
-first would blank email site-wide including the public Contact card. Staging's
-backfill landed 2026-06-11 (8,895 scholars) via the LDAP→S3 bridge (#898), because
-the in-VPC ED ETL cannot reach WCM LDAP (#443). Tracked in **#2327**.
+**Prod gate is ON.** Prod's ED backfill completed 2026-08-11 (#2327: every
+non-deleted scholar has a non-NULL `email_visibility`) and the gate flipped the
+same day. Staging's backfill landed 2026-06-11 via the LDAP→S3 bridge (#898),
+because the in-VPC ED ETL cannot reach WCM LDAP (#443).
 
 **The cache-safety gate below is RESOLVED.** Option 1 (the #866 reveal pattern)
 shipped: `app/api/profile/[cwid]/contact-email/route.ts` +
@@ -27,6 +26,26 @@ shipped: `app/api/profile/[cwid]/contact-email/route.ts` +
 the CloudFront-cached page; `institution` emails are revealed out-of-band by that
 uncacheable endpoint. The ⚠️ block further down is kept for the reasoning, but its
 "not yet solved" framing is no longer accurate.
+
+**Crawler hardening (#3327).** "Internal" includes anonymous on-network viewers,
+so an indexing crawler with WCM-network egress counted as one, and an on-mount
+reveal would land `institution` addresses in a public search index. As shipped:
+
+- A signed-in (session) viewer gets the address on mount, as before.
+- An anonymous on-network viewer gets `{ email: null, revealable }`, sees a
+  **Show email** button, and the address is fetched with `?reveal=1` only on
+  click. Crawlers render pages but do not click.
+- A bot-like User-Agent (`lib/auth/bot-user-agent.ts`) gets the external shape
+  before any DB read.
+
+The same bot-UA refusal guards `/api/profile/[cwid]/sensitive-families`, whose
+on-mount reveal to anonymous on-network PEOPLE is intentional.
+
+Known ceiling: a crawler that spoofs a browser UA (and, for email, also clicks)
+gets through. Upgrade path is a per-IP WAF rate rule on `/api/profile/*`.
+
+Staging's `INTERNAL_VIEWER_CIDRS` is a single soak host, so the anonymous
+on-network path is only testable against prod.
 
 ### The release code does NOT gate the `/edit` unit exports
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isBotUserAgent } from "@/lib/auth/bot-user-agent";
 import { resolveViewerContext } from "@/lib/auth/viewer-context";
 import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
 import { loadSensitiveScholarFamilies } from "@/lib/api/profile";
@@ -22,6 +23,9 @@ import { loadSensitiveScholarFamilies } from "@/lib/api/profile";
  *   - external viewer       → `{ families: [], viewer: "external" }`
  *   - internal viewer       → `{ families, viewer: basis }` for ANY cwid
  *     (no self/admin restriction — that is the #866 broadening).
+ *   - bot-like User-Agent   → `{ families: [], viewer: "external" }`, before any
+ *     viewer resolution or DB read. Anonymous on-network PEOPLE keep the reveal;
+ *     an on-network crawler must not render and index it (lib/auth/bot-user-agent).
  * Never cached.
  */
 export const dynamic = "force-dynamic";
@@ -36,6 +40,10 @@ export async function GET(
 
   if (!isMethodsLensSensitiveGateOn()) {
     return NextResponse.json({ families: [], viewer: "off" }, { headers: NO_STORE });
+  }
+
+  if (isBotUserAgent(request)) {
+    return NextResponse.json({ families: [], viewer: "external" }, { headers: NO_STORE });
   }
 
   const vc = await resolveViewerContext(request);

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isBotUserAgent } from "@/lib/auth/bot-user-agent";
 import { resolveViewerContext } from "@/lib/auth/viewer-context";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { isEmailVisibleToViewer } from "@/lib/profile/email-display-gate";
@@ -39,11 +40,6 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
 
-// ponytail: UA regex, not a bot-detection dep. Well-behaved crawlers self-identify;
-// a UA-spoofing crawler that also clicks gets through — upgrade path is a per-IP
-// WAF rate rule on /api/profile/*/contact-email.
-const BOT_UA = /bot|crawl|spider|slurp|headless|python|curl|wget|httpclient|java\//i;
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ cwid: string }> },
@@ -54,7 +50,7 @@ export async function GET(
     return NextResponse.json({ email: null, viewer: "off" }, { headers: NO_STORE });
   }
 
-  if (BOT_UA.test(request.headers.get("user-agent") ?? "")) {
+  if (isBotUserAgent(request)) {
     return NextResponse.json({ email: null, viewer: "external" }, { headers: NO_STORE });
   }
 
