@@ -229,11 +229,15 @@ export function composeAuthorStringFromReviewJson(authorsJson: unknown): string 
  *  bare `external_id` is stored under. Each prefix is only ever looked up under
  *  its own source. */
 export const REVIEW_BYLINE_SOURCES = [
-  { prefix: "SCOPUS:", source: "scopus" },
-  { prefix: "OPENALEX:", source: "openalex" },
+  { prefix: "SCOPUS:", source: "scopus", guarded: true },
+  { prefix: "OPENALEX:", source: "openalex", guarded: true },
   // PM #1060 — "CROSSREF:" + the lowercased DOI. No AAR lane writes `crossref`
   // review rows today, so this finds a byline only once reciterdb stores one.
-  { prefix: "CROSSREF:", source: "crossref" },
+  // ponytail: unguarded while no lane exists — `incoming` is always 0, so any
+  // CROSSREF row holding a byline from the PubMed author list tripped the volume
+  // guard and failed the whole nightly (11-08..11-11). Flip to true once an AAR
+  // lane writes crossref review rows.
+  { prefix: "CROSSREF:", source: "crossref", guarded: false },
 ] as const;
 
 /** Every source prefix an external (non-PubMed) `Publication.pmid` key carries. */
@@ -736,7 +740,7 @@ async function main() {
     // rather than throw out of main() and take down the publication upsert this
     // block sits in front of. A byline is cosmetic; the corpus is not.
     const reviewAuthorsByPmid = new Map<number, string>();
-    for (const { prefix, source } of REVIEW_BYLINE_SOURCES) {
+    for (const { prefix, source, guarded } of REVIEW_BYLINE_SOURCES) {
       const pmidByBareId = reviewBareIdsForSource(articleIdByPmid, prefix);
       const authorsByPmid = new Map<number, string>();
       for (const batch of chunks(Array.from(pmidByBareId.keys()), IN_BATCH)) {
@@ -781,13 +785,15 @@ async function main() {
       // counts only the rows this source owns — its prefixed pmids — so neither a
       // healthy PubMed corpus nor the other review source can mask a total loss
       // of this one. Guarded per source, before the merge, for the same reason.
-      assertSourceVolume(`reciter:${source}-review-bylines`, {
-        incoming: authorsByPmid.size,
-        existing: await db.write.publication.count({
-          where: { pmid: { startsWith: prefix }, authorsString: { not: null } },
-        }),
-        maxDropPct: 30,
-      });
+      if (guarded) {
+        assertSourceVolume(`reciter:${source}-review-bylines`, {
+          incoming: authorsByPmid.size,
+          existing: await db.write.publication.count({
+            where: { pmid: { startsWith: prefix }, authorsString: { not: null } },
+          }),
+          maxDropPct: 30,
+        });
+      }
       for (const [pmid, byline] of authorsByPmid) reviewAuthorsByPmid.set(pmid, byline);
     }
 
