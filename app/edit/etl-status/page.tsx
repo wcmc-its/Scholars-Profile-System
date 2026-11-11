@@ -124,19 +124,18 @@ function formatAge(ageHours: number | null): string {
  * How long the newest attempt took, start to finish — `null` when there is no
  * measurement.
  *
- * The sub-second floor is not cosmetic. Ten sources used to write a single
- * terminal `etl_run` row, leaving `startedAt` to `@default(now())` so it landed
- * on the same instant as `completedAt` — start and finish indistinguishable.
- * Those writers now record a real start, but the board reads the LATEST row, so
- * every one of them keeps serving a legacy zero until it next runs (up to a
- * month for the monthly ones). "—" is the honest answer for those; printing
- * "0 sec" would claim a measurement nobody took.
+ * A zero or NEGATIVE span is not a measurement. Ten sources used to write a
+ * single terminal `etl_run` row, leaving `startedAt` to `@default(now())` so it
+ * landed on (or a few ms after) `completedAt`. Those writers now record a real
+ * start, but the board reads the LATEST row, so each keeps serving a legacy
+ * zero until it next runs. "—" is the honest answer for those; a real
+ * sub-second run (a reconcile pass with nothing to do) prints as "0.3 sec".
  */
 function durationMs(startedAt: Date | null, endedAt: Date | null): number | null {
   if (startedAt === null || Number.isNaN(startedAt.getTime())) return null;
   if (endedAt === null || Number.isNaN(endedAt.getTime())) return null;
   const ms = endedAt.getTime() - startedAt.getTime();
-  return ms < 1000 ? null : ms;
+  return ms <= 0 ? null : ms;
 }
 
 function formatDuration(startedAt: Date | null, endedAt: Date | null): string {
@@ -145,6 +144,7 @@ function formatDuration(startedAt: Date | null, endedAt: Date | null): string {
   }
   const ms = durationMs(startedAt, endedAt);
   if (ms === null) return "—";
+  if (ms < 950) return ms < 50 ? "<0.1 sec" : `${(ms / 1000).toFixed(1)} sec`;
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} sec`;
   const minutes = Math.floor(seconds / 60);
@@ -471,7 +471,7 @@ function sortValue(row: EtlSourceRow, key: NormalSortKey): string | number | nul
       if (row.lastAttemptStartedAt === null) return null;
       // Still running outlasts every finished run — that IS the longest duration.
       if (row.lastAttemptEndedAt === null) return Infinity;
-      return row.lastAttemptEndedAt.getTime() - row.lastAttemptStartedAt.getTime();
+      return durationMs(row.lastAttemptStartedAt, row.lastAttemptEndedAt);
   }
 }
 

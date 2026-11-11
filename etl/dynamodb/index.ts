@@ -1103,14 +1103,17 @@ async function main() {
       // five signals above, and the next nightly retries. parseManifestGenerated
       // At returns null (so: no row) on an absent, malformed or FUTURE stamp.
       let grantsAt: Date | null = null;
+      let grantsRunStartedAt: Date | null = null;
       try {
         const body = await new S3Client({ region: REGION }).send(
           new GetObjectCommand({ Bucket: ARTIFACTS_BUCKET, Key: GRANTS_MANIFEST_KEY }),
         );
         const manifest = JSON.parse(await body.Body!.transformToString()) as {
           generated_at?: string;
+          run_started_at?: string;
         };
         grantsAt = parseManifestGeneratedAt(manifest.generated_at, Date.now());
+        grantsRunStartedAt = parseManifestGeneratedAt(manifest.run_started_at, Date.now());
         if (grantsAt === null) {
           console.warn(
             `ReciterAI grants manifest carries no usable generated_at (${String(manifest.generated_at)}) -- no liveness row written`,
@@ -1136,7 +1139,7 @@ async function main() {
         ...buildProducerRunWrites(buckets.producerRuns, since),
         ...buildDriftRunWrites(buckets.driftDays, since),
         ...buildCoresRecencyWrite(buckets.producerRuns, coresAt, since),
-        ...buildRecencyWrite(GRANTS_SOURCE, grantsAt, since),
+        ...buildRecencyWrite(GRANTS_SOURCE, grantsAt, since, grantsRunStartedAt),
       ];
       if (producerWrites.length > 0) {
         await db.write.etlRun.createMany({ data: producerWrites });
