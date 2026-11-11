@@ -36,6 +36,16 @@ export const EDIT_ACTIVITY_WINDOW_DAYS = 30;
  *  SQL literals must track this constant (a bound LIMIT is driver-fragile). */
 export const EDIT_ACTIVITY_RECENT_LIMIT = 100;
 
+/**
+ * Enterprise Directory name lookup (`resolveDirectoryPeople`), passed in by the
+ * server callers. Injected rather than imported because this module also
+ * reaches the CLIENT bundle (the dashboard's pure helpers) and the directory
+ * module pulls in the LDAP client (node:net).
+ */
+export type DirectoryLookup = (
+  cwids: string[],
+) => Promise<Map<string, { name: string; title: string | null }>>;
+
 /** The Prisma surface this module needs — keeps the unit test client tiny.
  *  `center` / `core` only name those entities (fail-soft, like `scholar`). */
 export type EditActivityClient = Pick<PrismaClient, "$queryRaw" | "scholar"> &
@@ -50,7 +60,41 @@ export const EDIT_ACTIVITY_TZ = "America/New_York";
  * ETL's `system-autolock`); anything else is a CWID.
  */
 export function isSystemActor(cwid: string): boolean {
-  return cwid.startsWith("system-");
+  return cwid.startsWith("system-") || cwid.toLowerCase() === "etl";
+}
+
+/** Who an edit was by, relative to what it touched. */
+export type EditorKind = "self" | "staff" | "automated";
+
+/**
+ * `automated` = a machine actor; `self` = a scholar editing their OWN profile
+ * (not through View-as); everything else is staff acting on someone's behalf.
+ */
+export function editorKind(e: {
+  actorCwid: string;
+  impersonatedCwid: string | null;
+  entityType: string;
+  entityId: string;
+}): EditorKind {
+  if (isSystemActor(e.actorCwid)) return "automated";
+  if (e.entityType === "scholar" && e.entityId === e.actorCwid && !e.impersonatedCwid) return "self";
+  return "staff";
+}
+
+/** View-as bookkeeping: an audit trail, not an edit. */
+export const AUDIT_ACTIONS: ReadonlySet<string> = new Set(["impersonation_start", "impersonation_end"]);
+
+/** An ISO instant's WCM-local (Eastern) calendar day, "YYYY-MM-DD". */
+export function easternDayKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: EDIT_ACTIVITY_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
 }
 
 /** The Eastern UTC offset at `now` as a MySQL `CONVERT_TZ` offset ("-04:00").
@@ -85,7 +129,13 @@ export type PerDay = { day: string; edits: number };
 export type TopEditor = { actorCwid: string; edits: number };
 export type TopEntity = { entityType: string; entityId: string; edits: number };
 /** One changed field's before -> after, both already coerced to display strings. */
-export type FieldChange = { field: string; before: string | null; after: string | null };
+export type FieldChange = {
+  /** The raw audit key ("overview", "manualMentees"), for value-aware rendering. */
+  key: string;
+  field: string;
+  before: string | null;
+  after: string | null;
+};
 export type RecentEdit = {
   id: string;
   ts: string;
@@ -112,6 +162,32 @@ export type EditorStats = {
   /** Edits made by {@link isSystemActor} actors. */
   automatedEdits: number;
 };
+/** One day of the chart, split by {@link EditorKind}. */
+export type DaySplit = {
+  day: string;
+  self: number;
+  staff: number;
+  automated: number;
+  /** The day's busiest actor (labels the spike). */
+  topActor: string | null;
+};
+/** Window-wide counts behind the tiles, chart, editor tags and field panels. */
+export type EditActivityAnalytics = {
+  kinds: Record<EditorKind, number>;
+  /** Distinct scholars who edited their own profile. */
+  selfEditors: number;
+  /** Staff actor with the most edits. */
+  topStaff: { actorCwid: string; edits: number } | null;
+  /** Edits per automated actor, busiest first. */
+  automatedByActor: { actorCwid: string; edits: number }[];
+  perDay: DaySplit[];
+  /** Per actor: their kind (majority) and distinct entities touched. */
+  editors: Record<string, { kind: EditorKind; profiles: number }>;
+  /** Most-edited fields: distinct entities + edits, busiest first. */
+  fields: { key: string; label: string; profiles: number; edits: number }[];
+  /** Fields that went empty -> filled: distinct scholars per field key. */
+  gained: { key: string; label: string; profiles: number }[];
+};
 export type EditActivitySummary = {
   windowDays: number;
   /** When the summary was read (ISO) — anchors the chart's day axis. */
@@ -128,6 +204,7 @@ export type EditActivitySummary = {
   /** Opaque cursor for the next-older feed page ({@link loadOlderEdits}), or
    *  null when `recent` already holds every edit in the window. */
   nextCursor: string | null;
+  analytics: EditActivityAnalytics;
   /** Names/titles for the CWIDs above. Absent keys render as the bare CWID —
    *  non-scholar admins and service accounts legitimately never resolve. */
   people: PeopleDirectory;
@@ -219,6 +296,7 @@ export function buildChanges(
   return keys
     .filter((k): k is string => typeof k === "string" && k.length > 0)
     .map((k) => ({
+      key: k,
       field: humanizeField(k),
       before: coerceValue(before[k]),
       after: coerceValue(after[k]),
@@ -283,6 +361,115 @@ export function parseAsOf(raw: string | null | undefined, now: Date = new Date()
   return asOf.getTime() > now.getTime() ? now : asOf;
 }
 
+/** One window row for {@link shapeAnalytics} (the feed columns, no id). */
+type RawWindowRow = Omit<RawRecent, "id">;
+
+/** The fields whose empty -> filled transition the "gained content" row counts. */
+export const GAINED_FIELDS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "overview", label: "Overview written" },
+  { key: "orcid", label: "ORCID linked" },
+  { key: "selectedHighlightPmids", label: "Highlight papers picked" },
+  { key: "profileLinks", label: "Profile links added" },
+  { key: "manualMentees", label: "Mentees listed" },
+];
+
+/** Audit keys that ride along in after_values but are not fields. */
+const META_KEYS = new Set(["edited_via", "via_unit_type", "via_unit_code", "primary_title"]);
+
+/** True for null, "", and JSON-encoded empties ("[]", "{}", "null"). */
+export function isEmptyValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  if (typeof v !== "string") return false;
+  const t = v.trim();
+  if (t === "" || t === "null") return true;
+  if (t === "[]" || t === "{}") return true;
+  return false;
+}
+
+/** Pure: window rows -> {@link EditActivityAnalytics}. */
+export function shapeAnalytics(rows: readonly RawWindowRow[]): EditActivityAnalytics {
+  const kinds: Record<EditorKind, number> = { self: 0, staff: 0, automated: 0 };
+  const selfEditors = new Set<string>();
+  const byActor = new Map<string, { edits: number; kinds: Record<EditorKind, number>; ents: Set<string> }>();
+  const days = new Map<string, DaySplit & { actors: Map<string, number> }>();
+  const fields = new Map<string, { ents: Set<string>; edits: number }>();
+  const gained = new Map<string, Set<string>>(GAINED_FIELDS.map((f) => [f.key, new Set()]));
+
+  for (const r of rows) {
+    const e = {
+      actorCwid: r.actor_cwid,
+      impersonatedCwid: r.impersonated_cwid,
+      entityType: r.target_entity_type,
+      entityId: r.target_entity_id,
+    };
+    const ent = `${e.entityType}:${e.entityId}`;
+    const kind = editorKind(e);
+    kinds[kind] += 1;
+    if (kind === "self") selfEditors.add(e.actorCwid);
+
+    const a = byActor.get(e.actorCwid) ?? { edits: 0, kinds: { self: 0, staff: 0, automated: 0 }, ents: new Set() };
+    a.edits += 1;
+    a.kinds[kind] += 1;
+    a.ents.add(ent);
+    byActor.set(e.actorCwid, a);
+
+    const dayKey = easternDayKey(toIso(r.ts));
+    const d = days.get(dayKey) ?? { day: dayKey, self: 0, staff: 0, automated: 0, topActor: null, actors: new Map() };
+    d[kind] += 1;
+    d.actors.set(e.actorCwid, (d.actors.get(e.actorCwid) ?? 0) + 1);
+    days.set(dayKey, d);
+
+    const keys = asJson(r.fields_changed);
+    if (!Array.isArray(keys)) continue;
+    const before = asJson(r.before_values) as Record<string, unknown> | null;
+    const after = asJson(r.after_values) as Record<string, unknown> | null;
+    for (const k of keys) {
+      if (typeof k !== "string" || !k || META_KEYS.has(k)) continue;
+      const f = fields.get(k) ?? { ents: new Set(), edits: 0 };
+      f.edits += 1;
+      f.ents.add(ent);
+      fields.set(k, f);
+      const g = gained.get(k);
+      if (g && e.entityType === "scholar" && isEmptyValue(before?.[k]) && !isEmptyValue(after?.[k])) {
+        g.add(e.entityId);
+      }
+    }
+  }
+
+  const desc = <T extends { edits: number }>(xs: T[]) => xs.sort((x, y) => y.edits - x.edits);
+  const actors = desc([...byActor].map(([actorCwid, a]) => ({ actorCwid, ...a })));
+  const majority = (k: Record<EditorKind, number>): EditorKind =>
+    (Object.keys(k) as EditorKind[]).reduce((best, x) => (k[x] > k[best] ? x : best), "staff");
+  const staffTop = desc(
+    actors
+      .filter((a) => a.kinds.staff > 0)
+      .map((a) => ({ actorCwid: a.actorCwid, edits: a.kinds.staff })),
+  )[0];
+  return {
+    kinds,
+    selfEditors: selfEditors.size,
+    topStaff: staffTop ?? null,
+    automatedByActor: actors
+      .filter((a) => a.kinds.automated > 0)
+      .map((a) => ({ actorCwid: a.actorCwid, edits: a.kinds.automated })),
+    perDay: [...days.values()].map(({ actors: dayActors, ...d }) => {
+      let top: string | null = null;
+      let n = 0;
+      for (const [cwid, c] of dayActors) if (c > n) [top, n] = [cwid, c];
+      return { ...d, topActor: top };
+    }),
+    editors: Object.fromEntries(
+      actors.map((a) => [a.actorCwid, { kind: majority(a.kinds), profiles: a.ents.size }]),
+    ),
+    fields: desc(
+      [...fields].map(([key, f]) => ({ key, label: humanizeField(key), profiles: f.ents.size, edits: f.edits })),
+    ).slice(0, 10),
+    gained: GAINED_FIELDS.map((f) => ({ ...f, profiles: gained.get(f.key)?.size ?? 0 })),
+  };
+}
+
 /**
  * Pure row-shaper: raw query rows -> the view model. Split out from the DB call
  * so it is unit-testable without a database (mirrors queries.ts in cf-usage-rollup).
@@ -304,6 +491,7 @@ export function shapeSummary(
     // Filled in by loadEditActivitySummary — this shaper stays pure/DB-free.
     people: {},
     entityNames: {},
+    analytics: shapeAnalytics([]),
     windowDays: EDIT_ACTIVITY_WINDOW_DAYS,
     generatedAt: now.toISOString(),
     totalEdits,
@@ -338,7 +526,10 @@ export function shapeSummary(
 }
 
 /** The parts of a summary (or a "Load older" page) that name people/entities. */
-type NamedRows = Pick<EditActivitySummary, "topEditors" | "topEntities" | "recent">;
+type NamedRows = Pick<EditActivitySummary, "topEditors" | "topEntities" | "recent"> & {
+  /** Extra CWIDs to name (the chart's per-day top actors, the top staff editor). */
+  extraCwids?: readonly string[];
+};
 
 /**
  * Every CWID the summary refers to: editors (both tables), impersonated actors,
@@ -348,6 +539,7 @@ type NamedRows = Pick<EditActivitySummary, "topEditors" | "topEntities" | "recen
 export function collectCwids(summary: NamedRows): string[] {
   const cwids = new Set<string>();
   for (const e of summary.topEditors) cwids.add(e.actorCwid);
+  for (const c of summary.extraCwids ?? []) cwids.add(c);
   for (const e of summary.topEntities) if (e.entityType === "scholar") cwids.add(e.entityId);
   for (const r of summary.recent) {
     cwids.add(r.actorCwid);
@@ -415,6 +607,7 @@ export async function resolveEntityNames(
 export async function loadEditActivitySummary(
   client: EditActivityClient,
   now: Date = new Date(),
+  directory?: DirectoryLookup,
 ): Promise<EditActivitySummary> {
   const cutoff = new Date(now.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
@@ -422,7 +615,7 @@ export async function loadEditActivitySummary(
   // timestamps the feed renders. A bound numeric offset needs no MySQL tz tables.
   const offset = easternOffset(now);
 
-  const [perDay, editors, entities, recent, stats] = await Promise.all([
+  const [perDay, editors, entities, recent, stats, windowRows] = await Promise.all([
     client.$queryRaw<RawPerDay[]>`
       SELECT DATE(CONVERT_TZ(ts, '+00:00', ${offset})) AS day, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
@@ -459,10 +652,27 @@ export async function loadEditActivitySummary(
                AS SIGNED) AS automated_edits
         FROM scholars_audit.manual_edit_audit
        WHERE ts >= ${cutoff}`,
+    // ponytail: every window row, read whole and folded in JS (~1.5k rows/30d in
+    // prod). The cap keeps a runaway ETL from ballooning the read; past it the
+    // analytics undercount. Move the folds into SQL if the window ever nears it.
+    client.$queryRaw<RawWindowRow[]>`
+      SELECT ts, actor_cwid, impersonated_cwid, action,
+             target_entity_type, target_entity_id,
+             fields_changed, before_values, after_values
+        FROM scholars_audit.manual_edit_audit
+       WHERE ts >= ${cutoff}
+       LIMIT 50000`,
   ]);
 
   const summary = shapeSummary(perDay, editors, entities, recent, stats, now);
-  const named = await resolveNames(client, summary);
+  summary.analytics = shapeAnalytics(windowRows);
+  const named = await resolveNames(client, {
+    ...summary,
+    extraCwids: [
+      ...summary.analytics.perDay.flatMap((d) => (d.topActor ? [d.topActor] : [])),
+      ...(summary.analytics.topStaff ? [summary.analytics.topStaff.actorCwid] : []),
+    ],
+  }, directory);
   summary.entityNames = named.entityNames;
   summary.people = named.people;
   return summary;
@@ -491,6 +701,7 @@ export async function loadOlderEdits(
   client: EditActivityClient,
   cursor: FeedCursor,
   asOf: Date = new Date(),
+  directory?: DirectoryLookup,
 ): Promise<EditActivityPage> {
   const cutoff = new Date(asOf.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   // LIMIT 101 = EDIT_ACTIVITY_RECENT_LIMIT + 1 look-ahead row (a literal, like
@@ -511,7 +722,7 @@ export async function loadOlderEdits(
     topEditors: [],
     topEntities: [],
     recent,
-  });
+  }, directory);
   return {
     recent,
     nextCursor: more && oldest ? encodeCursor(oldest) : null,
@@ -525,6 +736,7 @@ export async function loadOlderEdits(
 async function resolveNames(
   client: EditActivityClient,
   rows: NamedRows,
+  directory?: DirectoryLookup,
 ): Promise<{ people: PeopleDirectory; entityNames: Record<string, string> }> {
   let entityNames: Record<string, string> = {};
   let people: PeopleDirectory = {};
@@ -543,8 +755,9 @@ async function resolveNames(
   // would surface as the "activity unavailable" notice — a cosmetic lookup must
   // never be able to take down a working page — so it is logged and swallowed,
   // leaving every person rendered as a bare CWID.
+  const cwids = collectCwids(rows);
   try {
-    people = await resolvePeople(client, collectCwids(rows));
+    people = await resolvePeople(client, cwids);
   } catch (err) {
     console.error(
       JSON.stringify({
@@ -552,6 +765,16 @@ async function resolveNames(
         error: err instanceof Error ? err.message : String(err),
       }),
     );
+  }
+  // Staff editors usually have no Scholar row: name them from the Enterprise
+  // Directory (cached, time-boxed, never throws). Automated actors are skipped.
+  const unnamed = cwids.filter((c) => !people[c] && !isSystemActor(c));
+  if (directory && unnamed.length > 0) {
+    const ed = await directory(unnamed);
+    for (const c of unnamed) {
+      const p = ed.get(c.toLowerCase());
+      if (p) people[c] = p;
+    }
   }
   return { people, entityNames };
 }

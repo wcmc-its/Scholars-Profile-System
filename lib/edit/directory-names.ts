@@ -32,7 +32,7 @@ const MAX_CACHE_ENTRIES = 5_000;
 
 const CWID_PATTERN = /^[a-z0-9]{3,16}$/;
 
-type CacheEntry = { name: string | null; expires: number };
+type CacheEntry = { name: string | null; title: string | null; expires: number };
 const cache = new Map<string, CacheEntry>();
 let backoffUntil = 0;
 
@@ -75,6 +75,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/** An ED person as a page renders them. */
+export type DirectoryNameTitle = { name: string; title: string | null };
+
 /**
  * ED display names for `cwids`, keyed by lowercased CWID. A CWID ED does not
  * know, or any failure, is simply absent from the map. Never throws.
@@ -83,15 +86,24 @@ export async function resolveDirectoryNames(
   cwids: Iterable<string>,
   deps: DirectoryNameDeps = {},
 ): Promise<Map<string, string>> {
+  const people = await resolveDirectoryPeople(cwids, deps);
+  return new Map([...people].map(([k, v]) => [k, v.name]));
+}
+
+/** {@link resolveDirectoryNames} plus the ED title. Same cache, same fail-soft. */
+export async function resolveDirectoryPeople(
+  cwids: Iterable<string>,
+  deps: DirectoryNameDeps = {},
+): Promise<Map<string, DirectoryNameTitle>> {
   const now = deps.now?.() ?? Date.now();
-  const out = new Map<string, string>();
+  const out = new Map<string, DirectoryNameTitle>();
   const missing = new Set<string>();
   for (const raw of cwids) {
     const lc = raw.trim().toLowerCase();
     if (!CWID_PATTERN.test(lc)) continue;
     const hit = cache.get(lc);
     if (hit && hit.expires > now) {
-      if (hit.name) out.set(lc, hit.name);
+      if (hit.name) out.set(lc, { name: hit.name, title: hit.title });
     } else {
       missing.add(lc);
     }
@@ -104,13 +116,15 @@ export async function resolveDirectoryNames(
       (deps.fetch ?? fetchDirectoryPeopleByCwid)(batch),
       deps.timeoutMs ?? DIRECTORY_LOOKUP_TIMEOUT_MS,
     );
-    const found = new Map<string, string | null>();
-    for (const p of people) found.set(p.cwid.toLowerCase(), directoryDisplayName(p));
+    const found = new Map<string, DirectoryPerson>();
+    for (const p of people) found.set(p.cwid.toLowerCase(), p);
     if (cache.size + batch.length > MAX_CACHE_ENTRIES) cache.clear();
     for (const lc of batch) {
-      const name = found.get(lc) ?? null;
-      cache.set(lc, { name, expires: now + DIRECTORY_NAME_TTL_MS });
-      if (name) out.set(lc, name);
+      const p = found.get(lc);
+      const name = p ? directoryDisplayName(p) : null;
+      const title = p?.title?.trim() || null;
+      cache.set(lc, { name, title, expires: now + DIRECTORY_NAME_TTL_MS });
+      if (name) out.set(lc, { name, title });
     }
   } catch (err) {
     backoffUntil = now + DIRECTORY_FAILURE_BACKOFF_MS;

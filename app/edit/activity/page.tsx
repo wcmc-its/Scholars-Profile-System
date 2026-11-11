@@ -26,6 +26,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { resolveDirectoryPeople } from "@/lib/edit/directory-names";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -67,7 +68,7 @@ export default async function EditActivityPage() {
   let summary: EditActivitySummary | null = null;
   let unavailable = false;
   try {
-    summary = await loadEditActivitySummary(db.read);
+    summary = await loadEditActivitySummary(db.read, new Date(), resolveDirectoryPeople);
   } catch (err) {
     unavailable = true;
     console.error(

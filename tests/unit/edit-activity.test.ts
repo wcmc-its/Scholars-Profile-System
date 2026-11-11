@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   EDIT_ACTIVITY_RECENT_LIMIT,
@@ -48,14 +48,14 @@ describe("buildChanges", () => {
         '{"overview":"new","slug":"b"}',
       ),
     ).toEqual([
-      { field: "Overview", before: "old", after: "new" },
-      { field: "Slug", before: "a", after: "b" },
+      { key: "overview", field: "Overview", before: "old", after: "new" },
+      { key: "slug", field: "Slug", before: "a", after: "b" },
     ]);
   });
 
   it("accepts already-parsed values and null-fills a missing side", () => {
     expect(buildChanges(["overview"], null, { overview: "created" })).toEqual([
-      { field: "Overview", before: null, after: "created" },
+      { key: "overview", field: "Overview", before: null, after: "created" },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe("shapeSummary", () => {
       actorCwid: "aog2001",
       entityType: "scholar",
       entityId: "abc123",
-      changes: [{ field: "Overview", before: "old bio", after: "new bio" }],
+      changes: [{ key: "overview", field: "Overview", before: "old bio", after: "new bio" }],
       detail: null,
     });
   });
@@ -250,8 +250,9 @@ describe("activity redesign — KPIs, day buckets, entity names", () => {
     expect(easternOffset(new Date("2026-01-15T12:00:00Z"))).toBe("-05:00");
   });
 
-  it("isSystemActor is the system- prefix only", () => {
+  it("isSystemActor is the system- prefix, plus the ETL actor", () => {
     expect(isSystemActor("system-autolock")).toBe(true);
+    expect(isSystemActor("ETL")).toBe(true);
     expect(isSystemActor("abc1234")).toBe(false);
   });
 
@@ -467,5 +468,22 @@ describe("Load older: cursor + paged read", () => {
     const page = await loadOlderEdits(softNames, decodeCursor("2026-09-24T12:00:00.000Z_9")!);
     expect(page.recent).toHaveLength(1);
     expect(page.people).toEqual({});
+  });
+
+  it("names CWIDs with no Scholar row from the Enterprise Directory, never system actors", async () => {
+    const directory = vi.fn(async () => new Map([["stf0001", { name: "Dana Staff", title: "Program Manager" }]]));
+    const client = {
+      $queryRaw: async () => [
+        { ...raw(1), actor_cwid: "stf0001", target_entity_id: "sch0001" },
+        { ...raw(2), actor_cwid: "system-autolock", target_entity_id: "sch0001" },
+      ],
+      scholar: { findMany: async () => [{ cwid: "sch0001", preferredName: "Sam Scholar", primaryTitle: null }] },
+    } as never;
+    const page = await loadOlderEdits(client, decodeCursor("2026-09-24T12:00:00.000Z_9")!, new Date(), directory);
+    expect(directory).toHaveBeenCalledWith(["stf0001"]);
+    expect(page.people).toEqual({
+      sch0001: { name: "Sam Scholar", title: null },
+      stf0001: { name: "Dana Staff", title: "Program Manager" },
+    });
   });
 });

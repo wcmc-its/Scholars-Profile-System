@@ -21,6 +21,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { resolveDirectoryPeople } from "@/lib/edit/directory-names";
 import { editError, editOk } from "@/lib/edit/request";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!asOf) return editError(400, "invalid_as_of", "asOf");
 
   try {
-    const page = await loadOlderEdits(db.read, cursor, asOf);
+    const page = await loadOlderEdits(db.read, cursor, asOf, resolveDirectoryPeople);
     return editOk({ ...page });
   } catch (err) {
     console.error(

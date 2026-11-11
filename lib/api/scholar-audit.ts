@@ -97,6 +97,7 @@ const FIELD_LABEL_OVERRIDE: Record<string, string> = {
   primaryTitle: "Primary title",
   orcid: "ORCID",
   url: "URL",
+  selectedHighlightPmids: "Selected highlights",
 };
 
 /** "primaryTitle" / "primary_title" → "Primary title"; known keys get a nicer label. */

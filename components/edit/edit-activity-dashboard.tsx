@@ -1,16 +1,21 @@
 /**
- * The `/edit/activity` body (2026-09 redesign): four KPI tiles, an
- * edits-per-day bar chart, Top editors / Most-edited entities bar lists, and
- * a Recent activity feed grouped by day. Clicking a day's bar, an editor, a
- * category chip or "Hide system edits" narrows the feed client-side.
+ * The `/edit/activity` body (2026-11 redesign): who-made-the-edits tiles
+ * (all / faculty on their own profile / staff on someone's behalf /
+ * automated), a "profiles that gained content" row, an edits-per-day chart
+ * stacked by editor kind, Top editors (tagged Self / Staff / Automated) beside
+ * Most-edited fields, and a paged Recent activity feed.
  *
- * The KPIs, chart and rankings are a view over the one server read
- * (`loadEditActivitySummary`). The feed starts with the most recent
- * `EDIT_ACTIVITY_RECENT_LIMIT` edits that read loaded; "Load older"
- * appends the next page from `GET /api/edit/activity/recent` (a `(ts, id)`
- * cursor, same superuser gate). Day grouping, same-minute grouping and every
- * filter re-run over the whole loaded list, so a group or a day that straddles
- * a page boundary merges, and the footer says how much is loaded.
+ * The tiles, chart and panels are a view over the one server read
+ * (`loadEditActivitySummary`, incl. its window-wide `analytics`). The feed
+ * starts with the most recent `EDIT_ACTIVITY_RECENT_LIMIT` edits; paging past
+ * them pulls the next page from `GET /api/edit/activity/recent` (a `(ts, id)`
+ * cursor, same gate). Grouping and every filter re-run over the whole loaded
+ * list, so a run that straddles a page boundary merges.
+ *
+ * Feed rows: with "Group repeated saves" on, one editor's consecutive saves to
+ * one entity (gaps under {@link SESSION_GAP_MS}) collapse into one row showing
+ * the NET change per field; one automated actor's consecutive same-action
+ * edits collapse into one run; a View-as start/end pair becomes one audit row.
  *
  * Client-safe: imports only pure helpers (`edit-activity.ts` and
  * `scholar-audit.ts` carry type-only Prisma imports).
@@ -19,42 +24,43 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { Search, X } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
+  AUDIT_ACTIONS,
   EDIT_ACTIVITY_TZ,
   type EditActivityPage,
   type EditActivitySummary,
-  type FieldChange,
+  type EditorKind,
   type RecentEdit,
+  easternDayKey,
+  editorKind,
+  isEmptyValue,
   isSystemActor,
 } from "@/lib/api/edit-activity";
-import { labelForAction } from "@/lib/api/scholar-audit";
+import { humanizeField, labelForAction } from "@/lib/api/scholar-audit";
 import { cn } from "@/lib/utils";
 
-/** Above this length a changed value collapses behind "more". */
-const VALUE_COLLAPSE_AT = 90;
-/** Rows a bar list shows before "Show all". */
-const LIST_TOP = 10;
+export { easternDayKey };
+
+/** Feed rows per page. */
+const PAGE_ROWS = 25;
+/** Rows a ranked list shows before "Show all". */
+const LIST_TOP = 8;
+/** One editor's saves closer together than this are one working session. */
+export const SESSION_GAP_MS = 30 * 60_000;
+/** Above this length a text value is excerpted / word-diffed. */
+const LONG_TEXT = 90;
+/** List items (mentees, PMIDs, run members) shown before "Show". */
+const ITEMS_SHOWN = 5;
 
 /** Counts in one fixed locale, so the server render and the browser agree. */
 const fmt = (n: number) => n.toLocaleString("en-US");
+const plural = (n: number, word: string) => `${fmt(n)} ${word}${n === 1 ? "" : "s"}`;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/** An ISO instant's WCM-local (Eastern) calendar day, "YYYY-MM-DD". */
-export function easternDayKey(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: EDIT_ACTIVITY_TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
 
 /** An ISO instant's Eastern wall-clock time, "HH:mm". */
 function easternTime(iso: string): string {
@@ -102,126 +108,283 @@ export function niceMax(n: number): number {
   return 10 * pow;
 }
 
-/** The feed's category chips. An action outside every list shows under All only. */
-const CATEGORIES: ReadonlyArray<{ key: string; label: string; actions?: ReadonlySet<string> }> = [
-  { key: "all", label: "All" },
+// ── Categories ─────────────────────────────────────────────────────────────
+
+const PROFILE_ACTIONS = new Set([
+  "field_override",
+  "field_override_clear",
+  "orcid_set",
+  "orcid_librarian_confirm",
+  "request_change",
+  "suppression_create",
+  "suppression_revoke",
+  "publication_reject",
+  "appointment_visibility_set",
+  "profile_appointment_create",
+  "profile_appointment_update",
+  "profile_appointment_delete",
+  "honor_create",
+  "honor_update",
+  "honor_delete",
+  "slug_request",
+  "slug_request_approved",
+  "slug_request_rejected",
+  "slug_request_withdrawn",
+  "biosketch_generation_delete",
+]);
+const ROSTER_ACTIONS = new Set([
+  "unit_create",
+  "roster_change",
+  "grant_change",
+  "role_vocabulary_create",
+  "role_vocabulary_update",
+  "role_vocabulary_delete",
+  "disease_assignment_decision",
+  "disease_auto_publish_set",
+  "core_claim",
+  "core_client_add",
+  "core_client_remove",
+  "core_staff_add",
+  "core_staff_remove",
+]);
+const NEWS_ACTIONS = new Set(["news_mention_update"]);
+const ACCESS_ACTIONS = new Set([
+  "proxy_grant",
+  "proxy_revoke",
+  "report_access_grant",
+  "report_access_revoke",
+  "functional_role_grant",
+  "functional_role_revoke",
+]);
+const NAMED = [PROFILE_ACTIONS, ROSTER_ACTIONS, NEWS_ACTIONS, ACCESS_ACTIONS];
+
+/** The feed's category chips. "All" leaves out View-as sessions; they (and any
+ *  action no other chip claims) live under "Audit & operations". */
+export const CATEGORIES: ReadonlyArray<{ key: string; label: string; test: (action: string) => boolean }> = [
+  { key: "all", label: "All", test: (a) => !AUDIT_ACTIONS.has(a) },
+  { key: "profile", label: "Profile content", test: (a) => PROFILE_ACTIONS.has(a) },
+  { key: "roster", label: "Roster & roles", test: (a) => ROSTER_ACTIONS.has(a) },
+  { key: "news", label: "News mentions", test: (a) => NEWS_ACTIONS.has(a) },
+  { key: "access", label: "Access", test: (a) => ACCESS_ACTIONS.has(a) },
   {
-    key: "profile",
-    label: "Profile updates",
-    actions: new Set([
-      "field_override",
-      "field_override_clear",
-      "orcid_set",
-      "request_change",
-      "suppression_create",
-      "suppression_revoke",
-      "publication_reject",
-      "appointment_visibility_set",
-      "profile_appointment_create",
-      "profile_appointment_update",
-      "profile_appointment_delete",
-      "honor_create",
-      "honor_update",
-      "honor_delete",
-      "slug_request",
-      "slug_request_approved",
-      "slug_request_rejected",
-      "slug_request_withdrawn",
-      "biosketch_generation_delete",
-    ]),
-  },
-  {
-    key: "roster",
-    label: "Roster & roles",
-    actions: new Set([
-      "unit_create",
-      "roster_change",
-      "grant_change",
-      "role_vocabulary_create",
-      "role_vocabulary_update",
-      "role_vocabulary_delete",
-      "disease_assignment_decision",
-      "disease_auto_publish_set",
-      "core_claim",
-      "core_client_add",
-      "core_client_remove",
-      "core_staff_add",
-      "core_staff_remove",
-    ]),
-  },
-  { key: "news", label: "News mentions", actions: new Set(["news_mention_update"]) },
-  {
-    key: "access",
-    label: "Access",
-    actions: new Set([
-      "proxy_grant",
-      "proxy_revoke",
-      "report_access_grant",
-      "report_access_revoke",
-      "impersonation_start",
-      "impersonation_end",
-    ]),
+    key: "audit",
+    label: "Audit & operations",
+    test: (a) => AUDIT_ACTIONS.has(a) || !NAMED.some((s) => s.has(a)),
   },
 ];
 
-/** The small type tag for an audited entity type. */
-function typeLabel(entityType: string): string {
-  switch (entityType) {
-    case "news_mention":
-      return "news mention";
-    case "report_access":
-      return "report access";
-    case "org_unit_role":
-      return "role";
-    default:
-      return entityType.replace(/_/g, " ");
+// ── Kind styling ───────────────────────────────────────────────────────────
+
+const KIND: Record<EditorKind, { tag: string; legend: string; bar: string; chip: string }> = {
+  self: {
+    tag: "Self",
+    legend: "Faculty, own profile",
+    bar: "bg-apollo-slate",
+    chip: "bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate",
+  },
+  staff: {
+    tag: "Staff",
+    legend: "Staff, on behalf",
+    bar: "bg-[#8fa6bf]",
+    chip: "bg-apollo-surface-2 border-apollo-border-strong text-foreground",
+  },
+  automated: {
+    tag: "Automated",
+    legend: "Automated",
+    bar: "bg-[#a39486]",
+    chip: "bg-apollo-lock-bg border-apollo-border-strong text-foreground",
+  },
+};
+const KIND_ORDER: EditorKind[] = ["self", "staff", "automated"];
+
+/** "system-autolock" → "autolock"; "ETL" stays. */
+function automatedLabel(cwid: string): string {
+  return cwid.replace(/^system-/, "");
+}
+
+// ── Value helpers ──────────────────────────────────────────────────────────
+
+/** Parse a stored value that may itself be JSON-encoded (arrays, link maps). */
+function parseValue(v: string | null): unknown {
+  if (v === null) return null;
+  const t = v.trim();
+  if (t.startsWith("[") || t.startsWith("{")) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return v;
+    }
   }
+  return v;
 }
 
-/** The per-entity history page, when one exists (scholar + center only). */
-function historyHref(entityType: string, entityId: string): string | null {
-  const id = encodeURIComponent(entityId);
-  if (entityType === "scholar") return `/edit/scholar/${id}/history`;
-  if (entityType === "center") return `/edit/center/${id}/history`;
-  return null;
+/** Overview and other rich text are stored as HTML; show words, not tags. */
+export function plainText(v: string): string {
+  return v
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-/** A grouped feed row: consecutive identical edits in the same minute. */
-type FeedGroup = { key: string; day: string; time: string; head: RecentEdit; members: RecentEdit[] };
-
-function sameChanges(a: RecentEdit, b: RecentEdit): boolean {
-  return JSON.stringify(a.changes) === JSON.stringify(b.changes) && a.detail === b.detail;
+/** Same value once formatting is ignored (ORCID URL vs bare iD, whitespace, tags). */
+export function sameIgnoringFormat(a: string | null, b: string | null): boolean {
+  const norm = (v: string | null) =>
+    v === null ? "" : plainText(v).toLowerCase().replace(/https?:\/\/(www\.)?orcid\.org\//, "").replace(/[^a-z0-9]/g, "");
+  return norm(a) === norm(b);
 }
 
-/** Group consecutive edits that share minute, editor, action, entity (any
- *  news mention counts as the same entity) and the same change set. */
-export function groupFeed(edits: ReadonlyArray<RecentEdit>): FeedGroup[] {
-  const out: FeedGroup[] = [];
+/** One list item's display label. */
+function itemLabel(fieldKey: string, item: unknown): { id: string; label: string; note: string | null } {
+  if (typeof item === "string" || typeof item === "number") {
+    const s = String(item);
+    return fieldKey === "selectedHighlightPmids"
+      ? { id: s, label: `PMID ${s}`, note: null }
+      : { id: s, label: s, note: null };
+  }
+  if (item && typeof item === "object") {
+    const o = item as Record<string, unknown>;
+    const name = [o.name, o.title, o.label].find((x) => typeof x === "string") as string | undefined;
+    const note = [o.programLabel, o.year].filter((x) => x !== undefined && x !== null && x !== "").join(" · ");
+    return { id: JSON.stringify(o), label: name ?? JSON.stringify(o), note: note || null };
+  }
+  return { id: String(item), label: String(item), note: null };
+}
+
+export type WordDiffPart = { kind: "same" | "del" | "ins"; text: string };
+
+/**
+ * Word-level diff (LCS). Inputs are capped so a pathological pair stays
+ * cheap; past the cap the tail is reported as one replaced chunk.
+ */
+export function wordDiff(before: string, after: string, cap = 1500): WordDiffPart[] {
+  const a = before.split(/\s+/).filter(Boolean);
+  const b = after.split(/\s+/).filter(Boolean);
+  const A = a.slice(0, cap);
+  const B = b.slice(0, cap);
+  const n = A.length;
+  const m = B.length;
+  const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i]![j] = A[i] === B[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+  const out: WordDiffPart[] = [];
+  const push = (kind: WordDiffPart["kind"], w: string) => {
+    const last = out[out.length - 1];
+    if (last && last.kind === kind) last.text += ` ${w}`;
+    else out.push({ kind, text: w });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) {
+      push("same", A[i]!);
+      i++;
+      j++;
+    } else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) push("del", A[i++]!);
+    else push("ins", B[j++]!);
+  }
+  while (i < n) push("del", A[i++]!);
+  while (j < m) push("ins", B[j++]!);
+  if (a.length > cap) push("del", a.slice(cap).join(" "));
+  if (b.length > cap) push("ins", b.slice(cap).join(" "));
+  return out;
+}
+
+/** Keep only the changed words plus a few words of context either side. */
+function changedOnly(parts: WordDiffPart[], context = 6): WordDiffPart[] {
+  return parts.map((p, i) => {
+    if (p.kind !== "same") return p;
+    const words = p.text.split(" ");
+    const first = i === 0;
+    const last = i === parts.length - 1;
+    if (words.length <= context * 2 && !first && !last) return p;
+    const head = first ? [] : words.slice(0, context);
+    const tail = last ? [] : words.slice(-context);
+    if (head.length + tail.length >= words.length) return p;
+    return { kind: "same", text: [head.join(" "), "…", tail.join(" ")].filter(Boolean).join(" ") };
+  });
+}
+
+// ── Feed rows ──────────────────────────────────────────────────────────────
+
+/** One field's net change across a row's saves. */
+export type NetChange = { key: string; field: string; before: string | null; after: string | null; saves: number };
+
+export type FeedRow = {
+  key: string;
+  day: string;
+  kind: EditorKind | "audit";
+  /** Newest first. */
+  edits: RecentEdit[];
+};
+
+function rowKindOf(e: RecentEdit): FeedRow["kind"] {
+  return AUDIT_ACTIONS.has(e.action) ? "audit" : editorKind(e);
+}
+
+/**
+ * Edits (newest first) → feed rows. With `group`, consecutive edits on the
+ * same day join the previous row when:
+ *  - audit: the same actor's View-as start/end on the same scholar;
+ *  - automated: the same actor and action (a run, any entity);
+ *  - people: the same actor, View-as identity and entity, with no gap over
+ *    {@link SESSION_GAP_MS}.
+ */
+export function buildRows(edits: ReadonlyArray<RecentEdit>, group: boolean): FeedRow[] {
+  const out: FeedRow[] = [];
   for (const e of edits) {
     const day = easternDayKey(e.ts);
-    const time = easternTime(e.ts);
+    const kind = rowKindOf(e);
     const last = out[out.length - 1];
-    if (
+    const prev = last?.edits[last.edits.length - 1];
+    const joins =
+      group &&
       last &&
+      prev &&
       last.day === day &&
-      last.time === time &&
-      last.head.actorCwid === e.actorCwid &&
-      last.head.impersonatedCwid === e.impersonatedCwid &&
-      last.head.action === e.action &&
-      last.head.entityType === e.entityType &&
-      (e.entityType === "news_mention" || last.head.entityId === e.entityId) &&
-      sameChanges(last.head, e)
-    ) {
-      last.members.push(e);
-    } else {
-      out.push({ key: e.id, day, time, head: e, members: [e] });
-    }
+      last.kind === kind &&
+      prev.actorCwid === e.actorCwid &&
+      (kind === "automated"
+        ? prev.action === e.action
+        : prev.entityType === e.entityType &&
+          prev.entityId === e.entityId &&
+          prev.impersonatedCwid === e.impersonatedCwid &&
+          (kind === "audit" || new Date(prev.ts).getTime() - new Date(e.ts).getTime() <= SESSION_GAP_MS));
+    if (joins) last.edits.push(e);
+    else out.push({ key: e.id, day, kind, edits: [e] });
   }
   return out;
 }
 
-const CARD = "bg-apollo-surface border-apollo-border-strong rounded-[13px] border";
-const SMALL_CAPS = "text-muted-foreground text-xs font-medium tracking-[0.08em] uppercase";
+/** A row's field changes, folded to first-before → last-after per field. */
+export function netChanges(edits: ReadonlyArray<RecentEdit>): NetChange[] {
+  const byKey = new Map<string, NetChange>();
+  // edits are newest first: walk oldest → newest.
+  for (let i = edits.length - 1; i >= 0; i--) {
+    for (const c of edits[i]!.changes) {
+      const k = c.key ?? c.field;
+      const cur = byKey.get(k);
+      if (cur) {
+        cur.after = c.after;
+        cur.saves += 1;
+      } else {
+        byKey.set(k, { key: k, field: c.field, before: c.before, after: c.after, saves: 1 });
+      }
+    }
+  }
+  return [...byKey.values()];
+}
+
+/** True when an edit took `key` from empty to filled. */
+function gainedIn(e: RecentEdit, key: string): boolean {
+  return e.changes.some((c) => c.key === key && isEmptyValue(c.before) && !isEmptyValue(c.after));
+}
 
 /** Append `older` to `loaded`, dropping any id already present (a retried or
  *  double-clicked page must never duplicate rows). */
@@ -238,7 +401,25 @@ export function appendOlder(
   return [...loaded, ...fresh];
 }
 
-/** Older feed pages loaded by "Load older", with the names they brought. */
+/** The per-entity history page, when one exists (scholar + center only). */
+function historyHref(entityType: string, entityId: string): string | null {
+  const id = encodeURIComponent(entityId);
+  if (entityType === "scholar") return `/edit/scholar/${id}/history`;
+  if (entityType === "center") return `/edit/center/${id}/history`;
+  return null;
+}
+
+/** RFC 4180 cell. */
+function csvCell(v: string): string {
+  return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+const CARD = "bg-apollo-surface border-apollo-border rounded-xl border";
+const SMALL_CAPS = "text-muted-foreground text-xs font-medium tracking-[0.06em] uppercase";
+const PILL = "rounded border px-1.5 text-xs whitespace-nowrap";
+const LINKISH = "text-apollo-slate text-[13px] hover:underline";
+
+/** Older feed pages loaded on demand, with the names they brought. */
 type Older = {
   rows: RecentEdit[];
   people: EditActivityPage["people"];
@@ -250,12 +431,8 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   const [cursor, setCursor] = React.useState<string | null>(summary.nextCursor);
   const [loadingOlder, setLoadingOlder] = React.useState(false);
   const [olderError, setOlderError] = React.useState(false);
-  // A new summary (router.refresh, a re-render with fresh data) starts a new
-  // feed: the loaded older pages and their cursor belong to the OLD window and
-  // would otherwise sit under the new first page with a stale cursor. Reset
-  // them during render (React's "adjust state on prop change" pattern), and
-  // bump the generation so a page still in flight for the old summary is
-  // dropped when it lands.
+  // A new summary starts a new feed (React's "adjust state on prop change"
+  // pattern); the generation ref drops a page still in flight for the old one.
   const [feedAsOf, setFeedAsOf] = React.useState(summary.generatedAt);
   const feedGeneration = React.useRef(summary.generatedAt);
   if (feedAsOf !== summary.generatedAt) {
@@ -275,9 +452,9 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     [summary.recent, older.rows],
   );
 
-  async function loadOlder() {
-    if (!cursor || loadingOlder) return;
-    // The window every page is cut off at is the summary's, not the request's.
+  /** Fetch the next older page; resolves true when rows were added. */
+  async function loadOlder(): Promise<boolean> {
+    if (!cursor || loadingOlder) return false;
     const asOf = summary.generatedAt;
     const stale = () => feedGeneration.current !== asOf;
     setLoadingOlder(true);
@@ -291,7 +468,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         | ({ ok: true } & EditActivityPage)
         | { ok: false }
         | null;
-      if (stale()) return;
+      if (stale()) return false;
       if (!res.ok || !body || !body.ok) throw new Error(`load older failed: ${res.status}`);
       setOlder((o) => ({
         rows: appendOlder(o.rows, body.recent),
@@ -299,217 +476,611 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         entityNames: { ...o.entityNames, ...body.entityNames },
       }));
       setCursor(body.nextCursor);
+      return body.recent.length > 0;
     } catch {
       if (!stale()) setOlderError(true);
+      return false;
     } finally {
       if (!stale()) setLoadingOlder(false);
     }
   }
 
+  // ── Filter state ───────────────────────────────────────────────────────────
   const [hover, setHover] = React.useState<string | null>(null);
   const [day, setDay] = React.useState<string | null>(null);
-  const [editor, setEditor] = React.useState<string | null>(null);
+  const [editor, setEditor] = React.useState<string>("");
+  const [field, setField] = React.useState<string>("");
+  const [gainedOnly, setGainedOnly] = React.useState(false);
   const [category, setCategory] = React.useState("all");
-  const [hideSystem, setHideSystem] = React.useState(false);
+  const [hideAutomated, setHideAutomated] = React.useState(false);
+  const [group, setGroup] = React.useState(true);
+  const [query, setQuery] = React.useState("");
   const [allEditors, setAllEditors] = React.useState(false);
-  const [allEntities, setAllEntities] = React.useState(false);
-  const [openGroups, setOpenGroups] = React.useState<ReadonlySet<string>>(() => new Set());
-  const [shownValues, setShownValues] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [open, setOpen] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [page, setPage] = React.useState(0);
 
-  const toggleIn = (set: ReadonlySet<string>, k: string) => {
-    const next = new Set(set);
-    if (next.has(k)) next.delete(k);
-    else next.add(k);
-    return next;
-  };
+  const filterKey = [day, editor, field, gainedOnly, category, hideAutomated, group, query].join("|");
+  const [pageFilterKey, setPageFilterKey] = React.useState(filterKey);
+  if (pageFilterKey !== filterKey) {
+    setPageFilterKey(filterKey);
+    setPage(0);
+  }
 
-  // ── Day axis + KPIs ────────────────────────────────────────────────────────
-  const perDay = new Map(summary.perDay.map((r) => [r.day, r.edits]));
+  const toggle = (k: string) =>
+    setOpen((s) => {
+      const next = new Set(s);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+
+  // ── Names ──────────────────────────────────────────────────────────────────
+  const personName = (cwid: string) => people[cwid]?.name ?? null;
+  const actorName = (cwid: string) =>
+    isSystemActor(cwid) ? cwid : (personName(cwid) ?? cwid);
+  function entityText(type: string, id: string): string {
+    if (type === "scholar") return personName(id) ?? id;
+    return entityNames[`${type}:${id}`] ?? id;
+  }
+
+  // ── Tiles ──────────────────────────────────────────────────────────────────
+  const a = summary.analytics;
+  const total = summary.totalEdits;
+  const perDayTotal = new Map(summary.perDay.map((r) => [r.day, r.edits]));
+  const split = new Map(a.perDay.map((d) => [d.day, d]));
   const axis = dayAxis(easternDayKey(summary.generatedAt), summary.windowDays);
   const activeDays = summary.perDay.filter((r) => r.edits > 0).length;
-  const busiest = summary.perDay.reduce<{ day: string; edits: number } | null>(
-    (best, r) => (!best || r.edits > best.edits ? r : best),
-    null,
-  );
-  const total = summary.totalEdits;
-  const { editors, automatedEditors, automatedEdits } = summary.editorStats;
-  const humanEdits = Math.max(0, total - automatedEdits);
-  const kpis = [
-    { label: "Edits", value: fmt(total), sub: `on ${activeDays} of ${summary.windowDays} days` },
+  const tiles: { label: string; value: string; sub: string; accent: string }[] = [
+    { label: "All edits", value: fmt(total), sub: `On ${activeDays} of ${summary.windowDays} days`, accent: "border-t-apollo-bar" },
     {
-      label: "Editors",
-      value: fmt(editors),
-      sub: `${fmt(editors - automatedEditors)} ${editors - automatedEditors === 1 ? "person" : "people"}, ${fmt(automatedEditors)} automated`,
+      label: "Faculty, own profile",
+      value: fmt(a.kinds.self),
+      sub: `${fmt(a.selfEditors)} ${a.selfEditors === 1 ? "scholar" : "scholars"} edited their own profile`,
+      accent: "border-t-apollo-slate",
     },
     {
-      label: "By people",
-      value: total > 0 ? `${Math.round((humanEdits / total) * 100)}%` : "—",
-      sub: `${fmt(humanEdits)} edits; the rest automated`,
+      label: "Staff, on someone's behalf",
+      value: fmt(a.kinds.staff),
+      sub: a.topStaff
+        ? `Largest: ${actorName(a.topStaff.actorCwid)} with ${fmt(a.topStaff.edits)} edits`
+        : "None this period",
+      accent: "border-t-[#8fa6bf]",
     },
     {
-      label: "Busiest day",
-      value: busiest ? fmt(busiest.edits) : "—",
-      sub: busiest ? dayLabel(busiest.day) : "No edits",
+      label: "Automated",
+      value: fmt(a.kinds.automated),
+      sub:
+        a.automatedByActor.length > 0
+          ? a.automatedByActor.map((x) => `${automatedLabel(x.actorCwid)} ${fmt(x.edits)}`).join(" · ")
+          : "None this period",
+      accent: "border-t-[#a39486]",
     },
   ];
 
-  const maxEdits = Math.max(0, ...axis.map((k) => perDay.get(k) ?? 0));
+  // ── Chart ──────────────────────────────────────────────────────────────────
+  const dayTotal = (k: string) => perDayTotal.get(k) ?? 0;
+  const maxEdits = Math.max(0, ...axis.map(dayTotal));
   const yMax = niceMax(maxEdits);
   const ticks = Number.isInteger(yMax / 2) ? [0, yMax / 2, yMax] : [0, yMax];
+  const spike = axis.reduce<string | null>((best, k) => (dayTotal(k) > (best ? dayTotal(best) : 0) ? k : best), null);
+  const spikeTop = spike ? split.get(spike)?.topActor : null;
   const hoverLabel = hover
-    ? `${dayLabel(hover)}: ${fmt(perDay.get(hover) ?? 0)} edits · click to filter the activity feed`
+    ? (() => {
+        const s = split.get(hover);
+        const parts = s
+          ? KIND_ORDER.filter((k) => s[k] > 0).map((k) => `${fmt(s[k])} ${KIND[k].tag.toLowerCase()}`)
+          : [];
+        return `${dayLabel(hover)}: ${fmt(dayTotal(hover))} edits${parts.length ? ` (${parts.join(", ")})` : ""}`;
+      })()
     : day
       ? `Filtered to ${dayLabel(day)} · click again to clear`
-      : "Hover a bar for the count; click to filter the feed";
-
-  // ── People / entity labels ─────────────────────────────────────────────────
-  const personName = (cwid: string) => people[cwid]?.name ?? null;
-
-  function entityText(type: string, id: string): { text: string; raw: boolean } {
-    if (type === "scholar") {
-      const n = personName(id);
-      return n ? { text: n, raw: false } : { text: id, raw: true };
-    }
-    const n = entityNames[`${type}:${id}`];
-    return n ? { text: n, raw: false } : { text: id, raw: true };
-  }
-
-  // ── Bar lists ──────────────────────────────────────────────────────────────
-  const topEditorN = summary.topEditors[0]?.edits ?? 1;
-  const topEntityN = summary.topEntities[0]?.edits ?? 1;
-  const editorRows = allEditors ? summary.topEditors : summary.topEditors.slice(0, LIST_TOP);
-  const entityRows = allEntities ? summary.topEntities : summary.topEntities.slice(0, LIST_TOP);
+      : "Click a bar to filter the feed. Eastern time.";
 
   // ── Feed ───────────────────────────────────────────────────────────────────
-  const cat = CATEGORIES.find((c) => c.key === category);
+  const cat = CATEGORIES.find((c) => c.key === category) ?? CATEGORIES[0]!;
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (e: RecentEdit) =>
+    !q ||
+    [
+      e.actorCwid,
+      actorName(e.actorCwid),
+      e.entityId,
+      entityText(e.entityType, e.entityId),
+      labelForAction(e.action),
+      e.detail ?? "",
+      ...e.changes.flatMap((c) => [c.field, c.before ?? "", c.after ?? ""]),
+    ].some((s) => s.toLowerCase().includes(q));
   const filtered = recent.filter(
     (e) =>
-      (!cat?.actions || cat.actions.has(e.action)) &&
-      (!hideSystem || !isSystemActor(e.actorCwid)) &&
+      cat.test(e.action) &&
+      (!hideAutomated || !isSystemActor(e.actorCwid)) &&
       (!editor || e.actorCwid === editor) &&
-      (!day || easternDayKey(e.ts) === day),
+      (!field || e.changes.some((c) => c.key === field)) &&
+      (!gainedOnly || !field || gainedIn(e, field)) &&
+      (!day || easternDayKey(e.ts) === day) &&
+      matchesQuery(e),
   );
-  const groups = groupFeed(filtered);
-  const byDay: { day: string; groups: FeedGroup[] }[] = [];
-  for (const g of groups) {
+  const rows = buildRows(filtered, group);
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_ROWS));
+  const pageRows = rows.slice(page * PAGE_ROWS, (page + 1) * PAGE_ROWS);
+  const rowsPerDay = new Map<string, number>();
+  for (const r of rows) rowsPerDay.set(r.day, (rowsPerDay.get(r.day) ?? 0) + 1);
+  const byDay: { day: string; rows: FeedRow[] }[] = [];
+  for (const r of pageRows) {
     const last = byDay[byDay.length - 1];
-    if (last && last.day === g.day) last.groups.push(g);
-    else byDay.push({ day: g.day, groups: [g] });
+    if (last && last.day === r.day) last.rows.push(r);
+    else byDay.push({ day: r.day, rows: [r] });
   }
-  const isFiltered = Boolean(day || editor || category !== "all" || hideSystem);
+  const pageEdits = pageRows.reduce((n, r) => n + r.edits.length, 0);
+  const firstEdit = rows.slice(0, page * PAGE_ROWS).reduce((n, r) => n + r.edits.length, 0) + 1;
+  const hasNext = page + 1 < pageCount || Boolean(cursor);
 
-  function valueNode(v: string | null, key: string, before: boolean) {
-    if (v === null) return <span className="text-muted-foreground italic">empty</span>;
-    const long = v.length > VALUE_COLLAPSE_AT;
-    const shown = shownValues.has(key);
+  // Next on the last loaded page fetches older edits first; it only turns the
+  // page once they overflow this one (a short page just fills up).
+  const [advance, setAdvance] = React.useState(false);
+  if (advance && !loadingOlder) {
+    setAdvance(false);
+    if (rows.length > (page + 1) * PAGE_ROWS) setPage(page + 1);
+  }
+  function nextPage() {
+    if (page + 1 < pageCount) {
+      setPage(page + 1);
+      return;
+    }
+    setAdvance(true);
+    void loadOlder();
+  }
+
+  function exportCsv() {
+    const header = ["time", "editor_cwid", "editor_name", "editor_kind", "action", "entity_type", "entity_id", "entity_name", "fields"];
+    const lines = filtered.map((e) =>
+      [
+        e.ts,
+        e.actorCwid,
+        actorName(e.actorCwid),
+        rowKindOf(e),
+        labelForAction(e.action),
+        e.entityType,
+        e.entityId,
+        entityText(e.entityType, e.entityId),
+        e.changes.map((c) => c.field).join("; "),
+      ]
+        .map(csvCell)
+        .join(","),
+    );
+    const blob = new Blob([[header.join(","), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `edit-activity-${easternDayKey(summary.generatedAt)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Renderers ──────────────────────────────────────────────────────────────
+
+  function firstLabel(key: string): string {
+    if (key === "overview") return "First written";
+    if (key === "selectedHighlightPmids") return "First picked";
+    return "First set";
+  }
+
+  function badge(children: React.ReactNode) {
     return (
-      <>
-        <span
-          className={cn(
-            "min-w-0 [overflow-wrap:anywhere]",
-            before && "text-muted-foreground line-through",
-          )}
-        >
-          {long && !shown ? `${v.slice(0, VALUE_COLLAPSE_AT - 2)}…` : v}
-        </span>
-        {long && (
-          <button
-            type="button"
-            onClick={() => setShownValues((s) => toggleIn(s, key))}
-            className="text-apollo-slate text-[12.5px] hover:underline"
-          >
-            {shown ? "less" : "more"}
+      <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground rounded border px-1.5 text-xs whitespace-nowrap">
+        {children}
+      </span>
+    );
+  }
+
+  function listChange(c: NetChange, rowKey: string) {
+    const b = parseValue(c.before);
+    const af = parseValue(c.after);
+    const before = Array.isArray(b) ? b.map((x) => itemLabel(c.key, x)) : [];
+    const after = Array.isArray(af) ? af.map((x) => itemLabel(c.key, x)) : [];
+    const had = new Set(before.map((x) => x.id));
+    const has = new Set(after.map((x) => x.id));
+    const items = [
+      ...after.filter((x) => !had.has(x.id)).map((x) => ({ ...x, sign: "+" })),
+      ...before.filter((x) => !has.has(x.id)).map((x) => ({ ...x, sign: "−" })),
+    ];
+    const k = `${rowKey}:${c.key}:items`;
+    const shown = open.has(k) ? items : items.slice(0, ITEMS_SHOWN);
+    if (items.length === 0) return <span className="text-muted-foreground">Reordered</span>;
+    return (
+      <span className="flex flex-col gap-0.5">
+        {shown.map((x) => (
+          <span key={`${x.sign}${x.id}`}>
+            <span className={cn("font-semibold", x.sign === "+" ? "text-apollo-green" : "text-apollo-maroon")}>
+              {x.sign}
+            </span>{" "}
+            <span className={x.sign === "−" ? "text-muted-foreground line-through" : undefined}>{x.label}</span>
+            {x.note && <span className="text-muted-foreground"> · {x.note}</span>}
+          </span>
+        ))}
+        {items.length > ITEMS_SHOWN && (
+          <button type="button" className={cn(LINKISH, "w-fit")} onClick={() => toggle(k)}>
+            {open.has(k) ? "Show fewer" : `+ ${items.length - ITEMS_SHOWN} more`}
           </button>
         )}
-      </>
+      </span>
     );
   }
 
-  function changeLine(c: FieldChange, key: string) {
+  function mapChange(c: NetChange) {
+    const rec = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+    const b = rec(parseValue(c.before));
+    const af = rec(parseValue(c.after));
+    const keys = [...new Set([...Object.keys(b), ...Object.keys(af)])];
+    const parts = keys.flatMap((k) => {
+      const label = k.length <= 2 ? k.toUpperCase() : k === "linkedin" ? "LinkedIn" : humanizeField(k);
+      if (!(k in b) && k in af) return [{ sign: "+", label }];
+      if (k in b && !(k in af)) return [{ sign: "−", label }];
+      return JSON.stringify(b[k]) === JSON.stringify(af[k]) ? [] : [{ sign: "~", label }];
+    });
     return (
-      <div key={key} className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1">
-        <span className="font-medium">{c.field}</span>
-        {valueNode(c.before, `${key}:b`, true)}
-        <span className="text-muted-foreground" aria-label="changed to">
-          →
-        </span>
-        {valueNode(c.after, `${key}:a`, false)}
-      </div>
-    );
-  }
-
-  function editorName(cwid: string) {
-    const n = personName(cwid);
-    return n ? (
-      <span>{n}</span>
-    ) : (
-      <span className="font-mono">{cwid}</span>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-7" data-slot="edit-activity">
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="flex min-w-0 flex-1 basis-[300px] flex-col gap-1.5">
-          <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
-            Edit activity
-          </h1>
-          <p className="text-muted-foreground m-0 text-[14.5px] leading-normal">
-            Edits across all profile entities, {dayLabel(axis[0]!)} – {dayLabel(axis[axis.length - 1]!)}.
-            Read-only. Scholars and centers link to their full history.
-          </p>
-        </div>
-        <span className="text-muted-foreground border-apollo-border-strong bg-apollo-surface rounded-lg border px-3 py-[7px] text-[13px] whitespace-nowrap">
-          Last {summary.windowDays} days
-        </span>
-      </div>
-
-      <div
-        className="grid grid-cols-2 gap-3.5 md:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]"
-        data-testid="edit-activity-kpis"
-      >
-        {kpis.map((k) => (
-          <div key={k.label} className={cn(CARD, "flex flex-col gap-1 px-[18px] py-4")}>
-            <span className="text-muted-foreground text-xs font-medium tracking-[0.1em] uppercase">
-              {k.label}
-            </span>
-            <span className="text-[30px] leading-tight font-semibold tracking-[-0.01em] tabular-nums">
-              {k.value}
-            </span>
-            <span className="text-muted-foreground text-[13px]">{k.sub}</span>
-          </div>
+      <span>
+        {parts.map((p, i) => (
+          <React.Fragment key={p.label}>
+            {i > 0 && " · "}
+            <span className={cn("font-semibold", p.sign === "−" ? "text-apollo-maroon" : "text-apollo-green")}>
+              {p.sign}
+            </span>{" "}
+            {p.label}
+          </React.Fragment>
         ))}
-      </div>
+      </span>
+    );
+  }
 
-      <section className={cn(CARD, "flex flex-col gap-3.5 px-4 pt-5 pb-4 md:px-[22px]")}>
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 className="m-0 text-[17px] font-semibold">Edits per day</h2>
-          <span className="text-muted-foreground text-[13px]" aria-live="polite">
-            {hoverLabel}
+  function textChange(c: NetChange, rowKey: string) {
+    const k = `${rowKey}:${c.key}:text`;
+    const full = open.has(k);
+    const before = c.before === null ? null : plainText(c.before);
+    const after = c.after === null ? null : plainText(c.after);
+    if (!before && after) {
+      const long = after.length > LONG_TEXT * 2;
+      return (
+        <p className="m-0">
+          {long && !full ? `${after.slice(0, LONG_TEXT * 2 - 2)}…` : after}{" "}
+          {long && (
+            <button type="button" className={LINKISH} onClick={() => toggle(k)}>
+              {full ? "Show less" : "Read all"}
+            </button>
+          )}
+        </p>
+      );
+    }
+    if (before && !after) {
+      return <span className="text-muted-foreground line-through">{before.length > LONG_TEXT ? `${before.slice(0, LONG_TEXT)}…` : before}</span>;
+    }
+    if ((before ?? "").length <= LONG_TEXT && (after ?? "").length <= LONG_TEXT) {
+      return (
+        <span>
+          <span className="text-muted-foreground line-through">{before}</span>{" "}
+          <span className="text-muted-foreground" aria-label="changed to">→</span> {after}
+        </span>
+      );
+    }
+    const diff = wordDiff(before ?? "", after ?? "");
+    const parts = full ? diff : changedOnly(diff);
+    return (
+      <p className="m-0">
+        {parts.map((p, i) =>
+          p.kind === "same" ? (
+            <span key={i}>{p.text} </span>
+          ) : p.kind === "del" ? (
+            <del key={i} className="bg-apollo-red-tint text-apollo-maroon decoration-apollo-maroon/60 mr-1 rounded-sm px-0.5">
+              {p.text}
+            </del>
+          ) : (
+            <ins key={i} className="bg-apollo-green-tint text-apollo-green-foreground mr-1 rounded-sm px-0.5 no-underline">
+              {p.text}
+            </ins>
+          ),
+        )}
+        <button type="button" className={LINKISH} onClick={() => toggle(k)}>
+          {full ? "Changed words only" : "Full comparison"}
+        </button>
+      </p>
+    );
+  }
+
+  function changeBlock(c: NetChange, rowKey: string) {
+    const parsed = parseValue(c.after) ?? parseValue(c.before);
+    const isList = Array.isArray(parsed);
+    const isMap = !isList && parsed !== null && typeof parsed === "object";
+    const first = isEmptyValue(c.before) && !isEmptyValue(c.after);
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium">{c.field}</span>
+          {first && badge(firstLabel(c.key))}
+          {isEmptyValue(c.after) && !isEmptyValue(c.before) && (
+            <span className={cn(PILL, "bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground")}>Cleared</span>
+          )}
+          {c.saves > 1 && <span className="text-muted-foreground text-[13px]">· {c.saves} saves combined</span>}
+        </div>
+        <div className="min-w-0 [overflow-wrap:anywhere]">
+          {isList ? listChange(c, rowKey) : isMap ? mapChange(c) : textChange(c, rowKey)}
+        </div>
+      </div>
+    );
+  }
+
+  function editorCell(r: FeedRow) {
+    const e = r.edits[0]!;
+    const person = people[e.actorCwid];
+    const forHref = historyHref(e.entityType, e.entityId);
+    const forText = entityText(e.entityType, e.entityId);
+    let tag: React.ReactNode;
+    if (r.kind === "self") tag = "Own profile";
+    else if (r.kind === "automated") tag = "Automated";
+    else if (r.kind === "audit") tag = "Audit";
+    else
+      tag = (
+        <>
+          Staff, for{" "}
+          {forHref ? (
+            <Link href={forHref} className="hover:underline">
+              {forText}
+            </Link>
+          ) : (
+            forText
+          )}
+        </>
+      );
+    const selfHref = r.kind === "self" ? forHref : null;
+    return (
+      <div className="flex min-w-0 flex-col items-start gap-1">
+        <span className="text-[14px] font-medium" title={person?.title ?? undefined}>
+          {selfHref ? (
+            <Link href={selfHref} className="hover:underline">
+              {actorName(e.actorCwid)}
+            </Link>
+          ) : (
+            actorName(e.actorCwid)
+          )}
+          {r.kind !== "self" && person && (
+            <span className="text-muted-foreground ml-1.5 font-normal">{e.actorCwid}</span>
+          )}
+        </span>
+        <span
+          className={cn(
+            PILL,
+            r.kind === "self"
+              ? KIND.self.chip
+              : r.kind === "staff"
+                ? KIND.staff.chip
+                : "bg-apollo-lock-bg border-apollo-border-strong text-foreground",
+          )}
+        >
+          {tag}
+        </span>
+      </div>
+    );
+  }
+
+  function rowBody(r: FeedRow) {
+    const e = r.edits[0]!;
+    const n = r.edits.length;
+    if (r.kind === "audit") {
+      const start = r.edits.find((x) => x.action === "impersonation_start");
+      const end = r.edits.find((x) => x.action === "impersonation_end");
+      const who = (
+        <>
+          {entityText(e.entityType, e.entityId)} <span className="text-muted-foreground">({e.entityId})</span>
+        </>
+      );
+      if (start && end) {
+        const mins = Math.max(1, Math.round((new Date(end.ts).getTime() - new Date(start.ts).getTime()) / 60_000));
+        return <span>Viewed the console as {who} for {mins} min</span>;
+      }
+      return <span>{start ? "Started" : "Ended"} viewing the console as {who}</span>;
+    }
+    if (r.kind === "automated") {
+      const k = `${r.key}:run`;
+      const names = [...new Set(r.edits.map((x) => entityText(x.entityType, x.entityId)))];
+      const shown = open.has(k) ? names : names.slice(0, ITEMS_SHOWN);
+      return (
+        <div className="flex min-w-0 flex-col gap-1">
+          <span>
+            <span className="font-medium">{labelForAction(e.action)}</span>
+            {n > 1 && <span className="text-muted-foreground"> · {fmt(n)} in one run</span>}
+          </span>
+          <span className="text-muted-foreground [overflow-wrap:anywhere]">
+            {shown.join(", ")}
+            {names.length > ITEMS_SHOWN && (
+              <>
+                {open.has(k) ? " " : ` and ${fmt(names.length - ITEMS_SHOWN)} more `}
+                <button type="button" className={LINKISH} onClick={() => toggle(k)}>
+                  {open.has(k) ? "Show fewer" : "Show all"}
+                </button>
+              </>
+            )}
           </span>
         </div>
-        <div className="grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[40px_minmax(0,1fr)]">
-          <div className="text-muted-foreground relative h-[180px] text-[11.5px] tabular-nums" aria-hidden>
-            {ticks.map((t) => (
-              <span
-                key={t}
-                className="absolute right-0 translate-y-1/2"
-                style={{ bottom: `${(t / yMax) * 100}%` }}
+      );
+    }
+    const changes = netChanges(r.edits);
+    const visible = changes.filter((c) => !sameIgnoringFormat(c.before, c.after));
+    const other = new Map<string, { label: string; detail: string | null; n: number }>();
+    for (const x of r.edits) {
+      if (x.changes.length > 0) continue;
+      const cur = other.get(x.action);
+      if (cur) cur.n += 1;
+      else other.set(x.action, { label: labelForAction(x.action), detail: x.detail, n: 1 });
+    }
+    if (changes.length > 0 && visible.length === 0 && other.size === 0) {
+      const k = `${r.key}:raw`;
+      return (
+        <span className="text-muted-foreground">
+          {changes.map((c) => c.field).join(", ")} re-saved with no visible change (format only).{" "}
+          <button type="button" className={LINKISH} onClick={() => toggle(k)}>
+            {open.has(k) ? "Hide raw" : "Show raw"}
+          </button>
+          {open.has(k) &&
+            changes.map((c) => (
+              <span key={c.key} className="mt-1 block font-mono text-xs [overflow-wrap:anywhere]">
+                {c.field}: {c.before ?? "empty"} → {c.after ?? "empty"}
+              </span>
+            ))}
+        </span>
+      );
+    }
+    return (
+      <div className="flex min-w-0 flex-col gap-2.5">
+        {visible.map((c) => (
+          <React.Fragment key={c.key}>{changeBlock(c, r.key)}</React.Fragment>
+        ))}
+        {[...other.values()].map((o) => (
+          <span key={o.label}>
+            <span className="font-medium">{o.label}</span>
+            {o.n > 1 && <span className="text-muted-foreground"> ×{o.n}</span>}
+            {o.detail && <span className="text-muted-foreground"> · {o.detail}</span>}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  function chip(label: string, onClear: () => void) {
+    return (
+      <span className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate inline-flex items-center gap-1.5 rounded-full border py-[3px] pr-1.5 pl-2.5 text-[13px]">
+        {label}
+        <button type="button" aria-label={`Clear ${label}`} onClick={onClear} className="hover:bg-apollo-slate/10 rounded-full p-0.5">
+          <X className="size-3.5" aria-hidden />
+        </button>
+      </span>
+    );
+  }
+
+  const editorOptions = summary.topEditors.map((t) => t.actorCwid);
+  const fieldOptions = [...new Map([...a.fields, ...a.gained].map((f) => [f.key, humanizeField(f.key)]))];
+  const topEditorN = summary.topEditors[0]?.edits ?? 1;
+  const editorRows = allEditors ? summary.topEditors : summary.topEditors.slice(0, LIST_TOP);
+
+  return (
+    <div className="flex flex-col gap-6" data-slot="edit-activity">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="flex min-w-0 flex-1 basis-[300px] flex-col gap-1.5">
+          <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.02em]">Edit activity</h1>
+          <p className="text-muted-foreground m-0 text-[14.5px] leading-normal">
+            Who changed which profiles, {dayLabel(axis[0]!)} to {dayLabel(axis[axis.length - 1]!)}. Read-only. Each
+            scholar and center links to its full history.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <span className="border-apollo-border-strong bg-apollo-surface inline-flex h-8 items-center rounded-md border px-3 text-sm">
+            Last {summary.windowDays} days
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportCsv}
+            disabled={filtered.length === 0}
+            title="Download the loaded edits that match the current filters"
+            data-testid="edit-activity-export"
+          >
+            Export CSV
+          </Button>
+        </div>
+      </div>
+
+      <section
+        aria-label="Who made the edits"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        data-testid="edit-activity-kpis"
+      >
+        {tiles.map((t) => (
+          <div key={t.label} className={cn(CARD, "flex flex-col gap-1 border-t-[3px] px-5 py-4", t.accent)}>
+            <span className={SMALL_CAPS}>{t.label}</span>
+            <span className="text-[30px] leading-tight font-semibold tabular-nums">{t.value}</span>
+            <span className="text-muted-foreground text-xs">{t.sub}</span>
+          </div>
+        ))}
+      </section>
+
+      <section aria-labelledby="outcomes-h" className={cn(CARD, "flex flex-col gap-3.5 p-5")} data-testid="edit-activity-gained">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2 id="outcomes-h" className="m-0 text-base font-semibold">
+            Profiles that gained content this period
+          </h2>
+          <span className="text-muted-foreground text-[13px]">
+            Field went from empty to filled. Click a number to filter the feed.
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {a.gained.map((g) => {
+            const on = gainedOnly && field === g.key;
+            return (
+              <button
+                key={g.key}
+                type="button"
+                aria-pressed={on}
+                onClick={() => {
+                  setField(on ? "" : g.key);
+                  setGainedOnly(!on);
+                }}
+                className={cn(
+                  "flex flex-col items-start gap-0.5 rounded-lg border px-4 py-3 text-left",
+                  on ? "bg-apollo-slate-tint border-apollo-slate" : "bg-apollo-page border-apollo-border hover:border-apollo-border-strong",
+                )}
+                data-testid={`edit-activity-gained-${g.key}`}
               >
+                <span className="text-apollo-slate text-2xl font-semibold tabular-nums">{fmt(g.profiles)}</span>
+                <span className="text-[13px]">{g.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section aria-labelledby="chart-h" className={cn(CARD, "flex flex-col gap-3 p-5")}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 id="chart-h" className="m-0 text-base font-semibold">
+              Edits per day
+            </h2>
+            <span className="text-muted-foreground text-[13px]" aria-live="polite">
+              {hoverLabel}
+            </span>
+          </div>
+          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {KIND_ORDER.map((k) => (
+              <span key={k} className="inline-flex items-center gap-1.5">
+                <span aria-hidden className={cn("inline-block size-2.5 rounded-sm", KIND[k].bar)} />
+                {KIND[k].legend}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-[32px_minmax(0,1fr)] gap-2 md:grid-cols-[40px_minmax(0,1fr)]">
+          <div className="text-muted-foreground relative mt-7 h-[180px] text-[11.5px] tabular-nums" aria-hidden>
+            {ticks.map((t) => (
+              <span key={t} className="absolute right-0 translate-y-1/2" style={{ bottom: `${(t / yMax) * 100}%` }}>
                 {fmt(t)}
               </span>
             ))}
           </div>
           <div className="flex min-w-0 flex-col gap-1.5">
+            <div className="h-7">
+              {spike && dayTotal(spike) > 0 && (
+                <span
+                  className="bg-apollo-surface-2 border-apollo-border-strong inline-block rounded-md border px-2 py-0.5 text-xs whitespace-nowrap"
+                  data-testid="edit-activity-spike"
+                >
+                  {dayLabel(spike)} · {fmt(dayTotal(spike))}
+                  {spikeTop ? ` · top editor ${actorName(spikeTop)}` : ""}
+                </span>
+              )}
+            </div>
             <div className="relative h-[180px]">
               {ticks.map((t) => (
                 <div
                   key={t}
                   aria-hidden
-                  className={cn(
-                    "absolute inset-x-0 border-t",
-                    t === 0 ? "border-apollo-border-strong" : "border-apollo-border",
-                  )}
+                  className={cn("absolute inset-x-0 border-t", t === 0 ? "border-apollo-border-strong" : "border-apollo-border")}
                   style={{ bottom: `${(t / yMax) * 100}%` }}
                 />
               ))}
@@ -519,7 +1090,8 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
                 aria-label="Edits per day; select a day to filter the activity feed"
               >
                 {axis.map((k) => {
-                  const n = perDay.get(k) ?? 0;
+                  const n = dayTotal(k);
+                  const s = split.get(k);
                   const active = day === k || hover === k;
                   return (
                     <button
@@ -527,26 +1099,28 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
                       type="button"
                       aria-pressed={day === k}
                       aria-label={`${dayLabel(k)}: ${fmt(n)} edits`}
-                      title={`${dayLabel(k)}: ${fmt(n)}`}
                       onMouseEnter={() => setHover(k)}
                       onMouseLeave={() => setHover(null)}
                       onFocus={() => setHover(k)}
                       onBlur={() => setHover(null)}
                       onClick={() => setDay((d) => (d === k ? null : k))}
-                      className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 cursor-pointer items-end rounded-sm outline-none focus-visible:ring-2"
+                      className={cn(
+                        "focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse rounded-sm outline-none focus-visible:ring-2",
+                        isWeekend(k) && !active && "opacity-45",
+                        active && "ring-apollo-bar/40 ring-1",
+                      )}
                       data-testid={`edit-activity-bar-${k}`}
                     >
-                      <span
-                        className={cn(
-                          "block w-full rounded-t-[3px]",
-                          active
-                            ? "bg-apollo-bar"
-                            : isWeekend(k)
-                              ? "bg-apollo-slate/45"
-                              : "bg-apollo-slate",
-                        )}
-                        style={{ height: `${(n / yMax) * 100}%`, minHeight: n > 0 ? 2 : 0 }}
-                      />
+                      {KIND_ORDER.map((kind) => {
+                        const v = s?.[kind] ?? 0;
+                        return v > 0 ? (
+                          <span
+                            key={kind}
+                            className={cn("block w-full first:rounded-none last:rounded-t-[3px]", KIND[kind].bar)}
+                            style={{ height: `${(v / yMax) * 100}%`, minHeight: 2 }}
+                          />
+                        ) : null;
+                      })}
                     </button>
                   );
                 })}
@@ -555,24 +1129,22 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
             <div className="text-muted-foreground flex gap-[2px] text-[11.5px] md:gap-1" aria-hidden>
               {axis.map((k, i) => (
                 <span key={k} className="relative min-w-0 flex-1 text-center whitespace-nowrap">
-                  {i % 7 === 0 ? (
-                    <span className="md:hidden">{dayLabel(k)}</span>
-                  ) : null}
-                  {i % 4 === 0 ? (
-                    <span className="hidden md:inline">{dayLabel(k)}</span>
-                  ) : null}
+                  {i % 7 === 0 ? <span className="md:hidden">{dayLabel(k)}</span> : null}
+                  {i % 4 === 0 ? <span className="hidden md:inline">{dayLabel(k)}</span> : null}
                 </span>
               ))}
             </div>
           </div>
         </div>
-        <p className="text-muted-foreground m-0 text-xs">Lighter bars are weekends. Days are Eastern time.</p>
+        <span className="text-muted-foreground text-xs">Faded bars are weekends.</span>
       </section>
 
-      <div className="grid items-start gap-5 lg:grid-cols-2">
-        <section className={cn(CARD, "overflow-hidden")} data-testid="edit-activity-top-editors">
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <section aria-labelledby="ed-h" className={cn(CARD, "overflow-hidden")} data-testid="edit-activity-top-editors">
           <div className="flex items-center justify-between px-5 pt-4 pb-2.5">
-            <h2 className="m-0 text-[17px] font-semibold">Top editors</h2>
+            <h2 id="ed-h" className="m-0 text-base font-semibold">
+              Top editors
+            </h2>
             <span className={SMALL_CAPS}>Edits</span>
           </div>
           {editorRows.length === 0 ? (
@@ -582,49 +1154,45 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
           ) : (
             editorRows.map((r) => {
               const person = people[r.actorCwid];
-              const system = isSystemActor(r.actorCwid);
+              const info = a.editors[r.actorCwid];
+              const kind: EditorKind = info?.kind ?? (isSystemActor(r.actorCwid) ? "automated" : "staff");
               const picked = editor === r.actorCwid;
+              const meta =
+                kind === "automated"
+                  ? "Scheduled job"
+                  : [
+                      person?.title,
+                      kind === "staff" && info ? `edited ${fmt(info.profiles)} ${info.profiles === 1 ? "profile" : "profiles"}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
               return (
                 <button
                   key={r.actorCwid}
                   type="button"
                   aria-pressed={picked}
-                  onClick={() => setEditor(picked ? null : r.actorCwid)}
+                  onClick={() => setEditor(picked ? "" : r.actorCwid)}
                   title={picked ? "Clear the editor filter" : "Show only this editor's edits"}
                   className={cn(
-                    "border-apollo-border hover:bg-apollo-page grid w-full grid-cols-[minmax(0,1fr)_48px] items-center gap-2.5 border-t px-5 py-[7px] text-left",
+                    "border-apollo-border hover:bg-apollo-page grid w-full grid-cols-[minmax(0,1fr)_56px] items-center gap-3 border-t px-5 py-2.5 text-left",
                     picked && "bg-apollo-slate-tint hover:bg-apollo-slate-tint",
                   )}
                   data-testid={`edit-activity-editor-${r.actorCwid}`}
                 >
-                  <span className="relative min-w-0 overflow-hidden rounded-[5px] px-2 py-1">
-                    <span
-                      aria-hidden
-                      className="bg-apollo-slate-tint absolute inset-y-0 left-0 rounded-[5px]"
-                      style={{ width: `${(r.edits / topEditorN) * 100}%` }}
-                    />
-                    <span className="relative flex min-w-0 flex-col">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span
-                          className={cn(
-                            "truncate text-sm",
-                            person ? "font-medium" : "font-mono",
-                          )}
-                        >
-                          {person?.name ?? r.actorCwid}
-                        </span>
-                        {system && (
-                          <span className="bg-apollo-surface-2 text-muted-foreground rounded px-[7px] py-px text-[11px] whitespace-nowrap">
-                            System
-                          </span>
-                        )}
+                  <span className="flex min-w-0 flex-col gap-1">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-medium">
+                        {actorName(r.actorCwid)}
+                        {person && <span className="text-muted-foreground font-normal"> · {r.actorCwid}</span>}
                       </span>
-                      {person && (
-                        <span className="text-muted-foreground truncate text-[12.5px]">
-                          {person.title ? `${person.title} · ` : ""}
-                          {r.actorCwid}
-                        </span>
-                      )}
+                      <span className={cn(PILL, "text-[11px]", KIND[kind].chip)}>{KIND[kind].tag}</span>
+                    </span>
+                    {meta && <span className="text-muted-foreground truncate text-xs">{meta}</span>}
+                    <span aria-hidden className="bg-apollo-surface-2 block h-1 w-full overflow-hidden rounded-full">
+                      <span
+                        className={cn("block h-full rounded-full", KIND[kind].bar)}
+                        style={{ width: `${Math.max(2, (r.edits / topEditorN) * 100)}%` }}
+                      />
                     </span>
                   </span>
                   <span className="text-right text-sm font-medium tabular-nums">{fmt(r.edits)}</span>
@@ -633,303 +1201,232 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
             })
           )}
           {summary.topEditors.length > LIST_TOP && (
-            <button
-              type="button"
-              onClick={() => setAllEditors((v) => !v)}
-              className="border-apollo-border bg-apollo-page text-apollo-slate w-full border-t p-2.5 text-[13px] hover:underline"
-            >
-              {allEditors ? `Show top ${LIST_TOP}` : `Show top ${summary.topEditors.length}`}
-            </button>
+            <div className="border-apollo-border border-t px-3 py-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setAllEditors((v) => !v)}>
+                {allEditors ? `Show top ${LIST_TOP}` : `Show top ${summary.topEditors.length}`}
+              </Button>
+            </div>
           )}
         </section>
 
-        <section className={cn(CARD, "overflow-hidden")} data-testid="edit-activity-top-entities">
+        <section aria-labelledby="fd-h" className={cn(CARD, "overflow-hidden")} data-testid="edit-activity-top-fields">
           <div className="flex items-center justify-between px-5 pt-4 pb-2.5">
-            <h2 className="m-0 text-[17px] font-semibold">Most-edited entities</h2>
-            <span className={SMALL_CAPS}>Edits</span>
+            <h2 id="fd-h" className="m-0 text-base font-semibold">
+              Most-edited fields
+            </h2>
+            <span className={SMALL_CAPS}>Profiles · Edits</span>
           </div>
-          {entityRows.length === 0 ? (
+          {a.fields.length === 0 ? (
             <p className="text-muted-foreground border-apollo-border m-0 border-t px-5 py-3 text-sm">
-              None in the last {summary.windowDays} days.
+              No field edits in the last {summary.windowDays} days.
             </p>
           ) : (
-            entityRows.map((r) => {
-              const { text, raw } = entityText(r.entityType, r.entityId);
-              const href = historyHref(r.entityType, r.entityId);
+            a.fields.map((f) => {
+              const on = field === f.key && !gainedOnly;
               return (
-                <div
-                  key={`${r.entityType}:${r.entityId}`}
-                  className="border-apollo-border grid grid-cols-[minmax(0,1fr)_48px] items-center gap-2.5 border-t px-5 py-[7px]"
+                <button
+                  key={f.key}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => {
+                    setGainedOnly(false);
+                    setField(on ? "" : f.key);
+                  }}
+                  className={cn(
+                    "border-apollo-border hover:bg-apollo-page flex w-full items-center justify-between gap-3 border-t px-5 py-2.5 text-left text-sm",
+                    on && "bg-apollo-slate-tint hover:bg-apollo-slate-tint",
+                  )}
                 >
-                  <span className="relative min-w-0 overflow-hidden rounded-[5px] px-2 py-1">
-                    <span
-                      aria-hidden
-                      className="bg-apollo-slate-tint absolute inset-y-0 left-0 rounded-[5px]"
-                      style={{ width: `${(r.edits / topEntityN) * 100}%` }}
-                    />
-                    <span className="relative flex min-w-0 items-center gap-2">
-                      <span className="bg-apollo-surface border-apollo-border-strong text-muted-foreground flex-none rounded border px-[7px] py-px text-[11px] whitespace-nowrap">
-                        {typeLabel(r.entityType)}
-                      </span>
-                      {href ? (
-                        <Link
-                          href={href}
-                          title={raw ? undefined : r.entityId}
-                          className={cn(
-                            "text-apollo-slate truncate text-sm hover:underline",
-                            raw && "font-mono",
-                          )}
-                        >
-                          {text}
-                        </Link>
-                      ) : (
-                        <span
-                          title={raw ? undefined : r.entityId}
-                          className={cn("truncate text-sm", raw && "font-mono")}
-                        >
-                          {text}
-                        </span>
-                      )}
-                    </span>
+                  <span className="truncate font-medium">{f.label}</span>
+                  <span className="text-muted-foreground tabular-nums whitespace-nowrap">
+                    {fmt(f.profiles)} · {fmt(f.edits)}
                   </span>
-                  <span className="text-right text-sm font-medium tabular-nums">{fmt(r.edits)}</span>
-                </div>
+                </button>
               );
             })
           )}
-          {summary.topEntities.length > LIST_TOP && (
-            <button
-              type="button"
-              onClick={() => setAllEntities((v) => !v)}
-              className="border-apollo-border bg-apollo-page text-apollo-slate w-full border-t p-2.5 text-[13px] hover:underline"
-            >
-              {allEntities ? `Show top ${LIST_TOP}` : `Show top ${summary.topEntities.length}`}
-            </button>
-          )}
+          <p className="text-muted-foreground border-apollo-border m-0 border-t px-5 py-3 text-xs">
+            &ldquo;Profiles&rdquo; counts distinct profiles, so one person saving 15 times counts once.
+          </p>
         </section>
       </div>
 
-      <section className="flex flex-col gap-3" data-testid="edit-activity-recent">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 className="m-0 text-[17px] font-semibold">Recent activity</h2>
-          {day && (
-            <span className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate inline-flex items-center gap-1.5 rounded-full border py-[3px] pr-1.5 pl-2.5 text-[13px]">
-              {dayLabel(day)}
-              <button
-                type="button"
-                aria-label="Clear the day filter"
-                onClick={() => setDay(null)}
-                className="hover:bg-apollo-slate/10 rounded-full p-0.5"
-              >
-                <X className="size-3.5" aria-hidden />
-              </button>
-            </span>
-          )}
-          {editor && (
-            <span
-              className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-slate inline-flex items-center gap-1.5 rounded-full border py-[3px] pr-1.5 pl-2.5 text-[13px]"
-              data-testid="edit-activity-editor-chip"
-            >
-              {personName(editor) ?? editor}
-              <button
-                type="button"
-                aria-label="Clear the editor filter"
-                onClick={() => setEditor(null)}
-                className="hover:bg-apollo-slate/10 rounded-full p-0.5"
-              >
-                <X className="size-3.5" aria-hidden />
-              </button>
-            </span>
-          )}
-          <div className="flex flex-wrap items-center gap-1.5 md:ml-auto">
-            {CATEGORIES.map((c) => {
-              const on = category === c.key;
-              return (
-                <button
-                  key={c.key}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => setCategory(c.key)}
-                  className={cn(
-                    "rounded-full border px-[11px] py-1 text-[12.5px] whitespace-nowrap",
-                    on
-                      ? "bg-apollo-slate-tint text-apollo-slate border-apollo-slate"
-                      : "bg-apollo-surface text-foreground border-apollo-border-strong hover:bg-apollo-surface-2",
-                  )}
-                  data-testid={`edit-activity-category-${c.key}`}
-                >
-                  {c.label}
-                </button>
-              );
-            })}
-            <label className="text-muted-foreground ml-2 flex cursor-pointer items-center gap-2 text-[13px] whitespace-nowrap">
+      <section aria-labelledby="feed-h" className="flex flex-col gap-3" data-testid="edit-activity-recent">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="feed-h" className="m-0 text-lg font-semibold">
+            Recent activity
+          </h2>
+          <div className="flex flex-wrap gap-4 text-[13px]">
+            <label className="flex cursor-pointer items-center gap-2">
               <input
                 type="checkbox"
-                checked={hideSystem}
-                onChange={() => setHideSystem((v) => !v)}
-                className="accent-apollo-maroon m-0 size-4 flex-none cursor-pointer"
+                checked={group}
+                onChange={() => setGroup((v) => !v)}
+                className="accent-apollo-maroon m-0 size-4"
+                data-testid="edit-activity-group"
+              />
+              Group repeated saves
+            </label>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={hideAutomated}
+                onChange={() => setHideAutomated((v) => !v)}
+                className="accent-apollo-maroon m-0 size-4"
                 data-testid="edit-activity-hide-system"
               />
-              Hide system edits
+              Hide automated
             </label>
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="border-apollo-border-strong bg-apollo-surface flex h-8 min-w-[240px] flex-1 items-center gap-2 rounded-md border px-2.5 sm:flex-none">
+            <Search className="text-muted-foreground size-4" aria-hidden />
+            <span className="sr-only">Search activity</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(ev) => setQuery(ev.target.value)}
+              placeholder="Search a person, entity or field"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+              data-testid="edit-activity-search"
+            />
+          </label>
+          {CATEGORIES.map((c) => {
+            const on = category === c.key;
+            return (
+              <button
+                key={c.key}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setCategory(c.key)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-[13px] whitespace-nowrap",
+                  on
+                    ? "bg-apollo-slate-tint text-apollo-slate border-apollo-slate"
+                    : "bg-apollo-surface text-foreground border-apollo-border-strong hover:bg-apollo-surface-2",
+                )}
+                data-testid={`edit-activity-category-${c.key}`}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+          <span className="flex-1" />
+          <select
+            aria-label="Editor"
+            value={editor}
+            onChange={(ev) => setEditor(ev.target.value)}
+            className="border-apollo-border-strong bg-apollo-surface h-8 rounded-md border px-2 text-[13px]"
+            data-testid="edit-activity-editor-select"
+          >
+            <option value="">Editor: any</option>
+            {editorOptions.map((c) => (
+              <option key={c} value={c}>
+                {actorName(c)}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Field"
+            value={field}
+            onChange={(ev) => {
+              setGainedOnly(false);
+              setField(ev.target.value);
+            }}
+            className="border-apollo-border-strong bg-apollo-surface h-8 rounded-md border px-2 text-[13px]"
+            data-testid="edit-activity-field-select"
+          >
+            <option value="">Field: any</option>
+            {fieldOptions.map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {(day || (gainedOnly && field)) && (
+          <div className="flex flex-wrap gap-2">
+            {day && chip(dayLabel(day), () => setDay(null))}
+            {gainedOnly && field && (
+              chip(a.gained.find((g) => g.key === field)?.label ?? humanizeField(field), () => {
+                  setGainedOnly(false);
+                  setField("");
+                })
+            )}
+          </div>
+        )}
+
         <div className={cn(CARD, "overflow-hidden")}>
           {byDay.map((d) => (
             <div key={d.day} data-testid={`edit-activity-day-${d.day}`}>
-              <div className="bg-apollo-surface-2 border-apollo-border-strong sticky top-0 z-[1] flex justify-between gap-3 border-b px-5 py-[9px] text-[12.5px] font-semibold tracking-[0.04em]">
+              <div className="bg-apollo-surface-2 border-apollo-border flex justify-between gap-3 border-b px-5 py-2 text-[13px] font-semibold">
                 <span>{dayHeading(d.day)}</span>
                 <span className="text-muted-foreground font-normal">
-                  {fmt(perDay.get(d.day) ?? 0)} edits that day
+                  {plural(dayTotal(d.day), "edit")} · {plural(rowsPerDay.get(d.day) ?? 0, "row")}
                 </span>
               </div>
-              {d.groups.map((g) => {
-                const e = g.head;
-                const n = g.members.length;
-                const isGroup = n > 1;
-                const news = e.entityType === "news_mention";
-                const open = isGroup && news && openGroups.has(g.key);
-                const person = people[e.actorCwid];
-                const { text, raw } = entityText(e.entityType, e.entityId);
-                const href = isGroup && news ? null : historyHref(e.entityType, e.entityId);
-                const entityLabel = isGroup && news ? `${n} news mentions` : text;
+              {d.rows.map((r) => {
+                const first = r.edits[r.edits.length - 1]!;
+                const t0 = easternTime(first.ts);
+                const t1 = easternTime(r.edits[0]!.ts);
                 return (
                   <div
-                    key={g.key}
-                    className="border-apollo-border border-b"
-                    data-action={e.action}
-                    data-testid={`edit-activity-row-${g.key}`}
+                    key={r.key}
+                    className="border-apollo-border grid grid-cols-[88px_minmax(0,1fr)] gap-x-4 gap-y-2 border-b px-5 py-3.5 text-sm md:grid-cols-[96px_minmax(180px,240px)_minmax(0,1fr)]"
+                    data-kind={r.kind}
+                    data-testid={`edit-activity-row-${r.key}`}
                   >
-                    <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-x-3 gap-y-2 px-5 py-[11px] md:grid-cols-[64px_minmax(120px,1fr)_minmax(160px,1.3fr)_minmax(0,2fr)] md:items-start md:gap-x-3.5">
-                      <span className="text-muted-foreground pt-px text-[13px] tabular-nums">{g.time}</span>
-                      <div className="flex min-w-0 flex-col gap-px">
-                        <span
-                          className="truncate text-[13.5px] font-medium"
-                          title={person?.title ? `${person.title} · ${e.actorCwid}` : e.actorCwid}
-                        >
-                          {editorName(e.actorCwid)}
-                          {e.impersonatedCwid && (
-                            <span className="text-muted-foreground font-normal">
-                              {" "}
-                              (as {personName(e.impersonatedCwid) ?? e.impersonatedCwid})
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-muted-foreground text-[12.5px]">
-                          {labelForAction(e.action)}
-                          {isGroup ? ` ×${n}` : ""}
-                        </span>
-                      </div>
-                      <div className="col-start-2 flex min-w-0 flex-col gap-[3px] md:col-start-auto">
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <span className="bg-apollo-page border-apollo-border-strong text-muted-foreground flex-none rounded border px-[7px] py-px text-[11px] whitespace-nowrap">
-                            {typeLabel(e.entityType)}
-                          </span>
-                          {href ? (
-                            <Link
-                              href={href}
-                              title={raw ? undefined : e.entityId}
-                              className={cn(
-                                "text-apollo-slate truncate text-[13.5px] hover:underline",
-                                raw && "font-mono",
-                              )}
-                            >
-                              {entityLabel}
-                            </Link>
-                          ) : (
-                            <span
-                              title={raw ? undefined : e.entityId}
-                              className={cn(
-                                "truncate text-[13.5px]",
-                                raw && !(isGroup && news) && "font-mono",
-                              )}
-                            >
-                              {entityLabel}
-                            </span>
-                          )}
-                        </div>
-                        {isGroup &&
-                          (news ? (
-                            <button
-                              type="button"
-                              aria-expanded={open}
-                              onClick={() => setOpenGroups((s) => toggleIn(s, g.key))}
-                              className="text-apollo-slate w-fit text-[12.5px] hover:underline"
-                            >
-                              {open ? "Hide IDs" : "Show IDs"}
-                            </button>
-                          ) : (
-                            <span className="text-muted-foreground text-[12.5px]">
-                              {n} changes in the same minute
-                            </span>
-                          ))}
-                      </div>
-                      <div className="col-start-2 flex min-w-0 flex-col gap-1 text-[13.5px] leading-[1.45] md:col-start-auto">
-                        {e.changes.length > 0 ? (
-                          e.changes.map((c, i) => changeLine(c, `${g.key}:${i}`))
-                        ) : e.detail ? (
-                          <span className="text-muted-foreground">{e.detail}</span>
-                        ) : (
-                          <span className="text-muted-foreground text-[13px]">
-                            No field-level details recorded
-                          </span>
-                        )}
-                      </div>
+                    <span className="text-muted-foreground pt-px text-[13px] tabular-nums">
+                      {t0 === t1 ? t0 : `${t0}–${t1}`}
+                    </span>
+                    {editorCell(r)}
+                    <div className="col-start-2 min-w-0 leading-[1.5] md:col-start-auto">
+                      {rowBody(r)}
                     </div>
-                    {open && (
-                      <div className="flex flex-col gap-0.5 px-5 pb-2.5 pl-[84px] md:pl-[98px]">
-                        {g.members.map((m) => (
-                          <span key={m.id} className="text-muted-foreground font-mono text-[12.5px]">
-                            {m.entityId}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
             </div>
           ))}
           {byDay.length === 0 && (
-            <p
-              className="text-muted-foreground m-0 px-7 py-7 text-center text-sm"
-              data-testid="edit-activity-feed-empty"
-            >
+            <p className="text-muted-foreground m-0 px-7 py-7 text-center text-sm" data-testid="edit-activity-feed-empty">
               {recent.length === 0
                 ? `No edits recorded in the last ${summary.windowDays} days.`
                 : cursor
-                  ? "No loaded edits match these filters. Load older edits to look further back."
+                  ? "No loaded edits match these filters. Page forward to look further back."
                   : "No edits match these filters."}
             </p>
           )}
           <div className="bg-apollo-page text-muted-foreground flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-3 text-[13px]">
             <span data-testid="edit-activity-feed-footer">
-              Showing {fmt(filtered.length)} of {fmt(total)} edits{isFiltered ? " (filtered)" : ""}.
-              {total > recent.length
-                ? ` The feed holds the latest ${fmt(recent.length)}; filters apply to those.`
-                : ""}{" "}
-              Repeated edits in the same minute are grouped.
+              {pageRows.length > 0
+                ? `Showing ${fmt(pageRows.length)} rows (edits ${fmt(firstEdit)}–${fmt(firstEdit + pageEdits - 1)}) of ${fmt(total)} edits`
+                : `${fmt(total)} edits in the last ${summary.windowDays} days`}
+              {recent.length < total ? ` · ${fmt(recent.length)} loaded` : ""}
             </span>
-            {cursor && (
-              <span className="flex items-center gap-2 whitespace-nowrap">
-                {olderError && (
-                  <span role="alert" data-testid="edit-activity-load-older-error">
-                    Couldn&rsquo;t load older edits.
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={loadOlder}
-                  disabled={loadingOlder}
-                  aria-busy={loadingOlder}
-                  className="text-apollo-slate hover:underline disabled:cursor-wait disabled:no-underline disabled:opacity-60"
-                  data-testid="edit-activity-load-older"
-                >
-                  {loadingOlder ? "Loading…" : olderError ? "Try again" : "Load older"}
-                </button>
-              </span>
-            )}
+            <span className="flex items-center gap-2">
+              {olderError && (
+                <span role="alert" data-testid="edit-activity-load-older-error">
+                  Couldn&rsquo;t load older edits.
+                </span>
+              )}
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!hasNext || loadingOlder}
+                aria-busy={loadingOlder}
+                onClick={nextPage}
+                data-testid="edit-activity-next"
+              >
+                {loadingOlder ? "Loading…" : "Next"}
+              </Button>
+            </span>
           </div>
         </div>
       </section>
