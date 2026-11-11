@@ -94,6 +94,23 @@ describe("buildProducerRunWrites", () => {
     expect(bogus.completedAt.getTime() - bogus.startedAt.getTime()).toBe(900);
   });
 
+  it("prefers duration_ms when completed_at is rounded down to the start second", () => {
+    // onboarding-detector: second-precision stamps, a 400 ms run.
+    const [w] = buildProducerRunWrites(
+      [
+        {
+          PK: "STAGE#onboarding_detector#GLOBAL",
+          SK: "RUN#2026-11-10T13:00:25Z",
+          status: "complete",
+          completed_at: "2026-11-10T13:00:25Z",
+          duration_ms: 400,
+        },
+      ],
+      NONE,
+    );
+    expect(w.completedAt.getTime() - w.startedAt.getTime()).toBe(400);
+  });
+
   it("TRAP 3: writes `skipped` verbatim so it is neither a success nor a failure", () => {
     // The real 2026-09-01 spotlight tick. Mapping this to success rebuilds the
     // blind spot; mapping it to failed cries wolf on correct behaviour.
@@ -494,6 +511,19 @@ describe("latestCoreScoredAt / buildRecencyWrite (the output-age tier)", () => {
 
     const behind = new Map([[CORES_SOURCE, new Date("2026-09-06T05:00:00Z")]]);
     expect(buildRecencyWrite(CORES_SOURCE, at, behind)).toHaveLength(1);
+  });
+
+  it("times the row from runStartedAt, and keys idempotence on that start", () => {
+    const start = new Date("2026-11-11T04:40:00Z");
+    const at = new Date("2026-11-11T04:42:53Z");
+    const [w] = buildRecencyWrite(GRANTS_SOURCE, at, NONE, start);
+    expect(w.startedAt).toEqual(start);
+    expect(w.completedAt).toEqual(at);
+    // Same manifest next night: stored startedAt is the run start, so no repeat.
+    expect(buildRecencyWrite(GRANTS_SOURCE, at, new Map([[GRANTS_SOURCE, start]]), start)).toEqual([]);
+    // A run start after the artifact is nonsense and falls back to the stamp.
+    const [late] = buildRecencyWrite(GRANTS_SOURCE, at, NONE, new Date("2026-11-11T05:00:00Z"));
+    expect(late.startedAt).toEqual(at);
   });
 
   it("keeps the two output-age sources independent of each other", () => {
