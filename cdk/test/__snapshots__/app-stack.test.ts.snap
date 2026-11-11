@@ -270,6 +270,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodappfeedbackexportallowlistC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/app/feedback-export-allowlist",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
     "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
       "Default": "/sps/prod/net/alb-sg-id",
       "Type": "AWS::SSM::Parameter::Value<String>",
@@ -965,6 +969,12 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
+              },
+              {
+                "Name": "FEEDBACK_EXPORT_ALLOWLIST",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodappfeedbackexportallowlistC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -5339,6 +5349,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsstagingappfeedbackexportallowlistC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/app/feedback-export-allowlist",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AlbLogsBucket9F12F2B8": {
@@ -6016,6 +6030,12 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
+              },
+              {
+                "Name": "FEEDBACK_EXPORT_ALLOWLIST",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingappfeedbackexportallowlistC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",

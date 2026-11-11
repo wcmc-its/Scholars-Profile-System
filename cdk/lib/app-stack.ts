@@ -2122,6 +2122,18 @@ export class AppStack extends Stack {
         // determination is being handled out of band by the project lead per
         // docs/feedback-badge-spec.md § IRB / governance.
         FEEDBACK_BADGE_ENABLED: "on",
+        // Who may download the raw feedback CSV (GET /api/edit/feedback/export,
+        // docs/feedback-badge-spec.md § CSV export): comma-separated CWIDs named
+        // on the IRB protocol, ALSO required to be superusers. Read from SSM, never
+        // a literal -- this repo is public and CWIDs are never committed. The
+        // operator creates `/sps/<env>/app/feedback-export-allowlist` (String)
+        // BEFORE deploying; a missing parameter fails the CloudFormation deploy
+        // (resolved at deploy time), not the running app. Changing the list is a
+        // parameter edit + `cdk deploy Sps-App-<env>`.
+        FEEDBACK_EXPORT_ALLOWLIST: ssm.StringParameter.valueForStringParameter(
+          this,
+          `/sps/${env}/app/feedback-export-allowlist`,
+        ),
         // Origin allowlist the submit endpoint validates the request's
         // `Origin` header against. Derived from the SAML ACS URL so the env
         // can't drift between the two; same `https://<public-host>` value.
