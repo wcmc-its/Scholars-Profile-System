@@ -376,7 +376,13 @@ export type AuditAction =
    *  `targetEntityType='matcha_ask'`, `targetEntityId` = the paste's `descriptionHash`;
    *  `afterValues` = `{ cwids, drafted, failed, model }`. Edits are not audited.
    *  ENUM extended in scripts/sql/audit-log.sql. */
-  | "matcha_brief_generate";
+  | "matcha_brief_generate"
+  /** An allowlisted superuser downloaded the raw feedback CSV
+   *  (`GET /api/edit/feedback/export`, docs/feedback-badge-spec.md § CSV export).
+   *  `targetEntityType='feedback_submission'`, `targetEntityId='export'`;
+   *  `afterValues` = `{ from, to, pageRoute, rows }`. ENUM extended in
+   *  scripts/sql/audit-log.sql. */
+  | "feedback_export";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -490,7 +496,10 @@ export type AuditEntityType =
   | "center_publication_relevance"
   /** one Matcha ask (a pasted description); `targetEntityId` is its `descriptionHash`.
    *  ENUM extended in scripts/sql/audit-log.sql. */
-  | "matcha_ask";
+  | "matcha_ask"
+  /** the `feedback_submission` table as a whole; `targetEntityId` is `export`.
+   *  Only `feedback_export` uses it. ENUM extended in scripts/sql/audit-log.sql. */
+  | "feedback_submission";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
