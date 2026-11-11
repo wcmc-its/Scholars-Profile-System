@@ -116,8 +116,19 @@ npx prisma migrate deploy
 #    pre-swap health checks expect the real corpus; SEARCH_INDEX_SKIP_HEALTH=1
 #    skips them for seed data (ignored when NODE_ENV=production).
 npm run seed
-SEARCH_INDEX_SKIP_HEALTH=1 npm run search:index
+```
 
+### Environment Variables
+
+Set the following environment variable:
+
+| Operating System | Command |
+|---|---|
+| macOS / Linux | `export SEARCH_INDEX_SKIP_HEALTH=1` |
+| Windows PowerShell | `$env:SEARCH_INDEX_SKIP_HEALTH="1"` |
+| Windows CMD | `set SEARCH_INDEX_SKIP_HEALTH=1` |
+```
+npm run search:index
 # 7. Run dev server
 npm run dev
 ```
