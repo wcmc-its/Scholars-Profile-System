@@ -29,7 +29,7 @@ export type FkCategory = "member" | "trainee" | "key_personnel" | "no_mentor";
 export const FK_CATEGORIES: ReadonlyArray<{ key: FkCategory; label: string }> = [
   { key: "member", label: "Member" },
   { key: "trainee", label: "Trainee of a member" },
-  { key: "key_personnel", label: "Member is Key Personnel" },
+  { key: "key_personnel", label: "Trainee via Key Personnel" },
   { key: "no_mentor", label: "No mentor record" },
 ];
 
