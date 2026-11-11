@@ -130,6 +130,32 @@ Open <http://localhost:3000>.
 
 **`/edit` (the editing console) is not reachable on a fresh clone.** It sits behind WCM SAML SSO; outside a configured IdP, dev builds redirect to a local-only `/api/auth/dev-login` route that is not committed to this repo. Public pages (home, profiles, search, browse) work without it.
 
+## Docker setup (no host Node or MariaDB)
+
+Runs MariaDB, OpenSearch, and the Next.js dev server in containers. Use this on Windows, or anywhere you'd rather not install Node and MariaDB. The only prerequisite is Docker (Docker Desktop on Windows/macOS) with about 6 GB of memory available to it.
+
+**Windows:** clone the repo inside WSL2 (e.g. `~/src` in an Ubuntu WSL shell), not under `C:\`. Bind mounts from the Windows filesystem are slow enough to make installs and page compiles crawl.
+
+```bash
+git clone https://github.com/wcmc-its/Scholars-Profile-System.git
+cd Scholars-Profile-System
+
+# 1. Start the stack. The first run installs dependencies inside the
+#    container (several minutes); later runs reuse them. OPENSEARCH_HEAP=1g
+#    is plenty for seed data and leaves room for the app.
+OPENSEARCH_HEAP=1g docker compose --profile app up -d
+
+# 2. Once, and whenever you want fresh fixtures: load the synthetic seed data
+#    and build the search indexes. Seeding WIPES scholars, publications,
+#    grants, appointments, and education, so don't re-run it over data you
+#    loaded yourself; re-run only `npm run search:index` after loading data.
+docker compose exec app sh -c "npm run seed && npm run search:index"
+```
+
+Open <http://localhost:3000>. Code edits hot-reload. Follow the app with `docker compose logs -f app`; stop with `docker compose --profile app down` (add `-v` to delete the database, index, and installed dependencies).
+
+The container's settings (database URL, OpenSearch URL, bridge flags, `SEARCH_INDEX_SKIP_HEALTH`) are set in `docker-compose.yml` and take precedence over any `.env` in the checkout. The containerized MariaDB is published on host port **3307** (user `scholars` / `scholars`) so it never collides with a host MariaDB on 3306. The `docker-stack` CI workflow brings this stack up from scratch weekly and on changes to its inputs.
+
 ## Useful commands
 
 ```bash
@@ -140,7 +166,7 @@ npm run typecheck    # tsc --noEmit
 npm run test         # Vitest unit tests
 npm run test:e2e     # Playwright E2E (requires dev server)
 npm run format       # Prettier
-npm run db:up        # Start OpenSearch via docker compose (MariaDB runs on the host)
+npm run db:up        # Start OpenSearch via docker compose (native setup; MariaDB runs on the host)
 npm run db:down      # Stop the local containers
 npm run db:check     # Show which DB DATABASE_URL points at + grant schema sanity check
 npm run db:migrate   # Author a new Prisma migration (needs CREATE DATABASE for the shadow DB)
