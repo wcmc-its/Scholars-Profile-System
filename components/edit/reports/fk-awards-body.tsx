@@ -8,7 +8,7 @@
  */
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { DownloadAside, SELECT } from "@/components/edit/reports/core-report-ui";
-import { ReportCard, ReportStats } from "@/components/edit/reports/report-ui";
+import { ReportCard } from "@/components/edit/reports/report-ui";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import {
   FK_CATEGORIES,
@@ -18,6 +18,7 @@ import {
   parseFkAwardsParams,
   roleLabel,
   type FkAward,
+  type FkAwards,
 } from "@/lib/edit/fk-awards";
 import { loadFkAwards } from "@/lib/edit/fk-awards.server";
 import { nci2aUnitQuery } from "@/lib/edit/nci-2a-report";
@@ -55,6 +56,57 @@ function Who({ a }: { a: FkAward }) {
         <li className="text-muted-foreground text-[13px]">Faculty career mentor only</li>
       )}
     </ul>
+  );
+}
+
+/** Award counts: the center's categories with a total, then the no-mentor
+ *  awards set apart, since those are a review pile, not the center's. */
+function CountTable({ counts }: { counts: FkAwards["counts"] }) {
+  const center = FK_CATEGORIES.filter((c) => c.key !== "no_mentor");
+  const rows = [
+    { label: "F awards", n: (k: keyof typeof counts) => counts[k].F },
+    { label: "K awards", n: (k: keyof typeof counts) => counts[k].K },
+    { label: "Total", n: (k: keyof typeof counts) => counts[k].F + counts[k].K },
+  ];
+  const num = "px-3 py-1.5 text-right tabular-nums";
+  return (
+    <table className="border-collapse text-sm" data-testid="fk-awards-counts">
+      <thead>
+        <tr className="text-left">
+          <th className={cn(TH, "pl-0")} />
+          {center.map((c) => (
+            <th key={c.key} className={cn(TH, "text-right")}>
+              {c.label}
+            </th>
+          ))}
+          <th className={cn(TH, "text-right")}>Total</th>
+          <th className={cn(TH, "border-apollo-border border-l text-right")}>
+            To review: no mentor record
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr
+            key={r.label}
+            className={cn(i === rows.length - 1 && "border-apollo-border border-t font-semibold")}
+          >
+            <td className="py-1.5 pr-3 font-medium">{r.label}</td>
+            {center.map((c) => (
+              <td key={c.key} className={num}>
+                {r.n(c.key)}
+              </td>
+            ))}
+            <td className={cn(num, "font-semibold")}>
+              {center.reduce((t, c) => t + r.n(c.key), 0)}
+            </td>
+            <td className={cn(num, "border-apollo-border text-muted-foreground border-l")}>
+              {r.n("no_mentor")}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -128,14 +180,8 @@ export async function renderFkAwardsReport({
               testId="fk-awards"
             />
           </div>
-          <div className="px-5 py-5">
-            <ReportStats
-              testId="fk-awards-stats"
-              stats={FK_CATEGORIES.map((c) => ({
-                value: `${r.counts[c.key].F} F · ${r.counts[c.key].K} K`,
-                label: c.label,
-              }))}
-            />
+          <div className="overflow-x-auto px-5 py-5">
+            <CountTable counts={r.counts} />
           </div>
           <div className="overflow-x-auto">
             <table
@@ -211,8 +257,8 @@ export async function renderFkAwardsReport({
                 ` ${r.careerMentorOnlyHidden.toLocaleString()} such awards are left out by the filter.`}
             </li>
             <li>
-              Member is Key Personnel: no mentor record, but a member is listed as Key Personnel on
-              the award.
+              Trainee via Key Personnel: no mentor record, but a member is listed as Key Personnel
+              on the award.
             </li>
             <li>
               No mentor record: the holder has no mentor in Scholars, so their lab is unknown.
