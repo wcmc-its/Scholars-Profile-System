@@ -7,17 +7,15 @@
  *   SCHOLARS_RECITERDB_USERNAME   (required)
  *   SCHOLARS_RECITERDB_PASSWORD   (required)
  *   SCHOLARS_RECITERDB_DATABASE   (required)
+ *   SCHOLARS_RECITERDB_SSL_CA     (optional, CA bundle path; enables verified TLS)
  */
 import { readFileSync } from "node:fs";
 import { createPool, type Pool, type PoolConnection } from "mariadb";
 
-// Cached on globalThis so dev hot reload (HMR) doesn't create a new pool on
-// every module re-evaluation and orphan the old one's connections. In
-// production there is no HMR, so this behaves like a plain module variable.
+// On globalThis so dev HMR reuses one pool instead of orphaning a new one per reload.
 const globalForReciter = globalThis as unknown as {
   __reciterPool?: Pool;
 };
-
 
 function readConfig() {
   const names = {
@@ -27,7 +25,6 @@ function readConfig() {
     database: "SCHOLARS_RECITERDB_DATABASE",
   } as const;
 
-  // Report all missing vars at once. Only names are listed, never values.
   const missing = Object.values(names).filter((n) => !process.env[n]);
   if (missing.length > 0) {
     throw new Error(`Missing ReciterDB env vars: ${missing.join(", ")}`);
@@ -41,11 +38,7 @@ function readConfig() {
     throw new Error("SCHOLARS_RECITERDB_PORT must be a valid port number");
   }
 
-  // TLS is opt-in: set SCHOLARS_RECITERDB_SSL_CA to a CA bundle path to
-  // encrypt the connection and verify the server certificate. If unset, the
-  // connection is plaintext, which is only acceptable if the SPS VPC->WCM
-  // path is private and already encrypted. If ReciterDB requires TLS, throw
-  // here instead of falling back to undefined.
+  // TLS is opt-in. Unset = plaintext, as before.
   const caPath = process.env.SCHOLARS_RECITERDB_SSL_CA;
   let ssl: { ca: string; rejectUnauthorized: true } | undefined;
   if (caPath) {
@@ -57,7 +50,6 @@ function readConfig() {
   }
 
   return {
-    // Non-null assertions are safe: the missing check above guarantees these.
     host: process.env[names.host]!,
     user: process.env[names.user]!,
     password: process.env[names.password]!,
@@ -68,28 +60,16 @@ function readConfig() {
 }
 
 export function getReciterPool(): Pool {
-  // Lazy: config is read on first use, not at import time, so `next build`
-  // doesn't fail when DB env vars are absent during the build.
+  // Lazy, so `next build` works without DB env vars.
   return (globalForReciter.__reciterPool ??= createPool({
     ...readConfig(),
-    // Per Node process. Total DB load is 4 x (Next.js instances + ETL), so
-    // check that against the DB's max_connections / per-user limit.
-    connectionLimit: 4,
-
-    // BIGINT columns come back as numbers. Fine for PMIDs and counts, but
-    // precision is lost above 2^53, so don't read 64-bit IDs through this pool.
+    connectionLimit: 4, // per process
+    // Precision is lost above 2^53; fine for PMIDs and counts, not 64-bit IDs.
     bigIntAsNumber: true,
-
     // Fail fast when ReciterDB is unreachable (WCM-side; the SPS VPC->WCM
     // path can be down) instead of stalling callers ~10s on driver defaults.
     connectTimeout: 2000,
     acquireTimeout: 3000,
-    // TODO: add queryTimeout / socketTimeout once real query durations are
-    // measured. These bound hangs after connecting (e.g. the network drops
-    // mid-query), but must be set above the slowest legitimate query
-    // (mentoring refresh, ETL) or they will start failing healthy queries.
-    // queryTimeout: 5000,
-    // socketTimeout: 10000,
   }));
 }
 
@@ -100,18 +80,14 @@ export async function withReciterConnection<T>(
   try {
     return await fn(conn);
   } finally {
-    // release() returns a Promise. Swallow its rejection rather than awaiting:
-    // a throw from finally would replace fn's own result or error.
+    // Not awaited: a throw from finally would mask fn's result or error.
     conn.release().catch(() => {});
   }
 }
 
 export async function closeReciterPool(): Promise<void> {
   const pool = globalForReciter.__reciterPool;
-
-  // Clear the reference before closing. If end() throws, we don't keep
-  // handing out a half-closed pool; the next call builds a fresh one, and
-  // the error still propagates to the caller.
+  // Clear first so a failed end() never leaves a half-closed pool in use.
   globalForReciter.__reciterPool = undefined;
   await pool?.end();
 }
