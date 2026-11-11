@@ -113,13 +113,14 @@ npm run db:check
 npx prisma migrate deploy
 
 # 6. Load synthetic data and build the search indexes. The indexer's
-#    pre-swap health checks expect the real corpus; SEARCH_INDEX_SKIP_HEALTH=1
-#    skips them for seed data (ignored when NODE_ENV=production).
+#    pre-swap health checks expect the real corpus, so for seed data first
+#    uncomment SEARCH_INDEX_SKIP_HEALTH="1" in .env (works on any OS; ignored
+#    when NODE_ENV=production). Re-run search:index after any change to the
+#    publication/scholar tables: search reads OpenSearch, not the DB.
 npm run seed
 ```
 
 ### Environment Variables
-
 Set the following environment variable:
 
 | Operating System | Command |
@@ -166,7 +167,7 @@ ETL pipelines live in `etl/` and run in-process via `tsx`. Connection details fo
 - All credentials live in `~/.zshrc` under generic names (e.g. `DB_HOST`, `DB_PASSWORD`). Never hardcode in `.env*` files committed to git.
 - `.env.local` re-exports them under the `SCHOLARS_*` namespace the code actually reads (e.g. `SCHOLARS_RECITERDB_HOST="$DB_HOST"`). The namespace prevents collisions with other tools that grab generic `DB_*` vars.
 - We do not maintain separate dev instances of source systems (ReciterDB, ASMS, InfoEd). Local ETL development reads from production. The `etl/reciter/*` scripts in particular only `SELECT`; treat the connection as read-only by convention even when the credentials permit writes.
-- The Next.js web app at runtime does not connect to source systems — only the local app DB and OpenSearch. ETL scripts are the sole readers.
+- The Next.js web app reads the local app DB and OpenSearch, plus **ReciterDB directly** on four paths: the publications "Mentoring activity" facet (`lib/api/mentoring-pmids.ts`), the publication detail modal (`lib/api/publication-detail.ts`), hover-card context (`lib/api/popover-context.ts`), and the profile mentoring section (`lib/api/mentoring.ts`). These fail soft when ReciterDB is unset or unreachable (e.g. the facet times out after 2 s and serves empty buckets), so a local install without ReciterDB still works, minus those details. The exception is the citing-publications CSV download (`/api/publications/<pmid>/citations.csv`), which errors unless `PUBLICATION_CITING_BRIDGE=on` serves it from the local `publication_citing` table. Some `/edit` reports also read ReciterDB. Staging and prod cannot reach ReciterDB at all; they run `MENTORING_COPUB_BRIDGE=on` and `PUBLICATION_CITING_BRIDGE=on`, which serve these features from local tables copied over by the `etl:mentoring:import-*` steps. `.env.example` sets both on so a local install matches, and the server logs one `[reciterdb]` warning at boot if ReciterDB is unset while either flag is off. Every other source system is ETL-only.
 
 ### Orchestrated daily run
 

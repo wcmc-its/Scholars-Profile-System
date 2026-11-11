@@ -31,6 +31,10 @@ export async function register(): Promise<void> {
     if (process.env.NEXT_PHASE !== "phase-production-build") {
       const { warmUp } = await import("./lib/warmup");
       void warmUp().catch(() => {});
+
+      const { reciterDbConfigWarning } = await import("./lib/sources/reciterdb");
+      const warning = reciterDbConfigWarning();
+      if (warning) console.warn(warning);
     }
   }
 }
