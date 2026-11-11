@@ -23,7 +23,7 @@ import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
-import { type SpsEnvConfig } from "./config";
+import { SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
 import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 import { drCurationBackupBucketName } from "./dr-backup-vault-stack";
 import { CLIPS_PREFIX, FUNDING_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
@@ -764,6 +764,25 @@ export class EtlStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // #538 weekly feedback digest (etl:feedback-digest) emails the Scholars
+    // project lead via SESv2. Mirrors the app task role's TaskRoleSesPolicy:
+    // one action, identity-scoped resource, and a From condition pinned to the
+    // shared SCHOLARS_MAIL_FROM so this role can send ONLY as that address.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "EtlTaskRoleSesPolicy", {
+      policyName: `sps-etl-task-${env}-ses`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ses:SendEmail"],
+          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+          conditions: { StringEquals: { "ses:FromAddress": SCHOLARS_MAIL_FROM } },
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Curated-tables logical-backup bucket (belt-and-suspenders over AWS
     // Backup / Aurora PITR).
     //
@@ -958,6 +977,19 @@ export class EtlStack extends Stack {
       // etl:freshness skips SLA entries for sources a given env's cadence
       // deliberately omits (none today; InfoEd was the last, until #2906).
       SCHOLARS_ENV: env,
+      // #538 weekly feedback digest (etl:feedback-digest). The sender is the
+      // shared verified identity the SES grant above is conditioned on; the
+      // export link in the mail uses the PUBLIC origin (SCHOLARS_BASE_URL here
+      // is the internal ALB). The recipient is resolved from SSM at DEPLOY time
+      // so no address lives in this public repo: the operator creates
+      // `/sps/<env>/etl/feedback-digest-recipient` (comma-separated addresses; a
+      // single space disables the digest) BEFORE deploying, or the deploy fails.
+      SCHOLARS_MAIL_FROM,
+      FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
+      FEEDBACK_DIGEST_RECIPIENT: ssm.StringParameter.valueForStringParameter(
+        this,
+        `/sps/${env}/etl/feedback-digest-recipient`,
+      ),
       // #485 — the search:index build holds the full corpus graph in memory
       // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
       // the task well under the container limit; pin the heap to ~85% of the
@@ -2361,6 +2393,16 @@ export class EtlStack extends Stack {
       "heartbeat",
       freshnessSteps,
     );
+    // #538 — weekly feedback digest. One step (`etl:feedback-digest`) reads the
+    // new `feedback_submission` rows since its last successful run and emails
+    // the aggregates + verbatims to FEEDBACK_DIGEST_RECIPIENT (SES grant +
+    // env above). A send failure exits non-zero -> the status alarm below.
+    // external: false — Aurora + SES only, no WCM source.
+    const feedbackDigestMachine = buildStateMachine(
+      "FeedbackDigestStateMachine",
+      "feedback-digest",
+      [{ id: "FeedbackDigest", npmScript: "etl:feedback-digest", external: false }],
+    );
     // #2196 -- an override naming no graded step would ack nothing while the
     // test (or operator) believed it did. Every graded machine is built above.
     const unusedAckOverrides = Object.keys(ackOverrides).filter((id) => !ackOverridesUsed.has(id));
@@ -2437,12 +2479,21 @@ export class EtlStack extends Stack {
       events.Schedule.expression("cron(0 13 * * ? *)"),
       this.heartbeatStateMachine,
     );
+    // #538 — Mondays 14:00 UTC = 09:00 EST / 10:00 EDT (EventBridge rules are
+    // UTC-only). Same `etlSchedulesEnabled` gate as everything above.
+    buildSchedule(
+      "FeedbackDigestScheduleRule",
+      "feedback-digest",
+      events.Schedule.expression("cron(0 14 ? * MON *)"),
+      feedbackDigestMachine,
+    );
 
     // ------------------------------------------------------------------
-    // CloudWatch alarms (D4). One status alarm per state machine (4: nightly,
-    // weekly, annual, heartbeat) plus a cadence alarm for the sub-weekly
-    // machines (nightly + weekly + heartbeat = 3), seven total. (#595 added the
-    // heartbeat machine + its two alarms.)
+    // CloudWatch alarms (D4). One status alarm per state machine (5: nightly,
+    // weekly, annual, heartbeat, feedback-digest) plus a cadence alarm for the
+    // sub-annual machines (nightly + weekly + heartbeat + feedback-digest = 4),
+    // nine total. (#595 added the heartbeat machine + its two alarms; #538 the
+    // feedback-digest machine + its two.)
     //
     // - **Status alarm** -- unsuccessful terminations, sum > 0 over one period
     //   at the cadence interval. Catches every failed execution including
@@ -2629,6 +2680,20 @@ export class EtlStack extends Stack {
         // suddenly takes 30 min is wedged on the DB, not slow.
         maxDuration: Duration.minutes(30),
         stateMachine: this.heartbeatStateMachine,
+      },
+      {
+        // #538 weekly feedback digest, treated like the heartbeat: a failed
+        // send pages (status), and the job going dark pages (cadence). Weekly,
+        // so the status period is the run interval (one notification per
+        // failing week, not one that clears and re-fires) and the cadence
+        // window is the CloudWatch max; both 1 * 604800 <= 604800. No duration
+        // alarm: it is one SELECT and one email.
+        id: "FeedbackDigest",
+        cadenceLabel: "feedback-digest",
+        cadenceWindow: Duration.days(7),
+        statusPeriod: Duration.days(7),
+        statusDescription: `SPS weekly feedback digest (${env}) -- the email was not sent. Nothing else is affected: feedback is still being collected, and the next successful run covers every submission since the last digest that went out, so no week is lost. Next: open the latest execution of scholars-feedback-digest-${env} and read the "[feedback-digest]" log lines (an SES rejection usually means the sender identity or the SES sandbox; a rejected address means fixing /sps/${env}/etl/feedback-digest-recipient and redeploying Sps-Etl-${env}).`,
+        stateMachine: feedbackDigestMachine,
       },
     ];
     for (const c of cadences) {

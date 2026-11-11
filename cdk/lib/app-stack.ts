@@ -22,7 +22,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
-import { type SpsEnvConfig } from "./config";
+import { SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
 import {
   importSharedVpc,
   resolveSharedSg,
@@ -85,14 +85,6 @@ const WCM_SAML_CWID_ATTRIBUTE = "CWID";
  */
 const WCM_SAML_EPPN_TRUSTED_SCOPES = "nyp.org,qatar-med.cornell.edu";
 
-/**
- * The verified SES sender for the #160 Phase 2 "Request a change" server mailer.
- * Shared by the task-role `ses:FromAddress` condition and the app `SCHOLARS_MAIL_
- * FROM` env var so the IAM grant and the runtime From can never drift. Verifying
- * this identity (DKIM CNAMEs) + leaving the SES sandbox are ops steps
- * (docs/ses-sender-verification.md); the send stays dormant until then.
- */
-const SCHOLARS_MAIL_FROM = "no-reply-scholars@weill.cornell.edu";
 
 /** Props for {@link AppStack}. */
 export interface AppStackProps extends StackProps {
