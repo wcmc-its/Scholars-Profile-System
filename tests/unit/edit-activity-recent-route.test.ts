@@ -104,6 +104,8 @@ describe("GET /api/edit/activity/recent", () => {
         id: 4242n,
       },
       new Date(AS_OF),
+      expect.any(Function),
+      "30d",
     );
     expect(await res.json()).toEqual({ ok: true, ...PAGE });
   });

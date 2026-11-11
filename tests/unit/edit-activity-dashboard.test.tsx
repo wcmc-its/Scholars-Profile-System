@@ -1,8 +1,8 @@
 /**
  * `components/edit/edit-activity-dashboard.tsx` — the /edit/activity body
- * (2026-09 redesign): KPI tiles, the per-day chart as a feed filter, the
- * editor / category / system filters, same-minute grouping, and day headers
- * in Eastern time. All people and ids here are fake.
+ * (2026-11 redesign): who-made-the-edits tiles, gained-content filters, the
+ * stacked chart as a day filter, top editors / fields, and the grouped, paged
+ * feed. All people and ids here are fake.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
@@ -10,12 +10,16 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import {
   EditActivityDashboard,
   appendOlder,
+  buildRows,
   dayAxis,
   easternDayKey,
-  groupFeed,
+  netChanges,
   niceMax,
+  plainText,
+  sameIgnoringFormat,
+  wordDiff,
 } from "@/components/edit/edit-activity-dashboard";
-import type { EditActivitySummary, RecentEdit } from "@/lib/api/edit-activity";
+import { type EditActivitySummary, type RecentEdit, shapeAnalytics } from "@/lib/api/edit-activity";
 
 const edit = (over: Partial<RecentEdit>): RecentEdit => ({
   id: "r0",
@@ -30,8 +34,16 @@ const edit = (over: Partial<RecentEdit>): RecentEdit => ({
   ...over,
 });
 
+const ch = (key: string, field: string, before: string | null, after: string | null) => ({
+  key,
+  field,
+  before,
+  after,
+});
+
 function summary(over: Partial<EditActivitySummary> = {}): EditActivitySummary {
   return {
+    range: "30d",
     windowDays: 30,
     generatedAt: "2026-09-24T20:00:00.000Z",
     totalEdits: 12,
@@ -42,58 +54,81 @@ function summary(over: Partial<EditActivitySummary> = {}): EditActivitySummary {
       { day: "2026-09-23", edits: 4 },
     ],
     topEditors: [
-      { actorCwid: "edt0001", edits: 7 },
+      { actorCwid: "stf0001", edits: 7 },
       { actorCwid: "system-autolock", edits: 3 },
-      { actorCwid: "edt0002", edits: 2 },
+      { actorCwid: "sch0002", edits: 2 },
     ],
-    topEntities: [
-      { entityType: "center", entityId: "ctr_one", edits: 5 },
-      { entityType: "scholar", entityId: "sch0001", edits: 3 },
-    ],
+    topEntities: [],
+    analytics: {
+      kinds: { self: 2, staff: 7, automated: 3 },
+      selfEditors: 1,
+      topStaff: { actorCwid: "stf0001", edits: 7 },
+      automatedByActor: [{ actorCwid: "system-autolock", edits: 3 }],
+      perDay: [
+        { day: "2026-09-24", self: 1, staff: 4, automated: 3, topActor: "stf0001" },
+        { day: "2026-09-23", self: 1, staff: 3, automated: 0, topActor: "stf0001" },
+      ],
+      editors: {
+        stf0001: { kind: "staff", profiles: 4 },
+        "system-autolock": { kind: "automated", profiles: 3 },
+        sch0002: { kind: "self", profiles: 1 },
+      },
+      fields: [{ key: "overview", label: "Overview", profiles: 2, edits: 3 }],
+      gained: [
+        { key: "overview", label: "Overview written", profiles: 1 },
+        { key: "orcid", label: "ORCID linked", profiles: 0 },
+      ],
+    },
     recent: [
-      edit({
-        id: "a",
-        changes: [{ field: "Primary title", before: null, after: "Professor of Examples" }],
-      }),
+      // Staff writes Sam's overview for the first time.
+      edit({ id: "a", actorCwid: "stf0001", changes: [ch("overview", "Overview", null, "<p>Sam studies examples.</p>")] }),
+      // An automated run over two scholars.
       edit({
         id: "b",
         ts: "2026-09-24T15:06:00.000Z",
         actorCwid: "system-autolock",
-        action: "news_mention_update",
-        entityType: "news_mention",
-        entityId: "n-1",
-        changes: [{ field: "Status", before: "pending", after: "published" }],
+        action: "reporter_profile_confirm",
+        entityId: "sch0001",
       }),
       edit({
         id: "c",
-        ts: "2026-09-24T15:06:10.000Z",
+        ts: "2026-09-24T15:05:00.000Z",
         actorCwid: "system-autolock",
-        action: "news_mention_update",
-        entityType: "news_mention",
-        entityId: "n-2",
-        changes: [{ field: "Status", before: "pending", after: "published" }],
+        action: "reporter_profile_confirm",
+        entityId: "sch0002",
       }),
+      // A scholar's two mentee saves on their own profile.
       edit({
         id: "d",
-        ts: "2026-09-23T14:00:00.000Z",
-        actorCwid: "edt0002",
-        action: "roster_change",
-        entityType: "center",
-        entityId: "ctr_one",
+        ts: "2026-09-23T14:10:00.000Z",
+        actorCwid: "sch0002",
+        entityId: "sch0002",
+        changes: [ch("manualMentees", "Manual mentees", '[{"name":"Ann"}]', '[{"name":"Ann"},{"name":"Bo","year":2026}]')],
       }),
+      edit({
+        id: "e",
+        ts: "2026-09-23T14:00:00.000Z",
+        actorCwid: "sch0002",
+        entityId: "sch0002",
+        changes: [ch("manualMentees", "Manual mentees", null, '[{"name":"Ann"}]')],
+      }),
+      // View-as session.
+      edit({ id: "f", ts: "2026-09-23T13:05:00.000Z", actorCwid: "stf0001", action: "impersonation_end", entityId: "sch0001" }),
+      edit({ id: "g", ts: "2026-09-23T13:00:00.000Z", actorCwid: "stf0001", action: "impersonation_start", entityId: "sch0001" }),
     ],
     people: {
-      edt0001: { name: "Ada Editor", title: "Librarian" },
+      stf0001: { name: "Dana Staff", title: "Program Manager" },
       sch0001: { name: "Sam Scholar", title: null },
+      sch0002: { name: "Pat Prof", title: "Professor" },
     },
     nextCursor: null,
+    publicationTitles: {},
     ...over,
   };
 }
 
 describe("pure helpers", () => {
   it("easternDayKey uses Eastern time, not UTC", () => {
-    // 01:30 UTC on the 25th is still the evening of the 24th in New York.
     expect(easternDayKey("2026-09-25T01:30:00.000Z")).toBe("2026-09-24");
   });
   it("dayAxis lists N days ending on the given day, oldest first", () => {
@@ -103,34 +138,174 @@ describe("pure helpers", () => {
     expect(axis[29]).toBe("2026-09-24");
   });
   it("niceMax rounds up to a readable axis top", () => {
-    expect(niceMax(392)).toBe(500);
-    expect(niceMax(8)).toBe(10);
+    expect(niceMax(392)).toBe(400);
+    expect(niceMax(25)).toBe(30);
+    expect(niceMax(8)).toBe(8);
     expect(niceMax(0)).toBe(1);
   });
-  it("groupFeed merges same-minute identical edits; news mentions group across ids", () => {
-    const g = groupFeed(summary().recent);
-    expect(g.map((x) => x.members.length)).toEqual([1, 2, 1]);
+  it("buildRows: sessions, automated runs and View-as pairs collapse when grouping", () => {
+    const rows = buildRows(summary().recent, true);
+    expect(rows.map((r) => r.edits.map((e) => e.id).join(""))).toEqual(["a", "bc", "de", "fg"]);
+    expect(rows.map((r) => r.kind)).toEqual(["staff", "automated", "self", "audit"]);
+    expect(rows.map((r) => r.mode)).toEqual(["session", "run", "session", "audit"]);
+    expect(buildRows(summary().recent, false)).toHaveLength(7);
+  });
+  it("buildRows: one editor's identical change across profiles is one bulk row", () => {
+    const title = [ch("primaryTitle", "Primary title", "Professor", "Professor of Medicine")];
+    const rows = buildRows(
+      ["sch0001", "sch0002", "sch0003", "sch0001"].map((entityId, i) =>
+        edit({ id: `t${i}`, actorCwid: "stf0001", entityId, ts: `2026-09-24T18:0${9 - i}:00.000Z`, changes: title }),
+      ),
+      true,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.mode).toBe("bulk");
+  });
+  it("buildRows: someone else's edit in between does not split a bulk row", () => {
+    const title = [ch("primaryTitle", "Primary title", "Professor", "Professor of Medicine")];
+    const rows = buildRows(
+      [
+        edit({ id: "t1", actorCwid: "stf0001", entityId: "sch0001", ts: "2026-09-24T18:05:00.000Z", changes: title }),
+        edit({ id: "x", actorCwid: "sch0009", entityId: "sch0009", ts: "2026-09-24T18:04:00.000Z", changes: [ch("overview", "Overview", "a", "b")] }),
+        edit({ id: "t2", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:03:00.000Z", changes: title }),
+      ],
+      true,
+    );
+    expect(rows.map((r) => [r.mode, r.edits.length])).toEqual([
+      ["bulk", 2],
+      ["session", 1],
+    ]);
+  });
+  it("buildRows: two people editing the same field of one profile is one contested row", () => {
+    const rows = buildRows(
+      [
+        edit({ id: "p2", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:03:00.000Z", changes: [ch("primaryTitle", "Primary title", "B", "C")] }),
+        edit({ id: "s2", actorCwid: "sch0002", entityId: "sch0002", ts: "2026-09-24T18:02:00.000Z", changes: [ch("primaryTitle", "Primary title", "A", "B")] }),
+        edit({ id: "p1", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:01:00.000Z", changes: [ch("primaryTitle", "Primary title", "B", "A")] }),
+        edit({ id: "s1", actorCwid: "sch0002", entityId: "sch0002", ts: "2026-09-24T18:00:00.000Z", changes: [ch("primaryTitle", "Primary title", null, "B")] }),
+      ],
+      true,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.mode).toBe("contested");
+  });
+  it("buildRows splits one editor's saves past the session gap", () => {
+    const rows = buildRows(
+      [edit({ id: "x", ts: "2026-09-24T18:00:00.000Z" }), edit({ id: "y", ts: "2026-09-24T17:00:00.000Z" })],
+      true,
+    );
+    expect(rows).toHaveLength(2);
+  });
+  it("netChanges folds a field to first-before → last-after", () => {
+    const [c] = netChanges(summary().recent.slice(3, 5));
+    expect(c).toMatchObject({ key: "manualMentees", before: null, saves: 2 });
+    expect(c!.after).toContain("Bo");
+  });
+  it("wordDiff marks only changed words", () => {
+    expect(wordDiff("a b c d", "a x c d")).toEqual([
+      { kind: "same", text: "a" },
+      { kind: "del", text: "b" },
+      { kind: "ins", text: "x" },
+      { kind: "same", text: "c d" },
+    ]);
+  });
+  it("plainText strips tags and decodes entities exactly once", () => {
+    expect(plainText("<p>A &amp; B &amp;lt;i&amp;gt;</p>")).toBe("A & B &lt;i&gt;");
+  });
+  it("sameIgnoringFormat treats an ORCID URL and bare iD as equal", () => {
+    expect(sameIgnoringFormat("https://orcid.org/0000-0001-2345-6789", "0000-0001-2345-6789")).toBe(true);
+    expect(sameIgnoringFormat("0000-0001-2345-6789", "0000-0001-2345-6780")).toBe(false);
+  });
+  it("shapeAnalytics: kinds, gained-from-empty, fields, ETL counts as automated", () => {
+    const row = (over: Record<string, unknown>) => ({
+      ts: "2026-09-24T18:00:00.000Z",
+      actor_cwid: "abc1001",
+      impersonated_cwid: null,
+      action: "field_override",
+      target_entity_type: "scholar",
+      target_entity_id: "abc1001",
+      fields_changed: '["overview"]',
+      before_values: '{"overview":null}',
+      after_values: '{"overview":"<p>x</p>"}',
+      ...over,
+    });
+    const a = shapeAnalytics([
+      row({}),
+      row({ actor_cwid: "stf0001", target_entity_id: "sch0009", before_values: '{"overview":"<p>old</p>"}' }),
+      row({ actor_cwid: "ETL", target_entity_id: "sch0009", fields_changed: '["orcid"]', before_values: '{"orcid":null}', after_values: '{"orcid":"0000-0001-2345-6789"}' }),
+      row({ actor_cwid: "stf0001", target_entity_id: "sch0008", fields_changed: '["manualMentees"]', before_values: '{"manualMentees":"[]"}', after_values: '{"manualMentees":"[{\\"name\\":\\"A\\"}]"}' }),
+    ]);
+    expect(a.kinds).toEqual({ self: 1, staff: 2, automated: 1 });
+    expect(a.selfEditors).toBe(1);
+    expect(a.topStaff).toEqual({ actorCwid: "stf0001", edits: 2 });
+    expect(Object.fromEntries(a.gained.map((g) => [g.key, g.profiles]))).toMatchObject({
+      overview: 1,
+      orcid: 1,
+      manualMentees: 1,
+    });
+    expect(a.fields[0]).toMatchObject({ key: "overview", profiles: 2, edits: 2 });
+    // ETL's ORCID edit is automated: not in the people-made fields panel.
+    expect(a.fields.find((f) => f.key === "orcid")).toBeUndefined();
+    expect(a.editors.stf0001).toEqual({ kind: "staff", profiles: 2 });
+    expect(a.perDay).toHaveLength(1);
   });
 });
 
 describe("EditActivityDashboard", () => {
-  it("renders the KPI tiles from the summary", () => {
+  it("renders who-made-the-edits tiles with resolved names", () => {
     render(<EditActivityDashboard summary={summary()} />);
     const kpis = screen.getByTestId("edit-activity-kpis").textContent ?? "";
-    expect(kpis).toContain("12");
-    expect(kpis).toContain("on 2 of 30 days");
-    expect(kpis).toContain("2 people, 1 automated");
-    expect(kpis).toContain("75%"); // 9 of 12 by people
-    expect(kpis).toContain("Sep 24");
+    expect(kpis).toContain("On 2 of 30 days");
+    expect(kpis).toContain("1 scholar edited their own profile");
+    expect(kpis).toContain("Largest: Dana Staff with 7 edits");
+    expect(kpis).toContain("autolock 3");
   });
 
-  it("groups the feed under Eastern day headings with that day's count", () => {
+  it("labels the spike with its top editor's name, not a CWID", () => {
     render(<EditActivityDashboard summary={summary()} />);
-    const day = screen.getByTestId("edit-activity-day-2026-09-24");
-    expect(day.textContent).toContain("Thu, Sep 24");
-    expect(day.textContent).toContain("8 edits that day");
-    expect(day.textContent).toContain("2 news mentions");
-    expect(day.textContent).toContain("×2");
+    const spike = screen.getByTestId("edit-activity-spike");
+    expect(spike.textContent).toBe("Sep 24 · 8 · top editor Dana Staff");
+    // The last day of the axis: pinned right, over its bar.
+    expect(spike.style.right).toBe("0px");
+  });
+
+  it("tags staff rows with who they were for and shows the first-written overview", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    const row = screen.getByTestId("edit-activity-row-a");
+    expect(row.textContent).toContain("Dana Staff");
+    expect(row.textContent).toContain("stf0001");
+    expect(row.textContent).toContain("Staff, for Sam Scholar");
+    expect(row.textContent).toContain("First written");
+    expect(row.textContent).toContain("Sam studies examples.");
+    expect(row.textContent).not.toContain("<p>");
+  });
+
+  it("combines repeated saves into one net row; unchecking shows each save", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    const row = screen.getByTestId("edit-activity-row-d");
+    expect(row.textContent).toContain("Own profile");
+    expect(row.textContent).toContain("2 saves combined");
+    expect(row.textContent).toContain("+ Ann");
+    expect(row.textContent).toContain("+ Bo · 2026");
+    expect(screen.queryByTestId("edit-activity-row-e")).toBeNull();
+    fireEvent.click(screen.getByTestId("edit-activity-group"));
+    expect(screen.getByTestId("edit-activity-row-e")).toBeTruthy();
+  });
+
+  it("collapses an automated run and names its scholars", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    const row = screen.getByTestId("edit-activity-row-b");
+    expect(row.textContent).toContain("2 in one run");
+    expect(row.textContent).toContain("Sam Scholar, Pat Prof");
+  });
+
+  it("View-as sessions sit under Audit & operations, not All", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    expect(screen.queryByTestId("edit-activity-row-f")).toBeNull();
+    fireEvent.click(screen.getByTestId("edit-activity-category-audit"));
+    expect(screen.getByTestId("edit-activity-row-f").textContent).toContain(
+      "Viewed the console as Sam Scholar (sch0001) for 5 min",
+    );
   });
 
   it("clicking a day's bar filters the feed to that day; again clears it", () => {
@@ -142,95 +317,189 @@ describe("EditActivityDashboard", () => {
     expect(screen.getByTestId("edit-activity-day-2026-09-24")).toBeTruthy();
   });
 
-  it("picking an editor filters the feed and shows a clearable chip", () => {
+  it("a gained-content number filters to edits that filled that field", () => {
     render(<EditActivityDashboard summary={summary()} />);
-    fireEvent.click(screen.getByTestId("edit-activity-editor-edt0002"));
-    expect(screen.getByTestId("edit-activity-editor-chip")).toBeTruthy();
-    expect(screen.queryByTestId("edit-activity-row-a")).toBeNull();
-    expect(screen.getByTestId("edit-activity-row-d")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Clear the editor filter" }));
+    fireEvent.click(screen.getByTestId("edit-activity-gained-overview"));
     expect(screen.getByTestId("edit-activity-row-a")).toBeTruthy();
+    expect(screen.queryByTestId("edit-activity-row-d")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear Overview written" }));
+    expect(screen.getByTestId("edit-activity-row-d")).toBeTruthy();
   });
 
-  it("category chips and Hide system edits narrow the feed", () => {
+  it("top editors carry a kind tag; clicking one filters the feed", () => {
     render(<EditActivityDashboard summary={summary()} />);
-    fireEvent.click(screen.getByTestId("edit-activity-category-news"));
-    expect(screen.getByTestId("edit-activity-row-b")).toBeTruthy();
+    const editors = screen.getByTestId("edit-activity-top-editors");
+    expect(within(editors).getByTestId("edit-activity-editor-stf0001").textContent).toContain("Staff");
+    expect(within(editors).getByTestId("edit-activity-editor-sch0002").textContent).toContain("Self");
+    expect(within(editors).getByTestId("edit-activity-editor-system-autolock").textContent).toContain("Automated");
+    fireEvent.click(screen.getByTestId("edit-activity-editor-sch0002"));
     expect(screen.queryByTestId("edit-activity-row-a")).toBeNull();
+    expect(screen.getByTestId("edit-activity-row-d")).toBeTruthy();
+  });
+
+  it("search and Hide automated narrow the feed", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    fireEvent.change(screen.getByTestId("edit-activity-search"), { target: { value: "bo" } });
+    expect(screen.getByTestId("edit-activity-row-d")).toBeTruthy();
+    expect(screen.queryByTestId("edit-activity-row-a")).toBeNull();
+    fireEvent.change(screen.getByTestId("edit-activity-search"), { target: { value: "" } });
     fireEvent.click(screen.getByTestId("edit-activity-hide-system"));
-    expect(screen.getByTestId("edit-activity-feed-empty").textContent).toBe(
-      "No edits match these filters.",
+    expect(screen.queryByTestId("edit-activity-row-b")).toBeNull();
+  });
+
+  it("bulk and back-and-forth rows read as sentences", () => {
+    const title = (b: string | null, a: string) => [ch("primaryTitle", "Primary title", b, a)];
+    render(
+      <EditActivityDashboard
+        summary={summary({
+          recent: [
+            edit({ id: "u3", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:03:00.000Z", changes: title("Professor", "Professor of Medicine") }),
+            edit({ id: "u2", actorCwid: "stf0001", entityId: "sch0001", ts: "2026-09-24T18:02:00.000Z", changes: title("Professor", "Professor of Medicine") }),
+            edit({ id: "c2", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T17:03:00.000Z", changes: title("Chief", "Professor") }),
+            edit({ id: "c1", actorCwid: "sch0002", entityId: "sch0002", ts: "2026-09-24T17:00:00.000Z", changes: title("Professor", "Chief") }),
+          ],
+        })}
+      />,
+    );
+    const bulk = screen.getByTestId("edit-activity-row-u3").textContent;
+    expect(bulk).toContain("Changed Primary title to “Professor of Medicine” on 2 profiles (2 edits)");
+    expect(bulk).toContain("Managed at its source");
+    const back = screen.getByTestId("edit-activity-row-c2").textContent;
+    expect(back).toContain("Pat Prof and Dana Staff");
+    expect(back).toContain("Back-and-forth on Pat Prof");
+    expect(back).toContain("edited by Pat Prof and Dana Staff, 2 times in 3 min");
+    // Each save's own change, not the row's net change.
+    expect(back).toContain("Professor → Chief");
+    expect(back).toContain("Chief → Professor");
+  });
+
+  it("names an ETL field_override run by its field, and highlights by title", () => {
+    render(
+      <EditActivityDashboard
+        summary={summary({
+          publicationTitles: { "123": "A <i>study</i> of examples" },
+          recent: [
+            edit({ id: "h", actorCwid: "sch0002", entityId: "sch0002", changes: [ch("selectedHighlightPmids", "Selected highlights", null, "[123,456]")] }),
+            edit({ id: "e1", ts: "2026-09-24T15:00:00.000Z", actorCwid: "ETL", entityId: "sch0001", changes: [ch("orcid", "ORCID", null, "0000-0001-2345-6789")] }),
+            edit({ id: "e2", ts: "2026-09-24T15:00:00.000Z", actorCwid: "ETL", entityId: "sch0002", changes: [ch("orcid", "ORCID", null, "0000-0001-2345-6780")] }),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("edit-activity-row-e1").textContent).toContain("ORCID updated · 2 in one run");
+    const h = screen.getByTestId("edit-activity-row-h").textContent;
+    expect(h).toContain("A study of examples · PMID 123");
+    expect(h).toContain("PMID 456");
+  });
+
+  it("the footer counts rows and edits without mixing in load state", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toBe("Rows 1–3 · edits 1–5 of 12");
+  });
+
+  it("day headers pluralize", () => {
+    const base = summary();
+    render(
+      <EditActivityDashboard
+        summary={{
+          ...base,
+          analytics: {
+            ...base.analytics,
+            perDay: [{ day: "2026-09-24", self: 0, staff: 1, automated: 0, topActor: "stf0001" }],
+          },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("edit-activity-day-2026-09-24").textContent).toContain("1 edit · 2 rows");
+  });
+
+  it("offers the four ranges, marks the current one, and exports the whole range", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    const nav = screen.getByTestId("edit-activity-range");
+    const links = within(nav).getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["Last 30 days", "Last 90 days", "Last 12 months", "All time"]);
+    expect(links[0]!.getAttribute("aria-current")).toBe("page");
+    expect(links[2]!.getAttribute("href")).toBe("?range=12m");
+    expect(screen.getByTestId("edit-activity-export").getAttribute("href")).toBe(
+      "/api/edit/activity/export?range=30d&asOf=2026-09-24T20%3A00%3A00.000Z",
     );
   });
 
-  it("resolves names: editor and scholar via people, center via entityNames, links history", () => {
-    render(<EditActivityDashboard summary={summary()} />);
-    const entities = screen.getByTestId("edit-activity-top-entities");
-    const center = within(entities).getByRole("link", { name: "Center One" });
-    expect(center.getAttribute("href")).toBe("/edit/center/ctr_one/history");
-    expect(within(entities).getByRole("link", { name: "Sam Scholar" })).toBeTruthy();
-    const editors = screen.getByTestId("edit-activity-top-editors");
-    expect(editors.textContent).toContain("Ada Editor");
-    expect(editors.textContent).toContain("System");
+  it("a long range draws one bar per week and filters the feed by week", () => {
+    render(<EditActivityDashboard summary={summary({ range: "12m", windowDays: 365 })} />);
+    // Sep 23 and 24, 2026 are a Wednesday and Thursday: both in the week of Mon Sep 21.
+    expect(screen.queryByTestId("edit-activity-bar-2026-09-24")).toBeNull();
+    const bar = screen.getByTestId("edit-activity-bar-2026-09-21");
+    expect(bar.getAttribute("aria-label")).toBe("Week of Sep 21: 12 edits");
+    expect(screen.getByTestId("edit-activity-spike").textContent).toContain("Week of Sep 21 · 12");
+    fireEvent.click(bar);
+    expect(screen.getByTestId("edit-activity-day-2026-09-23")).toBeTruthy();
+    expect(screen.getByTestId("edit-activity-day-2026-09-24")).toBeTruthy();
+    expect(screen.getByTestId("edit-activity-kpis").textContent).toContain("of 365 days");
   });
 
-  it("marks an empty 'before' as empty and keeps the after value", () => {
-    render(<EditActivityDashboard summary={summary()} />);
-    const row = screen.getByTestId("edit-activity-row-a");
-    expect(row.textContent).toContain("Primary title");
-    expect(row.textContent).toContain("empty");
-    expect(row.textContent).toContain("Professor of Examples");
+  it("Next past the loaded rows carries the range to the older-page API", async () => {
+    const fn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, recent: [], nextCursor: null, people: {}, entityNames: {}, publicationTitles: {} }),
+    });
+    vi.stubGlobal("fetch", fn);
+    render(<EditActivityDashboard summary={summary({ range: "90d", windowDays: 90, nextCursor: "c1_4" })} />);
+    fireEvent.click(screen.getByTestId("edit-activity-next"));
+    await vi.waitFor(() => expect(fn).toHaveBeenCalled());
+    expect(String(fn.mock.calls[0]![0])).toContain("&range=90d");
+    vi.unstubAllGlobals();
+  });
+
+  it("mutes a re-save with no visible change", () => {
+    render(
+      <EditActivityDashboard
+        summary={summary({
+          recent: [
+            edit({
+              id: "o",
+              actorCwid: "sch0002",
+              entityId: "sch0002",
+              action: "orcid_set",
+              changes: [ch("orcid", "ORCID", "https://orcid.org/0000-0001-2345-6789", "0000-0001-2345-6789")],
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("edit-activity-row-o").textContent).toContain(
+      "ORCID re-saved with no visible change (format only).",
+    );
   });
 });
 
-describe("Load older", () => {
+describe("paging", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  /** One older page: row "e" repeats row "d" in the same minute (so the group
-   *  must merge across the page boundary), "f" is a new, older day by another
-   *  editor, and "d" itself is repeated (a retried page) to prove dedupe. */
   const olderPage = (nextCursor: string | null) => ({
     ok: true,
     recent: [
       edit({
-        id: "d",
-        ts: "2026-09-23T14:00:00.000Z",
-        actorCwid: "edt0002",
-        action: "roster_change",
-        entityType: "center",
-        entityId: "ctr_one",
-      }),
-      edit({
-        id: "e",
-        ts: "2026-09-23T14:00:00.000Z",
-        actorCwid: "edt0002",
-        action: "roster_change",
-        entityType: "center",
-        entityId: "ctr_one",
-      }),
-      edit({
-        id: "f",
+        id: "z",
         ts: "2026-09-22T16:00:00.000Z",
-        actorCwid: "edt0003",
+        actorCwid: "stf0003",
         entityId: "sch0009",
-        changes: [{ field: "Overview", before: "old text", after: "new text" }],
+        changes: [ch("primaryTitle", "Primary title", "Old title", "New title")],
       }),
     ],
     nextCursor,
-    people: { edt0003: { name: "Olga Older", title: null } },
+    people: { stf0003: { name: "Olga Older", title: null }, sch0009: { name: "Nia Ninth", title: null } },
     entityNames: {},
+    publicationTitles: {},
   });
 
   const stubFetch = (...responses: Array<{ status: number; body: unknown }>) => {
     const fn = vi.fn();
     for (const r of responses) {
-      fn.mockResolvedValueOnce({
-        ok: r.status === 200,
-        status: r.status,
-        json: async () => r.body,
-      });
+      fn.mockResolvedValueOnce({ ok: r.status === 200, status: r.status, json: async () => r.body });
     }
     vi.stubGlobal("fetch", fn);
     return fn;
@@ -244,144 +513,42 @@ describe("Load older", () => {
     expect(merged.map((e) => e.id)).toEqual(["a", "b", "c"]);
   });
 
-  it("shows no Load older control when the summary has no cursor", () => {
+  it("Next is disabled when everything is on one page and no cursor remains", () => {
     render(<EditActivityDashboard summary={summary()} />);
-    expect(screen.queryByTestId("edit-activity-load-older")).toBeNull();
+    expect((screen.getByTestId("edit-activity-next") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("appends the older page: merges a same-minute group across the boundary, adds a day, keeps filters", async () => {
+  it("Next past the loaded rows fetches the older page with the summary's window", async () => {
     const fetchMock = stubFetch({ status: 200, body: olderPage(null) });
-    render(
-      <EditActivityDashboard
-        summary={summary({ totalEdits: 40, nextCursor: "2026-09-23T14:00:00.000Z_4" })}
-      />,
-    );
-    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toContain(
-      "The feed holds the latest 4",
-    );
-
-    // Filter to editor edt0002 first; the filter must still apply after loading.
-    fireEvent.click(screen.getByTestId("edit-activity-editor-edt0002"));
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
-
-    await vi.waitFor(() =>
-      expect(screen.getByTestId("edit-activity-row-d").textContent).toContain("×2"),
-    );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "2026-09-23T13:00:00.000Z_4" })} />);
+    fireEvent.click(screen.getByTestId("edit-activity-next"));
+    const row = await screen.findByTestId("edit-activity-row-z");
+    expect(row.textContent).toContain("Olga Older");
+    expect(row.textContent).toContain("Staff, for Nia Ninth");
     expect(String(fetchMock.mock.calls[0]![0])).toBe(
-      "/api/edit/activity/recent?cursor=2026-09-23T14%3A00%3A00.000Z_4&asOf=2026-09-24T20%3A00%3A00.000Z",
+      "/api/edit/activity/recent?cursor=2026-09-23T13%3A00%3A00.000Z_4&asOf=2026-09-24T20%3A00%3A00.000Z",
     );
-    // Row "d" absorbed "e" (same minute, same edit): no separate "e" row.
-    expect(screen.queryByTestId("edit-activity-row-e")).toBeNull();
-    // The older-day row is hidden by the editor filter...
-    expect(screen.queryByTestId("edit-activity-row-f")).toBeNull();
-    // ...and appears under its own day heading, with its fetched name, once cleared.
-    fireEvent.click(screen.getByRole("button", { name: "Clear the editor filter" }));
-    const day = screen.getByTestId("edit-activity-day-2026-09-22");
-    expect(day.textContent).toContain("Tue, Sep 22");
-    expect(within(day).getByTestId("edit-activity-row-f").textContent).toContain("Olga Older");
-    // 4 + 2 new ids (the repeated "d" is dropped); no cursor left, so no button.
-    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toContain(
-      "The feed holds the latest 6",
-    );
-    expect(screen.queryByTestId("edit-activity-load-older")).toBeNull();
   });
 
-  it("keeps the button, with the next cursor, while more pages remain", async () => {
-    const fetchMock = stubFetch(
-      { status: 200, body: olderPage("2026-09-22T16:00:00.000Z_2") },
-      {
-        status: 200,
-        body: { ok: true, recent: [], nextCursor: null, people: {}, entityNames: {} },
-      },
-    );
+  it("a failed page shows an error and keeps the loaded rows", async () => {
+    stubFetch({ status: 500, body: { ok: false } });
     render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
-    await screen.findByTestId("edit-activity-row-f");
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
-    await vi.waitFor(() => expect(screen.queryByTestId("edit-activity-load-older")).toBeNull());
-    expect(String(fetchMock.mock.calls[1]![0])).toContain("cursor=2026-09-22T16%3A00%3A00.000Z_2");
-  });
-
-  it("a failed page shows an error and offers Try again without dropping rows", async () => {
-    stubFetch(
-      { status: 500, body: { ok: false, error: "activity_unavailable" } },
-      { status: 200, body: olderPage(null) },
-    );
-    render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
+    fireEvent.click(screen.getByTestId("edit-activity-next"));
     expect(await screen.findByTestId("edit-activity-load-older-error")).toBeTruthy();
-    expect(screen.getByTestId("edit-activity-load-older").textContent).toBe("Try again");
     expect(screen.getByTestId("edit-activity-row-a")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
-    expect(await screen.findByTestId("edit-activity-row-f")).toBeTruthy();
-    expect(screen.queryByTestId("edit-activity-load-older-error")).toBeNull();
   });
 
-  it("a new summary (router.refresh) drops loaded older pages and restarts from its own cursor", async () => {
-    const fetchMock = stubFetch(
-      { status: 200, body: olderPage("2026-09-22T16:00:00.000Z_2") },
-      { status: 200, body: olderPage(null) },
-    );
-    const { rerender } = render(
-      <EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />,
-    );
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
-    await screen.findByTestId("edit-activity-row-f");
-
+  it("a new summary (router.refresh) drops loaded older pages", async () => {
+    stubFetch({ status: 200, body: olderPage("c9_1") });
+    const { rerender } = render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);
+    fireEvent.click(screen.getByTestId("edit-activity-next"));
+    await screen.findByTestId("edit-activity-row-z");
     rerender(
       <EditActivityDashboard
-        summary={summary({
-          totalEdits: 41,
-          generatedAt: "2026-09-24T21:00:00.000Z",
-          nextCursor: "c2_9",
-        })}
+        summary={summary({ totalEdits: 41, generatedAt: "2026-09-24T21:00:00.000Z", nextCursor: "c2_9" })}
       />,
     );
-    // The old window's loaded rows are gone and the footer counts only the new first page.
-    expect(screen.queryByTestId("edit-activity-row-f")).toBeNull();
-    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toContain(
-      "The feed holds the latest 4",
-    );
-    // The next Load older uses the NEW summary's cursor and generatedAt, not the old page's.
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
-    await screen.findByTestId("edit-activity-row-f");
-    expect(String(fetchMock.mock.calls[1]![0])).toBe(
-      "/api/edit/activity/recent?cursor=c2_9&asOf=2026-09-24T21%3A00%3A00.000Z",
-    );
-  });
-
-  it("a page still in flight for the old summary is dropped when it lands", async () => {
-    let resolve!: (v: unknown) => void;
-    const fn = vi.fn(() => new Promise((r) => (resolve = r)));
-    vi.stubGlobal("fetch", fn);
-    const { rerender } = render(
-      <EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />,
-    );
-    fireEvent.click(screen.getByTestId("edit-activity-load-older"));
-    rerender(
-      <EditActivityDashboard
-        summary={summary({
-          totalEdits: 41,
-          generatedAt: "2026-09-24T21:00:00.000Z",
-          nextCursor: "c2_9",
-        })}
-      />,
-    );
-    // The new summary's button is live, not stuck on "Loading…".
-    expect(screen.getByTestId("edit-activity-load-older").textContent).toBe("Load older");
-    resolve({ ok: true, status: 200, json: async () => olderPage(null) });
-    await new Promise((r) => setTimeout(r, 0));
-    await new Promise((r) => setTimeout(r, 0));
-    expect(screen.queryByTestId("edit-activity-row-f")).toBeNull();
-    expect(screen.getByTestId("edit-activity-load-older").textContent).toBe("Load older");
-  });
-
-  it("an empty filtered feed points at Load older while older pages exist", () => {
-    render(<EditActivityDashboard summary={summary({ totalEdits: 40, nextCursor: "c1_4" })} />);
-    fireEvent.click(screen.getByTestId("edit-activity-category-access"));
-    expect(screen.getByTestId("edit-activity-feed-empty").textContent).toBe(
-      "No loaded edits match these filters. Load older edits to look further back.",
-    );
+    expect(screen.queryByTestId("edit-activity-row-z")).toBeNull();
+    expect(screen.getByTestId("edit-activity-row-a")).toBeTruthy();
   });
 });
