@@ -236,16 +236,14 @@ function parseValue(v: string | null): unknown {
   return v;
 }
 
+const ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
+
 /** Overview and other rich text are stored as HTML; show words, not tags. */
 export function plainText(v: string): string {
   return v
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    // One pass, so "&amp;lt;" decodes to "&lt;" and never on to "<".
+    .replace(/&(nbsp|amp|lt|gt|quot|#39);/g, (_m, e: string) => ENTITIES[e]!)
     .replace(/\s+/g, " ")
     .trim();
 }

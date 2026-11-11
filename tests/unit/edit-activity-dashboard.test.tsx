@@ -15,6 +15,7 @@ import {
   easternDayKey,
   netChanges,
   niceMax,
+  plainText,
   sameIgnoringFormat,
   wordDiff,
 } from "@/components/edit/edit-activity-dashboard";
@@ -207,6 +208,9 @@ describe("pure helpers", () => {
       { kind: "ins", text: "x" },
       { kind: "same", text: "c d" },
     ]);
+  });
+  it("plainText strips tags and decodes entities exactly once", () => {
+    expect(plainText("<p>A &amp; B &amp;lt;i&amp;gt;</p>")).toBe("A & B &lt;i&gt;");
   });
   it("sameIgnoringFormat treats an ORCID URL and bare iD as equal", () => {
     expect(sameIgnoringFormat("https://orcid.org/0000-0001-2345-6789", "0000-0001-2345-6789")).toBe(true);
