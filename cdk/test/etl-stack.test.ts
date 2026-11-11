@@ -771,7 +771,7 @@ describe("EtlStack", () => {
         });
         // The recipient is a deploy-time SSM lookup, never a literal address.
         const params = template.toJSON().Parameters as Record<string, { Default?: string }>;
-        expect(Object.values(params).map((p) => p.Default)).toContain("/sps/prod/feedback-digest-recipient");
+        expect(Object.values(params).map((p) => p.Default)).toContain("/sps/prod/etl/feedback-digest-recipient");
       });
 
       it("prod CADENCE schedules ship ENABLED (etlSchedulesEnabled=true)", () => {

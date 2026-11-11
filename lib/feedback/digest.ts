@@ -71,7 +71,7 @@ export function buildFeedbackDigest({ rows, from, to, baseUrl }: DigestInput): {
 } {
   const week = isoDay(from);
   const n = rows.length;
-  const exportUrl = `${baseUrl.replace(/\/+$/, "")}/api/feedback/export?from=${isoDay(from)}&to=${isoDay(to)}`;
+  const exportUrl = `${baseUrl.replace(/\/+$/, "")}/api/edit/feedback/export?from=${isoDay(from)}&to=${isoDay(to)}`;
 
   if (n === 0) {
     return {

@@ -102,8 +102,8 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Default": "/sps/prod/app/internal-alb-sg-id",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
-    "SsmParameterValuespsprodfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter": {
-      "Default": "/sps/prod/feedback-digest-recipient",
+    "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/etl/feedback-digest-recipient",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
   },
@@ -2180,7 +2180,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsprodfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -2877,7 +2877,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsprodfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -3511,7 +3511,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsprodfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -4076,7 +4076,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsprodfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -5080,7 +5080,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsprodfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -6328,7 +6328,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS weekly feedback digest (prod) -- the email was not sent. Nothing else is affected: feedback is still being collected, and the next successful run covers every submission since the last digest that went out, so no week is lost. Next: open the latest execution of scholars-feedback-digest-prod and read the "[feedback-digest]" log lines (an SES rejection usually means the sender identity or the SES sandbox; a rejected address means fixing /sps/prod/feedback-digest-recipient and redeploying Sps-Etl-prod).",
+        "AlarmDescription": "SPS weekly feedback digest (prod) -- the email was not sent. Nothing else is affected: feedback is still being collected, and the next successful run covers every submission since the last digest that went out, so no week is lost. Next: open the latest execution of scholars-feedback-digest-prod and read the "[feedback-digest]" log lines (an SES rejection usually means the sender identity or the SES sandbox; a rejected address means fixing /sps/prod/etl/feedback-digest-recipient and redeploying Sps-Etl-prod).",
         "AlarmName": "sps-etl-feedback-digest-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "EvaluationPeriods": 1,
@@ -11767,8 +11767,8 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Default": "/sps/staging/app/internal-alb-sg-id",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
-    "SsmParameterValuespsstagingfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter": {
-      "Default": "/sps/staging/feedback-digest-recipient",
+    "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/etl/feedback-digest-recipient",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
   },
@@ -14489,7 +14489,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsstagingfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -15186,7 +15186,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsstagingfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -15820,7 +15820,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsstagingfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -16385,7 +16385,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsstagingfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -17389,7 +17389,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
-                  "Ref": "SsmParameterValuespsstagingfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                  "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -18642,7 +18642,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS weekly feedback digest (staging) -- the email was not sent. Nothing else is affected: feedback is still being collected, and the next successful run covers every submission since the last digest that went out, so no week is lost. Next: open the latest execution of scholars-feedback-digest-staging and read the "[feedback-digest]" log lines (an SES rejection usually means the sender identity or the SES sandbox; a rejected address means fixing /sps/staging/feedback-digest-recipient and redeploying Sps-Etl-staging).",
+        "AlarmDescription": "SPS weekly feedback digest (staging) -- the email was not sent. Nothing else is affected: feedback is still being collected, and the next successful run covers every submission since the last digest that went out, so no week is lost. Next: open the latest execution of scholars-feedback-digest-staging and read the "[feedback-digest]" log lines (an SES rejection usually means the sender identity or the SES sandbox; a rejected address means fixing /sps/staging/etl/feedback-digest-recipient and redeploying Sps-Etl-staging).",
         "AlarmName": "sps-etl-feedback-digest-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "EvaluationPeriods": 1,

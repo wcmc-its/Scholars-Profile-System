@@ -982,13 +982,13 @@ export class EtlStack extends Stack {
       // export link in the mail uses the PUBLIC origin (SCHOLARS_BASE_URL here
       // is the internal ALB). The recipient is resolved from SSM at DEPLOY time
       // so no address lives in this public repo: the operator creates
-      // `/sps/<env>/feedback-digest-recipient` (comma-separated addresses; a
+      // `/sps/<env>/etl/feedback-digest-recipient` (comma-separated addresses; a
       // single space disables the digest) BEFORE deploying, or the deploy fails.
       SCHOLARS_MAIL_FROM,
       FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
       FEEDBACK_DIGEST_RECIPIENT: ssm.StringParameter.valueForStringParameter(
         this,
-        `/sps/${env}/feedback-digest-recipient`,
+        `/sps/${env}/etl/feedback-digest-recipient`,
       ),
       // #485 — the search:index build holds the full corpus graph in memory
       // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
@@ -2692,7 +2692,7 @@ export class EtlStack extends Stack {
         cadenceLabel: "feedback-digest",
         cadenceWindow: Duration.days(7),
         statusPeriod: Duration.days(7),
-        statusDescription: `SPS weekly feedback digest (${env}) -- the email was not sent. Nothing else is affected: feedback is still being collected, and the next successful run covers every submission since the last digest that went out, so no week is lost. Next: open the latest execution of scholars-feedback-digest-${env} and read the "[feedback-digest]" log lines (an SES rejection usually means the sender identity or the SES sandbox; a rejected address means fixing /sps/${env}/feedback-digest-recipient and redeploying Sps-Etl-${env}).`,
+        statusDescription: `SPS weekly feedback digest (${env}) -- the email was not sent. Nothing else is affected: feedback is still being collected, and the next successful run covers every submission since the last digest that went out, so no week is lost. Next: open the latest execution of scholars-feedback-digest-${env} and read the "[feedback-digest]" log lines (an SES rejection usually means the sender identity or the SES sandbox; a rejected address means fixing /sps/${env}/etl/feedback-digest-recipient and redeploying Sps-Etl-${env}).`,
         stateMachine: feedbackDigestMachine,
       },
     ];

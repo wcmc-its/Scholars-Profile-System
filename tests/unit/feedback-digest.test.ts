@@ -93,7 +93,7 @@ describe("buildFeedbackDigest", () => {
 
   it("links the export for the same window", () => {
     expect(build([row()]).text).toContain(
-      "https://scholars.example.edu/api/feedback/export?from=2026-11-02&to=2026-11-09",
+      "https://scholars.example.edu/api/edit/feedback/export?from=2026-11-02&to=2026-11-09",
     );
   });
 
