@@ -33,10 +33,11 @@ function readConfig() {
     throw new Error(`Missing ReciterDB env vars: ${missing.join(", ")}`);
   }
 
-  // parseInt returns NaN on garbage input, so validate instead of passing it
-  // to the driver and getting a confusing connection error later.
-  const port = Number.parseInt(process.env.SCHOLARS_RECITERDB_PORT ?? "3306", 10);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  // Empty counts as unset (a bare `SCHOLARS_RECITERDB_PORT=` line in .env).
+  // Digits only, so "3306abc" is rejected instead of parsed as 3306.
+  const rawPort = process.env.SCHOLARS_RECITERDB_PORT || "3306";
+  const port = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
+  if (!(port >= 1 && port <= 65535)) {
     throw new Error("SCHOLARS_RECITERDB_PORT must be a valid port number");
   }
 
@@ -46,9 +47,14 @@ function readConfig() {
   // path is private and already encrypted. If ReciterDB requires TLS, throw
   // here instead of falling back to undefined.
   const caPath = process.env.SCHOLARS_RECITERDB_SSL_CA;
-  const ssl = caPath
-    ? { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true }
-    : undefined;
+  let ssl: { ca: string; rejectUnauthorized: true } | undefined;
+  if (caPath) {
+    try {
+      ssl = { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true };
+    } catch (err) {
+      throw new Error(`SCHOLARS_RECITERDB_SSL_CA could not be read: ${(err as Error).message}`);
+    }
+  }
 
   return {
     // Non-null assertions are safe: the missing check above guarantees these.
@@ -94,10 +100,9 @@ export async function withReciterConnection<T>(
   try {
     return await fn(conn);
   } finally {
-    // release() returns a Promise; awaiting it avoids an unhandled rejection.
-    // finally runs whether fn succeeded or threw, so the connection is always
-    // returned to the pool.
-    await conn.release();
+    // release() returns a Promise. Swallow its rejection rather than awaiting:
+    // a throw from finally would replace fn's own result or error.
+    conn.release().catch(() => {});
   }
 }
 
@@ -109,4 +114,21 @@ export async function closeReciterPool(): Promise<void> {
   // the error still propagates to the caller.
   globalForReciter.__reciterPool = undefined;
   await pool?.end();
+}
+
+/**
+ * Boot-time hint for the silent-degrade case: ReciterDB unset while a feature
+ * still routes to its live path (bridge flag off). Those features then show
+ * "temporarily unavailable" on every request; say so once instead. Staging and
+ * prod run both bridges on, so this is null there.
+ */
+export function reciterDbConfigWarning(env: Record<string, string | undefined> = process.env): string | null {
+  if (env.SCHOLARS_RECITERDB_HOST) return null;
+  const live = ["MENTORING_COPUB_BRIDGE", "PUBLICATION_CITING_BRIDGE"].filter((f) => env[f] !== "on");
+  if (live.length === 0) return null;
+  return (
+    `[reciterdb] SCHOLARS_RECITERDB_HOST is unset and ${live.join(", ")} not "on": ` +
+    "mentoring and cited-by data will show as unavailable. Set the flag(s) to \"on\" " +
+    "to read the local bridge tables (see .env.example)."
+  );
 }
