@@ -49,7 +49,7 @@ export type DirectoryLookup = (
 /** The Prisma surface this module needs — keeps the unit test client tiny.
  *  `center` / `core` only name those entities (fail-soft, like `scholar`). */
 export type EditActivityClient = Pick<PrismaClient, "$queryRaw" | "scholar"> &
-  Partial<Pick<PrismaClient, "center" | "core">>;
+  Partial<Pick<PrismaClient, "center" | "core" | "publication">>;
 
 /** The one timezone the console reads dates in (WCM-local). */
 export const EDIT_ACTIVITY_TZ = "America/New_York";
@@ -83,6 +83,20 @@ export function editorKind(e: {
 
 /** View-as bookkeeping: an audit trail, not an edit. */
 export const AUDIT_ACTIONS: ReadonlySet<string> = new Set(["impersonation_start", "impersonation_end"]);
+
+/** A field's identity across entity types: scholar fields are bare
+ *  ("overview"); others carry their entity ("reporter_profile_candidate.status"). */
+export function fieldId(entityType: string, key: string): string {
+  return entityType === "scholar" ? key : `${entityType}.${key}`;
+}
+
+/** "overview" → "Overview"; "reporter_profile_candidate.status" →
+ *  "Reporter profile candidate status". */
+export function fieldIdLabel(id: string): string {
+  const dot = id.indexOf(".");
+  if (dot < 0) return humanizeField(id);
+  return `${humanizeField(id.slice(0, dot))} ${humanizeField(id.slice(dot + 1)).toLowerCase()}`;
+}
 
 /** An ISO instant's WCM-local (Eastern) calendar day, "YYYY-MM-DD". */
 export function easternDayKey(iso: string): string {
@@ -183,7 +197,8 @@ export type EditActivityAnalytics = {
   perDay: DaySplit[];
   /** Per actor: their kind (majority) and distinct entities touched. */
   editors: Record<string, { kind: EditorKind; profiles: number }>;
-  /** Most-edited fields: distinct entities + edits, busiest first. */
+  /** Most-edited fields by people (automated edits left out), keyed by
+   *  {@link fieldId}: distinct entities + edits, busiest first. */
   fields: { key: string; label: string; profiles: number; edits: number }[];
   /** Fields that went empty -> filled: distinct scholars per field key. */
   gained: { key: string; label: string; profiles: number }[];
@@ -205,6 +220,8 @@ export type EditActivitySummary = {
    *  null when `recent` already holds every edit in the window. */
   nextCursor: string | null;
   analytics: EditActivityAnalytics;
+  /** PMID -> article title, for the highlight papers the feed shows. */
+  publicationTitles: Record<string, string>;
   /** Names/titles for the CWIDs above. Absent keys render as the bare CWID —
    *  non-scholar admins and service accounts legitimately never resolve. */
   people: PeopleDirectory;
@@ -427,10 +444,13 @@ export function shapeAnalytics(rows: readonly RawWindowRow[]): EditActivityAnaly
     const after = asJson(r.after_values) as Record<string, unknown> | null;
     for (const k of keys) {
       if (typeof k !== "string" || !k || META_KEYS.has(k)) continue;
-      const f = fields.get(k) ?? { ents: new Set(), edits: 0 };
-      f.edits += 1;
-      f.ents.add(ent);
-      fields.set(k, f);
+      if (kind !== "automated") {
+        const id = fieldId(e.entityType, k);
+        const f = fields.get(id) ?? { ents: new Set(), edits: 0 };
+        f.edits += 1;
+        f.ents.add(ent);
+        fields.set(id, f);
+      }
       const g = gained.get(k);
       if (g && e.entityType === "scholar" && isEmptyValue(before?.[k]) && !isEmptyValue(after?.[k])) {
         g.add(e.entityId);
@@ -464,7 +484,7 @@ export function shapeAnalytics(rows: readonly RawWindowRow[]): EditActivityAnaly
       actors.map((a) => [a.actorCwid, { kind: majority(a.kinds), profiles: a.ents.size }]),
     ),
     fields: desc(
-      [...fields].map(([key, f]) => ({ key, label: humanizeField(key), profiles: f.ents.size, edits: f.edits })),
+      [...fields].map(([key, f]) => ({ key, label: fieldIdLabel(key), profiles: f.ents.size, edits: f.edits })),
     ).slice(0, 10),
     gained: GAINED_FIELDS.map((f) => ({ ...f, profiles: gained.get(f.key)?.size ?? 0 })),
   };
@@ -492,6 +512,7 @@ export function shapeSummary(
     people: {},
     entityNames: {},
     analytics: shapeAnalytics([]),
+    publicationTitles: {},
     windowDays: EDIT_ACTIVITY_WINDOW_DAYS,
     generatedAt: now.toISOString(),
     totalEdits,
@@ -675,6 +696,7 @@ export async function loadEditActivitySummary(
   }, directory);
   summary.entityNames = named.entityNames;
   summary.people = named.people;
+  summary.publicationTitles = named.publicationTitles;
   return summary;
 }
 
@@ -685,6 +707,7 @@ export type EditActivityPage = {
   nextCursor: string | null;
   people: PeopleDirectory;
   entityNames: Record<string, string>;
+  publicationTitles: Record<string, string>;
 };
 
 /**
@@ -718,7 +741,7 @@ export async function loadOlderEdits(
   const more = rows.length > EDIT_ACTIVITY_RECENT_LIMIT;
   const recent = rows.slice(0, EDIT_ACTIVITY_RECENT_LIMIT).map(shapeRecent);
   const oldest = recent[recent.length - 1];
-  const { people, entityNames } = await resolveNames(client, {
+  const { people, entityNames, publicationTitles } = await resolveNames(client, {
     topEditors: [],
     topEntities: [],
     recent,
@@ -728,6 +751,7 @@ export async function loadOlderEdits(
     nextCursor: more && oldest ? encodeCursor(oldest) : null,
     people,
     entityNames,
+    publicationTitles,
   };
 }
 
@@ -737,9 +761,32 @@ async function resolveNames(
   client: EditActivityClient,
   rows: NamedRows,
   directory?: DirectoryLookup,
-): Promise<{ people: PeopleDirectory; entityNames: Record<string, string> }> {
+): Promise<{
+  people: PeopleDirectory;
+  entityNames: Record<string, string>;
+  publicationTitles: Record<string, string>;
+}> {
   let entityNames: Record<string, string> = {};
   let people: PeopleDirectory = {};
+  let publicationTitles: Record<string, string> = {};
+  // Article titles for highlight-paper changes; decoration, fail-soft.
+  const pmids = collectPmids(rows.recent);
+  if (pmids.length > 0 && client.publication) {
+    try {
+      const pubs = await client.publication.findMany({
+        where: { pmid: { in: pmids } },
+        select: { pmid: true, title: true },
+      });
+      publicationTitles = Object.fromEntries(pubs.map((p) => [p.pmid, p.title]));
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: "edit_activity_pub_title_resolve_failed",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
   // Center / core display names, same fail-soft rule as the people below.
   try {
     entityNames = await resolveEntityNames(client, rows);
@@ -776,5 +823,19 @@ async function resolveNames(
       if (p) people[c] = p;
     }
   }
-  return { people, entityNames };
+  return { people, entityNames, publicationTitles };
+}
+
+/** Every PMID in a highlight-papers change (both sides), capped. */
+export function collectPmids(recent: readonly RecentEdit[]): string[] {
+  const out = new Set<string>();
+  for (const r of recent)
+    for (const c of r.changes) {
+      if (c.key !== "selectedHighlightPmids") continue;
+      for (const v of [c.before, c.after]) {
+        const arr = asJson(v);
+        if (Array.isArray(arr)) for (const p of arr) if (/^\d{1,12}$/.test(String(p))) out.add(String(p));
+      }
+    }
+  return [...out].slice(0, 500);
 }

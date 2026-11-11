@@ -120,6 +120,7 @@ function summary(over: Partial<EditActivitySummary> = {}): EditActivitySummary {
       sch0002: { name: "Pat Prof", title: "Professor" },
     },
     nextCursor: null,
+    publicationTitles: {},
     ...over,
   };
 }
@@ -135,15 +136,56 @@ describe("pure helpers", () => {
     expect(axis[29]).toBe("2026-09-24");
   });
   it("niceMax rounds up to a readable axis top", () => {
-    expect(niceMax(392)).toBe(500);
-    expect(niceMax(8)).toBe(10);
+    expect(niceMax(392)).toBe(400);
+    expect(niceMax(25)).toBe(30);
+    expect(niceMax(8)).toBe(8);
     expect(niceMax(0)).toBe(1);
   });
   it("buildRows: sessions, automated runs and View-as pairs collapse when grouping", () => {
     const rows = buildRows(summary().recent, true);
     expect(rows.map((r) => r.edits.map((e) => e.id).join(""))).toEqual(["a", "bc", "de", "fg"]);
     expect(rows.map((r) => r.kind)).toEqual(["staff", "automated", "self", "audit"]);
+    expect(rows.map((r) => r.mode)).toEqual(["session", "run", "session", "audit"]);
     expect(buildRows(summary().recent, false)).toHaveLength(7);
+  });
+  it("buildRows: one editor's identical change across profiles is one bulk row", () => {
+    const title = [ch("primaryTitle", "Primary title", "Professor", "Professor of Medicine")];
+    const rows = buildRows(
+      ["sch0001", "sch0002", "sch0003", "sch0001"].map((entityId, i) =>
+        edit({ id: `t${i}`, actorCwid: "stf0001", entityId, ts: `2026-09-24T18:0${9 - i}:00.000Z`, changes: title }),
+      ),
+      true,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.mode).toBe("bulk");
+  });
+  it("buildRows: someone else's edit in between does not split a bulk row", () => {
+    const title = [ch("primaryTitle", "Primary title", "Professor", "Professor of Medicine")];
+    const rows = buildRows(
+      [
+        edit({ id: "t1", actorCwid: "stf0001", entityId: "sch0001", ts: "2026-09-24T18:05:00.000Z", changes: title }),
+        edit({ id: "x", actorCwid: "sch0009", entityId: "sch0009", ts: "2026-09-24T18:04:00.000Z", changes: [ch("overview", "Overview", "a", "b")] }),
+        edit({ id: "t2", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:03:00.000Z", changes: title }),
+      ],
+      true,
+    );
+    expect(rows.map((r) => [r.mode, r.edits.length])).toEqual([
+      ["bulk", 2],
+      ["session", 1],
+    ]);
+  });
+  it("buildRows: two people editing the same field of one profile is one contested row", () => {
+    const rows = buildRows(
+      [
+        edit({ id: "p2", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:03:00.000Z", changes: [ch("primaryTitle", "Primary title", "B", "C")] }),
+        edit({ id: "s2", actorCwid: "sch0002", entityId: "sch0002", ts: "2026-09-24T18:02:00.000Z", changes: [ch("primaryTitle", "Primary title", "A", "B")] }),
+        edit({ id: "p1", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:01:00.000Z", changes: [ch("primaryTitle", "Primary title", "B", "A")] }),
+        edit({ id: "s1", actorCwid: "sch0002", entityId: "sch0002", ts: "2026-09-24T18:00:00.000Z", changes: [ch("primaryTitle", "Primary title", null, "B")] }),
+      ],
+      true,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.mode).toBe("contested");
   });
   it("buildRows splits one editor's saves past the session gap", () => {
     const rows = buildRows(
@@ -197,6 +239,8 @@ describe("pure helpers", () => {
       manualMentees: 1,
     });
     expect(a.fields[0]).toMatchObject({ key: "overview", profiles: 2, edits: 2 });
+    // ETL's ORCID edit is automated: not in the people-made fields panel.
+    expect(a.fields.find((f) => f.key === "orcid")).toBeUndefined();
     expect(a.editors.stf0001).toEqual({ kind: "staff", profiles: 2 });
     expect(a.perDay).toHaveLength(1);
   });
@@ -214,7 +258,10 @@ describe("EditActivityDashboard", () => {
 
   it("labels the spike with its top editor's name, not a CWID", () => {
     render(<EditActivityDashboard summary={summary()} />);
-    expect(screen.getByTestId("edit-activity-spike").textContent).toBe("Sep 24 · 8 · top editor Dana Staff");
+    const spike = screen.getByTestId("edit-activity-spike");
+    expect(spike.textContent).toBe("Sep 24 · 8 · top editor Dana Staff");
+    // The last day of the axis: pinned right, over its bar.
+    expect(spike.style.right).toBe("0px");
   });
 
   it("tags staff rows with who they were for and shows the first-written overview", () => {
@@ -295,6 +342,61 @@ describe("EditActivityDashboard", () => {
     expect(screen.queryByTestId("edit-activity-row-b")).toBeNull();
   });
 
+  it("bulk and back-and-forth rows read as sentences", () => {
+    const title = (b: string | null, a: string) => [ch("primaryTitle", "Primary title", b, a)];
+    render(
+      <EditActivityDashboard
+        summary={summary({
+          recent: [
+            edit({ id: "u3", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T18:03:00.000Z", changes: title("Professor", "Professor of Medicine") }),
+            edit({ id: "u2", actorCwid: "stf0001", entityId: "sch0001", ts: "2026-09-24T18:02:00.000Z", changes: title("Professor", "Professor of Medicine") }),
+            edit({ id: "c2", actorCwid: "stf0001", entityId: "sch0002", ts: "2026-09-24T17:03:00.000Z", changes: title("Chief", "Professor") }),
+            edit({ id: "c1", actorCwid: "sch0002", entityId: "sch0002", ts: "2026-09-24T17:00:00.000Z", changes: title("Professor", "Chief") }),
+          ],
+        })}
+      />,
+    );
+    const bulk = screen.getByTestId("edit-activity-row-u3").textContent;
+    expect(bulk).toContain("Changed Primary title to “Professor of Medicine” on 2 profiles (2 edits)");
+    expect(bulk).toContain("Managed at its source");
+    const back = screen.getByTestId("edit-activity-row-c2").textContent;
+    expect(back).toContain("Pat Prof and Dana Staff");
+    expect(back).toContain("Back-and-forth on Pat Prof");
+    expect(back).toContain("edited by Pat Prof and Dana Staff, 2 times in 3 min");
+    // Each save's own change, not the row's net change.
+    expect(back).toContain("Professor → Chief");
+    expect(back).toContain("Chief → Professor");
+  });
+
+  it("names an ETL field_override run by its field, and highlights by title", () => {
+    render(
+      <EditActivityDashboard
+        summary={summary({
+          publicationTitles: { "123": "A <i>study</i> of examples" },
+          recent: [
+            edit({ id: "h", actorCwid: "sch0002", entityId: "sch0002", changes: [ch("selectedHighlightPmids", "Selected highlights", null, "[123,456]")] }),
+            edit({ id: "e1", ts: "2026-09-24T15:00:00.000Z", actorCwid: "ETL", entityId: "sch0001", changes: [ch("orcid", "ORCID", null, "0000-0001-2345-6789")] }),
+            edit({ id: "e2", ts: "2026-09-24T15:00:00.000Z", actorCwid: "ETL", entityId: "sch0002", changes: [ch("orcid", "ORCID", null, "0000-0001-2345-6780")] }),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("edit-activity-row-e1").textContent).toContain("ORCID updated · 2 in one run");
+    const h = screen.getByTestId("edit-activity-row-h").textContent;
+    expect(h).toContain("A study of examples · PMID 123");
+    expect(h).toContain("PMID 456");
+  });
+
+  it("the footer counts rows and edits without mixing in load state", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    expect(screen.getByTestId("edit-activity-feed-footer").textContent).toBe("Rows 1–3 · edits 1–5 of 12");
+  });
+
+  it("day headers pluralize", () => {
+    render(<EditActivityDashboard summary={summary({ perDay: [{ day: "2026-09-24", edits: 1 }] })} />);
+    expect(screen.getByTestId("edit-activity-day-2026-09-24").textContent).toContain("1 edit · 2 rows");
+  });
+
   it("mutes a re-save with no visible change", () => {
     render(
       <EditActivityDashboard
@@ -336,6 +438,7 @@ describe("paging", () => {
     nextCursor,
     people: { stf0003: { name: "Olga Older", title: null }, sch0009: { name: "Nia Ninth", title: null } },
     entityNames: {},
+    publicationTitles: {},
   });
 
   const stubFetch = (...responses: Array<{ status: number; body: unknown }>) => {

@@ -26,6 +26,7 @@ import * as React from "react";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 
+import { LockedBadge } from "@/components/edit/locked-badge";
 import { Button } from "@/components/ui/button";
 import {
   AUDIT_ACTIONS,
@@ -36,6 +37,8 @@ import {
   type RecentEdit,
   easternDayKey,
   editorKind,
+  fieldId,
+  fieldIdLabel,
   isEmptyValue,
   isSystemActor,
 } from "@/lib/api/edit-activity";
@@ -52,6 +55,9 @@ const LIST_TOP = 8;
 export const SESSION_GAP_MS = 30 * 60_000;
 /** Above this length a text value is excerpted / word-diffed. */
 const LONG_TEXT = 90;
+/** Fields whose value normally comes from a system of record; an edit here is
+ *  an override of source data, so the feed flags it with the lock pill. */
+const SOURCE_MANAGED: ReadonlySet<string> = new Set(["primaryTitle"]);
 /** List items (mentees, PMIDs, run members) shown before "Show". */
 const ITEMS_SHOWN = 5;
 
@@ -104,7 +110,8 @@ export function dayAxis(lastKey: string, days: number): string[] {
 export function niceMax(n: number): number {
   if (n <= 0) return 1;
   const pow = 10 ** Math.floor(Math.log10(n));
-  for (const m of [1, 2, 2.5, 5, 10]) if (m * pow >= n) return m * pow;
+  // Even-friendly steps so the midline usually lands on a whole number.
+  for (const m of [1, 2, 3, 4, 5, 6, 8, 10]) if (m * pow >= n) return m * pow;
   return 10 * pow;
 }
 
@@ -240,12 +247,16 @@ export function sameIgnoringFormat(a: string | null, b: string | null): boolean 
 }
 
 /** One list item's display label. */
-function itemLabel(fieldKey: string, item: unknown): { id: string; label: string; note: string | null } {
+function itemLabel(
+  fieldKey: string,
+  item: unknown,
+  titles: Record<string, string> = {},
+): { id: string; label: string; note: string | null } {
   if (typeof item === "string" || typeof item === "number") {
     const s = String(item);
-    return fieldKey === "selectedHighlightPmids"
-      ? { id: s, label: `PMID ${s}`, note: null }
-      : { id: s, label: s, note: null };
+    if (fieldKey !== "selectedHighlightPmids") return { id: s, label: s, note: null };
+    const title = titles[s];
+    return title ? { id: s, label: plainText(title), note: `PMID ${s}` } : { id: s, label: `PMID ${s}`, note: null };
   }
   if (item && typeof item === "object") {
     const o = item as Record<string, unknown>;
@@ -320,6 +331,13 @@ export type FeedRow = {
   key: string;
   day: string;
   kind: EditorKind | "audit";
+  /**
+   * How the edits were folded: `session` = one editor, one entity;
+   * `bulk` = one editor making the identical change on several entities;
+   * `contested` = more than one person editing the same field of one entity;
+   * `run` = one automated actor's same-action batch; `audit` = View-as.
+   */
+  mode: "session" | "bulk" | "contested" | "run" | "audit";
   /** Newest first. */
   edits: RecentEdit[];
 };
@@ -328,38 +346,87 @@ function rowKindOf(e: RecentEdit): FeedRow["kind"] {
   return AUDIT_ACTIONS.has(e.action) ? "audit" : editorKind(e);
 }
 
+/** What an edit did, independent of whom it did it to. */
+function changeSignature(e: RecentEdit): string | null {
+  if (e.changes.length === 0) return null;
+  return JSON.stringify([e.action, e.changes.map((c) => [c.key, c.after])]);
+}
+
+const sameEntity = (a: RecentEdit, b: RecentEdit) =>
+  a.entityType === b.entityType && a.entityId === b.entityId;
+
 /**
- * Edits (newest first) → feed rows. With `group`, consecutive edits on the
- * same day join the previous row when:
+ * Edits (newest first) → feed rows. With `group`, an edit on the same day,
+ * within {@link SESSION_GAP_MS} of the row's last edit, joins that row when:
  *  - audit: the same actor's View-as start/end on the same scholar;
  *  - automated: the same actor and action (a run, any entity);
- *  - people: the same actor, View-as identity and entity, with no gap over
- *    {@link SESSION_GAP_MS}.
+ *  - session: the same actor and View-as identity on the same entity;
+ *  - contested: ANOTHER person on the same entity, touching a field the row
+ *    already touched (a back-and-forth worth flagging);
+ *  - bulk: the same actor making the identical change on another entity.
  */
 export function buildRows(edits: ReadonlyArray<RecentEdit>, group: boolean): FeedRow[] {
   const out: FeedRow[] = [];
   for (const e of edits) {
     const day = easternDayKey(e.ts);
     const kind = rowKindOf(e);
-    const last = out[out.length - 1];
-    const prev = last?.edits[last.edits.length - 1];
-    const joins =
-      group &&
-      last &&
-      prev &&
-      last.day === day &&
-      last.kind === kind &&
-      prev.actorCwid === e.actorCwid &&
-      (kind === "automated"
-        ? prev.action === e.action
-        : prev.entityType === e.entityType &&
-          prev.entityId === e.entityId &&
-          prev.impersonatedCwid === e.impersonatedCwid &&
-          (kind === "audit" || new Date(prev.ts).getTime() - new Date(e.ts).getTime() <= SESSION_GAP_MS));
-    if (joins) last.edits.push(e);
-    else out.push({ key: e.id, day, kind, edits: [e] });
+    let target: FeedRow | null = null;
+    let mode: FeedRow["mode"] | null = null;
+    // Look back past interleaved rows (someone else's edit in between) to any
+    // row from the same day whose latest edit is within the gap.
+    // ponytail: linear lookback, bounded by the gap; fine for 100-edit pages.
+    for (let k = out.length - 1; group && k >= 0 && !mode; k--) {
+      const last = out[k]!;
+      const prev = last.edits[last.edits.length - 1]!;
+      if (last.day !== day) break;
+      if (new Date(prev.ts).getTime() - new Date(e.ts).getTime() > SESSION_GAP_MS) break;
+      mode = joinMode(last, prev, e, kind);
+      if (mode) target = last;
+    }
+    if (target && mode) {
+      target.edits.push(e);
+      target.mode = mode;
+    } else {
+      out.push({
+        key: e.id,
+        day,
+        kind,
+        mode: kind === "audit" ? "audit" : kind === "automated" ? "run" : "session",
+        edits: [e],
+      });
+    }
   }
   return out;
+}
+
+/** How `e` joins `row` (whose newest-joined edit is `prev`), or null. */
+function joinMode(row: FeedRow, prev: RecentEdit, e: RecentEdit, kind: FeedRow["kind"]): FeedRow["mode"] | null {
+  if (kind === "audit" || row.mode === "audit") {
+    return kind === "audit" && row.mode === "audit" && prev.actorCwid === e.actorCwid && sameEntity(prev, e)
+      ? "audit"
+      : null;
+  }
+  if (kind === "automated" || row.mode === "run") {
+    return kind === "automated" && row.mode === "run" && prev.actorCwid === e.actorCwid && prev.action === e.action
+      ? "run"
+      : null;
+  }
+  const sameActor = prev.actorCwid === e.actorCwid && prev.impersonatedCwid === e.impersonatedCwid;
+  if (row.mode !== "bulk" && sameEntity(prev, e)) {
+    if (row.mode === "session" && sameActor) return "session";
+    const rowKeys = new Set(row.edits.flatMap((x) => x.changes.map((c) => c.key)));
+    if (e.changes.some((c) => rowKeys.has(c.key))) return "contested";
+    return null;
+  }
+  const sig = changeSignature(e);
+  if (
+    (row.mode === "bulk" || row.mode === "session") &&
+    sameActor &&
+    sig !== null &&
+    row.edits.every((x) => changeSignature(x) === sig)
+  )
+    return "bulk";
+  return null;
 }
 
 /** A row's field changes, folded to first-before → last-after per field. */
@@ -422,12 +489,13 @@ const LINKISH = "text-apollo-slate text-[13px] hover:underline";
 /** Older feed pages loaded on demand, with the names they brought. */
 type Older = {
   rows: RecentEdit[];
+  publicationTitles: EditActivityPage["publicationTitles"];
   people: EditActivityPage["people"];
   entityNames: EditActivityPage["entityNames"];
 };
 
 export function EditActivityDashboard({ summary }: { summary: EditActivitySummary }) {
-  const [older, setOlder] = React.useState<Older>({ rows: [], people: {}, entityNames: {} });
+  const [older, setOlder] = React.useState<Older>({ rows: [], people: {}, entityNames: {}, publicationTitles: {} });
   const [cursor, setCursor] = React.useState<string | null>(summary.nextCursor);
   const [loadingOlder, setLoadingOlder] = React.useState(false);
   const [olderError, setOlderError] = React.useState(false);
@@ -437,7 +505,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   const feedGeneration = React.useRef(summary.generatedAt);
   if (feedAsOf !== summary.generatedAt) {
     setFeedAsOf(summary.generatedAt);
-    setOlder({ rows: [], people: {}, entityNames: {} });
+    setOlder({ rows: [], people: {}, entityNames: {}, publicationTitles: {} });
     setCursor(summary.nextCursor);
     setLoadingOlder(false);
     setOlderError(false);
@@ -447,6 +515,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   }, [summary.generatedAt]);
   const people = { ...older.people, ...summary.people };
   const entityNames = { ...older.entityNames, ...summary.entityNames };
+  const pubTitles = { ...older.publicationTitles, ...summary.publicationTitles };
   const recent = React.useMemo(
     () => appendOlder(summary.recent, older.rows),
     [summary.recent, older.rows],
@@ -474,6 +543,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         rows: appendOlder(o.rows, body.recent),
         people: { ...o.people, ...body.people },
         entityNames: { ...o.entityNames, ...body.entityNames },
+        publicationTitles: { ...o.publicationTitles, ...body.publicationTitles },
       }));
       setCursor(body.nextCursor);
       return body.recent.length > 0;
@@ -561,7 +631,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   const dayTotal = (k: string) => perDayTotal.get(k) ?? 0;
   const maxEdits = Math.max(0, ...axis.map(dayTotal));
   const yMax = niceMax(maxEdits);
-  const ticks = Number.isInteger(yMax / 2) ? [0, yMax / 2, yMax] : [0, yMax];
+  const ticks = [0, yMax / 2, yMax];
   const spike = axis.reduce<string | null>((best, k) => (dayTotal(k) > (best ? dayTotal(best) : 0) ? k : best), null);
   const spikeTop = spike ? split.get(spike)?.topActor : null;
   const hoverLabel = hover
@@ -574,7 +644,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       })()
     : day
       ? `Filtered to ${dayLabel(day)} · click again to clear`
-      : "Click a bar to filter the feed. Eastern time.";
+      : "Each bar counts individual saves; the feed below combines repeated saves. Click a bar to filter. Eastern time.";
 
   // ── Feed ───────────────────────────────────────────────────────────────────
   const cat = CATEGORIES.find((c) => c.key === category) ?? CATEGORIES[0]!;
@@ -595,7 +665,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       cat.test(e.action) &&
       (!hideAutomated || !isSystemActor(e.actorCwid)) &&
       (!editor || e.actorCwid === editor) &&
-      (!field || e.changes.some((c) => c.key === field)) &&
+      (!field || e.changes.some((c) => fieldId(e.entityType, c.key) === field)) &&
       (!gainedOnly || !field || gainedIn(e, field)) &&
       (!day || easternDayKey(e.ts) === day) &&
       matchesQuery(e),
@@ -667,7 +737,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
 
   function badge(children: React.ReactNode) {
     return (
-      <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground rounded border px-1.5 text-xs whitespace-nowrap">
+      <span className="bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber rounded border px-1.5 text-xs whitespace-nowrap">
         {children}
       </span>
     );
@@ -676,8 +746,8 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   function listChange(c: NetChange, rowKey: string) {
     const b = parseValue(c.before);
     const af = parseValue(c.after);
-    const before = Array.isArray(b) ? b.map((x) => itemLabel(c.key, x)) : [];
-    const after = Array.isArray(af) ? af.map((x) => itemLabel(c.key, x)) : [];
+    const before = Array.isArray(b) ? b.map((x) => itemLabel(c.key, x, pubTitles)) : [];
+    const after = Array.isArray(af) ? af.map((x) => itemLabel(c.key, x, pubTitles)) : [];
     const had = new Set(before.map((x) => x.id));
     const has = new Set(after.map((x) => x.id));
     const items = [
@@ -691,7 +761,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       <span className="flex flex-col gap-0.5">
         {shown.map((x) => (
           <span key={`${x.sign}${x.id}`}>
-            <span className={cn("font-semibold", x.sign === "+" ? "text-apollo-green" : "text-apollo-maroon")}>
+            <span className={cn("font-semibold", x.sign === "+" ? "text-apollo-slate" : "text-apollo-maroon")}>
               {x.sign}
             </span>{" "}
             <span className={x.sign === "−" ? "text-muted-foreground line-through" : undefined}>{x.label}</span>
@@ -723,7 +793,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         {parts.map((p, i) => (
           <React.Fragment key={p.label}>
             {i > 0 && " · "}
-            <span className={cn("font-semibold", p.sign === "−" ? "text-apollo-maroon" : "text-apollo-green")}>
+            <span className={cn("font-semibold", p.sign === "−" ? "text-apollo-maroon" : "text-apollo-slate")}>
               {p.sign}
             </span>{" "}
             {p.label}
@@ -774,7 +844,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
               {p.text}
             </del>
           ) : (
-            <ins key={i} className="bg-apollo-green-tint text-apollo-green-foreground mr-1 rounded-sm px-0.5 no-underline">
+            <ins key={i} className="bg-apollo-slate-tint text-apollo-slate mr-1 rounded-sm px-0.5 no-underline">
               {p.text}
             </ins>
           ),
@@ -795,6 +865,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-medium">{c.field}</span>
+          {SOURCE_MANAGED.has(c.key) && <LockedBadge label="Managed at its source" />}
           {first && badge(firstLabel(c.key))}
           {isEmptyValue(c.after) && !isEmptyValue(c.before) && (
             <span className={cn(PILL, "bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground")}>Cleared</span>
@@ -808,13 +879,58 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     );
   }
 
+  /** "A", "A and B", "A, B and C". */
+  function andList(xs: string[]): string {
+    return xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+  }
+
+  /** Entity names with a Show all toggle (runs and bulk rows). */
+  function entityList(r: FeedRow) {
+    const k = `${r.key}:ents`;
+    const names = [...new Set(r.edits.map((x) => entityText(x.entityType, x.entityId)))];
+    const shown = open.has(k) ? names : names.slice(0, ITEMS_SHOWN);
+    return (
+      <span className="text-muted-foreground [overflow-wrap:anywhere]">
+        {shown.join(", ")}
+        {names.length > ITEMS_SHOWN && (
+          <>
+            {open.has(k) ? " " : ` and ${fmt(names.length - ITEMS_SHOWN)} more `}
+            <button type="button" className={LINKISH} onClick={() => toggle(k)}>
+              {open.has(k) ? "Show fewer" : "Show all"}
+            </button>
+          </>
+        )}
+      </span>
+    );
+  }
+
+  /** "12 min" / "3 min" / "under a minute" between a row's first and last edit. */
+  function spanText(r: FeedRow): string {
+    const ms = new Date(r.edits[0]!.ts).getTime() - new Date(r.edits[r.edits.length - 1]!.ts).getTime();
+    const mins = Math.round(ms / 60_000);
+    return mins < 1 ? "under a minute" : `${mins} min`;
+  }
+
   function editorCell(r: FeedRow) {
     const e = r.edits[0]!;
+    if (r.mode === "contested") {
+      const actors = [...new Set(r.edits.map((x) => x.actorCwid))].reverse();
+      return (
+        <div className="flex min-w-0 flex-col items-start gap-1">
+          <span className="text-[14px] font-medium">{andList(actors.map(actorName))}</span>
+          <span className={cn(PILL, "bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber")}>
+            Back-and-forth on {entityText(e.entityType, e.entityId)}
+          </span>
+        </div>
+      );
+    }
     const person = people[e.actorCwid];
     const forHref = historyHref(e.entityType, e.entityId);
     const forText = entityText(e.entityType, e.entityId);
+    const profiles = new Set(r.edits.map((x) => `${x.entityType}:${x.entityId}`)).size;
     let tag: React.ReactNode;
-    if (r.kind === "self") tag = "Own profile";
+    if (r.mode === "bulk") tag = `Staff, for ${fmt(profiles)} profiles`;
+    else if (r.kind === "self") tag = "Own profile";
     else if (r.kind === "automated") tag = "Automated";
     else if (r.kind === "audit") tag = "Audit";
     else
@@ -830,7 +946,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
           )}
         </>
       );
-    const selfHref = r.kind === "self" ? forHref : null;
+    const selfHref = r.kind === "self" && r.mode === "session" ? forHref : null;
     return (
       <div className="flex min-w-0 flex-col items-start gap-1">
         <span className="text-[14px] font-medium" title={person?.title ?? undefined}>
@@ -878,27 +994,71 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       }
       return <span>{start ? "Started" : "Ended"} viewing the console as {who}</span>;
     }
-    if (r.kind === "automated") {
-      const k = `${r.key}:run`;
-      const names = [...new Set(r.edits.map((x) => entityText(x.entityType, x.entityId)))];
-      const shown = open.has(k) ? names : names.slice(0, ITEMS_SHOWN);
+    if (r.mode === "run") {
+      // A generic "Updated profile" says nothing; name the fields instead.
+      const fields = [...new Set(r.edits.flatMap((x) => x.changes.map((c) => c.field)))];
+      const label =
+        e.action === "field_override" && fields.length > 0
+          ? `${andList(fields)} updated`
+          : labelForAction(e.action);
       return (
         <div className="flex min-w-0 flex-col gap-1">
           <span>
-            <span className="font-medium">{labelForAction(e.action)}</span>
+            <span className="font-medium">{label}</span>
             {n > 1 && <span className="text-muted-foreground"> · {fmt(n)} in one run</span>}
           </span>
-          <span className="text-muted-foreground [overflow-wrap:anywhere]">
-            {shown.join(", ")}
-            {names.length > ITEMS_SHOWN && (
-              <>
-                {open.has(k) ? " " : ` and ${fmt(names.length - ITEMS_SHOWN)} more `}
-                <button type="button" className={LINKISH} onClick={() => toggle(k)}>
-                  {open.has(k) ? "Show fewer" : "Show all"}
-                </button>
-              </>
-            )}
+          {entityList(r)}
+        </div>
+      );
+    }
+    if (r.mode === "bulk") {
+      const c = e.changes[0]!;
+      const profiles = new Set(r.edits.map((x) => `${x.entityType}:${x.entityId}`)).size;
+      const to = c.after === null ? null : plainText(c.after);
+      return (
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              Changed <span className="font-medium">{andList(e.changes.map((x) => x.field))}</span>
+              {e.changes.length === 1 && to && to.length <= LONG_TEXT ? <> to &ldquo;{to}&rdquo;</> : null} on{" "}
+              {fmt(profiles)} profiles <span className="text-muted-foreground">({fmt(n)} edits)</span>
+            </span>
+            {e.changes.some((x) => SOURCE_MANAGED.has(x.key)) && <LockedBadge label="Managed at its source" />}
           </span>
+          {entityList(r)}
+        </div>
+      );
+    }
+    if (r.mode === "contested") {
+      const actors = [...new Set(r.edits.map((x) => x.actorCwid))].reverse();
+      const fields = [...new Set(r.edits.flatMap((x) => x.changes.map((c) => c.field)))];
+      return (
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <span>
+            <span className="font-medium">{andList(fields)}</span>
+            <span className="text-muted-foreground">
+              {" "}
+              · edited by {andList(actors.map(actorName))}, {fmt(n)} times in {spanText(r)}
+            </span>
+          </span>
+          {/* Each save's own change, oldest first: the sequence IS the signal. */}
+          <ol className="m-0 flex list-none flex-col gap-0.5 p-0">
+            {[...r.edits].reverse().map((x) => (
+              <li key={x.id} className="flex flex-wrap gap-x-2">
+                <span className="text-muted-foreground tabular-nums">{easternTime(x.ts)}</span>
+                <span className="font-medium">{actorName(x.actorCwid)}</span>
+                {x.changes.map((c) => (
+                  <span key={c.key} className="[overflow-wrap:anywhere]">
+                    <span className="text-muted-foreground line-through">{c.before === null ? "empty" : plainText(c.before)}</span>{" "}
+                    <span className="text-muted-foreground" aria-label="changed to">
+                      →
+                    </span>{" "}
+                    {c.after === null ? <span className="text-muted-foreground italic">empty</span> : plainText(c.after)}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ol>
         </div>
       );
     }
@@ -956,7 +1116,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   }
 
   const editorOptions = summary.topEditors.map((t) => t.actorCwid);
-  const fieldOptions = [...new Map([...a.fields, ...a.gained].map((f) => [f.key, humanizeField(f.key)]))];
+  const fieldOptions = [...new Map([...a.fields, ...a.gained].map((f) => [f.key, fieldIdLabel(f.key)]))];
   const topEditorN = summary.topEditors[0]?.edits ?? 1;
   const editorRows = allEditors ? summary.topEditors : summary.topEditors.slice(0, LIST_TOP);
 
@@ -1059,15 +1219,23 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
           <div className="text-muted-foreground relative mt-7 h-[180px] text-[11.5px] tabular-nums" aria-hidden>
             {ticks.map((t) => (
               <span key={t} className="absolute right-0 translate-y-1/2" style={{ bottom: `${(t / yMax) * 100}%` }}>
-                {fmt(t)}
+                {Number.isInteger(t) ? fmt(t) : ""}
               </span>
             ))}
           </div>
           <div className="flex min-w-0 flex-col gap-1.5">
-            <div className="h-7">
+            <div className="relative h-7">
               {spike && dayTotal(spike) > 0 && (
                 <span
-                  className="bg-apollo-surface-2 border-apollo-border-strong inline-block rounded-md border px-2 py-0.5 text-xs whitespace-nowrap"
+                  className="bg-apollo-surface-2 border-apollo-border-strong absolute bottom-1 rounded-md border px-2 py-0.5 text-xs whitespace-nowrap"
+                  // Centered over the spike's bar; pinned to an edge near either end.
+                  style={(() => {
+                    const i = axis.indexOf(spike);
+                    const pct = ((i + 0.5) / axis.length) * 100;
+                    if (i < 4) return { left: 0 };
+                    if (i > axis.length - 5) return { right: 0 };
+                    return { left: `${pct}%`, transform: "translateX(-50%)" };
+                  })()}
                   data-testid="edit-activity-spike"
                 >
                   {dayLabel(spike)} · {fmt(dayTotal(spike))}
@@ -1281,7 +1449,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <label className="border-apollo-border-strong bg-apollo-surface flex h-8 min-w-[240px] flex-1 items-center gap-2 rounded-md border px-2.5 sm:flex-none">
+          <label className="border-apollo-border-strong bg-apollo-surface flex h-8 min-w-[320px] flex-1 items-center gap-2 rounded-md border px-2.5 sm:flex-none">
             <Search className="text-muted-foreground size-4" aria-hidden />
             <span className="sr-only">Search activity</span>
             <input
@@ -1403,9 +1571,8 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
           <div className="bg-apollo-page text-muted-foreground flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-3 text-[13px]">
             <span data-testid="edit-activity-feed-footer">
               {pageRows.length > 0
-                ? `Showing ${fmt(pageRows.length)} rows (edits ${fmt(firstEdit)}–${fmt(firstEdit + pageEdits - 1)}) of ${fmt(total)} edits`
+                ? `Rows ${fmt(page * PAGE_ROWS + 1)}–${fmt(page * PAGE_ROWS + pageRows.length)} · edits ${fmt(firstEdit)}–${fmt(firstEdit + pageEdits - 1)} of ${fmt(total)}`
                 : `${fmt(total)} edits in the last ${summary.windowDays} days`}
-              {recent.length < total ? ` · ${fmt(recent.length)} loaded` : ""}
             </span>
             <span className="flex items-center gap-2">
               {olderError && (
