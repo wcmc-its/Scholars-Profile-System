@@ -42,6 +42,7 @@ const ch = (key: string, field: string, before: string | null, after: string | n
 
 function summary(over: Partial<EditActivitySummary> = {}): EditActivitySummary {
   return {
+    range: "30d",
     windowDays: 30,
     generatedAt: "2026-09-24T20:00:00.000Z",
     totalEdits: 12,
@@ -393,8 +394,58 @@ describe("EditActivityDashboard", () => {
   });
 
   it("day headers pluralize", () => {
-    render(<EditActivityDashboard summary={summary({ perDay: [{ day: "2026-09-24", edits: 1 }] })} />);
+    const base = summary();
+    render(
+      <EditActivityDashboard
+        summary={{
+          ...base,
+          analytics: {
+            ...base.analytics,
+            perDay: [{ day: "2026-09-24", self: 0, staff: 1, automated: 0, topActor: "stf0001" }],
+          },
+        }}
+      />,
+    );
     expect(screen.getByTestId("edit-activity-day-2026-09-24").textContent).toContain("1 edit · 2 rows");
+  });
+
+  it("offers the four ranges, marks the current one, and exports the whole range", () => {
+    render(<EditActivityDashboard summary={summary()} />);
+    const nav = screen.getByTestId("edit-activity-range");
+    const links = within(nav).getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["Last 30 days", "Last 90 days", "Last 12 months", "All time"]);
+    expect(links[0]!.getAttribute("aria-current")).toBe("page");
+    expect(links[2]!.getAttribute("href")).toBe("?range=12m");
+    expect(screen.getByTestId("edit-activity-export").getAttribute("href")).toBe(
+      "/api/edit/activity/export?range=30d&asOf=2026-09-24T20%3A00%3A00.000Z",
+    );
+  });
+
+  it("a long range draws one bar per week and filters the feed by week", () => {
+    render(<EditActivityDashboard summary={summary({ range: "12m", windowDays: 365 })} />);
+    // Sep 23 and 24, 2026 are a Wednesday and Thursday: both in the week of Mon Sep 21.
+    expect(screen.queryByTestId("edit-activity-bar-2026-09-24")).toBeNull();
+    const bar = screen.getByTestId("edit-activity-bar-2026-09-21");
+    expect(bar.getAttribute("aria-label")).toBe("Week of Sep 21: 12 edits");
+    expect(screen.getByTestId("edit-activity-spike").textContent).toContain("Week of Sep 21 · 12");
+    fireEvent.click(bar);
+    expect(screen.getByTestId("edit-activity-day-2026-09-23")).toBeTruthy();
+    expect(screen.getByTestId("edit-activity-day-2026-09-24")).toBeTruthy();
+    expect(screen.getByTestId("edit-activity-kpis").textContent).toContain("of 365 days");
+  });
+
+  it("Next past the loaded rows carries the range to the older-page API", async () => {
+    const fn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, recent: [], nextCursor: null, people: {}, entityNames: {}, publicationTitles: {} }),
+    });
+    vi.stubGlobal("fetch", fn);
+    render(<EditActivityDashboard summary={summary({ range: "90d", windowDays: 90, nextCursor: "c1_4" })} />);
+    fireEvent.click(screen.getByTestId("edit-activity-next"));
+    await vi.waitFor(() => expect(fn).toHaveBeenCalled());
+    expect(String(fn.mock.calls[0]![0])).toContain("&range=90d");
+    vi.unstubAllGlobals();
   });
 
   it("mutes a re-save with no visible change", () => {

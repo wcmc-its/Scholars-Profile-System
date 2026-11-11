@@ -12,8 +12,11 @@ import {
   encodeCursor,
   isSystemActor,
   loadEditActivitySummary,
+  loadEditActivityCsv,
   loadOlderEdits,
   parseAsOf,
+  parseRange,
+  rangeCutoff,
   shapeSummary,
   toDay,
 } from "@/lib/api/edit-activity";
@@ -485,5 +488,84 @@ describe("Load older: cursor + paged read", () => {
       sch0001: { name: "Sam Scholar", title: null },
       stf0001: { name: "Dana Staff", title: "Program Manager" },
     });
+  });
+});
+
+describe("ranges", () => {
+  it("parseRange accepts the four ranges and defaults to 30 days", () => {
+    expect(parseRange("12m")).toBe("12m");
+    expect(parseRange("all")).toBe("all");
+    expect(parseRange(null)).toBe("30d");
+    expect(parseRange("7d")).toBe("30d");
+    expect(parseRange("__proto__")).toBe("30d");
+  });
+  it("rangeCutoff counts back from asOf; all time starts at the epoch", () => {
+    const asOf = new Date("2026-11-11T12:00:00.000Z");
+    expect(rangeCutoff("90d", asOf).toISOString()).toBe("2026-08-13T12:00:00.000Z");
+    expect(rangeCutoff("all", asOf).getTime()).toBe(0);
+  });
+  it("all time spans from the first recorded day through today", async () => {
+    const now = new Date("2026-11-11T17:00:00.000Z");
+    const windowRow = {
+      ts: new Date("2026-11-02T15:00:00.000Z"),
+      actor_cwid: "abc1001",
+      impersonated_cwid: null,
+      action: "field_override",
+      target_entity_type: "scholar",
+      target_entity_id: "abc1001",
+      fields_changed: null,
+      before_values: null,
+      after_values: null,
+    };
+    let call = 0;
+    const client = {
+      // perDay, editors, entities, recent, stats, window rows — in that order.
+      $queryRaw: async () => (++call === 6 ? [windowRow] : []),
+      scholar: { findMany: async () => [] },
+    } as never;
+    const s = await loadEditActivitySummary(client, now, undefined, "all");
+    expect(s.range).toBe("all");
+    expect(s.windowDays).toBe(10);
+  });
+});
+
+describe("loadEditActivityCsv", () => {
+  it("one line per edit with names and editor kind; no values; RFC 4180 quoting", async () => {
+    const client = {
+      $queryRaw: async () => [
+        {
+          id: 2,
+          ts: new Date("2026-11-10T15:00:00.000Z"),
+          actor_cwid: "stf0001",
+          impersonated_cwid: null,
+          action: "field_override",
+          target_entity_type: "scholar",
+          target_entity_id: "sch0001",
+          fields_changed: '["primaryTitle"]',
+        },
+        {
+          id: 1,
+          ts: new Date("2026-11-10T14:00:00.000Z"),
+          actor_cwid: "ETL",
+          impersonated_cwid: null,
+          action: "field_override",
+          target_entity_type: "scholar",
+          target_entity_id: "sch0001",
+          fields_changed: '["orcid"]',
+        },
+      ],
+      scholar: { findMany: async () => [{ cwid: "sch0001", preferredName: "Scholar, Sam", primaryTitle: null }] },
+    } as never;
+    const directory = async () => new Map([["stf0001", { name: "Dana Staff", title: null }]]);
+    const csv = await loadEditActivityCsv(client, "all", new Date("2026-11-11T00:00:00.000Z"), directory);
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toBe(
+      "time,editor_cwid,editor_name,editor_kind,viewing_as_cwid,action,entity_type,entity_id,entity_name,fields",
+    );
+    expect(lines[1]).toBe(
+      '2026-11-10T15:00:00.000Z,stf0001,Dana Staff,staff,,field_override,scholar,sch0001,"Scholar, Sam",Primary title',
+    );
+    expect(lines[2]).toContain(",ETL,ETL,automated,");
+    expect(lines).toHaveLength(3);
   });
 });

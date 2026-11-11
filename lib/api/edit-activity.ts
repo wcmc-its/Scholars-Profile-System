@@ -29,8 +29,28 @@
 import { detailForAction, humanizeField } from "@/lib/api/scholar-audit";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
-/** Rolling window the summary spans. */
+/** Default rolling window the summary spans. */
 export const EDIT_ACTIVITY_WINDOW_DAYS = 30;
+
+/** The ranges the page offers: days back, or null for the whole audit log. */
+export const EDIT_ACTIVITY_RANGES = {
+  "30d": { days: 30, label: "Last 30 days" },
+  "90d": { days: 90, label: "Last 90 days" },
+  "12m": { days: 365, label: "Last 12 months" },
+  all: { days: null, label: "All time" },
+} as const;
+export type EditActivityRange = keyof typeof EDIT_ACTIVITY_RANGES;
+
+/** A `?range=` value, defaulting to 30 days for anything unrecognized. */
+export function parseRange(raw: string | null | undefined): EditActivityRange {
+  return raw && Object.hasOwn(EDIT_ACTIVITY_RANGES, raw) ? (raw as EditActivityRange) : "30d";
+}
+
+/** The earliest instant a range includes, counted back from `asOf`. */
+export function rangeCutoff(range: EditActivityRange, asOf: Date): Date {
+  const days = EDIT_ACTIVITY_RANGES[range].days;
+  return days === null ? new Date(0) : new Date(asOf.getTime() - days * 86_400_000);
+}
 /** How many edits one feed page loads: the initial read's SQL `LIMIT 100`,
  *  and each "Load older" page (`LIMIT 101` = this + 1 look-ahead row). The
  *  SQL literals must track this constant (a bound LIMIT is driver-fragile). */
@@ -204,6 +224,8 @@ export type EditActivityAnalytics = {
   gained: { key: string; label: string; profiles: number }[];
 };
 export type EditActivitySummary = {
+  range: EditActivityRange;
+  /** Days the chart spans: the range's days, or (all time) back to the first edit. */
   windowDays: number;
   /** When the summary was read (ISO) — anchors the chart's day axis. */
   generatedAt: string;
@@ -513,6 +535,7 @@ export function shapeSummary(
     entityNames: {},
     analytics: shapeAnalytics([]),
     publicationTitles: {},
+    range: "30d",
     windowDays: EDIT_ACTIVITY_WINDOW_DAYS,
     generatedAt: now.toISOString(),
     totalEdits,
@@ -620,8 +643,8 @@ export async function resolveEntityNames(
 }
 
 /**
- * Load the fleet-wide edit-activity summary for the trailing
- * {@link EDIT_ACTIVITY_WINDOW_DAYS} days. Four aggregate reads run in parallel;
+ * Load the fleet-wide edit-activity summary for `range` (default the trailing
+ * {@link EDIT_ACTIVITY_WINDOW_DAYS} days). The aggregate reads run in parallel;
  * the cutoff is bound (no INTERVAL literal). Throws if the audit table is
  * unreadable — the caller renders an "unavailable" notice rather than 500ing.
  */
@@ -629,8 +652,9 @@ export async function loadEditActivitySummary(
   client: EditActivityClient,
   now: Date = new Date(),
   directory?: DirectoryLookup,
+  range: EditActivityRange = "30d",
 ): Promise<EditActivitySummary> {
-  const cutoff = new Date(now.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = rangeCutoff(range, now);
 
   // Day buckets in WCM-local (Eastern) time, so they agree with the Eastern
   // timestamps the feed renders. A bound numeric offset needs no MySQL tz tables.
@@ -673,20 +697,49 @@ export async function loadEditActivitySummary(
                AS SIGNED) AS automated_edits
         FROM scholars_audit.manual_edit_audit
        WHERE ts >= ${cutoff}`,
-    // ponytail: every window row, read whole and folded in JS (~1.5k rows/30d in
-    // prod). The cap keeps a runaway ETL from ballooning the read; past it the
-    // analytics undercount. Move the folds into SQL if the window ever nears it.
+    // Every window row, folded in JS. The value blobs are NOT read: only the
+    // first few characters of the five "gained content" fields, rebuilt as tiny
+    // JSON objects, which is all the empty -> filled test needs. That keeps an
+    // all-time read small (a few hundred bytes a row).
+    // ponytail: no index on ts, so this (and every window query) scans the
+    // table; trivial at ~1.5k rows/month. Add `KEY idx_ts (ts)` past ~1M rows.
+    // The cap stops a runaway ETL from ballooning the read; past it the
+    // analytics undercount.
     client.$queryRaw<RawWindowRow[]>`
       SELECT ts, actor_cwid, impersonated_cwid, action,
-             target_entity_type, target_entity_id,
-             fields_changed, before_values, after_values
+             target_entity_type, target_entity_id, fields_changed,
+             IF(JSON_VALID(before_values), JSON_OBJECT(
+               'overview', LEFT(JSON_UNQUOTE(JSON_EXTRACT(before_values, '$.overview')), 8),
+               'orcid', LEFT(JSON_UNQUOTE(JSON_EXTRACT(before_values, '$.orcid')), 8),
+               'selectedHighlightPmids', LEFT(JSON_UNQUOTE(JSON_EXTRACT(before_values, '$.selectedHighlightPmids')), 8),
+               'profileLinks', LEFT(JSON_UNQUOTE(JSON_EXTRACT(before_values, '$.profileLinks')), 8),
+               'manualMentees', LEFT(JSON_UNQUOTE(JSON_EXTRACT(before_values, '$.manualMentees')), 8)
+             ), NULL) AS before_values,
+             IF(JSON_VALID(after_values), JSON_OBJECT(
+               'overview', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.overview')), 8),
+               'orcid', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.orcid')), 8),
+               'selectedHighlightPmids', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.selectedHighlightPmids')), 8),
+               'profileLinks', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.profileLinks')), 8),
+               'manualMentees', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.manualMentees')), 8)
+             ), NULL) AS after_values
         FROM scholars_audit.manual_edit_audit
        WHERE ts >= ${cutoff}
-       LIMIT 50000`,
+       LIMIT 500000`,
   ]);
 
   const summary = shapeSummary(perDay, editors, entities, recent, stats, now);
   summary.analytics = shapeAnalytics(windowRows);
+  summary.range = range;
+  const days = EDIT_ACTIVITY_RANGES[range].days;
+  if (days !== null) summary.windowDays = days;
+  else {
+    // All time: from the first recorded day through today.
+    const first = summary.analytics.perDay.reduce<string | null>((m, d) => (!m || d.day < m ? d.day : m), null);
+    const today = easternDayKey(now.toISOString());
+    summary.windowDays = first
+      ? Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${first}T12:00:00Z`)) / 86_400_000) + 1
+      : EDIT_ACTIVITY_WINDOW_DAYS;
+  }
   const named = await resolveNames(client, {
     ...summary,
     extraCwids: [
@@ -725,8 +778,9 @@ export async function loadOlderEdits(
   cursor: FeedCursor,
   asOf: Date = new Date(),
   directory?: DirectoryLookup,
+  range: EditActivityRange = "30d",
 ): Promise<EditActivityPage> {
-  const cutoff = new Date(asOf.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = rangeCutoff(range, asOf);
   // LIMIT 101 = EDIT_ACTIVITY_RECENT_LIMIT + 1 look-ahead row (a literal, like
   // the first page's LIMIT 100: a bound LIMIT is driver-fragile).
   const rows = await client.$queryRaw<RawRecent[]>`
@@ -838,4 +892,59 @@ export function collectPmids(recent: readonly RecentEdit[]): string[] {
       }
     }
   return [...out].slice(0, 500);
+}
+
+/** One CSV row of the export (`GET /api/edit/activity/export`). */
+type RawExportRow = Omit<RawRecent, "before_values" | "after_values">;
+
+/** The export's hard ceiling; the CSV says so when it is reached. */
+export const EDIT_ACTIVITY_EXPORT_LIMIT = 200_000;
+
+/**
+ * Every edit in `range` (as of `asOf`) as CSV: who, what kind of editor,
+ * which action on which entity, which fields. Values are NOT exported (the
+ * overview text etc. stays in the audit log). Names resolve like the page's.
+ */
+export async function loadEditActivityCsv(
+  client: EditActivityClient,
+  range: EditActivityRange,
+  asOf: Date,
+  directory?: DirectoryLookup,
+): Promise<string> {
+  const cutoff = rangeCutoff(range, asOf);
+  const rows = await client.$queryRaw<RawExportRow[]>`
+    SELECT id, ts, actor_cwid, impersonated_cwid, action,
+           target_entity_type, target_entity_id, fields_changed
+      FROM scholars_audit.manual_edit_audit
+     WHERE ts >= ${cutoff} AND ts <= ${asOf}
+     ORDER BY ts DESC, id DESC
+     LIMIT 200000`;
+  const edits = rows.map((r) => shapeRecent({ ...r, before_values: null, after_values: null }));
+  const { people, entityNames } = await resolveNames(client, { topEditors: [], topEntities: [], recent: edits }, directory);
+  const name = (cwid: string) => (isSystemActor(cwid) ? cwid : (people[cwid]?.name ?? cwid));
+  const entity = (t: string, id: string) =>
+    t === "scholar" ? (people[id]?.name ?? id) : (entityNames[`${t}:${id}`] ?? id);
+  const cell = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const header = [
+    "time", "editor_cwid", "editor_name", "editor_kind", "viewing_as_cwid",
+    "action", "entity_type", "entity_id", "entity_name", "fields",
+  ];
+  const lines = edits.map((e) =>
+    [
+      e.ts,
+      e.actorCwid,
+      name(e.actorCwid),
+      AUDIT_ACTIONS.has(e.action) ? "audit" : editorKind(e),
+      e.impersonatedCwid ?? "",
+      e.action,
+      e.entityType,
+      e.entityId,
+      entity(e.entityType, e.entityId),
+      e.changes.map((c) => c.field).join("; "),
+    ]
+      .map(cell)
+      .join(","),
+  );
+  if (rows.length >= EDIT_ACTIVITY_EXPORT_LIMIT) lines.push(`# truncated at ${EDIT_ACTIVITY_EXPORT_LIMIT} rows`);
+  return [header.join(","), ...lines].join("\r\n");
 }

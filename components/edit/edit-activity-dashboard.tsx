@@ -30,6 +30,8 @@ import { LockedBadge } from "@/components/edit/locked-badge";
 import { Button } from "@/components/ui/button";
 import {
   AUDIT_ACTIONS,
+  EDIT_ACTIVITY_RANGES,
+  type EditActivityRange,
   EDIT_ACTIVITY_TZ,
   type EditActivityPage,
   type EditActivitySummary,
@@ -97,6 +99,15 @@ function isWeekend(key: string): boolean {
   const dow = keyDate(key).getUTCDay();
   return dow === 0 || dow === 6;
 }
+
+/** The Monday that starts `key`'s week. */
+export function mondayOf(key: string): string {
+  const d = keyDate(key);
+  return new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Past this many days the chart draws one bar per week. */
+export const WEEKLY_AFTER_DAYS = 92;
 
 /** The `days` calendar keys ending on `lastKey`, oldest first. */
 export function dayAxis(lastKey: string, days: number): string[] {
@@ -476,10 +487,6 @@ function historyHref(entityType: string, entityId: string): string | null {
   return null;
 }
 
-/** RFC 4180 cell. */
-function csvCell(v: string): string {
-  return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
 
 const CARD = "bg-apollo-surface border-apollo-border rounded-xl border";
 const SMALL_CAPS = "text-muted-foreground text-xs font-medium tracking-[0.06em] uppercase";
@@ -530,7 +537,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     setOlderError(false);
     try {
       const res = await fetch(
-        `/api/edit/activity/recent?cursor=${encodeURIComponent(cursor)}&asOf=${encodeURIComponent(asOf)}`,
+        `/api/edit/activity/recent?cursor=${encodeURIComponent(cursor)}&asOf=${encodeURIComponent(asOf)}${summary.range === "30d" ? "" : `&range=${summary.range}`}`,
         { cache: "no-store" },
       );
       const body = (await res.json().catch(() => null)) as
@@ -596,12 +603,32 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   // ── Tiles ──────────────────────────────────────────────────────────────────
   const a = summary.analytics;
   const total = summary.totalEdits;
-  const perDayTotal = new Map(summary.perDay.map((r) => [r.day, r.edits]));
-  const split = new Map(a.perDay.map((d) => [d.day, d]));
-  const axis = dayAxis(easternDayKey(summary.generatedAt), summary.windowDays);
-  const activeDays = summary.perDay.filter((r) => r.edits > 0).length;
+  // Per-day counts come from the analytics fold (true Eastern days, DST-safe).
+  const perDayTotal = new Map(a.perDay.map((d) => [d.day, d.self + d.staff + d.automated]));
+  const days = dayAxis(easternDayKey(summary.generatedAt), summary.windowDays);
+  const weekly = summary.windowDays > WEEKLY_AFTER_DAYS;
+  const bucketOf = (dayKey: string) => (weekly ? mondayOf(dayKey) : dayKey);
+  const axis = [...new Set(days.map(bucketOf))];
+  const bucketLabel = (k: string) => (weekly ? `Week of ${dayLabel(k)}` : dayLabel(k));
+  // Chart buckets: a day, or a Mon–Sun week; the busiest day's top editor stands in for the week's.
+  const buckets = new Map<string, { self: number; staff: number; automated: number; topActor: string | null; top: number }>();
+  for (const d of a.perDay) {
+    const k = bucketOf(d.day);
+    const b = buckets.get(k) ?? { self: 0, staff: 0, automated: 0, topActor: null, top: 0 };
+    b.self += d.self;
+    b.staff += d.staff;
+    b.automated += d.automated;
+    const n = d.self + d.staff + d.automated;
+    if (n > b.top) [b.top, b.topActor] = [n, d.topActor];
+    buckets.set(k, b);
+  }
+  const activeDays = a.perDay.filter((d) => d.self + d.staff + d.automated > 0).length;
+  // "Nov 12, 2025": a long range needs the year to read unambiguously.
+  const rangeDate = (k: string) => (weekly ? `${dayLabel(k)}, ${k.slice(0, 4)}` : dayLabel(k));
+  const rangeInfo = EDIT_ACTIVITY_RANGES[summary.range];
+  const inRange = summary.range === "all" ? "since tracking began" : `in the ${rangeInfo.label.toLowerCase()}`;
   const tiles: { label: string; value: string; sub: string; accent: string }[] = [
-    { label: "All edits", value: fmt(total), sub: `On ${activeDays} of ${summary.windowDays} days`, accent: "border-t-apollo-bar" },
+    { label: "All edits", value: fmt(total), sub: `On ${fmt(activeDays)} of ${fmt(summary.windowDays)} days`, accent: "border-t-apollo-bar" },
     {
       label: "Faculty, own profile",
       value: fmt(a.kinds.self),
@@ -628,22 +655,26 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   ];
 
   // ── Chart ──────────────────────────────────────────────────────────────────
-  const dayTotal = (k: string) => perDayTotal.get(k) ?? 0;
+  const dayTotal = (k: string) => {
+    const b = buckets.get(k);
+    return b ? b.self + b.staff + b.automated : 0;
+  };
+  const dayCount = (dayKey: string) => perDayTotal.get(dayKey) ?? 0;
   const maxEdits = Math.max(0, ...axis.map(dayTotal));
   const yMax = niceMax(maxEdits);
   const ticks = [0, yMax / 2, yMax];
   const spike = axis.reduce<string | null>((best, k) => (dayTotal(k) > (best ? dayTotal(best) : 0) ? k : best), null);
-  const spikeTop = spike ? split.get(spike)?.topActor : null;
+  const spikeTop = spike ? buckets.get(spike)?.topActor : null;
   const hoverLabel = hover
     ? (() => {
-        const s = split.get(hover);
+        const s = buckets.get(hover);
         const parts = s
           ? KIND_ORDER.filter((k) => s[k] > 0).map((k) => `${fmt(s[k])} ${KIND[k].tag.toLowerCase()}`)
           : [];
-        return `${dayLabel(hover)}: ${fmt(dayTotal(hover))} edits${parts.length ? ` (${parts.join(", ")})` : ""}`;
+        return `${bucketLabel(hover)}: ${fmt(dayTotal(hover))} edits${parts.length ? ` (${parts.join(", ")})` : ""}`;
       })()
     : day
-      ? `Filtered to ${dayLabel(day)} · click again to clear`
+      ? `Filtered to ${bucketLabel(day)} · click again to clear`
       : "Each bar counts individual saves; the feed below combines repeated saves. Click a bar to filter. Eastern time.";
 
   // ── Feed ───────────────────────────────────────────────────────────────────
@@ -667,7 +698,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       (!editor || e.actorCwid === editor) &&
       (!field || e.changes.some((c) => fieldId(e.entityType, c.key) === field)) &&
       (!gainedOnly || !field || gainedIn(e, field)) &&
-      (!day || easternDayKey(e.ts) === day) &&
+      (!day || bucketOf(easternDayKey(e.ts)) === day) &&
       matchesQuery(e),
   );
   const rows = buildRows(filtered, group);
@@ -701,31 +732,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     void loadOlder();
   }
 
-  function exportCsv() {
-    const header = ["time", "editor_cwid", "editor_name", "editor_kind", "action", "entity_type", "entity_id", "entity_name", "fields"];
-    const lines = filtered.map((e) =>
-      [
-        e.ts,
-        e.actorCwid,
-        actorName(e.actorCwid),
-        rowKindOf(e),
-        labelForAction(e.action),
-        e.entityType,
-        e.entityId,
-        entityText(e.entityType, e.entityId),
-        e.changes.map((c) => c.field).join("; "),
-      ]
-        .map(csvCell)
-        .join(","),
-    );
-    const blob = new Blob([[header.join(","), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `edit-activity-${easternDayKey(summary.generatedAt)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
+
 
   // ── Renderers ──────────────────────────────────────────────────────────────
 
@@ -1126,23 +1133,38 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         <div className="flex min-w-0 flex-1 basis-[300px] flex-col gap-1.5">
           <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.02em]">Edit activity</h1>
           <p className="text-muted-foreground m-0 text-[14.5px] leading-normal">
-            Who changed which profiles, {dayLabel(axis[0]!)} to {dayLabel(axis[axis.length - 1]!)}. Read-only. Each
+            Who changed which profiles, {rangeDate(days[0]!)} to {rangeDate(days[days.length - 1]!)}. Read-only. Each
             scholar and center links to its full history.
           </p>
         </div>
-        <div className="flex gap-2">
-          <span className="border-apollo-border-strong bg-apollo-surface inline-flex h-8 items-center rounded-md border px-3 text-sm">
-            Last {summary.windowDays} days
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={exportCsv}
-            disabled={filtered.length === 0}
-            title="Download the loaded edits that match the current filters"
-            data-testid="edit-activity-export"
+        <div className="flex flex-wrap gap-2">
+          <nav
+            aria-label="Date range"
+            className="border-apollo-border-strong bg-apollo-surface inline-flex h-8 overflow-hidden rounded-md border text-sm"
+            data-testid="edit-activity-range"
           >
-            Export CSV
+            {(Object.keys(EDIT_ACTIVITY_RANGES) as EditActivityRange[]).map((k) => (
+              <Link
+                key={k}
+                href={k === "30d" ? "?" : `?range=${k}`}
+                aria-current={summary.range === k ? "page" : undefined}
+                className={cn(
+                  "border-apollo-border-strong flex items-center border-l px-3 first:border-l-0",
+                  summary.range === k ? "bg-apollo-slate-tint text-apollo-slate font-medium" : "hover:bg-apollo-surface-2",
+                )}
+              >
+                {EDIT_ACTIVITY_RANGES[k].label}
+              </Link>
+            ))}
+          </nav>
+          <Button variant="outline" size="sm" asChild>
+            <a
+              href={`/api/edit/activity/export?range=${summary.range}&asOf=${encodeURIComponent(summary.generatedAt)}`}
+              title="Every edit in this range, as CSV (who, what, which fields; not the values)"
+              data-testid="edit-activity-export"
+            >
+              Export CSV
+            </a>
           </Button>
         </div>
       </div>
@@ -1200,7 +1222,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h2 id="chart-h" className="m-0 text-base font-semibold">
-              Edits per day
+              Edits per {weekly ? "week" : "day"}
             </h2>
             <span className="text-muted-foreground text-[13px]" aria-live="polite">
               {hoverLabel}
@@ -1238,7 +1260,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
                   })()}
                   data-testid="edit-activity-spike"
                 >
-                  {dayLabel(spike)} · {fmt(dayTotal(spike))}
+                  {bucketLabel(spike)} · {fmt(dayTotal(spike))}
                   {spikeTop ? ` · top editor ${actorName(spikeTop)}` : ""}
                 </span>
               )}
@@ -1255,18 +1277,18 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
               <div
                 className="absolute inset-0 flex items-end gap-[2px] md:gap-1"
                 role="group"
-                aria-label="Edits per day; select a day to filter the activity feed"
+                aria-label={`Edits per ${weekly ? "week" : "day"}; select a bar to filter the activity feed`}
               >
                 {axis.map((k) => {
                   const n = dayTotal(k);
-                  const s = split.get(k);
+                  const s = buckets.get(k);
                   const active = day === k || hover === k;
                   return (
                     <button
                       key={k}
                       type="button"
                       aria-pressed={day === k}
-                      aria-label={`${dayLabel(k)}: ${fmt(n)} edits`}
+                      aria-label={`${bucketLabel(k)}: ${fmt(n)} edits`}
                       onMouseEnter={() => setHover(k)}
                       onMouseLeave={() => setHover(null)}
                       onFocus={() => setHover(k)}
@@ -1274,7 +1296,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
                       onClick={() => setDay((d) => (d === k ? null : k))}
                       className={cn(
                         "focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse rounded-sm outline-none focus-visible:ring-2",
-                        isWeekend(k) && !active && "opacity-45",
+                        !weekly && isWeekend(k) && !active && "opacity-45",
                         active && "ring-apollo-bar/40 ring-1",
                       )}
                       data-testid={`edit-activity-bar-${k}`}
@@ -1297,14 +1319,20 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
             <div className="text-muted-foreground flex gap-[2px] text-[11.5px] md:gap-1" aria-hidden>
               {axis.map((k, i) => (
                 <span key={k} className="relative min-w-0 flex-1 text-center whitespace-nowrap">
-                  {i % 7 === 0 ? <span className="md:hidden">{dayLabel(k)}</span> : null}
-                  {i % 4 === 0 ? <span className="hidden md:inline">{dayLabel(k)}</span> : null}
+                  {i % Math.max(1, Math.ceil(axis.length / 4)) === 0 ? (
+                    <span className="md:hidden">{dayLabel(k)}</span>
+                  ) : null}
+                  {i % Math.max(1, Math.ceil(axis.length / 8)) === 0 ? (
+                    <span className="hidden md:inline">{dayLabel(k)}</span>
+                  ) : null}
                 </span>
               ))}
             </div>
           </div>
         </div>
-        <span className="text-muted-foreground text-xs">Faded bars are weekends.</span>
+        <span className="text-muted-foreground text-xs">
+          {weekly ? "Each bar is one week, Monday to Sunday." : "Faded bars are weekends."}
+        </span>
       </section>
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
@@ -1317,7 +1345,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
           </div>
           {editorRows.length === 0 ? (
             <p className="text-muted-foreground border-apollo-border m-0 border-t px-5 py-3 text-sm">
-              None in the last {summary.windowDays} days.
+              None {inRange}.
             </p>
           ) : (
             editorRows.map((r) => {
@@ -1386,7 +1414,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
           </div>
           {a.fields.length === 0 ? (
             <p className="text-muted-foreground border-apollo-border m-0 border-t px-5 py-3 text-sm">
-              No field edits in the last {summary.windowDays} days.
+              No field edits {inRange}.
             </p>
           ) : (
             a.fields.map((f) => {
@@ -1517,7 +1545,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
 
         {(day || (gainedOnly && field)) && (
           <div className="flex flex-wrap gap-2">
-            {day && chip(dayLabel(day), () => setDay(null))}
+            {day && chip(bucketLabel(day), () => setDay(null))}
             {gainedOnly && field && (
               chip(a.gained.find((g) => g.key === field)?.label ?? humanizeField(field), () => {
                   setGainedOnly(false);
@@ -1533,7 +1561,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
               <div className="bg-apollo-surface-2 border-apollo-border flex justify-between gap-3 border-b px-5 py-2 text-[13px] font-semibold">
                 <span>{dayHeading(d.day)}</span>
                 <span className="text-muted-foreground font-normal">
-                  {plural(dayTotal(d.day), "edit")} · {plural(rowsPerDay.get(d.day) ?? 0, "row")}
+                  {plural(dayCount(d.day), "edit")} · {plural(rowsPerDay.get(d.day) ?? 0, "row")}
                 </span>
               </div>
               {d.rows.map((r) => {
@@ -1562,7 +1590,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
           {byDay.length === 0 && (
             <p className="text-muted-foreground m-0 px-7 py-7 text-center text-sm" data-testid="edit-activity-feed-empty">
               {recent.length === 0
-                ? `No edits recorded in the last ${summary.windowDays} days.`
+                ? `No edits recorded ${inRange}.`
                 : cursor
                   ? "No loaded edits match these filters. Page forward to look further back."
                   : "No edits match these filters."}
@@ -1572,7 +1600,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
             <span data-testid="edit-activity-feed-footer">
               {pageRows.length > 0
                 ? `Rows ${fmt(page * PAGE_ROWS + 1)}–${fmt(page * PAGE_ROWS + pageRows.length)} · edits ${fmt(firstEdit)}–${fmt(firstEdit + pageEdits - 1)} of ${fmt(total)}`
-                : `${fmt(total)} edits in the last ${summary.windowDays} days`}
+                : `${fmt(total)} edits ${inRange}`}
             </span>
             <span className="flex items-center gap-2">
               {olderError && (

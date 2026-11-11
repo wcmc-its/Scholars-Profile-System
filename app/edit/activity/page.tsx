@@ -21,7 +21,7 @@ import { redirect } from "next/navigation";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { EditActivityDashboard } from "@/components/edit/edit-activity-dashboard";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { type EditActivitySummary, loadEditActivitySummary } from "@/lib/api/edit-activity";
+import { type EditActivitySummary, loadEditActivitySummary, parseRange } from "@/lib/api/edit-activity";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
@@ -37,7 +37,13 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function EditActivityPage() {
+export default async function EditActivityPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const range = parseRange(typeof sp.range === "string" ? sp.range : null);
   const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/activity");
@@ -68,7 +74,7 @@ export default async function EditActivityPage() {
   let summary: EditActivitySummary | null = null;
   let unavailable = false;
   try {
-    summary = await loadEditActivitySummary(db.read, new Date(), resolveDirectoryPeople);
+    summary = await loadEditActivitySummary(db.read, new Date(), resolveDirectoryPeople, range);
   } catch (err) {
     unavailable = true;
     console.error(
