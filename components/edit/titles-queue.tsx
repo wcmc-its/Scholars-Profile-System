@@ -453,12 +453,15 @@ export function TitlesQueue({
   session,
   searchParams,
   basePath,
+  readOnly = false,
 }: {
   data: TitlesQueueData;
   session: Pick<EditSession, "isSuperuser" | "isCommsSteward" | "isContentEditor" | "isObserver">;
   searchParams: TitlesQueueSearchParams;
   /** `/edit/titles-queue` — for the page's own links (tabs, chips, the form). */
   basePath: string;
+  /** Hide the pin control even for a pinner: a View as the pin write refuses. */
+  readOnly?: boolean;
 }) {
   const { all, counts } = data;
   const parsed = parseTitleDashboardParams(toSearchParams(searchParams));
@@ -467,7 +470,7 @@ export function TitlesQueue({
   const inTab = params.tab === "all" ? all.length : counts[params.tab!];
   const base = filterTitleDashboard(all, { ...params, reason: null });
   const rows = params.reason ? base.filter((r) => r.reasons.includes(params.reason!)) : base;
-  const canSet = canPinTitles(session);
+  const canSet = !readOnly && canPinTitles(session);
   const grid = canSet ? GRID_SET : GRID_VIEW;
   const downloadHref = `${basePath}/export?${titleDashboardQueryString(params)}`;
 

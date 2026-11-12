@@ -20,10 +20,11 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { NewsApprovalQueue } from "@/components/edit/news-approval-queue";
 import { NewsQueueGuide, NewsReadOnlyText } from "@/components/edit/queue-guides";
-import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
 import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
+import { viewAsWriteState } from "@/lib/edit/request";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isNewsQueueEnabled, loadNewsQueue, loadNewsQueueCounts } from "@/lib/edit/news-queue";
@@ -60,6 +61,8 @@ export default async function NewsQueuePage() {
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
+  const viewAs = await viewAsWriteState();
+  const readOnly = viewAs.writesRefused || session.isObserver === true;
 
   return (
     <ConsoleShell
@@ -86,10 +89,11 @@ export default async function NewsQueuePage() {
         </QueueIntro>
       </div>
       {/* An observer gets the synthetic steward view to read this page, but the
-          decision route strips it (`stripObserverView`) and refuses. */}
-      {session.isObserver === true ? (
+          decision route strips it (`stripObserverView`) and refuses. A View
+          as the route refuses (`resolveEditIdentityForWrite`) reads only too. */}
+      {readOnly ? (
         <ReadOnlyNote className="mb-4" testId="news-queue-read-only-note">
-          <NewsReadOnlyText noun="stories" />
+          {viewAs.viewingAs ? VIEW_AS_READ_ONLY : <NewsReadOnlyText noun="stories" />}
         </ReadOnlyNote>
       ) : null}
       <NewsApprovalQueue

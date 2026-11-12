@@ -12,6 +12,8 @@
 import { QueueHelpPanel, QueueHelpSection, QueueTerm } from "@/components/edit/queue-help";
 import { HIDE_AT, SHOW_AT } from "@/lib/edit/grant-attribution-decided";
 
+/** The bulk-approval job covers honors, ORCID, grant attribution and news
+ *  (#3366); NOT media highlights, so its guide leaves this out. */
 const BULK_NOTE =
   "An administrator may approve strong matches in bulk, so some leave this queue without a separate review here.";
 
@@ -71,15 +73,18 @@ export function HonorsReadOnlyText() {
 }
 
 /** ORCID. Levels: `bandOf` in `etl/orcid-evidence/index.ts` (MIN_SHARED = 3,
- *  ORCID_HISTORY_BAND on in both envs); auto-confirm: `planAutoConfirm` there;
+ *  ORCID_HISTORY_BAND on in both envs); auto-confirm: `planAutoConfirm` there,
+ *  on only where ORCID_EMAIL_AUTOCONFIRM is (prod today, `cdk/lib/etl-stack.ts`),
+ *  so the copy says "may be";
  *  labels: `ORCID_QUEUE_BAND_LABEL`; who decides: `isOrcidQueueTabVisible`. */
 export function OrcidQueueGuide() {
   return (
     <QueueHelpPanel>
       <QueueHelpSection title="Match strength, strongest first">
         <QueueTerm term="Email verified">
-          The ORCID record shows the scholar&rsquo;s own email, verified by ORCID. When nothing
-          conflicts, the iD is confirmed automatically overnight and shows here with an Undo.
+          The ORCID record shows the scholar&rsquo;s own email, verified by ORCID. Email-verified
+          iDs with no conflict may be confirmed automatically overnight; they show here with an
+          Undo.
         </QueueTerm>
         <QueueTerm term="Strong">
           At least 3 shared papers, names that agree, and an affiliation with Cornell or with an
@@ -169,7 +174,10 @@ export function GrantAttributionReadOnlyText() {
 }
 
 /** News and Media highlights share the matcher (`etl/news/names.ts`: TAG is
- *  High; prose is scored on position, repeats, headline and a department tag;
+ *  High; prose is scored on position (first tenth +3, first third +1), repeats
+ *  +1, a department tag +2 and the headline +1, High at 4 and Medium at 2; a
+ *  clip's "Dr. X" summary names are fed in as tags and a clip has no caption
+ *  (`etl/news/clips.ts`);
  *  caption-only and endowed-title-only are Low; a shared name is capped at
  *  Medium), the review state (`etl/news/index.ts` never resurrects a rejected
  *  row), and the decision route (superuser, comms steward or content editor). */
@@ -180,8 +188,9 @@ export function NewsQueueGuide() {
     <QueueHelpPanel>
       <QueueHelpSection title="Match strength">
         <QueueTerm term="HIGH">
-          The newsroom tagged this scholar on the story, or the text names them prominently: early
-          in the story, more than once, in the headline, or with their department tagged.
+          The newsroom tagged this scholar on the story, or several signs agree: named early in the
+          story, named more than once, in the headline, or their department tagged. One sign alone
+          is not enough.
         </QueueTerm>
         <QueueTerm term="MEDIUM">
           Named with less prominence, or tagged by a middle name or nickname. A name shared by more
@@ -208,7 +217,10 @@ export function NewsQueueGuide() {
         <QueueTerm term="Reject or None of these">
           Rules out the match. It won&rsquo;t be suggested again.
         </QueueTerm>
-        <QueueTerm term="Approve all">Approves every waiting mention on a story at once.</QueueTerm>
+        <QueueTerm term="Approve all">
+          Shown when a story names more than one scholar. Approves every mention that is ready. A
+          shared name stays waiting until you pick the right person.
+        </QueueTerm>
         <QueueTerm term="Undo">The bar after a decision offers Undo, which reverses it.</QueueTerm>
         <QueueTerm term="Bulk approval">{BULK_NOTE}</QueueTerm>
         <QueueTerm term="Who can decide">{NEWS_WHO}</QueueTerm>
@@ -222,15 +234,16 @@ export function MediaHighlightsQueueGuide() {
     <QueueHelpPanel>
       <QueueHelpSection title="Match strength">
         <QueueTerm term="High match">
-          The clip names the scholar prominently, for example early in the story or more than once.
+          The clip summary from Communications names the scholar as &ldquo;Dr.&rdquo; plus their
+          name, or several signs agree: named early, named more than once, or in the headline.
         </QueueTerm>
         <QueueTerm term="Medium match">
-          Named with less prominence. A name shared by more than one scholar is never higher than
-          Medium.
+          Named with less prominence, or called &ldquo;Dr.&rdquo; by a middle name or nickname. A
+          name shared by more than one scholar is never higher than Medium.
         </QueueTerm>
         <QueueTerm term="Low match">
-          Named only in a photo caption, only inside an endowed chair&rsquo;s name, or only in
-          passing. The clip is often about someone else.
+          Named only inside an endowed chair&rsquo;s name, or only in passing. The clip is often
+          about someone else.
         </QueueTerm>
         <QueueTerm term="via">Where in the clip the name was found.</QueueTerm>
       </QueueHelpSection>
@@ -241,7 +254,6 @@ export function MediaHighlightsQueueGuide() {
         <QueueTerm term="Approve but hide">Confirms the match without showing it.</QueueTerm>
         <QueueTerm term="Reject">Rules out the match. It won&rsquo;t be suggested again.</QueueTerm>
         <QueueTerm term="Undo">The bar after a decision offers Undo, which reverses it.</QueueTerm>
-        <QueueTerm term="Bulk approval">{BULK_NOTE}</QueueTerm>
         <QueueTerm term="Who can decide">{NEWS_WHO}</QueueTerm>
       </QueueHelpSection>
     </QueueHelpPanel>

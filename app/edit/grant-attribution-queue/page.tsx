@@ -21,7 +21,7 @@ import {
   GrantAttributionQueueGuide,
   GrantAttributionReadOnlyText,
 } from "@/components/edit/queue-guides";
-import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
 import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession, impersonationActive } from "@/lib/auth/effective-identity";
 import { nowSeconds } from "@/lib/auth/session";
@@ -168,14 +168,7 @@ export default async function GrantAttributionQueuePage({
 
       {readOnly ? (
         <ReadOnlyNote className="mb-4" testId="grant-attribution-read-only-note">
-          {viewingAs ? (
-            <>
-              Read-only while viewing as someone else. Decisions are recorded under your own
-              sign-in.
-            </>
-          ) : (
-            <GrantAttributionReadOnlyText />
-          )}
+          {viewingAs ? VIEW_AS_READ_ONLY : <GrantAttributionReadOnlyText />}
         </ReadOnlyNote>
       ) : null}
 

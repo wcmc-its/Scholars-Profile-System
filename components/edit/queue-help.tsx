@@ -56,6 +56,11 @@ export function QueueHelpSection({ title, children }: { title: string; children:
   );
 }
 
+/** The read-only notice under "View as" when the overlay itself refuses the
+ *  queue's writes (`impersonatedWriteRefused`, `lib/edit/request.ts`). */
+export const VIEW_AS_READ_ONLY =
+  "Read-only while viewing as someone else. Decisions are recorded under your own sign-in.";
+
 /** The notice for a viewer who can see a queue but cannot decide it. */
 export function ReadOnlyNote({
   children,

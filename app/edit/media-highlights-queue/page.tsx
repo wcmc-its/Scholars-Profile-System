@@ -26,10 +26,11 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { MediaHighlightsQueue } from "@/components/edit/media-highlights-queue";
 import { MediaHighlightsQueueGuide, NewsReadOnlyText } from "@/components/edit/queue-guides";
-import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
 import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
+import { viewAsWriteState } from "@/lib/edit/request";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
@@ -70,6 +71,8 @@ export default async function MediaHighlightsQueuePage() {
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
+  const viewAs = await viewAsWriteState();
+  const readOnly = viewAs.writesRefused || session.isObserver === true;
 
   return (
     <ConsoleShell
@@ -95,10 +98,10 @@ export default async function MediaHighlightsQueuePage() {
           <MediaHighlightsQueueGuide />
         </QueueIntro>
       </div>
-      {/* Same as the news queue: an observer reads, the decision route refuses. */}
-      {session.isObserver === true ? (
+      {/* Same as the news queue: an observer, or a refused View as, reads only. */}
+      {readOnly ? (
         <ReadOnlyNote className="mb-4" testId="media-highlights-queue-read-only-note">
-          <NewsReadOnlyText noun="clips" />
+          {viewAs.viewingAs ? VIEW_AS_READ_ONLY : <NewsReadOnlyText noun="clips" />}
         </ReadOnlyNote>
       ) : null}
       <MediaHighlightsQueue

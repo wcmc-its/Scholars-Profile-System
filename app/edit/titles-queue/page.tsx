@@ -20,7 +20,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { TitlesReadOnlyText } from "@/components/edit/queue-guides";
-import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
 import {
   loadTitlesQueue,
   TitlesQueue,
@@ -29,6 +29,7 @@ import {
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { viewAsWriteState } from "@/lib/edit/request";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { canPinTitles, canReviewTitles, rememberTitlesPendingCount } from "@/lib/edit/titles-queue";
 
@@ -64,6 +65,10 @@ export default async function TitlesQueuePage({
   // The exact count this page just computed: the pill here, and the memo the
   // other console pages read, so the two agree after a pin.
   rememberTitlesPendingCount(data.counts.review);
+  // The pin write refuses an observer or content editor, and a View as it
+  // refuses (`resolveEditIdentityForWrite`).
+  const viewAs = await viewAsWriteState();
+  const canPin = !viewAs.writesRefused && canPinTitles(session);
 
   return (
     <ConsoleShell
@@ -78,17 +83,22 @@ export default async function TitlesQueuePage({
         <p className="text-muted-foreground m-0 max-w-3xl text-[14.5px] leading-normal">
           Scholars whose displayed title needs a look: contested leadership titles, leadership
           titles that lost, and roles the title text disagrees with.{" "}
-          {canPinTitles(session) ? "Fix the source or pin a title." : "Fix the source."}
+          {canPin ? "Fix the source or pin a title." : "Fix the source."}
         </p>
       </div>
-      {/* An observer or content editor reads the queue but never pins
-          (`canPinTitles`); say so, and who can. */}
-      {canPinTitles(session) ? null : (
+      {/* Read-only: say so, and who can pin. */}
+      {canPin ? null : (
         <ReadOnlyNote className="mb-4" testId="titles-read-only-note">
-          <TitlesReadOnlyText />
+          {viewAs.viewingAs ? VIEW_AS_READ_ONLY : <TitlesReadOnlyText />}
         </ReadOnlyNote>
       )}
-      <TitlesQueue data={data} session={session} searchParams={sp} basePath={BASE_PATH} />
+      <TitlesQueue
+        data={data}
+        session={session}
+        searchParams={sp}
+        basePath={BASE_PATH}
+        readOnly={!canPin}
+      />
     </ConsoleShell>
   );
 }

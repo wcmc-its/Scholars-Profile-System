@@ -24,7 +24,7 @@ import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { HonorsQueue } from "@/components/edit/honors-queue";
 import { HonorsQueueGuide, HonorsReadOnlyText } from "@/components/edit/queue-guides";
-import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
 import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -40,6 +40,7 @@ import {
   loadHonorSources,
 } from "@/lib/edit/honor-queue";
 import { isHonorsRunNowEnabled } from "@/lib/honors/run-now";
+import { viewAsWriteState } from "@/lib/edit/request";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -99,7 +100,11 @@ export default async function HonorsQueuePage() {
     db.read,
     rejected.flatMap((g) => g.rows.map((r) => r.cwid)),
   );
-  const readOnly = isHonorsQueueReadOnly(session);
+  // Read-only too under a View as the decision routes refuse
+  // (`resolveEditIdentityForWrite`): one an observer or content editor
+  // started, or any while IMPERSONATION_READONLY is on.
+  const viewAs = await viewAsWriteState();
+  const readOnly = viewAs.writesRefused || isHonorsQueueReadOnly(session);
   const pendingCount = groups.reduce((sum, g) => sum + g.rows.length, 0);
   // The subnav's slug badge is a live count; keep it truthful on this page too
   // rather than passing 0 and making the tab lie.
@@ -149,7 +154,7 @@ export default async function HonorsQueuePage() {
           controls are hidden; say why, and who can decide. */}
       {readOnly ? (
         <ReadOnlyNote className="mb-4" testId="honors-read-only-note">
-          <HonorsReadOnlyText />
+          {viewAs.viewingAs ? VIEW_AS_READ_ONLY : <HonorsReadOnlyText />}
         </ReadOnlyNote>
       ) : null}
       <HonorsQueue
