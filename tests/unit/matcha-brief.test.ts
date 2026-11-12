@@ -75,6 +75,7 @@ import {
   briefFacts,
   briefMatchedConcepts,
   buildAskBlock,
+  buildResearcherBlock,
   buildSourceTable,
   checkDataSources,
   checkMethodPills,
@@ -91,7 +92,7 @@ import {
   type BriefRecords,
   type BriefTopic,
 } from "@/lib/api/matcha-brief";
-import { MAX_METHOD_PILLS } from "@/lib/edit/matcha-brief-types";
+import { MAX_METHOD_PILLS, NO_LAB_ANGLE, hasAngle } from "@/lib/edit/matcha-brief-types";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import type { MatchaCandidate, MatchaConcept } from "@/lib/api/matcha-contract";
 
@@ -196,6 +197,23 @@ describe("angleRole and dataSources validation", () => {
     expect(cleanAngleRole("   ")).toBe("");
     expect(cleanAngleRole("x".repeat(60))).toBe("x".repeat(60));
     expect(cleanAngleRole("x".repeat(61))).toBe("");
+  });
+
+  it("cleanAngleRole drops a consulting or advisory role, whatever the model returned", () => {
+    expect(cleanAngleRole("Scientific consultant")).toBe("");
+    expect(cleanAngleRole("Clinical consulting partner.")).toBe("");
+    expect(cleanAngleRole("Scientific advisor")).toBe("");
+    expect(cleanAngleRole("Trial-design ADVISER")).toBe("");
+    expect(cleanAngleRole("Advisory board member")).toBe("");
+    expect(cleanAngleRole("Disease-model validation partner")).toBe("Disease-model validation partner");
+    // The post-check applies it: the angle then prints with no bold role.
+    const r = postCheckBrief(
+      { why: "x", angle: "Can test candidates in mouse models.", angleRole: "Scientific consultant" },
+      matched,
+      sources,
+    );
+    expect(r.angleRole).toBe("");
+    expect(r.angle).toBe("Can test candidates in mouse models.");
   });
 
   it("keeps only data sources that name a given method, in that method's spelling", () => {
@@ -678,6 +696,75 @@ describe("loadBriefRecords", () => {
   });
 });
 
+describe("laboratory partnership angle", () => {
+  it("the prompt bans consulting and advisory roles and names what an angle may rest on", () => {
+    const anglePart = BRIEF_SYSTEM_PROMPT.split("`angle`:")[1].split("`methodPills`")[0];
+    expect(anglePart).toMatch(/Never propose a consulting, advisory or\s+biomarker-expertise role/);
+    expect(anglePart).toMatch(/Never a consulting or advisory role/);
+    // In order of preference: awards, then methods and tools, then first/last-author papers.
+    const award = anglePart.indexOf("awardsAsPI");
+    const methods = anglePart.indexOf("METHODS_AND_TOOLS");
+    const papers = anglePart.indexOf("authorPosition is 'first' or 'last'");
+    expect(award).toBeGreaterThan(-1);
+    expect(methods).toBeGreaterThan(award);
+    expect(papers).toBeGreaterThan(methods);
+    expect(anglePart).toMatch(/Never base the angle on clinical-trial participation/);
+    expect(anglePart).toMatch(/only when the ASK itself asks for\s+trials or patient data/);
+    expect(anglePart).toMatch(/return `angle`\s+and `angleRole` as empty strings/);
+    // No role example invites consulting, and no trial count is an allowed number.
+    expect(anglePart).not.toMatch(/scientific consultant|Clinical-trial site lead|Five trials/i);
+    expect(anglePart).not.toContain("other than the trial count");
+    expect(BRIEF_REVISE_SYSTEM_PROMPT).toMatch(
+      /Never replace a removed role with a consulting or advisory one/,
+    );
+  });
+
+  it("puts awardsAsPI before publications, and middle-author papers last with their keys", () => {
+    const pub = (pmid: string, authorPosition: "first" | "last" | "middle" | null) => ({
+      ...facts.representativePublications[0],
+      pmid,
+      title: `Paper ${pmid}`,
+      authorPosition,
+    });
+    const many: OverviewFacts = {
+      ...facts,
+      representativePublications: [
+        pub("201", "middle"),
+        pub("202", "last"),
+        pub("203", null),
+        pub("204", "first"),
+      ],
+    };
+    const block = buildResearcherBlock(briefFacts(many, records), matched, records);
+    const payload = JSON.parse(block.split("<RESEARCHER>")[1].split("</RESEARCHER>")[0]) as {
+      publications: { key: string; pmid: string }[];
+    };
+    expect(Object.keys(payload).indexOf("awardsAsPI")).toBeLessThan(
+      Object.keys(payload).indexOf("publications"),
+    );
+    // First- and last-author papers lead, in their original order; the rest follow in theirs.
+    expect(payload.publications.map((p) => [p.key, p.pmid])).toEqual([
+      ["P2", "202"],
+      ["P4", "204"],
+      ["P1", "201"],
+      ["P3", "203"],
+    ]);
+    // Every key still resolves to the same paper in the source table.
+    const table = buildSourceTable(many, records);
+    for (const p of payload.publications) {
+      expect(table.get(p.key)).toMatchObject({ kind: "pub", pmid: p.pmid });
+    }
+    expect(block).toContain("CLINICAL_TRIALS_ON_RECORD: 3");
+  });
+
+  it("hasAngle is false for an empty angle and for the no-angle sentence", () => {
+    expect(hasAngle("")).toBe(false);
+    expect(hasAngle(undefined)).toBe(false);
+    expect(hasAngle(` ${NO_LAB_ANGLE} `)).toBe(false);
+    expect(hasAngle("Can test candidates in mouse models.")).toBe(true);
+  });
+});
+
 const generatedWhy = "Runs a lab on endothelial lipid signaling. Leads a clinical trial.";
 // The post-checked angle (the bracketed key stripped) is what the fact-check and revise see.
 const generatedAngle = "Could validate candidates in mouse models. Holds a patent on a device.";
@@ -850,6 +937,40 @@ describe("generateBrief", () => {
     const { generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
     expect(generated.angle).toBe("");
     expect(mockVerify.mock.calls[0][1]).toBe("Works on lipids.");
+  });
+
+  it("stores the no-angle sentence for an explicitly empty angle, unverified and with no role", async () => {
+    mockVerify.mockResolvedValue([]);
+    mockGenerateObject.mockResolvedValue({
+      object: { why: "Works on lipids.", angle: "  ", angleRole: "", topics: [] },
+    });
+    let { generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
+    expect(generated.angle).toBe(NO_LAB_ANGLE);
+    expect(generated.angleRole).toBeUndefined();
+    // The sentence is ours, not a claim about the researcher: the fact-check never sees it.
+    expect(mockVerify.mock.calls[0][1]).toBe("Works on lipids.");
+    expect(mockRevise).not.toHaveBeenCalled();
+
+    // A stray role beside an empty angle is not kept.
+    mockGenerateObject.mockResolvedValue({
+      object: { why: "Works on lipids.", angle: "", angleRole: "Disease-model partner", topics: [] },
+    });
+    ({ generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records }));
+    expect(generated.angle).toBe(NO_LAB_ANGLE);
+    expect(generated.angleRole).toBeUndefined();
+
+    // null is a missing field, not the model's statement.
+    mockGenerateObject.mockResolvedValue({ object: { why: "Works on lipids.", angle: null, topics: [] } });
+    ({ generated } = await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records }));
+    expect(generated.angle).toBe("");
+  });
+
+  it("tells the fact-check a consulting role resting on clinical trials is unsupported", async () => {
+    mockVerify.mockResolvedValue([]);
+    await generateBrief({ cwid: "abc1001", askTitle: null, concepts: CONCEPTS, candidate, records });
+    const extra = mockVerify.mock.calls[0][2].extraReference as string;
+    expect(extra).toMatch(/consulting, advisory or biomarker role resting on clinical trials is unsupported/);
+    expect(extra).not.toMatch(/\(consultant, trial lead/);
   });
 
   it("skips the revise call when the fact-check finds nothing", async () => {

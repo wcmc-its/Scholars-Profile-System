@@ -15,7 +15,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 
 import { MatchaPanel } from "@/components/edit/matcha-panel";
 import type { MatchaCandidate, MatchaConcept } from "@/lib/api/matcha-contract";
-import type { BriefRecords, BriefWire } from "@/lib/edit/matcha-brief-types";
+import { NO_LAB_ANGLE, type BriefRecords, type BriefWire } from "@/lib/edit/matcha-brief-types";
 
 const CONCEPTS: MatchaConcept[] = [
   {
@@ -366,6 +366,22 @@ describe("Matcha brief UI", () => {
       expect(calls.some((c) => c.method === "PATCH" && c.body?.angle === "Trial lead.")).toBe(true),
     );
     expect(await within(section).findByText("Trial lead.")).toBeTruthy();
+  });
+
+  it("shows the no-laboratory-angle sentence as an empty state, and edits from a blank", async () => {
+    window.localStorage.setItem("sponsor-match-density", "detailed");
+    const saved = brief("p1");
+    saved.generated.angle = NO_LAB_ANGLE;
+    stub({ candidates: pool(2), saved: [saved] });
+    await search();
+    const section = await screen.findByRole("region", { name: "Brief for Person 01" });
+    const empty = section.querySelector('[data-slot="matcha-brief-no-angle"]')!;
+    expect(empty.textContent).toBe(NO_LAB_ANGLE);
+    expect(section.querySelector('[data-slot="matcha-brief-angle-role"]')).toBeNull();
+    expect(within(section).queryByText(/Drafted before partnership angles/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Partnership angle for Person 01" }));
+    const box = screen.getByRole("textbox", { name: "Partnership angle for Person 01" });
+    expect((box as HTMLTextAreaElement).value).toBe("");
   });
 
   it("a brief drafted before angles shows no crash and points to Redraft", async () => {

@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { briefCsvFields, buildMatchaCsv, type MatchaCsvRow } from "@/lib/edit/matcha-export";
+import { NO_LAB_ANGLE } from "@/lib/edit/matcha-brief-types";
 
 const ROW: MatchaCsvRow = {
   rank: 1,
@@ -19,19 +20,20 @@ const ROW: MatchaCsvRow = {
   careerStage: "Senior",
   clinician: "Yes",
   researcherType: "Physician-scientist",
+  researchKind: "Laboratory research",
   technologyCount: 2,
   profileUrl: "https://example.org/alice-alpha",
 };
 
 const HEADER =
-  "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,CTL technologies,Profile URL";
+  "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,Research kind,CTL technologies,Profile URL";
 
 describe("buildMatchaCsv", () => {
   it("writes the header row and one row per researcher", () => {
     const lines = buildMatchaCsv([ROW]).split("\r\n");
     expect(lines[0]).toBe(HEADER);
     expect(lines[1]).toBe(
-      '1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,2,https://example.org/alice-alpha',
+      '1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,Laboratory research,2,https://example.org/alice-alpha',
     );
   });
 
@@ -44,7 +46,7 @@ describe("buildMatchaCsv", () => {
     const csv = buildMatchaCsv([{ ...ROW, title: null, department: null }]);
     expect(csv).not.toContain("null");
     expect(csv.split("\r\n")[1]).toBe(
-      '1,aaa1001,Alice Alpha,,,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,2,https://example.org/alice-alpha',
+      '1,aaa1001,Alice Alpha,,,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,Laboratory research,2,https://example.org/alice-alpha',
     );
   });
 
@@ -80,9 +82,10 @@ describe("buildMatchaCsv", () => {
       careerStage: "",
       clinician: "",
       researcherType: "",
+      researchKind: "",
     };
     const cells = buildMatchaCsv([unknown]).split("\r\n")[1];
-    expect(cells).toContain("systemic sclerosis; pulmonary fibrosis,,,,,2,");
+    expect(cells).toContain("systemic sclerosis; pulmonary fibrosis,,,,,,2,");
     expect(cells).not.toMatch(/,No,/);
   });
 
@@ -104,7 +107,7 @@ describe("buildMatchaCsv", () => {
     ).split("\r\n");
     expect(lines[0]).toBe(`${HEADER},Eligible`);
     expect(lines[1]).toBe(
-      "1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,2,https://example.org/alice-alpha,Yes",
+      "1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,Laboratory research,2,https://example.org/alice-alpha,Yes",
     );
     expect(lines[2].endsWith(",No")).toBe(true);
   });
@@ -114,10 +117,10 @@ describe("buildMatchaCsv", () => {
   });
 
   it("without the option the file is unchanged — `/edit/matcha` states no rule, so no column", () => {
-    // A stray `eligible` value must not smuggle a 14th cell into a 13-column file either.
+    // A stray `eligible` value must not smuggle a 15th cell into a 14-column file either.
     const lines = buildMatchaCsv([{ ...ROW, eligible: "Yes" }]).split("\r\n");
     expect(lines[0]).toBe(HEADER);
-    expect(lines[1].split(",")).toHaveLength(13);
+    expect(lines[1].split(",")).toHaveLength(14);
   });
 });
 
@@ -181,6 +184,14 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
     const fields = briefCsvFields({ generated: legacy, edited: null });
     expect(fields.briefAngle).toBe("");
     expect(fields.briefWhy).toBe("Generated why.");
+  });
+
+  it("writes the no-laboratory-angle sentence as plain text", () => {
+    const fields = briefCsvFields({
+      generated: { ...BRIEF.generated, angle: NO_LAB_ANGLE },
+      edited: null,
+    });
+    expect(fields.briefAngle).toBe("No laboratory collaboration angle is evident.");
   });
 
   it("writes blanks for a row with no brief", () => {

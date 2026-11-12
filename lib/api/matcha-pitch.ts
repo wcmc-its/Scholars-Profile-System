@@ -12,6 +12,7 @@ import { bedrockClient } from "@/lib/llm/client";
 import { bedrockCallOptions, modelAcceptsTemperature } from "@/lib/llm/models";
 import type { MatchaConcept } from "@/lib/api/matcha-contract";
 import { briefModelId } from "@/lib/api/matcha-brief";
+import { hasAngle } from "@/lib/edit/matcha-brief-types";
 
 /** The hard cap after the post-check (the prompt asks for ≤ 70). */
 export const PITCH_MAX_WORDS = 90;
@@ -177,7 +178,8 @@ export function buildLinesPrompt(input: EmailLinesInput): string {
     "",
     "BRIEF:",
     input.role ? `Role: ${input.role}` : null,
-    input.angle ? `Partnership angle: ${input.angle}` : null,
+    // The "no laboratory angle" sentence is the officer's empty state, never outreach copy.
+    hasAngle(input.angle) ? `Partnership angle: ${input.angle}` : null,
     input.why ? `Why a fit: ${input.why}` : null,
     input.topics.length > 0
       ? `Discussion topics:\n${input.topics.map((t) => `- ${t}`).join("\n")}`

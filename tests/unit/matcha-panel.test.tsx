@@ -894,7 +894,7 @@ describe("MatchaPanel", () => {
       expect(parts).toHaveLength(1);
       const csv = parts[0];
       expect(csv.split("\r\n")[0]).toBe(
-        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,CTL technologies,Profile URL",
+        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,Research kind,CTL technologies,Profile URL",
       );
       expect(csv).toContain("Alice Alpha");
       expect(csv).toContain("Strong fit");
@@ -990,6 +990,132 @@ describe("MatchaPanel", () => {
     await renderAndSearch(); // THREE — no `measures`
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText(/Researcher type:/)).toBeNull();
+  });
+
+  // ── Research kind facet + default ──────────────────────────────────────────
+  const KIND_RUN: MatchaCandidate[] = [
+    candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9, measures: { researcherType: "basic_scientist", researchKinds: ["lab"], isPhysician: false } }),
+    candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.85, measures: { researcherType: "clinical_researcher", researchKinds: ["clinical"], isPhysician: false } }),
+    candidate({ cwid: "c", name: "Carol Gamma", fusedScore: 0.8, measures: { researcherType: "funded_investigator", researchKinds: [], isPhysician: false } }),
+    candidate({ cwid: "d", name: "Dan Delta", fusedScore: 0.75, measures: { researcherType: "unclassified", researchKinds: [], isPhysician: false } }),
+    candidate({ cwid: "e", name: "Erin Epsilon", fusedScore: 0.7, measures: { researcherType: "physician_scientist", researchKinds: ["lab", "clinical"], isPhysician: true } }),
+  ];
+  async function searchKindRun(preferences?: MatchaPreference[]) {
+    stubFetch({ concepts: CONCEPTS, candidates: KIND_RUN, ...(preferences ? { preferences } : {}) });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+  }
+
+  it("defaults Research kind to laboratory only, as removable chips that Clear filters drops", async () => {
+    await searchKindRun();
+
+    // Laboratory researchers (incl. the both-kinds physician-scientist) show; the funded
+    // investigator, the clinical-only researcher and the no-kind row are one click away.
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+    expect(screen.queryByText("Carol Gamma")).toBeNull();
+    expect(screen.getByText("Erin Epsilon")).toBeTruthy();
+    expect(screen.queryByText("Bob Beta")).toBeNull();
+    expect(screen.queryByText("Dan Delta")).toBeNull();
+
+    expect(screen.getByText("Research kind")).toBeTruthy();
+    const box = (name: RegExp) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
+    expect(box(/^Laboratory research/).checked).toBe(true);
+    expect(box(/^Funded, kind not evident/).checked).toBe(false);
+    expect(box(/^Clinical research/).checked).toBe(false);
+    // The default is never a mystery: each selected kind is a removable chip.
+    expect(screen.getByRole("button", { name: "Remove Laboratory research filter" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Funded, kind not evident filter" })).toBeNull();
+
+    // OR within the group: adding Clinical research brings back the clinical-only researcher.
+    fireEvent.click(box(/^Clinical research/));
+    expect(screen.getByText("Bob Beta")).toBeTruthy();
+    expect(screen.queryByText("Dan Delta")).toBeNull();
+
+    // Funded, kind not evident is one click away, and its chip's remove is the checkbox's toggle.
+    fireEvent.click(box(/^Funded, kind not evident/));
+    expect(screen.getByText("Carol Gamma")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Funded, kind not evident filter" }));
+    expect(screen.queryByText("Carol Gamma")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    for (const name of ["Alice Alpha", "Bob Beta", "Carol Gamma", "Dan Delta", "Erin Epsilon"])
+      expect(screen.getByText(name)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+    expect(box(/^Laboratory research/).checked).toBe(false);
+  });
+
+  it("ANDs Research kind with the other facets", async () => {
+    await searchKindRun();
+    // Laboratory research AND Physician-scientist leaves only the physician with lab papers.
+    for (const label of [/^Basic scientist/, /^Clinical or population researcher/, /^Funded investigator/, /^Unclassified/])
+      fireEvent.click(screen.getByRole("checkbox", { name: label }));
+    expect(screen.getByText("Erin Epsilon")).toBeTruthy();
+    expect(screen.queryByText("Alice Alpha")).toBeNull();
+  });
+
+  it("applies no Research kind default when the ask states a clinician preference", async () => {
+    await searchKindRun([
+      {
+        measure: "isClinician",
+        label: "Practicing clinician",
+        evidence: "…seeking a practicing clinician…",
+        importance: 1,
+      },
+    ]);
+    // The group is offered, nothing is preselected, and nobody is hidden by kind.
+    expect(screen.getByText("Research kind")).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: /^Laboratory research/ }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+    expect(screen.getByText("Bob Beta")).toBeTruthy();
+    expect(screen.getByText("Dan Delta")).toBeTruthy();
+  });
+
+  it("an old four-value run still renders and filters, with no Research kind group or default", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9, measures: { researcherType: "clinician" } }),
+        candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.85, measures: { researcherType: "basic_scientist" } }),
+        candidate({ cwid: "c", name: "Carol Gamma", fusedScore: 0.8, measures: { researcherType: "unclassified" } }),
+        candidate({ cwid: "d", name: "Dan Delta", fusedScore: 0.75, measures: { researcherType: "physician_scientist" } }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Bob Beta");
+
+    // No `researchKinds` on any row: not computed, so no group, no default, no chip.
+    expect(screen.queryByText("Research kind")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+    // The researcher-type default and facet behave as they did.
+    expect(screen.queryByText("Alice Alpha")).toBeNull();
+    expect(screen.getByText("Carol Gamma")).toBeTruthy();
+    expect(screen.getByText("Dan Delta")).toBeTruthy();
+    expect(screen.getByText("Researcher type: all but Clinician")).toBeTruthy();
+    for (const label of [/^Basic scientist/, /^Physician-scientist/, /^Clinician/, /^Unclassified/])
+      expect(screen.getByRole("checkbox", { name: label })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Physician-scientist/ }));
+    expect(screen.queryByText("Dan Delta")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+  });
+
+  it("lists the archetypes in the fixed order", async () => {
+    await searchKindRun();
+    const heading = screen.getByText("Researcher type");
+    const labels = Array.from(heading.closest("div.mt-3")!.querySelectorAll("label span.truncate")).map(
+      (el) => el.textContent,
+    );
+    expect(labels).toEqual([
+      "Basic scientist",
+      "Physician-scientist",
+      "Clinical or population researcher",
+      "Funded investigator",
+      "Unclassified",
+    ]);
   });
 
   // ── Person type facet (§2) ─────────────────────────────────────────────────
