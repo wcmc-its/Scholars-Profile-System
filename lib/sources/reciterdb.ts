@@ -92,3 +92,20 @@ export async function closeReciterPool(): Promise<void> {
   globalForReciter.__reciterPool = undefined;
   await pool?.end();
 }
+
+/**
+ * Boot-time hint for the silent-degrade case: ReciterDB unset while a feature
+ * still routes to its live path (bridge flag off). Those features then show
+ * "temporarily unavailable" on every request; say so once instead. Staging and
+ * prod run both bridges on, so this is null there.
+ */
+export function reciterDbConfigWarning(env: Record<string, string | undefined> = process.env): string | null {
+  if (env.SCHOLARS_RECITERDB_HOST) return null;
+  const live = ["MENTORING_COPUB_BRIDGE", "PUBLICATION_CITING_BRIDGE"].filter((f) => env[f] !== "on");
+  if (live.length === 0) return null;
+  return (
+    `[reciterdb] SCHOLARS_RECITERDB_HOST is unset and ${live.join(", ")} not "on": ` +
+    "mentoring and cited-by data will show as unavailable. Set the flag(s) to \"on\" " +
+    "to read the local bridge tables (see .env.example)."
+  )
+}
