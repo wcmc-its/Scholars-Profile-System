@@ -48,10 +48,10 @@ const caCache = new Map<string, string>();
 export function loadRdsCa(file: string = rdsCaBundlePath()): string {
   const cached = caCache.get(file);
   if (cached !== undefined) return cached;
-  if (!existsSync(file)) {
+  if (!existsSync(/*turbopackIgnore: true*/ file)) {
     throw new Error(`DB_TLS=on but the RDS CA bundle is missing at ${file}`);
   }
-  const pem = readFileSync(file, "utf8");
+  const pem = readFileSync(/*turbopackIgnore: true*/ file, "utf8");
   if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
     throw new Error(`DB_TLS=on but ${file} is not a PEM certificate bundle`);
   }

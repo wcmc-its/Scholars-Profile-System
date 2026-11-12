@@ -97,7 +97,7 @@ export function parseSpecialtyAnchors(csv: string): Map<string, string[]> {
 export function loadSpecialtyAnchorMap(
   csvPath: string = CLINICAL_ANCHORS_CSV,
 ): Map<string, string[]> {
-  return parseSpecialtyAnchors(readFileSync(csvPath, "utf8"));
+  return parseSpecialtyAnchors(readFileSync(/*turbopackIgnore: true*/ csvPath, "utf8"));
 }
 
 /**
