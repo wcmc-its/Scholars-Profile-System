@@ -1690,6 +1690,56 @@ a{color:var(--slate)}
           },
           {
             "Action": {
+              "Block": {},
+            },
+            "Name": "search-block-scraper-ua",
+            "Priority": 6,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "SingleHeader": {
+                          "Name": "user-agent",
+                        },
+                      },
+                      "PositionalConstraint": "EXACTLY",
+                      "SearchString": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "NONE",
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-block-scraper-ua",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
               "Block": {
                 "CustomResponse": {
                   "CustomResponseBodyKey": "rateLimited",
@@ -1698,7 +1748,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 6,
+            "Priority": 7,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -1757,7 +1807,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -3647,6 +3697,56 @@ a{color:var(--slate)}
           },
           {
             "Action": {
+              "Block": {},
+            },
+            "Name": "search-block-scraper-ua",
+            "Priority": 6,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "SingleHeader": {
+                          "Name": "user-agent",
+                        },
+                      },
+                      "PositionalConstraint": "EXACTLY",
+                      "SearchString": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "NONE",
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-block-scraper-ua",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
               "Block": {
                 "CustomResponse": {
                   "CustomResponseBodyKey": "rateLimited",
@@ -3655,7 +3755,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 6,
+            "Priority": 7,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -3714,7 +3814,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",

@@ -1463,13 +1463,46 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // 2026-11-12: residential-proxy scraper (~26k IPs, ~2 req/IP, stock
+          // Chrome TLS) sends one exact, ~20-month-stale UA. Per-IP limits
+          // and Bot Control COMMON cannot see it; the UA is the only tell.
+          // Exact match + /search only, so the blast radius is real Chrome 133
+          // Mac users on /search (11 hits in the prior 6 days). Trivially
+          // evaded by a UA rotation -- the durable fix is Bot Control TARGETED.
+          // ponytail: one hardcoded UA; promote to a list if a second shows up.
+          {
+            name: "search-block-scraper-ua",
+            priority: managedGroups.length + 3,
+            action: { block: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  searchPathMatch,
+                  {
+                    byteMatchStatement: {
+                      searchString:
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+                      fieldToMatch: { singleHeader: { Name: "user-agent" } },
+                      positionalConstraint: "EXACTLY",
+                      textTransformations: [{ priority: 0, type: "NONE" }],
+                    },
+                  },
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-block-scraper-ua`,
+              sampledRequestsEnabled: true,
+            },
+          },
           // Same incident: unlabeled scrapers get a /search-only per-IP cap.
           // 500/5min sits above every non-bot, non-WCM 7-day peak but one
           // (786, a scraper-shaped burst). WCM IPs are exempt: campus NAT
           // pools legitimately peak ~470/5min on /search alone.
           {
             name: "search-rate-limit",
-            priority: managedGroups.length + 3,
+            priority: managedGroups.length + 4,
             action: {
               block: {
                 customResponse: {
@@ -1507,7 +1540,7 @@ export class EdgeStack extends Stack {
           },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 4,
+            priority: managedGroups.length + 5,
             // Enforced (#1434): zero rate matches in the count window -- the
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
