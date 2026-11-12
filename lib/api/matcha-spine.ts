@@ -11,7 +11,7 @@
  *                  `searchPeople` rankings (§4: score(s) = Σ_c weight_c / (K + rank)).
  */
 
-import { DEFAULT_K, fuseTerms } from "@/lib/api/matcha-contract";
+import { DEFAULT_K } from "@/lib/api/matcha-contract";
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -91,29 +91,25 @@ export function rrfFuse(
   // default weights. Absent (flag off / other callers) ⇒ every scholar multiplies by 1 — the
   // fusion is byte-identical to before.
   recencyWeightByCwid?: ReadonlyMap<string, number>,
-  // Count only each scholar's strongest N terms (`fuseTerms`). Absent ⇒ the plain sum above.
-  topConcepts?: number,
 ): FusedScholar[] {
-  const terms = new Map<string, number[]>();
+  const score = new Map<string, number>();
   const contributions = new Map<string, { term: string; rank: number }[]>();
   const firstSeen = new Map<string, number>();
   let order = 0;
   for (const { term, weight, ranked } of rankings) {
     for (let rank = 1; rank <= ranked.length; rank++) {
       const cwid = ranked[rank - 1];
-      const t = terms.get(cwid);
-      if (t) t.push(weight / (K + rank));
-      else terms.set(cwid, [weight / (K + rank)]);
+      score.set(cwid, (score.get(cwid) ?? 0) + weight / (K + rank));
       const rows = contributions.get(cwid);
       if (rows) rows.push({ term, rank });
       else contributions.set(cwid, [{ term, rank }]);
       if (!firstSeen.has(cwid)) firstSeen.set(cwid, order++);
     }
   }
-  return [...terms.entries()]
-    .map(([cwid, t]) => ({
+  return [...score.entries()]
+    .map(([cwid, s]) => ({
       cwid,
-      score: fuseTerms(t, topConcepts) * (recencyWeightByCwid?.get(cwid) ?? 1),
+      score: s * (recencyWeightByCwid?.get(cwid) ?? 1),
       contributions: contributions.get(cwid)!,
     }))
     .sort((a, b) => b.score - a.score || firstSeen.get(a.cwid)! - firstSeen.get(b.cwid)!);
