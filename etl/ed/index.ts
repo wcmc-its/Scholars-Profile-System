@@ -1293,6 +1293,7 @@ async function main() {
             primaryOrgCode: f.primaryOrgCode,
             email: f.email,
             emailVisibility: f.emailVisibility,
+            netid: f.netid,
             roleCategory,
             // #1034 — ASMS-authoritative professorial rank from the person-type
             // leaf; read by the Jenzabar GS import to normalize its titles.
@@ -1358,6 +1359,7 @@ async function main() {
             primaryOrgCode: f.primaryOrgCode,
             email: f.email,
             emailVisibility: f.emailVisibility,
+            netid: f.netid,
             slug,
             roleCategory,
             // #1034 — ASMS-authoritative professorial rank from the person-type

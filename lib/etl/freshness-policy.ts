@@ -303,6 +303,9 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Deployed weekly step (cdk/lib/etl-stack.ts MyncbiWeekly, tier:"continue") that
   // writes source "MyNCBI" (etl/myncbi/index.ts withEtlRun).
   MyNCBI: { cadence: "weekly" },
+  // Deployed weekly step (cdk/lib/etl-stack.ts IdentityLinksWeekly, tier:"continue")
+  // that writes source "Identity-Links" (etl/identity-links/index.ts withEtlRun).
+  "Identity-Links": { cadence: "weekly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.

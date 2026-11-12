@@ -88,6 +88,7 @@ import { renderCoreUsersReport } from "@/components/edit/reports/core-users-body
 import { renderGrantAttributionReport } from "@/components/edit/reports/grant-attribution-body";
 import { renderNihBiosketchesReport } from "@/components/edit/reports/nih-biosketches-body";
 import { renderMyncbiDiscrepanciesReport } from "@/components/edit/reports/myncbi-discrepancies-body";
+import { renderIdentityLinksReport } from "@/components/edit/reports/identity-links-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -152,7 +153,7 @@ export type AdminReportProps = {
   basePath: string;
 };
 
-/** What a superuser-gated body (reports 15, 16) is handed: the gate is
+/** What a superuser-gated body (reports 15, 16, 22) is handed: the gate is
  *  `session.isSuperuser` alone (not comms stewards), nothing to scope. */
 export type SuperuserReportProps = AdminReportProps;
 
@@ -245,6 +246,8 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
   "20": { n: "20", gate: "unit", render: renderSharedResourceUsageReport },
   // Center-only: F and K awards to members and their trainees (mentor tables).
   "21": { n: "21", gate: "unit", render: renderFkAwardsReport },
+  // WCM scholars also holding a Cornell Ithaca NetID (etl/identity-links). Superusers only.
+  "22": { n: "22", gate: "superuser", render: renderIdentityLinksReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page

@@ -129,6 +129,12 @@ model Scholar {
   /// `https://orcid.org/<id>` URL to the scholar's Person.sameAs for AI/LLM
   /// crawler entity resolution.
   orcid                   String?   @db.VarChar(19)
+  /// The person's Cornell NetID from ED `weillCornellEduNetID` (etl/ed,
+  /// lowercased), or null. Equal to `cwid` for people minted in the merged
+  /// NetID/CWID namespace; a DIFFERENT value is ED asserting that this WCM
+  /// person also holds a Cornell (Ithaca) identity under that NetID — the
+  /// "known" band of `scholar_identity_link` (etl/identity-links).
+  netid                   String?   @db.VarChar(32)
   /// When the PERSON (or their proxy) confirmed `orcid` in SPS via the
   /// `/edit` confirm route. Null when the value came from Identity
   /// (etl/identity) — provenance for `/edit/orcid-coverage`'s confirmed
@@ -197,6 +203,7 @@ model Scholar {
   grantReviews         GrantAttributionReview[]
   grantScores          GrantAttributionScore[]
   wcmNamesake          WcmNamesake?
+  identityLinks        ScholarIdentityLink[]
   infoedBiosketches    InfoedBiosketch[]
   myncbiBibliography   MyncbiBibliography?
   myncbiCitations      MyncbiCitation[]
@@ -222,6 +229,7 @@ model Scholar {
   @@index([roleCategory])
   @@index([deptCode])
   @@index([divCode])
+  @@index([netid])
   @@index([primaryOrgCode])
   @@index([postdoctoralMentorCwid])
   @@map("scholar")
@@ -1352,6 +1360,31 @@ model MyncbiCitation {
   @@id([cwid, citationId])
   @@index([pmid])
   @@map("myncbi_citation")
+}
+
+/// A WCM scholar and a Cornell (Ithaca) NetID that are probably the same person
+/// (etl/identity-links, weekly, full replace). `band`: "known" (ED lists the NetID
+/// on the scholar), "strong" (a shared ORCID iD, or the Cornell record carries the
+/// scholar's WCM email), "possible" (same full name, unique on both campuses).
+/// `signals` is the evidence: { ed?: true, orcid?: string, email?: string,
+/// name?: true }. Read by report 22 (superusers only). The Cornell columns are a
+/// snapshot of reciterdb `identity_cornell_current` at compute time.
+model ScholarIdentityLink {
+  id                Int      @id @default(autoincrement())
+  cwid              String   @db.VarChar(32)
+  scholar           Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  netid             String   @db.VarChar(32)
+  band              String   @db.VarChar(16)
+  signals           Json
+  cornellName       String?  @map("cornell_name") @db.VarChar(255)
+  cornellDepartment String?  @map("cornell_department") @db.VarChar(255)
+  cornellTitle      String?  @map("cornell_title") @db.VarChar(255)
+  computedAt        DateTime @default(now()) @map("computed_at")
+
+  @@unique([cwid, netid])
+  @@index([band])
+  @@index([netid])
+  @@map("scholar_identity_link")
 }
 
 model WcmNamesake {

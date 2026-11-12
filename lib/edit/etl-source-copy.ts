@@ -260,6 +260,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Reads the public MyNCBI bibliography linked on a scholar's own NIH biosketch.",
     origin: "external", // ncbi.nlm.nih.gov
   },
+  "Identity-Links": {
+    label: "Cross-Campus Duplicates",
+    description: "Finds WCM scholars who probably also hold a Cornell Ithaca NetID, for a superuser report.",
+    origin: "external", // sibling ReCiterDB (Cornell roster)
+  },
   "InfoEd-Biosketch": {
     label: "NIH Biosketches",
     description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",

@@ -102,6 +102,7 @@ describe("unitKindsFor", () => {
       "19": ["center"],
       "20": ["center"],
       "21": ["center"],
+      "22": [],
     };
     for (const key of REPORT_KEYS) {
       expect(unitKindsFor(key)).toEqual(expected[key]);
