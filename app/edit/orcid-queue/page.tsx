@@ -29,6 +29,8 @@
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
+import { OrcidQueueGuide } from "@/components/edit/queue-guides";
+import { QueueIntro } from "@/components/edit/queue-intro";
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { OrcidQueue } from "@/components/edit/orcid-queue";
@@ -117,10 +119,19 @@ export default async function OrcidQueuePage({
     >
       <div className="mb-[22px] flex flex-col gap-1.5">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">ORCID queue</h1>
-        <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
-          ORCID iDs that may belong to a scholar, with the evidence from each public ORCID record. A
-          confirmed iD goes on file and reaches WCM Identity overnight.
-        </p>
+        <QueueIntro
+          panelId="orcid-queue-guide"
+          toggleTestId="orcid-queue-guide-toggle"
+          introClassName="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal"
+          intro={
+            <>
+              ORCID iDs that may belong to a scholar, with the evidence from each public ORCID
+              record. A confirmed iD goes on file and reaches WCM Identity overnight.
+            </>
+          }
+        >
+          <OrcidQueueGuide />
+        </QueueIntro>
       </div>
       <OrcidQueue
         data={data}

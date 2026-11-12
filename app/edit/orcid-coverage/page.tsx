@@ -20,7 +20,7 @@
  * ETL step if one is ever wanted). The only bars are proportions of the
  * current counts.
  *
- * Client islands: `./how-we-count` (the definitions toggle), `./filter-bar`,
+ * Client islands: `QueueIntro` (the "How we count" toggle), `./filter-bar`,
  * and `./coverage-tables` (Summary / All columns, department filter, sort and
  * the top-15 fold). Every number is computed here on the server.
  */
@@ -28,6 +28,8 @@ import { redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { QueueTerm as Definition } from "@/components/edit/queue-help";
+import { QueueIntro } from "@/components/edit/queue-intro";
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
@@ -53,7 +55,6 @@ import { cn } from "@/lib/utils";
 
 import { CoverageTables } from "./coverage-tables";
 import { CoverageFilterBar } from "./filter-bar";
-import { HowWeCount } from "./how-we-count";
 
 export const dynamic = "force-dynamic";
 
@@ -102,31 +103,6 @@ function Tile({ label, c }: { label: string; c: CoverageCounts }) {
           strong inference
         </span>
       </div>
-    </div>
-  );
-}
-
-/** One term in the "How we count" panel. */
-function Definition({
-  term,
-  swatch,
-  children,
-}: {
-  term: string;
-  swatch?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        {swatch ? (
-          <span className={cn("size-2.5 rounded-[3px]", swatch)} aria-hidden="true" />
-        ) : null}
-        <span className="text-sm font-semibold">{term}</span>
-      </div>
-      <span className="text-[13.5px] leading-[1.55] text-pretty text-[color:var(--evidence-body)]">
-        {children}
-      </span>
     </div>
   );
 }
@@ -456,7 +432,11 @@ export default async function EditOrcidCoveragePage({
           <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">
             ORCID coverage
           </h1>
-          <HowWeCount
+          <QueueIntro
+            panelId="orcid-coverage-definitions"
+            label="How we count"
+            hideLabel="Hide how we count"
+            toggleTestId="orcid-coverage-how-we-count"
             intro={
               <>
                 How many people have an ORCID iD on file, and how many more we can infer. NIH
@@ -466,7 +446,7 @@ export default async function EditOrcidCoveragePage({
             }
           >
             <Definitions />
-          </HowWeCount>
+          </QueueIntro>
         </div>
         {coverage === null ? (
           <p className="text-muted-foreground m-0" data-testid="orcid-coverage-unavailable">

@@ -19,8 +19,12 @@ import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { NewsApprovalQueue } from "@/components/edit/news-approval-queue";
+import { NewsQueueGuide, NewsReadOnlyText } from "@/components/edit/queue-guides";
+import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
+import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
+import { viewAsWriteState } from "@/lib/edit/request";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isNewsQueueEnabled, loadNewsQueue, loadNewsQueueCounts } from "@/lib/edit/news-queue";
@@ -57,6 +61,8 @@ export default async function NewsQueuePage() {
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
+  const viewAs = await viewAsWriteState();
+  const readOnly = viewAs.writesRefused || session.isObserver === true;
 
   return (
     <ConsoleShell
@@ -67,12 +73,29 @@ export default async function NewsQueuePage() {
     >
       <div className="mb-[22px] flex flex-col gap-1.5">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">News approval</h1>
-        <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
-          Newsroom stories matched to scholars by name. Nothing shows on a profile until it&rsquo;s
-          approved. Mentions are grouped by story, so one article naming several scholars is
-          reviewed once.
-        </p>
+        <QueueIntro
+          panelId="news-queue-guide"
+          toggleTestId="news-queue-guide-toggle"
+          introClassName="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal"
+          intro={
+            <>
+              Newsroom stories matched to scholars by name. Nothing shows on a profile until
+              it&rsquo;s approved. Mentions are grouped by story, so one article naming several
+              scholars is reviewed once.
+            </>
+          }
+        >
+          <NewsQueueGuide />
+        </QueueIntro>
       </div>
+      {/* An observer gets the synthetic steward view to read this page, but the
+          decision route strips it (`stripObserverView`) and refuses. A View
+          as the route refuses (`resolveEditIdentityForWrite`) reads only too. */}
+      {readOnly ? (
+        <ReadOnlyNote className="mb-4" testId="news-queue-read-only-note">
+          {viewAs.viewingAs ? VIEW_AS_READ_ONLY : <NewsReadOnlyText noun="stories" />}
+        </ReadOnlyNote>
+      ) : null}
       <NewsApprovalQueue
         pending={pending}
         approved={approved}

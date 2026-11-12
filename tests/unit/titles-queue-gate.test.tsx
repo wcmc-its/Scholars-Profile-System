@@ -27,6 +27,7 @@ const h = vi.hoisted(() => ({
   }),
   shell: vi.fn(),
   workbook: vi.fn(),
+  viewAs: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
@@ -47,6 +48,7 @@ vi.mock("@/lib/edit/honor-queue", () => ({
   isHonorsQueueTabVisible: () => false,
   countPendingHonors: vi.fn(),
 }));
+vi.mock("@/lib/edit/request", () => ({ viewAsWriteState: h.viewAs }));
 vi.mock("@/lib/edit/slug-request", () => ({
   isSlugRequestEnabled: () => false,
   countPendingSlugRequests: vi.fn(),
@@ -85,6 +87,7 @@ beforeEach(() => {
   h.redirect.mockClear();
   h.shell.mockClear();
   h.workbook.mockReset().mockResolvedValue(Buffer.from("xlsx"));
+  h.viewAs.mockReset().mockResolvedValue({ viewingAs: false, writesRefused: false });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -159,6 +162,62 @@ describe("/edit/titles-queue page gate", () => {
     h.load.mockClear();
     expect(await countTitlesNeedingReview({} as never)).toBe(2);
     expect(h.load).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["superuser", SUPER, false],
+    ["comms steward", STEWARD, false],
+    ["observer", { ...STEWARD, isObserver: true }, true],
+    ["content editor", { ...STEWARD, isContentEditor: true }, true],
+  ])("%s → the read-only note only when it cannot pin", async (_n, s, shown) => {
+    h.session.mockResolvedValue(s);
+    const { render } = await import("@testing-library/react");
+    render(await TitlesQueuePage({ searchParams: Promise.resolve({}) }));
+    const { children } = h.shell.mock.calls.at(-1)![0] as { children: React.ReactNode[] };
+    // The queue itself needs the router, so render only the note element.
+    const note = children.find(
+      (c) =>
+        (c as React.ReactElement<{ testId?: string }> | null)?.props?.testId ===
+        "titles-read-only-note",
+    ) as React.ReactElement | undefined;
+    expect(note !== undefined).toBe(shown);
+    if (note) {
+      const r = render(note);
+      expect(r.getByTestId("titles-read-only-note").textContent).toContain("you can’t pin titles");
+      r.unmount();
+    }
+  });
+
+  /** The page's children: the header, the note (or null), the queue. */
+  async function pageParts() {
+    const { render } = await import("@testing-library/react");
+    render(await TitlesQueuePage({ searchParams: Promise.resolve({}) }));
+    const { children } = h.shell.mock.calls.at(-1)![0] as { children: React.ReactNode[] };
+    const els = children as (React.ReactElement<Record<string, unknown>> | null)[];
+    const note = els.find((c) => c?.props?.testId === "titles-read-only-note");
+    const queue = els.find((c) => c?.props?.basePath !== undefined)!;
+    return { note, queue };
+  }
+
+  it("a refused View as over a steward → read-only, with the View as wording", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    h.viewAs.mockResolvedValue({ viewingAs: true, writesRefused: true });
+    const { note, queue } = await pageParts();
+    expect(queue.props.readOnly).toBe(true);
+    const { render } = await import("@testing-library/react");
+    const r = render(note!);
+    expect(r.getByTestId("titles-read-only-note").textContent).toContain(
+      "Read-only while viewing as someone else.",
+    );
+    r.unmount();
+  });
+
+  it("a superuser's View as of a steward can still pin", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    h.viewAs.mockResolvedValue({ viewingAs: true, writesRefused: false });
+    const { note, queue } = await pageParts();
+    expect(note).toBeUndefined();
+    expect(queue.props.readOnly).toBe(false);
   });
 });
 
