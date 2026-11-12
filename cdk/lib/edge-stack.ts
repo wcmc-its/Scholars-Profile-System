@@ -1264,6 +1264,14 @@ export class EdgeStack extends Stack {
         "AWSManagedRulesKnownBadInputsRuleSet",
         "AWSManagedRulesSQLiRuleSet",
       ];
+      const searchPathMatch = {
+        byteMatchStatement: {
+          searchString: "/search",
+          fieldToMatch: { uriPath: {} },
+          positionalConstraint: "STARTS_WITH",
+          textTransformations: [{ priority: 0, type: "LOWERCASE" }],
+        },
+      };
       const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
         name: `sps-edge-${env}-wcm-only`,
         scope: "CLOUDFRONT",
@@ -1424,9 +1432,82 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // 2026-11-12 incident: GPTBot + Googlebot walked /search facet
+          // combinations (unique, uncacheable URLs -> one OpenSearch query
+          // each), saturated OpenSearch, and heap-OOM'd all four prod tasks.
+          // Verified bots are exempt from rate-limit below by design (#125),
+          // so they need their own rule. robots.txt disallows /search too;
+          // this enforces it for bots that ignore or lag on robots.txt.
+          // /search is never an SEO surface -- profiles reach crawlers via
+          // the sitemap.
+          {
+            name: "search-block-bots",
+            priority: managedGroups.length + 2,
+            action: { block: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  searchPathMatch,
+                  {
+                    labelMatchStatement: {
+                      scope: "NAMESPACE",
+                      key: "awswaf:managed:aws:bot-control:bot:",
+                    },
+                  },
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-block-bots`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          // Same incident: unlabeled scrapers get a /search-only per-IP cap.
+          // 500/5min sits above every non-bot, non-WCM 7-day peak but one
+          // (786, a scraper-shaped burst). WCM IPs are exempt: campus NAT
+          // pools legitimately peak ~470/5min on /search alone.
+          {
+            name: "search-rate-limit",
+            priority: managedGroups.length + 3,
+            action: {
+              block: {
+                customResponse: {
+                  responseCode: 429,
+                  customResponseBodyKey: "rateLimited",
+                },
+              },
+            },
+            statement: {
+              rateBasedStatement: {
+                limit: 500,
+                evaluationWindowSec: 300,
+                aggregateKeyType: "IP",
+                scopeDownStatement: {
+                  andStatement: {
+                    statements: [
+                      searchPathMatch,
+                      {
+                        notStatement: {
+                          statement: {
+                            ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-rate-limit`,
+              sampledRequestsEnabled: true,
+            },
+          },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 2,
+            priority: managedGroups.length + 4,
             // Enforced (#1434): zero rate matches in the count window -- the
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
@@ -1472,8 +1553,8 @@ export class EdgeStack extends Stack {
             },
           },
           // #432: public launch drops the gate; everything after it stays.
-          // ponytail: the IPSet is kept (unreferenced) so rolling back is a
-          // pure rule re-add -- delete it with the rest of this block later.
+          // The IPSet also backs the search-rate-limit WCM exemption, so it
+          // stays even after block-non-wcm is gone.
         ].filter((r) => !(envConfig.edgePublic && r.name === "block-non-wcm")),
         visibilityConfig: {
           cloudWatchMetricsEnabled: true,
