@@ -2946,7 +2946,7 @@ service:
         "DeploymentController": {
           "Type": "ECS",
         },
-        "DesiredCount": 2,
+        "DesiredCount": 4,
         "EnableECSManagedTags": false,
         "EnableExecuteCommand": false,
         "HealthCheckGracePeriodSeconds": 120,
@@ -3003,8 +3003,8 @@ service:
         "TaskRole30FC0FBB",
       ],
       "Properties": {
-        "MaxCapacity": 6,
-        "MinCapacity": 2,
+        "MaxCapacity": 8,
+        "MinCapacity": 4,
         "ResourceId": {
           "Fn::Join": [
             "",
