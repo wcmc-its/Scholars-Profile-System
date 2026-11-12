@@ -1008,13 +1008,13 @@ describe("MatchaPanel", () => {
     await screen.findByText("Alice Alpha");
   }
 
-  it("defaults Research kind to laboratory + funded, as removable chips that Clear filters drops", async () => {
+  it("defaults Research kind to laboratory only, as removable chips that Clear filters drops", async () => {
     await searchKindRun();
 
-    // Laboratory researchers (incl. the both-kinds physician-scientist) and the funded
-    // investigator show; the clinical-only researcher and the no-kind row are one click away.
+    // Laboratory researchers (incl. the both-kinds physician-scientist) show; the funded
+    // investigator, the clinical-only researcher and the no-kind row are one click away.
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
-    expect(screen.getByText("Carol Gamma")).toBeTruthy();
+    expect(screen.queryByText("Carol Gamma")).toBeNull();
     expect(screen.getByText("Erin Epsilon")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
     expect(screen.queryByText("Dan Delta")).toBeNull();
@@ -1022,18 +1022,20 @@ describe("MatchaPanel", () => {
     expect(screen.getByText("Research kind")).toBeTruthy();
     const box = (name: RegExp) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
     expect(box(/^Laboratory research/).checked).toBe(true);
-    expect(box(/^Funded, kind not evident/).checked).toBe(true);
+    expect(box(/^Funded, kind not evident/).checked).toBe(false);
     expect(box(/^Clinical research/).checked).toBe(false);
     // The default is never a mystery: each selected kind is a removable chip.
     expect(screen.getByRole("button", { name: "Remove Laboratory research filter" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Remove Funded, kind not evident filter" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Funded, kind not evident filter" })).toBeNull();
 
     // OR within the group: adding Clinical research brings back the clinical-only researcher.
     fireEvent.click(box(/^Clinical research/));
     expect(screen.getByText("Bob Beta")).toBeTruthy();
     expect(screen.queryByText("Dan Delta")).toBeNull();
 
-    // A chip's remove is the checkbox's toggle.
+    // Funded, kind not evident is one click away, and its chip's remove is the checkbox's toggle.
+    fireEvent.click(box(/^Funded, kind not evident/));
+    expect(screen.getByText("Carol Gamma")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Remove Funded, kind not evident filter" }));
     expect(screen.queryByText("Carol Gamma")).toBeNull();
 
@@ -1047,7 +1049,6 @@ describe("MatchaPanel", () => {
   it("ANDs Research kind with the other facets", async () => {
     await searchKindRun();
     // Laboratory research AND Physician-scientist leaves only the physician with lab papers.
-    fireEvent.click(screen.getByRole("checkbox", { name: /^Funded, kind not evident/ }));
     for (const label of [/^Basic scientist/, /^Clinical or population researcher/, /^Funded investigator/, /^Unclassified/])
       fireEvent.click(screen.getByRole("checkbox", { name: label }));
     expect(screen.getByText("Erin Epsilon")).toBeTruthy();

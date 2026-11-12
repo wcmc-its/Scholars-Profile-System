@@ -385,10 +385,10 @@ const RESEARCH_KIND_OPTIONS: readonly string[] = [
   RESEARCH_TYPE_LABELS.clinical,
   KIND_FUNDED,
 ];
-/** The sponsor console's default research-kind selection: laboratory researchers, plus the
- *  funded investigators whose kind the papers do not show (hiding them would hide funded
- *  labs). Clinical-only researchers stay one click away. */
-const DEFAULT_RESEARCH_KINDS: ReadonlySet<string> = new Set([RESEARCH_TYPE_LABELS.lab, KIND_FUNDED]);
+/** The sponsor console's default research-kind selection: laboratory researchers only.
+ *  Funded-but-kind-unknown is left out because on a staging run it admitted clinical chiefs
+ *  at the top of an industry ask; it and clinical research stay one click away. */
+const DEFAULT_RESEARCH_KINDS: ReadonlySet<string> = new Set([RESEARCH_TYPE_LABELS.lab]);
 
 /** The research-kind options this candidate matches. Empty when `researchKinds` is absent
  *  (an older stored run): not computed, so it can satisfy no kind filter. */
@@ -3390,7 +3390,7 @@ export function MatchaPanel({
                       options={kindFacet}
                       selected={kindSelEffective}
                       onToggle={(v) => setKindSel(toggled(kindSelEffective, v))}
-                      title={`The kind of research a person's own papers show: ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers of that kind in the last ${RESEARCH_ACTIVE_YEARS} years. A person can show both. "${KIND_FUNDED}" is a PI on a research award whose papers show neither. Laboratory research and funded investigators are selected by default.`}
+                      title={`The kind of research a person's own papers show: ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers of that kind in the last ${RESEARCH_ACTIVE_YEARS} years. A person can show both. "${KIND_FUNDED}" is a PI on a research award whose papers show neither. Laboratory research is selected by default.`}
                     />
                   ) : null}
                   <FacetGroup
