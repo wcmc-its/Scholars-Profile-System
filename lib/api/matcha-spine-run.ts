@@ -54,6 +54,7 @@ import {
   recencyWeight,
   matchaMeasuresFrom,
   DEFAULT_K,
+  FUSION_TOP_CONCEPTS,
   MAX_EVIDENCE_CONCEPTS,
   type CulledConcept,
   type MatchaCandidate,
@@ -945,7 +946,7 @@ export async function rankResearchersForDescriptionSpine(
           ]),
       )
     : undefined;
-  const allFused = rrfFuse(rankings, DEFAULT_K, recencyWeightByCwid);
+  const allFused = rrfFuse(rankings, DEFAULT_K, recencyWeightByCwid, FUSION_TOP_CONCEPTS);
   const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
   const degraded = llmPath ? {} : { degraded: true as const };
   if (fused.length === 0)

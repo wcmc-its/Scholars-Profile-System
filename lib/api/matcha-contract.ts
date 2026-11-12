@@ -127,6 +127,29 @@ import type { MeshResolution } from "@/lib/api/search-taxonomy";
 export const DEFAULT_K = 30;
 
 /**
+ * How many of a scholar's per-concept terms the PEOPLE fusion counts: the strongest two.
+ *
+ * A plain sum rewards breadth without limit, so an ask that lists alternatives ("Crohn disease,
+ * psoriasis, atopic dermatitis…") puts a scholar who sits mid-table under every one of them above
+ * the scholar who leads one. Counting the best two keeps the reward for covering a related pair
+ * and stops paying for a third and fourth thin appearance. One was tried and is too harsh: it
+ * sinks scholars who are solid on two related concepts.
+ *
+ * People spine + its client re-rank only. The grant spine fuses with the plain sum (it passes no
+ * limit), because an opportunity's concepts are facets of one call, not alternatives.
+ */
+export const FUSION_TOP_CONCEPTS = 2;
+
+/** Sum of the `top` largest per-concept terms (all of them when `top` is absent). The ONE
+ *  definition both `rrfFuse` (server) and `fusedScore` (client) call, so they cannot drift. */
+export function fuseTerms(terms: readonly number[], top?: number): number {
+  const kept = top == null ? terms : [...terms].sort((a, b) => b - a).slice(0, top);
+  let sum = 0;
+  for (const t of kept) sum += t;
+  return sum;
+}
+
+/**
  * Exponent on centrality in the fusion weight (FINDING §8.4 — decomposition asymmetry).
  *
  * A sponsor's paste decomposes into ONE primary target and SIX-ish supporting mechanisms,
@@ -1058,6 +1081,9 @@ export function assessMatchSignal(concepts: readonly MatchaConcept[]): MatchSign
  *  preference term of the formula is inert, which is today's state. */
 export type RerankOptions = {
   k?: number;
+  /** Count only the strongest N per-concept terms (`fuseTerms`). Absent ⇒ plain sum. The people
+   *  panel passes `FUSION_TOP_CONCEPTS`, matching what the people spine fused with. */
+  topConcepts?: number;
   /** Returns the candidate's preference boost in [0,1]. */
   prefBoost?: (candidate: MatchaCandidate) => number;
   /** Preference strength λ. Only read when `prefBoost` is supplied. */
@@ -1113,10 +1139,10 @@ export function fusedScore(
   opts: RerankOptions = {},
 ): number {
   const k = opts.k ?? DEFAULT_K;
-  let score = 0;
-  for (const { term, rank } of candidate.contributions) {
-    score += (weightByTerm.get(term) ?? 0) / (k + rank);
-  }
+  let score = fuseTerms(
+    candidate.contributions.map(({ term, rank }) => (weightByTerm.get(term) ?? 0) / (k + rank)),
+    opts.topConcepts,
+  );
   // D1 — per-scholar recency, folded into the ONE value both the sort and `fitTier` read, so it
   // moves order AND tier together. Neutral (×1) when the candidate carries no `mostRecentYear`
   // (flag off), which keeps the round-trip test and every existing order unchanged. The server's

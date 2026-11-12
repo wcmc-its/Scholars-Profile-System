@@ -104,6 +104,7 @@ import {
   evidenceMatchCount,
   evidenceProvenance,
   fitTier,
+  FUSION_TOP_CONCEPTS,
   hasMatchEvidence,
   latestEvidenceYear,
   matchedConcepts,
@@ -1206,6 +1207,8 @@ export function MatchaPanel({
   const ranked = useMemo(
     () =>
       rerankCandidates(results, concepts, {
+        // Same limit the people spine fused with, so an untouched rail reproduces its order.
+        topConcepts: FUSION_TOP_CONCEPTS,
         // D3 — the officer's dial. "recent" (the default) is the server's own weighting, so an
         // untouched control reproduces the shipped order; anything else is a deliberate re-rank.
         recency,

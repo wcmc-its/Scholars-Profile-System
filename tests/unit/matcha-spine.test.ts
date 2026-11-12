@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { extractTerms, rrfFuse } from "@/lib/api/matcha-spine";
-import { DEFAULT_K } from "@/lib/api/matcha-contract";
+import {
+  DEFAULT_K,
+  FUSION_TOP_CONCEPTS,
+  fusedScore,
+  type MatchaCandidate,
+} from "@/lib/api/matcha-contract";
 
 describe("extractTerms (v1 dictionary match)", () => {
   const vocab = ["CRISPR", "machine learning", "PCR", "cell", "t-test", "a.b"];
@@ -141,5 +146,39 @@ describe("rrfFuse (§4 weighted RRF)", () => {
     expect(out.find((r) => r.cwid === "A")!.contributions).toEqual([
       { term: "muted", rank: 1 },
     ]);
+  });
+});
+
+describe("rrfFuse topConcepts (best-N fusion)", () => {
+  // "wide" sits 5th under four concepts; "deep" leads two and is absent from the rest.
+  const filler = (n: number) => Array.from({ length: 4 }, (_, i) => `f${n}-${i}`);
+  const rankings = [
+    { term: "c1", weight: 1, ranked: ["deep", ...filler(1), "wide"] },
+    { term: "c2", weight: 1, ranked: ["deep", ...filler(2), "wide"] },
+    { term: "c3", weight: 1, ranked: [...filler(3), "wide"] },
+    { term: "c4", weight: 1, ranked: [...filler(4), "wide"] },
+  ];
+  const rankOf = (out: { cwid: string }[], cwid: string) => out.findIndex((r) => r.cwid === cwid);
+
+  it("plain sum (no limit) rewards thin breadth: wide outranks deep", () => {
+    const out = rrfFuse(rankings);
+    expect(rankOf(out, "wide")).toBeLessThan(rankOf(out, "deep"));
+  });
+
+  it("best two stops paying for a third and fourth appearance: deep outranks wide", () => {
+    const out = rrfFuse(rankings, DEFAULT_K, undefined, 2);
+    expect(rankOf(out, "deep")).toBeLessThan(rankOf(out, "wide"));
+    // all four contributions still ship, so a slider can lift a dropped concept
+    expect(out.find((r) => r.cwid === "wide")!.contributions).toHaveLength(4);
+  });
+
+  it("the client score with the same limit reproduces the server score", () => {
+    const weights = new Map(rankings.map((r) => [r.term, r.weight]));
+    for (const s of rrfFuse(rankings, DEFAULT_K, undefined, FUSION_TOP_CONCEPTS)) {
+      const candidate = { contributions: s.contributions } as MatchaCandidate;
+      expect(
+        fusedScore(candidate, weights, { topConcepts: FUSION_TOP_CONCEPTS }),
+      ).toBeCloseTo(s.score, 12);
+    }
   });
 });
