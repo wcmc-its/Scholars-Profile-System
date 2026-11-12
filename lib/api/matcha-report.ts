@@ -23,7 +23,7 @@ import {
   type BriefRecords,
   type BriefTopic,
 } from "@/lib/api/matcha-brief";
-import { fitTier, type MatchaCandidate, type MatchaFitTier } from "@/lib/api/matcha-contract";
+import { candidateFitTier, type MatchaCandidate, type MatchaFitTier } from "@/lib/api/matcha-contract";
 import { loadReportThemes } from "@/lib/api/matcha-report-themes";
 import {
   briefAngle,
@@ -363,7 +363,7 @@ export async function loadMatchaReport(
       methods: rec.methods,
       methodPills: row ? curatedMethodPills(row.generated, rec.methods) : null,
       trialCount: rec.trialCount,
-      fit: fitTier(c.fusedScore, topScore),
+      fit: candidateFitTier(c, topScore),
       keyPapers: papersFrom(brief?.topics ?? [], c),
       brief,
     };

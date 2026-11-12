@@ -885,8 +885,10 @@ describe("rankResearchersForDescriptionSpine", () => {
       careerStage: "early",
       isClinician: true,
       roleCategory: "full_time_faculty",
-      // Clinical profile, no NIH PI award ⇒ a clinician.
+      // A medical degree, no PI award, no paper volume ⇒ a clinician.
       researcherType: "clinician",
+      researchKinds: [],
+      isPhysician: true,
     });
 
     const ghost = candidates.find((c) => c.cwid === "ghost");
@@ -972,8 +974,11 @@ describe("rankResearchersForDescriptionSpine", () => {
         scholarRow("md", true, []),
       ]);
       const { candidates } = await rankResearchersForDescriptionSpine("cancer");
+      // A PI award with no paper volume: funded, kind not evident.
       expect(candidates.find((c) => c.cwid === "lab")?.measures).toMatchObject({
-        researcherType: "physician_scientist",
+        researcherType: "funded_investigator",
+        researchKinds: [],
+        isPhysician: true,
         researchAward: { label: "NIH R01", endYear: thisYear + 2 },
       });
       expect(candidates.find((c) => c.cwid === "md")?.measures?.researcherType).toBe("clinician");
@@ -997,7 +1002,7 @@ describe("rankResearchersForDescriptionSpine", () => {
       mockScholarFindMany.mockResolvedValue([scholarRow("private", false, [r01("g1")])]);
       mockFieldOverrideFindMany.mockResolvedValue([{ entityId: "private" }]);
       const { candidates } = await rankResearchersForDescriptionSpine("cancer");
-      expect(candidates[0].measures?.researcherType).toBe("basic_scientist");
+      expect(candidates[0].measures?.researcherType).toBe("funded_investigator");
       expect(candidates[0].measures?.researchAward).toBeUndefined();
     });
 
@@ -1009,6 +1014,8 @@ describe("rankResearchersForDescriptionSpine", () => {
       const { candidates } = await rankResearchersForDescriptionSpine("cancer");
       expect(candidates[0].measures).toMatchObject({
         researcherType: "physician_scientist",
+        researchKinds: ["lab"],
+        isPhysician: true,
         labPubs5y: 4,
         clinicalPubs5y: 1,
       });
