@@ -902,7 +902,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // the VIVO hostname cutover (#945).
     edgeCertArn:
       "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
-    edgeAliasDomains: ["vivo.weill.cornell.edu"],
+    edgeAliasDomains: [], // ROLLBACK: vivo alias handed back to VIVO (#945)
     // #432: public launch Wed 2026-11-11, same Sps-Edge-prod deploy as the
     // VIVO alias. Takes effect only on that manual deploy.
     edgePublic: true,
