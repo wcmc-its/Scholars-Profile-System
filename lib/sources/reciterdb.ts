@@ -40,24 +40,13 @@ function readConfig() {
     throw new Error("SCHOLARS_RECITERDB_PORT must be a valid port number");
   }
 
-  // TLS is opt-in: set SCHOLARS_RECITERDB_SSL_CA to a CA bundle path to
-  // encrypt the connection and verify the server certificate. If unset, the
-  // connection is plaintext, which is only acceptable if the SPS VPC->WCM
-  // path is private and already encrypted. If ReciterDB requires TLS, throw
-  // here instead of falling back to undefined.
-  const caPath = process.env.SCHOLARS_RECITERDB_SSL_CA;
-  const ssl = caPath
-    ? { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true }
-    : undefined;
-
   return {
     // Non-null assertions are safe: the missing check above guarantees these.
     host: process.env[names.host]!,
     user: process.env[names.user]!,
     password: process.env[names.password]!,
     database: process.env[names.database]!,
-    port,
-    ssl,
+    port
   };
 }
 
@@ -78,12 +67,7 @@ export function getReciterPool(): Pool {
     // path can be down) instead of stalling callers ~10s on driver defaults.
     connectTimeout: 2000,
     acquireTimeout: 3000,
-    // TODO: add queryTimeout / socketTimeout once real query durations are
-    // measured. These bound hangs after connecting (e.g. the network drops
-    // mid-query), but must be set above the slowest legitimate query
-    // (mentoring refresh, ETL) or they will start failing healthy queries.
-    // queryTimeout: 5000,
-    // socketTimeout: 10000,
+   
   }));
 }
 
@@ -95,8 +79,6 @@ export async function withReciterConnection<T>(
     return await fn(conn);
   } finally {
     // release() returns a Promise; awaiting it avoids an unhandled rejection.
-    // finally runs whether fn succeeded or threw, so the connection is always
-    // returned to the pool.
     await conn.release();
   }
 }
