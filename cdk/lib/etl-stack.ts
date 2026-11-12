@@ -1410,6 +1410,8 @@ export class EtlStack extends Stack {
       // ORCID queue v2.1: reads reciterdb person_article (each candidate work's
       // ReCiter assertion for the scholar), so the sources family since then.
       "etl:orcid-evidence",
+      // Reads reciterdb identity_cornell_current + pubsource_orcid_person.
+      "etl:identity-links",
       "etl:asms",
       "etl:infoed",
       "etl:infoed-biosketch",
@@ -2232,6 +2234,12 @@ export class EtlStack extends Stack {
       // it runs on the sources family (SOURCES_SCRIPTS) and is external: true. `continue`:
       // the queue is a librarian tool.
       { id: "OrcidEvidenceWeekly", npmScript: "etl:orcid-evidence", external: true, tier: "continue" },
+      // Cross-campus duplicates (etl/identity-links) -> scholar_identity_link, read by
+      // report 22: WCM scholars that are probably also a Cornell (Ithaca) person under a
+      // NetID. Reads reciterdb (the Cornell roster and ORCID iDs), so the sources family
+      // and external: true. Its "known" band needs scholar.netid, which the nightly Ed
+      // step fills. `continue`: superuser report data only.
+      { id: "IdentityLinksWeekly", npmScript: "etl:identity-links", external: true, tier: "continue" },
       // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
       // search:index so their fresh rows are indexed. POPS reads the public
       // directory (no secret); reporter-grants + clinical-trials read ReciterDB
