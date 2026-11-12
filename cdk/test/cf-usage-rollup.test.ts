@@ -9,6 +9,7 @@ import {
   assertIsoDate,
   buildRollupInsert,
   isRerollable,
+  KNOWN_SCRAPER_UAS,
   MAX_REROLL_AGE_DAYS,
 } from "../lambda/cf-usage-rollup/queries";
 
@@ -132,6 +133,74 @@ describe("buildRollupInsert", () => {
     const upTo3xx = sql.match(/sc_status BETWEEN 200 AND 399/g) ?? [];
     expect(twoxx).toHaveLength(2);
     expect(upTo3xx).toHaveLength(3);
+  });
+});
+
+describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => {
+  const sql = buildRollupInsert(CFG, "2026-11-12");
+  // Arms in emit order: pageviews, profile, search_term, referrer, geo, device.
+  const [pageviews, profile, search, referrer, geo, device] = sql.split("UNION ALL");
+  const NOT_BOT = "NOT coalesce((regexp_like(url_decode(cs_user_agent)";
+  const SCRAPER = `'${KNOWN_SCRAPER_UAS[0]}'`;
+
+  it("lists the 2026-11-12 residential-proxy scraper UA decoded", () => {
+    expect(KNOWN_SCRAPER_UAS).toContain(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    );
+    // Compared against the url-decoded UA, never the raw %20-encoded field.
+    expect(sql).toContain(`url_decode(cs_user_agent) IN (${SCRAPER})`);
+  });
+
+  it("excludes bot UAs from the pageview, profile, and search arms", () => {
+    for (const arm of [pageviews, profile, search]) {
+      expect(arm).toContain(NOT_BOT);
+      expect(arm).toContain(SCRAPER);
+      // `bot` covers GPTBot/ClaudeBot/CCBot/Amazonbot/Applebot; `spider` Bytespider.
+      expect(arm).toContain("(?i)(bot|crawl|spider|");
+      expect(arm).toContain("perplexity|googleother");
+    }
+  });
+
+  it("keeps bots visible in the device breakdown and does not filter traffic arms by UA", () => {
+    // The device arm LABELS bots (same pattern + scraper list) but never excludes them.
+    expect(device).toContain("WHEN (regexp_like(url_decode(cs_user_agent)");
+    expect(device).toContain("perplexity|googleother");
+    expect(device).toContain(SCRAPER);
+    expect(device).toContain("THEN 'bot'");
+    for (const arm of [referrer, geo, device]) {
+      expect(arm).not.toContain("NOT coalesce(");
+    }
+  });
+
+  it("drops RSC (_rsc=) requests from the profile arms only, keeping search soft-navs", () => {
+    const rsc = "strpos(coalesce(cs_uri_query, '-'), '_rsc=') = 0";
+    expect(pageviews).toContain(rsc);
+    expect(profile).toContain(rsc);
+    expect(search).not.toContain("_rsc=");
+    expect(sql.split(rsc)).toHaveLength(3);
+  });
+
+  it("excludes CloudFront edge errors (WAF block/challenge) from every arm", () => {
+    for (const arm of [pageviews, profile, search, referrer, geo, device]) {
+      expect(arm).toContain("x_edge_result_type <> 'Error'");
+    }
+  });
+
+  it("never counts a 202 WAF challenge in the traffic-source arms", () => {
+    for (const arm of [referrer, geo, device]) {
+      expect(arm).toContain("sc_status BETWEEN 200 AND 399 AND sc_status <> 202");
+    }
+  });
+
+  it("restricts referrer/geo/device to page paths (no /_next/, /api/, dotted assets)", () => {
+    for (const arm of [referrer, geo, device]) {
+      expect(arm).toContain("NOT starts_with(cs_uri_stem, '/_next/')");
+      expect(arm).toContain("NOT starts_with(cs_uri_stem, '/api/')");
+      expect(arm).toContain("NOT regexp_like(cs_uri_stem, '[.][^/]*$')");
+    }
+    for (const arm of [pageviews, profile, search]) {
+      expect(arm).not.toContain("starts_with(cs_uri_stem, '/_next/')");
+    }
   });
 });
 

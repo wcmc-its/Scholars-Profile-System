@@ -71,8 +71,37 @@ export interface RollupConfig {
 // arm applies.
 // ----------------------------------------------------------------------------
 
-/** A successful content GET -- the baseline filter for every hit/pageview count. */
-const SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 399`;
+/**
+ * Not a CloudFront edge error. WAF blocks (403), rate-limit rejections (429)
+ * and WAF Challenge interstitials (202) are all logged with
+ * `x_edge_result_type = 'Error'`, so this drops them regardless of status code
+ * -- a future WAF Challenge rule returns a 202, which the 2xx/3xx ranges below
+ * would otherwise admit. Applied to every arm (#3368).
+ */
+const NOT_EDGE_ERROR = "x_edge_result_type <> 'Error'";
+
+/**
+ * A successful content GET -- the baseline filter for the traffic-shape arms.
+ * 202 is excluded explicitly: the WAF Challenge interstitial is a 202 with no
+ * content, not a hit (NOT_EDGE_ERROR covers it too; this is belt and braces).
+ */
+const SUCCESS_GET = [
+  "cs_method = 'GET' AND sc_status BETWEEN 200 AND 399 AND sc_status <> 202",
+  `    AND ${NOT_EDGE_ERROR}`,
+].join("\n");
+
+/**
+ * The traffic-shape arms (referrer/geo/device) count PAGE requests only: not
+ * Next.js build assets (`/_next/`), not API calls (`/api/`), and not static
+ * files (a dot in the last path segment: favicon.ico, robots.txt, *.png,
+ * sitemap.xml). One page load fans out into dozens of those, so counting them
+ * weighted every dimension by asset count rather than by page (#3368).
+ */
+const PAGE_PATH_PREDICATE = [
+  "NOT starts_with(cs_uri_stem, '/_next/')",
+  "    AND NOT starts_with(cs_uri_stem, '/api/')",
+  "    AND NOT regexp_like(cs_uri_stem, '[.][^/]*$')",
+].join("\n");
 
 /**
  * A profile pageview must be a 2xx -- content actually rendered. The wider
@@ -93,6 +122,7 @@ const SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 399`;
 const PROFILE_SUCCESS_GET = [
   "cs_method = 'GET' AND sc_status BETWEEN 200 AND 299",
   "    AND x_edge_result_type <> 'FunctionGeneratedResponse'",
+  `    AND ${NOT_EDGE_ERROR}`,
 ].join("\n");
 
 /**
@@ -115,13 +145,56 @@ const GEO_CASE = [
 ].join("\n");
 
 /**
+ * Crawler/automation User-Agent tokens (case-insensitive). The single source
+ * for both the device CASE's 'bot' bucket and the NOT_BOT_UA exclusion on the
+ * pageview/profile/search arms. `bot` already covers GPTBot, ClaudeBot, CCBot,
+ * Amazonbot, Applebot and Googlebot, and `spider` covers Bytespider; the AI
+ * crawlers without either token are named explicitly (#3368).
+ */
+const BOT_UA_PATTERN =
+  "(?i)(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|crawler|fetch|monitor|curl|wget|python-requests|httpclient|headless|perplexity|googleother)";
+
+/**
+ * Exact User-Agents of scrapers that spoof a real browser, so no token regex
+ * can catch them. Compared against the url-decoded cs_user_agent (CloudFront
+ * standard logs URL-encode the field, e.g. spaces arrive as %20), so list them
+ * DECODED, exactly as the client sent them.
+ *
+ * - Chrome 133 on macOS: the residential-proxy scraper of 2026-11-12 (~55k
+ *   /search requests; WAF-blocked since #3367). A genuine Chrome 133 user
+ *   matches too, but Chrome auto-updates and 133 is long superseded, so the
+ *   real-user cost is negligible.
+ */
+export const KNOWN_SCRAPER_UAS: readonly string[] = [
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+];
+
+const KNOWN_SCRAPER_UA_LIST = KNOWN_SCRAPER_UAS.map(
+  (ua) => `'${ua.replace(/'/g, "''")}'`,
+).join(", ");
+
+/** True when the request's User-Agent is a known crawler, bot, or scraper. */
+const IS_BOT_UA = [
+  `(regexp_like(url_decode(cs_user_agent), '${BOT_UA_PATTERN}')`,
+  `    OR url_decode(cs_user_agent) IN (${KNOWN_SCRAPER_UA_LIST}))`,
+].join("\n");
+
+/**
+ * Human-traffic filter for the pageview/profile/search arms. coalesce: a NULL
+ * User-Agent makes IS_BOT_UA NULL, and `NOT NULL` would silently drop the row.
+ */
+const NOT_BOT_UA = `NOT coalesce(${IS_BOT_UA}, false)`;
+
+/**
  * Device class from the (url-decoded) User-Agent. Order matters: bots first
  * (they often spoof a desktop/mobile UA tail), then tablet (an Android tablet
  * UA lacks the "Mobile" token a phone carries), then mobile, else desktop.
+ * The device arm deliberately does NOT apply NOT_BOT_UA: the 'bot' bucket is
+ * how the dashboard shows bot share.
  */
 const DEVICE_CASE = [
   "CASE",
-  "  WHEN regexp_like(url_decode(cs_user_agent), '(?i)(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|crawler|fetch|monitor|curl|wget|python-requests|httpclient|headless)') THEN 'bot'",
+  `  WHEN ${IS_BOT_UA} THEN 'bot'`,
   "  WHEN regexp_like(url_decode(cs_user_agent), '(?i)(ipad|tablet|playbook|silk|(android(?!.*mobile)))') THEN 'tablet'",
   "  WHEN regexp_like(url_decode(cs_user_agent), '(?i)(mobi|iphone|ipod|android.*mobile|blackberry|iemobile|opera mini|windows phone)') THEN 'mobile'",
   "  ELSE 'desktop'",
@@ -204,6 +277,25 @@ const PROFILE_PATH_PREDICATE = [
 ].join("\n");
 
 /**
+ * Not a Next.js Flight (RSC) request. The client router appends `?_rsc=<hash>`
+ * to every Flight fetch: prefetches (HoverPrefetchLink on search results
+ * prefetches a profile on mouse-over, clicked or not) and soft-navigation
+ * clicks alike. The hash folds in router headers CloudFront does not log, so a
+ * prefetch cannot be told apart from a click. The profile arms therefore count
+ * document loads only (direct, external, search-engine, and hard navigations);
+ * in-app soft-nav clicks to a profile are no longer counted. That under-count
+ * is stable and bot-proof; the prefetch over-count was neither (#3368).
+ */
+const NOT_RSC_REQUEST = "strpos(coalesce(cs_uri_query, '-'), '_rsc=') = 0";
+
+/** Shared WHERE tail for the two profile arms (pageviews + profile). */
+const PROFILE_VIEW_FILTERS = [
+  PROFILE_PATH_PREDICATE,
+  `    AND ${NOT_RSC_REQUEST}`,
+  `    AND ${NOT_BOT_UA}`,
+].join("\n");
+
+/**
  * INSERT INTO daily_usage the six aggregated marketing metrics for a single dt
  * partition: pageviews, profile, search_term, referrer, geo, device. Every arm
  * emits (metric, dimension, cnt, dt) with dt LAST (the partition-projection
@@ -237,7 +329,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day} AND ${PROFILE_SUCCESS_GET}`,
-    `    AND ${PROFILE_PATH_PREDICATE}`,
+    `    AND ${PROFILE_VIEW_FILTERS}`,
 
     "  UNION ALL",
 
@@ -246,7 +338,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day} AND ${PROFILE_SUCCESS_GET}`,
-    `    AND ${PROFILE_PATH_PREDICATE}`,
+    `    AND ${PROFILE_VIEW_FILTERS}`,
     `  GROUP BY ${PROFILE_SLUG_EXPR}`,
     `  HAVING ${PROFILE_SLUG_EXPR} <> ''`,
 
@@ -259,7 +351,11 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     // (`/api/search/suggest`, every >=2-char keystroke) and the per-evidence
     // key-paper fetch, so the old arm listed typing prefixes ("sch", "ma") and
     // Matcha's internal lookups, and zero actual searches. Both the document
-    // load and the RSC soft-navigation carry q=, so both count.
+    // load and the RSC soft-navigation carry q=, so both count. `_rsc=` is
+    // KEPT here, unlike the profile arms: a submitted query is a client-side
+    // router.push, so nearly every real search IS an RSC soft-nav and dropping
+    // `_rsc=` would erase most real searches. Bots are removed by NOT_BOT_UA
+    // and NOT_EDGE_ERROR instead (#3368).
     // ponytail: pagination / tab switches re-request /search?q= and count as
     // another search of the same term; there is no session key to dedupe on
     // (cs_cookie is not logged). Accept the over-count.
@@ -268,6 +364,8 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `  FROM ${from}`,
     `  WHERE "date" = ${day}`,
     "    AND cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200",
+    `    AND ${NOT_EDGE_ERROR}`,
+    `    AND ${NOT_BOT_UA}`,
     "    AND cs_uri_query IS NOT NULL AND cs_uri_query <> '-'",
     "    AND url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL",
     `  GROUP BY ${SEARCH_TERM_EXPR}`,
@@ -280,6 +378,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
+    `    AND ${PAGE_PATH_PREDICATE}`,
     `  GROUP BY ${REFERRER_CASE}`,
 
     "  UNION ALL",
@@ -289,6 +388,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
+    `    AND ${PAGE_PATH_PREDICATE}`,
     `  GROUP BY ${GEO_CASE}`,
 
     "  UNION ALL",
@@ -298,6 +398,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
+    `    AND ${PAGE_PATH_PREDICATE}`,
     `  GROUP BY ${DEVICE_CASE}`,
 
     ")",
