@@ -28,6 +28,7 @@ import { loadReportThemes } from "@/lib/api/matcha-report-themes";
 import {
   briefAngle,
   briefAngleRole,
+  hasAngle,
   briefDataSources,
   briefTopics,
   briefWhy,
@@ -88,7 +89,8 @@ export type ReportPi = {
   /** Edited text when present, else generated. Null = no brief drafted for this PI. */
   brief: {
     why: string;
-    /** Partnership angle, edited text winning; "" on a brief drafted before angles existed. */
+    /** Partnership angle, edited text winning; "" on a brief drafted before angles existed or
+     *  whose draft found no laboratory angle (`hasAngle`). */
     angle: string;
     /** Bold role phrase before the angle; "" on a brief drafted before roles existed. */
     angleRole: string;
@@ -326,11 +328,14 @@ export async function loadMatchaReport(
           edited: (row.edited ?? null) as BriefEdited | null,
         }
       : null;
+    // The "no laboratory angle" sentence is the officer's empty state in the console, never report
+    // copy: it prints as no angle (and so no role).
+    const angle = wire && hasAngle(briefAngle(wire)) ? briefAngle(wire).trim() : "";
     const brief = wire
       ? {
           why: briefWhy(wire),
-          angle: briefAngle(wire).trim(),
-          angleRole: briefAngleRole(wire).trim(),
+          angle,
+          angleRole: angle ? briefAngleRole(wire).trim() : "",
           dataSources: briefDataSources(wire),
           // A grant suppressed (or hideFunding set) since drafting must not ride along as a source.
           topics: withLiveSources(briefTopics(wire), rec),

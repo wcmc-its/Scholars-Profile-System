@@ -139,6 +139,7 @@ import {
   angleRoleLead,
   briefAngle,
   briefAngleRole,
+  hasAngle,
   briefDataSources,
   briefMethodPills,
   briefSourceLabel,
@@ -1743,7 +1744,8 @@ export function MatchaPanel({
   function openReport() {
     if (!submissionId || reportCwids.length === 0) return;
     // A brief drafted before partnership angles counts as missing: drafting it again (POST always
-    // redrafts) adds the angle.
+    // redrafts) adds the angle. A brief whose draft found no laboratory angle (`NO_LAB_ANGLE`) is
+    // current: redrafting it would not add one.
     const missing = reportCwids.filter((c) => {
       const b = briefMap.get(c);
       return !b || !briefAngle(b);
@@ -5922,7 +5924,8 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
             canEdit={canEdit}
             name={name}
             onEdit={() => {
-              setDraft(angle);
+              // The "no laboratory angle" sentence is an empty state, not text to edit.
+              setDraft(hasAngle(angle) ? angle : "");
               setRoleDraft(role);
               setSaveError(false);
               setEditing("angle");
@@ -5935,7 +5938,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
                 value={roleDraft}
                 maxLength={MAX_ANGLE_ROLE_CHARS}
                 aria-label={`Partnership role for ${name}`}
-                placeholder="Role, e.g. Clinical-trial lead"
+                placeholder="Role, e.g. Disease-model validation partner"
                 onChange={(e) => setRoleDraft(e.target.value)}
                 className="bg-apollo-surface h-8 text-[14px] font-semibold"
               />
@@ -5954,7 +5957,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
                 onCancel={() => setEditing(null)}
               />
             </div>
-          ) : angle ? (
+          ) : hasAngle(angle) ? (
             <p className="text-[14px] text-pretty">
               {role ? (
                 <strong className="font-semibold" data-slot="matcha-brief-angle-role">
@@ -5962,6 +5965,11 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
                 </strong>
               ) : null}
               {role ? " " : null}
+              {angle}
+            </p>
+          ) : angle ? (
+            // The draft found no laboratory collaboration to propose (`NO_LAB_ANGLE`).
+            <p className="text-muted-foreground text-[13px] italic" data-slot="matcha-brief-no-angle">
               {angle}
             </p>
           ) : b.generated.angle === undefined ? (

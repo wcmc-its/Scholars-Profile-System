@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { briefCsvFields, buildMatchaCsv, type MatchaCsvRow } from "@/lib/edit/matcha-export";
+import { NO_LAB_ANGLE } from "@/lib/edit/matcha-brief-types";
 
 const ROW: MatchaCsvRow = {
   rank: 1,
@@ -181,6 +182,14 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
     const fields = briefCsvFields({ generated: legacy, edited: null });
     expect(fields.briefAngle).toBe("");
     expect(fields.briefWhy).toBe("Generated why.");
+  });
+
+  it("writes the no-laboratory-angle sentence as plain text", () => {
+    const fields = briefCsvFields({
+      generated: { ...BRIEF.generated, angle: NO_LAB_ANGLE },
+      edited: null,
+    });
+    expect(fields.briefAngle).toBe("No laboratory collaboration angle is evident.");
   });
 
   it("writes blanks for a row with no brief", () => {

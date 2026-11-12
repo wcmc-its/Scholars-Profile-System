@@ -67,7 +67,8 @@ export type MatchaCsvRow = {
   /** Matcha Phase 3 — Why this PI (the officer's edit when present). Written only when
    *  `buildMatchaCsv` is asked for the brief columns; "" when the row has no brief. */
   briefWhy?: string;
-  /** Matcha Phase 3 — the partnership angle (the officer's edit when present); "" when none. */
+  /** Matcha Phase 3 — the partnership angle (the officer's edit when present); "" when none, and
+   *  the `NO_LAB_ANGLE` sentence when the draft found no laboratory angle. */
   briefAngle?: string;
   /** Matcha Phase 3 — discussion topics with their source labels, edited text when present. */
   briefTopics?: string;

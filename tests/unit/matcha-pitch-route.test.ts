@@ -53,10 +53,12 @@ vi.mock("@/lib/llm/client", () => ({ bedrockClient: () => (id: string) => ({ id 
 import { POST } from "@/app/api/edit/matcha/pitch/route";
 import {
   PITCH_MAX_WORDS,
+  buildLinesPrompt,
   parsePitchOutput,
   postCheckEmailLines,
   postCheckPitch,
 } from "@/lib/api/matcha-pitch";
+import { NO_LAB_ANGLE } from "@/lib/edit/matcha-brief-types";
 
 const devSession = { cwid: "dev1", isSuperuser: false, isDeveloper: true };
 function req(session: Record<string, unknown>, body: Record<string, unknown>) {
@@ -227,6 +229,31 @@ describe("POST /api/edit/matcha/pitch", () => {
   it("500s when the model call fails", async () => {
     mockGenerate.mockRejectedValue(new Error("bedrock down"));
     expect((await POST(req(devSession, { submissionId: "s1" }))).status).toBe(500);
+  });
+});
+
+describe("buildLinesPrompt", () => {
+  const input = {
+    name: "Person One",
+    role: "",
+    angle: "Can test candidates in mouse models.",
+    why: "Works on lipids.",
+    topics: [],
+    methods: [],
+    trialCount: 0,
+  };
+
+  it("carries a real partnership angle", () => {
+    expect(buildLinesPrompt(input)).toContain(
+      "Partnership angle: Can test candidates in mouse models.",
+    );
+  });
+
+  it("treats the no-laboratory-angle sentence as absent, so outreach never quotes it", () => {
+    const prompt = buildLinesPrompt({ ...input, angle: NO_LAB_ANGLE });
+    expect(prompt).not.toContain("Partnership angle");
+    expect(prompt).not.toContain(NO_LAB_ANGLE);
+    expect(prompt).toContain("Why a fit: Works on lipids.");
   });
 });
 

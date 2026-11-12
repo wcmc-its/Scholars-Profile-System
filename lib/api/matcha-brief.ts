@@ -47,6 +47,7 @@ import {
   MAX_ANGLE_ROLE_CHARS,
   MAX_METHOD_PILLS,
   MAX_METHOD_PILL_CHARS,
+  NO_LAB_ANGLE,
   normalizeMethodName,
   type MethodPill,
   type BriefEdited,
@@ -351,23 +352,29 @@ export const BRIEF_SYSTEM_PROMPT = [
   "pronouns; use the surname or 'their'. Never mention the facts, records or inputs, or what is",
   "missing or absent from them; say only what the researcher does.",
   "",
-  "`angle`: 1-2 sentences, at most 50 words, plain prose. Name the concrete role this researcher",
-  "could play for the requester, for example clinical-trial lead with access to patient data,",
-  "scientific consultant, drug-design ideation partner, animal-model validation, or biomarker",
-  "expertise. Base the role ONLY on METHODS_AND_TOOLS, CLINICAL_TRIALS_ON_RECORD, the",
-  "publications and the awards; name the method, tool or trial record it rests on. Prefer a role",
-  "that is not obvious from the researcher's topic alone. Never claim a trial, model or method",
-  "the facts do not list. The same bans as `why` apply (no numbers other than the trial count,",
+  "`angle`: 1-2 sentences, at most 50 words, plain prose. Name the research collaboration this",
+  "researcher could offer on the ask's disease mechanisms or its laboratory and translational",
+  "questions. Rest it, in this order of preference, on:",
+  "  (a) an award in awardsAsPI on one of the MATCHED_CONCEPTS;",
+  "  (b) a model, assay, method or tool in METHODS_AND_TOOLS;",
+  "  (c) a publication on a matched concept whose authorPosition is 'first' or 'last'.",
+  "Name the award topic, method or tool it rests on. Never propose a consulting, advisory or",
+  "biomarker-expertise role. Never base the angle on clinical-trial participation or on",
+  "CLINICAL_TRIALS_ON_RECORD; propose a clinical-trial role only when the ASK itself asks for",
+  "trials or patient data. When nothing in (a)-(c) supports such a collaboration, return `angle`",
+  "and `angleRole` as empty strings. Never claim a trial, model or method",
+  "the facts do not list. The same bans as `why` apply (no numbers,",
   "no keys, no superlatives, no speculation about interest or availability). Never mention the",
   "facts, records or inputs, or what is missing or absent (no 'no trials are listed'); say only",
   "what the researcher can do. The angle is printed right after `angleRole` in bold, so it must",
-  "NOT restate or rephrase the role: start with what the researcher brings ('Five trials on",
-  "record and …') or with a verb phrase ('Can validate …'), never with the role or a noun phrase",
-  "like it ('Imaging biomarker partner who …').",
+  "NOT restate or rephrase the role: start with what the researcher brings ('A mouse model of",
+  "… and …') or with a verb phrase ('Can validate …'), never with the role or a noun phrase",
+  "like it ('Disease-model partner who …').",
   "",
   "`angleRole`: the role your `angle` sentence is built around, as a noun phrase of 3-5 words in",
-  "sentence case, for example 'Clinical-trial site lead' or 'Animal-model validation partner'.",
-  "No names, numbers or keys, and no final period.",
+  "sentence case, for example 'Disease-model validation partner' or 'Animal-model validation",
+  "partner'. Never a consulting or advisory role. No names, numbers or keys, and no final period.",
+  "Empty when `angle` is empty.",
   "",
   "`methodPills`: a curated list of at most 12 methods and data sources from METHODS_AND_TOOLS,",
   "ordered most relevant to the ask first. Each pill has:",
@@ -403,7 +410,7 @@ export const BRIEF_REVISE_SYSTEM_PROMPT = [
   OVERVIEW_REVISE_SYSTEM_PROMPT,
   "Never mention the facts, records, inputs or the fact-checker, and never say what is missing,",
   "absent or not listed. When a claim goes, drop it silently and keep only what the researcher",
-  "does or can do.",
+  "does or can do. Never replace a removed role with a consulting or advisory one.",
 ].join("\n");
 
 const BriefSchema = z.object({
@@ -458,6 +465,13 @@ export function buildResearcherBlock(
   records?: Pick<BriefRecords, "methods" | "trialCount">,
 ): string {
   const model = toModelFacts(facts);
+  // Keys are assigned BEFORE the sort (they index `buildSourceTable`); the stable sort then puts
+  // first- and last-author papers ahead of the rest.
+  const lead = (p: { authorPosition: string | null }) =>
+    p.authorPosition === "first" || p.authorPosition === "last" ? 0 : 1;
+  const publications = model.representativePublications
+    .map((p, i) => ({ key: `P${i + 1}`, ...p }))
+    .sort((a, b) => lead(a) - lead(b));
   const payload = {
     name: model.name,
     title: model.title,
@@ -466,13 +480,13 @@ export function buildResearcherBlock(
     publicationCount: model.publicationCount,
     yearsActive: model.yearsActive,
     methods: model.methods.map((m) => ({ name: m.name, examples: m.examples })),
-    publications: model.representativePublications.map((p, i) => ({ key: `P${i + 1}`, ...p })),
     awardsAsPI: facts.activeGrants.map((g, i) => ({
       key: `G${i + 1}`,
       funder: g.funderLabel,
       mechanism: g.mechanism,
       title: g.title,
     })),
+    publications,
   };
   return [
     "<RESEARCHER>",
@@ -634,11 +648,15 @@ export function stripRoleRestatement(angle: string, role: string): string {
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
-/** The role phrase, trimmed (and a trailing period dropped); "" when absent, empty, or longer than
- *  `MAX_ANGLE_ROLE_CHARS` (then it is not a phrase, and the angle prints unbolded). */
+/** A consulting or advisory role: never shown, whatever the model returned. */
+const CONSULTING_ROLE = /consult|advis/i;
+
+/** The role phrase, trimmed (and a trailing period dropped); "" when absent, empty, longer than
+ *  `MAX_ANGLE_ROLE_CHARS` (then it is not a phrase, and the angle prints unbolded), or a
+ *  consulting or advisory role (`CONSULTING_ROLE`). */
 export function cleanAngleRole(raw: string | null | undefined): string {
   const role = (raw ?? "").replace(/\s+/g, " ").trim().replace(/[.:;,]+$/, "").trim();
-  return role.length > MAX_ANGLE_ROLE_CHARS ? "" : role;
+  return role.length > MAX_ANGLE_ROLE_CHARS || CONSULTING_ROLE.test(role) ? "" : role;
 }
 
 /** The model's data-source labels, kept only when they name a method it was given (canonicalized
@@ -778,6 +796,9 @@ export async function generateBrief(
   });
 
   const first = postCheckBrief(object, matched, sources, input.records.methods);
+  // The model said, explicitly, that no laboratory collaboration is evident: an empty STRING. A
+  // missing field (null, omitted) is not that statement, and neither is an angle revised away.
+  const noLabAngle = typeof object.angle === "string" && object.angle.trim() === "";
   const combined = [first.why, first.angle, ...first.topics.map((t) => `- ${t.text}`)]
     .filter(Boolean)
     .join("\n");
@@ -801,8 +822,9 @@ export async function generateBrief(
     input.records.trialCount > 0
       ? "Saying the researcher has run or is on clinical trials is allowed."
       : "Any claim that the researcher runs or works on clinical trials is unsupported.",
-    "A role the researcher could play for the partner (consultant, trial lead, validation",
-    "partner and the like) is not itself a specific claim; check only the specifics it rests on.",
+    "A role the researcher could play for the partner (validation partner, disease-model",
+    "collaborator and the like) is not itself a specific claim; check only the specifics it rests",
+    "on. A consulting, advisory or biomarker role resting on clinical trials is unsupported.",
   ].join("\n");
   const ungrounded = await verifyDraftGrounding(facts, combined, { model: modelId, extraReference });
   const { whySpans, angleSpans, keptTopics } = partitionUngrounded(
@@ -828,7 +850,7 @@ export async function generateBrief(
     generated: {
       why: clean.why,
       // A revision may reintroduce the restatement the first pass stripped.
-      angle: stripRoleRestatement(clean.angle, angleRole),
+      angle: noLabAngle ? NO_LAB_ANGLE : stripRoleRestatement(clean.angle, angleRole),
       ...(angleRole ? { angleRole } : {}),
       dataSources: first.dataSources,
       ...(first.methodPills.length > 0 ? { methodPills: first.methodPills } : {}),
