@@ -1,0 +1,56 @@
+name: docker-stack
+
+# Keeps the `docker compose --profile app` full stack (README "Docker setup")
+# from silently rotting: bring it up from scratch, seed, index, and load pages.
+on:
+  pull_request:
+    paths:
+      - docker-compose.yml
+      - package.json
+      - package-lock.json
+      - prisma/**
+      - seed/**
+      - .github/workflows/docker-stack.yml
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OPENSEARCH_HEAP: 1g
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start stack
+        run: docker compose --profile app up -d
+
+      - name: Wait for the app
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS -o /dev/null -m 120 http://localhost:3000/; then echo "up after ~$((i*10))s"; exit 0; fi
+            if [ "$(docker compose ps -a app --format '{{.State}}')" = "exited" ]; then echo "app exited"; exit 1; fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Seed and index
+        run: docker compose exec -T app sh -c "npm run seed && npm run search:index"
+
+      - name: Profile and search serve seed data
+        run: |
+          curl -fsS -o /dev/null -m 180 http://localhost:3000/anna-grant
+          curl -fsS -m 180 "http://localhost:3000/search?q=grant" | grep -q 'href="/anna-grant"'
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile app logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile app down -v

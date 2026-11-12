@@ -78,6 +78,7 @@ const ORIGIN_OPTIONS: ReadonlyArray<{ value: OriginFilter; label: string }> = [
 
 /** Same units the Took column prints, summed across a group. */
 export function formatTotal(ms: number): string {
+  if (ms < 950) return ms < 50 ? "<0.1 sec" : `${(ms / 1000).toFixed(1)} sec`;
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} sec`;
   const minutes = Math.round(seconds / 60);
@@ -210,7 +211,7 @@ export function RunningNormally({
           &ldquo;Last good data&rdquo; is when the information itself was produced, which
           isn&rsquo;t always when the import last ran: some imports check for changes and finish
           without replacing anything. The freshness bar fills as data ages toward the point it would
-          count as late. &ldquo;&mdash;&rdquo; under Took means no start time has been logged yet.
+          count as late. &ldquo;&mdash;&rdquo; under Took means the last run wasn&rsquo;t timed.
         </p>
       </div>
     </section>

@@ -89,6 +89,7 @@ const ACTION_LABEL: Partial<Record<AuditAction, string>> = {
   orcid_set: "Set ORCID iD",
   slug_redirect_remove: "Removed old profile URL redirect",
   disease_assignment_decision: "Reviewed disease assignment",
+  feedback_export: "Exported feedback",
 };
 
 /** A few field keys that don't humanize cleanly from camelCase alone. */
@@ -97,6 +98,7 @@ const FIELD_LABEL_OVERRIDE: Record<string, string> = {
   primaryTitle: "Primary title",
   orcid: "ORCID",
   url: "URL",
+  selectedHighlightPmids: "Selected highlights",
 };
 
 /** "primaryTitle" / "primary_title" → "Primary title"; known keys get a nicer label. */

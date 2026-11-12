@@ -151,9 +151,13 @@ function resolveCompletedAt(
   startedAt: Date,
 ): Date {
   const explicit = parseDate(rec.completed_at);
-  if (explicit !== null && explicit.getTime() >= startedAt.getTime()) return explicit;
   const ms = toNumber(rec.duration_ms);
-  return ms > 0 ? new Date(startedAt.getTime() + ms) : startedAt;
+  const derived = ms > 0 ? startedAt.getTime() + ms : startedAt.getTime();
+  // The later of the two: producers stamp completed_at to the SECOND, so a
+  // sub-second run's explicit end equals its start while duration_ms holds the
+  // real span (onboarding-detector read 0 ms on the board for exactly this).
+  if (explicit !== null && explicit.getTime() >= derived) return explicit;
+  return new Date(derived);
 }
 
 function errorText(rec: ProducerRunRecord): string | null {
@@ -350,25 +354,31 @@ export function latestCoreScoredAt(records: readonly CoreRecord[]): Date | null 
  * which is what keeps this idempotent across nightlies: a producer that
  * published nothing new adds no row, and its existing row simply ages.
  *
- * ponytail: startedAt === completedAt, so Run duration reads 0s for these two,
- * same declared-unknown as the drift rows. There is no duration to be had --
- * we are timestamping an ARTIFACT, not observing a run. It stops being a
- * approximation the day either producer writes a STAGE# row, at which point
- * both move to buildProducerRunWrites and this helper loses two callers.
+ * Without `runStartedAt`, startedAt === completedAt and the board shows "—":
+ * we are timestamping an ARTIFACT, not observing a run. Grants supplies its run
+ * start in the manifest; cores retires to buildProducerRunWrites once its
+ * STAGE# row exists.
  */
 export function buildRecencyWrite(
   source: string,
   latestAt: Date | null,
   since: ReadonlyMap<string, Date | null>,
+  // When the producer records its run start beside the artifact (the grants
+  // manifest's `run_started_at`), the row is a timed run, not a bare stamp.
+  // Ignored unless it precedes `latestAt`. Idempotence keys on the stored
+  // startedAt, so it compares against whichever start is written.
+  runStartedAt: Date | null = null,
 ): ProducerRunWrite[] {
   if (latestAt === null) return [];
+  const startedAt =
+    runStartedAt !== null && runStartedAt.getTime() <= latestAt.getTime() ? runStartedAt : latestAt;
   const seen = since.get(source);
-  if (seen != null && latestAt.getTime() <= seen.getTime()) return [];
+  if (seen != null && startedAt.getTime() <= seen.getTime()) return [];
   return [
     {
       source,
       status: "success",
-      startedAt: latestAt,
+      startedAt,
       completedAt: latestAt,
       rowsProcessed: 0,
       errorMessage: null,

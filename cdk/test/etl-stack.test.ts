@@ -356,17 +356,18 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates eight state machines (3 cadence + #595 heartbeat + grants export + honors lists + funding digest + curated-tables backup), ten EventBridge rules (+ AWS Backup failure + image vulnerability alerts), two SNS topics", () => {
+      it("creates nine state machines (3 cadence + #595 heartbeat + #538 feedback digest + grants export + honors lists + funding digest + curated-tables backup), eleven EventBridge rules (+ AWS Backup failure + image vulnerability alerts), two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the grants-export machine, now
         // that grantsExportScheduleEnabled is true in prod too, + the
         // honors-list scraper (weekly + the console's Run now) + the funding
         // digest import, started by its email landing in the inbound bucket,
-        // + the curated-tables backup (#1032, prod activated 2026-11-09).
+        // + the curated-tables backup (#1032, prod activated 2026-11-09)
+        // + the #538 weekly feedback digest.
         // The #393/#353 reconcilers are ECS services now, not state machines.
         // Rules: one per machine + the AWS Backup failure and image
         // vulnerability alert rules.
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 8);
-        template.resourceCountIs("AWS::Events::Rule", 10);
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 9);
+        template.resourceCountIs("AWS::Events::Rule", 11);
         // The heartbeat + both reconcilers + grants export reuse the cadence
         // failure topic; PR-7 adds the etl-page P1 topic, so two total:
         // etl-failures + etl-page.
@@ -375,7 +376,7 @@ describe("EtlStack", () => {
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates twenty-one CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status + funding digest status + curated-tables backup status/cadence)", () => {
+      it("creates twenty-three CloudWatch alarms (5 status + 4 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness + honors status + funding digest status + curated-tables backup status/cadence)", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
         // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
         // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
@@ -387,8 +388,9 @@ describe("EtlStack", () => {
         // freshness heartbeat, TRACKED.HonorsLists, not a cadence alarm)
         // + the funding digest import's status alarm (event-driven, so no
         // cadence alarm; TRACKED.FundingDigest grades its absence).
-        // + the curated-tables backup status + cadence alarms (#1032).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 21);
+        // + the curated-tables backup status + cadence alarms (#1032)
+        // + the #538 feedback digest status + cadence alarms.
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 23);
       });
 
       it("creates eight ECS task definitions (5 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -749,16 +751,40 @@ describe("EtlStack", () => {
         },
       );
 
+      it("#538 feedback digest: Mondays 14:00 UTC, SES send only as the shared sender, recipient from SSM", () => {
+        template.hasResourceProperties("AWS::Events::Rule", {
+          Name: "sps-etl-feedback-digest-prod",
+          ScheduleExpression: "cron(0 14 ? * MON *)",
+          State: "ENABLED",
+        });
+        template.hasResourceProperties("AWS::IAM::Policy", {
+          PolicyName: "sps-etl-task-prod-ses",
+          PolicyDocument: {
+            Statement: [
+              Match.objectLike({
+                Effect: "Allow",
+                Action: "ses:SendEmail",
+                Condition: { StringEquals: { "ses:FromAddress": "no-reply-scholars@weill.cornell.edu" } },
+              }),
+            ],
+          },
+        });
+        // The recipient is a deploy-time SSM lookup, never a literal address.
+        const params = template.toJSON().Parameters as Record<string, { Default?: string }>;
+        expect(Object.values(params).map((p) => p.Default)).toContain("/sps/prod/etl/feedback-digest-recipient");
+      });
+
       it("prod CADENCE schedules ship ENABLED (etlSchedulesEnabled=true)", () => {
         const rules = template.findResources("AWS::Events::Rule");
         // The #393 reconciler runs on its own flag (reconcileScheduleEnabled),
         // enabled in prod -- so scope this to the four sps-etl-* rules
-        // (3 cadence + the #595 heartbeat), all gated on etlSchedulesEnabled.
+        // (3 cadence + the #595 heartbeat + the #538 feedback digest), all
+        // gated on etlSchedulesEnabled.
         const cadenceRules = Object.entries(rules).filter(([, rule]) => {
           const name = rule.Properties?.Name as string | undefined;
           return typeof name === "string" && name.startsWith("sps-etl-");
         });
-        expect(cadenceRules).toHaveLength(4);
+        expect(cadenceRules).toHaveLength(5);
         for (const [id, rule] of cadenceRules) {
           const state = rule.Properties?.State as string | undefined;
           // Prod cadences went live 2026-07-07. This asserts the TEMPLATE says so
@@ -787,8 +813,9 @@ describe("EtlStack", () => {
         // and the funding digest import's status alarms; all share the
         // topic -- a duration alarm that routed elsewhere would be invisible,
         // so it is covered by the same loop below. + the curated-tables backup
-        // status + cadence alarms (#1032).
-        expect(Object.keys(alarms)).toHaveLength(21);
+        // status + cadence alarms (#1032) + the #538 feedback digest status +
+        // cadence alarms.
+        expect(Object.keys(alarms)).toHaveLength(23);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -847,7 +874,7 @@ describe("EtlStack", () => {
             name.includes("-status-")
           );
         });
-        expect(statusAlarms).toHaveLength(4);
+        expect(statusAlarms).toHaveLength(5);
         for (const [, a] of statusAlarms) {
           const shape = alarmMetricShape(a.Properties);
           // Dropping any one of the three re-opens a silent terminal state:
@@ -870,7 +897,7 @@ describe("EtlStack", () => {
         }
       });
 
-      it("cadence alarms watch ExecutionsStarted sum < 1 with treatMissingData=breaching (nightly + weekly + heartbeat)", () => {
+      it("cadence alarms watch ExecutionsStarted sum < 1 with treatMissingData=breaching (nightly + weekly + heartbeat + feedback digest)", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         // Scope to the cadence machines (sps-etl-*); the #393 reconciler's
         // cadence alarm has its own focused test below.
@@ -884,12 +911,14 @@ describe("EtlStack", () => {
         });
         // Annual has no cadence alarm -- CloudWatch can't express a yearly
         // no-execution window (see EtlStack alarm note + the guard below).
-        // Nightly + weekly + the #595 daily heartbeat each get one.
-        expect(cadenceAlarms).toHaveLength(3);
+        // Nightly + weekly + the #595 daily heartbeat + the #538 weekly
+        // feedback digest each get one.
+        expect(cadenceAlarms).toHaveLength(4);
         const labels = cadenceAlarms
           .map(([, a]) => a.Properties?.AlarmName as string)
           .sort();
         expect(labels).toEqual([
+          "sps-etl-feedback-digest-cadence-prod",
           "sps-etl-heartbeat-cadence-prod",
           "sps-etl-nightly-cadence-prod",
           "sps-etl-weekly-cadence-prod",
@@ -2057,8 +2086,8 @@ describe("EtlStack", () => {
       // weekly rule brings it to 10 (enabled after staging's clean supervised
       // first run on 2026-09-25); the funding digest arrival rule makes 11.
       // The #393/#353 reconcilers are ECS services, not rules, so 9; + the
-      // AWS Backup failure alert rule = 10.
-      expect(Object.keys(rules)).toHaveLength(10);
+      // AWS Backup failure alert rule = 10; + the #538 feedback digest = 11.
+      expect(Object.keys(rules)).toHaveLength(11);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -2359,6 +2388,7 @@ describe("EtlStack", () => {
     it("discovers exactly the machines buildStateMachine produces", () => {
       expect(gradedMachines).toEqual([
         "scholars-annual-staging",
+        "scholars-feedback-digest-staging",
         "scholars-heartbeat-staging",
         "scholars-nightly-staging",
         "scholars-weekly-staging",

@@ -216,8 +216,8 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
       // and the technical account stays in the comment above it.
       reason:
         "This data is refreshed by hand rather than on a schedule. The last " +
-        "hand-published refresh was 23 June 2026, and a scheduled refresh is " +
-        "not switched on yet; there is nothing to do here.",
+        "hand-published refresh was 23 June 2026. A scheduled weekly refresh " +
+        "is being built; until it is live, no action is needed here.",
     },
   },
   // #2051 part B — deployed nightly steps (cdk/lib/etl-stack.ts

@@ -1,10 +1,13 @@
 # Local dev services.
 #
-# Note: MySQL is intentionally NOT in this file. The local app talks to host
-# MariaDB on 127.0.0.1:3306 (homebrew install). See README.md "Local setup" for
-# the rationale and the cleanup steps if you're migrating from the old
-# `scholars-mysql` container. Run `npm run db:check` to confirm what your
-# DATABASE_URL is actually pointing at.
+# Default (`docker compose up -d` / `npm run db:up`): OpenSearch only. The
+# native setup talks to host MariaDB on 127.0.0.1:3306 (see README.md "Local
+# setup"); run `npm run db:check` to confirm what DATABASE_URL points at.
+#
+# `--profile app` adds MariaDB and the Next.js dev server in containers: the
+# whole stack with no host Node or MariaDB (e.g. on Windows). See README.md
+# "Docker setup". Its MariaDB publishes on 3307, never 3306, so it can't
+# shadow a host MariaDB (the old `scholars-mysql` container did exactly that).
 services:
   opensearch:
     image: opensearchproject/opensearch:2.18.0
@@ -18,7 +21,9 @@ services:
       # 4g: the sponsor-match fan-out drives a 1g heap past the 95% parent
       # circuit-breaker, which then refuses even 1KB requests with a 502. Same
       # class of failure as the staging domain right-sized in #1675, one tier down.
-      - "OPENSEARCH_JAVA_OPTS=-Xms4g -Xmx4g"
+      # OPENSEARCH_HEAP overrides (e.g. 1g for the --profile app stack on seed
+      # data, where Docker Desktop's default VM can't fit 4g plus the app).
+      - "OPENSEARCH_JAVA_OPTS=-Xms${OPENSEARCH_HEAP:-4g} -Xmx${OPENSEARCH_HEAP:-4g}"
       - "DISABLE_SECURITY_PLUGIN=true"
       - "DISABLE_INSTALL_DEMO_CONFIG=true"
     ulimits:
@@ -38,5 +43,76 @@ services:
       timeout: 5s
       retries: 20
 
+  mariadb:
+    profiles: [app]
+    image: mariadb:11.8
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: scholars
+      MARIADB_USER: scholars
+      MARIADB_PASSWORD: scholars
+      MARIADB_ROOT_PASSWORD: scholars-root
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    ports:
+      - "3307:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  app:
+    profiles: [app]
+    image: node:26-bookworm-slim
+    working_dir: /app
+    # Source is bind-mounted for live edits; node_modules and .next live in
+    # named volumes so the container's Linux build never mixes with a host
+    # (e.g. Windows) install.
+    volumes:
+      - .:/app
+      - app-node-modules:/app/node_modules
+      - app-next:/app/.next
+    environment:
+      # These win over any .env in the checkout (neither Next nor
+      # `tsx --env-file-if-exists` overrides a variable already set).
+      DATABASE_URL: mysql://scholars:scholars@mariadb:3306/scholars
+      OPENSEARCH_NODE: http://opensearch:9200
+      MENTORING_COPUB_BRIDGE: "on"
+      PUBLICATION_CITING_BRIDGE: "on"
+      SEARCH_INDEX_SKIP_HEALTH: "1"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      # Bind mounts from a Windows/macOS host don't deliver file events;
+      # poll so edits still hot-reload.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    # npm ci only when package-lock.json changed since the last install;
+    # migrations apply on every start (no-op when current). Seeding is a
+    # separate, explicit step (README) because it wipes the core tables.
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        h=$$(sha1sum package-lock.json | cut -d' ' -f1)
+        if [ "$$h" != "$$(cat node_modules/.lock-sha1 2>/dev/null)" ]; then
+          npm ci --no-audit --no-fund
+          echo "$$h" > node_modules/.lock-sha1
+        fi
+        npx prisma migrate deploy
+        exec npm run dev -- -H 0.0.0.0 -p 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+
 volumes:
   opensearch-data:
+  mariadb-data:
+  app-node-modules:
+  app-next:

@@ -104,9 +104,10 @@ describe("reviewBareIdsForSource (#2581)", () => {
 
   it("pins each prefix to its authorship_review source", () => {
     expect(REVIEW_BYLINE_SOURCES).toEqual([
-      { prefix: "SCOPUS:", source: "scopus" },
-      { prefix: "OPENALEX:", source: "openalex" },
-      { prefix: "CROSSREF:", source: "crossref" },
+      { prefix: "SCOPUS:", source: "scopus", guarded: true },
+      { prefix: "OPENALEX:", source: "openalex", guarded: true },
+      // No crossref review lane yet: guarding it fails the nightly on 0 incoming.
+      { prefix: "CROSSREF:", source: "crossref", guarded: false },
     ]);
   });
 

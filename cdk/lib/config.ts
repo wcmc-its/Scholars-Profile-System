@@ -10,6 +10,16 @@
 /** The two deployment environments. */
 export type EnvName = "staging" | "prod";
 
+/**
+ * The verified SES sender for every outbound Scholars mail: the #160 Phase 2
+ * "Request a change" mailer (app task) and the #538 weekly feedback digest (ETL
+ * task). Shared by each task role's `ses:FromAddress` condition and the
+ * `SCHOLARS_MAIL_FROM` env var, so an IAM grant and its runtime From can never
+ * drift. Verifying this identity (DKIM CNAMEs) + leaving the SES sandbox are ops
+ * steps (docs/ses-sender-verification.md).
+ */
+export const SCHOLARS_MAIL_FROM = "no-reply-scholars@weill.cornell.edu";
+
 /** Resolved configuration for one environment. */
 export interface SpsEnvConfig {
   /** Environment name — drives stack naming. */
