@@ -46,6 +46,9 @@ const EXEMPT: Record<string, string> = {
   // unscheduled step going silent harms nobody, a scheduled one is #2293 again.
   "clinical-mesh": "no cdk reference — not deployed",
   "vivo-redirect": "no cdk reference — not deployed",
+  // An operator one-off launched by hand with `aws ecs run-task`, never on a
+  // schedule, so there is no freshness to grade. Its dry run must write nothing.
+  "bulk-confirm-strong": "operator one-off, never scheduled; its dry run writes nothing",
 };
 
 const stepDirs = readdirSync(ETL, { withFileTypes: true })

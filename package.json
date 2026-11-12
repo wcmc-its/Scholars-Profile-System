@@ -134,6 +134,7 @@
     "etl:scholar-tool": "tsx etl/tools/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
     "etl:revalidate": "tsx etl/revalidate/index.ts",
+    "etl:bulk-confirm-strong": "tsx etl/bulk-confirm-strong/index.ts",
     "etl:freshness": "tsx etl/freshness/index.ts",
     "etl:feedback-digest": "tsx etl/feedback-digest/index.ts",
     "etl:integrity": "tsx etl/integrity/index.ts",

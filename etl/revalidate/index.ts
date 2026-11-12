@@ -82,7 +82,7 @@ export function isAllowedBaseUrl(baseUrl: string): boolean {
  * Best-effort: a missing token, a disallowed base URL, or a non-2xx response
  * is `console.warn`ed and swallowed — the 6h ISR TTL is the safety net.
  */
-async function requestRevalidate(p: string): Promise<void> {
+export async function requestRevalidate(p: string): Promise<void> {
   const token = process.env.SCHOLARS_REVALIDATE_TOKEN;
   const baseUrl = process.env.SCHOLARS_BASE_URL ?? "http://localhost:3000";
   if (!token) {
