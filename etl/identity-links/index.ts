@@ -36,14 +36,17 @@ async function main(): Promise<number> {
   const { roster, orcidRows } = await withReciterConnection(async (conn) => ({
     roster: (await conn.query(
       `SELECT netid, name, name_first, name_last, email, email_alt_cu, primary_department, primary_job_title
-         FROM identity_cornell_current WHERE netid IS NOT NULL AND netid <> ''`,
+         FROM identity_cornell_current WHERE netid REGEXP '^[A-Za-z]+[0-9]+$'`,
     )) as RosterRow[],
     orcidRows: (await conn.query(
       `SELECT personIdentifier, personIdentifierType, orcid FROM pubsource_orcid_person
         WHERE orcid IS NOT NULL AND orcid <> ''`,
     )) as OrcidRow[],
   }));
-  // 34,219 people on 2026-11-12; a short read would silently drop pairs.
+  // NetID-shaped keys only: the 2025 Ithaca spreadsheet keyed ~500 people by an
+  // email address (often their WCM one, some cut off at 20 characters), which
+  // paired WCM scholars with their own address. 33,711 people on 2026-11-12;
+  // a short read would silently drop pairs.
   assertSourceVolume("identity-links-roster", { incoming: roster.length, floor: 25_000 });
 
   const orcidsBy = (type: string) => {
