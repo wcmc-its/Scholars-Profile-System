@@ -294,6 +294,43 @@ describe("page gate", () => {
     const props = queueProps((await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as never);
     expect(props.readOnly).toBe(true);
   });
+
+  it("tells a read-only viewer who can decide, and a View as session why it is read-only", async () => {
+    const note = async () => {
+      const el = (await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as {
+        props: { children: unknown };
+      };
+      const r = render(<>{el.props.children as React.ReactNode}</>);
+      const n = r.queryByTestId("grant-attribution-read-only-note")?.textContent ?? null;
+      r.unmount();
+      return n;
+    };
+    h.session.mockResolvedValue(STEWARD);
+    expect(await note()).toBeNull();
+    h.session.mockResolvedValue(OBSERVER);
+    expect(await note()).toContain("Only administrators and communications stewards can decide.");
+    h.session.mockResolvedValue(SUPER);
+    h.impersonating.mockReturnValue(true);
+    expect(await note()).toContain("Read-only while viewing as someone else.");
+  });
+
+  it("explains the queue behind a closed How this queue works toggle", async () => {
+    h.session.mockResolvedValue(STEWARD);
+    const el = (await GrantAttributionQueuePage({ searchParams: Promise.resolve({}) })) as {
+      props: { children: unknown };
+    };
+    render(<>{el.props.children as React.ReactNode}</>);
+    const toggle = screen.getByTestId("grant-attribution-queue-guide-toggle");
+    const panel = screen.getByTestId("grant-attribution-queue-guide");
+    expect(toggle.getAttribute("aria-controls")).toBe("grant-attribution-queue-guide");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(panel.hasAttribute("hidden")).toBe(true);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(panel.hasAttribute("hidden")).toBe(false);
+    expect(panel.textContent).toContain("a score of +2 or more");
+    expect(panel.textContent).toContain("Administrators and communications stewards.");
+  });
 });
 
 const COAUTHOR: GrantAttributionItem = {

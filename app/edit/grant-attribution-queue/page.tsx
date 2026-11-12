@@ -17,6 +17,12 @@ import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { GrantAttributionBoard } from "@/components/edit/grant-attribution-board";
 import { GRANT_ATTRIBUTION_REPORT_HREF } from "@/components/edit/grant-attribution-shared";
+import {
+  GrantAttributionQueueGuide,
+  GrantAttributionReadOnlyText,
+} from "@/components/edit/queue-guides";
+import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession, impersonationActive } from "@/lib/auth/effective-identity";
 import { nowSeconds } from "@/lib/auth/session";
 import { getSession } from "@/lib/auth/session-server";
@@ -87,10 +93,8 @@ export default async function GrantAttributionQueuePage({
       : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
   ]);
-  const readOnly = isGrantAttributionQueueReadOnly(
-    session,
-    rawSession ? impersonationActive(rawSession, nowSeconds()) : false,
-  );
+  const viewingAs = rawSession ? impersonationActive(rawSession, nowSeconds()) : false;
+  const readOnly = isGrantAttributionQueueReadOnly(session, viewingAs);
   const unproven = tab === "pending" ? await loadUnprovenQueueItems(db.read, decided.unprovenIds) : [];
   const run = runs[0] ?? null;
   const since = runs[1]?.ranAt ?? null;
@@ -113,10 +117,19 @@ export default async function GrantAttributionQueuePage({
         <h1 className="m-0 text-[34px] font-semibold tracking-[-0.01em] max-md:text-[24px]">
           Grant attribution
         </h1>
-        <p className="m-0 max-w-[74ch] text-[15px] leading-normal text-pretty text-[var(--evidence-body)]">
-          NIH awards RePORTER links to a scholar. A weekly check weighs each one; the ones it can&rsquo;t
-          settle wait here. Profiles and search update within minutes of a decision.
-        </p>
+        <QueueIntro
+          panelId="grant-attribution-queue-guide"
+          toggleTestId="grant-attribution-queue-guide-toggle"
+          introClassName="m-0 max-w-[74ch] text-[15px] leading-normal text-pretty text-[var(--evidence-body)]"
+          intro={
+            <>
+              NIH awards RePORTER links to a scholar. A weekly check weighs each one; the ones it
+              can&rsquo;t settle wait here. Profiles and search update within minutes of a decision.
+            </>
+          }
+        >
+          <GrantAttributionQueueGuide />
+        </QueueIntro>
         <p
           className="m-0 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[13px] text-[var(--evidence-faint)]"
           data-testid="grant-attribution-run-summary"
@@ -154,9 +167,16 @@ export default async function GrantAttributionQueuePage({
       </div>
 
       {readOnly ? (
-        <p className="border-apollo-border-strong bg-apollo-surface-2 m-0 mb-4 rounded-lg border px-3 py-[9px] text-[13.5px] text-[#3a3532]">
-          You can see every decision and its evidence. Curators can change them.
-        </p>
+        <ReadOnlyNote className="mb-4" testId="grant-attribution-read-only-note">
+          {viewingAs ? (
+            <>
+              Read-only while viewing as someone else. Decisions are recorded under your own
+              sign-in.
+            </>
+          ) : (
+            <GrantAttributionReadOnlyText />
+          )}
+        </ReadOnlyNote>
       ) : null}
 
       {tab === "pending" ? (

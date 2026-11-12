@@ -25,6 +25,9 @@ import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { MediaHighlightsQueue } from "@/components/edit/media-highlights-queue";
+import { MediaHighlightsQueueGuide, NewsReadOnlyText } from "@/components/edit/queue-guides";
+import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -77,11 +80,27 @@ export default async function MediaHighlightsQueuePage() {
     >
       <div className="mb-[22px] flex flex-col gap-1.5">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Media highlights</h1>
-        <p className="text-muted-foreground m-0 max-w-3xl text-[14.5px] leading-normal">
-          Press clips matched to scholars. Approved clips appear in the profile&rsquo;s Media
-          highlights section; &ldquo;Approve but hide&rdquo; confirms the match without showing it.
-        </p>
+        <QueueIntro
+          panelId="media-highlights-queue-guide"
+          toggleTestId="media-highlights-queue-guide-toggle"
+          introClassName="text-muted-foreground m-0 max-w-3xl text-[14.5px] leading-normal"
+          intro={
+            <>
+              Press clips matched to scholars. Approved clips appear in the profile&rsquo;s Media
+              highlights section; &ldquo;Approve but hide&rdquo; confirms the match without showing
+              it.
+            </>
+          }
+        >
+          <MediaHighlightsQueueGuide />
+        </QueueIntro>
       </div>
+      {/* Same as the news queue: an observer reads, the decision route refuses. */}
+      {session.isObserver === true ? (
+        <ReadOnlyNote className="mb-4" testId="media-highlights-queue-read-only-note">
+          <NewsReadOnlyText noun="clips" />
+        </ReadOnlyNote>
+      ) : null}
       <MediaHighlightsQueue
         pending={pending}
         approved={approved}

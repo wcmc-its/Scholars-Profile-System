@@ -36,6 +36,7 @@ import {
   OrcidQueueFilterBar,
   type OrcidQueueClientFilter,
 } from "@/components/edit/orcid-queue-filter-bar";
+import { ReadOnlyNote } from "@/components/edit/queue-help";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -351,9 +352,9 @@ export function OrcidQueue({
       />
 
       {readOnly ? (
-        <p className="border-apollo-border-strong bg-apollo-surface-2 m-0 rounded-lg border px-3 py-[9px] text-[13.5px] text-[#3a3532]">
+        <ReadOnlyNote testId="orcid-queue-read-only-note">
           Read-only while viewing as someone else. Decisions are recorded under your own sign-in.
-        </p>
+        </ReadOnlyNote>
       ) : null}
 
       {error ? (

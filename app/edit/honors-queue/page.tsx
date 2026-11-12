@@ -23,6 +23,9 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { HonorsQueue } from "@/components/edit/honors-queue";
+import { HonorsQueueGuide, HonorsReadOnlyText } from "@/components/edit/queue-guides";
+import { ReadOnlyNote } from "@/components/edit/queue-help";
+import { QueueIntro } from "@/components/edit/queue-intro";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 // No `countPendingHonors` here: this page has already loaded the queue, so it
@@ -109,28 +112,46 @@ export default async function HonorsQueuePage() {
       pendingSlugRequests={slugRequests.length}
       pendingHonors={pendingCount}
     >
-      <div className="mb-[22px] flex flex-wrap items-end gap-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-[300px]">
+      {/* The intro sits below the title row, full width, so opening "How this
+          queue works" never pushes the CSV button down with it. */}
+      <div className="mb-[22px] flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">Honors approval</h1>
-          <p className="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal">
-            Honors matched to scholars from external award lists. Nothing renders on a profile until
-            it&rsquo;s approved.
-          </p>
+          {/* #1762 — the Research Dean's office exports the full record (all
+              statuses) as CSV. Same gate as this page enforces the route. A plain
+              <a>: /export is a CSV download route (route.ts), not a page, so
+              <Link>'s client nav + prefetch would fetch the file itself. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
+            href="/edit/honors-queue/export"
+            className="border-apollo-border-strong bg-apollo-surface hover:bg-apollo-surface-2 inline-flex h-[34px] items-center gap-1.5 rounded-lg border px-3 text-[13.5px] whitespace-nowrap"
+            data-testid="honors-export-link"
+          >
+            <Download className="size-[13px]" aria-hidden />
+            Download CSV
+          </a>
         </div>
-        {/* #1762 — the Research Dean's office exports the full record (all
-            statuses) as CSV. Same gate as this page enforces the route. A plain
-            <a>: /export is a CSV download route (route.ts), not a page, so
-            <Link>'s client nav + prefetch would fetch the file itself. */}
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-        <a
-          href="/edit/honors-queue/export"
-          className="border-apollo-border-strong bg-apollo-surface hover:bg-apollo-surface-2 inline-flex h-[34px] items-center gap-1.5 rounded-lg border px-3 text-[13.5px] whitespace-nowrap"
-          data-testid="honors-export-link"
+        <QueueIntro
+          panelId="honors-queue-guide"
+          toggleTestId="honors-queue-guide-toggle"
+          introClassName="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal"
+          intro={
+            <>
+              Honors matched to scholars from external award lists. Nothing renders on a profile
+              until it&rsquo;s approved.
+            </>
+          }
         >
-          <Download className="size-[13px]" aria-hidden />
-          Download CSV
-        </a>
+          <HonorsQueueGuide />
+        </QueueIntro>
       </div>
+      {/* An observer, content editor or comms steward reads the queue but the
+          controls are hidden; say why, and who can decide. */}
+      {readOnly ? (
+        <ReadOnlyNote className="mb-4" testId="honors-read-only-note">
+          <HonorsReadOnlyText />
+        </ReadOnlyNote>
+      ) : null}
       <HonorsQueue
         pending={groups}
         approved={approved}

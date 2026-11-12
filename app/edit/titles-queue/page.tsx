@@ -19,6 +19,8 @@
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
+import { TitlesReadOnlyText } from "@/components/edit/queue-guides";
+import { ReadOnlyNote } from "@/components/edit/queue-help";
 import {
   loadTitlesQueue,
   TitlesQueue,
@@ -79,6 +81,13 @@ export default async function TitlesQueuePage({
           {canPinTitles(session) ? "Fix the source or pin a title." : "Fix the source."}
         </p>
       </div>
+      {/* An observer or content editor reads the queue but never pins
+          (`canPinTitles`); say so, and who can. */}
+      {canPinTitles(session) ? null : (
+        <ReadOnlyNote className="mb-4" testId="titles-read-only-note">
+          <TitlesReadOnlyText />
+        </ReadOnlyNote>
+      )}
       <TitlesQueue data={data} session={session} searchParams={sp} basePath={BASE_PATH} />
     </ConsoleShell>
   );

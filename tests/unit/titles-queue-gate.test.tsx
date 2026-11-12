@@ -160,6 +160,30 @@ describe("/edit/titles-queue page gate", () => {
     expect(await countTitlesNeedingReview({} as never)).toBe(2);
     expect(h.load).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["superuser", SUPER, false],
+    ["comms steward", STEWARD, false],
+    ["observer", { ...STEWARD, isObserver: true }, true],
+    ["content editor", { ...STEWARD, isContentEditor: true }, true],
+  ])("%s → the read-only note only when it cannot pin", async (_n, s, shown) => {
+    h.session.mockResolvedValue(s);
+    const { render } = await import("@testing-library/react");
+    render(await TitlesQueuePage({ searchParams: Promise.resolve({}) }));
+    const { children } = h.shell.mock.calls.at(-1)![0] as { children: React.ReactNode[] };
+    // The queue itself needs the router, so render only the note element.
+    const note = children.find(
+      (c) =>
+        (c as React.ReactElement<{ testId?: string }> | null)?.props?.testId ===
+        "titles-read-only-note",
+    ) as React.ReactElement | undefined;
+    expect(note !== undefined).toBe(shown);
+    if (note) {
+      const r = render(note);
+      expect(r.getByTestId("titles-read-only-note").textContent).toContain("you can’t pin titles");
+      r.unmount();
+    }
+  });
 });
 
 describe("/edit/titles-queue/export gate", () => {
