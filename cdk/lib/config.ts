@@ -795,12 +795,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     opensearchMasterNodes: 3,
     opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 35,
-    appDesiredCount: 2,
-    // #596 — 3x the 2-task floor gives room to absorb a Wave-4 (WCM-wide,
-    // #506 Gate D5) spike on the uncacheable origin paths before the ALB
-    // queue saturates. Conservative placeholder; the true ceiling is a
-    // function of the #554 RPS / CPU-per-task numbers (P0, Gate A).
-    appMaxCount: 6,
+    // 2026-11-12 — floor 2→4 after the public launch (#432): ~150k req/h,
+    // mostly a distributed crawler, and per-task CPU peaked at 92–96% in the
+    // minutes before scale-out landed. A higher floor absorbs those bursts.
+    appDesiredCount: 4,
+    // #596 — ceiling over the floor for a Wave-4 (WCM-wide, #506 Gate D5)
+    // spike on the uncacheable origin paths. 6→8 with the floor raise.
+    appMaxCount: 8,
     // 2026-06-26 — bumped 1024→2048 (1→2 vCPU; memory follows to the Fargate
     // minimum for 2048 CPU). Same per-request taxonomy-resolve CPU cost as
     // staging (matchQueryToTaxonomy is request-scoped-cache-only); prod's higher
