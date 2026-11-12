@@ -1388,6 +1388,11 @@ export class AppStack extends Stack {
       environment: {
         NODE_ENV: "production",
         PORT: "3000",
+        // The Dockerfile's --max-old-space-size lives in the BUILD stage only,
+        // so the runtime fell back to V8's default heap (~half the container).
+        // 2026-11-12 all four prod tasks died "JavaScript heap out of memory" at
+        // ~63% container memory. 75% leaves room for the OTel sidecar + native.
+        NODE_OPTIONS: `--max-old-space-size=${Math.floor(envConfig.appMemoryMiB * 0.75)}`,
         // Verified TLS to Aurora for db.write / db.read (see `dbTls` above).
         DB_TLS: dbTls,
         // Next standalone server.js reads this into server.keepAliveTimeout.

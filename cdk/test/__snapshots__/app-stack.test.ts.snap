@@ -609,6 +609,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "3000",
               },
               {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=3072",
+              },
+              {
                 "Name": "DB_TLS",
                 "Value": "on",
               },
@@ -5668,6 +5672,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "PORT",
                 "Value": "3000",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=1536",
               },
               {
                 "Name": "DB_TLS",

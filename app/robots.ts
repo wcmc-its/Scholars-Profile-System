@@ -15,7 +15,10 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       // CRITICAL (Phase 5 D-20): do NOT add "/_next/" — Googlebot fetches
       // /_next/static/* for JS/CSS to render pages. Blocking it tanks SEO.
-      disallow: ["/api/", "/admin/"],
+      // /search: facet combinations are unbounded, uncacheable URLs, each an
+      // OpenSearch query. Crawlers walking them took prod down 2026-11-12.
+      // Profiles reach crawlers via the sitemap, not search results.
+      disallow: ["/api/", "/admin/", "/search"],
     },
     sitemap: `${base}/sitemap.xml`,
   };

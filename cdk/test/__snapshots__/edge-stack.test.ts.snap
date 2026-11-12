@@ -1651,6 +1651,104 @@ a{color:var(--slate)}
           },
           {
             "Action": {
+              "Block": {},
+            },
+            "Name": "search-block-bots",
+            "Priority": 5,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "LabelMatchStatement": {
+                      "Key": "awswaf:managed:aws:bot-control:bot:",
+                      "Scope": "NAMESPACE",
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-block-bots",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Block": {
+                "CustomResponse": {
+                  "CustomResponseBodyKey": "rateLimited",
+                  "ResponseCode": 429,
+                },
+              },
+            },
+            "Name": "search-rate-limit",
+            "Priority": 6,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "IP",
+                "EvaluationWindowSec": 300,
+                "Limit": 500,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
               "Block": {
                 "CustomResponse": {
                   "CustomResponseBodyKey": "rateLimited",
@@ -1659,7 +1757,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 5,
+            "Priority": 7,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -3510,6 +3608,104 @@ a{color:var(--slate)}
           },
           {
             "Action": {
+              "Block": {},
+            },
+            "Name": "search-block-bots",
+            "Priority": 5,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "LabelMatchStatement": {
+                      "Key": "awswaf:managed:aws:bot-control:bot:",
+                      "Scope": "NAMESPACE",
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-block-bots",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Block": {
+                "CustomResponse": {
+                  "CustomResponseBodyKey": "rateLimited",
+                  "ResponseCode": 429,
+                },
+              },
+            },
+            "Name": "search-rate-limit",
+            "Priority": 6,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "IP",
+                "EvaluationWindowSec": 300,
+                "Limit": 500,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
               "Block": {
                 "CustomResponse": {
                   "CustomResponseBodyKey": "rateLimited",
@@ -3518,7 +3714,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 5,
+            "Priority": 7,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
