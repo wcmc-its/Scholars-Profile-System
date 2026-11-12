@@ -21,10 +21,29 @@
  *
  * PER ITEM. A row decided since the selection (or now refused by the route's
  * own guards: a sibling published meanwhile, a dismissal, an iD now on file, an
- * age hide) is SKIPPED, not failed. A decision that would reject a sibling
- * (the strong rule says none exists) is rolled back and STOPS that queue, as
- * does any unexpected error. The remaining queues still run; the exit code is 1
- * when any queue stopped.
+ * age hide) is SKIPPED, not failed. So is a row that no longer meets the strong
+ * rule: inside its transaction, before the core runs, the job re-reads the row
+ * and re-asserts the rule's row-level predicates (news: pending newsroom NAME
+ * row, HIGH + TAG, snippet present, never touched by /edit, not a copy, no
+ * other row on its source_ref; honors: pending, alone on its source_ref;
+ * grant: pending, queue band, never decided or reopened, no active hide other
+ * than `system-unverified`). A decision that would reject a sibling (the strong
+ * rule says none exists) is rolled back and STOPS that queue, as does any
+ * unexpected error. The remaining queues still run.
+ *
+ * RUNNING ETL. A queue whose own ETL has a `running` etl_run row from the last
+ * 6 h sits out (HELD): ReporterGrants, HonorsLists (all-lists runs only; a
+ * single-list run writes no row), ORCID-evidence. News has no such guard: its
+ * ETL writes etl_run only on completion, so a running News reconcile is
+ * invisible; the in-transaction re-check is what protects that queue.
+ *
+ * EXIT CODE, first match wins:
+ *   2  bad arguments (nothing ran)
+ *   1  a queue STOPPED (unexpected outcome or error)
+ *   3  a queue was HELD by its running ETL: re-run it when the ETL finishes
+ *   4  every write committed, but a refresh step failed (see the TALLY
+ *      refresh line; the ISR TTL, nightly sweep and reconcilers backstop it)
+ *   0  otherwise
  *
  * REFRESH, after the writes (this task has no Next runtime, so no
  * `revalidatePath`, and no CloudFront grant):
@@ -55,7 +74,11 @@ import path from "node:path";
 import { enqueueEdgePurgeAll, requestRevalidate } from "@/etl/revalidate";
 import { isCwid } from "@/lib/cwid";
 import { db, disconnect } from "@/lib/db";
-import { decideGrantReview, GrantAttributionRefused } from "@/lib/edit/grant-attribution-decision";
+import {
+  decideGrantReview,
+  GrantAttributionRefused,
+  SYSTEM_UNVERIFIED,
+} from "@/lib/edit/grant-attribution-decision";
 import { decideHonor } from "@/lib/edit/honor-decision";
 import { decideNewsMention } from "@/lib/edit/news-mention-decision";
 import { confirmPair, OrcidQueueRefused } from "@/lib/edit/orcid-queue.server";
@@ -205,6 +228,20 @@ export async function decideOne(client: TxRunner, c: Candidate, ctx: WriteCtx): 
       const ts = new Date();
       switch (c.queue) {
         case "honors": {
+          // A single-list HonorsLists run writes no etl_run row, so it can add a
+          // competing row on this line after the selection. Re-asserted here.
+          const cur = await tx.honor.findUnique({
+            where: { id: c.key },
+            select: { status: true, sourceRef: true },
+          });
+          if (!cur) return { kind: "skipped" as const, reason: "not_found" };
+          if (cur.status !== "pending") return { kind: "skipped" as const, reason: "not_pending" };
+          if (cur.sourceRef === null)
+            return { kind: "skipped" as const, reason: "no_longer_strong" };
+          const sharing = await tx.honor.count({
+            where: { sourceRef: cur.sourceRef, id: { not: c.key } },
+          });
+          if (sharing > 0) return { kind: "skipped" as const, reason: "source_ref_shared" };
           const r = await decideHonor(tx, {
             ...base,
             id: c.key,
@@ -222,13 +259,44 @@ export async function decideOne(client: TxRunner, c: Candidate, ctx: WriteCtx): 
         }
         case "news": {
           // The core also approves a REJECTED row (the un-reject path); a bulk
-          // run decides pending rows only.
+          // run decides pending rows only. And the nightly News reconcile can
+          // rewrite a pending row (likelihood, basis, snippet, group) after the
+          // selection without leaving a running etl_run row, so the strong
+          // rule's row-level predicates are re-asserted here, in the write.
           const cur = await tx.newsMention.findUnique({
             where: { id: c.key },
-            select: { status: true },
+            select: {
+              status: true,
+              outlet: true,
+              source: true,
+              likelihood: true,
+              matchBasis: true,
+              contextSnippet: true,
+              enteredByCwid: true,
+              decisionId: true,
+              duplicateOf: true,
+              sourceRef: true,
+            },
           });
           if (!cur) return { kind: "skipped" as const, reason: "not_found" };
           if (cur.status !== "pending") return { kind: "skipped" as const, reason: "not_pending" };
+          if (
+            cur.outlet !== null ||
+            cur.source !== "NAME" ||
+            cur.likelihood !== "HIGH" ||
+            cur.matchBasis !== "TAG" ||
+            cur.contextSnippet === null ||
+            cur.enteredByCwid !== null ||
+            cur.decisionId !== null ||
+            cur.duplicateOf !== null ||
+            cur.sourceRef === null
+          ) {
+            return { kind: "skipped" as const, reason: "no_longer_strong" };
+          }
+          const sharing = await tx.newsMention.count({
+            where: { sourceRef: cur.sourceRef, id: { not: c.key } },
+          });
+          if (sharing > 0) return { kind: "skipped" as const, reason: "source_ref_shared" };
           const r = await decideNewsMention(tx, {
             ...base,
             mentionId: c.key,
@@ -250,6 +318,21 @@ export async function decideOne(client: TxRunner, c: Candidate, ctx: WriteCtx): 
           const row = await tx.grantAttributionReview.findUnique({ where: { id: c.key } });
           if (!row) return { kind: "skipped" as const, reason: "not_found" };
           if (row.status !== "pending") return { kind: "skipped" as const, reason: "not_pending" };
+          // The strong rule's row-level predicates, re-asserted in the write: a
+          // rescore or a curator can change them after the selection.
+          if (row.band !== "queue" || row.decidedByCwid !== null || row.reopenedAt !== null) {
+            return { kind: "skipped" as const, reason: "no_longer_strong" };
+          }
+          // Confirm revokes `system-unverified` hides only as a side effect of
+          // the decision; any other active hide (a curator's, the age rule's)
+          // means the rule no longer holds.
+          const hides = await tx.suppression.findMany({
+            where: { entityType: "grant", entityId: row.grantExternalId, revokedAt: null },
+            select: { createdBy: true },
+          });
+          if (hides.some((s) => s.createdBy !== SYSTEM_UNVERIFIED)) {
+            return { kind: "skipped" as const, reason: "other_hide_active" };
+          }
           const r = await decideGrantReview(tx, row, {
             ...base,
             decision: "confirm",
@@ -295,11 +378,14 @@ export type QueueTally = {
   heldBy: string | null;
 };
 
-/** The ETL whose run rewrites each queue's rows. */
-const QUEUE_ETL: Record<QueueName, string> = {
+/** The ETL whose `running` etl_run row holds each queue. Null where the ETL
+ *  writes no running row (News records etl_run only on completion), so a
+ *  guard on it could never fire; that queue relies on the in-transaction
+ *  re-check in `decideOne`. HonorsLists writes one on all-lists runs only. */
+const QUEUE_ETL: Record<QueueName, string | null> = {
   grant: "ReporterGrants",
   honors: "HonorsLists",
-  news: "News",
+  news: null,
   orcid: "ORCID-evidence",
 };
 
@@ -319,16 +405,46 @@ export type Deps = {
         }) => Promise<Array<{ slug: string }>>;
       };
     };
-  revalidate: (path: string) => Promise<void>;
-  enqueuePurgeAll: () => Promise<void>;
-  reflectGrants: (rows: Array<{ suppressionId: string; entityId: string }>) => Promise<unknown>;
+  /** Resolves false when the revalidate did not land (the helper swallows errors). */
+  revalidate: (path: string) => Promise<boolean>;
+  /** Resolves false when the outbox row was not written. */
+  enqueuePurgeAll: () => Promise<boolean>;
+  reflectGrants: (
+    rows: Array<{ suppressionId: string; entityId: string }>,
+  ) => Promise<ReadonlyArray<{ ok: boolean }>>;
   sleep: (ms: number) => Promise<void>;
   log: (line: string) => void;
   now: () => Date;
 };
 
+/** What the post-commit refresh came to. Null when nothing needed one. */
+export type RefreshTally = {
+  /** /browse + profile revalidates that did not land (or could not be listed). */
+  revalidateFailed: number;
+  revalidateTotal: number;
+  /** The one CDN outbox row was not written. */
+  purgeFailed: boolean;
+  /** Grant suppressions not reflected to search. */
+  reflectFailed: number;
+  reflectTotal: number;
+};
+
+export type RunResult = { tallies: QueueTally[]; refresh: RefreshTally | null };
+
+export function refreshFailed(r: RefreshTally | null): boolean {
+  return !!r && (r.revalidateFailed > 0 || r.purgeFailed || r.reflectFailed > 0);
+}
+
+/** The process exit code for a finished run; see the file docblock. */
+export function exitCodeFor(r: RunResult): number {
+  if (r.tallies.some((t) => t.stopped)) return 1;
+  if (r.tallies.some((t) => t.heldBy)) return 3;
+  if (refreshFailed(r.refresh)) return 4;
+  return 0;
+}
+
 /** Run the job. Never writes without `args.apply`. */
-export async function runBulkConfirm(args: Args, deps: Deps): Promise<QueueTally[]> {
+export async function runBulkConfirm(args: Args, deps: Deps): Promise<RunResult> {
   const { write, log } = deps;
   const requestId = `bulk-strong-${deps.now().toISOString()}`;
   log(
@@ -338,6 +454,7 @@ export async function runBulkConfirm(args: Args, deps: Deps): Promise<QueueTally
   const tallies: QueueTally[] = [];
   const touched = new Set<string>();
   const suppressions: Array<{ suppressionId: string; entityId: string }> = [];
+  let refreshTally: RefreshTally | null = null;
 
   try {
     for (const queue of args.queues) {
@@ -355,14 +472,15 @@ export async function runBulkConfirm(args: Args, deps: Deps): Promise<QueueTally
       try {
         // The queue's own ETL rewrites these rows (the weekly ORCID evidence run
         // replaces its table outright). Sit it out rather than race it.
-        if (args.apply) {
+        const etl = QUEUE_ETL[queue];
+        if (args.apply && etl) {
           const since = new Date(deps.now().getTime() - 6 * 3600 * 1000);
           const running = await write.etlRun.findFirst({
-            where: { source: QUEUE_ETL[queue], status: "running", startedAt: { gt: since } },
+            where: { source: etl, status: "running", startedAt: { gt: since } },
             select: { startedAt: true },
           });
           if (running) {
-            tally.heldBy = `${QUEUE_ETL[queue]} running since ${running.startedAt.toISOString()}`;
+            tally.heldBy = `${etl} running since ${running.startedAt.toISOString()}`;
             log(`[${queue}] SKIPPED: ${tally.heldBy}; re-run when it finishes`);
             continue;
           }
@@ -411,7 +529,8 @@ export async function runBulkConfirm(args: Args, deps: Deps): Promise<QueueTally
     }
   } finally {
     // Refresh whatever was committed, even when a queue stopped.
-    if (args.apply && touched.size > 0) await refresh(deps, [...touched], suppressions);
+    if (args.apply && touched.size > 0)
+      refreshTally = await refresh(deps, [...touched], suppressions);
   }
 
   for (const t of tallies) {
@@ -421,41 +540,89 @@ export async function runBulkConfirm(args: Args, deps: Deps): Promise<QueueTally
         .join(" ") || "none";
     log(
       `TALLY ${t.queue}: selected=${t.selected} decided=${t.decided} skipped: ${skipped}` +
-        `${t.heldBy ? ` held: ${t.heldBy}` : ""}${t.stopped ? ` STOPPED: ${t.stopped}` : ""}`,
+        `${t.heldBy ? ` HELD: ${t.heldBy}` : ""}${t.stopped ? ` STOPPED: ${t.stopped}` : ""}`,
     );
   }
-  return tallies;
+  if (refreshTally) {
+    const r = refreshTally;
+    // The writes above are committed whatever this line says.
+    log(
+      `TALLY refresh: ${refreshFailed(r) ? "FAILED" : "ok"} (writes committed)` +
+        ` revalidate=${r.revalidateTotal - r.revalidateFailed}/${r.revalidateTotal}` +
+        ` cdn_purge=${r.purgeFailed ? "FAILED" : "enqueued"}` +
+        ` search_reflect=${r.reflectTotal - r.reflectFailed}/${r.reflectTotal}`,
+    );
+  }
+  return { tallies, refresh: refreshTally };
 }
 
-/** Post-commit refresh outside Next; see the file docblock. Best-effort. */
+/** Post-commit refresh outside Next; see the file docblock. Best-effort: a
+ *  failed step is logged and counted, never thrown, so it cannot hide the
+ *  committed writes. */
 async function refresh(
   deps: Deps,
   cwids: string[],
   suppressions: Array<{ suppressionId: string; entityId: string }>,
-): Promise<void> {
+): Promise<RefreshTally> {
   const { log } = deps;
+  const t: RefreshTally = {
+    revalidateFailed: 0,
+    revalidateTotal: 0,
+    purgeFailed: false,
+    reflectFailed: 0,
+    reflectTotal: suppressions.length,
+  };
+  const landed = async (p: Promise<boolean>): Promise<boolean> => {
+    try {
+      return await p;
+    } catch {
+      return false;
+    }
+  };
+
+  let paths: string[];
   try {
     const scholars = await deps.write.scholar.findMany({
       where: { cwid: { in: cwids } },
       select: { slug: true },
     });
-    await deps.revalidate("/browse");
-    for (const s of scholars) await deps.revalidate(canonicalProfilePath(s.slug));
-    log(`[refresh] revalidated /browse + ${scholars.length} profile(s)`);
+    paths = ["/browse", ...scholars.map((s) => canonicalProfilePath(s.slug))];
   } catch (err) {
-    log(
-      `[refresh] profile revalidation failed (the 6h ISR TTL and the nightly sweep still cover it): ${String(err)}`,
-    );
+    // The profiles cannot be listed: count each touched one as missed.
+    log(`[refresh] could not list touched profiles: ${String(err)}`);
+    paths = ["/browse"];
+    t.revalidateTotal += cwids.length;
+    t.revalidateFailed += cwids.length;
   }
-  await deps.enqueuePurgeAll();
-  if (suppressions.length > 0) {
-    try {
-      await deps.reflectGrants(suppressions);
-      log(`[refresh] reflected ${suppressions.length} grant suppression(s) to search`);
-    } catch (err) {
-      log(`[refresh] search reflect failed (scholars-reconcile retries it): ${String(err)}`);
+  for (const p of paths) {
+    t.revalidateTotal++;
+    if (!(await landed(deps.revalidate(p)))) {
+      t.revalidateFailed++;
+      log(`[refresh] revalidate ${p} did not land`);
     }
   }
+  log(
+    `[refresh] revalidated ${t.revalidateTotal - t.revalidateFailed}/${t.revalidateTotal} path(s)` +
+      `${t.revalidateFailed ? " (the 6h ISR TTL and the nightly sweep still cover the rest)" : ""}`,
+  );
+
+  t.purgeFailed = !(await landed(deps.enqueuePurgeAll()));
+  log(`[refresh] CDN /* purge ${t.purgeFailed ? "NOT enqueued" : "enqueued"}`);
+
+  if (suppressions.length > 0) {
+    try {
+      const results = await deps.reflectGrants(suppressions);
+      t.reflectFailed = suppressions.length - results.filter((r) => r.ok).length;
+    } catch (err) {
+      log(`[refresh] search reflect threw: ${String(err)}`);
+      t.reflectFailed = suppressions.length;
+    }
+    log(
+      `[refresh] reflected ${t.reflectTotal - t.reflectFailed}/${t.reflectTotal} grant suppression(s) to search` +
+        `${t.reflectFailed ? " (scholars-reconcile retries the rest)" : ""}`,
+    );
+  }
+  return t;
 }
 
 async function main(): Promise<number> {
@@ -469,7 +636,7 @@ async function main(): Promise<number> {
     );
     return 2;
   }
-  const tallies = await runBulkConfirm(args, {
+  const result = await runBulkConfirm(args, {
     write: db.write as unknown as Deps["write"],
     revalidate: requestRevalidate,
     enqueuePurgeAll: enqueueEdgePurgeAll,
@@ -478,7 +645,7 @@ async function main(): Promise<number> {
     log: (line) => console.log(line),
     now: () => new Date(),
   });
-  return tallies.some((t) => t.stopped) ? 1 : 0;
+  return exitCodeFor(result);
 }
 
 const isDirectInvocation =

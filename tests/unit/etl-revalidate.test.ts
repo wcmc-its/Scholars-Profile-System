@@ -23,7 +23,7 @@ describe("enqueueEdgePurgeAll", () => {
 
   it("enqueues one /* purge on the cdn_invalidation outbox", async () => {
     mockCdnCreate.mockResolvedValue({ id: "row-1" });
-    await enqueueEdgePurgeAll();
+    await expect(enqueueEdgePurgeAll()).resolves.toBe(true);
     expect(mockCdnCreate).toHaveBeenCalledWith({
       data: { paths: JSON.stringify(["/*"]), attempts: 0 },
     });
@@ -34,7 +34,7 @@ describe("enqueueEdgePurgeAll", () => {
       throw new Error("db down");
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(enqueueEdgePurgeAll()).resolves.toBeUndefined();
+    await expect(enqueueEdgePurgeAll()).resolves.toBe(false);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
