@@ -40,15 +40,20 @@
  */
 import { type NextRequest, NextResponse } from "next/server";
 
-import { isReopenedFromDecision } from "@/etl/reporter-grants/attribution-plan";
 import { db } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { runAfterResponse } from "@/lib/edit/after-response";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
+  GrantAttributionRefused as Refused,
+  SYSTEM_RECENCY,
+  SYSTEM_UNVERIFIED,
+  decideGrantReview,
+  type GrantDecisionEffects as Effects,
+} from "@/lib/edit/grant-attribution-decision";
+import {
   GRANT_ATTRIBUTION_BULK_MAX,
   GRANT_REJECTION_REASON_MAX,
-  NOT_THIS_PERSON_REASON_PREFIX,
   canDecideGrantAttribution,
   isGrantAttributionQueueEnabled,
 } from "@/lib/edit/grant-attribution-queue";
@@ -60,35 +65,13 @@ export const dynamic = "force-dynamic";
 
 const PATH = "/api/edit/grant-attribution/decision";
 
-/** The ETL's createdBy markers (etl/reporter-grants/index.ts). */
-const SYSTEM_UNVERIFIED = "system-unverified";
-const SYSTEM_RECENCY = "system-recency";
 /** The hide a by-grant decision mints on a shown award, as the requeue route does. */
 const OPENED_REASON =
   "RePORTER grant opened for a curator's decision in the grant attribution queue. " +
   "Hidden until a curator confirms it.";
 
 type Decision = "confirm" | "reject" | "undo";
-/** `reopenedBy`: the review was pending as reopened-from-decision (a requeue,
- *  or the ETL reopening a decision) when decided, by this cwid. Undo puts the
- *  marker back, so the next run still leaves it to a curator. */
-type Effects = { revoked: string[]; created: string[]; reopenedBy?: string | null };
 type Review = NonNullable<Awaited<ReturnType<typeof db.write.grantAttributionReview.findUnique>>>;
-
-class Refused extends Error {
-  constructor(
-    readonly status: 404 | 409,
-    readonly code:
-      | "not_found"
-      | "not_pending"
-      | "not_undoable"
-      | "hidden_by_age"
-      | "state_changed"
-      | "already_decided",
-  ) {
-    super(code);
-  }
-}
 
 function parseEffects(v: unknown): Effects | null {
   if (!v || typeof v !== "object") return null;
@@ -335,87 +318,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           target.review ??
           (await tx.grantAttributionReview.findUnique({ where: { id: target.id } }));
         if (!row) throw new Refused(404, "not_found");
-        const id = row.id;
         const entityId = row.grantExternalId;
         const opened = target.review ? (openedFrom.get(entityId) ?? null) : null;
-        const snapshot = {
-          review_id: row.id,
-          status: row.status,
-          score: row.score,
-          band: row.band,
-        };
 
         if (decision === "undo") {
           await undoRow(row);
           continue;
         }
 
-        if (row.status !== "pending") throw new Refused(409, "not_pending");
-
-        const active = await tx.suppression.findMany({
-          where: { entityType: "grant", entityId, revokedAt: null },
-          select: { id: true, createdBy: true, reason: true },
-        });
-        // Confirming an award the age rule also hides would "confirm" it and
-        // leave it hidden. The ETL never queues one, so this is a guard.
-        if (active.some((s) => s.createdBy === SYSTEM_RECENCY)) {
-          throw new Refused(409, "hidden_by_age");
-        }
-        const systemHides = active.filter((s) => s.createdBy === SYSTEM_UNVERIFIED);
-        const curatorHides = active.filter((s) => s.reason.startsWith(NOT_THIS_PERSON_REASON_PREFIX));
-
-        const effects: Effects = {
-          revoked: [],
-          created: [],
-          reopenedBy: isReopenedFromDecision(row) ? row.decidedByCwid : null,
-        };
-        if (decision === "confirm") {
-          for (const s of [...systemHides, ...curatorHides]) {
-            const r = await tx.suppression.updateMany({
-              where: { id: s.id, revokedAt: null },
-              data: { revokedAt: ts, revokedBy: realCwid, searchReflectedAt: null },
-            });
-            if (r.count !== 1) throw new Refused(409, "state_changed");
-            effects.revoked.push(s.id);
-            suppressions.push({ suppressionId: s.id, entityId });
-          }
-        } else if (curatorHides.length === 0) {
-          const sup = await tx.suppression.create({
-            data: {
-              entityType: "grant",
-              entityId,
-              reason: reason ? `${NOT_THIS_PERSON_REASON_PREFIX}: ${reason}` : NOT_THIS_PERSON_REASON_PREFIX,
-              createdBy: realCwid,
-            },
-          });
-          effects.created.push(sup.id);
-          suppressions.push({ suppressionId: sup.id, entityId });
-        }
-
-        const status = decision === "confirm" ? "confirmed" : "rejected";
-        const claimed = await tx.grantAttributionReview.updateMany({
-          where: { id, status: "pending" },
-          data: {
-            status,
-            decidedByCwid: realCwid,
-            decidedAt: ts,
-            rejectionReason: decision === "reject" ? reason : null,
-            decisionEffects: effects,
-          },
-        });
-        if (claimed.count !== 1) throw new Refused(409, "not_pending");
-        await appendAuditRow(tx, {
-          actorCwid: realCwid,
+        // Confirm / reject: the shared core (lib/edit/grant-attribution-decision.ts),
+        // also run by the etl/bulk-confirm-strong operator job.
+        const decided = await decideGrantReview(tx, row, {
+          decision,
+          reason,
+          realCwid,
           impersonatedCwid,
-          targetEntityType: "grant",
-          targetEntityId: entityId,
-          action: decision === "confirm" ? "grant_attribution_confirm" : "grant_attribution_reject",
-          fieldsChanged: decision === "reject" && reason ? ["status", "rejectionReason"] : ["status"],
-          beforeValues: opened ? { ...snapshot, ...opened, status: opened.review_status } : snapshot,
-          afterValues: { review_id: row.id, status, reason, effects },
-          ts,
           requestId,
+          ts,
+          opened,
         });
+        suppressions.push(...decided.suppressions);
         entities.push(entityId);
       }
       return { entities, suppressions, reviews };
