@@ -8,6 +8,7 @@ import * as snsSubs from "aws-cdk-lib/aws-sns-subscriptions";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { NOTIFY_SUBSCRIBER_EMAIL } from "./observability-stack";
+import { SCHOLARS_MAIL_CONFIG_SET } from "./config";
 
 /** Receive-only mail domain. ITS delegates it to this stack's Route53 zone (NS). */
 export const INBOUND_MAIL_DOMAIN = "scholars-mail.weill.cornell.edu";
@@ -70,7 +71,7 @@ export class InboundMailStack extends Stack {
     });
     feedbackTopic.addSubscription(new snsSubs.EmailSubscription(NOTIFY_SUBSCRIBER_EMAIL));
     const sendConfig = new ses.ConfigurationSet(this, "SendConfigurationSet", {
-      configurationSetName: "scholars-mail-default",
+      configurationSetName: SCHOLARS_MAIL_CONFIG_SET,
     });
     sendConfig.addEventDestination("BounceComplaintToSns", {
       destination: ses.EventDestination.snsTopic(feedbackTopic),

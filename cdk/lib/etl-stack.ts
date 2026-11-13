@@ -23,7 +23,7 @@ import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
-import { SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
+import { SCHOLARS_MAIL_CONFIG_SET, SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
 import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 import { drCurationBackupBucketName } from "./dr-backup-vault-stack";
 import { CLIPS_PREFIX, FUNDING_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
@@ -776,7 +776,10 @@ export class EtlStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["ses:SendEmail"],
-          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+          resources: [
+            `arn:aws:ses:${this.region}:${this.account}:identity/*`,
+            `arn:aws:ses:${this.region}:${this.account}:configuration-set/${SCHOLARS_MAIL_CONFIG_SET}`,
+          ],
           conditions: { StringEquals: { "ses:FromAddress": SCHOLARS_MAIL_FROM } },
         }),
       ],
