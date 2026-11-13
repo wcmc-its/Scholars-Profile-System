@@ -3284,7 +3284,7 @@ function FacetSidebar({
               />
             )),
             <li key="about" className="pt-1 text-[12.5px]">
-              <Link href={methodologyHref("researchType")} className="text-[#2c4f6e] hover:underline">
+              <Link href={methodologyHref("researchType")} prefetch={false} className="text-[#2c4f6e] hover:underline">
                 How these are defined
               </Link>
             </li>,
