@@ -1492,6 +1492,11 @@ function handler(event) {
     },
     "EdgeWebAcl": {
       "Properties": {
+        "ChallengeConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
         "CustomResponseBodies": {
           "offNetwork": {
             "Content": "<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Coming soon - Scholars @ Weill Cornell Medicine</title><style>
@@ -1640,6 +1645,25 @@ a{color:var(--slate)}
                   },
                 ],
                 "Name": "AWSManagedRulesBotControlRuleSet",
+                "ScopeDownStatement": {
+                  "NotStatement": {
+                    "Statement": {
+                      "ByteMatchStatement": {
+                        "FieldToMatch": {
+                          "UriPath": {},
+                        },
+                        "PositionalConstraint": "STARTS_WITH",
+                        "SearchString": "/search",
+                        "TextTransformations": [
+                          {
+                            "Priority": 0,
+                            "Type": "LOWERCASE",
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
                 "VendorName": "AWS",
               },
             },
@@ -1650,11 +1674,180 @@ a{color:var(--slate)}
             },
           },
           {
+            "Name": "AWSManagedRulesBotControlRuleSet-Targeted",
+            "OverrideAction": {
+              "None": {},
+            },
+            "Priority": 5,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "ManagedRuleGroupConfigs": [
+                  {
+                    "AWSManagedRulesBotControlRuleSet": {
+                      "EnableMachineLearning": true,
+                      "InspectionLevel": "TARGETED",
+                    },
+                  },
+                ],
+                "Name": "AWSManagedRulesBotControlRuleSet",
+                "RuleActionOverrides": [
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAdvertising",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryArchiver",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryContentFetcher",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryEmailClient",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryHttpLibrary",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryLinkChecker",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMiscellaneous",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMonitoring",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryPagePreview",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryScrapingFramework",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySearchEngine",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySecurity",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySeo",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySocialMedia",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryWebhooks",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAI",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalAutomatedBrowser",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalKnownBotDataCenter",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalNonBrowserUserAgent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Challenge": {},
+                    },
+                    "Name": "TGT_TokenAbsent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_SignalBrowserAutomationExtension",
+                  },
+                ],
+                "ScopeDownStatement": {
+                  "ByteMatchStatement": {
+                    "FieldToMatch": {
+                      "UriPath": {},
+                    },
+                    "PositionalConstraint": "STARTS_WITH",
+                    "SearchString": "/search",
+                    "TextTransformations": [
+                      {
+                        "Priority": 0,
+                        "Type": "LOWERCASE",
+                      },
+                    ],
+                  },
+                },
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-AWSManagedRulesBotControlRuleSet-Targeted",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
             "Action": {
               "Block": {},
             },
             "Name": "search-block-bots",
-            "Priority": 5,
+            "Priority": 6,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -1693,7 +1886,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-scraper-ua",
-            "Priority": 6,
+            "Priority": 7,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -1748,7 +1941,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -1807,7 +2000,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 8,
+            "Priority": 9,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -3443,6 +3636,11 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     },
     "EdgeWebAcl": {
       "Properties": {
+        "ChallengeConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
         "CustomResponseBodies": {
           "offNetwork": {
             "Content": "<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Coming soon - Scholars @ Weill Cornell Medicine</title><style>
@@ -3647,6 +3845,25 @@ a{color:var(--slate)}
                   },
                 ],
                 "Name": "AWSManagedRulesBotControlRuleSet",
+                "ScopeDownStatement": {
+                  "NotStatement": {
+                    "Statement": {
+                      "ByteMatchStatement": {
+                        "FieldToMatch": {
+                          "UriPath": {},
+                        },
+                        "PositionalConstraint": "STARTS_WITH",
+                        "SearchString": "/search",
+                        "TextTransformations": [
+                          {
+                            "Priority": 0,
+                            "Type": "LOWERCASE",
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
                 "VendorName": "AWS",
               },
             },
@@ -3657,11 +3874,180 @@ a{color:var(--slate)}
             },
           },
           {
+            "Name": "AWSManagedRulesBotControlRuleSet-Targeted",
+            "OverrideAction": {
+              "None": {},
+            },
+            "Priority": 5,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "ManagedRuleGroupConfigs": [
+                  {
+                    "AWSManagedRulesBotControlRuleSet": {
+                      "EnableMachineLearning": true,
+                      "InspectionLevel": "TARGETED",
+                    },
+                  },
+                ],
+                "Name": "AWSManagedRulesBotControlRuleSet",
+                "RuleActionOverrides": [
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAdvertising",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryArchiver",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryContentFetcher",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryEmailClient",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryHttpLibrary",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryLinkChecker",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMiscellaneous",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMonitoring",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryPagePreview",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryScrapingFramework",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySearchEngine",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySecurity",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySeo",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySocialMedia",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryWebhooks",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAI",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalAutomatedBrowser",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalKnownBotDataCenter",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalNonBrowserUserAgent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Challenge": {},
+                    },
+                    "Name": "TGT_TokenAbsent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_SignalBrowserAutomationExtension",
+                  },
+                ],
+                "ScopeDownStatement": {
+                  "ByteMatchStatement": {
+                    "FieldToMatch": {
+                      "UriPath": {},
+                    },
+                    "PositionalConstraint": "STARTS_WITH",
+                    "SearchString": "/search",
+                    "TextTransformations": [
+                      {
+                        "Priority": 0,
+                        "Type": "LOWERCASE",
+                      },
+                    ],
+                  },
+                },
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-AWSManagedRulesBotControlRuleSet-Targeted",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
             "Action": {
               "Block": {},
             },
             "Name": "search-block-bots",
-            "Priority": 5,
+            "Priority": 6,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -3700,7 +4086,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-scraper-ua",
-            "Priority": 6,
+            "Priority": 7,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -3755,7 +4141,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -3814,7 +4200,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 8,
+            "Priority": 9,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
