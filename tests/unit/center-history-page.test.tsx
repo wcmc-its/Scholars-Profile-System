@@ -20,7 +20,11 @@ const {
   mockFindUnique,
   mockForbidden,
   mockView,
+  mockResolveNames,
+  mockLoadExternals,
 } = vi.hoisted(() => ({
+  mockLoadExternals: vi.fn(async () => new Map<string, { displayName: string }>()),
+  mockResolveNames: vi.fn(async () => new Map<string, string>()),
   mockGetEditSession: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`__REDIRECT__:${url}`);
@@ -47,6 +51,8 @@ vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogDenial }));
 vi.mock("@/lib/db", () => ({
   db: { read: { center: { findUnique: mockFindUnique } }, write: {} },
 }));
+vi.mock("@/lib/edit/person-names", () => ({ resolvePersonNames: mockResolveNames }));
+vi.mock("@/lib/api/external-members", () => ({ loadExternalMembersByCuid: mockLoadExternals }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
 vi.mock("@/components/edit/center-history-view", () => ({ CenterHistoryView: mockView }));
 
@@ -109,6 +115,30 @@ describe("/edit/center/[code]/history — authorization", () => {
     expect(result.type).toBe(mockView);
     expect(mockLoadHistory).toHaveBeenCalledWith("meyer_cancer_center", expect.anything());
     expect(result.props.unavailable).toBe(false);
+  });
+
+  it("resolves actor / impersonated / member CWIDs to names for the view", async () => {
+    mockGetEditSession.mockResolvedValue({ cwid: "cur01", isSuperuser: false });
+    mockLoadCtx.mockResolvedValue(CTX);
+    mockLoadHistory.mockResolvedValue([
+      { id: "1", actorCwid: "cur0001", impersonatedCwid: null, targetCwid: "abc1001" },
+    ]);
+    mockResolveNames.mockResolvedValueOnce(new Map([["abc1001", "Ada Member"]]));
+    const result = asEl(await EditCenterHistoryPage({ params: params("meyer_cancer_center") }));
+    expect(mockResolveNames).toHaveBeenCalledWith(["cur0001", null, "abc1001"]);
+    expect(result.props.names).toEqual({ abc1001: "Ada Member" });
+  });
+
+  it("names an external member from external_member and keeps its id out of the WCM lookup", async () => {
+    mockGetEditSession.mockResolvedValue({ cwid: "cur01", isSuperuser: false });
+    mockLoadCtx.mockResolvedValue(CTX);
+    mockLoadHistory.mockResolvedValue([
+      { id: "1", actorCwid: "cur0001", impersonatedCwid: null, targetCwid: "ext9" },
+    ]);
+    mockLoadExternals.mockResolvedValueOnce(new Map([["ext9", { displayName: "Ida Ithaca" }]]));
+    const result = asEl(await EditCenterHistoryPage({ params: params("meyer_cancer_center") }));
+    expect(mockResolveNames).toHaveBeenCalledWith(["cur0001", null, null]);
+    expect(result.props.names).toEqual({ ext9: "Ida Ithaca" });
   });
 
   it("audit read failure → renders the view as unavailable, does not 500", async () => {

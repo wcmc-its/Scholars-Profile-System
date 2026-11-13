@@ -60,6 +60,14 @@ describe("TitleField — radio list", () => {
     expect(screen.queryByText(/on record/)).toBeNull();
   });
 
+  it("names the requester of a pending request, not their CWID", () => {
+    const { container } = renderField({
+      pending: { value: "Professor of Medicine", requestedBy: "xyz9001", requestedByName: "Pat Proxy" },
+    });
+    expect(container.textContent).toContain("Pat Proxy requested:");
+    expect(container.textContent).not.toContain("xyz9001");
+  });
+
   it("explains the working title on its row only", () => {
     renderField();
     const working = screen.getByTestId("title-option-working");

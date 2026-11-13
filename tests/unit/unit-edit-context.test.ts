@@ -24,6 +24,17 @@ vi.mock("@/lib/db", () => ({
   prisma: { externalMember: { findMany: externalMemberFindMany } },
 }));
 
+// WCM-directory name fallback for grantees/granters/roster/leaders with no
+// Scholar row — mocked so no test reaches LDAP; empty unless a test seeds it.
+const { resolveDirectoryNamesMock, fetchDirectoryPeopleByCwidMock } = vi.hoisted(() => ({
+  resolveDirectoryNamesMock: vi.fn(async (_cwids: string[]) => new Map<string, string>()),
+  fetchDirectoryPeopleByCwidMock: vi.fn(
+    async (_cwids: string[]): Promise<Array<{ cwid: string; name: string; title: string | null }>> => [],
+  ),
+}));
+vi.mock("@/lib/edit/directory-names", () => ({ resolveDirectoryNames: resolveDirectoryNamesMock }));
+vi.mock("@/lib/sources/ldap", () => ({ fetchDirectoryPeopleByCwid: fetchDirectoryPeopleByCwidMock }));
+
 vi.mock("@/lib/edit/cornell-directory-flag", () => ({
   isCornellDirectoryMembersEnabled: isCornellDirectoryMembersEnabledMock,
 }));
@@ -187,6 +198,8 @@ const asClient = (c: ReturnType<typeof fakeClient>) => c as unknown as Client;
 beforeEach(() => {
   isCornellDirectoryMembersEnabledMock.mockReturnValue(false);
   externalMemberFindMany.mockReset().mockResolvedValue([]);
+  resolveDirectoryNamesMock.mockReset().mockResolvedValue(new Map());
+  fetchDirectoryPeopleByCwidMock.mockReset().mockResolvedValue([]);
 });
 
 const DEPT = {
@@ -300,6 +313,34 @@ describe("loadUnitEditContext — department", () => {
     expect(ctx!.access![0]).toMatchObject({ cwid: "cur001", name: "Casey Curator", title: "MD", role: "curator" });
     // a non-Scholar grantee falls back to the cwid (the access card re-resolves it).
     expect(ctx!.access![1]).toMatchObject({ cwid: "staff9", name: "staff9", title: null });
+  });
+
+  it("names non-Scholar grantees and granters from the directory; ED-ETL stays unnamed", async () => {
+    resolveDirectoryNamesMock.mockResolvedValue(
+      new Map([
+        ["staff9", "Sam Staff"],
+        ["boss7", "Bea Boss"],
+      ]),
+    );
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      OWNER,
+      asClient(
+        fakeClient({
+          department: DEPT,
+          roleRows: [{ entityType: "department", entityId: "N1280", role: "owner" }],
+          accessRows: [
+            { cwid: "staff9", role: "curator", grantedBy: "boss7", createdAt: new Date("2026-05-03") },
+            { cwid: "cur001", role: "curator", grantedBy: "ED-ETL", createdAt: new Date("2026-05-02") },
+          ],
+          scholars: [{ cwid: "cur001", preferredName: "Casey Curator", primaryTitle: "MD" }],
+        }),
+      ),
+    );
+    expect(resolveDirectoryNamesMock).toHaveBeenCalledWith(["staff9", "boss7"]);
+    expect(ctx!.access![0]).toMatchObject({ name: "Sam Staff", grantedBy: "boss7", grantedByName: "Bea Boss" });
+    expect(ctx!.access![1]).toMatchObject({ grantedBy: "ED-ETL", grantedByName: null });
   });
 
   // 2026-08-26 policy widening (decision #3) — a comms_steward with NO
@@ -457,6 +498,13 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
     const roster = await rosterFor([{ cwid: "ghost1", source: "manual-ui" }], []);
     expect(roster[0].scholarState).toBe("unknown");
     expect(roster[0].name).toBe("ghost1");
+  });
+
+  it("a cwid with no scholar row but a directory entry shows the directory name", async () => {
+    resolveDirectoryNamesMock.mockResolvedValue(new Map([["trn1", "Tara Trainee"]]));
+    const roster = await rosterFor([{ cwid: "trn1", source: "manual-ui" }], []);
+    expect(roster[0].scholarState).toBe("unknown");
+    expect(roster[0].name).toBe("Tara Trainee");
   });
 
   it("distinguishes departed from unknown in one roster", async () => {
@@ -778,6 +826,24 @@ describe("loadUnitEditContext — center", () => {
       },
       { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
     ]);
+  });
+
+  it("names a program leader with no Scholar row from the directory", async () => {
+    fetchDirectoryPeopleByCwidMock.mockResolvedValue([{ cwid: "stf001", name: "Pat Staff", title: "Manager" }]);
+    const ctx = await loadUnitEditContext(
+      "center",
+      "man-abc12345",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center: { code: "man-abc12345", name: "P", description: null, url: null, slug: "p", centerType: "center" },
+          centerPrograms: [{ code: "CB", label: "Cancer Biology", sortOrder: 10, description: null }],
+          programAssignments: [{ entityId: "man-abc12345:CB", cwid: "stf001", interim: false, sortOrder: 0 }],
+        }),
+      ),
+    );
+    expect(fetchDirectoryPeopleByCwidMock).toHaveBeenCalledWith(["stf001"]);
+    expect(ctx!.programs![0].leaders[0]).toMatchObject({ cwid: "stf001", name: "Pat Staff", title: "Manager" });
   });
 
   it("returns null for department/division and [] by default for a center", async () => {

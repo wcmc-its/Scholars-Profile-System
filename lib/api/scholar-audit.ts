@@ -53,6 +53,9 @@ export type ScholarAuditEntry = {
   fields: string[];
   /** a compact extra detail (e.g. the proxy cwid, the requested slug), else null. */
   detail: string | null;
+  /** the proxy's CWID on a `proxy_grant` / `proxy_revoke` row (so the page can
+   *  resolve it to a name), else null. */
+  detailCwid: string | null;
 };
 
 /** The narrow Prisma surface this reader needs — `db.read` satisfies it. */
@@ -200,6 +203,12 @@ export function shapeScholarAuditRows(
       actionLabel: labelForAction(r.action),
       fields: fieldLabels(r.fields_changed),
       detail: detailForAction(r.action, before, after),
+      detailCwid:
+        r.action === "proxy_grant"
+          ? readStr(after, "proxy_cwid")
+          : r.action === "proxy_revoke"
+            ? readStr(before, "proxy_cwid")
+            : null,
     };
   });
 }

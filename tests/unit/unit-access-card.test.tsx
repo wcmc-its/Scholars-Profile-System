@@ -178,6 +178,13 @@ describe("UnitAccessCard", () => {
     expect(row.textContent).toContain("Granted by own001 · May 2, 2026");
   });
 
+  it("'Granted by' shows the server-resolved granter name when present", () => {
+    render(<UnitAccessCard {...base} access={[{ ...rows[1], grantedByName: "Olivia Owner" }]} />);
+    const row = screen.getByTestId("unit-access-row-cur001");
+    expect(row.textContent).toContain("Granted by Olivia Owner · May 2, 2026");
+    expect(row.textContent).not.toContain("own001");
+  });
+
   it("the grant row's segmented role control switches the posted role to owner", async () => {
     const fetchMock = stubOk();
     render(<UnitAccessCard {...base} access={rows} />);

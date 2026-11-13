@@ -425,6 +425,18 @@ describe("departed / unresolvable members (#2324)", () => {
     expect(screen.queryByTestId("roster-needs-close-out")).toBeNull();
   });
 
+  it("a no-Scholar-row member the directory named shows that name with no Not in directory badge", () => {
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "trn1", name: "Tara Trainee", scholarState: "unknown" })]}
+        programs={[]}
+      />,
+    );
+    expect(screen.getByTestId("center-roster-row-trn1").textContent).toContain("Tara Trainee");
+    expect(screen.queryByTestId("roster-scholar-state-trn1")).toBeNull();
+  });
+
   it("a Cornell (Ithaca) external member renders its name + a Cornell University badge, never Not in directory (#2519)", () => {
     render(
       <CenterRosterCard

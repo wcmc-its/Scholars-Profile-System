@@ -4,7 +4,12 @@
  * grouping by person, scope filtering, provenance passthrough, and the #443
  * name-resolution degradation flag.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const { resolveDirectoryNamesMock } = vi.hoisted(() => ({
+  resolveDirectoryNamesMock: vi.fn(async (_cwids: string[]) => new Map<string, string>()),
+}));
+vi.mock("@/lib/edit/directory-names", () => ({ resolveDirectoryNames: resolveDirectoryNamesMock }));
 
 import {
   loadUnitAdministratorRoster,
@@ -287,5 +292,19 @@ describe("loadUnitAdministratorRoster — grant provenance (Added by)", () => {
     const div = entries[0].grants.find((g) => g.entityId === "V1")!;
     expect(div.grantedBy).toBe("ED-ETL");
     expect(div.grantedByName).toBeNull();
+  });
+
+  it("names a manual granter with no Scholar row from the directory", async () => {
+    resolveDirectoryNamesMock.mockResolvedValueOnce(new Map([["staff1", "Sam Staff"]]));
+    const client = makeClient({
+      unitAdmin: [
+        { entityType: "department", entityId: "D1", cwid: "p1", role: "owner", source: "manual", grantedBy: "staff1" },
+      ],
+      departments: [{ code: "D1", name: "Dept One" }],
+      scholars: [{ cwid: "p1", preferredName: "P One", primaryTitle: null }],
+    });
+    const { entries } = await loadUnitAdministratorRoster({}, client);
+    expect(resolveDirectoryNamesMock).toHaveBeenLastCalledWith(["staff1"]);
+    expect(entries[0].grants[0].grantedByName).toBe("Sam Staff");
   });
 });

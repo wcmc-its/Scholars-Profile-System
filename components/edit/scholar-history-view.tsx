@@ -28,7 +28,13 @@ export type ScholarHistoryViewProps = {
    *  render an honest "unavailable" notice instead of an empty/"no edits" state,
    *  so the page degrades gracefully rather than 500ing. */
   unavailable?: boolean;
+  /** lowercased CWID → display name, resolved server-side by the page. A CWID
+   *  absent here renders as itself (resolution failed). */
+  names?: Readonly<Record<string, string>>;
 };
+
+const nameFor = (names: Readonly<Record<string, string>>, cwid: string): string =>
+  names[cwid.trim().toLowerCase()] ?? cwid;
 
 /**
  * Format a stored UTC instant as WCM-local Eastern time. `America/New_York` is
@@ -54,9 +60,18 @@ function formatTs(iso: string): string {
 }
 
 /** Render one row's detail: the changed fields, or a compact extra, else a dash. */
-function DetailSummary({ entry }: { entry: ScholarAuditEntry }) {
+function DetailSummary({
+  entry,
+  names,
+}: {
+  entry: ScholarAuditEntry;
+  names: Readonly<Record<string, string>>;
+}) {
   if (entry.fields.length > 0) {
     return <span>{entry.fields.join(", ")}</span>;
+  }
+  if (entry.detailCwid) {
+    return <span className="text-muted-foreground">{nameFor(names, entry.detailCwid)}</span>;
   }
   if (entry.detail) {
     return <span className="text-muted-foreground">{entry.detail}</span>;
@@ -70,6 +85,7 @@ export function ScholarHistoryView({
   entries,
   windowDays,
   unavailable = false,
+  names = {},
 }: ScholarHistoryViewProps) {
   return (
     <div className="bg-apollo-page min-h-screen">
@@ -126,14 +142,17 @@ export function ScholarHistoryView({
                   >
                     <td className="px-3 py-2 whitespace-nowrap">{formatTs(e.ts)}</td>
                     <td className="px-3 py-2">
-                      {e.actorCwid}
+                      {nameFor(names, e.actorCwid)}
                       {e.impersonatedCwid && (
-                        <span className="text-muted-foreground"> (as {e.impersonatedCwid})</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          (as {nameFor(names, e.impersonatedCwid)})
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">{e.actionLabel}</td>
                     <td className="px-3 py-2">
-                      <DetailSummary entry={e} />
+                      <DetailSummary entry={e} names={names} />
                     </td>
                   </tr>
                 ))}

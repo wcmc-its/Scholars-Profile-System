@@ -32,6 +32,7 @@ const ACTIVE_TAKEDOWN = {
   id: "sup-takedown",
   reason: "retraction notice",
   actorCwid: "adm001",
+  actorName: "Ada Admin",
   createdAt: new Date("2026-05-15"),
 };
 
@@ -92,7 +93,8 @@ describe("PublicationTakedownCard — removed state (explicit takedown)", () => 
     const alert = screen.getByTestId("publication-takedown-removed");
     expect(alert.textContent).toContain("Removed from the site");
     expect(alert.textContent).toContain("retraction notice");
-    expect(alert.textContent).toContain("adm001");
+    expect(alert.textContent).toContain("By Ada Admin on");
+    expect(alert.textContent).not.toContain("adm001");
     expect(screen.getByTestId("publication-takedown-restore")).toBeTruthy();
     // No Remove button in the removed state.
     expect(screen.queryByTestId("publication-takedown-remove")).toBeNull();

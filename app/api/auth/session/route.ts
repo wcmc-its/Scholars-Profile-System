@@ -236,7 +236,7 @@ export async function GET(): Promise<NextResponse> {
         .catch(() => null);
       impersonating = {
         targetCwid,
-        targetName: stewardName?.displayName ?? targetCwid,
+        targetName: stewardName?.displayName ?? (await directoryName(targetCwid)) ?? targetCwid,
         role: "comms_steward",
         unitKind: null,
         unit: null,
@@ -274,7 +274,10 @@ export async function GET(): Promise<NextResponse> {
         }));
         impersonating = {
           targetCwid,
-          targetName: grants.find((g) => g.granteeName)?.granteeName ?? targetCwid,
+          targetName:
+            grants.find((g) => g.granteeName)?.granteeName ??
+            (await directoryName(targetCwid)) ??
+            targetCwid,
           role: display.role,
           unitKind: display.unitKind,
           unit: display.unit,

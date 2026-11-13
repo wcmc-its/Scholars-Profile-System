@@ -91,6 +91,10 @@ import { enabledExternalMemberSources } from "@/lib/edit/external-member-sources
 import { loadExternalMembersByCuid } from "@/lib/api/external-members";
 import type { ExternalMember, PrismaClient } from "@/lib/generated/prisma/client";
 import { fetchDirectoryPeopleByCwid } from "@/lib/sources/ldap";
+import { resolveDirectoryNames } from "@/lib/edit/directory-names";
+
+/** Non-person `grantedBy` actors (the ED admin import stamps `"ED-ETL"`). */
+const GRANTED_BY_SENTINELS = new Set(["ED-ETL"]);
 
 export type UnitActorRole = "superuser" | "owner" | "curator";
 
@@ -150,6 +154,9 @@ export type UnitEditContext = {
      *  `ed_locked` gate is the backstop; the card disables Remove for them. */
     source: string;
     grantedBy: string | null;
+    /** Display name for `grantedBy` (Scholar, then WCM directory); null when
+     *  unresolvable or a non-person sentinel such as `"ED-ETL"`. */
+    grantedByName?: string | null;
     grantedAt: Date;
   }> | null;
   /** A content editor sees `access` (its synthetic steward read grant) but
@@ -980,12 +987,16 @@ export async function loadUnitEditContext(
   }
 
   // 5. Batch-resolve names for the leader + access + roster cwids. A unit admin
-  // is often a non-Scholar staff member, so a Scholar miss is expected — the
-  // access card re-resolves those names client-side via /api/directory/people.
+  // is often a non-Scholar staff member, so a Scholar miss is expected — those
+  // fall back to one batched WCM-directory lookup below.
+  const granterCwids = accessRows
+    .map((r) => r.grantedBy)
+    .filter((g): g is string => !!g && !GRANTED_BY_SENTINELS.has(g));
   const nameMap = await resolveScholarNames(
     [
       ...(leaderCwid ? [leaderCwid] : []),
       ...accessRows.map((r) => r.cwid),
+      ...granterCwids,
       ...rosterRows.map((r) => r.cwid),
       // #1117 — program-leader cwids, so the program editor shows names.
       ...programAssignments.map((a) => a.cwid),
@@ -998,14 +1009,33 @@ export async function loadUnitEditContext(
 
   const leaderResolved = leaderCwid ? nameMap.get(leaderCwid) : undefined;
 
+  // Grantees, granters, and WCM roster members with no Scholar row (staff,
+  // trainees): name them from the WCM directory in one batched, cached,
+  // time-boxed lookup. Never throws; a miss keeps the CWID as the fallback.
+  const directoryMisses = [
+    ...new Set(
+      [
+        ...accessRows.map((r) => r.cwid),
+        ...granterCwids,
+        ...rosterRows.filter((r) => !externalByCuid.has(r.cwid)).map((r) => r.cwid),
+      ].filter((c) => !nameMap.get(c)),
+    ),
+  ];
+  const directoryNames = directoryMisses.length > 0 ? await resolveDirectoryNames(directoryMisses) : new Map();
+  const directoryName = (cwid: string): string | undefined => directoryNames.get(cwid.trim().toLowerCase());
+
   const access = canManageAccess
     ? accessRows.map((r) => ({
         cwid: r.cwid,
-        name: nameMap.get(r.cwid)?.name ?? r.cwid,
+        name: nameMap.get(r.cwid)?.name ?? directoryName(r.cwid) ?? r.cwid,
         title: nameMap.get(r.cwid)?.title ?? null,
         role: r.role,
         source: r.source,
         grantedBy: r.grantedBy,
+        grantedByName:
+          r.grantedBy && !GRANTED_BY_SENTINELS.has(r.grantedBy)
+            ? (nameMap.get(r.grantedBy)?.name ?? directoryName(r.grantedBy) ?? null)
+            : null,
         grantedAt: r.createdAt,
       }))
     : null;
@@ -1033,7 +1063,7 @@ export async function loadUnitEditContext(
         const external = externalByCuid.get(r.cwid);
         return {
           cwid: r.cwid,
-          name: external ? external.displayName : (resolved?.name ?? r.cwid),
+          name: external ? external.displayName : (resolved?.name ?? directoryName(r.cwid) ?? r.cwid),
           title: external ? external.title : (resolved?.title ?? null),
           source: r.source,
           membershipType: r.membershipType,
@@ -1052,9 +1082,26 @@ export async function loadUnitEditContext(
       })
     : null;
 
+  // A center or program leader with no Scholar row (staff) would otherwise
+  // show as a bare CWID in the editor; name them from ED in one batched
+  // lookup. Fail-soft: any ED error leaves them unnamed, as before.
+  const unnamedLeaders = [
+    ...new Set([...programAssignments, ...centerLeadershipAssignments].map((a) => a.cwid)),
+  ].filter((c) => !nameMap.get(c));
+  const leaderDirectory = new Map<string, { name: string; title: string | null }>();
+  if (unnamedLeaders.length > 0) {
+    try {
+      for (const p of await fetchDirectoryPeopleByCwid(unnamedLeaders)) {
+        leaderDirectory.set(p.cwid.toLowerCase(), { name: p.name, title: p.title });
+      }
+    } catch (err) {
+      console.warn("unit edit context: ED lookup for center leaders failed", err);
+    }
+  }
+
   // #1117 — resolve each program's leader cwids to display names for the editor.
-  // A leader cwid that isn't a WCM scholar (external leader) stays name/title
-  // null; the card re-resolves it client-side like the access/roster cards do.
+  // A leader cwid with no Scholar row is named from ED (`leaderDirectory`
+  // above); one ED can't name either stays name/title null.
   // #2558 — leaders come from `programAssignments` (an `OrgUnitRoleAssignment`
   // row per leader), grouped here by the program's `entityId`
   // (`"{centerCode}:{programCode}"`).
@@ -1072,8 +1119,8 @@ export async function loadUnitEditContext(
         description: p.description,
         leaders: (assignmentsByProgram.get(`${code}:${p.code}`) ?? []).map((a) => ({
           cwid: a.cwid,
-          name: nameMap.get(a.cwid)?.name ?? null,
-          title: nameMap.get(a.cwid)?.title ?? null,
+          name: nameMap.get(a.cwid)?.name ?? leaderDirectory.get(a.cwid.toLowerCase())?.name ?? null,
+          title: nameMap.get(a.cwid)?.title ?? leaderDirectory.get(a.cwid.toLowerCase())?.title ?? null,
           interim: a.interim,
           // `roleKey` is a VarChar, not an enum — narrow it the same way the
           // public program page does (`lib/api/centers.ts`): anything
@@ -1091,20 +1138,6 @@ export async function loadUnitEditContext(
     const list = centerLeadershipByRole.get(a.roleKey);
     if (list) list.push(a);
     else centerLeadershipByRole.set(a.roleKey, [a]);
-  }
-  // A center leader with no Scholar row (staff) would otherwise show as a bare
-  // CWID in the editor; name them from ED. Fail-soft: any ED error leaves them
-  // unnamed, as before.
-  const unnamedLeaders = centerLeadershipAssignments.map((a) => a.cwid).filter((c) => !nameMap.get(c));
-  const leaderDirectory = new Map<string, { name: string; title: string | null }>();
-  if (unnamedLeaders.length > 0) {
-    try {
-      for (const p of await fetchDirectoryPeopleByCwid(unnamedLeaders)) {
-        leaderDirectory.set(p.cwid.toLowerCase(), { name: p.name, title: p.title });
-      }
-    } catch (err) {
-      console.warn("unit edit context: ED lookup for center leaders failed", err);
-    }
   }
   const centerLeadership = centerLeadershipRolesRaw
     ? centerLeadershipRolesRaw.map((r) => ({

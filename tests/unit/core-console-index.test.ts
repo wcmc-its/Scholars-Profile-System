@@ -2,7 +2,12 @@
  * `/edit/core` index loader (lib/api/core-console-index.ts): the pure row
  * builder and the DB wrapper over an injected reader. Fake cores and people only.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const { resolveDirectoryNamesMock } = vi.hoisted(() => ({
+  resolveDirectoryNamesMock: vi.fn(async (_cwids: string[]) => new Map<string, string>()),
+}));
+vi.mock("@/lib/edit/directory-names", () => ({ resolveDirectoryNames: resolveDirectoryNamesMock }));
 
 import {
   buildCoreConsoleRows,
@@ -190,6 +195,38 @@ describe("loadCoreConsoleIndex", () => {
     expect(row.reviewTotal).toBe(4);
     expect(row.reviewHigh).toBe(1);
     expect(row.confirmed).toBe(1);
+  });
+
+  it("names leaders and admins with no Scholar row or stored name from the directory", async () => {
+    resolveDirectoryNamesMock.mockResolvedValueOnce(
+      new Map([
+        ["lea0001", "Lee Leader"],
+        ["own0001", "Olive Owner"],
+      ]),
+    );
+    const reader = {
+      core: { findMany: async () => [{ ...baseCore, id: "1", name: "Alpha Core" }] },
+      coreLeader: {
+        findMany: async () => [{ coreId: "1", cwid: "lea0001", role: "director", interim: false }],
+      },
+      orgUnitRole: { findMany: async () => [] },
+      unitAdmin: {
+        findMany: async () => [
+          { entityId: "1", cwid: "own0001", role: "owner", granteeName: null },
+          { entityId: "1", cwid: "cur0001", role: "curator", granteeName: "Stored Name" },
+        ],
+      },
+      scholar: { findMany: async () => [] },
+      coreClient: { findMany: async () => [] },
+      coreClaim: { findMany: async () => [] },
+      publicationCore: { groupBy: async () => [], findMany: async () => [] },
+    } as unknown as Parameters<typeof loadCoreConsoleIndex>[0];
+
+    const [row] = await loadCoreConsoleIndex(reader);
+    expect(resolveDirectoryNamesMock).toHaveBeenLastCalledWith(["lea0001", "own0001"]);
+    expect(row.leaders[0].name).toBe("Lee Leader");
+    expect(row.owners).toEqual(["Olive Owner"]);
+    expect(row.curators).toEqual(["Stored Name"]);
   });
 });
 

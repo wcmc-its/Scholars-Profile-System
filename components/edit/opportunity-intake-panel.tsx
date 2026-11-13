@@ -45,6 +45,11 @@ type SubmissionGroup = {
   items: OpportunitySubmission[];
 };
 
+/** "Name (cwid)" when the GET resolved the submitter, else the bare cwid. */
+function submitterLabel(names: Record<string, string>, cwid: string): string {
+  return names[cwid] ? `${names[cwid]} (${cwid})` : cwid;
+}
+
 function groupSubmissions(items: OpportunitySubmission[]): SubmissionGroup[] {
   const groups: SubmissionGroup[] = [];
   for (const s of items) {
@@ -485,9 +490,7 @@ export function OpportunityIntakePanel() {
                           </span>
                           <span className="text-muted-foreground shrink-0 text-xs">
                             {g.items.length} submissions ·{" "}
-                            {list.names[g.submittedBy]
-                              ? `${list.names[g.submittedBy]} (${g.submittedBy})`
-                              : g.submittedBy}{" "}
+                            {submitterLabel(list.names, g.submittedBy)}{" "}
                             ·{" "}
                             {formatSubmitted(g.submittedAt)}
                           </span>
@@ -514,7 +517,8 @@ export function OpportunityIntakePanel() {
                                     to live, so it stays on the row. */}
                                 {!isBatch && (
                                   <span className="text-muted-foreground">
-                                    {s.submittedBy} · {formatSubmitted(s.submittedAt)}
+                                    {submitterLabel(list.names, s.submittedBy)} ·{" "}
+                                    {formatSubmitted(s.submittedAt)}
                                   </span>
                                 )}
                                 {!isBatch && s.note && (
