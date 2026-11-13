@@ -131,7 +131,7 @@ function FunderRow({ item, via }: { item: FunderFacetItem; via?: boolean }) {
   const display = item.full ?? item.short;
   return (
     <li className="py-1 leading-[1.4]">
-      <Link
+      <Link prefetch={false}
         href={item.href}
         scroll={false}
         className="flex w-full items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"

@@ -20,6 +20,13 @@ export type EnvName = "staging" | "prod";
  */
 export const SCHOLARS_MAIL_FROM = "no-reply@scholars-mail.weill.cornell.edu";
 
+/**
+ * The sender domain's DEFAULT configuration set (InboundMailStack). SESv2
+ * authorizes SendEmail against it as well as the identity, so every SES grant
+ * must list both or the send is denied.
+ */
+export const SCHOLARS_MAIL_CONFIG_SET = "scholars-mail-default";
+
 /** Resolved configuration for one environment. */
 export interface SpsEnvConfig {
   /** Environment name — drives stack naming. */

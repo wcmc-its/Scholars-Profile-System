@@ -1839,10 +1839,13 @@ describe("AppStack", () => {
         expect(statements).toHaveLength(1);
         const stmt = statements![0];
         expect(stmt.Action).toBe("ses:SendEmail");
-        // Resource is SES-identity-scoped, NOT a blanket "*".
-        const resource = stmt.Resource as string;
-        expect(resource).not.toBe("*");
-        expect(resource).toContain(":identity/");
+        // Resource is SES-identity-scoped, NOT a blanket "*" -- plus the
+        // sender domain's default configuration set, which SESv2 also
+        // authorizes against (without it every send is AccessDenied).
+        const resources = JSON.stringify([stmt.Resource].flat());
+        expect(resources).not.toContain('"*"');
+        expect(resources).toContain(":identity/");
+        expect(resources).toContain(":configuration-set/scholars-mail-default");
         // The From-address condition pins the sender.
         expect(stmt.Condition).toMatchObject({
           StringEquals: { "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu" },

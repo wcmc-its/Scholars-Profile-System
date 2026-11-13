@@ -100,6 +100,15 @@ describe("readEditRequest", () => {
     }
   });
 
+  it("caps the body at 64 KB by default, and a route can raise the cap", async () => {
+    const body = JSON.stringify({ pad: "x".repeat(70 * 1024) });
+    const capped = await readEditRequest(makeRequest({ body }));
+    expect(capped.ok).toBe(false);
+    if (!capped.ok) expect(capped.response.status).toBe(413);
+    const raised = await readEditRequest(makeRequest({ body }), { maxBytes: 128 * 1024 });
+    expect(raised.ok).toBe(true);
+  });
+
   it("yields the session, parsed body, and a request id on success", async () => {
     const r = await readEditRequest(makeRequest({ body: JSON.stringify({ fieldName: "overview" }) }));
     expect(r.ok).toBe(true);

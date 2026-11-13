@@ -764,6 +764,7 @@ describe("EtlStack", () => {
               Match.objectLike({
                 Effect: "Allow",
                 Action: "ses:SendEmail",
+                Resource: Match.arrayWith([Match.stringLikeRegexp(":configuration-set/scholars-mail-default$")]),
                 Condition: { StringEquals: { "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu" } },
               }),
             ],

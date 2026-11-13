@@ -181,8 +181,12 @@ function stubFetch(payload: {
    *  default, turning the fail-closed test into theatre that passes on any implementation. */
   scope?: "all" | "own" | "omit";
 }) {
-  const fetchMock = vi.fn(async (_url: string, init?: { method?: string }) => {
+  const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
     const method = init?.method ?? "GET";
+    // The .xlsx export: the server writes the workbook; here any bytes will do.
+    if (String(url).endsWith("/matcha/export")) {
+      return { ok: true, blob: async () => new Blob(["xlsx"]) };
+    }
     if (method === "GET") {
       return {
         ok: true,
@@ -204,8 +208,46 @@ function stubFetch(payload: {
  *  the matcher POST would let a re-added re-query hide behind a history refresh. */
 function rankCalls(fetchMock: { mock: { calls: unknown[][] } }): number {
   return fetchMock.mock.calls.filter(
-    (c) => ((c[1] as { method?: string } | undefined)?.method ?? "GET") === "POST",
+    (c) =>
+      ((c[1] as { method?: string } | undefined)?.method ?? "GET") === "POST" &&
+      !String(c[0]).endsWith("/matcha/export"),
   ).length;
+}
+
+type ExportBody = {
+  rows: Record<string, unknown>[];
+  shortlist: boolean;
+  eligibility: boolean;
+  brief: boolean;
+  title: string | null;
+};
+
+/** What the panel posted to the export route. */
+function exportBodies(fetchMock: { mock: { calls: unknown[][] } }): ExportBody[] {
+  return fetchMock.mock.calls
+    .filter((c) => String(c[0]).endsWith("/matcha/export"))
+    .map((c) => JSON.parse((c[1] as { body: string }).body) as ExportBody);
+}
+
+/** Stub the browser download; returns the clicked anchors and a restore. */
+function stubDownload() {
+  const clicked: HTMLAnchorElement[] = [];
+  const { createObjectURL: realCreate, revokeObjectURL: realRevoke } = URL;
+  URL.createObjectURL = (() => "blob:stub") as typeof URL.createObjectURL;
+  URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this);
+    });
+  return {
+    clicked,
+    restore() {
+      click.mockRestore();
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    },
+  };
 }
 
 type Submission = {
@@ -872,48 +914,59 @@ describe("MatchaPanel", () => {
     expect(screen.getByRole("button", { name: "Name" }).getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("exports the VISIBLE rows as CSV — no raw fused score in the file", async () => {
-    // Capture at the Blob constructor: jsdom's Blob is a stub with no readable body, and the
-    // CSV text is the thing under test anyway.
-    const parts: string[] = [];
-    const OrigBlob = globalThis.Blob;
-    class CapturingBlob {
-      constructor(bits: BlobPart[]) {
-        parts.push(bits.map(String).join(""));
-      }
-    }
-    globalThis.Blob = CapturingBlob as unknown as typeof Blob;
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    URL.createObjectURL = (() => "blob:stub") as typeof URL.createObjectURL;
-    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+  it("exports the filtered rows through the .xlsx route, with no raw fused score in the body", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    const dl = stubDownload();
     try {
       await renderAndSearch();
       fireEvent.click(screen.getByRole("button", { name: /Export \(3\)/ }));
+      await waitFor(() => expect(dl.clicked).toHaveLength(1));
 
-      expect(parts).toHaveLength(1);
-      const csv = parts[0];
-      expect(csv.split("\r\n")[0]).toBe(
-        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,Research kind,CTL technologies,Profile URL",
-      );
-      expect(csv).toContain("Alice Alpha");
-      expect(csv).toContain("Strong fit");
+      const [body] = exportBodies(fetchMock);
+      expect(body.shortlist).toBe(false);
+      expect(body.rows.map((r) => r.name)).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
+      expect(body.rows[0].fit).toBe("Strong fit");
       // The fused score is withheld from the DOM; it must not leak into a spreadsheet either.
-      expect(csv).not.toContain("0.91");
+      expect(JSON.stringify(body)).not.toContain("0.91");
+      expect(JSON.stringify(body)).not.toMatch(/fusedScore/);
+      expect(dl.clicked[0].download).toMatch(/^matcha-.*-\d{4}-\d{2}-\d{2}\.xlsx$/);
+      expect(dl.clicked[0].download).not.toContain("shortlist");
+      // An export is not a re-rank.
+      expect(rankCalls(fetchMock)).toBe(1);
     } finally {
-      globalThis.Blob = OrigBlob;
-      URL.createObjectURL = origCreate;
-      URL.revokeObjectURL = origRevoke;
+      dl.restore();
     }
   });
 
-  // ── Career stage / Clinician facets (#1654) ────────────────────────────────
-  it("renders no Career stage or Clinician facet when no candidate carries the measure", async () => {
+  it("says so when the export fails, rather than downloading nothing silently", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: { method?: string }) =>
+      String(url).endsWith("/matcha/export")
+        ? ({ ok: false, status: 500 } as never)
+        : base(url, init),
+    );
+    const dl = stubDownload();
+    try {
+      await renderAndSearch();
+      fireEvent.click(screen.getByRole("button", { name: /Export \(3\)/ }));
+      expect((await screen.findByRole("alert")).textContent).toBe("Export failed. Try again.");
+      expect(dl.clicked).toHaveLength(0);
+    } finally {
+      dl.restore();
+    }
+  });
+
+  // ── Career stage / Research facets (#1654) ─────────────────────────────────
+  const researchFacet = () =>
+    document.querySelector('[data-slot="matcha-research-facet"]') as HTMLElement | null;
+
+  it("renders no Career stage or Research facet when no candidate carries the measure", async () => {
     await renderAndSearch(); // THREE — no `measures`
     // Absent != zero. A filter that cannot filter, or one that reads as "nobody here is a
     // clinician" when the truth is "we don't know", is worse than no filter at all.
     expect(screen.queryByText("Career stage")).toBeNull();
-    expect(screen.queryByText("Researcher type")).toBeNull();
+    expect(researchFacet()).toBeNull();
   });
 
   it("renders both facets once the measures are produced, and filters on them", async () => {
@@ -924,13 +977,13 @@ describe("MatchaPanel", () => {
           cwid: "a",
           name: "Alice Alpha",
           fusedScore: 0.9,
-          measures: { careerStage: "early", isClinician: true, researcherType: "physician_scientist" },
+          measures: { careerStage: "early", isClinician: true, researcherType: "physician_scientist", researchKinds: ["lab"], isPhysician: true },
         }),
         candidate({
           cwid: "b",
           name: "Bob Beta",
           fusedScore: 0.5,
-          measures: { careerStage: "senior", isClinician: false, researcherType: "basic_scientist" },
+          measures: { careerStage: "senior", isClinician: false, researcherType: "basic_scientist", researchKinds: ["lab"], isPhysician: false },
         }),
       ],
     });
@@ -939,123 +992,167 @@ describe("MatchaPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    // Both groups appear, in career-ladder order (not count order).
     expect(screen.getByText("Career stage")).toBeTruthy();
-    expect(screen.getByText("Researcher type")).toBeTruthy();
+    expect(researchFacet()).not.toBeNull();
 
     // Filtering by stage keeps only the early-career candidate.
     fireEvent.click(screen.getByRole("checkbox", { name: /Early career/ }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
 
-    // Clearing restores both; the researcher-type facet then narrows to the physician-scientist.
+    // Clearing restores both; the Research child then narrows to the physician.
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getByText("Bob Beta")).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: /Physician-scientist/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Laboratory research: Physician-scientist" }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
   });
 
-  // ── Researcher type default ────────────────────────────────────────────────
-  it("hides clinicians by default, one click away, and Clear filters shows everyone", async () => {
-    stubFetch({
-      concepts: CONCEPTS,
-      candidates: [
-        candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9, measures: { researcherType: "clinician" } }),
-        candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.85, measures: { researcherType: "basic_scientist" } }),
-        // Non-NIH-funded scientists land here; they must NOT be hidden by default.
-        candidate({ cwid: "c", name: "Carol Gamma", fusedScore: 0.8, measures: { researcherType: "unclassified" } }),
-      ],
-    });
-    render(<MatchaPanel />);
-    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
-    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
-    await screen.findByText("Bob Beta");
-
-    expect(screen.queryByText("Alice Alpha")).toBeNull();
-    expect(screen.getByText("Carol Gamma")).toBeTruthy();
-    // The default is visible as a removable chip, so the hidden clinicians are never a mystery.
-    expect(screen.getByText("Researcher type: all but Clinician")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("checkbox", { name: /^Clinician/ }));
-    expect(screen.getByText("Alice Alpha")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("checkbox", { name: /^Clinician/ }));
-    expect(screen.queryByText("Alice Alpha")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("Alice Alpha")).toBeTruthy();
-  });
-
-  it("applies no researcher-type default to a run that carries no types (an old stored run)", async () => {
-    await renderAndSearch(); // THREE — no `measures`
-    expect(screen.getByText("Alice Alpha")).toBeTruthy();
-    expect(screen.queryByText(/Researcher type:/)).toBeNull();
-  });
-
-  // ── Research kind facet + default ──────────────────────────────────────────
+  // ── Research (nested) ──────────────────────────────────────────────────────
+  // Erin has both kinds and is a physician; Fay is a clinician with no kind and no award.
   const KIND_RUN: MatchaCandidate[] = [
     candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9, measures: { researcherType: "basic_scientist", researchKinds: ["lab"], isPhysician: false } }),
-    candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.85, measures: { researcherType: "clinical_researcher", researchKinds: ["clinical"], isPhysician: false } }),
+    candidate({ cwid: "b", name: "Bob Beta", department: "Surgery", fusedScore: 0.85, measures: { researcherType: "clinical_researcher", researchKinds: ["clinical"], isPhysician: false } }),
     candidate({ cwid: "c", name: "Carol Gamma", fusedScore: 0.8, measures: { researcherType: "funded_investigator", researchKinds: [], isPhysician: false } }),
     candidate({ cwid: "d", name: "Dan Delta", fusedScore: 0.75, measures: { researcherType: "unclassified", researchKinds: [], isPhysician: false } }),
-    candidate({ cwid: "e", name: "Erin Epsilon", fusedScore: 0.7, measures: { researcherType: "physician_scientist", researchKinds: ["lab", "clinical"], isPhysician: true } }),
+    candidate({ cwid: "e", name: "Erin Epsilon", department: "Surgery", fusedScore: 0.7, measures: { researcherType: "physician_scientist", researchKinds: ["lab", "clinical"], isPhysician: true } }),
+    candidate({ cwid: "f", name: "Fay Phi", fusedScore: 0.65, measures: { researcherType: "clinician", researchKinds: [], isPhysician: true } }),
   ];
-  async function searchKindRun(preferences?: MatchaPreference[]) {
-    stubFetch({ concepts: CONCEPTS, candidates: KIND_RUN, ...(preferences ? { preferences } : {}) });
+  const ALL_KIND_RUN = ["Alice Alpha", "Bob Beta", "Carol Gamma", "Dan Delta", "Erin Epsilon", "Fay Phi"];
+  async function searchKindRun(
+    preferences?: MatchaPreference[],
+    candidates: MatchaCandidate[] = KIND_RUN,
+  ) {
+    stubFetch({ concepts: CONCEPTS, candidates, ...(preferences ? { preferences } : {}) });
     render(<MatchaPanel />);
     fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
-    await screen.findByText("Alice Alpha");
+    await screen.findByText(candidates[0].name);
   }
+  const box = (name: string | RegExp) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
+  const shown = (names: string[]) => names.filter((n) => screen.queryByText(n) !== null);
 
-  it("defaults Research kind to laboratory only, as removable chips that Clear filters drops", async () => {
+  it("lists parents with their children nested, and counts a both-kinds person under both", async () => {
     await searchKindRun();
+    const rows = Array.from(researchFacet()!.querySelectorAll("label")).map((l) => [
+      l.querySelector("span.truncate")!.textContent,
+      l.querySelector("span.tabular-nums")!.textContent,
+    ]);
+    expect(rows).toEqual([
+      ["Laboratory research", "2"],
+      ["Physician-scientist", "1"],
+      ["Basic scientist", "1"],
+      ["Clinical research", "2"],
+      ["Physician-scientist", "1"],
+      ["Clinical or population researcher", "1"],
+      ["Funded, kind not evident", "1"],
+      ["No research signal", "2"],
+    ]);
+    // The children sit inside their parent's list item.
+    const lab = box(/^Laboratory research ?\d/).closest("li")!;
+    expect(within(lab).getByRole("checkbox", { name: "Laboratory research: Basic scientist" })).toBeTruthy();
+    expect(researchFacet()!.textContent).toContain("How research and researcher types are defined");
+    expect(
+      within(researchFacet()!).getByRole("link", { name: "How research and researcher types are defined" }).getAttribute("href"),
+    ).toBe("/about#research-type");
+  });
 
-    // Laboratory researchers (incl. the both-kinds physician-scientist) show; the funded
-    // investigator, the clinical-only researcher and the no-kind row are one click away.
-    expect(screen.getByText("Alice Alpha")).toBeTruthy();
-    expect(screen.queryByText("Carol Gamma")).toBeNull();
-    expect(screen.getByText("Erin Epsilon")).toBeTruthy();
-    expect(screen.queryByText("Bob Beta")).toBeNull();
-    expect(screen.queryByText("Dan Delta")).toBeNull();
-
-    expect(screen.getByText("Research kind")).toBeTruthy();
-    const box = (name: RegExp) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
-    expect(box(/^Laboratory research/).checked).toBe(true);
-    expect(box(/^Funded, kind not evident/).checked).toBe(false);
-    expect(box(/^Clinical research/).checked).toBe(false);
-    // The default is never a mystery: each selected kind is a removable chip.
+  it("defaults to Laboratory research, as a removable chip that Clear filters drops", async () => {
+    await searchKindRun();
+    expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
+    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
+    expect(box(/^Clinical research ?\d/).checked).toBe(false);
     expect(screen.getByRole("button", { name: "Remove Laboratory research filter" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Remove Funded, kind not evident filter" })).toBeNull();
 
-    // OR within the group: adding Clinical research brings back the clinical-only researcher.
-    fireEvent.click(box(/^Clinical research/));
-    expect(screen.getByText("Bob Beta")).toBeTruthy();
-    expect(screen.queryByText("Dan Delta")).toBeNull();
-
-    // Funded, kind not evident is one click away, and its chip's remove is the checkbox's toggle.
+    // OR within the group.
+    fireEvent.click(box(/^Clinical research ?\d/));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Bob Beta", "Erin Epsilon"]);
     fireEvent.click(box(/^Funded, kind not evident/));
     expect(screen.getByText("Carol Gamma")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Remove Funded, kind not evident filter" }));
-    expect(screen.queryByText("Carol Gamma")).toBeNull();
+    fireEvent.click(box(/^No research signal/));
+    expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    for (const name of ["Alice Alpha", "Bob Beta", "Carol Gamma", "Dan Delta", "Erin Epsilon"])
-      expect(screen.getByText(name)).toBeTruthy();
+    expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
     expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
-    expect(box(/^Laboratory research/).checked).toBe(false);
+    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
   });
 
-  it("ANDs Research kind with the other facets", async () => {
+  it("ticking a child unticks its parent, and ticking the parent unticks its children", async () => {
     await searchKindRun();
-    // Laboratory research AND Physician-scientist leaves only the physician with lab papers.
-    for (const label of [/^Basic scientist/, /^Clinical or population researcher/, /^Funded investigator/, /^Unclassified/])
-      fireEvent.click(screen.getByRole("checkbox", { name: label }));
-    expect(screen.getByText("Erin Epsilon")).toBeTruthy();
-    expect(screen.queryByText("Alice Alpha")).toBeNull();
+    fireEvent.click(box("Laboratory research: Physician-scientist"));
+    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
+    expect(box("Laboratory research: Physician-scientist").checked).toBe(true);
+    expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
+
+    fireEvent.click(box("Laboratory research: Basic scientist"));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
+
+    fireEvent.click(box(/^Laboratory research ?\d/));
+    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
+    expect(box("Laboratory research: Physician-scientist").checked).toBe(false);
+    expect(box("Laboratory research: Basic scientist").checked).toBe(false);
+    expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
   });
 
-  it("applies no Research kind default when the ask states a clinician preference", async () => {
+  it("a person with both kinds matches under either parent", async () => {
+    await searchKindRun();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    fireEvent.click(box("Clinical research: Physician-scientist"));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
+    fireEvent.click(box("Clinical research: Physician-scientist"));
+    fireEvent.click(box("Laboratory research: Physician-scientist"));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
+    // Erin is a physician, so neither "other" child holds her.
+    fireEvent.click(box("Laboratory research: Physician-scientist"));
+    fireEvent.click(box("Clinical research: Clinical or population researcher"));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Bob Beta"]);
+  });
+
+  it("names a child chip with its parent, and the chip's remove unticks the child", async () => {
+    await searchKindRun();
+    fireEvent.click(box("Laboratory research: Physician-scientist"));
+    expect(screen.getByText("Laboratory research: Physician-scientist", { selector: "span" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove Laboratory research: Physician-scientist filter" }),
+    );
+    expect(box("Laboratory research: Physician-scientist").checked).toBe(false);
+    // An explicit empty selection: everyone, not the default back.
+    expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
+  });
+
+  it("the default returns on the next search", async () => {
+    await searchKindRun();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
+    await waitFor(() => expect(box(/^Laboratory research ?\d/).checked).toBe(true));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
+  });
+
+  it("applies no default when it would leave no one", async () => {
+    // Nobody shows laboratory research.
+    await searchKindRun(undefined, [KIND_RUN[1], KIND_RUN[2], KIND_RUN[3]]);
+    expect(researchFacet()).not.toBeNull();
+    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+    expect(shown(["Bob Beta", "Carol Gamma", "Dan Delta"])).toEqual(["Bob Beta", "Carol Gamma", "Dan Delta"]);
+  });
+
+  it("ANDs Research with the other facets", async () => {
+    await searchKindRun();
+    // Laboratory research (the default) AND Surgery leaves only the lab person in Surgery.
+    fireEvent.click(box(/^Surgery/));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
+    // OR within Research, still AND with Surgery: Bob (clinical, Surgery) joins.
+    fireEvent.click(box(/^Clinical research ?\d/));
+    expect(shown(ALL_KIND_RUN)).toEqual(["Bob Beta", "Erin Epsilon"]);
+  });
+
+  it("applies no Research default when the ask states a clinician preference", async () => {
     await searchKindRun([
       {
         measure: "isClinician",
@@ -1064,15 +1161,13 @@ describe("MatchaPanel", () => {
         importance: 1,
       },
     ]);
-    // The group is offered, nothing is preselected, and nobody is hidden by kind.
-    expect(screen.getByText("Research kind")).toBeTruthy();
-    expect((screen.getByRole("checkbox", { name: /^Laboratory research/ }) as HTMLInputElement).checked).toBe(false);
+    expect(researchFacet()).not.toBeNull();
+    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
     expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
-    expect(screen.getByText("Bob Beta")).toBeTruthy();
-    expect(screen.getByText("Dan Delta")).toBeTruthy();
+    expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
   });
 
-  it("an old four-value run still renders and filters, with no Research kind group or default", async () => {
+  it("an old four-value run renders everyone, with no Research group or default", async () => {
     stubFetch({
       concepts: CONCEPTS,
       candidates: [
@@ -1088,34 +1183,12 @@ describe("MatchaPanel", () => {
     await screen.findByText("Bob Beta");
 
     // No `researchKinds` on any row: not computed, so no group, no default, no chip.
-    expect(screen.queryByText("Research kind")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
-    // The researcher-type default and facet behave as they did.
-    expect(screen.queryByText("Alice Alpha")).toBeNull();
-    expect(screen.getByText("Carol Gamma")).toBeTruthy();
-    expect(screen.getByText("Dan Delta")).toBeTruthy();
-    expect(screen.getByText("Researcher type: all but Clinician")).toBeTruthy();
-    for (const label of [/^Basic scientist/, /^Physician-scientist/, /^Clinician/, /^Unclassified/])
-      expect(screen.getByRole("checkbox", { name: label })).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: /^Physician-scientist/ }));
-    expect(screen.queryByText("Dan Delta")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("Alice Alpha")).toBeTruthy();
-  });
-
-  it("lists the archetypes in the fixed order", async () => {
-    await searchKindRun();
-    const heading = screen.getByText("Researcher type");
-    const labels = Array.from(heading.closest("div.mt-3")!.querySelectorAll("label span.truncate")).map(
-      (el) => el.textContent,
-    );
-    expect(labels).toEqual([
-      "Basic scientist",
-      "Physician-scientist",
-      "Clinical or population researcher",
-      "Funded investigator",
-      "Unclassified",
-    ]);
+    expect(researchFacet()).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Remove .*research.* filter$/i })).toBeNull();
+    for (const name of ["Alice Alpha", "Bob Beta", "Carol Gamma", "Dan Delta"])
+      expect(screen.getByText(name)).toBeTruthy();
+    // The per-person label stays on the card.
+    expect(screen.getAllByText("Clinician").length).toBeGreaterThan(0);
   });
 
   // ── Person type facet (§2) ─────────────────────────────────────────────────
@@ -2491,18 +2564,8 @@ describe("MatchaPanel", () => {
    * preserved the row.
    */
   it("shortlists compact rows, counts them, and exports the SHORTLIST — not the filtered list", async () => {
-    const parts: string[] = [];
-    const OrigBlob = globalThis.Blob;
-    class CapturingBlob {
-      constructor(bits: BlobPart[]) {
-        parts.push(bits.map(String).join(""));
-      }
-    }
-    globalThis.Blob = CapturingBlob as unknown as typeof Blob;
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    URL.createObjectURL = (() => "blob:stub") as typeof URL.createObjectURL;
-    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    const dl = stubDownload();
     try {
       await renderAndSearch();
       fireEvent.click(screen.getByRole("button", { name: "compact" }));
@@ -2525,19 +2588,18 @@ describe("MatchaPanel", () => {
       expect(screen.queryByRole("button", { name: /^Export \(3\)/ })).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: /Export shortlist \(2\)/ }));
-      expect(parts).toHaveLength(1);
-      const rows = parts[0].split("\r\n").slice(1).filter(Boolean);
-      expect(rows).toHaveLength(2); // the two picked — not the three the facets matched
-      expect(parts[0]).toContain("Alice Alpha");
-      expect(parts[0]).toContain("Cara Gamma");
-      expect(parts[0]).not.toContain("Bob Beta");
-      // POOL ranks, carried: Cara exports as #3, not as "#2 of the shortlist".
-      expect(rows[0].startsWith("1,")).toBe(true);
-      expect(rows[1].startsWith("3,")).toBe(true);
+      await waitFor(() => expect(dl.clicked).toHaveLength(1));
+      const [body] = exportBodies(fetchMock);
+      expect(body.shortlist).toBe(true);
+      // The two picked — not the three the facets matched. POOL ranks, carried: Cara exports
+      // as #3, not as "#2 of the shortlist".
+      expect(body.rows.map((r) => [r.rank, r.name])).toEqual([
+        [1, "Alice Alpha"],
+        [3, "Cara Gamma"],
+      ]);
+      expect(dl.clicked[0].download).toContain("-shortlist-");
     } finally {
-      globalThis.Blob = OrigBlob;
-      URL.createObjectURL = origCreate;
-      URL.revokeObjectURL = origRevoke;
+      dl.restore();
     }
   });
 

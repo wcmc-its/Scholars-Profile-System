@@ -116,11 +116,11 @@ import {
 } from "@/lib/api/matcha-grants-spine";
 import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { isObserver } from "@/lib/auth/observer";
 import type { EditSession } from "@/lib/auth/superuser";
 import { loadStoredResult, matchaSubmissionScope } from "@/lib/api/matcha-brief";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { canUseMatchaForWrite } from "@/lib/edit/matcha-access";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { identityImageEndpoint } from "@/lib/headshot";
@@ -297,14 +297,6 @@ function bespokeToCandidate(r: MatchaRankedScholar): MatchaCandidate {
       })),
     },
   };
-}
-
-/** The write-side gate. `readEditRequest` strips the observer's synthetic read view, so
- *  `session.isObserver` is always false here; ask the directory for the EFFECTIVE cwid (a
- *  superuser viewing as an observer sees what the observer sees). An observer's own View-as
- *  overlay never reaches this: `readEditRequest` refuses writes under it. */
-async function canUseMatchaForWrite(session: EditSession): Promise<boolean> {
-  return session.isSuperuser || session.isDeveloper === true || (await isObserver(session.cwid));
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

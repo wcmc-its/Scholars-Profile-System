@@ -3,6 +3,12 @@ import Link from "next/link";
 import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
 import { FieldTable, SystemContext } from "@/components/docs/data-provenance";
 import { LATEST, loadSnapshot } from "@/lib/benchmark";
+import {
+  RESEARCH_TYPE_LABELS,
+  RESEARCH_TYPE_MIN_PUBS,
+  RESEARCH_TYPE_YEARS,
+} from "@/lib/research-type";
+import { RESEARCH_ACTIVE_YEARS, RESEARCHER_TYPE_LABEL } from "@/lib/api/matcha-contract";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -56,6 +62,8 @@ const NAV: NavGroup[] = [
       { id: "methods", label: "Methods & tools" },
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
+      { id: "research-type", label: "Research type", sub: true },
+      { id: "researcher-type", label: "Researcher type", sub: true },
       { id: "showcase", label: "Spotlight & Selected research" },
       { id: "mentees", label: "Mentees" },
       { id: "profile-url", label: "Your profile URL" },
@@ -244,6 +252,11 @@ export default async function DocsPage() {
               href: "#center-admin",
               q: "How do I add or remove a member of my center?",
               a: "A center Owner or Curator edits the roster in the app. Center membership is one of the few shared institutional fields Scholars itself owns.",
+            },
+            {
+              href: "#researcher-type",
+              q: "Why am I labeled a Clinician, or not a Physician-scientist?",
+              a: "The labels are computed from your recent first or last author papers, the degrees on your profile, and the awards you lead as PI. They change when that data does.",
             },
             {
               href: "#profile-url",
@@ -1035,6 +1048,224 @@ export default async function DocsPage() {
           </p>
         </Callout>
 
+        {/* One definition for the public "Research type" facet, Matcha's Research filter and
+            the console's researcher types. Numbers render from the constants the classifiers
+            use (lib/research-type.ts, lib/api/matcha-contract.ts); the award and degree lists
+            below are prose and must be updated with RESEARCH_MECHANISM / MEDICAL_DEGREES. */}
+        <h3 id="research-type" className="scroll-mt-28 lg:scroll-mt-20">
+          Research type
+        </h3>
+        <p>
+          People search can filter by the kind of research a scholar does. The label is computed
+          from the scholar&apos;s own recent papers. It does not come from a title, a department,
+          an appointment or anything the scholar declares, and nobody assigns it by hand.
+        </p>
+        <p className="!mt-6 !mb-2 font-semibold">How one paper is classified</p>
+        <p>
+          NIH iCite scores every PubMed paper on its &ldquo;translational triangle&rdquo;: the share
+          of the paper that is about humans, about animals, and about molecules and cells, worked
+          out from its MeSH terms. Scholars uses those shares as they are:
+        </p>
+        <ul>
+          <li>
+            A paper is <strong>laboratory</strong> when its animal and molecular or cellular shares
+            add up to at least half.
+          </li>
+          <li>
+            A paper is <strong>clinical</strong> when its human share is at least half, or when iCite
+            flags it as clinical research (for example a clinical trial).
+          </li>
+          <li>
+            Only papers iCite marks as research articles count. Reviews, editorials, letters and
+            comments never count. A paper iCite has not scored yet does not count either.
+          </li>
+        </ul>
+        <p className="!mt-6 !mb-2 font-semibold">How a scholar gets the label</p>
+        <ul>
+          <li>
+            <strong>{RESEARCH_TYPE_LABELS.lab}</strong>: at least {RESEARCH_TYPE_MIN_PUBS} laboratory
+            papers as first or last author, published in the last {RESEARCH_TYPE_YEARS} years.
+          </li>
+          <li>
+            <strong>{RESEARCH_TYPE_LABELS.clinical}</strong>: at least {RESEARCH_TYPE_MIN_PUBS} clinical
+            papers as first or last author in the same window.
+          </li>
+        </ul>
+        <p>
+          The papers are counted, not averaged. A scholar with 12 laboratory papers and 30 clinical
+          ones gets both labels, because they do both; an average would have hidden the laboratory
+          work. So one person can show both, and the counts in the filter can add up to more than
+          the number of people.
+        </p>
+        <p>
+          Only first and last authorship counts, because those positions usually mark the person
+          who did the work or led it. A scholar who is a middle author on many papers, such as a
+          core facility director or a member of a large consortium, may show no label even with a
+          long publication list.
+        </p>
+
+        <h3 id="researcher-type" className="scroll-mt-28 lg:scroll-mt-20">
+          Researcher type
+        </h3>
+        <p>
+          The Scholars console also gives each person one researcher type. It is used by staff
+          tools that match researchers to sponsors and funding opportunities, and it is not shown
+          on profiles. It is built from three facts, each defined below: the research type labels
+          above, whether the person is a physician, and whether they currently lead a research
+          award. The rules run in order, and the first one that fits decides the type.
+        </p>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-[640px]">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Type</th>
+                <th>Who</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td>{RESEARCHER_TYPE_LABEL.trainee}</td>
+                <td>A doctoral student, postdoc or fellow who does not lead a research award</td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td>{RESEARCHER_TYPE_LABEL.physician_scientist}</td>
+                <td>Has {RESEARCH_TYPE_LABELS.lab} or {RESEARCH_TYPE_LABELS.clinical}, and is a physician</td>
+              </tr>
+              <tr>
+                <td>3</td>
+                <td>{RESEARCHER_TYPE_LABEL.basic_scientist}</td>
+                <td>Has {RESEARCH_TYPE_LABELS.lab}, and is not a physician</td>
+              </tr>
+              <tr>
+                <td>4</td>
+                <td>{RESEARCHER_TYPE_LABEL.clinical_researcher}</td>
+                <td>Has {RESEARCH_TYPE_LABELS.clinical} only, and is not a physician</td>
+              </tr>
+              <tr>
+                <td>5</td>
+                <td>{RESEARCHER_TYPE_LABEL.funded_investigator}</td>
+                <td>Leads a research award, but has too few first or last author papers for either label</td>
+              </tr>
+              <tr>
+                <td>6</td>
+                <td>{RESEARCHER_TYPE_LABEL.clinician}</td>
+                <td>A physician or a clinical profile, with no research label and no research award</td>
+              </tr>
+              <tr>
+                <td>7</td>
+                <td>{RESEARCHER_TYPE_LABEL.research_staff}</td>
+                <td>Non-faculty academic staff with none of the above</td>
+              </tr>
+              <tr>
+                <td>8</td>
+                <td>{RESEARCHER_TYPE_LABEL.unclassified}</td>
+                <td>Everyone else</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          A physician-scientist can do laboratory work, clinical work or both; the research type
+          labels say which. That is why the console filter puts {RESEARCHER_TYPE_LABEL.physician_scientist}{" "}
+          under both {RESEARCH_TYPE_LABELS.lab} and {RESEARCH_TYPE_LABELS.clinical}. A basic
+          scientist who also publishes clinical papers stays a basic scientist and also shows{" "}
+          {RESEARCH_TYPE_LABELS.clinical}.
+        </p>
+        <p className="!mt-6 !mb-2 font-semibold">Who counts as a physician</p>
+        <p>
+          A scholar is a physician when any degree in the education on their profile is a medical
+          degree: MD, DO, MBBS, MBChB, MBBCh, BMBS or a combined MD-PhD, however it is punctuated.
+          Dental, podiatry, psychology, nursing and pharmacy degrees are not medical degrees here,
+          so a dentist or a psychologist is not counted as a physician. When a profile lists no
+          education at all, having a clinical profile at WCM stands in. A residency or fellowship
+          listed as education is training, not a degree, and does not count.
+        </p>
+        <p className="!mt-6 !mb-2 font-semibold">What counts as leading a research award</p>
+        <p>
+          The person is PI, PI on a subaward or co-PI on an award that is active now or ended in
+          the last {RESEARCH_ACTIVE_YEARS} years, from any sponsor. For NIH awards the activity code
+          decides: R, U, P, K, DP and SC series count, because they fund research, and K awards
+          count because career development awards are how many physician-scientists start a lab.
+          Conference grants (R13, U13), research education grants (R25) and institutional career
+          development awards (K12, KL2) do not count, because their PI runs a program rather than
+          a lab. Training, fellowship and loan repayment awards do not count. For other sponsors,
+          career, fellowship and training programs do not count, and neither do service
+          agreements, material transfer agreements or clinical trial agreements.
+        </p>
+
+        <h3 id="research-type-limits" className="scroll-mt-28 lg:scroll-mt-20">
+          What these labels can and cannot tell you
+        </h3>
+        <ul>
+          <li>
+            <strong>They are positive only.</strong> No label means the papers do not show it yet.
+            It never means the person does no research.
+          </li>
+          <li>
+            <strong>Recent work lags.</strong> iCite scores new papers some time after they appear
+            in PubMed, so a scholar whose papers are all very recent can be missing a label they
+            will get later.
+          </li>
+          <li>
+            <strong>MeSH terms are not intent.</strong> iCite reads the subject of a paper, not
+            its method. A paper about molecular markers in patient tissue can score as laboratory
+            work, and a case series can score as clinical research.
+          </li>
+          <li>
+            <strong>Fields that publish rarely are under-counted.</strong> {RESEARCH_TYPE_MIN_PUBS}{" "}
+            first or last author papers in {RESEARCH_TYPE_YEARS} years is easy in some fields and
+            hard in others.
+          </li>
+          <li>
+            <strong>Degrees come from the profile.</strong> A medical degree missing from the
+            profile&apos;s education means the person is not counted as a physician.
+          </li>
+          <li>
+            <strong>Award data is WCM&apos;s.</strong> An award held at another institution, or
+            not yet in WCM&apos;s grant records, does not count.
+          </li>
+        </ul>
+
+        <p className="!mt-6 !mb-2 font-semibold">Common questions</p>
+        <dl className="mt-2">
+          <dt className="mt-4 font-semibold">I run a lab. Why do I have no {RESEARCH_TYPE_LABELS.lab} label?</dt>
+          <dd className="mt-1 ml-0">
+            Usually because fewer than {RESEARCH_TYPE_MIN_PUBS} of your papers from the last{" "}
+            {RESEARCH_TYPE_YEARS} years list you first or last, or because iCite has not scored
+            them yet. Check that your publications are complete and correctly attributed.
+          </dd>
+          <dt className="mt-4 font-semibold">I am an MD. Why am I not a {RESEARCHER_TYPE_LABEL.physician_scientist}?</dt>
+          <dd className="mt-1 ml-0">
+            Either your degree is missing from your profile&apos;s education, or your papers do
+            not yet show a research label. With a research award but no label you are a{" "}
+            {RESEARCHER_TYPE_LABEL.funded_investigator}.
+          </dd>
+          <dt className="mt-4 font-semibold">Why am I a {RESEARCHER_TYPE_LABEL.clinician}?</dt>
+          <dd className="mt-1 ml-0">
+            You are a physician or have a clinical profile, and neither your recent first or last
+            author papers nor a current research award show research yet. It describes the data,
+            not your work, and it changes on its own when the data does.
+          </dd>
+          <dt className="mt-4 font-semibold">Can I choose my label?</dt>
+          <dd className="mt-1 ml-0">
+            No. Every label is computed the same way for everyone so that a filter means the same
+            thing for every person it returns. You can fix the data it is built from.
+          </dd>
+        </dl>
+        <p>
+          To change a label, fix what it is built from. A missing or misattributed publication is
+          corrected in{" "}
+          <a href={PM} className={LINK}>
+            ReCiter Publication Manager
+          </a>
+          . A missing or wrong degree is corrected through Request a change on your education. A
+          missing award or role goes to Sponsored Research through Request a change on your funding. Labels update after
+          the next nightly refresh.
+        </p>
+
         <h2 id="showcase">Spotlight &amp; Selected research</h2>
         <p>
           Most showcase surfaces are chosen by a model, not by you, and the home-page surfaces have
@@ -1256,6 +1487,10 @@ export default async function DocsPage() {
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies NIH abstract text and the portfolio link, and adds NIH awards InfoEd never held. NSF and Gates Foundation abstracts come from those funders’ public records." },
             { term: "Grant roles (PI, MPI, Co-I)", def: (<>Your role on an award, as recorded in InfoEd. PI is the principal investigator. MPI marks an NIH <a href={NIH_MPI} className={LINK}>multiple-principal-investigator</a> award, where two or more investigators hold principal-investigator standing equally; NIH names one of them the contact PI for correspondence only, which carries no seniority. Co-I is a co-investigator, Sub-PI leads a subaward, and KP is other key personnel. MPI is not a lesser form of PI, and it is not the same as co-PI, which is an NSF term not used on NIH awards. Corrections go to Sponsored Research through Request a change. A grant shown “via NIH RePORTER” always lists the role as PI and is corrected through NIH, not Sponsored Research.</>) },
             { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Center for Technology Licensing portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from the Center for Technology Licensing and refreshed weekly." },
+            { term: "Laboratory research", def: `A Research type label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as laboratory work. A scholar can also show Clinical research. See Research type under Search.` },
+            { term: "Clinical research", def: `A Research type label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as human or clinical research. A scholar can also show Laboratory research. See Research type under Search.` },
+            { term: "Researcher type", def: "The one type the Scholars console gives each person (Physician-scientist, Basic scientist, Clinical or population researcher, Funded investigator, Clinician, Trainee, Research staff or Unclassified), built from their research type labels, whether they are a physician, and whether they lead a research award. Used by staff matching tools, not shown on profiles. See Researcher type under Search." },
+            { term: "Physician-scientist", def: "A scholar who shows laboratory or clinical research and holds a medical degree (MD, DO, MBBS or an equivalent) in the education on their profile; a clinical profile stands in when no education is listed. Dental and psychology degrees do not count as medical degrees." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
             { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Scholars is the SOR for the institutional data it curates directly (center membership, unit and division metadata, and manually-created division rosters), and that set may grow; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },
             { term: "Roles (Superuser / Owner / Curator)", def: "Unit-scoped permissions for curating centers, divisions, and departments. Superuser is global and can grant any role; an Owner acts on one unit and can grant Owner or Curator on it; a Curator acts on one unit and grants nothing. Every edit is audit-logged." },

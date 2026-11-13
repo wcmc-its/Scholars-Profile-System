@@ -39,7 +39,7 @@ export function MeshOnlyToggle({
 
   return (
     <li className="flex items-center gap-2 py-1 leading-[1.4]">
-      <Link
+      <Link prefetch={false}
         href={href}
         scroll={false}
         onClick={handleClick}

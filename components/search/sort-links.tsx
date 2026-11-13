@@ -74,7 +74,7 @@ export function SortLinks({
         >
           {options.map((o) => (
             <li key={o.value} role="option" aria-selected={o.value === current}>
-              <Link
+              <Link prefetch={false}
                 href={o.href}
                 scroll={false}
                 onClick={() => setOpen(false)}

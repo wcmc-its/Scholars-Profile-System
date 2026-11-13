@@ -6735,7 +6735,8 @@ export async function suggestEntities(
       c.confidence === "entry-term"
         ? `MeSH concept · via "${c.matchedForm}"`
         : "MeSH concept",
-    href: searchHref(c.name),
+    // `suggest` tags the click for the usage rollup (typed vs suggested terms).
+    href: searchHref(c.name, "suggest"),
   });
 
   if (!useV2) {

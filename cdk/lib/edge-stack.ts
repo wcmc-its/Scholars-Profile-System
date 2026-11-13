@@ -1697,6 +1697,34 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // Staging 11-13: the TGT_TokenAbsent -> Challenge override did not
+          // fire (tokenless Chrome-UA /search got 200, labelled
+          // TGT_TokenAbsent_RC_COUNT). Challenge on the token label instead,
+          // the documented "block missing tokens" pattern. Runs after the
+          // Bot Control instances, which apply awswaf:managed:token:absent.
+          {
+            name: "search-challenge-tokenless",
+            priority: managedGroups.length + 7,
+            action: { challenge: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  searchPathMatch,
+                  {
+                    labelMatchStatement: {
+                      scope: "LABEL",
+                      key: "awswaf:managed:token:absent",
+                    },
+                  },
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-challenge-tokenless`,
+              sampledRequestsEnabled: true,
+            },
+          },
           // #432: public launch drops the gate; everything after it stays.
           // The IPSet also backs the search-rate-limit WCM exemption, so it
           // stays even after block-non-wcm is gone.

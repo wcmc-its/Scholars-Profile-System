@@ -226,6 +226,62 @@ const SEARCH_TERM_EXPR =
   "lower(trim(url_decode(url_extract_parameter('http://x?' || cs_uri_query, 'q'))))";
 
 /**
+ * Values of the `src=` query parameter the app adds to a `/search?q=` link the
+ * user did not type: `chip` (the home "Try:" chips) and `suggest` (a MeSH
+ * concept picked from the search-box typeahead). See SEARCH_SOURCES in
+ * lib/search/query-url.ts -- keep the two lists in sync. Any other value, or
+ * none, counts as typed.
+ */
+export const SUGGESTED_SEARCH_SOURCES: readonly string[] = ["chip", "suggest"];
+
+/**
+ * Which search_term metric a /search request lands in: `search_term_suggested`
+ * when it carries a known `src=` tag, else `search_term` (typed). Days rolled
+ * before the app started tagging have no `src=`, so every search on those days
+ * stays under `search_term` -- the same metric name the dashboard and the
+ * `sps-usage-search-terms-*` saved query already read.
+ */
+/**
+ * Edge (WAF) responses that mark a /search request as automated: 202 = WAF
+ * Challenge interstitial (no token yet), 403 = WAF block (labelled bot or a
+ * known scraper UA), 405 = WAF CAPTCHA (automated-browser signals), 429 = WAF
+ * rate limit.
+ */
+export const BOT_SEARCH_STATUSES: readonly number[] = [202, 403, 405, 429];
+
+/**
+ * A /search?q= request counted as a bot search: a declared bot UA (IS_BOT_UA,
+ * any status), or a request the edge WAF answered instead of the origin (one of
+ * BOT_SEARCH_STATUSES, or any `x_edge_result_type = 'Error'`). Before the WAF
+ * challenged /search (mid-November 2026) only the UA rule can fire, so earlier
+ * days undercount bots. A person's first search in a session can also land
+ * here once, as the 202 Challenge their browser then solves and retries.
+ * coalesce: a NULL User-Agent makes IS_BOT_UA NULL, which would otherwise fall
+ * through the CASE to the human branches.
+ */
+const IS_BOT_SEARCH = [
+  `coalesce(${IS_BOT_UA}, false)`,
+  `    OR sc_status IN (${BOT_SEARCH_STATUSES.join(", ")})`,
+  "    OR x_edge_result_type = 'Error'",
+].join("\n");
+
+/**
+ * Human-search filter: exactly the search arm's pre-bot-split WHERE (an origin
+ * 200, not an edge error, not a bot UA), so search_term and
+ * search_term_suggested count what they counted before search_term_bot.
+ */
+const IS_HUMAN_SEARCH = `sc_status = 200 AND ${NOT_EDGE_ERROR} AND ${NOT_BOT_UA}`;
+
+const SEARCH_METRIC_CASE = [
+  "CASE",
+  `  WHEN ${IS_BOT_SEARCH} THEN 'search_term_bot'`,
+  `  WHEN ${IS_HUMAN_SEARCH}`,
+  `    AND url_extract_parameter('http://x?' || cs_uri_query, 'src') IN (${SUGGESTED_SEARCH_SOURCES.map((v) => `'${v}'`).join(", ")}) THEN 'search_term_suggested'`,
+  `  WHEN ${IS_HUMAN_SEARCH} THEN 'search_term'`,
+  "END",
+].join("\n");
+
+/**
  * Reserved top-level route segments that are NOT scholar profiles. SPS serves a
  * profile at a ROOT vanity slug (`app/(public)/[slug]`, e.g. `/carl-f-nathan`) —
  * there is no `/scholar/<cwid>` path — so a profile pageview is a single-segment
@@ -292,8 +348,9 @@ const PROFILE_VIEW_FILTERS = [
 ].join("\n");
 
 /**
- * INSERT INTO daily_usage the six aggregated marketing metrics for a single dt
- * partition: pageviews, profile, search_term, referrer, geo, device. Every arm
+ * INSERT INTO daily_usage the aggregated marketing metrics for a single dt
+ * partition: pageviews, profile, search_term (+ search_term_suggested and
+ * search_term_bot, from the same arm), referrer, geo, device. Every arm
  * emits (metric, dimension, cnt, dt) with dt LAST (the partition-projection
  * column-order rule -- the partition key is the final column of the SELECT),
  * and dt is the literal validated date string.
@@ -340,7 +397,8 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
 
     "  UNION ALL",
 
-    // (3) search_term -- dimension = decoded/normalized q=, cnt = searches.
+    // (3) search_term / search_term_suggested -- dimension = decoded/normalized
+    // q=, cnt = searches.
     // Counted at the results page (`/search?q=`, the router.push target of a
     // submitted query), NOT under `/api/search%`: the browser never calls
     // `/api/search?q=` -- the only `/api/search/*` callers are the typeahead
@@ -350,22 +408,28 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     // load and the RSC soft-navigation carry q=, so both count. `_rsc=` is
     // KEPT here, as in the profile arms: a submitted query is a client-side
     // router.push, so nearly every real search IS an RSC soft-nav and dropping
-    // `_rsc=` would erase most real searches. Bots are removed by NOT_BOT_UA
-    // and NOT_EDGE_ERROR instead (#3368).
+    // `_rsc=` would erase most real searches. Bots are kept out of the human
+    // metrics by NOT_BOT_UA and NOT_EDGE_ERROR instead (#3368).
     // ponytail: pagination / tab switches re-request /search?q= and count as
     // another search of the same term; there is no session key to dedupe on
     // (cs_cookie is not logged). Accept the over-count.
-    `  SELECT 'search_term' AS metric, ${SEARCH_TERM_EXPR} AS dimension,`,
+    // Split by origin in one scan: a suggestion click carries `src=` and lands
+    // in search_term_suggested; everything else (typed searches, and every
+    // page/filter/tab change, since the search page never re-emits `src=`)
+    // stays in search_term.
+    // Bots split off in the same scan: search_term_bot takes every bot
+    // request (IS_BOT_SEARCH, any src=) BEFORE the human branches, so each
+    // request lands in exactly one metric. A request that is neither (a
+    // non-bot 3xx/5xx) gets a NULL metric and the HAVING drops it.
+    `  SELECT ${SEARCH_METRIC_CASE} AS metric, ${SEARCH_TERM_EXPR} AS dimension,`,
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day}`,
-    "    AND cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200",
-    `    AND ${NOT_EDGE_ERROR}`,
-    `    AND ${NOT_BOT_UA}`,
+    "    AND cs_uri_stem = '/search' AND cs_method = 'GET'",
     "    AND cs_uri_query IS NOT NULL AND cs_uri_query <> '-'",
     "    AND url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL",
-    `  GROUP BY ${SEARCH_TERM_EXPR}`,
-    `  HAVING ${SEARCH_TERM_EXPR} <> ''`,
+    `  GROUP BY ${SEARCH_METRIC_CASE}, ${SEARCH_TERM_EXPR}`,
+    `  HAVING ${SEARCH_METRIC_CASE} IS NOT NULL AND ${SEARCH_TERM_EXPR} <> ''`,
 
     "  UNION ALL",
 

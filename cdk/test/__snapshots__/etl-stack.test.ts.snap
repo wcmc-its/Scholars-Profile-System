@@ -5899,7 +5899,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               "Effect": "Allow",
-              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+              "Resource": [
+                "arn:aws:ses:us-east-1:123456789012:identity/*",
+                "arn:aws:ses:us-east-1:123456789012:configuration-set/scholars-mail-default",
+              ],
             },
           ],
           "Version": "2012-10-17",
@@ -18255,7 +18258,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               "Effect": "Allow",
-              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+              "Resource": [
+                "arn:aws:ses:us-east-1:123456789012:identity/*",
+                "arn:aws:ses:us-east-1:123456789012:configuration-set/scholars-mail-default",
+              ],
             },
           ],
           "Version": "2012-10-17",

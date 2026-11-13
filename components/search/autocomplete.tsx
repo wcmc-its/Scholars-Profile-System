@@ -327,8 +327,10 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
             >
               <Link
                 href={s.href}
-                // Profile links never prefetch: Usage counts each ?_rsc= profile hit as a click (#3368).
-                prefetch={s.kind === "person" ? false : undefined}
+                // Neither profile rows nor /search concept rows prefetch: the
+                // Usage rollup counts each ?_rsc= hit as a click, and /search
+                // prefetches cost OpenSearch queries (#3368).
+                prefetch={s.kind === "person" || s.href.startsWith("/search") ? false : undefined}
                 className={`flex items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-[#fafaf8] dark:hover:bg-zinc-800 ${
                   i === activeIndex ? "bg-[#f5f3ee] dark:bg-zinc-800" : ""
                 }`}
