@@ -680,7 +680,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
@@ -4795,7 +4795,7 @@ service:
               "Action": "ses:SendEmail",
               "Condition": {
                 "StringEquals": {
-                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                  "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu",
                 },
               },
               "Effect": "Allow",
@@ -5745,7 +5745,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
@@ -10037,7 +10037,7 @@ service:
               "Action": "ses:SendEmail",
               "Condition": {
                 "StringEquals": {
-                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                  "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu",
                 },
               },
               "Effect": "Allow",

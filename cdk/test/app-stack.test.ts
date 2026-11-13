@@ -1845,7 +1845,7 @@ describe("AppStack", () => {
         expect(resource).toContain(":identity/");
         // The From-address condition pins the sender.
         expect(stmt.Condition).toMatchObject({
-          StringEquals: { "ses:FromAddress": "no-reply-scholars@weill.cornell.edu" },
+          StringEquals: { "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu" },
         });
       });
 
@@ -2019,7 +2019,7 @@ describe("AppStack", () => {
         // stays in force until ops flip the flag post-verification.
         const env = appContainerEnv();
         expect(env.get("SELF_EDIT_REQUEST_CHANGE_SEND")).toBe("off");
-        expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
+        expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply@scholars-mail.weill.cornell.edu");
       });
 
       it("activates the ReCiter pending-suggestions nudge in prod (SELF_EDIT_RECITER_PENDING_HINT — launch batch 1, #506)", () => {
