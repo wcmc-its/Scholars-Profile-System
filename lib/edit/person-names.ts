@@ -11,7 +11,7 @@
 import { db } from "@/lib/db";
 import { resolveDirectoryNames, type DirectoryNameDeps } from "@/lib/edit/directory-names";
 
-type ScholarNameReader = {
+export type ScholarNameReader = {
   scholar: {
     findMany: (args: {
       where: { cwid: { in: string[] } };

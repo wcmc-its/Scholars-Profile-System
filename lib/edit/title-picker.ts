@@ -23,7 +23,6 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { NON_ACADEMIC_DEPT_NAMES } from "@/lib/non-academic-units";
-import { nameOr, resolvePersonNames } from "@/lib/edit/person-names";
 import {
   CENTER_ENTITY_TYPE,
   DEPARTMENT_CHAIR_ROLE_KEY,
@@ -143,8 +142,10 @@ export type PendingTitleRequest = {
   value: string;
   /** Who filed it — the scholar, or a proxy acting for them. */
   requestedBy: string;
-  /** The requester's display name; the CWID itself when unresolvable. */
-  requestedByName: string;
+  /** The requester's display name, filled by the page loader
+   *  (`lib/api/edit-context.ts`), not here: this module is reached by the ED
+   *  ETL, which must not import `@/lib/db` (etl-disconnect-guard). */
+  requestedByName?: string;
   requestedAt: Date;
 };
 
@@ -266,10 +267,6 @@ export async function loadTitlePickerState(
       ? {
           value: requestRow.value,
           requestedBy: requestRow.actorCwid,
-          requestedByName: nameOr(
-            await resolvePersonNames([requestRow.actorCwid], { read: client }),
-            requestRow.actorCwid,
-          ),
           requestedAt: requestRow.updatedAt,
         }
       : null,

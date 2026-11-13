@@ -66,6 +66,7 @@ import {
 import type { OrcidEvidence } from "@/lib/edit/orcid";
 import { frtNameKey } from "@/lib/frt/mentee-name";
 import { resolveDirectoryNames } from "@/lib/edit/directory-names";
+import { nameOr, resolvePersonNames, type ScholarNameReader } from "@/lib/edit/person-names";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
@@ -2098,7 +2099,7 @@ export async function loadEditContext(
     const noPubManual = includeHighlights ? await getSelectedHighlightPmids(cwid, client) : null;
     return {
       titlePicker: isTitleResolutionEnabled()
-        ? await loadTitlePickerState(client, scholar.cwid)
+        ? await withRequesterName(await loadTitlePickerState(client, scholar.cwid), client)
         : null,
       scholar: {
         cwid: scholar.cwid,
@@ -2282,7 +2283,7 @@ export async function loadEditContext(
   // read-only value and the write path rejects both field names, so nothing
   // half-renders.
   const titlePicker = isTitleResolutionEnabled()
-    ? await loadTitlePickerState(client, scholar.cwid)
+    ? await withRequesterName(await loadTitlePickerState(client, scholar.cwid), client)
     : null;
 
   return {
@@ -2427,4 +2428,15 @@ async function buildHighlightsContext(
     aiPmids,
     pickable,
   };
+}
+
+/** Name the pending title request's filer (Scholar name, then directory). */
+async function withRequesterName(
+  state: TitlePickerState | null,
+  client: ScholarNameReader,
+): Promise<TitlePickerState | null> {
+  if (!state?.pending) return state;
+  const cwid = state.pending.requestedBy;
+  const names = await resolvePersonNames([cwid], { read: client });
+  return { ...state, pending: { ...state.pending, requestedByName: nameOr(names, cwid) } };
 }
