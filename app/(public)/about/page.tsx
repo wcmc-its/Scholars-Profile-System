@@ -3,6 +3,11 @@ import Link from "next/link";
 import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
 import { FieldTable, SystemContext } from "@/components/docs/data-provenance";
 import { LATEST, loadSnapshot } from "@/lib/benchmark";
+import {
+  RESEARCH_TYPE_LABELS,
+  RESEARCH_TYPE_MIN_PUBS,
+  RESEARCH_TYPE_YEARS,
+} from "@/lib/research-type";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -56,6 +61,7 @@ const NAV: NavGroup[] = [
       { id: "methods", label: "Methods & tools" },
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
+      { id: "research-type", label: "Research type", sub: true },
       { id: "showcase", label: "Spotlight & Selected research" },
       { id: "mentees", label: "Mentees" },
       { id: "profile-url", label: "Your profile URL" },
@@ -1035,6 +1041,53 @@ export default async function DocsPage() {
           </p>
         </Callout>
 
+        {/* One definition for the public "Research type" facet and Matcha's Research filter.
+            N and M come from lib/research-type.ts, the constants the classifier uses. */}
+        <h3 id="research-type" className="scroll-mt-28 lg:scroll-mt-20">
+          Research type
+        </h3>
+        <p>
+          People search can filter by the kind of research a scholar does. The label comes from
+          the scholar&apos;s own recent papers, not from a title or a department.
+        </p>
+        <ul>
+          <li>
+            <strong>{RESEARCH_TYPE_LABELS.lab}</strong>: at least {RESEARCH_TYPE_MIN_PUBS} research
+            articles in the last {RESEARCH_TYPE_YEARS} years, as first or last author, that NIH
+            iCite classifies as laboratory work (mostly molecular, cellular or animal research).
+          </li>
+          <li>
+            <strong>{RESEARCH_TYPE_LABELS.clinical}</strong>: at least {RESEARCH_TYPE_MIN_PUBS} such
+            articles that iCite classifies as human or clinical research.
+          </li>
+        </ul>
+        <p>
+          One person can show both, so the counts in the filter can add up to more than the
+          number of people. Only research articles count; reviews, editorials and letters do not.
+        </p>
+        <p>
+          <strong>Physician-scientist</strong> means a scholar who shows laboratory or clinical
+          research and holds a medical degree (MD, DO, MBBS or an equivalent) in the education on
+          their profile. When a profile lists no education at all, a clinical profile at WCM is
+          used instead. Dental, podiatry, psychology, nursing and pharmacy degrees are not counted
+          as medical degrees, so a dentist or a psychologist is not counted as a physician here.
+        </p>
+        <p>
+          These labels are positive only. No label means the profile&apos;s papers do not show it
+          yet. It does not mean the person does no research. Common reasons are fewer than{" "}
+          {RESEARCH_TYPE_MIN_PUBS} first or last author papers in the window, or recent papers that
+          iCite has not classified yet.
+        </p>
+        <p>
+          To change a label, fix what it is built from. A missing or misattributed publication is
+          corrected in{" "}
+          <a href={PM} className={LINK}>
+            ReCiter Publication Manager
+          </a>
+          . A missing or wrong degree is corrected through Request a change on your education. The
+          label updates after the next nightly refresh.
+        </p>
+
         <h2 id="showcase">Spotlight &amp; Selected research</h2>
         <p>
           Most showcase surfaces are chosen by a model, not by you, and the home-page surfaces have
@@ -1256,6 +1309,9 @@ export default async function DocsPage() {
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies NIH abstract text and the portfolio link, and adds NIH awards InfoEd never held. NSF and Gates Foundation abstracts come from those funders’ public records." },
             { term: "Grant roles (PI, MPI, Co-I)", def: (<>Your role on an award, as recorded in InfoEd. PI is the principal investigator. MPI marks an NIH <a href={NIH_MPI} className={LINK}>multiple-principal-investigator</a> award, where two or more investigators hold principal-investigator standing equally; NIH names one of them the contact PI for correspondence only, which carries no seniority. Co-I is a co-investigator, Sub-PI leads a subaward, and KP is other key personnel. MPI is not a lesser form of PI, and it is not the same as co-PI, which is an NSF term not used on NIH awards. Corrections go to Sponsored Research through Request a change. A grant shown “via NIH RePORTER” always lists the role as PI and is corrected through NIH, not Sponsored Research.</>) },
             { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Center for Technology Licensing portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from the Center for Technology Licensing and refreshed weekly." },
+            { term: "Laboratory research", def: `A Research type label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as laboratory work. A scholar can also show Clinical research. See Research type under Search.` },
+            { term: "Clinical research", def: `A Research type label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as human or clinical research. A scholar can also show Laboratory research. See Research type under Search.` },
+            { term: "Physician-scientist", def: "A scholar who shows laboratory or clinical research and holds a medical degree (MD, DO, MBBS or an equivalent) in the education on their profile; a clinical profile stands in when no education is listed. Dental and psychology degrees do not count as medical degrees." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
             { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Scholars is the SOR for the institutional data it curates directly (center membership, unit and division metadata, and manually-created division rosters), and that set may grow; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },
             { term: "Roles (Superuser / Owner / Curator)", def: "Unit-scoped permissions for curating centers, divisions, and departments. Superuser is global and can grant any role; an Owner acts on one unit and can grant Owner or Curator on it; a Curator acts on one unit and grants nothing. Every edit is audit-logged." },

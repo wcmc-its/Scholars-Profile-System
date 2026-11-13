@@ -43,6 +43,9 @@ export const METHODOLOGY_ANCHORS = {
   dataCadence: "provenance",
   // 0–100 impact score surfaced inline (publication modal, search) — #285.
   impact: "impact",
+  // Laboratory / Clinical research and Physician-scientist: the public "Research type"
+  // facet and Matcha's Research filter share one definition.
+  researchType: "research-type",
 } as const;
 
 export const METHODOLOGY_BASE = "/about" as const;
