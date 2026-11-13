@@ -6294,7 +6294,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
 }
 
 /** The shared note at the card's foot. Collapsed until used; NEVER exported (see
- *  `briefCsvFields`). Shared by everyone who opens the paste, which is what the label says. */
+ *  `briefExportFields`). Shared by everyone who opens the paste, which is what the label says. */
 function BriefNote({ name, brief }: { name: string; brief: BriefRowProps }) {
   const { state, canEdit, onPatch } = brief;
   const [editing, setEditing] = useState(false);

@@ -34,7 +34,8 @@ const XLSX_CELL_MAX = 32767;
 /** Lines a value takes in a column `width` characters wide (wrapped) or not (newlines only). */
 export function wrappedLines(value: string, width: number, wrap: boolean): number {
   const parts = value.split(/\r?\n/);
-  if (!wrap) return parts.length;
+  // Excel shows an unwrapped cell on one line whatever newlines it holds.
+  if (!wrap) return 1;
   return parts.reduce((n, p) => n + Math.max(1, Math.ceil(p.length / width)), 0);
 }
 
@@ -64,7 +65,7 @@ export async function buildMatchaWorkbook(
   ws.addRow(header);
   boldRow(ws, 1);
   for (const r of body)
-    ws.addRow(r.map((v) => (typeof v === "number" ? v : guardFormula(v.slice(0, XLSX_CELL_MAX)))));
+    ws.addRow(r.map((v) => (typeof v === "number" ? v : guardFormula(v.slice(0, XLSX_CELL_MAX - 1)))));
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: header.length } };
 
   // Widths from the header and every value; a column over the cap wraps.

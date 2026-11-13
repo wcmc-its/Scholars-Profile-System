@@ -134,7 +134,7 @@ describe("buildMatchaWorkbook", () => {
 describe("wrappedLines", () => {
   it("counts newline segments, wrapped by width", () => {
     expect(wrappedLines("abc", 10, false)).toBe(1);
-    expect(wrappedLines("a\nb", 10, false)).toBe(2);
+    expect(wrappedLines("a\nb", 10, false)).toBe(1);
     expect(wrappedLines("x".repeat(25), 10, true)).toBe(3);
     expect(wrappedLines(`${"x".repeat(15)}\n\nshort`, 10, true)).toBe(4);
   });
