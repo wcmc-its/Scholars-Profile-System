@@ -3277,8 +3277,16 @@ function FacetSidebar({
                 isActive={c.isActive}
                 href={toggleHref("researchType", c.value)}
                 nested
+                ariaLabel={`${researchTypeLabel(c.value)}, ${c.count.toLocaleString()}${c.isActive ? ", selected" : ""}`}
               />
             )),
+            // ponytail: literal anchor; the section and METHODOLOGY_ANCHORS.researchType ship in
+            // the Matcha docs PR, switch to methodologyHref("researchType") once both are in.
+            <li key="about" className="pt-1 text-[12.5px]">
+              <Link href="/about#research-type" className="text-[#2c4f6e] hover:underline">
+                How these are defined
+              </Link>
+            </li>,
           ])}
         </FacetGroup>
       ) : null}
@@ -3814,6 +3822,7 @@ function FacetCheckbox({
   radio,
   disabled,
   nested,
+  ariaLabel,
 }: {
   label: React.ReactNode;
   tooltip?: string;
@@ -3836,6 +3845,9 @@ function FacetCheckbox({
   /** Indented child row under a parent checkbox (Research type children).
    *  Applies to the default (truncating) row only. */
   nested?: boolean;
+  /** Accessible name for the default row, when the visible label is not enough on its own
+   *  (a nested child names its parent: two "Physician-scientist" rows otherwise). */
+  ariaLabel?: string;
 }) {
   const inputType = radio ? "radio" : "checkbox";
   if (disabled) {
@@ -3909,6 +3921,7 @@ function FacetCheckbox({
           href={href}
           scroll={false}
           title={tooltip ? undefined : fallbackTitle}
+          aria-label={ariaLabel}
           className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
         >
           {/* readOnly input: state lives in the URL; the link toggles it. */}
