@@ -64,7 +64,7 @@ export function JournalFacet({
       <ul className="m-0 flex list-none flex-col p-0">
         {visible.map((j) => (
           <li key={j.value} className="py-1 leading-[1.4]">
-            <Link
+            <Link prefetch={false}
               href={j.toggleHref ?? appendBase + encodeValue(j.value)}
               scroll={false}
               className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"

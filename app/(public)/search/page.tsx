@@ -909,7 +909,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           as the results grid, so a tab switch — and the MeSH "Narrow to this
           concept only" / "Don't use MeSH" links inside the results — runs
           through the SAME shared useTransition as the facet / sort / pagination
-          links. Previously the tabs used a plain <Link> and lived outside the
+          links. Previously the tabs used a plain <Link prefetch={false}> and lived outside the
           provider: an in-page nav that only changes searchParams gets no
           loading.tsx fallback and no dim, so a slow round-trip read as "the
           click did nothing." Inside the provider the region dims + goes
@@ -928,7 +928,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           <div className="mx-auto max-w-[1280px] px-6 pt-6">
             <AZDirectory buckets={azBuckets} />
             <div className="mt-2 text-right">
-              <Link
+              <Link prefetch={false}
                 href="/browse"
                 className="text-sm text-[var(--color-accent-slate)] hover:underline"
               >
@@ -1177,7 +1177,7 @@ function ModeTab({
   title?: string;
 }) {
   return (
-    <Link
+    <Link prefetch={false}
       href={href}
       scroll={false}
       title={title}
@@ -2537,7 +2537,7 @@ async function TrialsResults({
             Filters
           </span>
           {chips.length > 0 ? (
-            <Link href={clearAllHref} scroll={false} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+            <Link prefetch={false} href={clearAllHref} scroll={false} className="text-xs font-medium text-[#2c4f6e] hover:underline">
               Clear all
             </Link>
           ) : null}
@@ -2719,7 +2719,7 @@ function FacetSidebarFunding({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link
+          <Link prefetch={false}
             href={clearAllHref}
             scroll={false}
             className="text-xs font-medium text-[#2c4f6e] hover:underline"
@@ -2915,7 +2915,7 @@ function FundingSortLinks({
       {opts.map((opt, i) => (
         <span key={opt.value}>
           {i > 0 ? <span className="text-muted-foreground"> · </span> : null}
-          <Link
+          <Link prefetch={false}
             href={buildHref(opt.value)}
             scroll={false}
             className={
@@ -2947,7 +2947,7 @@ function ActiveFilterChips({
       {chips.map((c, i) => {
         const aria = c.ariaLabel ?? (typeof c.label === "string" ? c.label : "filter");
         return (
-          <Link
+          <Link prefetch={false}
             key={`${aria}-${c.removeHref}-${i}`}
             href={c.removeHref}
             scroll={false}
@@ -2964,7 +2964,7 @@ function ActiveFilterChips({
           </Link>
         );
       })}
-      <Link
+      <Link prefetch={false}
         href={clearAllHref}
         scroll={false}
         className="ml-1 text-xs text-muted-foreground hover:text-[#2c4f6e]"
@@ -3070,7 +3070,7 @@ function ResultsToolbar({
                 <span aria-hidden="true" className="text-muted-foreground/60">
                   ·
                 </span>{" "}
-                <Link
+                <Link prefetch={false}
                   href={meshOnlyRemoveHref}
                   scroll={false}
                   className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
@@ -3090,7 +3090,7 @@ function ResultsToolbar({
                 <span aria-hidden="true" className="text-muted-foreground/60">
                   ·
                 </span>{" "}
-                <Link
+                <Link prefetch={false}
                   href={methodologyHref("impact")}
                   className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
                 >
@@ -3212,7 +3212,7 @@ function FacetSidebar({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link
+          <Link prefetch={false}
             href={clearAllHref}
             scroll={false}
             className="text-xs font-medium text-[#2c4f6e] hover:underline"
@@ -3450,7 +3450,7 @@ function PiMinStepper({
           −
         </span>
       ) : (
-        <Link
+        <Link prefetch={false}
           href={setMinHref(value - 1)}
           scroll={false}
           aria-label={`Decrease minimum to ${value - 1}`}
@@ -3465,7 +3465,7 @@ function PiMinStepper({
           +
         </span>
       ) : (
-        <Link
+        <Link prefetch={false}
           href={setMinHref(value + 1)}
           scroll={false}
           aria-label={`Increase minimum to ${value + 1}`}
@@ -3552,7 +3552,7 @@ function FacetSidebarPubs({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link
+          <Link prefetch={false}
             href={clearAllHref}
             scroll={false}
             className="text-xs font-medium text-[#2c4f6e] hover:underline"
@@ -3844,7 +3844,7 @@ function FacetCheckbox({
     return (
       <li className="py-1 leading-[1.4]">
         {wrapInTooltip(
-          <Link
+          <Link prefetch={false}
             href={href}
             scroll={false}
             title={tooltip ? undefined : fallbackTitle}
@@ -3872,7 +3872,7 @@ function FacetCheckbox({
   return (
     <li className="flex items-center gap-2 py-1 leading-[1.4]">
       {wrapInTooltip(
-        <Link
+        <Link prefetch={false}
           href={href}
           scroll={false}
           title={tooltip ? undefined : fallbackTitle}
@@ -3925,7 +3925,7 @@ function MeshOnlyEmptyState({ removeHref }: { removeHref: string }) {
     <div className="mt-12 flex flex-col items-center text-center">
       <div className="text-lg font-medium">No MeSH-tagged matches for this query.</div>
       <div className="mt-1 text-sm text-muted-foreground">
-        <Link
+        <Link prefetch={false}
           href={removeHref}
           scroll={false}
           className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
@@ -4014,7 +4014,7 @@ function PaginationButton({
     );
   }
   return (
-    <Link
+    <Link prefetch={false}
       href={href}
       className={
         active
