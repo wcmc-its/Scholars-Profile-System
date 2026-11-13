@@ -40,7 +40,15 @@ manifest carrying per-object SHA-256:
 | `tools/latest/families.json` | The family registry alone (`families[]` + `hierarchy`) — identical `families[]` to `tools.json`. |
 | `tools/latest/faculty.json` | The per-CWID rollup (also embedded in `tools.json` as `faculty{}`). |
 
-Reference counts (manifest `v2026-06-09`): **18,410 tools · 872 families · 1,316 faculty.**
+Reference counts (live artifact as of 2026-11-11): **18,497 tools · 816 families · 1,412 faculty.**
+(The original `v2026-06-09` manifest carried 18,410 · 872 · 1,316; counts now move with each weekly
+maintain run.)
+
+**Refresh cadence.** ReciterAI republishes the artifact weekly via the EventBridge rule
+`reciterai-tools-weekly` (Tuesdays 03:30 UTC; ReciterAI #502/#503), which also writes
+`STAGE#tools_maintain#GLOBAL` run-ledger rows. Before that the artifact was published by hand.
+ReciterAI's canonical description of the tools pipeline is `docs/tools-README.md` in the
+`wcmc-its/ReciterAI` repo.
 
 ### `tools[]` — canonical tool record
 
@@ -76,9 +84,9 @@ The repoint from the legacy DynamoDB scan to the S3 taxonomy is **#794** (the mi
 reversible behind a per-env switch).
 
 ```
-ReciterAI A2 (S3)  ──►  etl/tools/index.ts (loader)  ──►  scholar_tool table  ──►  lib/edit/overview-facts.ts (reader)
-                         manifest poll + sha256 +                                   → profile "Methods & tools" lens
-                         per-object integrity + full-replace
+ReciterAI A2 (S3)  ──►  etl/tools/index.ts (loader)  ──►  scholar_tool + scholar_family tables
+                         manifest poll + sha256 +           scholar_family → profile "Methods & tools" lens,
+                         per-object integrity + full-replace  overview facts, method pages
 ```
 
 | Piece | File |
@@ -88,7 +96,8 @@ ReciterAI A2 (S3)  ──►  etl/tools/index.ts (loader)  ──►  scholar_to
 | Family mapper | `etl/tools/scholar-family-mapper-s3.ts` |
 | Source switch | `lib/etl/scholar-tool-source.ts` → `resolveScholarToolSource()` |
 | Legacy path | `etl/dynamodb/index.ts` (Block 5) + `etl/dynamodb/scholar-tool-mapper.ts` |
-| Reader | `lib/edit/overview-facts.ts` (the only consumer of `scholar_tool`) |
+| `scholar_family` readers | profile lens `lib/api/profile.ts`, overview facts `lib/edit/overview-facts.ts`, method pages/roster/search (`lib/api/methods*.ts`, `lib/api/search.ts`, others) |
+| `scholar_tool` readers | `lib/api/search.ts` (`loadMethodFamilyCandidates`, tool-name → family-label match), `lib/api/matcha-brief.ts` (top tools per PI), `scripts/faculty-coverage-metric.ts` |
 
 ### The `SCHOLAR_TOOL_SOURCE` switch (reversible cutover)
 
@@ -96,11 +105,14 @@ Set per-env in the ETL container `environment:` (wired in `cdk/lib/etl-stack.ts`
 
 | Value | Behaviour |
 |---|---|
-| `ddb` *(default)* | Legacy DynamoDB Block 5 owns the `scholar_tool` table; `etl:scholar-tool` is a freshness-green **no-op**. |
-| `s3` | `etl:scholar-tool` is the **sole writer** (A2 canonical taxonomy); Block 5 skips. |
+| `ddb` *(code default when unset)* | Legacy DynamoDB Block 5 owns the `scholar_tool` table; `etl:scholar-tool` is a freshness-green **no-op**. |
+| `s3` *(deployed, both envs)* | `etl:scholar-tool` is the **sole writer** (A2 canonical taxonomy) and also populates `scholar_family`; Block 5 skips. |
+
+Both staging and prod set `SCHOLAR_TOOL_SOURCE: "s3"` in `cdk/lib/etl-stack.ts` (prod signed off
+2026-07-06). Rollback is setting it back to `ddb` and redeploying `Sps-Etl-<env>`.
 
 `etl:scholar-tool -- --dry-run` parallel-runs the S3 path and diffs against the live table
-**without** writing — safe to run while `ddb` still owns it. An unrecognized value warns and
+**without** writing — safe to run when `ddb` owns the table. An unrecognized value warns and
 falls back to `ddb`. Both writers are wired permanently; the flag is the only switch.
 
 > **Deploy ordering matters.** "Tools" is a freshness-tracked nightly step, so
@@ -111,8 +123,7 @@ falls back to `ddb`. Both writers are wired permanently; the flag is the only sw
 
 ### Field mapping into `scholar_tool`
 
-The reader (`overview-facts.ts`) consumes exactly four columns ordered `[pmidCount desc,
-maxConfidence desc]`, top-N per scholar. The S3 mapper fills them as:
+The S3 mapper fills the core columns as:
 
 | `scholar_tool` column | A2 source |
 |---|---|
@@ -128,10 +139,10 @@ Rows are grouped by `(cwid, tool display name)`, matching the table's `@@unique(
 ## 3. The display lens (status)
 
 The profile **Methods & tools** lens is family-primary (family title + member tools inline)
-and is being built under #799 (display), #800 (suppress non-distinctive families/tools), and
+and was built under #799 (display), #800 (suppress non-distinctive families/tools), and
 #801 (audience-gated visibility — e.g. animal-model supercategories hidden from public viewers,
-an access-control gate, not editorial). It currently ships **dark** behind flags; mockups live
-in [`mockups/methods-lens/`](./mockups/). This doc covers the **data plane** (source + ETL),
+an access-control gate, not editorial). It is **live in prod** since 2026-07-05 (`METHODS_LENS_*`
+flags on in `cdk/lib/app-stack.ts`, #962/#1481); mockups live in [`mockups/methods-lens/`](./mockups/). This doc covers the **data plane** (source + ETL),
 which is operational regardless of the display flags.
 
 ---
@@ -158,5 +169,5 @@ multiple tools in the same family).
 ## Related
 
 - **Issues:** #794 (source repoint, migration gate) · #799/#800/#801 (Methods lens display, suppression, audience gating) · #765 (slug-mangling fixed by canonical `display_name`)
-- **ReciterAI (producer) docs:** `docs/tools-a2-architecture.md`, `docs/tool-classifier-spec.md`, `docs/tools-producer-model.md`
+- **ReciterAI (producer) docs:** `docs/tools-README.md` (canonical overview, `wcmc-its/ReciterAI`), `docs/tools-a2-architecture.md`, `docs/tool-classifier-spec.md`, `docs/tools-producer-model.md`
 - **SPS docs:** [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) (ReciterAI as an upstream), [`data-dictionary.md`](./data-dictionary.md) (`scholar_tool` table), [`spotlight-runbook.md`](./spotlight-runbook.md) (the analogous ReciterAI→S3→SPS integration)

@@ -179,12 +179,13 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // its freshness row means something.
   "ORCID-push": { cadence: "nightly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
-  // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
+  // (a 0-row success in ddb mode; both envs run SCHOLAR_TOOL_SOURCE=s3 since the
+  // 2026-07-06 cutover), so it is freshness-tracked from the start.
   //
   // RE-ANCHORED AND ACKED, as one change. etl/tools/index.ts now stores the
   // artifact's `generated_at` (§2.1), so this row finally grades the CONTENT
-  // rather than the liveness of our own import — and tools.json has carried
-  // generated_at 2026-06-23 since June, so it grades stale immediately. The ack
+  // rather than the liveness of our own import — and when this landed, tools.json
+  // had carried generated_at 2026-06-23 since June, so it graded stale immediately. The ack
   // is what makes that landable: the staleness becomes an accepted decision
   // with a review date instead of a permanently red row nobody can fix, which
   // is the cry-wolf failure the ack mechanism exists to prevent and the same
@@ -198,15 +199,19 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   //     etl/freshness/index.ts's anti-clutter rule logs "ack is no longer
   //     needed — remove it" on every heartbeat.
   //
-  // `nightly` is kept, not widened: it is the honest cadence for our import,
-  // and no cadence would be honest for the producer, which has no EventBridge
-  // schedule at all and writes no STAGE# ledger row (see
-  // etl/dynamodb/producer-run-mapper.ts) — there is nothing to grade it
-  // against. The ack, not the cadence, is carrying the staleness.
+  // `nightly` is kept, not widened: it is the honest cadence for our import.
+  // When the ack was added the producer had no EventBridge schedule and wrote
+  // no STAGE# ledger row, so there was nothing to grade it against and the ack,
+  // not the cadence, carried the staleness. That is no longer true: ReciterAI
+  // now runs a weekly maintain pass (EventBridge rule reciterai-tools-weekly,
+  // Tuesdays 03:30 UTC; ReciterAI #502/#503) that republishes the artifact and
+  // writes STAGE#tools_maintain#GLOBAL ledger rows. SPS does not consume those
+  // rows yet: `tools_maintain` is not in PRODUCER_STAGES
+  // (etl/dynamodb/producer-run-mapper.ts).
   //
-  // At `until`: renew as a deliberate decision, or drop BOTH halves. Once the
-  // producer is scheduled the ack becomes unnecessary and the anchor stands on
-  // its own.
+  // Planned follow-up (not done here): add tools_maintain to PRODUCER_STAGES,
+  // then drop the ack and let the anchor stand on its own. Until then, at
+  // `until`: renew as a deliberate decision, or drop BOTH halves.
   Tools: {
     cadence: "nightly",
     ack: {
