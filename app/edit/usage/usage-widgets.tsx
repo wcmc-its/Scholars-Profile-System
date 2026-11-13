@@ -405,7 +405,12 @@ function RankLabel({ row }: { row: RankRow }) {
   }
   if (!row.cwid) {
     return (
-      <Link href={row.href} className={cn(cls, "hover:text-apollo-slate")} title={row.tip}>
+      <Link
+        href={row.href}
+        prefetch={false}
+        className={cn(cls, "hover:text-apollo-slate")}
+        title={row.tip}
+      >
         {row.label}
       </Link>
     );
@@ -416,6 +421,7 @@ function RankLabel({ row }: { row: RankRow }) {
     <ScholarHoverCard cwid={row.cwid}>
       <Link
         href={row.href}
+        prefetch={false}
         className={cn(cls, "hover:text-apollo-slate")}
         onTouchEnd={(e) => {
           e.preventDefault();
