@@ -8,7 +8,6 @@
  *   SCHOLARS_RECITERDB_PASSWORD   (required)
  *   SCHOLARS_RECITERDB_DATABASE   (required)
  */
-import { readFileSync } from "node:fs";
 import { createPool, type Pool, type PoolConnection } from "mariadb";
 
 // Cached on globalThis so dev hot reload (HMR) doesn't create a new pool on
@@ -107,5 +106,5 @@ export function reciterDbConfigWarning(env: Record<string, string | undefined> =
     `[reciterdb] SCHOLARS_RECITERDB_HOST is unset and ${live.join(", ")} not "on": ` +
     "mentoring and cited-by data will show as unavailable. Set the flag(s) to \"on\" " +
     "to read the local bridge tables (see .env.example)."
-  )
+  );
 }
