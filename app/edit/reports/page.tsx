@@ -247,6 +247,11 @@ export default async function EditReportsIndexPage({
             audience: "Superusers",
             rule: "Only superusers can run this report.",
           }),
+          catalogEntry(meta, 22, {
+            mode: "unit",
+            audience: "Superusers",
+            rule: "Only superusers can run this report.",
+          }),
         ]
       : []),
   ];

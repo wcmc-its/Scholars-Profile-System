@@ -103,6 +103,7 @@ import {
   assessMatchSignal,
   evidenceMatchCount,
   evidenceProvenance,
+  candidateFitTier,
   fitTier,
   hasMatchEvidence,
   latestEvidenceYear,
@@ -133,12 +134,13 @@ import {
   type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
-import { RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
+import { RESEARCH_TYPE_LABELS, RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
 import { briefCsvFields, buildMatchaCsv } from "@/lib/edit/matcha-export";
 import {
   angleRoleLead,
   briefAngle,
   briefAngleRole,
+  hasAngle,
   briefDataSources,
   briefMethodPills,
   briefSourceLabel,
@@ -365,15 +367,39 @@ function toggled(set: ReadonlySet<string>, value: string): Set<string> {
   return next;
 }
 
-/** The sponsor console's default researcher-type selection: everyone but "Clinician". CTL's
- *  usual ask is a lab to partner with; the clinicians stay one click away (consultant or
- *  patient-data asks). "Unclassified" stays in, since it holds scientists funded outside NIH. */
 /** The sponsor console's default person-type selection (a `roleCategoryLabel` value). */
 const DEFAULT_PERSON_TYPE = roleCategoryLabel("full_time_faculty");
 
+/** The sponsor console's default researcher-type selection: everyone but "Clinician". CTL's
+ *  usual ask is a lab to partner with; the clinicians stay one click away (consultant or
+ *  patient-data asks). "Unclassified" stays in: it is not "not a researcher". */
 const DEFAULT_RESEARCHER_TYPES: ReadonlySet<string> = new Set(
   RESEARCHER_TYPE_ORDER.filter((t) => t !== "clinician").map((t) => RESEARCHER_TYPE_LABEL[t]),
 );
+
+/** The "Research kind" facet's third option: a research award as PI, but too few
+ *  first/last-author papers of either kind to say which (archetype `funded_investigator`). */
+const KIND_FUNDED = "Funded, kind not evident";
+const RESEARCH_KIND_OPTIONS: readonly string[] = [
+  RESEARCH_TYPE_LABELS.lab,
+  RESEARCH_TYPE_LABELS.clinical,
+  KIND_FUNDED,
+];
+/** The sponsor console's default research-kind selection: laboratory researchers only.
+ *  Funded-but-kind-unknown is left out because on a staging run it admitted clinical chiefs
+ *  at the top of an industry ask; it and clinical research stay one click away. */
+const DEFAULT_RESEARCH_KINDS: ReadonlySet<string> = new Set([RESEARCH_TYPE_LABELS.lab]);
+
+/** The research-kind options this candidate matches. Empty when `researchKinds` is absent
+ *  (an older stored run): not computed, so it can satisfy no kind filter. */
+function researchKindLabels(m: MatchaMeasures | undefined): string[] {
+  if (!m?.researchKinds) return [];
+  return [
+    ...(m.researchKinds.includes("lab") ? [RESEARCH_TYPE_LABELS.lab] : []),
+    ...(m.researchKinds.includes("clinical") ? [RESEARCH_TYPE_LABELS.clinical] : []),
+    ...(m.researcherType === "funded_investigator" ? [KIND_FUNDED] : []),
+  ];
+}
 
 /** Why this scholar got their researcher type, the pill's hover. */
 function researcherTypeReason(m: MatchaMeasures): string {
@@ -387,23 +413,48 @@ function researcherTypeReason(m: MatchaMeasures): string {
     : null;
   const labText =
     lab >= RESEARCH_TYPE_MIN_PUBS ? `${lab} first/last-author lab research papers ${inWindow}` : null;
+  // A stored run from before the archetypes: its four types came from the older rule
+  // (award or lab papers, crossed with the clinical profile), so explain them by that rule.
+  if (!m.researchKinds) {
+    const clinicalText =
+      clinical >= RESEARCH_TYPE_MIN_PUBS ? ` ${clinical} first/last-author clinical research papers.` : "";
+    // Funded but the award is withheld (hidden Funding section) and no lab volume.
+    const evidence = [award, labText].filter(Boolean).join("; ") || `PI on a research award ${inWindow}`;
+    switch (m.researcherType) {
+      case "physician_scientist":
+        return `${evidence}. Has a clinical profile.${clinicalText}`;
+      case "basic_scientist":
+        return `${evidence}. No clinical profile.${clinicalText}`;
+      case "clinician":
+        return `Has a clinical profile, but no research award as PI and under ${RESEARCH_TYPE_MIN_PUBS} lab papers ${inWindow}.${clinicalText}`;
+      case "unclassified":
+        return `No research award as PI and under ${RESEARCH_TYPE_MIN_PUBS} first/last-author lab papers ${inWindow}.${clinicalText}`;
+      default:
+        return "";
+    }
+  }
   const clinicalText =
-    clinical >= RESEARCH_TYPE_MIN_PUBS ? ` ${clinical} first/last-author clinical research papers.` : "";
-  // Funded but the award is withheld (hidden Funding section) and no lab volume.
-  const evidence = [award, labText].filter(Boolean).join("; ") || `PI on a research award ${inWindow}`;
+    clinical >= RESEARCH_TYPE_MIN_PUBS
+      ? `${clinical} first/last-author clinical research papers ${inWindow}`
+      : null;
+  const evidence = [labText, clinicalText, award].filter(Boolean).join("; ");
+  const noPapers = `under ${RESEARCH_TYPE_MIN_PUBS} first/last-author lab or clinical research papers ${inWindow}`;
   switch (m.researcherType) {
     case "physician_scientist":
-      return `${evidence}. Has a clinical profile.${clinicalText}`;
+      return `${evidence}. Physician (medical degree, or a clinical profile when no degrees are on file).`;
     case "basic_scientist":
-      return `${evidence}. No clinical profile.${clinicalText}`;
+    case "clinical_researcher":
+      return `${evidence}. No medical degree on file.`;
+    case "funded_investigator":
+      return `${award ?? `PI on a research award ${inWindow}`}, but ${noPapers}, so the kind of research is not evident.`;
     case "clinician":
-      return `Has a clinical profile, but no research award as PI and under ${RESEARCH_TYPE_MIN_PUBS} lab papers ${inWindow}.${clinicalText}`;
+      return `Holds a medical degree or has a clinical profile, with no research award as PI and ${noPapers}.`;
+    case "trainee":
+      return `Doctoral student, postdoc or fellow with no research award as PI.${evidence ? ` ${evidence}.` : ""}`;
+    case "research_staff":
+      return `Non-faculty academic staff with no research award as PI and ${noPapers}.`;
     case "unclassified":
-      return `No research award as PI and under ${RESEARCH_TYPE_MIN_PUBS} first/last-author lab papers ${inWindow}.${clinicalText}${
-        m.roleCategory === "part_time_faculty" || m.roleCategory === "affiliated_faculty"
-          ? " Part-time and affiliated faculty often hold awards and see patients elsewhere, so this is unknown, not no."
-          : ""
-      }`;
+      return `No medical degree or clinical profile on file, no research award as PI and ${noPapers}.`;
     default:
       return "";
   }
@@ -611,6 +662,8 @@ export function MatchaPanel({
   // Researcher type. `null` = untouched, which means the DEFAULT selection on the sponsor path
   // (see `typeSelEffective`); an explicit empty set means "show everyone".
   const [typeSel, setTypeSel] = useState<ReadonlySet<string> | null>(null);
+  // Research kind. Same `null` = untouched convention (see `kindSelEffective`).
+  const [kindSel, setKindSel] = useState<ReadonlySet<string> | null>(null);
   // Grant Matcha — the officer owns the predicate. The hard career-stage axis defaults ON (it IS
   // the opportunity's own rule); unchecking RELAXES it, interleaving the dropped people back into
   // the ranking by fit, badged — a client-side toggle over already-fetched candidates, never a
@@ -992,6 +1045,7 @@ export function MatchaPanel({
     setCtlOnly(false);
     setStageSel(new Set());
     setTypeSel(new Set());
+    setKindSel(new Set());
     setRoleSel(new Set());
   }
 
@@ -1103,7 +1157,8 @@ export function MatchaPanel({
         };
         setGrantCandidates([]); // toggling back to people clears any prior grant results
         clearFilters(); // stale facet selections must not silently hide fresh results
-        setTypeSel(null); // ...except researcher type and person type, which return to their defaults
+        setTypeSel(null); // ...except researcher type, research kind and person type, which return to their defaults
+        setKindSel(null);
         setRoleSel(null);
         setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
         setShortlist(new Set()); // the shortlist is per-ask: last sponsor's picks are not this one's
@@ -1476,6 +1531,34 @@ export function MatchaPanel({
     [typeSel, grantPath, typeFacet.length],
   );
 
+  // Research kind. Offered only when the run carries `researchKinds`; a stored run from before
+  // the field has none, so it gets no group and no default (a default there would hide every
+  // row). A person with both kinds counts under both options.
+  const kindFacet = useMemo(() => {
+    const counts = new Map<string, number>(RESEARCH_KIND_OPTIONS.map((l) => [l, 0]));
+    let carried = false;
+    for (const c of ranked) {
+      if (!c.measures?.researchKinds) continue;
+      carried = true;
+      for (const l of researchKindLabels(c.measures)) counts.set(l, counts.get(l)! + 1);
+    }
+    return carried ? RESEARCH_KIND_OPTIONS.map((l) => [l, counts.get(l)!] as const) : [];
+  }, [ranked]);
+  // An ask that singles out clinicians is not looking for a laboratory: no default then.
+  const clinicianAsk = preferences.some(
+    (p) =>
+      p.measure === "isClinician" ||
+      (p.measure === "researcherType" && p.types.includes("clinician")),
+  );
+  // Like the Person type default: applied only when it would leave someone to look at.
+  const defaultKindsLeaveSomeone = kindFacet.some(([l, n]) => n > 0 && DEFAULT_RESEARCH_KINDS.has(l));
+  const kindSelEffective = useMemo<ReadonlySet<string>>(
+    () =>
+      kindSel ??
+      (!grantPath && defaultKindsLeaveSomeone && !clinicianAsk ? DEFAULT_RESEARCH_KINDS : new Set()),
+    [kindSel, grantPath, defaultKindsLeaveSomeone, clinicianAsk],
+  );
+
   // Person type. Same discipline as the two above: only rows that CARRY a role are counted, so
   // a candidate with no Scholar row is absent from the facet rather than invented into one.
   // Ordered by count — unlike career stage there is no natural ladder to preserve.
@@ -1502,6 +1585,7 @@ export function MatchaPanel({
     ctlOnly ||
     stageSel.size > 0 ||
     typeSelEffective.size > 0 ||
+    kindSelEffective.size > 0 ||
     roleSelEffective.size > 0;
 
   // Active filters, as removable chips above the results (mockup) — the rail's checkboxes are how
@@ -1537,6 +1621,11 @@ export function MatchaPanel({
           },
         ]
       : []),
+    ...[...kindSelEffective].map((v) => ({
+      key: `kind:${v}`,
+      label: v,
+      onRemove: () => setKindSel(toggled(kindSelEffective, v)),
+    })),
     ...(ctlOnly
       ? [{ key: "ctl", label: "Holds CTL technology", onRemove: () => setCtlOnly(false) }]
       : []),
@@ -1576,10 +1665,21 @@ export function MatchaPanel({
           (typeSelEffective.size === 0 ||
             (c.measures?.researcherType != null &&
               typeSelEffective.has(RESEARCHER_TYPE_LABEL[c.measures.researcherType]))) &&
+          (kindSelEffective.size === 0 ||
+            researchKindLabels(c.measures).some((l) => kindSelEffective.has(l))) &&
           (roleSelEffective.size === 0 ||
             roleSelEffective.has(roleCategoryLabel(c.measures?.roleCategory))),
       ),
-    [rankedRows, deptSel, conceptSel, ctlOnly, stageSel, typeSelEffective, roleSelEffective],
+    [
+      rankedRows,
+      deptSel,
+      conceptSel,
+      ctlOnly,
+      stageSel,
+      typeSelEffective,
+      kindSelEffective,
+      roleSelEffective,
+    ],
   );
 
   // Grant Matcha — the HARD eligibility gate, applied CLIENT-SIDE over already-fetched
@@ -1637,13 +1737,13 @@ export function MatchaPanel({
   const aboveFloor = useMemo(
     () =>
       sort === "fit"
-        ? visible.filter((r) => fitTier(r.c.fusedScore, topScore) !== "weak")
+        ? visible.filter((r) => candidateFitTier(r.c, topScore) !== "weak")
         : visible,
     [visible, sort, topScore],
   );
   const belowFloor = useMemo(
     () =>
-      sort === "fit" ? visible.filter((r) => fitTier(r.c.fusedScore, topScore) === "weak") : [],
+      sort === "fit" ? visible.filter((r) => candidateFitTier(r.c, topScore) === "weak") : [],
     [visible, sort, topScore],
   );
 
@@ -1743,7 +1843,8 @@ export function MatchaPanel({
   function openReport() {
     if (!submissionId || reportCwids.length === 0) return;
     // A brief drafted before partnership angles counts as missing: drafting it again (POST always
-    // redrafts) adds the angle.
+    // redrafts) adds the angle. A brief whose draft found no laboratory angle (`NO_LAB_ANGLE`) is
+    // current: redrafting it would not add one.
     const missing = reportCwids.filter((c) => {
       const b = briefMap.get(c);
       return !b || !briefAngle(b);
@@ -1899,7 +2000,7 @@ export function MatchaPanel({
         name: c.name,
         title: c.title,
         department: c.department,
-        fit: TIER_LABEL[fitTier(c.fusedScore, topScore)],
+        fit: TIER_LABEL[candidateFitTier(c, topScore)],
         matchedConcepts: matchedConcepts(c, concepts).map((m) => m.concept.term),
         // Blank = the measure is absent, never "no stage" / "not a clinician" (#1654).
         careerStage: c.measures?.careerStage ? careerStageLabel(c.measures.careerStage) : "",
@@ -1908,6 +2009,10 @@ export function MatchaPanel({
         personType: roleCategoryLabel(c.measures?.roleCategory),
         researcherType: c.measures?.researcherType
           ? RESEARCHER_TYPE_LABEL[c.measures.researcherType]
+          : "",
+        // Blank = not computed (an older stored run); computed-and-empty says so.
+        researchKind: c.measures?.researchKinds
+          ? researchKindLabels(c.measures).join("; ") || "None evident"
           : "",
         technologyCount: c.technologyCount,
         profileUrl: new URL(
@@ -3276,7 +3381,16 @@ export function MatchaPanel({
                       options={typeFacet}
                       selected={typeSelEffective}
                       onToggle={(v) => setTypeSel(toggled(typeSelEffective, v))}
-                      title={`Research-active = PI on a research award from any sponsor, or ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author lab research papers, in the last ${RESEARCH_ACTIVE_YEARS} years. Physician-scientists and clinicians also have a clinical profile in the Enterprise Directory. Clinicians are hidden by default.`}
+                      title={`One type per person, from two facts: whether they hold a medical degree, and whether their own papers are laboratory or clinical research (${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers in the last ${RESEARCH_ACTIVE_YEARS} years). Funded investigators are PI on a research award from any sponsor but show neither kind. Clinicians are hidden by default.`}
+                    />
+                  ) : null}
+                  {kindFacet.length > 0 ? (
+                    <FacetGroup
+                      label="Research kind"
+                      options={kindFacet}
+                      selected={kindSelEffective}
+                      onToggle={(v) => setKindSel(toggled(kindSelEffective, v))}
+                      title={`The kind of research a person's own papers show: ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers of that kind in the last ${RESEARCH_ACTIVE_YEARS} years. A person can show both. "${KIND_FUNDED}" is a PI on a research award whose papers show neither. Laboratory research is selected by default.`}
                     />
                   ) : null}
                   <FacetGroup
@@ -4650,7 +4764,7 @@ function CompactRow({
   // A hand-picked T would only push it toward 0 (T=25 ⇒ mean 0.52) — the same "display constant
   // chosen by taste" that made MAX_EVIDENCE_CONCEPTS a bug here. Do not add one without new data.
   const asksCovered = coverage.filter((c) => c.state !== "none").length;
-  const tier = fitTier(candidate.fusedScore, topScore);
+  const tier = candidateFitTier(candidate, topScore);
   const year = latestEvidenceYear(candidate);
   const stale = year != null && staleYear != null && year < staleYear;
   if (table) {
@@ -4990,7 +5104,7 @@ function ResearcherRow({
   // muting a concept drops it. This is what makes reweighting legible — an officer who zeroes the
   // concepts a #1 "ranks under, no evidence" would otherwise see nothing to zero (Safford, staging).
   const rankedNoEvidence = coverage.filter((c) => c.state === "ranked");
-  const tier = fitTier(candidate.fusedScore, topScore);
+  const tier = candidateFitTier(candidate, topScore);
   const papers = candidate.evidence?.papers ?? [];
   const topics = candidate.evidence?.topics ?? [];
   // #1696 — one evidence block per concept this candidate matched, joined to the chips above by
@@ -5922,7 +6036,8 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
             canEdit={canEdit}
             name={name}
             onEdit={() => {
-              setDraft(angle);
+              // The "no laboratory angle" sentence is an empty state, not text to edit.
+              setDraft(hasAngle(angle) ? angle : "");
               setRoleDraft(role);
               setSaveError(false);
               setEditing("angle");
@@ -5935,7 +6050,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
                 value={roleDraft}
                 maxLength={MAX_ANGLE_ROLE_CHARS}
                 aria-label={`Partnership role for ${name}`}
-                placeholder="Role, e.g. Clinical-trial lead"
+                placeholder="Role, e.g. Disease-model validation partner"
                 onChange={(e) => setRoleDraft(e.target.value)}
                 className="bg-apollo-surface h-8 text-[14px] font-semibold"
               />
@@ -5954,7 +6069,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
                 onCancel={() => setEditing(null)}
               />
             </div>
-          ) : angle ? (
+          ) : hasAngle(angle) ? (
             <p className="text-[14px] text-pretty">
               {role ? (
                 <strong className="font-semibold" data-slot="matcha-brief-angle-role">
@@ -5962,6 +6077,11 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
                 </strong>
               ) : null}
               {role ? " " : null}
+              {angle}
+            </p>
+          ) : angle ? (
+            // The draft found no laboratory collaboration to propose (`NO_LAB_ANGLE`).
+            <p className="text-muted-foreground text-[13px] italic" data-slot="matcha-brief-no-angle">
               {angle}
             </p>
           ) : b.generated.angle === undefined ? (

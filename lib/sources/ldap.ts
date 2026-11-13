@@ -70,6 +70,10 @@ export const DEFAULT_NYP_AFFILIATES_FILTER =
 /** Attributes we pull on the active-faculty search. */
 export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
+  // The person's Cornell NetID (-> Scholar.netid). Probe 2026-11-12: 1,860 ED
+  // people carry one; 284 equal the CWID (merged namespace), the rest are a
+  // second, Cornell-side identity for the same human (etl/identity-links).
+  "weillCornellEduNetID",
   "weillCornellEduPrimaryTitle",
   // Probe 2026-09-22: an HR-curated override for the primary title, carried
   // on the PEOPLE branch only (the faculty SOR does not return it). Present
@@ -238,6 +242,8 @@ export type EdFacultyEntry = {
    *  appointment (`WCMC`, `WCMC-Q`, `HMC`, ...). See lib/institutions.ts. */
   primaryOrgCode: string | null;
   email: string | null;
+  /** ED `weillCornellEduNetID`, lowercased; null when absent. */
+  netid: string | null;
   /** Effective email release audience derived from the multi-valued
    *  `weillCornellEduReleaseCode;mail` attribute (most-permissive-wins,
    *  fail-closed). Persisted to `Scholar.emailVisibility` and gates email
@@ -1211,6 +1217,7 @@ export function projectEntries(
         firstString(r["weillCornellEduPrimaryOrganization"]) ??
         null,
       email: firstString(e.mail) ?? null,
+      netid: firstString(e.weillCornellEduNetID)?.trim().toLowerCase() || null,
       // Multi-valued release-code parsed to the effective audience (fail-closed).
       // ldapts surfaces the option-tagged key under its tag suffix.
       emailVisibility: parseEmailReleaseAudience(r["weillCornellEduReleaseCode;mail"]),

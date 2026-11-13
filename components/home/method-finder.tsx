@@ -156,6 +156,7 @@ export function MethodFinder() {
           )}
           <Link
             href={seeAllHref}
+            prefetch={false} // a prefetch is a real OpenSearch query (#3368)
             className="bg-apollo-page flex items-center justify-between gap-3 px-4 py-2.5 text-[13px] text-[var(--color-accent-slate)]"
           >
             <span>See all matches for &ldquo;{q}&rdquo; →</span>

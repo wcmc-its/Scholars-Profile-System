@@ -223,6 +223,7 @@ function MeasuredChipRow({
       {expanded && browseQuery && beyond > 0 ? (
         <Link
           href={searchHref(browseQuery)}
+          prefetch={false} // a prefetch is a real OpenSearch query (#3368)
           className={`shrink-0 rounded px-1 text-[13px] text-[#1f51a8] no-underline hover:underline ${FOCUS_RING}`}
         >
           +{beyond} more in Browse →

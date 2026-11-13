@@ -241,6 +241,25 @@ export async function resolveEditIdentity(): Promise<EditIdentity | null> {
   return { session: effective, realCwid: real.cwid, impersonatedCwid };
 }
 
+/** Whether a write under a live "View as" overlay started by `realCwid` is
+ *  refused (`impersonation_readonly`): `IMPERSONATION_READONLY` is on, or the
+ *  person who started View as is not a superuser. The one rule
+ *  {@link resolveEditIdentityForWrite} applies, so a page can show a queue
+ *  read-only exactly when its decisions would be refused. */
+export async function impersonatedWriteRefused(realCwid: string): Promise<boolean> {
+  return impersonationReadonly() || !(await isSuperuser(realCwid));
+}
+
+/** For a page: whether "View as" is live, and whether it blocks every write
+ *  ({@link impersonatedWriteRefused}). Both false with no session. */
+export async function viewAsWriteState(): Promise<{ viewingAs: boolean; writesRefused: boolean }> {
+  const real = await getSession();
+  if (!real || !impersonationActive(real, nowSeconds())) {
+    return { viewingAs: false, writesRefused: false };
+  }
+  return { viewingAs: true, writesRefused: await impersonatedWriteRefused(real.cwid) };
+}
+
 /**
  * The identity a WRITE authorizes against — {@link resolveEditIdentity} with the
  * two write-only refusals every mutating `/api/edit/*` handler owes:
@@ -258,10 +277,7 @@ export async function resolveEditIdentityForWrite(): Promise<
 > {
   const id = await resolveEditIdentity();
   if (!id) return { ok: false, response: new NextResponse(null, { status: 401 }) };
-  if (
-    id.impersonatedCwid !== null &&
-    (impersonationReadonly() || !(await isSuperuser(id.realCwid)))
-  ) {
+  if (id.impersonatedCwid !== null && (await impersonatedWriteRefused(id.realCwid))) {
     return { ok: false, response: editError(403, "impersonation_readonly") };
   }
   return {

@@ -18,7 +18,7 @@ vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: mockIsSuperuser }));
 
 import { isObserver } from "@/lib/auth/observer";
 import { stripObserverView, withObserverView } from "@/lib/auth/observer-view";
-import { resolveEditIdentityForWrite } from "@/lib/edit/request";
+import { resolveEditIdentityForWrite, viewAsWriteState } from "@/lib/edit/request";
 
 const plain = { cwid: "obs01", isSuperuser: false, isCommsSteward: false };
 
@@ -107,6 +107,48 @@ describe("resolveEditIdentityForWrite", () => {
     mockGetEffectiveEditSession.mockResolvedValue({ cwid: "cur01", isSuperuser: false });
     const r = await resolveEditIdentityForWrite();
     expect(r.ok).toBe(true);
+  });
+});
+
+/** The page side of the same rule: a queue shows read-only exactly when the
+ *  write resolver above would refuse its decisions. */
+describe("viewAsWriteState", () => {
+  const overlay = (cwid: string) => ({
+    cwid,
+    iat: 0,
+    exp: 0,
+    impersonating: { targetCwid: "cur01", startedAt: 0 },
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    mockImpersonationActive.mockReturnValue(false);
+    mockIsSuperuser.mockResolvedValue(false);
+  });
+
+  it("no session, or no live overlay → not viewing as, nothing refused", async () => {
+    mockGetSession.mockResolvedValue(null);
+    expect(await viewAsWriteState()).toEqual({ viewingAs: false, writesRefused: false });
+    mockGetSession.mockResolvedValue({ cwid: "su01", iat: 0, exp: 0 });
+    expect(await viewAsWriteState()).toEqual({ viewingAs: false, writesRefused: false });
+    expect(mockIsSuperuser).not.toHaveBeenCalled();
+  });
+
+  it("an overlay a non-superuser started → refused", async () => {
+    mockGetSession.mockResolvedValue(overlay("obs01"));
+    mockImpersonationActive.mockReturnValue(true);
+    expect(await viewAsWriteState()).toEqual({ viewingAs: true, writesRefused: true });
+    expect(mockIsSuperuser).toHaveBeenCalledWith("obs01");
+  });
+
+  it("an overlay a superuser started → allowed, unless IMPERSONATION_READONLY", async () => {
+    mockGetSession.mockResolvedValue(overlay("su01"));
+    mockImpersonationActive.mockReturnValue(true);
+    mockIsSuperuser.mockResolvedValue(true);
+    expect(await viewAsWriteState()).toEqual({ viewingAs: true, writesRefused: false });
+    vi.stubEnv("IMPERSONATION_READONLY", "true");
+    expect(await viewAsWriteState()).toEqual({ viewingAs: true, writesRefused: true });
+    vi.unstubAllEnvs();
   });
 });
 

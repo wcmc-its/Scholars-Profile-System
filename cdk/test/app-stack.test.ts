@@ -538,11 +538,11 @@ describe("AppStack", () => {
         });
       });
 
-      it("runs Fargate with desiredCount=2 (prod) and circuit-breaker rollback enabled (ADR-004)", () => {
+      it("runs Fargate with desiredCount=4 (prod) and circuit-breaker rollback enabled (ADR-004)", () => {
         template.hasResourceProperties("AWS::ECS::Service", {
           ServiceName: "sps-app-prod",
           LaunchType: "FARGATE",
-          DesiredCount: 2,
+          DesiredCount: 4,
           DeploymentConfiguration: Match.objectLike({
             MinimumHealthyPercent: 100,
             MaximumPercent: 200,
@@ -551,7 +551,7 @@ describe("AppStack", () => {
         });
       });
 
-      it("attaches one application-autoscaling target on the ECS DesiredCount dimension, min=appDesiredCount(2) / max=appMaxCount(6) (#596)", () => {
+      it("attaches one application-autoscaling target on the ECS DesiredCount dimension, min=appDesiredCount(4) / max=appMaxCount(8) (#596)", () => {
         template.resourceCountIs(
           "AWS::ApplicationAutoScaling::ScalableTarget",
           1,
@@ -561,8 +561,8 @@ describe("AppStack", () => {
           {
             ServiceNamespace: "ecs",
             ScalableDimension: "ecs:service:DesiredCount",
-            MinCapacity: 2,
-            MaxCapacity: 6,
+            MinCapacity: 4,
+            MaxCapacity: 8,
           },
         );
       });

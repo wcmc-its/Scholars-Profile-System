@@ -32,6 +32,10 @@ export function TrySuggestionsChips({ count = 6 }: { count?: number }) {
         <Link
           key={s}
           href={searchHref(s)}
+          // Each chip is a live OpenSearch query. Default viewport prefetch
+          // fired all six on every home view: ~220k uncached searches/day
+          // and phantom "top search terms" on /edit/usage (#3368).
+          prefetch={false}
           className="rounded-full border border-zinc-200 bg-white px-3 py-0.5 text-zinc-600 transition-colors hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] hover:no-underline"
         >
           {s}

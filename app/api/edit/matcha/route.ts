@@ -183,8 +183,9 @@ function sponsorInputHash(engineInput: string): string {
  * v3: `researchAward` is `{ label, endYear }`, not `{ mechanism, endYear }`, plus
  *     `measures.labPubs5y` / `clinicalPubs5y` and the any-sponsor type rule (#3239).
  * v4: `requester` (who is asking) beside a focus-only, sentence-case `titleSummary`.
+ * v5: researcher archetypes, plus `measures.researchKinds` / `isPhysician`.
  */
-const MATCHA_RESULT_VERSION = 4;
+const MATCHA_RESULT_VERSION = 5;
 
 /** The cache key. Shares its digest with `SponsorMatchSubmission.descriptionHash`, so a
  *  retained row and the cached result for that same search are joinable on one value. */

@@ -16,7 +16,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { BriefRecords } from "@/lib/edit/matcha-brief-types";
+import { NO_LAB_ANGLE, type BriefRecords } from "@/lib/edit/matcha-brief-types";
 
 const {
   mockGetSession,
@@ -574,6 +574,25 @@ describe("Matcha report page", () => {
     expect(card("b")).toContain("Trial lead with patient data.");
     expect(card("c")).not.toContain("Partnership angle");
     expect(card("c")).not.toContain("data-report-angle");
+  });
+
+  it("prints no angle band, and no role, for a brief whose draft found no laboratory angle", async () => {
+    setup({
+      candidates: ["a"],
+      briefs: [
+        brief("a", {
+          generated: { ...brief("a").generated, angle: NO_LAB_ANGLE },
+          edited: { angleRole: "Stray role" },
+        }),
+      ],
+    });
+    const html = await renderPage({ submissionId: "s1", cwids: "a" });
+    const card = /data-report-cwid="a"[^]*?<\/article>/.exec(html)?.[0] ?? "";
+    expect(card).toContain("Why this investigator");
+    expect(card).not.toContain("Partnership angle");
+    expect(card).not.toContain("data-report-angle");
+    expect(html).not.toContain(NO_LAB_ANGLE);
+    expect(html).not.toContain("Stray role");
   });
 
   it("lists methods as pills (merged, by papers, six then +N more) and omits the section when empty", async () => {

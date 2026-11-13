@@ -307,3 +307,13 @@ describe("projectEntries — the #2600 strip is actually wired into preferredNam
     expect(r.fullName).toBe("Priya Vantour");
   });
 });
+
+describe("projectEntries — Cornell NetID (scholar.netid, etl/identity-links)", () => {
+  const project = (e: Record<string, unknown>) => projectEntries([e], "people")[0];
+
+  it("lowercases and trims weillCornellEduNetID; null when absent or blank", () => {
+    expect(project({ weillCornellEduCWID: "abc1001", sn: "Doe", weillCornellEduNetID: " AD12 " }).netid).toBe("ad12");
+    expect(project({ weillCornellEduCWID: "abc1001", sn: "Doe" }).netid).toBeNull();
+    expect(project({ weillCornellEduCWID: "abc1001", sn: "Doe", weillCornellEduNetID: "  " }).netid).toBeNull();
+  });
+});

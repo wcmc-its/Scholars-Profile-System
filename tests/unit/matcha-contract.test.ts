@@ -17,6 +17,7 @@ import {
   evidenceMatchCount,
   latestEvidenceYear,
   evidenceProvenance,
+  candidateFitTier,
   fitTier,
   fusedScore,
   recencyWeight,
@@ -31,6 +32,8 @@ import {
   rerankCandidates,
   askTitleFrom,
   researcherTypeFrom,
+  isMedicalDegree,
+  matchaMeasuresFrom,
   assessMatchSignal,
   sanitizeIncludeTerms,
   INCLUDE_MAX,
@@ -929,34 +932,89 @@ describe("researcherTypeFrom", () => {
     role,
     endDate: new Date(Date.UTC(endYear, 5, 30)),
   });
+  const r01 = [g("R01", "PI", 2028)];
+  const deg = (...degrees: string[]) => degrees.map((degree) => ({ degree }));
 
-  it("splits the four types on clinical profile × research PI", () => {
-    const r01 = [g("R01", "PI", 2028)];
-    expect(researcherTypeFrom({ hasClinicalProfile: false, grants: r01 }, NOW).type).toBe("basic_scientist");
-    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: r01 }, NOW).type).toBe("physician_scientist");
-    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [] }, NOW).type).toBe("clinician");
-    expect(researcherTypeFrom({ hasClinicalProfile: false, grants: [] }, NOW).type).toBe("unclassified");
+  // Every branch of the archetype decision, in the order it is decided.
+  it.each([
+    // Trainee roles without a qualifying PI award, whatever their papers say.
+    ["doctoral student", { roleCategory: "doctoral_student_phd", labPubs5y: 5 }, "trainee"],
+    ["postdoc", { roleCategory: "postdoc", educations: deg("PhD") }, "trainee"],
+    ["fellow, physician", { roleCategory: "fellow", educations: deg("MD"), hasClinicalProfile: true }, "trainee"],
+    // ...but a PI award lifts them out of "trainee" into the ordinary decision.
+    ["postdoc with a PI award and lab papers", { roleCategory: "postdoc", grants: r01, labPubs5y: 3, educations: deg("PhD") }, "basic_scientist"],
+    ["fellow with a PI award, no papers", { roleCategory: "fellow", grants: r01, educations: deg("MD") }, "funded_investigator"],
+    // A research kind: physician or not.
+    ["physician, lab", { educations: deg("M.D."), labPubs5y: 3 }, "physician_scientist"],
+    ["physician, clinical only", { educations: deg("MBBS"), clinicalPubs5y: 3 }, "physician_scientist"],
+    ["physician, both kinds", { educations: deg("PhD", "MD-PhD"), labPubs5y: 4, clinicalPubs5y: 9 }, "physician_scientist"],
+    ["non-physician, lab", { educations: deg("PhD"), labPubs5y: 3 }, "basic_scientist"],
+    ["non-physician, both kinds", { educations: deg("PhD"), labPubs5y: 3, clinicalPubs5y: 30 }, "basic_scientist"],
+    ["non-physician, clinical only", { educations: deg("PhD"), clinicalPubs5y: 3 }, "clinical_researcher"],
+    ["dentist with lab papers is not a physician", { educations: deg("DDS"), labPubs5y: 6 }, "basic_scientist"],
+    // No kind, a qualifying PI award.
+    ["funded, no kind", { educations: deg("PhD"), grants: r01 }, "funded_investigator"],
+    ["funded physician, no kind", { educations: deg("D.O."), grants: r01, labPubs5y: 2 }, "funded_investigator"],
+    // No kind, no award.
+    ["physician by degree", { educations: deg("D.O.") }, "clinician"],
+    ["clinical profile, non-medical degree", { educations: deg("DDS"), hasClinicalProfile: true }, "clinician"],
+    ["no education rows: the clinical profile stands in", { hasClinicalProfile: true }, "clinician"],
+    ["affiliated faculty with a clinical profile", { hasClinicalProfile: true, roleCategory: "affiliated_faculty" }, "clinician"],
+    ["part-time faculty physician", { educations: deg("MD"), roleCategory: "part_time_faculty" }, "clinician"],
+    ["non-faculty academic", { educations: deg("PhD"), roleCategory: "non_faculty_academic" }, "research_staff"],
+    ["non-faculty academic physician is a clinician first", { educations: deg("MD"), roleCategory: "non_faculty_academic" }, "clinician"],
+    ["nothing on file", { roleCategory: "full_time_faculty" }, "unclassified"],
+    ["papers under the threshold", { educations: deg("PhD"), labPubs5y: 2, clinicalPubs5y: 2 }, "unclassified"],
+  ] as const)("archetype: %s", (_name, over, expected) => {
+    expect(researcherTypeFrom({ hasClinicalProfile: false, grants: [], ...over }, NOW).type).toBe(expected);
+  });
+
+  it("normalises the degree string and matches medical degrees only", () => {
+    for (const d of ["M.D.", "md", "MD-PhD", "M.D./Ph.D.", "MBBS", "M.B.B.S.", "MBChB", "MB BCh", "MB BChir", "MB BCh BAO", "BMBS", "D.O."])
+      expect(isMedicalDegree(d), d).toBe(true);
+    for (const d of ["DDS", "DMD", "DPM", "PsyD", "DNP", "PharmD", "PhD", "MPH", "", null, undefined])
+      expect(isMedicalDegree(d), String(d)).toBe(false);
+  });
+
+  it("falls back to the clinical profile ONLY when there are no education rows at all", () => {
+    const t = (educations: { degree: string | null }[] | undefined) =>
+      researcherTypeFrom({ hasClinicalProfile: true, grants: [], labPubs5y: 3, educations }, NOW);
+    expect(t(undefined)).toMatchObject({ type: "physician_scientist", isPhysician: true });
+    expect(t([])).toMatchObject({ type: "physician_scientist", isPhysician: true });
+    // Degrees on file and none medical: not a physician, clinical profile or not.
+    expect(t(deg("PhD"))).toMatchObject({ type: "basic_scientist", isPhysician: false });
+  });
+
+  it("returns the two facts alongside the archetype", () => {
+    expect(
+      researcherTypeFrom({ hasClinicalProfile: false, grants: [], educations: deg("MD"), labPubs5y: 3, clinicalPubs5y: 7 }, NOW),
+    ).toEqual({ type: "physician_scientist", kinds: ["lab", "clinical"], isPhysician: true });
+    expect(researcherTypeFrom({ hasClinicalProfile: false, grants: [] }, NOW)).toEqual({
+      type: "unclassified",
+      kinds: [],
+      isPhysician: false,
+    });
   });
 
   it("counts PI and MPI roles only: a Co-I on a trial is still a clinician", () => {
     expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("U01", "Co-I", 2028)] }, NOW).type).toBe("clinician");
-    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("U01", "Co-PI", 2028)] }, NOW).type).toBe("physician_scientist");
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("U01", "Co-PI", 2028)] }, NOW).type).toBe("funded_investigator");
   });
 
   it("counts mentored K awards (the clinician-scientist's first lab) but not training, conference or education awards", () => {
     const md = (mech: string) =>
       researcherTypeFrom({ hasClinicalProfile: true, grants: [g(mech, "PI", 2028)] }, NOW).type;
-    expect(md("K08")).toBe("physician_scientist");
-    expect(md("K23")).toBe("physician_scientist");
+    expect(md("K08")).toBe("funded_investigator");
+    expect(md("K23")).toBe("funded_investigator");
     for (const mech of ["T32", "F32", "L30", "S10", "R13", "R25", "K12", "KL2"]) expect(md(mech)).toBe("clinician");
   });
 
   it("counts non-NIH research awards from any sponsor, but not service, MTA, trial or training rows", () => {
     const other = (o: Record<string, string>) =>
       researcherTypeFrom({ hasClinicalProfile: true, grants: [{ ...g(null, "PI", 2028), ...o }] }, NOW).type;
-    expect(other({ programType: "Grant", intakeType: "Grant", primeSponsor: "DOD" })).toBe("physician_scientist");
-    expect(other({ programType: "Contract with funding", intakeType: "Sponsored Research Agreement" })).toBe("physician_scientist");
-    expect(other({ programType: "BioPharma Alliance Agreement", intakeType: "BioPharma" })).toBe("physician_scientist");
+    expect(other({ programType: "Grant", intakeType: "Grant", primeSponsor: "DOD" })).toBe("funded_investigator");
+    expect(other({ programType: "Contract with funding", intakeType: "Sponsored Research Agreement" })).toBe("funded_investigator");
+    expect(other({ programType: "BioPharma Alliance Agreement", intakeType: "BioPharma" })).toBe("funded_investigator");
     expect(other({ programType: "Contract with funding", intakeType: "Service Agreement (WCM)" })).toBe("clinician");
     expect(other({ programType: "Grant", intakeType: "Incoming Material Transfer Agreement" })).toBe("clinician");
     expect(other({ programType: "Grant", intakeType: "Clinical Trial Agreement" })).toBe("clinician");
@@ -971,26 +1029,20 @@ describe("researcherTypeFrom", () => {
     expect(r.award).toEqual({ label: "NSF", endYear: 2027 });
   });
 
-  it("lab-paper volume makes an unfunded scholar research-active", () => {
+  it("paper volume alone gives an unfunded scholar a research kind", () => {
     const t = (labPubs5y: number, hasClinicalProfile: boolean) =>
       researcherTypeFrom({ hasClinicalProfile, grants: [], labPubs5y }, NOW).type;
     expect(t(3, false)).toBe("basic_scientist");
     expect(t(3, true)).toBe("physician_scientist");
     expect(t(2, true)).toBe("clinician");
-    // Clinical-paper volume alone is not lab research.
-    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [], clinicalPubs5y: 40 }, NOW).type).toBe("clinician");
-  });
-
-  it("never calls part-time or affiliated faculty 'clinician' on missing evidence (unknown ≠ no)", () => {
-    for (const roleCategory of ["part_time_faculty", "affiliated_faculty"])
-      expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [], roleCategory }, NOW).type).toBe("unclassified");
-    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [], roleCategory: "full_time_faculty" }, NOW).type).toBe("clinician");
+    // Clinical-paper volume is a research kind too: a physician with it is a physician-scientist.
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [], clinicalPubs5y: 40 }, NOW).type).toBe("physician_scientist");
   });
 
   it("ignores awards that ended more than 5 years ago", () => {
     expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("R01", "PI", 2020)] }, NOW).type).toBe("clinician");
     // The window edge: ended in 2021 = within 5 years of 2026.
-    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("R01", "PI", 2021)] }, NOW).type).toBe("physician_scientist");
+    expect(researcherTypeFrom({ hasClinicalProfile: true, grants: [g("R01", "PI", 2021)] }, NOW).type).toBe("funded_investigator");
   });
 
   it("returns the latest-ending qualifying award as the reason", () => {
@@ -999,5 +1051,91 @@ describe("researcherTypeFrom", () => {
       NOW,
     );
     expect(r.award).toEqual({ label: "NIH R01", endYear: 2029 });
+  });
+});
+
+describe("matchaMeasuresFrom: the researcher facts", () => {
+  const NOW = new Date(Date.UTC(2026, 9, 30));
+  const row = {
+    roleCategory: "full_time_faculty",
+    primaryTitle: "Professor",
+    hasClinicalProfile: false,
+    appointments: [],
+    educations: [{ year: 2001, degree: "M.D." }],
+  };
+
+  it("emits researchKinds and isPhysician whenever the type is computed", () => {
+    expect(matchaMeasuresFrom({ ...row, grants: [], labPubs5y: 4, clinicalPubs5y: 3 }, NOW)).toMatchObject({
+      researcherType: "physician_scientist",
+      researchKinds: ["lab", "clinical"],
+      isPhysician: true,
+    });
+    // Computed and empty is an empty array, never absent.
+    expect(matchaMeasuresFrom({ ...row, educations: [], grants: [] }, NOW)).toMatchObject({
+      researcherType: "unclassified",
+      researchKinds: [],
+      isPhysician: false,
+    });
+  });
+
+  it("emits none of them when grants were not read (absent is not none)", () => {
+    const m = matchaMeasuresFrom(row, NOW);
+    expect(m.researcherType).toBeUndefined();
+    expect(m.researchKinds).toBeUndefined();
+    expect(m.isPhysician).toBeUndefined();
+  });
+});
+
+describe("candidateFitTier", () => {
+  const award = { label: "NIH R01", endYear: 2028 };
+  const c = (measures: Record<string, unknown> | undefined, technologyCount?: number) => ({
+    fusedScore: 10,
+    measures,
+    technologyCount,
+  });
+
+  it("caps 'strong' at 'good' for computed measures with no award and no CTL technology", () => {
+    expect(candidateFitTier(c({ researcherType: "basic_scientist", researchKinds: ["lab"] }, 0), 10)).toBe("good");
+    expect(candidateFitTier(c({ researcherType: "clinician" }), 10)).toBe("good");
+  });
+
+  it("does not cap a candidate with a research award", () => {
+    expect(candidateFitTier(c({ researcherType: "basic_scientist", researchAward: award }, 0), 10)).toBe("strong");
+  });
+
+  it("does not cap a candidate holding CTL technology", () => {
+    expect(candidateFitTier(c({ researcherType: "basic_scientist" }, 2), 10)).toBe("strong");
+  });
+
+  it("does not cap a candidate whose measures were never computed", () => {
+    expect(candidateFitTier(c(undefined, 0), 10)).toBe("strong");
+    expect(candidateFitTier(c({ careerStage: "senior", isClinician: false }, 0), 10)).toBe("strong");
+  });
+
+  it("does not cap a funded investigator whose award is withheld (hidden Funding section)", () => {
+    expect(candidateFitTier(c({ researcherType: "funded_investigator" }, 0), 10)).toBe("strong");
+  });
+
+  it("leaves the lower tiers exactly as fitTier has them", () => {
+    const capped = { researcherType: "unclassified" };
+    expect(candidateFitTier({ ...c(capped, 0), fusedScore: 5 }, 10)).toBe("good");
+    expect(candidateFitTier({ ...c(capped, 0), fusedScore: 1 }, 10)).toBe("weak");
+    expect(candidateFitTier({ ...c(capped, 0), fusedScore: 1 }, 0)).toBe("weak");
+  });
+});
+
+describe("archetype follow-ups", () => {
+  it("finds a medical degree inside a cell that holds several degrees", () => {
+    for (const d of ["MD, MPH", "PhD, MD", "M.D./M.B.A.", "MD (Hons)", "MD-PhD"]) {
+      expect(isMedicalDegree(d), d).toBe(true);
+    }
+    for (const d of ["MDiv", "DMD, MS", "PhD, MPH", "Residency"]) {
+      expect(isMedicalDegree(d), d).toBe(false);
+    }
+  });
+
+  it("does not cap a funded lab scientist who hides their Funding section", () => {
+    const hidden = { fusedScore: 10, technologyCount: 0, measures: { researcherType: "basic_scientist", researchKinds: ["lab"], fundedAsPi: true } };
+    expect(candidateFitTier(hidden as never, 10)).toBe("strong");
   });
 });

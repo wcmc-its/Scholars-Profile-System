@@ -30,10 +30,11 @@ export type BriefTopic = {
 
 export type BriefGenerated = {
   why: string;
-  /** 1-2 sentences: the concrete role this PI could play for the requester. Absent on briefs
-   *  drafted before it existed; read it through `briefAngle`, which treats absent as "". */
+  /** 1-2 sentences: the research collaboration this PI could offer the requester, or
+   *  `NO_LAB_ANGLE` when the draft found none. Absent on briefs drafted before it existed; read
+   *  it through `briefAngle`, which treats absent as "". */
   angle?: string;
-  /** A 3-5 word noun phrase: the role the angle sentence is built around ("Clinical-trial lead"),
+  /** A 3-5 word noun phrase: the role the angle sentence is built around ("Disease-model validation partner"),
    *  shown bold with a trailing period before it (`angleRoleLead`); the sentence does not restate
    *  it. Absent on briefs drafted before it existed and when the model gave no valid one;
    *  read it through `briefAngleRole`. */
@@ -60,6 +61,17 @@ export type BriefEdited = {
   angleRole?: string;
   topics?: BriefTopic[];
 };
+
+/** The stored angle of a brief whose draft found no laboratory or disease-mechanism collaboration
+ *  to propose. Shown to the officer as this sentence; everywhere else it counts as no angle
+ *  (`hasAngle`). */
+export const NO_LAB_ANGLE = "No laboratory collaboration angle is evident.";
+
+/** Whether `angle` is a real partnership angle: not empty, and not the `NO_LAB_ANGLE` sentence. */
+export function hasAngle(angle: string | null | undefined): boolean {
+  const a = (angle ?? "").trim();
+  return a !== "" && a !== NO_LAB_ANGLE;
+}
 
 /** Longest role phrase the model or an officer may store. */
 export const MAX_ANGLE_ROLE_CHARS = 60;
@@ -111,7 +123,8 @@ export function briefWhy(b: Pick<BriefWire, "generated" | "edited">): string {
   return b.edited?.why ?? b.generated.why;
 }
 
-/** The partnership angle on screen; "" for a brief drafted before angles existed. */
+/** The partnership angle on screen; "" for a brief drafted before angles existed, and the
+ *  `NO_LAB_ANGLE` sentence when the draft found none (test with `hasAngle`). */
 export function briefAngle(b: Pick<BriefWire, "generated" | "edited">): string {
   return b.edited?.angle ?? b.generated.angle ?? "";
 }

@@ -81,19 +81,21 @@ export function isAllowedBaseUrl(baseUrl: string): boolean {
  * POST `/api/revalidate?path={p}` with `SCHOLARS_REVALIDATE_TOKEN` as a bearer.
  * Best-effort: a missing token, a disallowed base URL, or a non-2xx response
  * is `console.warn`ed and swallowed — the 6h ISR TTL is the safety net.
+ * Resolves `true` only when the app answered 2xx, so a caller that must report
+ * the outcome (etl/bulk-confirm-strong) can count the misses; the sweep ignores it.
  */
-async function requestRevalidate(p: string): Promise<void> {
+export async function requestRevalidate(p: string): Promise<boolean> {
   const token = process.env.SCHOLARS_REVALIDATE_TOKEN;
   const baseUrl = process.env.SCHOLARS_BASE_URL ?? "http://localhost:3000";
   if (!token) {
     console.warn(`[Revalidate] SCHOLARS_REVALIDATE_TOKEN unset; skipping ${p}`);
-    return;
+    return false;
   }
   if (!isAllowedBaseUrl(baseUrl)) {
     console.warn(
       `[Revalidate] SCHOLARS_BASE_URL "${baseUrl}" not in allowed list; skipping ${p}`,
     );
-    return;
+    return false;
   }
   // Bound every request: a hung POST (unreachable/slow app) must not stall the
   // step. This is best-effort — the 6h ISR TTL is the safety net — so an abort
@@ -109,8 +111,10 @@ async function requestRevalidate(p: string): Promise<void> {
     if (!resp.ok) {
       console.warn(`[Revalidate] ${p} -> ${resp.status} ${resp.statusText}`);
     }
+    return resp.ok;
   } catch (err) {
     console.warn(`[Revalidate] ${p} threw:`, err);
+    return false;
   } finally {
     clearTimeout(timer);
   }
@@ -121,18 +125,21 @@ async function requestRevalidate(p: string): Promise<void> {
  * on the `cdn_invalidation` outbox. The ETL task has no CloudFront grant; the
  * cdn-reconcile machine (which does) drains the outbox every ~5 min and is
  * dormant where no distribution id is set. Best-effort like the rest of the
- * sweep: a failure is logged, never thrown.
+ * sweep: a failure is logged, never thrown. Resolves `true` when the row was
+ * written, `false` when it was not.
  */
-export async function enqueueEdgePurgeAll(): Promise<void> {
+export async function enqueueEdgePurgeAll(): Promise<boolean> {
   try {
     await db.write.cdnInvalidation.create({
       data: { paths: JSON.stringify(["/*"]), attempts: 0 },
     });
     console.log("[Revalidate] enqueued CloudFront /* purge");
+    return true;
   } catch (err) {
     console.warn(
       `[Revalidate] could not enqueue CloudFront purge: ${err instanceof Error ? err.message : String(err)}`,
     );
+    return false;
   }
 }
 

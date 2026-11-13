@@ -65,28 +65,19 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
+import {
+  decideHonor,
+  honorSnapshot as snapshot,
+  type HonorStoredRow,
+} from "@/lib/edit/honor-decision";
 import { isHonorQueueEnabled } from "@/lib/edit/honor-queue";
 import { editError, editOk, readEditRequest } from "@/lib/edit/request";
 import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/revalidation";
 
 export const dynamic = "force-dynamic";
 
-type StoredRow = {
-  id: string;
-  cwid: string;
-  status: string;
-  name: string;
-  organization: string;
-  year: number | null;
-  /** The roster-LINE identity. Siblings share it — see the sibling note above. */
-  sourceRef: string | null;
-  /** CURATOR | SELF | a feed identifier — see `undoable()`. */
-  source?: string;
-  decidedByCwid?: string | null;
-  decidedAt?: Date | null;
-  rejectionReason?: string | null;
-  supersededById?: string | null;
-};
+/** The stored honor shape the undo branch reads (shared with the decision core). */
+type StoredRow = HonorStoredRow;
 
 /** Longest reason stored — the column is VARCHAR(255). */
 const REJECTION_REASON_MAX = 255;
@@ -121,21 +112,6 @@ class UndoRefused extends Error {
   constructor(readonly code: "not_found" | "not_undoable" | "superseded" | "line_already_awarded") {
     super(code);
   }
-}
-
-/** The audit before/after payload. Deliberately small: identity + what moved. */
-function snapshot(row: StoredRow) {
-  return {
-    id: row.id,
-    cwid: row.cwid,
-    status: row.status,
-    name: row.name,
-    organization: row.organization,
-    year: row.year,
-    decidedByCwid: row.decidedByCwid ?? null,
-    rejectionReason: row.rejectionReason ?? null,
-    supersededById: row.supersededById ?? null,
-  };
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -288,105 +264,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         };
       }
 
-      const row = (await tx.honor.findUnique({ where: { id: honorId } })) as StoredRow | null;
-      if (!row) return { kind: "not_found" as const };
-
-      // Only a pending row is decidable, re-checked INSIDE the transaction so two
-      // curators racing the same row cannot both decide it. This is also what
-      // enforces `rejected` being terminal — the DB does not.
-      if (row.status !== "pending") return { kind: "not_pending" as const, status: row.status };
-
-      // A line can only be awarded ONCE. If a sibling is already `published`, this
-      // row is a competing claim on an award that has been given away — approving
-      // it credits TWO people with one fellowship, the exact failure the sibling
-      // rejection below exists to prevent. Cannot arise while this route is the
-      // only writer, but `status` has no DB guard and the Phase 2 seed is written
-      // out of band, so it is guarded rather than assumed.
-      if (decision === "approve" && row.sourceRef) {
-        const awarded = await tx.honor.findFirst({
-          where: { sourceRef: row.sourceRef, status: "published", id: { not: row.id } },
-          select: { id: true },
-        });
-        if (awarded) return { kind: "line_already_awarded" as const };
-      }
-
-      const nextStatus = decision === "approve" ? "published" : "rejected";
-      const updated = (await tx.honor.update({
-        where: { id: honorId },
-        data: {
-          status: nextStatus,
-          decidedByCwid: realCwid,
-          decidedAt: ts,
-          rejectionReason: decision === "reject" ? reason : null,
-          supersededById: null,
-        },
-      })) as StoredRow;
-
-      await appendAuditRow(tx, {
-        actorCwid: realCwid,
+      // Approve / reject: the shared core (lib/edit/honor-decision.ts), also
+      // run by the etl/bulk-confirm-strong operator job.
+      return decideHonor(tx, {
+        id: honorId,
+        decision,
+        reason,
+        realCwid,
         impersonatedCwid,
-        targetEntityType: "honor",
         requestId,
-        targetEntityId: row.id,
-        action: "honor_update",
-        fieldsChanged:
-          decision === "reject" && reason
-            ? ["status", "decidedByCwid", "decidedAt", "rejectionReason"]
-            : ["status", "decidedByCwid", "decidedAt"],
-        beforeValues: snapshot(row),
-        afterValues: snapshot(updated),
         ts,
       });
-
-      // Approving a contested line rejects its siblings, atomically. `sourceRef`
-      // is the roster-LINE identity, so siblings are the other candidates for the
-      // same award. A NULL sourceRef identifies no line ⇒ it has no siblings.
-      // `status: "pending"` leaves an already-`rejected` sibling untouched: it is
-      // terminal, and re-writing it would emit a second audit row saying nothing.
-      let siblingsRejected = 0;
-      // Every owner whose public profile this decision changes. Collected INSIDE
-      // the transaction because siblings can belong to DIFFERENT scholars; the
-      // reflection itself must happen after commit.
-      const affectedCwids = new Set<string>([row.cwid]);
-      if (decision === "approve" && row.sourceRef) {
-        const siblings = (await tx.honor.findMany({
-          where: { sourceRef: row.sourceRef, status: "pending", id: { not: row.id } },
-        })) as StoredRow[];
-        for (const sibling of siblings) {
-          const after = (await tx.honor.update({
-            where: { id: sibling.id },
-            // `supersededById` is what lets an undo of THIS approval find and
-            // restore exactly these rows.
-            data: {
-              status: "rejected",
-              decidedByCwid: realCwid,
-              decidedAt: ts,
-              rejectionReason: null,
-              supersededById: row.id,
-            },
-          })) as StoredRow;
-          await appendAuditRow(tx, {
-            actorCwid: realCwid,
-            impersonatedCwid,
-            targetEntityType: "honor",
-            requestId,
-            targetEntityId: sibling.id,
-            action: "honor_update",
-            fieldsChanged: ["status", "decidedByCwid", "decidedAt", "supersededById"],
-            beforeValues: snapshot(sibling),
-            afterValues: snapshot(after),
-            ts,
-          });
-          affectedCwids.add(sibling.cwid);
-          siblingsRejected++;
-        }
-      }
-      return {
-        kind: "ok" as const,
-        status: nextStatus,
-        siblingsRejected,
-        affectedCwids: [...affectedCwids],
-      };
     });
 
     if (result.kind === "not_found") return editError(404, "not_found", "id");

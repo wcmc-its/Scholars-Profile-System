@@ -89,7 +89,7 @@
 import { taggedPubCount, type ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 import { isPiRole } from "@/lib/funding-roles";
-import { researchTypesFrom } from "@/lib/research-type";
+import { researchTypesFrom, type ResearchType } from "@/lib/research-type";
 // Type-only — erased at compile time, so this does NOT pull `search-taxonomy.ts` (which imports
 // `@/lib/db`) into any client bundle that imports this contract (`matcha-panel.tsx` is
 // `"use client"`). Reused rather than redefined so the two stay structurally identical by
@@ -455,13 +455,23 @@ export type MatchaMeasures = {
    *  spine's grant-matcha path (`eligibilitySignals`); absent on `/edit/matcha` and the bespoke
    *  engine. Absent ≠ ineligible: it means the signal was not computed for this candidate. */
   esiEligible?: boolean;
-  /** Researcher type, the officer's "lab PI or practising clinician?" lever. See
-   *  `researcherTypeFrom`. Absent when the caller did not read grants. */
+  /** Researcher type, the archetype badge. See `ResearcherType` and `researcherTypeFrom`.
+   *  Absent when the caller did not read grants. */
   researcherType?: ResearcherType;
+  /** The kinds of research this scholar's own recent papers show (`researchTypesFrom`).
+   *  Always an array, possibly empty, when `researcherType` was computed by the current
+   *  scheme. Absent on older stored runs: not computed, never "none". */
+  researchKinds?: ResearchType[];
+  /** Holds a medical degree (clinical profile when no degrees are on file). Absent on older
+   *  stored runs. */
+  isPhysician?: boolean;
   /** The award that made this scholar research-active: the hover reason on the badge.
    *  Absent when there is none, AND when the scholar hides their Funding section: the type
    *  still counts the award, but the console must not name a grant the profile hides. */
   researchAward?: ResearchAward;
+  /** PI on a qualifying research award. Set even when the Funding section is hidden (it names
+   *  nothing), so the tier guard treats a hidden award like a shown one. */
+  fundedAsPi?: true;
   /** First/last-author lab / clinical research papers in the last 5 years
    *  (`Scholar.labPubs5y` / `clinicalPubs5y`). Absent when not computed yet. */
   labPubs5y?: number;
@@ -469,34 +479,58 @@ export type MatchaMeasures = {
 };
 
 /**
- * Researcher type: who runs research vs who practises medicine. CTL's sponsor ask is
- * usually "who has a lab I can partner with", and topical fit alone ranks a clinician who
- * co-authors many large trials alongside a lab PI.
+ * Researcher type: one archetype per person, the badge and the "Researcher type" facet.
+ * CTL's sponsor ask is usually "who has a lab I can partner with", and topical fit alone
+ * ranks a clinician who co-authors many large trials alongside a lab PI.
  *
- * Research-active = EITHER funded PI (a research award as PI from ANY sponsor in the last
- * `RESEARCH_ACTIVE_YEARS`: NIH research mechanisms, foundations, DoD/NSF, industry sponsored
- * research) OR laboratory-research paper volume (`researchTypesFrom` — first/last-author
- * lab papers, which catches the unfunded early-career PI and funding outside InfoEd).
- * `hasClinicalProfile` is the clinician signal.
+ * Built from two facts (`researcherTypeFrom`):
+ *  - physician: any education degree is a medical degree (`isMedicalDegree`); with no
+ *    education rows at all, `hasClinicalProfile` stands in.
+ *  - research kinds: "lab" and/or "clinical", from first/last-author paper volume
+ *    (`researchTypesFrom`). A person can hold both, or neither.
+ * plus the funded-PI rule: a research award as PI from ANY sponsor in the last
+ * `RESEARCH_ACTIVE_YEARS`.
  *
- * Unknown is not "no": part-time and affiliated faculty hold awards and see patients at
- * other institutions SPS cannot see, so missing evidence never makes them "clinician" (the
- * one type hidden by default). They land in "unclassified" unless papers or awards say more.
- * "unclassified" is NOT "not a researcher", which is why the console keeps it visible.
+ * Decided in order: a doctoral student, postdoc or fellow without such an award is a
+ * "trainee". Anyone with a research kind is a "physician_scientist" (physician),
+ * "basic_scientist" (lab, or both kinds) or "clinical_researcher" (clinical only). With no
+ * kind, an award makes a "funded_investigator"; without one, a physician or clinical-profile
+ * holder is a "clinician" (the one type hidden by default), non-faculty academic staff are
+ * "research_staff", and the rest are "unclassified", which is NOT "not a researcher".
+ *
+ * Stored runs from before this scheme carry only basic_scientist, physician_scientist,
+ * clinician and unclassified, under the older award-or-lab-papers x clinical-profile rule,
+ * and no `researchKinds`.
  */
-export type ResearcherType = "basic_scientist" | "physician_scientist" | "clinician" | "unclassified";
+export type ResearcherType =
+  | "basic_scientist"
+  | "physician_scientist"
+  | "clinical_researcher"
+  | "funded_investigator"
+  | "clinician"
+  | "trainee"
+  | "research_staff"
+  | "unclassified";
 
 export const RESEARCHER_TYPE_ORDER: readonly ResearcherType[] = [
   "basic_scientist",
   "physician_scientist",
+  "clinical_researcher",
+  "funded_investigator",
   "clinician",
+  "trainee",
+  "research_staff",
   "unclassified",
 ];
 
 export const RESEARCHER_TYPE_LABEL: Record<ResearcherType, string> = {
   basic_scientist: "Basic scientist",
   physician_scientist: "Physician-scientist",
+  clinical_researcher: "Clinical or population researcher",
+  funded_investigator: "Funded investigator",
   clinician: "Clinician",
+  trainee: "Trainee",
+  research_staff: "Research staff",
   unclassified: "Unclassified",
 };
 
@@ -519,9 +553,34 @@ const NON_RESEARCH_PROGRAM_TYPE = new Set(["Career", "Fellowship", "Training"]);
  *  10-31: Grant, Sponsored Research Agreement and BioPharma intakes are the research ones. */
 const NON_RESEARCH_INTAKE = /service agreement|material transfer|clinical trial/i;
 
-/** Roles whose awards and clinical work often sit at another institution: absent evidence
- *  is unknown for them, never "no". */
-const UNKNOWN_EVIDENCE_ROLES = new Set(["part_time_faculty", "affiliated_faculty"]);
+/** Medical-degree families, compared against a degree string uppercased and stripped to
+ *  letters ("M.D." and "MD-PhD" both land here). Dental, podiatry, psychology, nursing and
+ *  pharmacy degrees are deliberately absent. */
+const MEDICAL_DEGREES = new Set([
+  "MD",
+  "DO",
+  "MBBS",
+  "MBCHB",
+  "MBBCH",
+  "MBBCHIR",
+  "MBBCHBAO",
+  "BMBS",
+  "MDPHD",
+]);
+
+/** Exported for tests. */
+export function isMedicalDegree(degree: string | null | undefined): boolean {
+  const raw = (degree ?? "").toUpperCase().replace(/\./g, "");
+  // Whole string first ("MD-PHD" -> MDPHD), then each part: one cell can hold several degrees
+  // ("MD, MPH", "PhD, MD").
+  if (MEDICAL_DEGREES.has(raw.replace(/[^A-Z]/g, ""))) return true;
+  return raw.split(/[^A-Z]+/).some((part) => MEDICAL_DEGREES.has(part));
+}
+
+function isTraineeRole(roleCategory: string | null | undefined): boolean {
+  const role = roleCategory ?? "";
+  return role.startsWith("doctoral_student") || role === "postdoc" || role === "fellow";
+}
 
 export type ResearcherGrantRow = {
   endDate: Date | null;
@@ -549,7 +608,8 @@ function awardLabel(g: ResearcherGrantRow): string {
   return g.primeSponsor || g.intakeType || g.programType || "research";
 }
 
-/** Classify one scholar. The returned award is the latest-ending qualifying one. */
+/** Classify one scholar. The returned award is the latest-ending qualifying one; `kinds`
+ *  and `isPhysician` are the two facts the archetype was decided from. */
 export function researcherTypeFrom(
   row: {
     hasClinicalProfile: boolean;
@@ -557,9 +617,11 @@ export function researcherTypeFrom(
     roleCategory?: string | null;
     labPubs5y?: number | null;
     clinicalPubs5y?: number | null;
+    /** Absent or empty ⇒ `hasClinicalProfile` decides physician. */
+    educations?: readonly { degree: string | null }[];
   },
   now: Date = new Date(),
-): { type: ResearcherType; award?: ResearchAward } {
+): { type: ResearcherType; award?: ResearchAward; kinds: ResearchType[]; isPhysician: boolean } {
   const floorYear = now.getFullYear() - RESEARCH_ACTIVE_YEARS;
   let award: ResearchAward | undefined;
   for (const g of row.grants) {
@@ -568,16 +630,25 @@ export function researcherTypeFrom(
     if (!isResearchAward(g)) continue;
     if (!award || endYear > award.endYear) award = { label: awardLabel(g), endYear };
   }
-  const lab = researchTypesFrom(row.labPubs5y, row.clinicalPubs5y).includes("lab");
-  const active = award != null || lab;
-  const type: ResearcherType = active
-    ? row.hasClinicalProfile
+  const educations = row.educations ?? [];
+  const isPhysician =
+    educations.length > 0
+      ? educations.some((e) => isMedicalDegree(e.degree))
+      : row.hasClinicalProfile;
+  const kinds = researchTypesFrom(row.labPubs5y, row.clinicalPubs5y);
+  let type: ResearcherType;
+  if (isTraineeRole(row.roleCategory) && !award) type = "trainee";
+  else if (kinds.length > 0)
+    type = isPhysician
       ? "physician_scientist"
-      : "basic_scientist"
-    : row.hasClinicalProfile && !UNKNOWN_EVIDENCE_ROLES.has(row.roleCategory ?? "")
-      ? "clinician"
-      : "unclassified";
-  return award ? { type, award } : { type };
+      : kinds.includes("lab")
+        ? "basic_scientist"
+        : "clinical_researcher";
+  else if (award) type = "funded_investigator";
+  else if (isPhysician || row.hasClinicalProfile) type = "clinician";
+  else if (row.roleCategory === "non_faculty_academic") type = "research_staff";
+  else type = "unclassified";
+  return { type, kinds, isPhysician, ...(award ? { award } : {}) };
 }
 
 /** The scholar columns `matchaMeasuresFrom` needs. Both engines already read Scholar for
@@ -624,11 +695,26 @@ export function matchaMeasuresFrom(row: MatchaMeasuresRow, now: Date = new Date(
 function researcherMeasures(
   row: MatchaMeasuresRow,
   now: Date,
-): Pick<MatchaMeasures, "researcherType" | "researchAward" | "labPubs5y" | "clinicalPubs5y"> {
+): Pick<
+  MatchaMeasures,
+  | "researcherType"
+  | "researchKinds"
+  | "isPhysician"
+  | "researchAward"
+  | "fundedAsPi"
+  | "labPubs5y"
+  | "clinicalPubs5y"
+> {
   if (!row.grants) return {};
-  const { type, award } = researcherTypeFrom({ ...row, grants: row.grants }, now);
+  const { type, award, kinds, isPhysician } = researcherTypeFrom(
+    { ...row, grants: row.grants },
+    now,
+  );
   return {
     researcherType: type,
+    researchKinds: kinds,
+    isPhysician,
+    ...(award ? { fundedAsPi: true as const } : {}),
     ...(award && !row.hideFunding ? { researchAward: award } : {}),
     ...(row.labPubs5y != null ? { labPubs5y: row.labPubs5y } : {}),
     ...(row.clinicalPubs5y != null ? { clinicalPubs5y: row.clinicalPubs5y } : {}),
@@ -1305,6 +1391,30 @@ export function fitTier(score: number, topScore: number): MatchaFitTier {
   if (share >= TIER_STRONG) return "strong";
   if (share >= TIER_GOOD) return "good";
   return "weak";
+}
+
+/**
+ * The tier a PERSON is labelled with: `fitTier`, except that "strong" is capped at "good" for
+ * a candidate whose measures were computed and show neither a research award as PI nor CTL
+ * technology. Topical fit alone should not read as the strongest partnership signal. A
+ * candidate without computed measures keeps the plain tier (absent is not none).
+ */
+export function candidateFitTier(
+  candidate: Pick<MatchaCandidate, "fusedScore" | "measures"> & { technologyCount?: number },
+  topScore: number,
+): MatchaFitTier {
+  const tier = fitTier(candidate.fusedScore, topScore);
+  if (tier !== "strong") return tier;
+  const m = candidate.measures;
+  // `fundedAsPi` covers a scholar who hides their Funding section; "funded_investigator" covers
+  // a stored run from before that flag.
+  const unbacked =
+    m?.researcherType != null &&
+    m.researcherType !== "funded_investigator" &&
+    m.researchAward == null &&
+    !m.fundedAsPi &&
+    !((candidate.technologyCount ?? 0) > 0);
+  return unbacked ? "good" : tier;
 }
 
 /** A concept is "rare" when its corpus coverage is at most this fraction of the most-covered

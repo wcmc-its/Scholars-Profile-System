@@ -609,6 +609,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "3000",
               },
               {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=3072",
+              },
+              {
                 "Name": "DB_TLS",
                 "Value": "on",
               },
@@ -2946,7 +2950,7 @@ service:
         "DeploymentController": {
           "Type": "ECS",
         },
-        "DesiredCount": 2,
+        "DesiredCount": 4,
         "EnableECSManagedTags": false,
         "EnableExecuteCommand": false,
         "HealthCheckGracePeriodSeconds": 120,
@@ -3003,8 +3007,8 @@ service:
         "TaskRole30FC0FBB",
       ],
       "Properties": {
-        "MaxCapacity": 6,
-        "MinCapacity": 2,
+        "MaxCapacity": 8,
+        "MinCapacity": 4,
         "ResourceId": {
           "Fn::Join": [
             "",
@@ -5668,6 +5672,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "PORT",
                 "Value": "3000",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=1536",
               },
               {
                 "Name": "DB_TLS",

@@ -61,6 +61,13 @@ describe("app/robots — disallow list", () => {
     expect(disallow).toContain("/admin/");
   });
 
+  it("disallows /search (unbounded facet URLs; crawler walk took prod down 2026-11-12)", () => {
+    const { rules } = robots();
+    const r = Array.isArray(rules) ? rules[0] : rules;
+    const disallow = Array.isArray(r.disallow) ? r.disallow : [r.disallow];
+    expect(disallow).toContain("/search");
+  });
+
   it("CRITICAL D-20: does NOT disallow /_next/ (Googlebot needs JS/CSS access)", () => {
     const { rules } = robots();
     const r = Array.isArray(rules) ? rules[0] : rules;
