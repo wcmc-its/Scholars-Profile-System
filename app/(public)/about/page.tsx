@@ -254,6 +254,11 @@ export default async function DocsPage() {
               a: "A center Owner or Curator edits the roster in the app. Center membership is one of the few shared institutional fields Scholars itself owns.",
             },
             {
+              href: "#researcher-type",
+              q: "Why am I labeled a Clinician, or not a Physician-scientist?",
+              a: "The labels are computed from your recent first or last author papers, the degrees on your profile, and the awards you lead as PI. They change when that data does.",
+            },
+            {
               href: "#profile-url",
               q: "Can I change my profile’s web address?",
               a: "You can request a custom, name-based address on your Edit my profile page, and the Scholars team approves it. Your existing address keeps working and redirects to the new one.",
@@ -1055,7 +1060,7 @@ export default async function DocsPage() {
           from the scholar&apos;s own recent papers. It does not come from a title, a department,
           an appointment or anything the scholar declares, and nobody assigns it by hand.
         </p>
-        <h4>How one paper is classified</h4>
+        <p className="!mt-6 !mb-2 font-semibold">How one paper is classified</p>
         <p>
           NIH iCite scores every PubMed paper on its &ldquo;translational triangle&rdquo;: the share
           of the paper that is about humans, about animals, and about molecules and cells, worked
@@ -1075,7 +1080,7 @@ export default async function DocsPage() {
             comments never count. A paper iCite has not scored yet does not count either.
           </li>
         </ul>
-        <h4>How a scholar gets the label</h4>
+        <p className="!mt-6 !mb-2 font-semibold">How a scholar gets the label</p>
         <ul>
           <li>
             <strong>{RESEARCH_TYPE_LABELS.lab}</strong>: at least {RESEARCH_TYPE_MIN_PUBS} laboratory
@@ -1169,7 +1174,7 @@ export default async function DocsPage() {
           scientist who also publishes clinical papers stays a basic scientist and also shows{" "}
           {RESEARCH_TYPE_LABELS.clinical}.
         </p>
-        <h4>Who counts as a physician</h4>
+        <p className="!mt-6 !mb-2 font-semibold">Who counts as a physician</p>
         <p>
           A scholar is a physician when any degree in the education on their profile is a medical
           degree: MD, DO, MBBS, MBChB, MBBCh, BMBS or a combined MD-PhD, however it is punctuated.
@@ -1178,7 +1183,7 @@ export default async function DocsPage() {
           education at all, having a clinical profile at WCM stands in. A residency or fellowship
           listed as education is training, not a degree, and does not count.
         </p>
-        <h4>What counts as leading a research award</h4>
+        <p className="!mt-6 !mb-2 font-semibold">What counts as leading a research award</p>
         <p>
           The person is PI, PI on a subaward or co-PI on an award that is active now or ended in
           the last {RESEARCH_ACTIVE_YEARS} years, from any sponsor. For NIH awards the activity code
@@ -1224,28 +1229,28 @@ export default async function DocsPage() {
           </li>
         </ul>
 
-        <h4>Common questions</h4>
-        <dl>
-          <dt>I run a lab. Why do I have no {RESEARCH_TYPE_LABELS.lab} label?</dt>
-          <dd>
+        <p className="!mt-6 !mb-2 font-semibold">Common questions</p>
+        <dl className="mt-2">
+          <dt className="mt-4 font-semibold">I run a lab. Why do I have no {RESEARCH_TYPE_LABELS.lab} label?</dt>
+          <dd className="mt-1 ml-0">
             Usually because fewer than {RESEARCH_TYPE_MIN_PUBS} of your papers from the last{" "}
             {RESEARCH_TYPE_YEARS} years list you first or last, or because iCite has not scored
             them yet. Check that your publications are complete and correctly attributed.
           </dd>
-          <dt>I am an MD. Why am I not a {RESEARCHER_TYPE_LABEL.physician_scientist}?</dt>
-          <dd>
+          <dt className="mt-4 font-semibold">I am an MD. Why am I not a {RESEARCHER_TYPE_LABEL.physician_scientist}?</dt>
+          <dd className="mt-1 ml-0">
             Either your degree is missing from your profile&apos;s education, or your papers do
             not yet show a research label. With a research award but no label you are a{" "}
             {RESEARCHER_TYPE_LABEL.funded_investigator}.
           </dd>
-          <dt>Why am I a {RESEARCHER_TYPE_LABEL.clinician}?</dt>
-          <dd>
+          <dt className="mt-4 font-semibold">Why am I a {RESEARCHER_TYPE_LABEL.clinician}?</dt>
+          <dd className="mt-1 ml-0">
             You are a physician or have a clinical profile, and neither your recent first or last
             author papers nor a current research award show research yet. It describes the data,
             not your work, and it changes on its own when the data does.
           </dd>
-          <dt>Can I choose my label?</dt>
-          <dd>
+          <dt className="mt-4 font-semibold">Can I choose my label?</dt>
+          <dd className="mt-1 ml-0">
             No. Every label is computed the same way for everyone so that a filter means the same
             thing for every person it returns. You can fix the data it is built from.
           </dd>
