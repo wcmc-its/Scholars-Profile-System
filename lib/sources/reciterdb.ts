@@ -77,8 +77,19 @@ export async function withReciterConnection<T>(
   try {
     return await fn(conn);
   } finally {
-    // release() returns a Promise; awaiting it avoids an unhandled rejection.
-    await conn.release();
+    // Swallow release() failures. A throw inside `finally` would replace the
+    // callback's result or mask its real error. A failed release only means
+    // the connection is already broken, and the pool discards it, so there is
+    // nothing useful for the caller to do. Awaiting still keeps the
+    // rejection handled (no unhandledRejection).
+    try {
+      await conn.release();
+    } catch (err) {
+      console.warn(
+        "[reciterdb] conn.release() failed (ignored):",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 }
 
