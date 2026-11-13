@@ -250,41 +250,28 @@ describe("freshness acknowledgements", () => {
 
   // The weekly maintain run (ReciterAI #502/#503) replaced the hand-run
   // producer, so the ack that said "a scheduled refresh is being built" is
-  // gone and the artifact-age anchor stands on its own at the producer's
-  // cadence plus the mirror lag.
-  it("Tools carries no ack and grades weekly plus mirror lag", () => {
+  // gone. Our import stays nightly and run-anchored (retry grading still
+  // covers it); the producer is graded on ReciterAI-tools.
+  it("Tools carries no ack and grades our nightly import on its run", () => {
     expect(TRACKED.Tools?.ack).toBeUndefined();
-    expect(TRACKED.Tools?.cadence).toBe("weekly-mirrored");
+    expect(TRACKED.Tools?.cadence).toBe("nightly");
+    expect(TRACKED.Tools?.anchorOnRun).toBe(true);
   });
 
-  it("Tools is green on the first scheduled publish and Late after a missed week", () => {
-    // generated_at of the 2026-11-11 catch-up publish (tools/latest/manifest.json).
-    const published = new Date("2026-11-11T23:23:31Z");
+  it("ReciterAI-tools is green on time, tolerates a late-mirrored week, and is Late after a missed week", () => {
+    const spec = TRACKED["ReciterAI-tools"]!;
+    // completed_at of the 2026-11-11 catch-up run.
+    const ran = new Date("2026-11-11T23:23:00Z");
+    expect(gradeSource("ReciterAI-tools", spec, ran, Date.parse("2026-11-18T07:00:00Z")).stale).toBe(false);
 
-    // Just before the second Tuesday's run lands: a healthy, on-time producer.
-    const beforeNext = gradeSource(
-      "Tools",
-      TRACKED.Tools!,
-      published,
-      Date.parse("2026-11-18T07:00:00Z"),
-    );
-    expect(beforeNext.stale).toBe(false);
-
-    // 11-17's run published on time at 05:00. 11-24's overran 07:00, so the
-    // 11-25 nightly is the first to read it, and until then the board still
-    // shows 11-17's age. Under plain `weekly` (8d) this healthy state reads Late.
+    // 11-17's run finished 05:00; 11-24's overran 07:00, so the 11-25 nightly
+    // is the first to mirror it. Under plain `weekly` (8d) this reads Late.
     const slowWeek = new Date("2026-11-17T05:00:00Z");
     const readLate = Date.parse("2026-11-25T06:59:00Z");
-    expect(gradeSource("Tools", TRACKED.Tools!, slowWeek, readLate).stale).toBe(false);
+    expect(gradeSource("ReciterAI-tools", spec, slowWeek, readLate).stale).toBe(false);
     expect((readLate - slowWeek.getTime()) / 3_600_000).toBeGreaterThan(SLA_HOURS.weekly);
 
-    // A whole missed week is real news, and with no ack it fails the check.
-    const missed = gradeSource(
-      "Tools",
-      TRACKED.Tools!,
-      slowWeek,
-      Date.parse("2026-11-27T07:00:00Z"),
-    );
+    const missed = gradeSource("ReciterAI-tools", spec, slowWeek, Date.parse("2026-11-27T07:00:00Z"));
     expect(missed.stale).toBe(true);
     expect(missed.acknowledged).toBe(false);
   });

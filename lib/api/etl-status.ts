@@ -86,8 +86,8 @@ export type EtlSourceRow = {
    * `completedAt` alone — the Spotlight and Hierarchy loaders write a fresh
    * success row on an unchanged-sha256 short-circuit, so `completedAt` advances
    * while the artifact stays frozen. Tools short-circuits the same way and
-   * also writes `manifestGeneratedAt` (etl/tools/index.ts), so it is graded on
-   * artifact age; its producer's weekly run is graded on `ReciterAI-tools`.
+   * also writes `manifestGeneratedAt`, but like Spotlight it grades on its run
+   * (`anchorOnRun`); its producer's weekly run is graded on `ReciterAI-tools`.
    */
   lastSuccessAt: Date | null;
   ageHours: number | null;

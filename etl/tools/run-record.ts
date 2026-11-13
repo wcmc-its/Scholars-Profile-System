@@ -40,18 +40,11 @@ export type ToolsRunRecord = {
  * signature helper lives with the artifact-loading code; everything else about
  * the row is decided here.
  *
- * §2.1: Tools IS generated_at-anchored, as of the tools-cadence decision.
- *
- * It was not, for a real reason: the tools producer is hand-run, so this anchor
- * makes the row read stale whenever nobody has republished — which is most of
- * the time, and which is a false alarm about OUR import. What changed is not
- * that reason but the ANSWER to it. Anchoring alone would paint a permanently
- * red row with no route back to green, so it lands together with the `Tools`
- * FreshnessAck in lib/etl/freshness-policy.ts, which accepts that staleness
- * until a dated expiry. The two are one change and must not be separated: the
- * ack suppresses only a source that grades STALE, so without this anchor it is
- * inert (and the heartbeat's own anti-clutter rule would tell you to delete
- * it); and without the ack this anchor is the cry-wolf the ack prevents.
+ * §2.1: the row carries the artifact's `generated_at` as manifestGeneratedAt,
+ * but Tools is graded on its run (`anchorOnRun` in lib/etl/freshness-policy.ts),
+ * the same as Spotlight: the weekly producer legitimately publishes nothing on
+ * some weeks, so artifact age is not a liveness signal. Producer liveness is
+ * graded on `ReciterAI-tools` from the STAGE#tools_maintain#GLOBAL ledger row.
  *
  * A null anchor (absent, malformed or future `generated_at`) means freshness
  * falls back to `completedAt` — the pre-existing behaviour, never a throw.
