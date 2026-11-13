@@ -8468,6 +8468,32 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Description": "SPS prod: Inspector found a fixable CRITICAL or HIGH vulnerability in a running image",
         "EventPattern": {
           "detail": {
+            "$or": [
+              {
+                "packageVulnerabilityDetails": {
+                  "vulnerablePackages": {
+                    "filePath": [
+                      {
+                        "anything-but": {
+                          "prefix": "/usr/local/lib/node_modules/npm/",
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                "packageVulnerabilityDetails": {
+                  "vulnerablePackages": {
+                    "filePath": [
+                      {
+                        "exists": false,
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
             "fixAvailable": [
               "YES",
             ],
