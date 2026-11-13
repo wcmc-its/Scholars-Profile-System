@@ -2373,8 +2373,9 @@ export class AppStack extends Stack {
         // Nested Research type children (Physician-scientist / non-physician under
         // each kind), split on the people doc's boolean `isPhysician`. Filter only.
         // Children stay hidden until the nightly people-alias rebuild writes the
-        // field. Staging ON; prod OFF until reviewed on staging.
-        SEARCH_PEOPLE_RESEARCH_TYPE_NESTED: envConfig.envName === "staging" ? "on" : "off",
+        // field. Prod ON 2026-11-13 after staging verified (q=Palliative care: Lab
+        // Physician-scientist 14 / Basic scientist 2, filter narrows to its count).
+        SEARCH_PEOPLE_RESEARCH_TYPE_NESTED: "on",
         // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET, SEARCH_RESULT_EVIDENCE,
         // SEARCH_EVIDENCE_ROWS and SEARCH_EVIDENCE_REASON_COUNTS (the #1464
         // evidence bundle) were retired in #1440 -- always on in code, no env key.
