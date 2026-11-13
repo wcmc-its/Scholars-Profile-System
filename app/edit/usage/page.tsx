@@ -32,8 +32,9 @@ import {
   type MonthlyAvailability,
   type ServiceHealthSummary,
   loadServiceHealth,
+  summarizeServiceHealth,
 } from "@/lib/api/service-health";
-import { addDays, resolveUsageRange } from "@/lib/api/usage-range";
+import { type UsageRange, addDays, resolveUsageRange } from "@/lib/api/usage-range";
 import { type NamedCount, type UsageSummary, loadUsageSummary } from "@/lib/api/usage-summary";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
@@ -86,14 +87,37 @@ function KpiTile({
   );
 }
 
+/** The selected range as a tile sub-line phrase: "last 7 days", "since
+ *  launch", or a custom range's "Oct 1 – Oct 15". */
+function rangePhrase(range: UsageRange): string {
+  if (range.key === "launch") return "since launch";
+  if (range.key === "custom") return `${shortDay(range.since)} – ${shortDay(range.until)}`;
+  return `last ${range.days} days`;
+}
+
+/** The alarm tile's sub-line. CloudWatch keeps only 30 days of alarm history,
+ *  so a longer or older range says what the count actually covers. */
+function alarmSub(health: ServiceHealthSummary, range: UsageRange): string {
+  if (health.alarmCoverage === "none") return "CloudWatch keeps only 30 days of alarm history";
+  if (health.alarmCoverage === "partial") {
+    return `fired since ${shortDay(health.alarmSince)} (CloudWatch keeps 30 days)`;
+  }
+  return range.key === "launch" || range.key === "custom"
+    ? `fired ${rangePhrase(range)}`
+    : `fired in ${rangePhrase(range)}`;
+}
+
 /** Headline row: pageviews + busiest day (Athena rollup), uptime + alarm
- *  firings (CloudWatch). Each pair fails soft on its own source. */
+ *  firings (CloudWatch). Every tile follows the header's Range. Each pair
+ *  fails soft on its own source. */
 function KpiRow({
   summary,
   health,
+  range,
 }: {
   summary: UsageSummary | null;
   health: ServiceHealthSummary | null;
+  range: UsageRange;
 }) {
   const days = summary?.pageviewsByDay ?? [];
   const peak = days.reduce<(typeof days)[number] | null>(
@@ -123,14 +147,18 @@ function KpiRow({
         <>
           <KpiTile
             label="Uptime"
-            value={`${health.uptimePercent.toFixed(2)}%`}
-            sub={`last ${health.windowDays} days`}
+            value={health.uptimePercent === null ? "—" : `${health.uptimePercent.toFixed(2)}%`}
+            sub={
+              health.uptimePercent === null
+                ? `no load balancer data ${rangePhrase(range)}`
+                : rangePhrase(range)
+            }
             testId="service-health-uptime"
           />
           <KpiTile
             label="Availability alarms"
-            value={health.alarmFirings.toLocaleString()}
-            sub={`fired in last ${health.windowDays} days`}
+            value={health.alarmFirings === null ? "—" : health.alarmFirings.toLocaleString()}
+            sub={alarmSub(health, range)}
             testId="service-health-alarm-firings"
           />
         </>
@@ -456,7 +484,8 @@ export default async function EditUsagePage({
   // tiles + uptime card, never the rest of the page.
   let serviceHealth: ServiceHealthSummary | null = null;
   try {
-    serviceHealth = await loadServiceHealth();
+    // One cached read for every range, windowed to the selected one here.
+    serviceHealth = summarizeServiceHealth(await loadServiceHealth(), range);
   } catch (err) {
     console.error(
       JSON.stringify({
@@ -505,7 +534,7 @@ export default async function EditUsagePage({
           />
         </div>
 
-        <KpiRow summary={summary} health={serviceHealth} />
+        <KpiRow summary={summary} health={serviceHealth} range={range} />
 
         {unavailable ? (
           <p className="text-muted-foreground" data-testid="edit-usage-unavailable">

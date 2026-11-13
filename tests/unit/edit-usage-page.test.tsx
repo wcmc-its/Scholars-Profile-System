@@ -27,7 +27,10 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.mockGetEditSession }));
 vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: h.mockCanViewUsage }));
 vi.mock("@/lib/api/usage-summary", () => ({ loadUsageSummary: h.mockLoadUsage }));
-vi.mock("@/lib/api/service-health", () => ({ loadServiceHealth: h.mockLoadHealth }));
+vi.mock("@/lib/api/service-health", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/service-health")>()),
+  loadServiceHealth: h.mockLoadHealth,
+}));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -91,14 +94,20 @@ const SUMMARY = {
   ],
 };
 
+// The raw CloudWatch reads (ServiceHealthData); the page windows them to the
+// selected range with the real summarizeServiceHealth. The clock is pinned to
+// 2026-09-25 below, so "Last 7 days" = Sep 18-24, "Last 30 days" = Aug 26 -
+// Sep 24 and "Last 90 days" = Jun 27 - Sep 24; alarm history (30-day
+// retention) starts Aug 26.
 const HEALTH = {
-  windowDays: 30,
-  uptimePercent: 99.987,
-  alarmFirings: 2,
-  monthly: [
-    { month: "2026-07", availabilityPercent: 99.5, totalRequests: 500, lowTraffic: true },
-    { month: "2026-08", availabilityPercent: 99.98, totalRequests: 40_000, lowTraffic: false },
+  daily: [
+    { date: "2026-07-15", requestCount: 400, elb5xx: 0, target5xx: 2 }, // 99.50%, low traffic
+    { date: "2026-08-10", requestCount: 30_000, elb5xx: 0, target5xx: 8 }, // outside 30 days
+    { date: "2026-09-02", requestCount: 10_000, elb5xx: 0, target5xx: 9 }, // inside 30, not 7
+    { date: "2026-09-20", requestCount: 10_000, elb5xx: 1, target5xx: 0 }, // inside 7
   ],
+  alarmFiringTimes: ["2026-09-01T03:00:00.000Z", "2026-09-21T04:00:00.000Z"],
+  alarmHistoryFrom: "2026-08-26T12:00:00.000Z",
 };
 
 async function renderPage(params: Record<string, string> = {}) {
@@ -112,6 +121,8 @@ async function renderPage(params: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-25T12:00:00Z"));
   h.mockGetEditSession.mockResolvedValue(ADMIN);
   h.mockCanViewUsage.mockResolvedValue(true);
   h.mockLoadUsage.mockResolvedValue(SUMMARY);
@@ -119,6 +130,10 @@ beforeEach(() => {
   h.mockFindMany.mockResolvedValue([
     { slug: "test-person-1", cwid: "tst0001", preferredName: "Test Person One" },
   ]);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("/edit/usage", () => {
@@ -136,8 +151,48 @@ describe("/edit/usage", () => {
     expect(root.getByText("about 225 a day")).toBeTruthy();
     expect(root.getByTestId("usage-busiest-day").textContent).toBe("700");
     expect(root.getByTestId("usage-busiest-day").nextElementSibling?.textContent).toBe("Aug 27");
-    expect(root.getByTestId("service-health-uptime").textContent).toBe("99.99%");
+    expect(root.getByTestId("service-health-uptime").textContent).toBe("99.95%");
+    expect(root.getByTestId("service-health-uptime").nextElementSibling?.textContent).toBe(
+      "last 30 days",
+    );
     expect(root.getByTestId("service-health-alarm-firings").textContent).toBe("2");
+  });
+
+  // Regression (2026-11-13): the uptime + alarm tiles were pinned to a fixed
+  // 30-day window, so switching the Range never changed them.
+  it("windows the uptime and alarm tiles to the selected range", async () => {
+    const tiles = async (params: Record<string, string>) => {
+      document.body.innerHTML = "";
+      const root = await renderPage(params);
+      const up = root.getByTestId("service-health-uptime");
+      const al = root.getByTestId("service-health-alarm-firings");
+      return [
+        up.textContent,
+        up.nextElementSibling?.textContent,
+        al.textContent,
+        al.nextElementSibling?.textContent,
+      ];
+    };
+    expect(await tiles({ range: "7" })).toEqual([
+      "99.99%",
+      "last 7 days",
+      "1",
+      "fired in last 7 days",
+    ]);
+    expect(await tiles({})).toEqual(["99.95%", "last 30 days", "2", "fired in last 30 days"]);
+    // 90 days reaches past CloudWatch's 30-day alarm history: say so.
+    expect(await tiles({ range: "90" })).toEqual([
+      "99.96%",
+      "last 90 days",
+      "2",
+      "fired since Aug 26 (CloudWatch keeps 30 days)",
+    ]);
+    expect(await tiles({ range: "custom", from: "2026-07-01", to: "2026-07-31" })).toEqual([
+      "99.50%",
+      "Jul 1 – Jul 31",
+      "—",
+      "CloudWatch keeps only 30 days of alarm history",
+    ]);
   });
 
   it("names resolved profiles (with the hover card), keeps unresolved slugs, and toggles Show all", async () => {
