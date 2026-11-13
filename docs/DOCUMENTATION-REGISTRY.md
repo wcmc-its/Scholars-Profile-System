@@ -105,6 +105,7 @@ in **§10**.
 
 | Doc | Answers |
 |---|---|
+| [`bot-defense-log.md`](./bot-defense-log.md) | **Who is crawling us and what did we do about it?** Dated log of bot and scraper incidents, the WAF rules added for each, and the current `/search` defenses. |
 | [`SLOs.md`](./SLOs.md) | The SLO policy and alarm catalog — what the system holds itself to and what fires when it doesn't. |
 | [`oncall.md`](./oncall.md) | The alerting path and on-call routing. Companion to `SLOs.md` and the addendum's Observability section. |
 | [`tracing.md`](./tracing.md) | Distributed tracing (CloudFront → ALB → ECS). How to follow a single request through the stack. |
