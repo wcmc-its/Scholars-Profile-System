@@ -139,3 +139,18 @@ describe("wrappedLines", () => {
     expect(wrappedLines(`${"x".repeat(15)}\n\nshort`, 10, true)).toBe(4);
   });
 });
+
+describe("About these columns sheet", () => {
+  it("defines the judgement columns and links the docs on the profile origin", async () => {
+    const wb = new ExcelJS.Workbook();
+    const buf = await buildMatchaWorkbook([ROW], {}, new Date("2026-11-13T12:00:00Z"));
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const ws = wb.getWorksheet("About these columns")!;
+    expect(ws).toBeTruthy();
+    expect(ws.getCell(1, 1).font?.bold).toBe(true);
+    const cols = [2, 3, 4].map((r) => ws.getCell(r, 1).text);
+    expect(cols).toEqual(["Fit", "Research kind", "Researcher type"]);
+    const link = ws.getCell(6, 2).value as { hyperlink?: string };
+    expect(link.hyperlink).toBe(`${new URL(ROW.profileUrl).origin}/about#research-type`);
+  });
+});

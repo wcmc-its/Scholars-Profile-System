@@ -17,6 +17,8 @@
 import ExcelJS from "exceljs";
 
 import { guardFormula } from "@/lib/csv";
+import { TIER_GOOD, TIER_STRONG } from "@/lib/api/matcha-contract";
+import { RESEARCH_TYPE_MIN_PUBS, RESEARCH_TYPE_YEARS } from "@/lib/research-type";
 import {
   buildMatchaRows,
   MATCHA_LONG_TEXT_HEADERS,
@@ -104,5 +106,38 @@ export async function buildMatchaWorkbook(
     cell.font = { color: { argb: "FF0563C1" }, underline: true };
   });
 
+  addAboutSheet(wb, rows);
   return workbookBuffer(wb);
 }
+
+/** Second sheet: what the judgement columns mean, for a reader who only has the file. The
+ *  link is absolute, from the origin of the profile URLs (the panel builds those from the
+ *  page origin); with no usable URL the sheet names the page instead. */
+function addAboutSheet(wb: ExcelJS.Workbook, rows: readonly MatchaExportRow[]): void {
+  const ws = wb.addWorksheet("About these columns");
+  const first = rows.map((r) => r.profileUrl).find(isWebUrl);
+  const docs = first ? `${new URL(first).origin}/about#research-type` : "";
+  ws.addRow(["Column", "What it means"]);
+  boldRow(ws, 1);
+  for (const [col, text] of MATCHA_ABOUT_ROWS) ws.addRow([col, text]);
+  ws.addRow([]);
+  const link = ws.addRow(["Full definitions", docs || "Scholars, About page, Research type"]);
+  if (docs) {
+    link.getCell(2).value = { text: docs, hyperlink: docs };
+    link.getCell(2).font = { color: { argb: "FF0563C1" }, underline: true };
+  }
+  ws.getColumn(1).width = 20;
+  ws.getColumn(2).width = 90;
+  ws.eachRow((row) => {
+    row.eachCell((cell) => (cell.alignment = { wrapText: true, vertical: "top" }));
+    const text = row.getCell(2).text;
+    row.height = wrappedLines(text, 90, true) * XLSX_LINE_HEIGHT_PT;
+  });
+}
+
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+export const MATCHA_ABOUT_ROWS: readonly (readonly [string, string])[] = [
+  ["Fit", `How close this person is to the best match in this search, not an absolute score. Strong fit is at least ${pct(TIER_STRONG)} of the top score and Good fit at least ${pct(TIER_GOOD)}; below that is Weak fit. Strong fit also needs a research award as PI or a CTL technology; without either it reads Good fit.`],
+  ["Research kind", `Laboratory research and Clinical research: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles of that kind in the last ${RESEARCH_TYPE_YEARS} years, as classified by NIH iCite. A person can show both. Blank means the papers do not show it yet, not that the person does no research.`],
+  ["Researcher type", "One type per person, from the research kind, whether they hold a medical degree, and whether they lead a research award: Physician-scientist, Basic scientist, Clinical or population researcher, Funded investigator, Clinician, Trainee, Research staff or Unclassified."],
+];

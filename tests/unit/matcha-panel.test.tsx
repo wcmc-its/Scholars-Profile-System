@@ -1051,9 +1051,9 @@ describe("MatchaPanel", () => {
     // The children sit inside their parent's list item.
     const lab = box(/^Laboratory research ?\d/).closest("li")!;
     expect(within(lab).getByRole("checkbox", { name: "Laboratory research: Basic scientist" })).toBeTruthy();
-    expect(researchFacet()!.textContent).toContain("How these are defined");
+    expect(researchFacet()!.textContent).toContain("How research and researcher types are defined");
     expect(
-      within(researchFacet()!).getByRole("link", { name: "How these are defined" }).getAttribute("href"),
+      within(researchFacet()!).getByRole("link", { name: "How research and researcher types are defined" }).getAttribute("href"),
     ).toBe("/about#research-type");
   });
 

@@ -4417,7 +4417,7 @@ function ResearchFacetGroup({
         rel="noopener noreferrer"
         className="text-muted-foreground mt-1.5 inline-block text-xs underline underline-offset-4 hover:text-foreground"
       >
-        How these are defined
+        How research and researcher types are defined
       </a>
     </div>
   );
