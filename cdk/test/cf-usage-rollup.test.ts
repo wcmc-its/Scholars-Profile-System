@@ -172,12 +172,12 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
     }
   });
 
-  it("drops RSC (_rsc=) requests from the profile arms only, keeping search soft-navs", () => {
-    const rsc = "strpos(coalesce(cs_uri_query, '-'), '_rsc=') = 0";
-    expect(pageviews).toContain(rsc);
-    expect(profile).toContain(rsc);
-    expect(search).not.toContain("_rsc=");
-    expect(sql.split(rsc)).toHaveLength(3);
+  it("counts RSC (_rsc=) soft-nav clicks in every arm (profile links never prefetch)", () => {
+    // Profile <Link>s are prefetch={false}, so a ?_rsc= profile hit is a real click.
+    for (const arm of [pageviews, profile, search]) {
+      expect(arm).not.toContain("_rsc=");
+    }
+    expect(sql).not.toContain("_rsc=");
   });
 
   it("excludes CloudFront edge errors (WAF block/challenge) from every arm", () => {

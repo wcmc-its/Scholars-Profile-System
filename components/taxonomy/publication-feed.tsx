@@ -632,7 +632,7 @@ function PlainAuthors({ authors: raw }: { authors: FeedHit["authors"] }) {
       {shown.map((a, i) => (
         <span key={a.cwid ?? `${a.name}-${i}`}>
           {a.slug && isPubliclyDisplayed(a.roleCategory) ? (
-            <Link href={profilePath(a.slug)} className="text-apollo-slate hover:underline">
+            <Link href={profilePath(a.slug)} prefetch={false} className="text-apollo-slate hover:underline">
               {a.name}
             </Link>
           ) : (

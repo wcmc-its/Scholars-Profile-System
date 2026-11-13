@@ -650,6 +650,7 @@ function AuthorPill({ author }: { author: ByLineAuthor }) {
   return (
     <Link
       href={profilePath(author.slug)}
+      prefetch={false}
       className={`${cls} hover:border-[var(--color-accent-slate)]`}
     >
       {body}

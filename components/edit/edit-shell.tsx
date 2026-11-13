@@ -420,7 +420,7 @@ export function EditShell({
               )}
               {previewHref && (
                 <Button asChild variant="outline" size="sm">
-                  <Link href={previewHref} target="_blank" rel="noreferrer">
+                  <Link href={previewHref} prefetch={false} target="_blank" rel="noreferrer">
                     Preview profile
                     <ArrowUpRight className="size-4" aria-hidden />
                   </Link>
