@@ -1517,7 +1517,14 @@ export class EtlStack extends Stack {
     // merge pushes a new image, and each push re-reports every known CVE as a
     // fresh finding, so a staging rule would post the same cards several times
     // a day. Prod pushes only on a prod deploy. Only ACTIVE findings with a fix
-    // available are actionable; suppressed (accepted) findings are not ACTIVE.
+    // available are actionable.
+    //
+    // Inspector suppression rules do NOT stop these events: each new image
+    // digest creates fresh findings that are emitted as ACTIVE before the
+    // suppression applies. So the accepted npm-CLI-in-node-base-image findings
+    // (#3340) are excluded here by path instead. The $or keeps OS-package
+    // findings, which have no filePath; a bare anything-but would drop them.
+    // Remove the $or once the npm CLI is gone from BOTH the app and etl images.
     if (env === "prod") {
       new events.Rule(this, "InspectorImageFindingRule", {
         ruleName: `sps-image-vulnerability-${env}`,
@@ -1536,6 +1543,10 @@ export class EtlStack extends Stack {
                 },
               },
             },
+            $or: [
+              { packageVulnerabilityDetails: { vulnerablePackages: { filePath: [{ "anything-but": { prefix: "/usr/local/lib/node_modules/npm/" } }] } } },
+              { packageVulnerabilityDetails: { vulnerablePackages: { filePath: [{ exists: false }] } } },
+            ],
           },
         },
         targets: [

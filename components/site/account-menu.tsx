@@ -227,6 +227,7 @@ export function AccountMenu({
     showViewProfile && effectiveScholar ? (
       <Link
         href={profilePath(effectiveScholar.slug)}
+        prefetch={false}
         className={ROW_CLASS}
         data-testid="account-menu-view"
       >

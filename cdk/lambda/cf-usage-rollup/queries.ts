@@ -300,21 +300,17 @@ const PROFILE_PATH_PREDICATE = [
 ].join("\n");
 
 /**
- * Not a Next.js Flight (RSC) request. The client router appends `?_rsc=<hash>`
- * to every Flight fetch: prefetches (HoverPrefetchLink on search results
- * prefetches a profile on mouse-over, clicked or not) and soft-navigation
- * clicks alike. The hash folds in router headers CloudFront does not log, so a
- * prefetch cannot be told apart from a click. The profile arms therefore count
- * document loads only (direct, external, search-engine, and hard navigations);
- * in-app soft-nav clicks to a profile are no longer counted. That under-count
- * is stable and bot-proof; the prefetch over-count was neither (#3368).
+ * Shared WHERE tail for the two profile arms (pageviews + profile).
+ *
+ * `_rsc=` (Next.js Flight) requests are COUNTED by the profile arms. The client
+ * router appends `?_rsc=<hash>` to prefetches and soft-navigation clicks alike,
+ * and CloudFront cannot tell the two apart. Every profile <Link> is therefore
+ * `prefetch={false}` (#3368), so a `?_rsc=` hit on a profile path is a real
+ * in-app click. Days rolled up before that app release are prefetch-inflated if
+ * re-rolled with this predicate; do not re-roll them.
  */
-const NOT_RSC_REQUEST = "strpos(coalesce(cs_uri_query, '-'), '_rsc=') = 0";
-
-/** Shared WHERE tail for the two profile arms (pageviews + profile). */
 const PROFILE_VIEW_FILTERS = [
   PROFILE_PATH_PREDICATE,
-  `    AND ${NOT_RSC_REQUEST}`,
   `    AND ${NOT_BOT_UA}`,
 ].join("\n");
 
@@ -377,7 +373,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     // key-paper fetch, so the old arm listed typing prefixes ("sch", "ma") and
     // Matcha's internal lookups, and zero actual searches. Both the document
     // load and the RSC soft-navigation carry q=, so both count. `_rsc=` is
-    // KEPT here, unlike the profile arms: a submitted query is a client-side
+    // KEPT here, as in the profile arms: a submitted query is a client-side
     // router.push, so nearly every real search IS an RSC soft-nav and dropping
     // `_rsc=` would erase most real searches. Bots are removed by NOT_BOT_UA
     // and NOT_EDGE_ERROR instead (#3368).

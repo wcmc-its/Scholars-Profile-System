@@ -225,7 +225,7 @@ function CardBody({ c }: { c: ScholarCard }) {
 
       {c.isVisible && (
         <div className="bg-apollo-surface-2 border-apollo-border flex justify-end gap-4 border-t px-4 py-2.5 text-sm">
-          <Link href={profilePath(c.slug)} className="text-apollo-maroon hover:underline">
+          <Link href={profilePath(c.slug)} prefetch={false} className="text-apollo-maroon hover:underline">
             Public profile
           </Link>
         </div>

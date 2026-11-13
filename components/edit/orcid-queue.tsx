@@ -744,7 +744,7 @@ function ScholarDetail({
           CWID <span className={cn(MONO, "text-foreground")}>{card.cwid}</span>
         </span>
         {card.slug ? (
-          <Link href={profilePath(card.slug)} className={LINK} target="_blank">
+          <Link href={profilePath(card.slug)} prefetch={false} className={LINK} target="_blank">
             View profile ↗
           </Link>
         ) : null}

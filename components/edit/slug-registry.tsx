@@ -424,6 +424,7 @@ function Row({ r }: { r: RowCells }) {
         {r.urlHref ? (
           <Link
             href={r.urlHref}
+            prefetch={false}
             className="font-mono text-[13.5px] break-words hover:underline"
             data-testid={r.urlTestId}
           >

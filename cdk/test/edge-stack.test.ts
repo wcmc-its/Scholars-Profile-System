@@ -1580,6 +1580,7 @@ describe("EdgeStack", () => {
           "AWSManagedRulesKnownBadInputsRuleSet",
           "AWSManagedRulesSQLiRuleSet",
           "AWSManagedRulesBotControlRuleSet",
+          "AWSManagedRulesBotControlRuleSet-Targeted",
           "rate-limit",
         ]),
       );
@@ -1877,6 +1878,120 @@ describe("EdgeStack", () => {
         const rate = rules.find((x) => x.Name === "rate-limit");
         // Labels are visible only to later-priority rules.
         expect(Number(bot?.Priority)).toBeLessThan(Number(rate?.Priority));
+      });
+
+      describe("#3368 option 4: Bot Control TARGETED + Challenge on /search*", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        type BotRule = {
+          Name: string;
+          Priority: number;
+          OverrideAction?: Record<string, unknown>;
+          Statement: {
+            ManagedRuleGroupStatement?: {
+              Name: string;
+              ManagedRuleGroupConfigs: Array<{
+                AWSManagedRulesBotControlRuleSet: { InspectionLevel: string };
+              }>;
+              RuleActionOverrides?: Array<{
+                Name: string;
+                ActionToUse: Record<string, unknown>;
+              }>;
+              ScopeDownStatement?: unknown;
+            };
+          };
+        };
+        const rules = acl.Rules as BotRule[];
+        const byName = (n: string) => rules.find((r) => r.Name === n);
+        const common = byName("AWSManagedRulesBotControlRuleSet");
+        const targeted = byName("AWSManagedRulesBotControlRuleSet-Targeted");
+        const searchMatch = {
+          ByteMatchStatement: {
+            SearchString: "/search",
+            FieldToMatch: { UriPath: {} },
+            PositionalConstraint: "STARTS_WITH",
+            TextTransformations: [{ Priority: 0, Type: "LOWERCASE" }],
+          },
+        };
+
+        it("splits Bot Control into two mutually exclusive instances", () => {
+          const mrg = (r: BotRule | undefined) =>
+            r?.Statement.ManagedRuleGroupStatement;
+          expect(mrg(common)?.Name).toBe("AWSManagedRulesBotControlRuleSet");
+          expect(mrg(targeted)?.Name).toBe("AWSManagedRulesBotControlRuleSet");
+          expect(
+            mrg(common)?.ManagedRuleGroupConfigs[0]
+              ?.AWSManagedRulesBotControlRuleSet.InspectionLevel,
+          ).toBe("COMMON");
+          expect(
+            mrg(targeted)?.ManagedRuleGroupConfigs[0]
+              ?.AWSManagedRulesBotControlRuleSet.InspectionLevel,
+          ).toBe("TARGETED");
+          // Exactly complementary scope-downs: no request billed twice, and
+          // every request still gets one Bot Control pass for its labels.
+          expect(mrg(targeted)?.ScopeDownStatement).toEqual(searchMatch);
+          expect(mrg(common)?.ScopeDownStatement).toEqual({
+            NotStatement: { Statement: searchMatch },
+          });
+          expect(
+            rules.filter(
+              (r) =>
+                r.Statement.ManagedRuleGroupStatement?.Name ===
+                "AWSManagedRulesBotControlRuleSet",
+            ),
+          ).toHaveLength(2);
+        });
+
+        it("COMMON stays label-only; TARGETED enforces its own actions", () => {
+          expect(common?.OverrideAction).toHaveProperty("Count");
+          expect(targeted?.OverrideAction).toHaveProperty("None");
+        });
+
+        it("challenges tokenless /search requests and keeps common rules in Count", () => {
+          const overrides =
+            targeted?.Statement.ManagedRuleGroupStatement?.RuleActionOverrides ??
+            [];
+          const actionOf = (n: string) =>
+            Object.keys(overrides.find((o) => o.Name === n)?.ActionToUse ?? {});
+          expect(actionOf("TGT_TokenAbsent")).toEqual(["Challenge"]);
+          expect(actionOf("TGT_SignalBrowserAutomationExtension")).toEqual([
+            "Count",
+          ]);
+          for (const n of [
+            "CategoryAI",
+            "CategoryHttpLibrary",
+            "SignalAutomatedBrowser",
+            "SignalNonBrowserUserAgent",
+          ]) {
+            expect(actionOf(n)).toEqual(["Count"]);
+          }
+          // Nothing is overridden to Block: the targeted instance only ever
+          // challenges/CAPTCHAs by override; defaults handle the rest.
+          expect(
+            overrides.filter((o) => "Block" in o.ActionToUse),
+          ).toHaveLength(0);
+        });
+
+        it("labels land before every rule that reads them", () => {
+          const p = (n: string) => Number(byName(n)?.Priority);
+          for (const reader of ["search-block-bots", "rate-limit"]) {
+            expect(p("AWSManagedRulesBotControlRuleSet")).toBeLessThan(
+              p(reader),
+            );
+            expect(p("AWSManagedRulesBotControlRuleSet-Targeted")).toBeLessThan(
+              p(reader),
+            );
+          }
+          const priorities = rules.map((r) => Number(r.Priority));
+          expect(new Set(priorities).size).toBe(priorities.length);
+        });
+
+        it("sets a 4h challenge immunity so search sessions are not re-challenged every 5 min", () => {
+          expect(acl.ChallengeConfig).toEqual({
+            ImmunityTimeProperty: { ImmunityTime: 14400 },
+          });
+        });
       });
 
       it("ENFORCES the per-IP rate rule, exempting verified bots (#1434 + #125)", () => {
