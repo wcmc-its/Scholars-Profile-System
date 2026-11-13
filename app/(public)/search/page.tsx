@@ -3283,12 +3283,13 @@ function FacetSidebar({
                 ariaLabel={`${researchTypeLabel(c.value)}, ${c.count.toLocaleString()}${c.isActive ? ", selected" : ""}`}
               />
             )),
-            <li key="about" className="pt-1 text-[12.5px]">
-              <Link href={methodologyHref("researchType")} prefetch={false} className="text-[#2c4f6e] hover:underline">
-                How these are defined
-              </Link>
-            </li>,
           ])}
+          {/* Once, after every parent: inside the flatMap above it repeated per bucket. */}
+          <li className="pt-1 text-[12.5px]">
+            <Link href={methodologyHref("researchType")} prefetch={false} className="text-[#2c4f6e] hover:underline">
+              How these are defined
+            </Link>
+          </li>
         </FacetGroup>
       ) : null}
 
