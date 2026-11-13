@@ -1272,9 +1272,47 @@ export class EdgeStack extends Stack {
           textTransformations: [{ priority: 0, type: "LOWERCASE" }],
         },
       };
+      const notSearchPath = { notStatement: { statement: searchPathMatch } };
+      // #3368 option 4: the Bot Control rules that every TARGETED instance
+      // also carries at the common level. Kept in Count on /search* so the
+      // targeted instance changes nothing about how self-identifying bots are
+      // handled there: `search-block-bots` still blocks every `bot:` label
+      // with a 403, exactly as under COMMON. (CategoryAI defaults to Block even
+      // for verified bots; Count keeps that decision with search-block-bots.)
+      const botControlCommonRules = [
+        "CategoryAdvertising",
+        "CategoryArchiver",
+        "CategoryContentFetcher",
+        "CategoryEmailClient",
+        "CategoryHttpLibrary",
+        "CategoryLinkChecker",
+        "CategoryMiscellaneous",
+        "CategoryMonitoring",
+        "CategoryPagePreview",
+        "CategoryScrapingFramework",
+        "CategorySearchEngine",
+        "CategorySecurity",
+        "CategorySeo",
+        "CategorySocialMedia",
+        "CategoryWebhooks",
+        "CategoryAI",
+        "SignalAutomatedBrowser",
+        "SignalKnownBotDataCenter",
+        "SignalNonBrowserUserAgent",
+      ];
       const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
         name: `sps-edge-${env}-wcm-only`,
         scope: "CLOUDFRONT",
+        // #3368 option 4: how long a solved challenge keeps a client out of
+        // the next one. The default is 300s, and a re-challenge mid-session
+        // is not silent here: a facet click is a Next.js `_rsc` fetch, and a
+        // 202 to that fetch makes the router fall back to a full page load
+        // (which then shows the interstitial). Four hours covers a working
+        // session. Cross-IP token reuse is caught by the TGT_TokenReuse* rules
+        // regardless of this value.
+        challengeConfig: {
+          immunityTimeProperty: { immunityTime: 14400 },
+        },
         // Default ALLOW: only WCM traffic ever reaches the default action --
         // the priority-0 block-non-wcm rule drops everything else. (Was
         // default-BLOCK + a terminating allow-wcm rule, which short-circuited
@@ -1409,6 +1447,15 @@ export class EdgeStack extends Stack {
           // is deleted (#432) and this exemption becomes load-bearing for
           // SEO + AI-answer visibility (#594 measured both pinned at zero).
           // Cost: Bot Control bills per WebACL/month + per request inspected.
+          //
+          // #3368 option 4: this COMMON instance now covers everything EXCEPT
+          // /search*, which the TARGETED instance below inspects instead. The
+          // two scope-downs are mutually exclusive (AWS's documented "two
+          // statements" pattern), so no request is billed twice, and every
+          // request still gets exactly one Bot Control pass -- the `bot:`
+          // labels that search-block-bots and the rate-limit exemption read
+          // keep arriving site-wide. TARGETED includes the common-level rules,
+          // so /search* is labeled the same way it was under COMMON.
           {
             name: "AWSManagedRulesBotControlRuleSet",
             priority: managedGroups.length + 1,
@@ -1424,11 +1471,79 @@ export class EdgeStack extends Stack {
                     },
                   },
                 ],
+                scopeDownStatement: notSearchPath,
               },
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
               metricName: `sps-edge-${env}-AWSManagedRulesBotControlRuleSet`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          // #3368 option 4: Bot Control TARGETED + Challenge on /search*.
+          // On 11-13 the scraper rotated off the Chrome/133 UA (Chrome/137
+          // Windows from residential proxies, plus a headless-Chrome fleet
+          // driving /search by client navigation). None of it self-identifies,
+          // so COMMON never labels it; only token-based checks can tell it
+          // from a person.
+          //
+          // - TGT_TokenAbsent -> Challenge (AWS default: Count). The scraper
+          //   sends ~2 requests per IP, under TGT_VolumetricIpTokenAbsent's
+          //   5-per-5-min threshold, so every tokenless /search request has to
+          //   be challenged. A real browser solves the silent JS challenge
+          //   once and is immune for `challengeConfig` above; an HTTP client
+          //   never gets past the 202, which costs no OpenSearch query.
+          // - TGT_SignalBrowserAutomationExtension -> Count. AWS documents it
+          //   as matching any user who merely has an automation extension
+          //   (e.g. Selenium IDE) installed.
+          // - Every other TGT_ rule keeps its AWS default: Challenge for the
+          //   volumetric/ML-low rules, CAPTCHA for automated-browser, browser-
+          //   inconsistency, session-volume and token-reuse signals, Block for
+          //   the max-confidence ones. Those are what catch a headless browser
+          //   that DID solve the challenge.
+          // - Common-level rules stay Count (see botControlCommonRules).
+          //
+          // Next.js: a challenged `_rsc` fetch gets a 202 whose content-type is
+          // not text/x-component, so the app router falls back to a hard
+          // navigation (fetch-server-response.js: `!isFlightResponse` ->
+          // doMpaNavigation), the document GET carries Accept: text/html, and
+          // WAF serves the interstitial, which solves and reloads.
+          //
+          // Cost: TARGETED bills $10/M requests (1M/month free) for the
+          // /search* requests in scope only.
+          {
+            name: "AWSManagedRulesBotControlRuleSet-Targeted",
+            priority: managedGroups.length + 2,
+            overrideAction: { none: {} },
+            statement: {
+              managedRuleGroupStatement: {
+                vendorName: "AWS",
+                name: "AWSManagedRulesBotControlRuleSet",
+                managedRuleGroupConfigs: [
+                  {
+                    awsManagedRulesBotControlRuleSet: {
+                      inspectionLevel: "TARGETED",
+                      enableMachineLearning: true,
+                    },
+                  },
+                ],
+                ruleActionOverrides: [
+                  ...botControlCommonRules.map((name) => ({
+                    name,
+                    actionToUse: { count: {} },
+                  })),
+                  { name: "TGT_TokenAbsent", actionToUse: { challenge: {} } },
+                  {
+                    name: "TGT_SignalBrowserAutomationExtension",
+                    actionToUse: { count: {} },
+                  },
+                ],
+                scopeDownStatement: searchPathMatch,
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-AWSManagedRulesBotControlRuleSet-Targeted`,
               sampledRequestsEnabled: true,
             },
           },
@@ -1442,7 +1557,7 @@ export class EdgeStack extends Stack {
           // the sitemap.
           {
             name: "search-block-bots",
-            priority: managedGroups.length + 2,
+            priority: managedGroups.length + 3,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1472,7 +1587,7 @@ export class EdgeStack extends Stack {
           // ponytail: one hardcoded UA; promote to a list if a second shows up.
           {
             name: "search-block-scraper-ua",
-            priority: managedGroups.length + 3,
+            priority: managedGroups.length + 4,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1502,7 +1617,7 @@ export class EdgeStack extends Stack {
           // pools legitimately peak ~470/5min on /search alone.
           {
             name: "search-rate-limit",
-            priority: managedGroups.length + 4,
+            priority: managedGroups.length + 5,
             action: {
               block: {
                 customResponse: {
@@ -1540,7 +1655,7 @@ export class EdgeStack extends Stack {
           },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 5,
+            priority: managedGroups.length + 6,
             // Enforced (#1434): zero rate matches in the count window -- the
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
