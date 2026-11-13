@@ -22,7 +22,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
-import { SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
+import { SCHOLARS_MAIL_CONFIG_SET, SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
 import {
   importSharedVpc,
   resolveSharedSg,
@@ -919,7 +919,10 @@ export class AppStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["ses:SendEmail"],
-          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+          resources: [
+            `arn:aws:ses:${this.region}:${this.account}:identity/*`,
+            `arn:aws:ses:${this.region}:${this.account}:configuration-set/${SCHOLARS_MAIL_CONFIG_SET}`,
+          ],
           conditions: {
             StringEquals: { "ses:FromAddress": SCHOLARS_MAIL_FROM },
           },
