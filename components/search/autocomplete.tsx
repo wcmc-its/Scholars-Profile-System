@@ -327,6 +327,10 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
             >
               <Link
                 href={s.href}
+                // A visible concept row (`/search?q=…&src=suggest`) would otherwise
+                // prefetch, and each prefetch is logged as a suggestion click by
+                // the usage rollup (and is a /search request, #3368).
+                prefetch={s.href.startsWith("/search") ? false : undefined}
                 className={`flex items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-[#fafaf8] dark:hover:bg-zinc-800 ${
                   i === activeIndex ? "bg-[#f5f3ee] dark:bg-zinc-800" : ""
                 }`}

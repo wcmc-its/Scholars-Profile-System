@@ -385,7 +385,10 @@ export class AnalyticsStack extends Stack {
       {
         constructId: "QuerySearchTerms",
         name: `sps-usage-search-terms-${env}`,
-        description: "Top 100 search terms (dimension = decoded q=).",
+        // Typed searches only since the src= split; suggestion clicks
+        // (home chips, typeahead concept picks) are metric search_term_suggested.
+        description:
+          "Top 100 typed search terms (dimension = decoded q=; suggestion clicks are metric search_term_suggested).",
         sql: [
           "SELECT dimension AS term, SUM(cnt) AS searches",
           "FROM daily_usage",

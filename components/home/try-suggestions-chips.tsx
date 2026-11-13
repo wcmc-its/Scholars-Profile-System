@@ -31,7 +31,7 @@ export function TrySuggestionsChips({ count = 6 }: { count?: number }) {
       {suggestions.map((s) => (
         <Link
           key={s}
-          href={searchHref(s)}
+          href={searchHref(s, "chip")}
           // Each chip is a live OpenSearch query. Default viewport prefetch
           // fired all six on every home view: ~220k uncached searches/day
           // and phantom "top search terms" on /edit/usage (#3368).

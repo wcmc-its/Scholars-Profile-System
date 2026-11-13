@@ -1,8 +1,8 @@
 /**
  * `/edit/usage` — the in-app Usage dashboard. Site-wide CloudFront usage over a
  * chosen range (the header's Range dropdown: last 7 / 30 / 90 days, since
- * launch, or custom; default last 30) — pageviews trend, top profiles, search
- * terms, referrers, geo, device — read from the durable `daily_usage` Athena
+ * launch, or custom; default last 30) — pageviews trend, top profiles, typed
+ * and suggested search terms, referrers, geo, device — read from the durable `daily_usage` Athena
  * rollup via a daily-cached loader keyed per range.
  * The viewer-friendly companion to the Athena console + the `sps-usage-*` saved
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
@@ -14,7 +14,8 @@
  * own fail-soft.
  *
  * Layout (2026-09 page revision): header, a four-tile KPI row, the pageviews
- * chart card, Top profiles + Top search terms side by side, three Traffic
+ * chart card, Top profiles + Top typed search terms side by side (Suggested
+ * terms clicked wraps below), three Traffic
  * sources cards, then the uptime card. The interactive bits (chart hover, Show
  * all, client-side CSV, the uptime ⓘ) are client islands in ./usage-widgets.
  *
@@ -352,10 +353,8 @@ function UsageBody({
       csvExtra: p.slug,
     };
   });
-  const termRows: RankRow[] = summary.searchTerms.map((t) => ({
-    label: t.term,
-    count: t.searches,
-  }));
+  const toTermRows = (terms: UsageSummary["searchTerms"]): RankRow[] =>
+    terms.map((t) => ({ label: t.term, count: t.searches }));
 
   return (
     <>
@@ -383,12 +382,23 @@ function UsageBody({
         />
         <RankTable
           testId="usage-top-search-terms"
-          title="Top search terms"
+          title="Top typed search terms"
           unit="Searches"
           labelHeader="Term"
           csvName="usage-top-search-terms"
-          rows={termRows}
+          rows={toTermRows(summary.searchTerms)}
           emptyLabel="No searches in the window."
+          note="What people typed, including paging and filtering of any search. Days before suggestion tracking began count every search here."
+        />
+        <RankTable
+          testId="usage-suggested-search-terms"
+          title="Suggested terms clicked"
+          unit="Clicks"
+          labelHeader="Term"
+          csvName="usage-suggested-search-terms"
+          rows={toTermRows(summary.suggestedSearchTerms)}
+          emptyLabel="No suggestion clicks in the window."
+          note="Home-page Try chips and MeSH concepts picked from the search box suggestions."
         />
       </div>
 

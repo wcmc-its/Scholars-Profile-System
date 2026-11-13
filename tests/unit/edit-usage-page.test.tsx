@@ -1,6 +1,6 @@
 /**
  * `app/edit/usage/page.tsx` — the 2026-09 revision layout: KPI row, pageviews
- * chart, ranked Top profiles / Top search terms (names resolved from slugs,
+ * chart, ranked Top profiles / Top typed + suggested search terms (names resolved from slugs,
  * Show all), Traffic sources cards, and the uptime card. Each data source
  * fails soft on its own. Renders are scoped to the page root.
  */
@@ -80,6 +80,7 @@ const SUMMARY = {
     { term: "widgets", searches: 12 },
     { term: "gizmos", searches: 3 },
   ],
+  suggestedSearchTerms: [{ term: "sprockets", searches: 5 }],
   referrers: [
     { label: "(direct)", hits: 900 },
     { label: "example.org", hits: 100 },
@@ -155,6 +156,32 @@ describe("/edit/usage", () => {
     const terms = within(root.getByTestId("usage-top-search-terms"));
     expect(terms.getByText("widgets")).toBeTruthy();
     expect(terms.queryByRole("button", { name: /Show all/ })).toBeNull();
+  });
+
+  it("lists typed search terms apart from suggested terms clicked", async () => {
+    const root = await renderPage();
+    const typed = within(root.getByTestId("usage-top-search-terms"));
+    expect(typed.getByText("Top typed search terms")).toBeTruthy();
+    expect(
+      typed.getByText(/Days before suggestion tracking began count every search here/),
+    ).toBeTruthy();
+    expect(typed.queryByText("sprockets")).toBeNull();
+
+    const suggested = within(root.getByTestId("usage-suggested-search-terms"));
+    expect(suggested.getByText("Suggested terms clicked")).toBeTruthy();
+    expect(suggested.getByText("sprockets")).toBeTruthy();
+    expect(suggested.queryByText("widgets")).toBeNull();
+  });
+
+  it("shows an empty suggested list (e.g. days before tagging) without hiding typed terms", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, suggestedSearchTerms: [] });
+    const root = await renderPage();
+    expect(
+      within(root.getByTestId("usage-suggested-search-terms")).getByText(
+        "No suggestion clicks in the window.",
+      ),
+    ).toBeTruthy();
+    expect(within(root.getByTestId("usage-top-search-terms")).getByText("widgets")).toBeTruthy();
   });
 
   it("falls back to slugs when the name lookup fails", async () => {

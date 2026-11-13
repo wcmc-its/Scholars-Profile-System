@@ -33,12 +33,13 @@ describe("loadUsageSummary", () => {
     await loadUsageSummary(launch);
 
     expect(h.cacheKeys).toEqual([
-      ["usage-summary", "v2", "2026-09-18", "2026-09-24"],
-      ["usage-summary", "v2", "2026-07-01", "2026-09-24"],
+      ["usage-summary", "v3", "2026-09-18", "2026-09-24"],
+      ["usage-summary", "v3", "2026-07-01", "2026-09-24"],
     ]);
-    const firstSix = h.runUsageQuery.mock.calls.slice(0, 6).map((c) => c[0] as string);
-    expect(firstSix).toHaveLength(6);
-    for (const sql of firstSix) {
+    const firstWindow = h.runUsageQuery.mock.calls.slice(0, 7).map((c) => c[0] as string);
+    expect(firstWindow).toHaveLength(7);
+    expect(firstWindow.some((sql) => sql.includes("metric = 'search_term_suggested'"))).toBe(true);
+    for (const sql of firstWindow) {
       expect(sql).toContain("dt >= '2026-09-18' AND dt <= '2026-09-24'");
     }
     expect(summary).toMatchObject({
@@ -73,6 +74,7 @@ describe("shapeUsageRows", () => {
       ],
       topProfiles: [{ slug: "carl-f-nathan", views: "45" }],
       searchTerms: [{ term: "cancer", searches: "30" }],
+      suggestedSearchTerms: [{ term: "immunotherapy", searches: "7" }],
       referrers: [{ referrer: "(direct)", hits: "200" }],
       geo: [{ region: "North America", hits: "180" }],
       device: [{ device: "desktop", hits: "150" }],
@@ -86,6 +88,7 @@ describe("shapeUsageRows", () => {
     ]);
     expect(summary.topProfiles).toEqual([{ slug: "carl-f-nathan", views: 45 }]);
     expect(summary.searchTerms).toEqual([{ term: "cancer", searches: 30 }]);
+    expect(summary.suggestedSearchTerms).toEqual([{ term: "immunotherapy", searches: 7 }]);
     expect(summary.referrers).toEqual([{ label: "(direct)", hits: 200 }]);
     expect(summary.geo).toEqual([{ label: "North America", hits: 180 }]);
     expect(summary.device).toEqual([{ label: "desktop", hits: 150 }]);
@@ -96,6 +99,7 @@ describe("shapeUsageRows", () => {
       pageviewsByDay: [{ dt: "2026-07-03", views: "" }],
       topProfiles: [{ slug: "x" }],
       searchTerms: [],
+      suggestedSearchTerms: [],
       referrers: [],
       geo: [],
       device: [],

@@ -11,6 +11,7 @@ import {
   isRerollable,
   KNOWN_SCRAPER_UAS,
   MAX_REROLL_AGE_DAYS,
+  SUGGESTED_SEARCH_SOURCES,
 } from "../lambda/cf-usage-rollup/queries";
 
 const CFG = {
@@ -65,16 +66,11 @@ describe("buildRollupInsert", () => {
   });
 
   it("emits all six marketing metric arms", () => {
-    for (const metric of [
-      "'pageviews'",
-      "'profile'",
-      "'search_term'",
-      "'referrer'",
-      "'geo'",
-      "'device'",
-    ]) {
+    for (const metric of ["'pageviews'", "'profile'", "'referrer'", "'geo'", "'device'"]) {
       expect(sql).toContain(`${metric} AS metric`);
     }
+    // search_term / search_term_suggested come from one arm's metric CASE.
+    expect(sql).toContain("ELSE 'search_term'\nEND AS metric");
     // Five UNION ALL joins between six arms.
     expect(sql.match(/UNION ALL/g)).toHaveLength(5);
   });
@@ -87,7 +83,9 @@ describe("buildRollupInsert", () => {
 
   it("groups the per-dimension arms (profile/search/referrer/geo/device)", () => {
     expect(sql).toContain("GROUP BY regexp_extract(cs_uri_stem");
-    expect(sql).toContain("GROUP BY lower(trim(url_decode");
+    expect(sql).toContain(
+      ", lower(trim(url_decode(url_extract_parameter('http://x?' || cs_uri_query, 'q'))))\n",
+    );
     // referrer/geo/device CASE group-bys: the CASE keyword follows GROUP BY
     // on the same line (`GROUP BY CASE\n  WHEN ...`).
     expect(sql).toMatch(/GROUP BY CASE\n/);
@@ -201,6 +199,34 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
     for (const arm of [pageviews, profile, search]) {
       expect(arm).not.toContain("starts_with(cs_uri_stem, '/_next/')");
     }
+  });
+});
+
+describe("buildRollupInsert typed vs suggested search terms", () => {
+  const sql = buildRollupInsert(CFG, "2026-11-13");
+  const search = sql.split("UNION ALL")[2];
+  const METRIC_CASE = [
+    "CASE",
+    "  WHEN url_extract_parameter('http://x?' || cs_uri_query, 'src') IN ('chip', 'suggest') THEN 'search_term_suggested'",
+    "  ELSE 'search_term'",
+    "END",
+  ].join("\n");
+
+  it("tags exactly the app's suggestion sources (lib/search/query-url.ts SEARCH_SOURCES)", () => {
+    expect([...SUGGESTED_SEARCH_SOURCES]).toEqual(["chip", "suggest"]);
+  });
+
+  it("splits the search arm by src= in one scan, untagged (and pre-tag days) staying search_term", () => {
+    expect(search).toContain(`SELECT ${METRIC_CASE} AS metric,`);
+    // Trino needs the grouped CASE character-identical to the SELECT one.
+    expect(search).toContain(`GROUP BY ${METRIC_CASE}, lower(trim(url_decode(`);
+    expect(sql.split(METRIC_CASE)).toHaveLength(3); // SELECT + GROUP BY, search arm only
+  });
+
+  it("keeps the search arm's existing filters unchanged", () => {
+    expect(search).toContain("cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200");
+    expect(search).toContain("url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL");
+    expect(search).toContain("NOT coalesce((regexp_like(url_decode(cs_user_agent)");
   });
 });
 
