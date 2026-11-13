@@ -9,17 +9,14 @@
  * `lib/edit/pub-citation-report.ts`).
  *
  * Authz mirrors `/api/edit/center/[code]/nci-2a`: Curator/Owner of the
- * center, or Superuser/comms_steward (`canEditUnit`).
+ * center, or Superuser/comms_steward (`canEditUnit`), or with
+ * `LEADER_REPORT_ACCESS` on a leader of the center (`authorizeUnitReportView`).
  */
 import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
-import {
-  canEditUnit,
-  getEffectiveUnitRole,
-  logEditDenial,
-  type UnitAdminLookup,
-} from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeUnitReportView } from "@/lib/edit/unit-leader-access";
 import { buildPubCitationWorkbook, parsePubCitationParams } from "@/lib/edit/pub-citation-report";
 import { loadPubCitationReport } from "@/lib/edit/pub-citation-report.server";
 import { editError, resolveEditIdentity } from "@/lib/edit/request";
@@ -40,12 +37,8 @@ export async function GET(
   const center = await db.read.center.findUnique({ where: { code }, select: { code: true } });
   if (!center) return editError(404, "unit_not_found", "code");
 
-  const effective = await getEffectiveUnitRole(
-    session,
-    { kind: "center", code: center.code },
-    db.read as unknown as UnitAdminLookup,
-  );
-  const authz = canEditUnit(session, effective);
+  // Report data: the unit's editors, or (LEADER_REPORT_ACCESS) its leaders.
+  const authz = await authorizeUnitReportView(session, { kind: "center", code: center.code }, db.read);
   if (!authz.ok) {
     logEditDenial({
       actorCwid: realCwid,

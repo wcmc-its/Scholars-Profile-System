@@ -93,7 +93,12 @@ const ROWS: CollabRow[] = [
 ];
 
 function renderCard(
-  over: { rows?: CollabRow[]; initial?: Partial<OptimizeParams>; cap?: number } = {},
+  over: {
+    rows?: CollabRow[];
+    initial?: Partial<OptimizeParams>;
+    cap?: number;
+    canEditRoster?: boolean;
+  } = {},
 ) {
   return render(
     <CancerCenterCollabReportCard
@@ -103,6 +108,7 @@ function renderCard(
       basePath="/edit/reports/optimize-membership"
       keepQuery="center=meyer_cancer_center"
       cap={over.cap ?? 50}
+      canEditRoster={over.canEditRoster}
     />,
   );
 }
@@ -382,6 +388,15 @@ describe("CancerCenterCollabReportCard — selection", () => {
     const { container } = renderCard();
     const link = within(container).getByRole("link", { name: "roster editor" });
     expect(link.getAttribute("href")).toBe("/edit/center/meyer_cancer_center");
+  });
+
+  it("a leader-only viewer (canEditRoster false) gets no roster-editor links; selection and export stay", () => {
+    const { container } = renderCard({ initial: { tab: "recruit" }, canEditRoster: false });
+    const c = within(container);
+    expect(c.queryByRole("link", { name: "roster editor" })).toBeNull();
+    fireEvent.click(c.getByLabelText("Select R2 Recruitperson"));
+    expect(c.getByTestId("om-export-selected")).toBeTruthy();
+    expect(c.queryByTestId("om-roster-editor")).toBeNull();
   });
 });
 

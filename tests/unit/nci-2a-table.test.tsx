@@ -9,10 +9,11 @@
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ load: vi.fn(), refresh: vi.fn() }));
+const h = vi.hoisted(() => ({ load: vi.fn(), refresh: vi.fn(), programLeader: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("@/lib/edit/nci-2a-report.server", () => ({ loadNci2aReport: h.load }));
+vi.mock("@/lib/edit/unit-leader-access", () => ({ isCenterProgramLeader: h.programLeader }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: h.refresh }) }));
 vi.mock("@/components/edit/scholar-hover-card", () => ({
   ScholarHoverCard: ({ cwid, children }: { cwid: string; children: React.ReactNode }) => (
@@ -99,10 +100,16 @@ const DATA = {
   awards: [AI, DONE, NONE],
 };
 
-async function renderBody(searchParams: Record<string, string> = {}, kind = "center") {
+async function renderBody(
+  searchParams: Record<string, string> = {},
+  kind = "center",
+  ctx: { unit: { name: string }; viewOnly?: boolean } = { unit: { name: "Meyer" } },
+) {
   const { main } = await renderNciTable2aReport({
     code: CENTER,
     kind,
+    ctx,
+    session: { cwid: "lead001", isSuperuser: false, isCommsSteward: false },
     searchParams,
     basePath: BASE,
   } as unknown as Parameters<typeof renderNciTable2aReport>[0]);
@@ -110,11 +117,12 @@ async function renderBody(searchParams: Record<string, string> = {}, kind = "cen
   return within(r.getByTestId("body"));
 }
 
-function tableEl(rows: Nci2aAward[], resetKey = "") {
+function tableEl(rows: Nci2aAward[], resetKey = "", readOnly = false) {
   return (
     <div data-testid="t">
       <Nci2aTable
         centerCode={CENTER}
+        readOnly={readOnly}
         rows={rows}
         resetKey={resetKey}
         sort="pi"
@@ -145,6 +153,7 @@ function stubFetch(ok = true, status = 200) {
 beforeEach(() => {
   h.load.mockReset().mockResolvedValue(DATA);
   h.refresh.mockReset();
+  h.programLeader.mockReset().mockResolvedValue(false);
 });
 
 describe("report 2 body", () => {
@@ -696,5 +705,53 @@ describe("report 2 table", () => {
     expect((within(r.container).getByTestId("nci-2a-download") as HTMLButtonElement).disabled).toBe(
       true,
     );
+  });
+});
+
+describe("report 2 for a leader-only viewer (LEADER_REPORT_ACCESS)", () => {
+  const LEADER_CTX = { unit: { name: "Meyer" }, viewOnly: true };
+
+  it("an editor's body never asks about program leadership and keeps the controls", async () => {
+    const q = await renderBody();
+    expect(h.programLeader).not.toHaveBeenCalled();
+    expect(q.getByRole("button", { name: "Accept 40% for P-1" })).toBeTruthy();
+    expect(q.getByRole("link", { name: "edit it in the center roster" })).toBeTruthy();
+  });
+
+  it("a center leader who leads no program sees values, not inputs, Accept or the roster link", async () => {
+    const q = await renderBody({}, "center", LEADER_CTX);
+    expect(h.programLeader).toHaveBeenCalledWith(
+      expect.objectContaining({ cwid: "lead001" }),
+      CENTER,
+      expect.anything(),
+    );
+    const table = q.getByTestId("nci-2a-table");
+    expect(within(table).queryAllByRole("spinbutton")).toHaveLength(0);
+    expect(within(table).queryByRole("button", { name: /Accept/ })).toBeNull();
+    expect(within(table).queryByTestId("nci-2a-note-link")).toBeNull();
+    expect(within(table).queryByTestId("nci-2a-bulk")).toBeNull();
+    expect(within(table).getAllByTestId("nci-2a-percent-text").map((e) => e.textContent)).toEqual([
+      "40%",
+      "100%",
+      "—",
+    ]);
+    expect(q.queryByRole("link", { name: "edit it in the center roster" })).toBeNull();
+  });
+
+  it("a program leader keeps every 2A edit control, but not the roster link", async () => {
+    h.programLeader.mockResolvedValue(true);
+    const q = await renderBody({}, "center", LEADER_CTX);
+    expect(q.getByRole("button", { name: "Accept 40% for P-1" })).toBeTruthy();
+    expect(q.getAllByRole("spinbutton").length).toBeGreaterThan(0);
+    expect(q.queryByRole("link", { name: "edit it in the center roster" })).toBeNull();
+  });
+
+  it("the read-only table shows an existing note and trainee slots as text", () => {
+    const t32 = { ...AI, projectNumber: "5 T32 CA000001-03", reviewerNote: "Aim 2", traineeSlots: 3 };
+    const r = render(tableEl([t32], "", true));
+    const q = within(r.getByTestId("t"));
+    expect(q.getByTestId("nci-2a-note-text").textContent).toBe("Aim 2");
+    expect(q.getByTestId("nci-2a-trainee-slots-text").textContent).toBe("Trainee slots 3");
+    expect(q.queryByTestId("nci-2a-trainee-slots")).toBeNull();
   });
 });

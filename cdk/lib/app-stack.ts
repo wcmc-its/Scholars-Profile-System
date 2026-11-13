@@ -1820,6 +1820,13 @@ export class AppStack extends Stack {
         // the ORCID sandbox client (scholars/staging/orcid-api). OFF in prod: no
         // prod client until ORCID's demo review, and no prod secret is wired.
         ORCID_CONNECT: envConfig.envName === "staging" ? "on" : "off",
+        // LEADER_REPORT_ACCESS — leaders of a department, division, center or
+        // core (OrgUnitRoleAssignment in the unit's leadership group, a core's
+        // CoreLeader director) VIEW that unit's /edit/reports, and a cancer
+        // center's program leaders also edit NCI Table 2A
+        // (`lib/edit/unit-leader-access.ts`). No other write is widened. ON in
+        // staging for the soak, OFF in prod until both journeys are checked.
+        LEADER_REPORT_ACCESS: envConfig.envName === "staging" ? "on" : "off",
         ORCID_CONNECT_BASE:
           envConfig.envName === "prod" ? "https://orcid.org" : "https://sandbox.orcid.org",
         // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links

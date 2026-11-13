@@ -267,7 +267,14 @@ export default async function EditReportsIndexPage({
   // group on that unit, not a one-unit view: every unit of a kind collapses
   // into one group with a picker (#2857 cores, #2856 the rest).
   const preselected = center || null;
-  let baseUnits: ReadonlyArray<{ code: string; kind: ReportableUnitKind; name: string; parentName?: string | null }> =
+  let baseUnits: ReadonlyArray<{
+    code: string;
+    kind: ReportableUnitKind;
+    name: string;
+    parentName?: string | null;
+    /** Reached only as a leader (leadership report access): no "Edit … profile" link. */
+    viewOnly?: boolean;
+  }> =
     await loadReportableUnitsForActor(session, db.read, REPORTABLE_KINDS);
   let preselectedCode = preselected;
   if (preselected) {
@@ -284,7 +291,7 @@ export default async function EditReportsIndexPage({
       if (!baseUnits.some((u) => u.kind === kind && u.code === code)) {
         const ctx = await loadReportsContext(code, session, db.read, kind);
         if (!ctx) return forbidden(session, code);
-        baseUnits = [...baseUnits, { code, kind, name: ctx.unit.name }];
+        baseUnits = [...baseUnits, { code, kind, name: ctx.unit.name, viewOnly: ctx.viewOnly }];
       }
     }
   }
@@ -304,7 +311,8 @@ export default async function EditReportsIndexPage({
       code: u.code,
       kind: u.kind,
       name: u.name,
-      editHref: unitEditHref(u.kind, u.code),
+      // A leader-only viewer can't open the unit editor (it 403s): no link.
+      editHref: u.viewOnly ? "" : unitEditHref(u.kind, u.code),
       reports,
       perReport: serializePerReport(liveness.get(u.code), reports),
     };

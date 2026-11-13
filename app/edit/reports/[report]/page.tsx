@@ -247,7 +247,7 @@ export default async function EditReportPage({
         : { mode: "unit" };
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
     if (kind === "core") {
-      loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n);
+      loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n, ctx.viewOnly === true);
     }
   } else if (def.gate === "admin") {
     if (!(await canViewArticleCountReport(session))) notFound();
@@ -335,6 +335,7 @@ async function coreReportsHeader(
   coreId: string,
   coreName: string,
   n: ReportKey,
+  viewOnly: boolean,
 ): Promise<ReactNode> {
   const [units, meta] = await Promise.all([
     loadReportableUnitsForActor(session, db.read, ["core"]),
@@ -362,6 +363,7 @@ async function coreReportsHeader(
       tabs={tabs}
       current={n}
       allCount={all ? options.length - 1 : undefined}
+      viewOnly={viewOnly}
     />
   );
 }

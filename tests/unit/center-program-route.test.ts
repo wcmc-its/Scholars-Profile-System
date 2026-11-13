@@ -382,6 +382,22 @@ describe("/api/edit/center-program — validation + authz", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
+  it("a program leader is still 403 with LEADER_REPORT_ACCESS on (no DB write)", async () => {
+    const prev = process.env.LEADER_REPORT_ACCESS;
+    process.env.LEADER_REPORT_ACCESS = "on";
+    try {
+      mockGetEditSession.mockResolvedValue({ cwid: "lead001", isSuperuser: false });
+      mockUnitAdminFindMany.mockResolvedValue([]);
+      const res = await POST(post({ ...BASE, action: "add_leader", cwid: "lead002" }));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ ok: false, error: "not_curator" });
+      expect(mockTransaction).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.LEADER_REPORT_ACCESS;
+      else process.env.LEADER_REPORT_ACCESS = prev;
+    }
+  });
+
   it("invalid cwid → 400 invalid_cwid", async () => {
     const res = await POST(post({ ...BASE, action: "add_leader", cwid: "bad cwid!" }));
     expect(res.status).toBe(400);
